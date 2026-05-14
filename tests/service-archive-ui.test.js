@@ -25,8 +25,11 @@ test('service active tab no longer offers closed status and archive opens ticket
   const archiveTabSource = servicePageSource.slice(archiveTabStart, queueTabStart);
 
   assert.doesNotMatch(activeTabSource, /<SelectItem value="closed">/);
-  assert.match(activeTabSource, /ServiceMetricCard title="Всего заявок" value=\{metrics\.total\}/);
-  assert.match(archiveTabSource, /ServiceMetricCard title="В архиве" value=\{archivedTickets\.length\}/);
+  assert.match(activeTabSource, /ServiceMetricCard title="Актуальные" value=\{metrics\.total\}/);
+  assert.match(activeTabSource, /ServiceMetricCard title="Без механика" value=\{metrics\.unassigned\}/);
+  assert.match(archiveTabSource, /ServiceMetricCard title="Всего в архиве" value=\{archiveMetrics\.total\}/);
+  assert.match(archiveTabSource, /ServiceMetricCard title="Закрыто за месяц" value=\{archiveMetrics\.closedThisMonth\}/);
+  assert.match(archiveTabSource, /ServiceMetricCard title="Среднее закрытие" value=\{archiveMetrics\.averageClosureDays\}/);
   assert.match(archiveTabSource, /<SelectItem value="closed">Закрыта<\/SelectItem>/);
   assert.match(archiveTabSource, /aria-label=\{`Открыть архивную заявку \$\{ticket\.id\}`\}/);
   assert.match(archiveTabSource, /openTicketCard\(ticket\.id\)/);

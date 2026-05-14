@@ -82,7 +82,7 @@ function taskMatchesFilter(task: DayPlanTask, filter: DayPlanFilter) {
 function MetricCard({ label, value, tone }: { label: string; value: number; tone: string }) {
   const safeValue = Number.isFinite(value) ? value : 0;
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-white/10 dark:bg-white/[0.03]">
+    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
       <div className="text-xs font-bold uppercase text-gray-500 dark:text-gray-500">{label}</div>
       <div className={`mt-2 text-3xl font-black leading-none ${tone}`}>{safeValue}</div>
     </div>
@@ -179,7 +179,7 @@ function TaskRow({
             disabled={isAssigning}
             onValueChange={(value) => onAssignMechanic?.(task.id, value)}
           >
-            <SelectTrigger className="h-9 w-full rounded-lg text-xs sm:w-[240px]" aria-label={`Назначить механика для заявки ${task.id}`}>
+            <SelectTrigger className="h-9 w-full max-w-full rounded-lg text-xs sm:w-[240px]" aria-label={`Назначить механика для заявки ${task.id}`}>
               <SelectValue placeholder="Назначить механика" />
             </SelectTrigger>
             <SelectContent>
@@ -262,9 +262,18 @@ function ProblemList({
   onAssignMechanic?: (ticketId: string, mechanicKey: string) => void;
   onOpenTicket?: (ticketId: string) => void;
 }) {
+  const isAttentionBlock = title === 'Без механика';
   return (
-    <section className="rounded-lg border border-gray-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
-      <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 dark:border-white/8">
+    <section className={`rounded-lg border bg-white shadow-sm shadow-slate-200/40 dark:bg-white/[0.03] dark:shadow-none ${
+      isAttentionBlock
+        ? 'border-amber-300 dark:border-amber-900/60'
+        : 'border-gray-200 dark:border-white/10'
+    }`}>
+      <div className={`flex items-center gap-2 border-b px-4 py-3 ${
+        isAttentionBlock
+          ? 'border-amber-200 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/20'
+          : 'border-gray-100 dark:border-white/8'
+      }`}>
         {icon}
         <h3 className="text-sm font-black uppercase text-gray-800 dark:text-white">{title}</h3>
         <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500 dark:bg-white/8 dark:text-gray-300">{items.length}</span>
@@ -366,7 +375,7 @@ export function ServiceDayPlanBoard({
 
   return (
     <div className="space-y-5">
-      <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.03]">
+      <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-gray-500 dark:text-gray-400">
@@ -381,12 +390,12 @@ export function ServiceDayPlanBoard({
               type="date"
               value={targetDate}
               onChange={(event) => setTargetDate(event.target.value || today)}
-              className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-white"
+              className="h-10 min-w-0 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 dark:border-white/10 dark:bg-white/[0.03] dark:text-white sm:w-[160px]"
               aria-label="Дата планировщика"
             />
             <Button type="button" variant="secondary" onClick={() => setTargetDate(today)} className="h-10">Сегодня</Button>
             <Select value={mechanicFilter} onValueChange={setMechanicFilter}>
-              <SelectTrigger className="h-10 w-full rounded-lg sm:w-[220px]">
+              <SelectTrigger className="h-10 w-full min-w-0 rounded-lg sm:w-[220px]">
                 <SelectValue placeholder="По механику" />
               </SelectTrigger>
               <SelectContent>
@@ -397,7 +406,7 @@ export function ServiceDayPlanBoard({
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as DayPlanFilter)}>
-              <SelectTrigger className="h-10 w-full rounded-lg sm:w-[220px]">
+              <SelectTrigger className="h-10 w-full min-w-0 rounded-lg sm:w-[220px]">
                 <SelectValue placeholder="По статусу" />
               </SelectTrigger>
               <SelectContent>
@@ -454,7 +463,7 @@ export function ServiceDayPlanBoard({
               По выбранным фильтрам задач нет.
             </div>
           ) : filteredMechanics.map(mechanic => (
-            <article key={mechanic.key} className="flex min-h-[360px] min-w-0 flex-col rounded-lg border border-gray-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
+            <article key={mechanic.key} className="flex min-h-[360px] min-w-0 flex-col rounded-lg border border-gray-200 bg-white shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
               <div className="border-b border-gray-100 p-4 dark:border-white/8">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

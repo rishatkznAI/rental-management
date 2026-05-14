@@ -6,7 +6,7 @@ const servicePageSource = readFileSync(new URL('../src/app/pages/Service.tsx', i
 const plannerSource = readFileSync(new URL('../src/app/components/service/ServiceDayPlanBoard.tsx', import.meta.url), 'utf8');
 
 test('service tab exposes planner naming instead of day plan wording', () => {
-  const dayPlanTabStart = servicePageSource.indexOf('<TabsTrigger\n              value="day-plan"');
+  const dayPlanTabStart = servicePageSource.indexOf('value="day-plan"');
   assert.ok(dayPlanTabStart > 0, 'day-plan tab exists');
   const dayPlanTabSource = servicePageSource.slice(dayPlanTabStart, servicePageSource.indexOf('</TabsTrigger>', dayPlanTabStart));
 

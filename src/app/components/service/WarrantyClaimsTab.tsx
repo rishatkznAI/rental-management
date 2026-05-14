@@ -572,34 +572,34 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
           <p className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Активные</p>
           <p className="mt-2 text-3xl font-black text-gray-900 dark:text-white">{metrics.active}</p>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Требуют контроля</p>
         </div>
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm shadow-blue-100/60 dark:border-blue-900/50 dark:bg-blue-950/20 dark:shadow-none">
           <p className="text-xs font-bold uppercase text-blue-700 dark:text-blue-300">Новые</p>
           <p className="mt-2 text-3xl font-black text-blue-900 dark:text-blue-100">{metrics.new}</p>
           <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">Первичная проверка</p>
         </div>
-        <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-900/50 dark:bg-orange-950/20">
+        <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 shadow-sm shadow-orange-100/60 dark:border-orange-900/50 dark:bg-orange-950/20 dark:shadow-none">
           <p className="text-xs font-bold uppercase text-orange-700 dark:text-orange-300">На рассмотрении</p>
           <p className="mt-2 text-3xl font-black text-orange-900 dark:text-orange-100">{metrics.inReview}</p>
           <p className="mt-1 text-xs text-orange-700/80 dark:text-orange-300/80">Разбор причины</p>
         </div>
-        <div className="rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-900/50 dark:bg-green-950/20">
+        <div className="rounded-lg border border-green-200 bg-green-50 p-4 shadow-sm shadow-green-100/60 dark:border-green-900/50 dark:bg-green-950/20 dark:shadow-none">
           <p className="text-xs font-bold uppercase text-green-700 dark:text-green-300">Закрыты за месяц</p>
           <p className="mt-2 text-3xl font-black text-green-900 dark:text-green-100">{metrics.closedMonth}</p>
           <p className="mt-1 text-xs text-green-700/80 dark:text-green-300/80">Итог за период</p>
         </div>
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900/50 dark:bg-red-950/20">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 shadow-sm shadow-red-100/60 dark:border-red-900/50 dark:bg-red-950/20 dark:shadow-none">
           <p className="text-xs font-bold uppercase text-red-700 dark:text-red-300">Просрочены</p>
           <p className="mt-2 text-3xl font-black text-red-900 dark:text-red-100">{metrics.overdue}</p>
           <p className="mt-1 text-xs text-red-700/80 dark:text-red-300/80">Нарушен срок реакции</p>
         </div>
       </div>
 
-      <Card className="rounded-lg">
+      <Card className="rounded-lg border-amber-200 bg-amber-50/40 dark:border-amber-900/50 dark:bg-amber-950/10">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Factory className="h-5 w-5 text-[--color-primary]" />
@@ -636,7 +636,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
         <div className="space-y-4">
-          <Card className="rounded-lg">
+          <Card className="rounded-lg shadow-sm shadow-slate-200/40 dark:shadow-none">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Send className="h-5 w-5 text-[--color-primary]" />
@@ -762,7 +762,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
             </CardContent>
           </Card>
 
-          <Card className="rounded-lg">
+          <Card className="rounded-lg shadow-sm shadow-slate-200/40 dark:shadow-none">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <FileText className="h-5 w-5 text-[--color-primary]" />
@@ -864,7 +864,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     Рекламации не найдены.
                   </div>
                 ) : (
-                  <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+                  <div className="overflow-hidden rounded-lg border border-gray-200 shadow-sm shadow-slate-200/40 dark:border-gray-700 dark:shadow-none">
                     <div className="hidden grid-cols-[minmax(110px,0.7fr)_minmax(160px,1fr)_minmax(130px,0.8fr)_minmax(110px,0.7fr)_minmax(190px,1.2fr)_130px_minmax(130px,0.8fr)_105px_minmax(110px,0.7fr)] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-gray-700 dark:bg-gray-900/50 xl:grid">
                       <div>№ рекламации</div>
                       <div>Техника</div>
@@ -917,7 +917,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
           </Card>
         </div>
 
-        <Card className="rounded-lg">
+        <Card className="rounded-lg shadow-sm shadow-slate-200/40 dark:shadow-none">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <ShieldCheck className="h-5 w-5 text-[--color-primary]" />

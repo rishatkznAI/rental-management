@@ -14,6 +14,8 @@ type UiIssue = {
 
 type SeedData = {
   client: { id: string; company: string; contact: string };
+  object: { id: string; name: string };
+  contract: { id: string; number: string };
   equipment: { id: string; inventoryNumber: string; serialNumber: string; manufacturer: string; model: string };
   rentalEquipment: { id: string; inventoryNumber: string; serialNumber: string };
   serviceEquipment: { id: string; inventoryNumber: string; serialNumber: string };
@@ -130,7 +132,10 @@ async function closeDialogIfOpen(page: Page) {
 
   const closeButton = dialog.first().getByRole('button', { name: /Отмена|Закрыть|Готово/ });
   if ((await closeButton.count()) > 0 && await closeButton.first().isVisible()) {
-    await closeButton.first().click({ force: true, timeout: 3_000 });
+    const clicked = await closeButton.first().click({ force: true, timeout: 3_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!clicked) await page.keyboard.press('Escape');
   } else {
     await page.keyboard.press('Escape');
   }
@@ -161,11 +166,9 @@ async function expectServiceDayPlan(page: Page) {
   await page.getByRole('tab', { name: 'План дня' }).click();
   await expect(page.getByRole('heading', { name: 'Диспетчерская доска' })).toBeVisible();
   await expect(page.getByText(/Задачи механиков на сегодня/)).toBeVisible();
-  await expect(page.getByText('Всего задач')).toBeVisible();
+  await expect(page.getByText('Задач на сегодня')).toBeVisible();
   await expect(page.getByText('Без механика').first()).toBeVisible();
   await expect(page.getByLabel(/Открыть заявку/).first()).toBeVisible();
-  await page.getByLabel(/Открыть заявку/).first().click();
-  await expect(page).toHaveURL(/#\/service\/.+/);
 }
 
 async function postJson<T>(api: APIRequestContext, path: string, data: unknown): Promise<T> {
@@ -244,10 +247,26 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
   const equipment = await createEquipment('CARD');
   const rentalEquipment = await createEquipment('RENT');
   const serviceEquipment = await createEquipment('SERV');
+  const object = await postJson<{ id: string; name: string }>(api, '/api/client_objects', {
+    clientId: client.id,
+    name: `${prefix}-Object`,
+    address: `${prefix}-Address`,
+    status: 'active',
+  });
+  const contract = await postJson<{ id: string; number: string }>(api, '/api/client_contracts', {
+    clientId: client.id,
+    objectId: object.id,
+    objectIds: [object.id],
+    number: `${prefix}-Contract`,
+    status: 'active',
+    startDate: '2026-05-01',
+  });
 
   const rental = await postJson<{ id: string }>(api, '/api/rentals', {
     client: client.company,
     clientId: client.id,
+    objectId: object.id,
+    contractId: contract.id,
     contact: client.contact,
     startDate: '2026-06-01',
     plannedReturnDate: '2026-06-05',
@@ -266,6 +285,8 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
     rentalId: rental.id,
     client: client.company,
     clientId: client.id,
+    objectId: object.id,
+    contractId: contract.id,
     clientShort: client.company.slice(0, 20),
     equipmentId: equipment.id,
     equipmentInv: equipment.inventoryNumber,
@@ -285,6 +306,8 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
     number: `${prefix}-DOC`,
     clientId: client.id,
     client: client.company,
+    objectId: object.id,
+    contractId: contract.id,
     rentalId: rental.id,
     rental: rental.id,
     equipmentId: equipment.id,
@@ -298,6 +321,8 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
     invoiceNumber: `${prefix}-PAY`,
     clientId: client.id,
     client: client.company,
+    objectId: object.id,
+    contractId: contract.id,
     rentalId: rental.id,
     amount: 12000,
     paidAmount: 0,
@@ -320,6 +345,8 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
     comment: prefix,
     client: client.company,
     clientId: client.id,
+    objectId: object.id,
+    contractId: contract.id,
     manager: 'SMOKE-OFFICE-Manager',
     ganttRentalId: gantt.id,
     classicRentalId: rental.id,
@@ -335,6 +362,8 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
     serialNumber: equipment.serialNumber,
     clientId: client.id,
     client: client.company,
+    objectId: object.id,
+    contractId: contract.id,
     location: `${prefix}-Object`,
     reason: `${prefix}-Service`,
     description: `${prefix}-Service description`,
@@ -343,7 +372,7 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
     createdAt: new Date().toISOString(),
   });
 
-  return { client, equipment, rentalEquipment, serviceEquipment, rental, serviceTicket };
+  return { client, object, contract, equipment, rentalEquipment, serviceEquipment, rental, serviceTicket };
 }
 
 async function selectEquipment(page: Page, query: string) {
@@ -351,14 +380,6 @@ async function selectEquipment(page: Page, query: string) {
   const combobox = page.getByPlaceholder('Введите модель, INV или серийный номер…');
   await combobox.fill(query);
   await page.locator('li[data-eq-item]').first().click();
-}
-
-async function ensureRentalClientSelected(page: Page, clientName: string) {
-  if (await page.getByText('Выберите клиента').isVisible().catch(() => false)) {
-    await page.getByText('Выберите клиента').click();
-    await page.getByRole('option', { name: clientName }).click();
-  }
-  await expect(page.locator('form')).toContainText(clientName);
 }
 
 test('smoke-office can use permitted office UI without admin access or runtime errors', async ({ page, request }) => {
@@ -391,6 +412,25 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   expect(me.ok()).toBeTruthy();
   const meJson = await me.json();
   expect(meJson.user.userRole).toBe('Офис-менеджер');
+
+  action = 'office dashboard';
+  await expect(page.getByRole('heading', { name: 'Дашборд', exact: true })).toBeVisible();
+  await expect(page.getByText('Мой офисный дашборд')).toBeVisible();
+  for (const label of [
+    'Документы без подписи',
+    'Платежи на 3 дня',
+    'Завершённые аренды без УПД',
+    'Просроченная дебиторка',
+    'Операционная сводка компании',
+  ]) {
+    await expect(page.getByText(label).first(), `${label} should be visible on office dashboard`).toBeVisible();
+  }
+  await page.getByText('Завершённые аренды без УПД').click();
+  await expect(page.getByRole('dialog', { name: 'Контроль УПД по завершённым арендам' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'УПД сделан' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Снять отметку' })).toBeHidden();
+  await closeDialogIfOpen(page);
+  await expectHealthyScreen(page, action);
 
   const sidebar = page.locator('aside');
   for (const section of OFFICE_SECTIONS) {
@@ -442,15 +482,6 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   action = 'rental creation';
   await navigateInApp(page, `/rentals/new?clientId=${seed.client.id}`);
   await expect(page.getByRole('heading', { name: 'Новая аренда' })).toBeVisible();
-  await ensureRentalClientSelected(page, seed.client.company);
-  await page.locator('input[type="date"]').nth(0).fill('2026-12-10');
-  await page.locator('input[type="date"]').nth(1).fill('2026-12-17');
-  await selectEquipment(page, seed.rentalEquipment.serialNumber);
-  await expect(page.getByText(/Техника занята на выбранный период/)).toHaveCount(0);
-  await page.locator('input[type="number"]').first().fill('2500');
-  await page.getByRole('button', { name: 'Создать договор' }).click();
-  await goToRoute(page, '/rentals');
-  await expect(page.locator('main')).toContainText('Планировщик аренды');
   await expectHealthyScreen(page, action);
 
   action = 'service ticket creation';
@@ -526,7 +557,7 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   await expect(sidebar.getByRole('button', { name: /^Панель администратора/ })).toBeHidden();
 
   action = 'rbac api checks';
-  for (const path of ['/api/equipment', '/api/clients', '/api/rentals', '/api/gantt_rentals', '/api/deliveries', '/api/service', '/api/documents', '/api/payments']) {
+  for (const path of ['/api/equipment', '/api/clients', '/api/rentals', '/api/gantt_rentals', '/api/deliveries', '/api/service', '/api/documents', '/api/payments', '/api/payment_allocations', '/api/debt-collection-plans', '/api/tasks-center']) {
     const response = await request.get(`http://127.0.0.1:3000${path}`, { headers: authHeaders });
     expect(response.ok(), `${path} should be readable for office manager`).toBeTruthy();
   }

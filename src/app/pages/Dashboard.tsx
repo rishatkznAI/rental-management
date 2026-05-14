@@ -1932,6 +1932,8 @@ export default function Dashboard() {
       : isManagerRole
         ? 'rentals'
         : 'overview';
+  const showRoleDashboardCards = activeDashboardTab === 'overview' && roleDashboardMeta && roleDashboardCards.length > 0;
+  const canToggleOfficeUpd = isAdminRole;
 
   useEffect(() => {
     if (!dashboardTabs.some(tab => tab.id === activeDashboardTab)) {
@@ -2379,6 +2381,79 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {showRoleDashboardCards && (
+        <Card className={dashboardCardClass}>
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div className="space-y-2">
+                <Badge variant="default" className="bg-primary/12 text-primary dark:bg-primary/12 dark:text-primary">{roleDashboardMeta.badge}</Badge>
+                <CardTitle className="app-shell-title text-xl font-extrabold">{roleDashboardMeta.title}</CardTitle>
+                <CardDescription className="max-w-3xl text-sm text-muted-foreground">
+                  {roleDashboardMeta.description}
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 lg:grid-cols-4">
+              {roleDashboardCards.map(item => {
+                const Icon = item.icon;
+                const toneClass =
+                  item.tone === 'danger'
+                    ? 'border-red-500/20 bg-red-500/8'
+                    : item.tone === 'warning'
+                    ? 'border-orange-400/20 bg-orange-400/8'
+                    : item.tone === 'success'
+                    ? 'border-emerald-400/20 bg-emerald-400/8'
+                    : 'border-border bg-secondary/70';
+
+                const iconClass =
+                  item.tone === 'danger'
+                    ? 'bg-red-500/12 text-red-400'
+                    : item.tone === 'warning'
+                    ? 'bg-orange-400/12 text-orange-300'
+                    : item.tone === 'success'
+                    ? 'bg-emerald-400/12 text-emerald-300'
+                    : 'bg-primary/12 text-primary';
+
+                const content = (
+                  <>
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${iconClass}`}>
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4">
+                      <p className="text-sm font-medium text-muted-foreground">{item.title}</p>
+                      <p className="mt-1 text-2xl font-bold text-foreground">{item.value}</p>
+                      <p className="mt-2 text-sm text-muted-foreground">{item.hint}</p>
+                      <p className="mt-4 text-sm font-semibold text-primary">{item.cta}</p>
+                    </div>
+                  </>
+                );
+
+                if (item.onClick) {
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={item.onClick}
+                      className={`rounded-2xl border p-4 text-left transition hover:shadow-md ${toneClass}`}
+                    >
+                      {content}
+                    </button>
+                  );
+                }
+
+                return (
+                  <Link key={item.id} to={item.href} className={`rounded-2xl border p-4 transition hover:shadow-md ${toneClass}`}>
+                    {content}
+                  </Link>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {activeDashboardTab === 'overview' && (
         <section className="space-y-5">
@@ -4283,7 +4358,7 @@ export default function Dashboard() {
           <DialogHeader className="border-b border-gray-200 px-6 pb-4 pt-6 pr-12 dark:border-gray-700">
             <DialogTitle>Контроль УПД по завершённым арендам</DialogTitle>
             <DialogDescription>
-              Здесь офис видит, у каких клиентов аренда уже завершилась, по каким сделкам УПД ещё не отмечен, и может сразу поставить отметку.
+              Здесь офис видит, у каких клиентов аренда уже завершилась и по каким сделкам УПД ещё не отмечен.
             </DialogDescription>
           </DialogHeader>
 
@@ -4413,14 +4488,16 @@ export default function Dashboard() {
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              onClick={() => void handleOfficeUpdToggle(rental, true)}
-                              disabled={officeUpdUpdatingId === rental.id}
-                            >
-                              <CheckCircle className="h-4 w-4" />
-                              {officeUpdUpdatingId === rental.id ? 'Сохраняю…' : 'УПД сделан'}
-                            </Button>
+                            {canToggleOfficeUpd && (
+                              <Button
+                                size="sm"
+                                onClick={() => void handleOfficeUpdToggle(rental, true)}
+                                disabled={officeUpdUpdatingId === rental.id}
+                              >
+                                <CheckCircle className="h-4 w-4" />
+                                {officeUpdUpdatingId === rental.id ? 'Сохраняю…' : 'УПД сделан'}
+                              </Button>
+                            )}
                             <Button asChild size="sm" variant="secondary">
                               <Link to="/rentals">Открыть аренду</Link>
                             </Button>
@@ -4476,14 +4553,16 @@ export default function Dashboard() {
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => void handleOfficeUpdToggle(rental, false)}
-                              disabled={officeUpdUpdatingId === rental.id}
-                            >
-                              {officeUpdUpdatingId === rental.id ? 'Сохраняю…' : 'Снять отметку'}
-                            </Button>
+                            {canToggleOfficeUpd && (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => void handleOfficeUpdToggle(rental, false)}
+                                disabled={officeUpdUpdatingId === rental.id}
+                              >
+                                {officeUpdUpdatingId === rental.id ? 'Сохраняю…' : 'Снять отметку'}
+                              </Button>
+                            )}
                             <Button asChild size="sm" variant="ghost">
                               <Link to="/rentals">Открыть аренду</Link>
                             </Button>

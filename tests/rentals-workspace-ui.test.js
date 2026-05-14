@@ -163,6 +163,13 @@ test('rentals workspace paginates rendered rental rows after filters and tab sel
   assert.match(rentalsSource, /const activeRows = rentalDealRows\.filter\(row => row\.isActive\)/);
 });
 
+test('rentals workspace does not show remaining days for returned or closed rentals', () => {
+  assert.match(
+    rentalsSource,
+    /!row\.isActive \? 'Период завершён' : row\.isOverdueReturn \? `Просрочено на \$\{Math\.abs\(row\.daysLeft\)\} дн\.` : row\.daysLeft >= 0 \? `Осталось \$\{row\.daysLeft\} дн\.` : 'Период завершён'/,
+  );
+});
+
 test('rentals workspace pagination controls reset clamp and keep table actions working', () => {
   assert.match(rentalsSource, /data-rental-list-pagination=\{placement\}/);
   assert.match(rentalsSource, /rentalListPaginationControls\('top'\)/);

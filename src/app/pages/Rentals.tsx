@@ -5491,7 +5491,7 @@ export default function Rentals() {
                               <td className="px-4 py-3">
                                 <div className="font-medium text-foreground">{safeRentalDateLabel(row.rental.endDate)}</div>
                                 <div className={cn('text-xs', row.isOverdueReturn ? 'font-semibold text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
-                                  {row.isOverdueReturn ? `Просрочено на ${Math.abs(row.daysLeft)} дн.` : row.daysLeft >= 0 ? `Осталось ${row.daysLeft} дн.` : 'Период завершён'}
+                                  {!row.isActive ? 'Период завершён' : row.isOverdueReturn ? `Просрочено на ${Math.abs(row.daysLeft)} дн.` : row.daysLeft >= 0 ? `Осталось ${row.daysLeft} дн.` : 'Период завершён'}
                                 </div>
                               </td>
                               <td className="px-4 py-3">
@@ -5602,7 +5602,7 @@ export default function Rentals() {
                               <td className="px-4 py-3">
                                 <div>{safeRentalDateRangeLabel(row.rental.startDate, row.rental.endDate)}</div>
                                 <div className={cn('text-xs', row.isOverdueReturn ? 'font-semibold text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
-                                  {row.isOverdueReturn ? `Просрочено на ${Math.abs(row.daysLeft)} дн.` : row.daysLeft >= 0 ? `Осталось ${row.daysLeft} дн.` : 'Период завершён'}
+                                  {!row.isActive ? 'Период завершён' : row.isOverdueReturn ? `Просрочено на ${Math.abs(row.daysLeft)} дн.` : row.daysLeft >= 0 ? `Осталось ${row.daysLeft} дн.` : 'Период завершён'}
                                 </div>
                               </td>
                               <td className="px-4 py-3">

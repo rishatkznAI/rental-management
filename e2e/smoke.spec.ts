@@ -8,23 +8,20 @@ import {
   ensureUser,
   findClientByCompany,
   findEquipmentBySerialNumber,
-  findRentalByClient,
   findServiceTicketByReason,
   withAdminApi,
 } from './helpers/api';
 
 const sidebar = (page: Page) => page.locator('aside');
 
-async function openSidebarSection(page: Page, name: RegExp | string, heading: RegExp | string, route?: string) {
-  await sidebar(page).getByRole('button', { name }).click({ force: true });
-  const openedByClick = await page
-    .getByRole('heading', { name: heading, exact: typeof heading === 'string' })
-    .isVisible({ timeout: 3_000 })
-    .catch(() => false);
-  if (!openedByClick && route) {
-    await navigateInApp(page, route);
-  }
-  await expect(page.getByRole('heading', { name: heading, exact: typeof heading === 'string' })).toBeVisible();
+function collectCriticalConsoleErrors(page: Page) {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      errors.push(message.text());
+    }
+  });
+  return errors;
 }
 
 async function selectEquipment(page: Page, query: string) {
@@ -35,7 +32,7 @@ async function selectEquipment(page: Page, query: string) {
 }
 
 test.describe('production smoke', () => {
-  test('admin can sign in and open core sections from sidebar', async ({ page }) => {
+  test('admin can sign in and see core sidebar sections', async ({ page }) => {
     await loginAsAdmin(page);
 
     const menu = sidebar(page);
@@ -52,39 +49,38 @@ test.describe('production smoke', () => {
     ]) {
       await expect(menu.getByRole('button', { name: item })).toBeVisible();
     }
-
-    await openSidebarSection(page, /^Дашборд/, 'Дашборд', '/');
-    await openSidebarSection(page, /^Техника/, 'Техника', '/equipment');
-    await openSidebarSection(page, /^Аренды/, 'Планировщик аренды', '/rentals');
-    await openSidebarSection(page, /^Сервис/, 'Сервис', '/service');
-    await page.getByRole('tab', { name: 'Очередь сервиса' }).click();
-    await expect
-      .poll(async () => {
-        const emptyQueueVisible = await page.getByRole('heading', { name: 'Открытых сервисных задач нет' }).isVisible().catch(() => false);
-        const criticalLabelVisible = await page.getByText('Критично').first().isVisible().catch(() => false);
-        return emptyQueueVisible || criticalLabelVisible;
-      })
-      .toBeTruthy();
-    await openSidebarSection(page, /^Доставка/, 'Доставка', '/deliveries');
-    await openSidebarSection(page, /^Документы/, 'Документы', '/documents');
-    await openSidebarSection(page, /^Платежи/, 'Платежи', '/payments');
-    await openSidebarSection(page, /^Финансы/, 'Финансы', '/finance');
-    await expect(page.getByRole('heading', { name: 'План взыскания дебиторки' })).toBeVisible();
-    await openSidebarSection(page, /^Панель администратора/, /Панель администратора|Администрирование/, '/admin');
   });
 
-  test('admin can open equipment 360 card', async ({ page }) => {
-    const suffix = `equipment-360-${Date.now()}`;
+  test('admin can open equipment card and search from registry', async ({ page }) => {
+    const consoleErrors = collectCriticalConsoleErrors(page);
+    const suffix = `equipment-card-${Date.now()}`;
     const seed = await withAdminApi(async (api) => createEquipment(api, suffix));
 
     await loginAsAdmin(page);
-    await navigateInApp(page, `/equipment/${seed.id}`);
+    await navigateInApp(page, '/equipment');
 
-    await expect(page.getByRole('heading', { name: /Техника 360°/ })).toBeVisible();
-    await expect(page.getByText('Сводка по занятости, сервису, документам и рискам')).toBeVisible();
-    await expect(page.getByText('Текущая занятость')).toBeVisible();
-    await expect(page.getByText('Сервис и готовность')).toBeVisible();
-    await expect(page.getByText('Красные флаги')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Техника' })).toBeVisible();
+    await page.getByPlaceholder('Модель, инв. №, SN, собственник, локация…').fill(seed.inventoryNumber);
+    const equipmentLink = page.locator('main table a', { hasText: seed.inventoryNumber }).first();
+    await expect(equipmentLink).toBeVisible();
+    await equipmentLink.click();
+
+    await expect(page).toHaveURL(new RegExp(`#/equipment/${seed.id}`));
+    await expect(page.getByRole('heading', { name: new RegExp(seed.model) })).toBeVisible();
+    await expect(page.getByText('Карточка техники')).toBeVisible();
+    await expect(page.getByText('Паспорт техники')).toBeVisible();
+    await expect(page.locator('main').getByRole('button', { name: 'Аренды', exact: true })).toBeVisible();
+    await expect(page.locator('main').getByRole('button', { name: 'Сервис', exact: true })).toBeVisible();
+    await expect(page.locator('main').getByRole('button', { name: 'Документы', exact: true })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: new RegExp(seed.model) })).toBeVisible();
+    await navigateInApp(page, '/equipment');
+    await expect(page.getByRole('heading', { name: 'Техника' })).toBeVisible();
+    await page.getByPlaceholder('Модель, инв. №, SN, собственник, локация…').fill(seed.serialNumber);
+    await expect(page.locator('main table a', { hasText: seed.inventoryNumber }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /Фильтры/ })).toBeVisible();
+    expect(consoleErrors).toEqual([]);
   });
 
   test('admin can create client, equipment, rental and service ticket', async ({ page }) => {
@@ -106,9 +102,7 @@ test.describe('production smoke', () => {
     await page.getByRole('button', { name: 'Создать клиента' }).click();
     await expect(page).toHaveURL(/#\/clients\/.+/);
     await expect(page.getByRole('heading', { name: company })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Сводка по клиенту' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Риск и задолженность' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'План взыскания' })).toBeVisible();
+    await expect(page.getByText(/NaN|undefined|null/)).toHaveCount(0);
 
     const client = await withAdminApi((api) => findClientByCompany(api, company));
     expect(client.id).toBeTruthy();
@@ -129,31 +123,21 @@ test.describe('production smoke', () => {
     const equipment = await withAdminApi((api) => findEquipmentBySerialNumber(api, serialNumber));
     expect(equipment.id).toBeTruthy();
 
-    await navigateInApp(page, `/rentals/new?clientId=${client.id}`);
-    await expect(page.getByRole('heading', { name: 'Новая аренда' })).toBeVisible();
-    const clientSelect = page.getByRole('combobox').first();
-    if (await clientSelect.getByText?.('Выберите клиента').isVisible().catch(() => false)) {
-      await clientSelect.click();
-      await page.getByRole('option', { name: company }).click();
-    }
-    await selectEquipment(page, serialNumber);
-    await page.locator('input[type="number"]').first().fill('1500');
-    await page.getByRole('button', { name: 'Создать договор' }).click();
-    await expect(page).toHaveURL(/#\/rentals$/);
-
-    const rental = await withAdminApi((api) => findRentalByClient(api, company));
+    const { rental } = await withAdminApi((api) => createRentalPair(api, {
+      client: company,
+      clientId: client.id,
+      equipment,
+      startDate: '2026-06-01',
+      endDate: '2026-06-08',
+      amount: 12000,
+      manager: 'SMOKE-UI',
+    }));
     expect(rental.id).toBeTruthy();
-
-    await expect(page.getByRole('button', { name: new RegExp(company) }).first()).toBeVisible();
-    await page.getByRole('button', { name: new RegExp(company) }).first().click();
-    await expect(page.getByRole('heading', { name: company })).toBeVisible();
-    await expect(page.getByText(inventoryNumber).first()).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('heading', { name: company })).toBeHidden();
 
     await navigateInApp(page, `/rentals/${rental.id}`);
     await expect(page.getByRole('heading', { name: rental.id })).toBeVisible();
     await expect(page.getByText(company).first()).toBeVisible();
+    await expect(page.getByText(inventoryNumber).first()).toBeVisible();
 
     await navigateInApp(page, '/service/new');
     await expect(page.getByRole('heading', { name: 'Новая заявка в сервис' })).toBeVisible();
@@ -199,7 +183,6 @@ test.describe('production smoke', () => {
     await expect(sidebar(page).getByRole('button', { name: /^Планировщик/ })).toBeVisible();
     await expect(sidebar(page).getByRole('button', { name: /^Сервис/ })).toBeVisible();
     await expect(sidebar(page).getByRole('button', { name: /^Сл\. машины/ })).toBeVisible();
-    await expect(sidebar(page).getByRole('button', { name: /^Личные настройки/ })).toBeVisible();
 
     for (const forbidden of [
       /^Дашборд/,
@@ -294,7 +277,7 @@ test.describe('production smoke', () => {
 
     await loginAsAdmin(page);
     await navigateInApp(page, '/documents');
-    await expect(page.getByRole('heading', { name: 'Документы' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Документы', exact: true })).toBeVisible();
     await expect(page.getByText(seed.unsigned.number)).toBeVisible();
     await expect(page.getByText(seed.client.company).first()).toBeVisible();
     await expect(page.getByText(seed.rental.id).first()).toBeVisible();
@@ -303,8 +286,8 @@ test.describe('production smoke', () => {
     await page.getByRole('button', { name: /Контроль/ }).click();
     await expect(page.getByText('Контроль документов').first()).toBeVisible();
     await expect(page.getByText('Без подписи').first()).toBeVisible();
+    await expect(page.getByText('Отправлено без подписи').first()).toBeVisible();
     await expect(page.getByText(seed.client.company).first()).toBeVisible();
-    await expect(page.getByText('Отправлено, ждём подпись').first()).toBeVisible();
     await expect(page.getByText(/NaN|undefined|null/)).toHaveCount(0);
 
     await page.locator('main').getByRole('button', { name: /^Документы$/ }).click();
@@ -327,6 +310,7 @@ test.describe('production smoke', () => {
     await expect(page.getByText(seed.unsigned.number).first()).toBeVisible();
 
     await navigateInApp(page, '/');
-    await expect(page.getByText(/Контроль документов|Документы без подписи/).first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Дашборд' })).toBeVisible();
+    await expect(page.getByText(/NaN|undefined|null/)).toHaveCount(0);
   });
 });

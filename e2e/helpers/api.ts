@@ -27,6 +27,11 @@ type ClientRecord = {
   status?: string;
 };
 
+type ClientRentalRelations = {
+  object: { id: string; name: string; address: string };
+  contract: { id: string; number: string };
+};
+
 type EquipmentRecord = {
   id: string;
   inventoryNumber: string;
@@ -173,6 +178,42 @@ export async function findClientByCompany(api: APIRequestContext, company: strin
   return client!;
 }
 
+export async function createClientRentalRelations(
+  api: APIRequestContext,
+  clientId: string,
+  suffix: string,
+): Promise<ClientRentalRelations> {
+  const objectRes = await api.post('/api/client_objects', {
+    data: {
+      clientId,
+      name: `E2E объект ${suffix}`,
+      address: 'Kazan',
+      contactName: 'E2E Contact',
+      contactPhone: '+79990000000',
+      status: 'active',
+      notes: 'Created by Playwright',
+    },
+  });
+  expect(objectRes.ok(), await objectRes.text()).toBeTruthy();
+  const object = (await objectRes.json()) as ClientRentalRelations['object'];
+
+  const contractRes = await api.post('/api/client_contracts', {
+    data: {
+      clientId,
+      objectId: object.id,
+      objectIds: [object.id],
+      number: `E2E-CONTRACT-${suffix}`.slice(0, 40),
+      date: '2026-05-14',
+      title: 'E2E договор аренды',
+      status: 'active',
+      notes: 'Created by Playwright',
+    },
+  });
+  expect(contractRes.ok(), await contractRes.text()).toBeTruthy();
+  const contract = (await contractRes.json()) as ClientRentalRelations['contract'];
+  return { object, contract };
+}
+
 export async function findEquipmentBySerialNumber(api: APIRequestContext, serialNumber: string): Promise<EquipmentRecord> {
   const res = await api.get('/api/equipment');
   expect(res.ok()).toBeTruthy();
@@ -247,7 +288,10 @@ export async function createRentalPair(
   api: APIRequestContext,
   options: {
     client: string;
+    clientId?: string;
     equipment: EquipmentRecord;
+    objectId?: string;
+    contractId?: string;
     startDate: string;
     endDate: string;
     amount?: number;
@@ -260,12 +304,21 @@ export async function createRentalPair(
   const manager = options.manager ?? 'E2E';
   const status = options.status ?? 'new';
   const ganttStatus = options.ganttStatus ?? status;
+  const client = options.clientId ? { id: options.clientId } : await findClientByCompany(api, options.client);
+  const relations = options.objectId && options.contractId
+    ? { object: { id: options.objectId }, contract: { id: options.contractId } }
+    : await createClientRentalRelations(api, client.id, `rental-${Date.now()}`);
   const rentalRes = await api.post('/api/rentals', {
     data: {
+      clientId: client.id,
       client: options.client,
       contact: 'E2E Contact',
+      objectId: relations.object.id,
+      contractId: relations.contract.id,
       startDate: options.startDate,
       plannedReturnDate: options.endDate,
+      equipmentId: options.equipment.id,
+      equipmentInv: options.equipment.inventoryNumber,
       equipment: [options.equipment.inventoryNumber],
       rate: '1000 ₽/день',
       price: amount,
@@ -276,7 +329,7 @@ export async function createRentalPair(
       comments: 'Created by Playwright',
     },
   });
-  expect(rentalRes.ok()).toBeTruthy();
+  expect(rentalRes.ok(), await rentalRes.text()).toBeTruthy();
   const rental = (await rentalRes.json()) as RentalRecord;
 
   const ganttRes = await api.post('/api/gantt_rentals', {

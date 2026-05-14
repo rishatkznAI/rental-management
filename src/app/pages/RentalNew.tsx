@@ -23,12 +23,13 @@ import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData } from '../mock-data';
 import type { EquipmentStatus } from '../types';
 import { canEquipmentParticipateInRentals } from '../lib/equipmentClassification';
-import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { calculateRentalAmount, formatCurrency, getRentalDays } from '../lib/utils';
 import { isEquipmentBusy } from '../lib/rental-conflicts';
 import { buildClientReceivables, buildRentalDebtRows } from '../lib/finance';
 import { EquipmentCombobox } from '../components/ui/EquipmentCombobox';
+import { filterRentalManagerUsers } from '../lib/userStorage';
+import { staffService, type StaffOption } from '../services/staff.service';
 
 export default function RentalNew() {
   const navigate = useNavigate();
@@ -43,6 +44,9 @@ export default function RentalNew() {
   const { data: rawEq = [] } = useEquipmentList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: payments = [] } = usePaymentsList();
+  const [managers, setManagers] = useState<StaffOption[]>([]);
+  const [formError, setFormError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const allEq = useMemo(
     () => rawEq.filter(e => canEquipmentParticipateInRentals(e) && e.status !== 'inactive' && e.status !== 'in_service'),
@@ -66,6 +70,18 @@ export default function RentalNew() {
     if (!can('create', 'rentals')) navigate('/rentals', { replace: true });
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    staffService.getManagerOptions()
+      .then(users => {
+        if (mounted) setManagers(filterRentalManagerUsers(users));
+      })
+      .catch(() => {
+        if (mounted) setManagers([]);
+      });
+    return () => { mounted = false; };
+  }, []);
+
   const today    = new Date().toISOString().split('T')[0];
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
 
@@ -76,6 +92,8 @@ export default function RentalNew() {
   const [equipmentId, setEquipmentId] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(nextWeek);
+  const [managerId, setManagerId] = useState('');
+  const [manager, setManager] = useState('');
   const [dailyRate, setDailyRate] = useState('');
   const [deposit, setDeposit] = useState('');
   const [notes, setNotes] = useState('');
@@ -163,65 +181,58 @@ export default function RentalNew() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedClient || !selectedEquipment) return;
+    setFormError('');
+    if (!selectedClient) {
+      setFormError('Выберите клиента.');
+      return;
+    }
+    if (!selectedEquipment) {
+      setFormError('Выберите технику.');
+      return;
+    }
+    if (!startDate || !endDate) {
+      setFormError('Укажите даты начала и окончания аренды.');
+      return;
+    }
+    if (!objectId || !contractId) {
+      setFormError('Для аренды укажите объект клиента и договор.');
+      return;
+    }
+    if (new Date(startDate).getTime() > new Date(endDate).getTime()) {
+      setFormError('Дата окончания аренды не может быть раньше даты начала.');
+      return;
+    }
+    if (conflictWarn) {
+      setFormError('Техника занята на выбранный период. Выберите другие даты или другую технику.');
+      return;
+    }
+    setIsSubmitting(true);
     const todayStr = new Date().toISOString().split('T')[0];
     const initialStatus: GanttRentalData['status'] = startDate <= todayStr ? 'active' : 'created';
 
-    // Classic rental
-    const savedClassicRental = await rentalsService.create({
-      client: selectedClient.company,
-      clientId: selectedClient.id,
-      objectId: objectId || undefined,
-      contractId: contractId || undefined,
-      contact: '',
-      startDate,
-      plannedReturnDate: endDate,
-      equipment: [selectedEquipment.inventoryNumber],
-      rate: `${dailyRate} ₽/день`,
-      price: totalPrice,
-      discount: 0,
-      deliveryAddress: '',
-      manager: '',
-      status: 'new' as const,
-      comments: notes,
-    });
+    try {
+      await rentalsService.create({
+        client: selectedClient.company,
+        clientId: selectedClient.id,
+        objectId: objectId || undefined,
+        contractId: contractId || undefined,
+        contact: '',
+        startDate,
+        plannedReturnDate: endDate,
+        equipment: [selectedEquipment.inventoryNumber],
+        equipmentId: selectedEquipment.id,
+        equipmentInv: selectedEquipment.inventoryNumber,
+        rate: `${dailyRate || 0} ₽/день`,
+        price: totalPrice,
+        discount: 0,
+        deliveryAddress: '',
+        manager,
+        managerId: managerId || undefined,
+        status: initialStatus,
+        paymentStatus: 'unpaid',
+        comments: notes,
+      });
 
-    // Gantt entry
-    await rentalsService.createGanttEntry({
-      rentalId: savedClassicRental.id,
-      clientId: selectedClient.id,
-      objectId: objectId || undefined,
-      contractId: contractId || undefined,
-      client: selectedClient.company,
-      clientShort: selectedClient.company.substring(0, 20),
-      equipmentId: selectedEquipment.id,
-      equipmentInv: selectedEquipment.inventoryNumber,
-      startDate,
-      endDate,
-      manager: '',
-      managerInitials: '',
-      status: initialStatus,
-      paymentStatus: 'unpaid',
-      updSigned: false,
-      amount: totalPrice,
-      comments: [
-        buildRentalCreationHistory(
-          {
-            client: selectedClient.company,
-            startDate,
-            endDate,
-            status: initialStatus,
-          },
-          user?.name || 'Система',
-        ),
-        ...(notes.trim()
-          ? [createRentalHistoryEntry(user?.name || 'Система', notes.trim(), 'comment')]
-          : []),
-      ],
-    });
-
-    // Update equipment status
-    if (selectedEquipment) {
       const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
       const equipmentWithHistory = appendAuditHistory(
         {
@@ -238,13 +249,17 @@ export default function RentalNew() {
         ),
       );
       const { id: _equipmentId, ...equipmentUpdateData } = equipmentWithHistory;
-      updateEquipment.mutate({ id: selectedEquipment.id, data: {
+      await updateEquipment.mutateAsync({ id: selectedEquipment.id, data: {
         ...equipmentUpdateData,
       } });
-    }
 
-    qc.invalidateQueries();
-    navigate('/rentals');
+      qc.invalidateQueries();
+      navigate('/rentals');
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Не удалось создать аренду.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -342,10 +357,10 @@ export default function RentalNew() {
             {selectedClient && (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Объект клиента</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Объект клиента <span className="text-red-500">*</span></label>
                   {selectedClientObjects.length === 0 ? (
                     <p className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700">
-                      У клиента нет активных объектов. Можно сохранить аренду без объекта.
+                      У клиента нет активных объектов. Для создания аренды сначала добавьте объект в карточке клиента.
                     </p>
                   ) : (
                     <Select
@@ -368,13 +383,13 @@ export default function RentalNew() {
                   )}
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Договор</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Договор <span className="text-red-500">*</span></label>
                   <Select value={contractId || 'none'} onValueChange={(value) => setContractId(value === 'none' ? '' : value)}>
                     <SelectTrigger>
                       <SelectValue placeholder="Выберите договор" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">Без договора</SelectItem>
+                      <SelectItem value="none">Выберите договор</SelectItem>
                       {selectedClientContracts.map(contract => (
                         <SelectItem key={contract.id} value={contract.id}>{contract.number}</SelectItem>
                       ))}
@@ -446,6 +461,32 @@ export default function RentalNew() {
             {/* Daily Rate + Deposit */}
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Менеджер</label>
+                <Select
+                  value={managerId || 'none'}
+                  onValueChange={(value) => {
+                    if (value === 'none') {
+                      setManagerId('');
+                      setManager('');
+                      return;
+                    }
+                    const selected = managers.find(item => item.id === value);
+                    setManagerId(value);
+                    setManager(selected?.name ?? '');
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите менеджера" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Не назначен</SelectItem>
+                    {managers.map(item => (
+                      <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Ставка в день (₽)</label>
                 <Input
                   type="number"
@@ -454,6 +495,8 @@ export default function RentalNew() {
                   onChange={(e) => setDailyRate(e.target.value)}
                 />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Залог (₽)</label>
                 <Input
@@ -488,9 +531,15 @@ export default function RentalNew() {
               />
             </div>
 
+            {formError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+                {formError}
+              </div>
+            )}
+
             <div className="flex gap-3 pt-4">
-              <Button type="submit" disabled={!client || !equipmentId || !startDate || !endDate}>
-                Создать договор
+              <Button type="submit" disabled={isSubmitting || !client || !objectId || !contractId || !equipmentId || !startDate || !endDate || conflictWarn}>
+                {isSubmitting ? 'Создание…' : 'Создать договор'}
               </Button>
               <Button
                 type="button"

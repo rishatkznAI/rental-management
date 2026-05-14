@@ -72,7 +72,6 @@ import {
 } from '../lib/rentalDowntimeFlow.js';
 import {
   appendRentalHistory,
-  buildRentalCreationHistory,
   buildRentalUpdateHistory,
   createRentalHistoryEntry,
 } from '../lib/rental-history';
@@ -6170,38 +6169,13 @@ export default function Rentals() {
           const initialStatus: GanttRentalData['status'] =
             (data.startDate || '') <= todayStr ? 'active' : 'created';
 
-          const newRental: Omit<GanttRentalData, 'id'> = {
-            clientId: data.clientId,
-            client: data.client || '',
-            clientShort: (data.client || '').substring(0, 20),
-            equipmentId: data.equipmentId,
-            equipmentInv: data.equipmentInv || '',
-            startDate: data.startDate || '',
-            endDate: data.endDate || '',
-            manager: data.manager || '',
-            managerInitials: (data.manager || '').split(' ').map((w: string) => w[0]).join('').toUpperCase(),
-            status: initialStatus,
-            paymentStatus: 'unpaid',
-            updSigned: false,
-            amount: data.amount || 0,
-            comments: [
-              buildRentalCreationHistory(
-                {
-                  client: data.client || '',
-                  startDate: data.startDate || '',
-                  endDate: data.endDate || '',
-                  status: initialStatus,
-                },
-                historyAuthor,
-              ),
-            ],
-          };
-
           try {
             // Сохраняем и "классическую" аренду, чтобы она была видна в связанных разделах и карточках.
             const savedClassicRental = await rentalsService.create({
               clientId: data.clientId,
               client: data.client || '',
+              objectId: data.objectId || undefined,
+              contractId: data.contractId || undefined,
               contact: '',
               startDate: data.startDate || '',
               plannedReturnDate: data.endDate || '',
@@ -6213,15 +6187,17 @@ export default function Rentals() {
               discount: 0,
               deliveryAddress: '',
               manager: data.manager || '',
-              status: 'new',
+              status: initialStatus,
+              paymentStatus: 'unpaid',
               comments: '',
             });
-            const savedRental = await rentalsService.createGanttEntry({
-              ...newRental,
-              rentalId: savedClassicRental.id,
-            });
 
-            setGanttRentals((prev) => [...prev, savedRental]);
+            const refreshedGanttRentals = await rentalsService.getGanttData();
+            const savedRental = refreshedGanttRentals.find(item =>
+              [item.rentalId, item.sourceRentalId, item.originalRentalId]
+                .some(id => String(id || '') === String(savedClassicRental.id || ''))
+            );
+            setGanttRentals(refreshedGanttRentals);
             await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
             await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all });
 
@@ -6234,22 +6210,23 @@ export default function Rentals() {
                   {
                     ...e,
                     status: eqStatus,
-                    currentClient: initialStatus === 'active' ? savedRental.client : e.currentClient,
-                    returnDate: initialStatus === 'active' ? savedRental.endDate : e.returnDate,
+                    currentClient: initialStatus === 'active' ? (savedRental?.client || data.client || '') : e.currentClient,
+                    returnDate: initialStatus === 'active' ? (savedRental?.endDate || data.endDate || '') : e.returnDate,
                   },
                   initialStatus === 'active'
-                    ? `Создана и сразу активирована аренда для клиента ${savedRental.client}`
-                    : `Создана бронь под клиента ${savedRental.client}`,
+                    ? `Создана и сразу активирована аренда для клиента ${savedRental?.client || data.client}`
+                    : `Создана бронь под клиента ${savedRental?.client || data.client}`,
                 );
               });
               await persistEquipment(newEqList);
             }
 
-            showToast(`Аренда создана: ${savedRental.id} — ${data.client} (${data.equipmentInv})`);
+            showToast(`Аренда создана: ${savedClassicRental.id} — ${data.client} (${data.equipmentInv})`);
             setShowNewRentalModal(false);
           } catch (error) {
             const message = error instanceof Error ? error.message : 'Не удалось создать аренду';
             showToast(message, 'error');
+            throw new Error(message);
           }
         }}
       />

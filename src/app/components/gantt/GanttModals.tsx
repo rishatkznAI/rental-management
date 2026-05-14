@@ -6,9 +6,11 @@ import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import type { DowntimePeriod, GanttRentalData } from '../../mock-data';
 import { filterRentalManagerUsers } from '../../lib/userStorage';
-import type { Client, Equipment } from '../../types';
+import type { Client, ClientContract, ClientObject, Equipment } from '../../types';
 import { equipmentService } from '../../services/equipment.service';
 import { clientsService } from '../../services/clients.service';
+import { clientContractsService } from '../../services/client-contracts.service';
+import { clientObjectsService } from '../../services/client-objects.service';
 import { paymentsService } from '../../services/payments.service';
 import { rentalsService } from '../../services/rentals.service';
 import { staffService, type StaffOption } from '../../services/staff.service';
@@ -558,13 +560,15 @@ interface NewRentalModalProps {
   onConfirm: (data: {
     clientId: string;
     client: string;
+    objectId: string;
+    contractId: string;
     equipmentId: string;
     equipmentInv: string;
     startDate: string;
     endDate: string;
     manager: string;
     amount: number;
-  }) => void;
+  }) => void | Promise<void>;
 }
 
 export function NewRentalModal({
@@ -583,18 +587,27 @@ export function NewRentalModal({
 
   const [client,       setClient]       = useState('');
   const [clientId,     setClientId]     = useState('');
+  const [objectId,     setObjectId]     = useState('');
+  const [contractId,   setContractId]   = useState('');
   const [equipmentId,  setEquipmentId]  = useState('');
   const [startDate,    setStartDate]    = useState(today);
   const [endDate,      setEndDate]      = useState(nextWeek);
   const [manager,      setManager]      = useState('');
   const [dailyRate,    setDailyRate]    = useState('');
   const [conflictWarn, setConflictWarn] = useState(false);
+  const [submitError,  setSubmitError]  = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   React.useEffect(() => {
     if (!open) return;
     setDailyRate('');
     setClient('');
     setClientId('');
+    setObjectId('');
+    setContractId('');
+    setManager('');
+    setSubmitError('');
+    setConflictWarn(false);
     if (!preselectedEquipmentId) setEquipmentId('');
   }, [open, preselectedEquipmentId]);
 
@@ -607,6 +620,16 @@ export function NewRentalModal({
     queryKey: ['staff', 'manager-options'],
     queryFn: staffService.getManagerOptions,
     enabled: open && !managersProp,
+  });
+  const { data: clientObjectsData = [] } = useQuery<ClientObject[]>({
+    queryKey: ['client_objects'],
+    queryFn: clientObjectsService.getAll,
+    enabled: open,
+  });
+  const { data: clientContractsData = [] } = useQuery<ClientContract[]>({
+    queryKey: ['client_contracts'],
+    queryFn: clientContractsService.getAll,
+    enabled: open,
   });
   const { data: paymentsData = [] } = useQuery({
     queryKey: ['payments'],
@@ -665,6 +688,27 @@ export function NewRentalModal({
     () => allClients.find(item => item.id === clientId) ?? null,
     [allClients, clientId],
   );
+  const selectedClientObjects = useMemo(
+    () => clientObjectsData.filter(item => item.clientId === clientId && item.status !== 'archived'),
+    [clientId, clientObjectsData],
+  );
+  const selectedClientContracts = useMemo(
+    () => clientContractsData.filter(item =>
+      item.clientId === clientId &&
+      item.status !== 'archived' &&
+      (!objectId || !item.objectId || item.objectId === objectId)
+    ),
+    [clientId, clientContractsData, objectId],
+  );
+  React.useEffect(() => {
+    if (!open) return;
+    setObjectId('');
+    setContractId('');
+  }, [clientId, open]);
+  React.useEffect(() => {
+    if (!open) return;
+    if (selectedClientObjects.length === 1 && !objectId) setObjectId(selectedClientObjects[0].id);
+  }, [objectId, open, selectedClientObjects]);
   const uniqueInventoryNumbers = useMemo(() => {
     const counts = new Map<string, number>();
     (equipmentListProp ?? fetchedEquipment).forEach(item => {
@@ -758,6 +802,53 @@ export function NewRentalModal({
 
   const hasNoEquipment = availableEquipment.length === 0 && busyEquipment.length === 0;
 
+  const submit = async () => {
+    setSubmitError('');
+    if (!selectedClient) {
+      setSubmitError('Выберите клиента.');
+      return;
+    }
+    if (!selectedEquipment) {
+      setSubmitError('Выберите технику.');
+      return;
+    }
+    if (!startDate || !endDate) {
+      setSubmitError('Укажите даты начала и окончания аренды.');
+      return;
+    }
+    if (!objectId || !contractId) {
+      setSubmitError('Для аренды укажите объект клиента и договор.');
+      return;
+    }
+    if (new Date(startDate).getTime() > new Date(endDate).getTime()) {
+      setSubmitError('Дата окончания аренды не может быть раньше даты начала.');
+      return;
+    }
+    if (conflictWarn) {
+      setSubmitError('Техника занята на выбранный период. Выберите другие даты или другую технику.');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await onConfirm({
+        clientId: selectedClient.id,
+        client: selectedClient.company,
+        objectId,
+        contractId,
+        equipmentId: selectedEquipment.id,
+        equipmentInv: selectedEquipment.inventoryNumber,
+        startDate,
+        endDate,
+        manager,
+        amount: totalAmount,
+      });
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Не удалось создать аренду.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div data-state={presence.dataState} className={modalOverlayClass} onClick={onClose} />
@@ -826,6 +917,46 @@ export function NewRentalModal({
                   <p className="text-xs uppercase tracking-wide opacity-75">Долг</p>
                   <p className="text-base font-semibold">{formatCurrency(selectedClientFinancial.currentDebt)}</p>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {selectedClient && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Объект <span className="text-red-500">*</span>
+                </label>
+                {selectedClientObjects.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-gray-300 px-3 py-2 text-xs text-gray-400 dark:border-gray-600">
+                    У клиента нет активных объектов
+                  </p>
+                ) : (
+                  <select
+                    value={objectId}
+                    onChange={event => {
+                      setObjectId(event.target.value);
+                      setContractId('');
+                    }}
+                    className={selectClass}
+                  >
+                    <option value="">Выберите</option>
+                    {selectedClientObjects.map(object => (
+                      <option key={object.id} value={object.id}>{object.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Договор <span className="text-red-500">*</span>
+                </label>
+                <select value={contractId} onChange={event => setContractId(event.target.value)} className={selectClass}>
+                  <option value="">Выберите</option>
+                  {selectedClientContracts.map(contract => (
+                    <option key={contract.id} value={contract.id}>{contract.number}</option>
+                  ))}
+                </select>
               </div>
             </div>
           )}
@@ -939,28 +1070,21 @@ export function NewRentalModal({
             </div>
           </div>
 
+          {submitError && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+              {submitError}
+            </div>
+          )}
+
         </div>
 
         <div className={modalFooterClass}>
           <Button variant="secondary" onClick={onClose}>Отмена</Button>
           <Button
-            onClick={() => {
-              if (!selectedEquipment || !selectedClient) return;
-              onConfirm({
-                clientId: selectedClient.id,
-                client: selectedClient.company,
-                equipmentId: selectedEquipment.id,
-                equipmentInv: selectedEquipment.inventoryNumber,
-                startDate,
-                endDate,
-                manager,
-                amount: totalAmount,
-              });
-              onClose();
-            }}
-            disabled={!selectedClient || !selectedEquipment || !startDate || !endDate}
+            onClick={() => { void submit(); }}
+            disabled={isSubmitting || !selectedClient || !objectId || !contractId || !selectedEquipment || !startDate || !endDate || conflictWarn}
           >
-            Создать аренду
+            {isSubmitting ? 'Создание…' : 'Создать аренду'}
           </Button>
         </div>
       </div>

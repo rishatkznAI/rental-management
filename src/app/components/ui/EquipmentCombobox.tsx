@@ -8,17 +8,18 @@ import { cn } from './utils';
 /** Единый читаемый label для единицы техники */
 export function eqLabel(eq: Equipment): string {
   const sn = eq.serialNumber ? `SN ${eq.serialNumber}` : 'SN не указан';
-  return `${eq.manufacturer} ${eq.model} · INV ${eq.inventoryNumber} · ${sn}`;
+  const title = [eq.manufacturer, eq.model].map(value => String(value || '').trim()).filter(Boolean).join(' ') || 'Техника';
+  return `${title} · INV ${eq.inventoryNumber || 'не указан'} · ${sn}`;
 }
 
 function matchesSearch(eq: Equipment, q: string): boolean {
   if (!q.trim()) return true;
   const lower = q.toLowerCase();
   return (
-    eq.manufacturer.toLowerCase().includes(lower) ||
-    eq.model.toLowerCase().includes(lower) ||
-    eq.inventoryNumber.toLowerCase().includes(lower) ||
-    (eq.serialNumber?.toLowerCase().includes(lower) ?? false)
+    String(eq.manufacturer || '').toLowerCase().includes(lower) ||
+    String(eq.model || '').toLowerCase().includes(lower) ||
+    String(eq.inventoryNumber || '').toLowerCase().includes(lower) ||
+    String(eq.serialNumber || '').toLowerCase().includes(lower)
   );
 }
 

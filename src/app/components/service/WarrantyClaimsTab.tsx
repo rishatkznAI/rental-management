@@ -570,31 +570,31 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-          <p className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Активные</p>
-          <p className="mt-2 text-3xl font-black text-gray-900 dark:text-white">{metrics.active}</p>
+    <div className="space-y-3">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="min-h-[88px] rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">Активные</p>
+          <p className="mt-2 text-2xl font-black text-gray-900 dark:text-white">{metrics.active}</p>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Требуют контроля</p>
         </div>
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm shadow-blue-100/60 dark:border-blue-900/50 dark:bg-blue-950/20 dark:shadow-none">
-          <p className="text-xs font-bold uppercase text-blue-700 dark:text-blue-300">Новые</p>
-          <p className="mt-2 text-3xl font-black text-blue-900 dark:text-blue-100">{metrics.new}</p>
+        <div className="min-h-[88px] rounded-lg border border-blue-200 bg-blue-50 p-3 shadow-sm shadow-blue-100/60 dark:border-blue-900/50 dark:bg-blue-950/20 dark:shadow-none">
+          <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">Новые</p>
+          <p className="mt-2 text-2xl font-black text-blue-900 dark:text-blue-100">{metrics.new}</p>
           <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">Первичная проверка</p>
         </div>
-        <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 shadow-sm shadow-orange-100/60 dark:border-orange-900/50 dark:bg-orange-950/20 dark:shadow-none">
-          <p className="text-xs font-bold uppercase text-orange-700 dark:text-orange-300">На рассмотрении</p>
-          <p className="mt-2 text-3xl font-black text-orange-900 dark:text-orange-100">{metrics.inReview}</p>
+        <div className="min-h-[88px] rounded-lg border border-orange-200 bg-orange-50 p-3 shadow-sm shadow-orange-100/60 dark:border-orange-900/50 dark:bg-orange-950/20 dark:shadow-none">
+          <p className="text-xs font-semibold text-orange-700 dark:text-orange-300">На рассмотрении</p>
+          <p className="mt-2 text-2xl font-black text-orange-900 dark:text-orange-100">{metrics.inReview}</p>
           <p className="mt-1 text-xs text-orange-700/80 dark:text-orange-300/80">Разбор причины</p>
         </div>
-        <div className="rounded-lg border border-green-200 bg-green-50 p-4 shadow-sm shadow-green-100/60 dark:border-green-900/50 dark:bg-green-950/20 dark:shadow-none">
-          <p className="text-xs font-bold uppercase text-green-700 dark:text-green-300">Закрыты за месяц</p>
-          <p className="mt-2 text-3xl font-black text-green-900 dark:text-green-100">{metrics.closedMonth}</p>
+        <div className="min-h-[88px] rounded-lg border border-green-200 bg-green-50 p-3 shadow-sm shadow-green-100/60 dark:border-green-900/50 dark:bg-green-950/20 dark:shadow-none">
+          <p className="text-xs font-semibold text-green-700 dark:text-green-300">Закрыты за месяц</p>
+          <p className="mt-2 text-2xl font-black text-green-900 dark:text-green-100">{metrics.closedMonth}</p>
           <p className="mt-1 text-xs text-green-700/80 dark:text-green-300/80">Итог за период</p>
         </div>
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 shadow-sm shadow-red-100/60 dark:border-red-900/50 dark:bg-red-950/20 dark:shadow-none">
-          <p className="text-xs font-bold uppercase text-red-700 dark:text-red-300">Просрочены</p>
-          <p className="mt-2 text-3xl font-black text-red-900 dark:text-red-100">{metrics.overdue}</p>
+        <div className="min-h-[88px] rounded-lg border border-red-200 bg-red-50 p-3 shadow-sm shadow-red-100/60 dark:border-red-900/50 dark:bg-red-950/20 dark:shadow-none">
+          <p className="text-xs font-semibold text-red-700 dark:text-red-300">Просрочены</p>
+          <p className="mt-2 text-2xl font-black text-red-900 dark:text-red-100">{metrics.overdue}</p>
           <p className="mt-1 text-xs text-red-700/80 dark:text-red-300/80">Нарушен срок реакции</p>
         </div>
       </div>
@@ -771,18 +771,18 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
               <CardDescription>Поиск по номеру, технике, клиенту, связанной заявке и причине.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 lg:grid-cols-[minmax(220px,1.4fr)_repeat(5,minmax(130px,1fr))]">
+              <div className="grid gap-2 lg:grid-cols-[minmax(240px,1.6fr)_repeat(5,minmax(120px,0.8fr))]">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                     placeholder="№, техника, клиент, заявка, причина..."
-                    className="pl-10"
+                    className="h-9 pl-10 text-sm"
                   />
                 </div>
                 <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ManagementClaimStatus | 'all')}>
-                  <SelectTrigger><SelectValue placeholder="Статус" /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Статус" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Все статусы</SelectItem>
                     {(Object.keys(MANAGEMENT_STATUS_META) as ManagementClaimStatus[]).map(status => (
@@ -791,7 +791,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   </SelectContent>
                 </Select>
                 <Select value={equipmentFilter} onValueChange={setEquipmentFilter}>
-                  <SelectTrigger><SelectValue placeholder="Техника" /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Техника" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Вся техника</SelectItem>
                     {filterOptions.equipment.map(equipment => (
@@ -800,7 +800,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   </SelectContent>
                 </Select>
                 <Select value={clientFilter} onValueChange={setClientFilter}>
-                  <SelectTrigger><SelectValue placeholder="Клиент" /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Клиент" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Все клиенты</SelectItem>
                     {filterOptions.clients.map(client => (
@@ -809,7 +809,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   </SelectContent>
                 </Select>
                 <Select value={factoryFilter} onValueChange={setFactoryFilter}>
-                  <SelectTrigger><SelectValue placeholder="Поставщик" /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Поставщик" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Все поставщики</SelectItem>
                     {filterOptions.factories.map(factory => (
@@ -818,7 +818,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   </SelectContent>
                 </Select>
                 <Select value={periodFilter} onValueChange={setPeriodFilter}>
-                  <SelectTrigger><SelectValue placeholder="Период" /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Период" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Все даты</SelectItem>
                     <SelectItem value="today">Сегодня</SelectItem>

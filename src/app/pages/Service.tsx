@@ -268,16 +268,35 @@ function servicePriorityLabel(priority: ServiceTicket['priority']) {
 
 function getServicePriorityPill(priority: ServiceTicket['priority']) {
   const normalized = normalizeServicePriority(priority);
-  const className = {
-    critical: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300',
-    high: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300',
-    medium: 'bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300',
-    low: 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300',
+  const meta = {
+    critical: { label: 'Крит.', className: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300', dot: 'bg-red-500' },
+    high: { label: 'Высок.', className: 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300', dot: 'bg-red-500' },
+    medium: { label: 'Сред.', className: 'bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300', dot: 'bg-orange-500' },
+    low: { label: 'Низк.', className: 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300', dot: 'bg-blue-500' },
   }[normalized];
 
   return (
-    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${className}`}>
-      {servicePriorityLabel(normalized)}
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold ${meta.className}`} title={servicePriorityLabel(normalized)}>
+      <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+      {meta.label}
+    </span>
+  );
+}
+
+function getCompactServiceStatusPill(status: ServiceTicket['status']) {
+  const normalized = normalizeServiceStatus(status);
+  const meta = {
+    new: { label: 'Новая', className: 'bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-300' },
+    in_progress: { label: 'В работе', className: 'bg-blue-50 text-blue-700 ring-1 ring-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-900' },
+    waiting_parts: { label: 'Запчасти', className: 'bg-orange-50 text-orange-700 ring-1 ring-orange-200 dark:bg-orange-500/15 dark:text-orange-300 dark:ring-orange-900' },
+    needs_revision: { label: 'Доработка', className: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-900' },
+    ready: { label: 'Готово', className: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-900' },
+    closed: { label: 'Закрыта', className: 'bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-300' },
+  }[normalized];
+
+  return (
+    <span className={`inline-flex max-w-full truncate rounded-full px-2 py-1 text-xs font-semibold ${meta.className}`} title={serviceStatusLabel(normalized)}>
+      {meta.label}
     </span>
   );
 }
@@ -448,16 +467,16 @@ function ServiceMetricCard({
   }[tone];
 
   return (
-    <div className="flex min-h-[116px] flex-col justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-      <div className="flex items-start justify-between gap-3">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${toneClasses.icon}`} aria-hidden="true">
+    <div data-service-kpi-card="true" className="flex min-h-[96px] flex-col justify-between rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+      <div className="flex items-start justify-between gap-2">
+        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${toneClasses.icon}`} aria-hidden="true">
           {icon ?? <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.accent}`} />}
         </div>
-        <div className="min-w-0 flex-1 text-right text-xs font-bold uppercase text-gray-500 dark:text-gray-500">{title}</div>
+        <div className="min-w-0 flex-1 text-right text-xs font-semibold leading-tight text-gray-500 dark:text-gray-500">{title}</div>
       </div>
       <div>
-        <div className={`mt-3 text-3xl font-black leading-none ${toneClasses.value}`}>{safeValue}</div>
-        <div className="mt-2 text-sm text-gray-500 dark:text-gray-500">{caption}</div>
+        <div className={`mt-2 text-2xl font-black leading-none ${toneClasses.value}`}>{safeValue}</div>
+        <div className="mt-1 text-xs text-gray-500 dark:text-gray-500">{caption}</div>
       </div>
     </div>
   );
@@ -466,7 +485,7 @@ function ServiceMetricCard({
 function TicketThumbnail({ ticket }: { ticket: ServiceTicket }) {
   const photo = getTicketPhoto(ticket);
   return (
-    <div className="flex h-11 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gray-200 bg-gray-100 dark:border-white/10 dark:bg-white/8">
+    <div className="flex h-10 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gray-200 bg-gray-100 dark:border-white/10 dark:bg-white/8">
       {photo ? (
         <AuthenticatedImage
           photo={photo}
@@ -838,14 +857,14 @@ function ServiceManagementPanel({
   ];
 
   return (
-    <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start">
-      <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-        <h3 className="text-sm font-black uppercase text-gray-800 dark:text-white">Быстрые действия</h3>
-        <div className="mt-3 grid gap-2">
+    <aside className="space-y-3 xl:sticky xl:top-4 xl:self-start">
+      <section className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+        <h3 className="text-sm font-bold text-gray-800 dark:text-white">Быстрые действия</h3>
+        <div className="mt-2 grid gap-1.5">
           {quickActions.filter(action => action.show).map(action => (
             action.to ? (
               <Link key={action.label} to={action.to}>
-                <Button type="button" variant="secondary" className="w-full justify-start">
+                <Button type="button" variant="secondary" className="h-9 w-full justify-start text-sm">
                   {action.icon}
                   {action.label}
                 </Button>
@@ -855,7 +874,7 @@ function ServiceManagementPanel({
                 key={action.label}
                 type="button"
                 variant="outline"
-                className="w-full justify-start"
+                className="h-9 w-full justify-start text-sm"
                 onClick={() => {
                   if (action.action === 'planner') onShowPlanner();
                   if (action.action === 'warranty') onShowWarranty();
@@ -876,11 +895,11 @@ function ServiceManagementPanel({
         </div>
       </section>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-        <h3 className="text-sm font-black uppercase text-gray-800 dark:text-white">Статистика</h3>
-        <div className="mt-3 divide-y divide-gray-100 dark:divide-white/8">
+      <section className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+        <h3 className="text-sm font-bold text-gray-800 dark:text-white">Статистика</h3>
+        <div className="mt-2 divide-y divide-gray-100 dark:divide-white/8">
           {statRows.map(row => (
-            <div key={row.label} className="flex items-center justify-between gap-3 py-2.5">
+            <div key={row.label} className="flex items-center justify-between gap-3 py-2">
               <span className="text-sm text-gray-600 dark:text-gray-300">{row.label}</span>
               <span className={`text-lg font-black ${row.tone}`}>{row.value}</span>
             </div>
@@ -889,22 +908,22 @@ function ServiceManagementPanel({
       </section>
 
       {problemGroups.map(group => (
-        <section key={group.title} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+        <section key={group.title} className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
           <div className="flex items-center gap-2">
             {group.icon}
             <h3 className="text-sm font-black text-gray-900 dark:text-white">{group.title}</h3>
             <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500 dark:bg-white/8 dark:text-gray-300">{group.rows.length}</span>
           </div>
           {group.rows.length === 0 ? (
-            <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:bg-white/[0.04] dark:text-gray-400">{group.empty}</p>
+            <p className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:bg-white/[0.04] dark:text-gray-400">{group.empty}</p>
           ) : (
-            <div className="mt-3 space-y-2">
+            <div className="mt-2 space-y-1.5">
               {group.rows.map(item => (
                 <button
                   key={`${group.title}-${item.ticketId}`}
                   type="button"
                   onClick={() => onOpenTicket(item.ticketId)}
-                  className="w-full rounded-lg border border-gray-100 p-3 text-left transition hover:border-[--color-primary]/40 hover:bg-[--color-primary]/5 dark:border-white/8"
+                  className="w-full rounded-lg border border-gray-100 p-2.5 text-left transition hover:border-[--color-primary]/40 hover:bg-[--color-primary]/5 dark:border-white/8"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-xs font-bold text-[--color-primary]">{item.ticketId}</span>
@@ -1260,7 +1279,7 @@ export default function Service() {
     dateTo !== '',
   ].filter(Boolean).length;
 
-  const serviceTabTriggerClass = 'group flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-4 py-3 text-sm font-bold text-gray-500 shadow-none transition data-[state=active]:border-[--color-primary] data-[state=active]:bg-transparent data-[state=active]:text-[--color-primary] dark:text-gray-400 dark:data-[state=active]:bg-transparent';
+  const serviceTabTriggerClass = 'group flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-4 py-2 text-sm font-bold text-gray-500 shadow-none transition data-[state=active]:border-[--color-primary] data-[state=active]:bg-transparent data-[state=active]:text-[--color-primary] dark:text-gray-400 dark:data-[state=active]:bg-transparent';
   const requestTabCounts = {
     actual: activeTickets.length,
     in_progress: metrics.inProgress,
@@ -1270,12 +1289,12 @@ export default function Service() {
   };
 
   return (
-    <div className="space-y-5 p-4 sm:p-6 md:p-8">
-      <section className="border-b border-gray-200 pb-4 dark:border-white/10">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="space-y-3 p-4 sm:p-5 md:p-6">
+      <section className="border-b border-gray-200 pb-3 dark:border-white/10">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Сервис</h1>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Заявки, рекламации и планирование механиков.</p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Сервис</h1>
+            <p className="sr-only">Заявки, рекламации и планирование механиков.</p>
           </div>
           <div className="flex flex-wrap gap-2">
           {can('create', 'service') && (
@@ -1320,7 +1339,7 @@ export default function Service() {
                   key={option.value}
                   type="button"
                   onClick={() => setPreset(option.value)}
-                  className="app-filter-chip"
+                  className="app-filter-chip h-8 whitespace-nowrap px-2.5 py-1 text-xs"
                   data-active={String(preset === option.value)}
                 >
                   {option.label}
@@ -1336,7 +1355,7 @@ export default function Service() {
                   key={option.value}
                   type="button"
                   onClick={() => setDatePreset(option.value)}
-                  className="app-filter-chip"
+                  className="app-filter-chip h-8 whitespace-nowrap px-2.5 py-1 text-xs"
                   data-active={String(datePreset === option.value)}
                 >
                   {option.label}
@@ -1435,7 +1454,7 @@ export default function Service() {
         </div>
       </FilterDialog>
 
-      <Tabs value={activeTopTab} onValueChange={setActiveTopTab} className="space-y-5">
+      <Tabs value={activeTopTab} onValueChange={setActiveTopTab} className="space-y-3">
         <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto border-b border-gray-200 bg-transparent p-0 dark:border-white/10">
           <TabsTrigger value="tickets" className={serviceTabTriggerClass}>
             <ServiceTabLabel label="Заявки" count={activeTickets.length} />
@@ -1452,7 +1471,7 @@ export default function Service() {
           )}
         </TabsList>
 
-        <TabsContent value="tickets" className="space-y-5">
+        <TabsContent value="tickets" className="space-y-3">
           <div className="flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-white/10">
             {[
               { value: 'actual' as const, label: 'Актуальные' },
@@ -1466,7 +1485,7 @@ export default function Service() {
                 type="button"
                 onClick={() => handleRequestTabChange(tab.value)}
                 data-active={String(requestTab === tab.value)}
-                className="group flex-none border-b-2 border-transparent px-3 py-2.5 text-sm font-bold text-gray-500 transition hover:text-gray-900 data-[active=true]:border-[--color-primary] data-[active=true]:text-[--color-primary] dark:text-gray-400 dark:hover:text-white"
+                className="group flex-none border-b-2 border-transparent px-3 py-2 text-sm font-bold text-gray-500 transition hover:text-gray-900 data-[active=true]:border-[--color-primary] data-[active=true]:text-[--color-primary] dark:text-gray-400 dark:hover:text-white"
               >
                 <RequestSubTabLabel label={tab.label} count={requestTabCounts[tab.value]} />
               </button>
@@ -1475,28 +1494,19 @@ export default function Service() {
 
           {requestTab !== 'archive' ? (
             <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-            <ServiceMetricCard title="Актуальные" value={metrics.total} caption="Активных сейчас" tone="blue" icon={<ClipboardList className="h-5 w-5" />} />
-            <ServiceMetricCard title="В работе" value={metrics.inProgress} caption="У механиков" tone="orange" icon={<Wrench className="h-5 w-5" />} />
-            <ServiceMetricCard title="Ожидают запчасти" value={metrics.waitingParts} caption="Требуют снабжения" tone="purple" icon={<PackageSearch className="h-5 w-5" />} />
-            <ServiceMetricCard title="Готовы к выдаче" value={metrics.ready} caption="Можно закрывать" tone="green" icon={<CheckCircle2 className="h-5 w-5" />} />
-            <ServiceMetricCard title="Без механика" value={metrics.unassigned} caption="Нужно назначить" tone="amber" icon={<UserRound className="h-5 w-5" />} />
-            <ServiceMetricCard title="Просрочено" value={metrics.overdue} caption="Нарушен срок" tone="red" icon={<AlertTriangle className="h-5 w-5" />} />
-          </div>
-
-          <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-            <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-[minmax(220px,1.3fr)_repeat(5,minmax(120px,0.9fr))_auto]">
+          <section className="rounded-lg border border-gray-200 bg-white p-2.5 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.6fr)_repeat(5,minmax(112px,0.8fr))_auto]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder="№ заявки, техника, клиент, проблема..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="h-11 pl-10"
+                  className="h-9 pl-10 text-sm"
                 />
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="h-11"><SelectValue placeholder="Статус" /></SelectTrigger>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Статус" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Все статусы</SelectItem>
                   <SelectItem value="new">Новая</SelectItem>
@@ -1507,7 +1517,7 @@ export default function Service() {
                 </SelectContent>
               </Select>
               <Select value={scenarioFilter} onValueChange={setScenarioFilter}>
-                <SelectTrigger className="h-11"><SelectValue placeholder="Тип работ" /></SelectTrigger>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Тип работ" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Все типы</SelectItem>
                   <SelectItem value="repair">Ремонт</SelectItem>
@@ -1517,7 +1527,7 @@ export default function Service() {
                 </SelectContent>
               </Select>
               <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                <SelectTrigger className="h-11"><SelectValue placeholder="Приоритет" /></SelectTrigger>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Приоритет" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Все приоритеты</SelectItem>
                   <SelectItem value="critical">Критический</SelectItem>
@@ -1527,7 +1537,7 @@ export default function Service() {
                 </SelectContent>
               </Select>
               <Select value={mechanicFilter} onValueChange={setMechanicFilter}>
-                <SelectTrigger className="h-11"><SelectValue placeholder="Мастер" /></SelectTrigger>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Механик" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Все мастера</SelectItem>
                   {mechanicOptions.map(mechanic => (
@@ -1536,21 +1546,30 @@ export default function Service() {
                 </SelectContent>
               </Select>
               <Select value={datePreset} onValueChange={(value) => setDatePreset(value as typeof datePreset)}>
-                <SelectTrigger className="h-11"><SelectValue placeholder="Период" /></SelectTrigger>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Период" /></SelectTrigger>
                 <SelectContent>
                   {datePresetOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Button type="button" variant="secondary" className="h-11" onClick={() => setShowFilters(true)}>
+              <Button type="button" variant="secondary" className="h-9 px-3 text-sm" onClick={() => setShowFilters(true)}>
                 <Filter className="h-4 w-4" />
                 Фильтры
               </Button>
             </div>
           </section>
 
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <ServiceMetricCard title="Актуальные" value={metrics.total} caption="Активных сейчас" tone="blue" icon={<ClipboardList className="h-4 w-4" />} />
+            <ServiceMetricCard title="В работе" value={metrics.inProgress} caption="У механиков" tone="orange" icon={<Wrench className="h-4 w-4" />} />
+            <ServiceMetricCard title="Ожидают запчасти" value={metrics.waitingParts} caption="Требуют снабжения" tone="purple" icon={<PackageSearch className="h-4 w-4" />} />
+            <ServiceMetricCard title="Готовы к выдаче" value={metrics.ready} caption="Можно закрывать" tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
+            <ServiceMetricCard title="Без механика" value={metrics.unassigned} caption="Нужно назначить" tone="amber" icon={<UserRound className="h-4 w-4" />} />
+            <ServiceMetricCard title="Просрочено" value={metrics.overdue} caption="Нарушен срок" tone="red" icon={<AlertTriangle className="h-4 w-4" />} />
+          </div>
+
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap gap-2">
               {WORKFLOW_FILTER_OPTIONS.map(option => (
                 <button
@@ -1567,20 +1586,20 @@ export default function Service() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 dark:border-white/10 dark:bg-white/[0.03]">
-                <button type="button" onClick={() => setViewMode('list')} className="app-filter-chip" data-active={String(viewMode === 'list')}>Список</button>
-                <button type="button" onClick={() => setViewMode('kanban')} className="app-filter-chip" data-active={String(viewMode === 'kanban')}>Канбан</button>
+              <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 dark:border-white/10 dark:bg-white/[0.03]">
+                <button type="button" onClick={() => setViewMode('list')} className="app-filter-chip h-8 px-2.5 py-1 text-xs" data-active={String(viewMode === 'list')}>Список</button>
+                <button type="button" onClick={() => setViewMode('kanban')} className="app-filter-chip h-8 px-2.5 py-1 text-xs" data-active={String(viewMode === 'kanban')}>Канбан</button>
               </div>
               <FilterButton
                 activeCount={activeFilterCount}
                 onClick={() => setShowFilters(true)}
-                className="h-11 rounded-lg px-5 text-sm font-bold"
+                className="h-9 rounded-lg px-4 text-sm font-bold"
               />
             </div>
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
-            <div className="min-w-0 space-y-4">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="min-w-0 space-y-3">
               {viewMode === 'kanban' ? (
                 <div className="grid gap-3 lg:grid-cols-3">
                   {SERVICE_STATUSES.filter(status => status !== 'closed').map(status => {
@@ -1616,7 +1635,7 @@ export default function Service() {
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-                  <div className="hidden gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] 2xl:grid 2xl:grid-cols-[minmax(135px,0.75fr)_minmax(220px,1fr)_minmax(180px,0.9fr)_minmax(120px,0.65fr)_118px_110px_minmax(150px,0.8fr)_100px_110px_42px]">
+                  <div className="hidden gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-[11px] font-bold text-gray-500 dark:border-white/10 dark:bg-white/[0.04] xl:grid xl:grid-cols-[90px_minmax(150px,1fr)_minmax(130px,0.8fr)_88px_88px_82px_minmax(110px,0.7fr)_72px_72px_28px]">
                     <div>№ заявки</div>
                     <div>Техника</div>
                     <div>Клиент / Объект</div>
@@ -1664,7 +1683,7 @@ export default function Service() {
                               openTicket();
                             }
                           }}
-                          className={`grid cursor-pointer gap-3 border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 hover:bg-[--color-primary]/5 dark:border-white/6 md:grid-cols-[minmax(160px,0.9fr)_minmax(220px,1.1fr)] lg:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_minmax(190px,0.9fr)_minmax(160px,0.8fr)] 2xl:grid-cols-[minmax(135px,0.75fr)_minmax(220px,1fr)_minmax(180px,0.9fr)_minmax(120px,0.65fr)_118px_110px_minmax(150px,0.8fr)_100px_110px_42px] lg:items-center ${
+                          className={`grid cursor-pointer gap-2 border-b border-gray-100 px-3 py-2.5 transition-colors last:border-b-0 hover:bg-[--color-primary]/5 dark:border-white/6 md:grid-cols-[minmax(160px,0.9fr)_minmax(220px,1.1fr)] lg:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_minmax(190px,0.9fr)_minmax(160px,0.8fr)] xl:grid-cols-[90px_minmax(150px,1fr)_minmax(130px,0.8fr)_88px_88px_82px_minmax(110px,0.7fr)_72px_72px_28px] lg:items-center ${
                             isSelected
                               ? 'bg-[--color-primary]/10'
                               : index % 2 === 0 ? 'bg-gray-50/60 dark:bg-white/[0.015]' : 'bg-white dark:bg-transparent'
@@ -1691,7 +1710,7 @@ export default function Service() {
                             <div className="truncate text-sm font-medium text-gray-700 dark:text-gray-200">{repairType}</div>
                             <div className="mt-0.5 truncate text-xs text-gray-500">{ticket.reason || '—'}</div>
                           </div>
-                          <div>{getServiceStatusBadge(normalizeServiceStatus(ticket.status))}</div>
+                          <div>{getCompactServiceStatusPill(normalizeServiceStatus(ticket.status))}</div>
                           <div>{getServicePriorityPill(ticket.priority)}</div>
                           <div className="flex min-w-0 items-center gap-2">
                             <MechanicAvatar name={assignedMechanic || 'Не назначен'} />

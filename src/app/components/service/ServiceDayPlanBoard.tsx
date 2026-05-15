@@ -82,9 +82,9 @@ function taskMatchesFilter(task: DayPlanTask, filter: DayPlanFilter) {
 function MetricCard({ label, value, tone }: { label: string; value: number; tone: string }) {
   const safeValue = Number.isFinite(value) ? value : 0;
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-      <div className="text-xs font-bold uppercase text-gray-500 dark:text-gray-500">{label}</div>
-      <div className={`mt-2 text-3xl font-black leading-none ${tone}`}>{safeValue}</div>
+    <div className="min-h-[88px] rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+      <div className="text-xs font-semibold leading-tight text-gray-500 dark:text-gray-500">{label}</div>
+      <div className={`mt-2 text-2xl font-black leading-none ${tone}`}>{safeValue}</div>
     </div>
   );
 }
@@ -374,16 +374,16 @@ export function ServiceDayPlanBoard({
   }, [assignableMechanics, updateTicket]);
 
   return (
-    <div className="space-y-5">
-      <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+    <div className="space-y-3">
+      <section className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-gray-500 dark:text-gray-400">
               <CalendarDays className="h-4 w-4" />
               <span>Планировщик: {plan.displayDate}</span>
             </div>
-            <h2 className="mt-1 text-2xl font-black text-gray-900 dark:text-white">Планировщик сервиса</h2>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Загрузка механиков, заявки без ответственного и критичные статусы</p>
+            <h2 className="mt-1 text-xl font-black text-gray-900 dark:text-white">Планировщик сервиса</h2>
+            <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">Загрузка механиков, заявки без ответственного и критичные статусы</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
             <input
@@ -433,13 +433,13 @@ export function ServiceDayPlanBoard({
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           {visibleFilterOptions.map(option => (
             <button
               key={option.value}
               type="button"
               onClick={() => setFilter(option.value)}
-              className="app-filter-chip"
+              className="app-filter-chip h-8 px-2.5 py-1 text-xs"
               data-active={String(filter === option.value || (option.value === 'mine' && onlyMine))}
             >
               {option.label}
@@ -448,7 +448,7 @@ export function ServiceDayPlanBoard({
         </div>
       </section>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Заявок на день" value={plan.metrics.scheduledToday} tone="text-gray-900 dark:text-white" />
         <MetricCard label="Без механика" value={plan.metrics.unassigned} tone="text-amber-500" />
         <MetricCard label="Просроченные" value={plan.metrics.overdue} tone="text-red-500" />
@@ -456,8 +456,8 @@ export function ServiceDayPlanBoard({
         <MetricCard label="Готово к закрытию" value={plan.metrics.readyToClose} tone="text-emerald-500" />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <section className="grid min-w-0 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
+        <section className="grid min-w-0 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
           {filteredMechanics.length === 0 ? (
             <div className="rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-gray-400">
               По выбранным фильтрам задач нет.

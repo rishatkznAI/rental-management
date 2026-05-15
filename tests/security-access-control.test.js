@@ -262,12 +262,22 @@ test('non-admin cannot read app_settings or use generic payments mutation', () =
 test('rental manager can read delivery carriers without mutating directory', () => {
   const access = createAccess({});
   const manager = { userId: 'U-manager', userName: 'Руслан', userRole: 'Менеджер по аренде' };
+  const admin = { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' };
   const carrier = { id: 'carrier-1', name: 'Быстрая доставка', status: 'active' };
 
   assert.doesNotThrow(() => access.assertCanReadCollection('delivery_carriers', manager));
   assert.deepEqual(access.filterCollectionByScope('delivery_carriers', [carrier], manager), [carrier]);
   assert.equal(access.canMutateEntity('delivery_carriers', carrier, manager), false);
   assert.throws(() => access.assertCanCreateCollection('delivery_carriers', manager, carrier), /Forbidden/);
+  assert.throws(() => access.assertCanUpdateEntity('delivery_carriers', carrier, manager), /Forbidden/);
+  assert.throws(() => access.assertCanDeleteEntity('delivery_carriers', carrier, manager), /Forbidden/);
+  assert.throws(() => access.assertCanBulkReplace('delivery_carriers', manager), /Массовое обновление/);
+
+  assert.doesNotThrow(() => access.assertCanReadCollection('delivery_carriers', admin));
+  assert.doesNotThrow(() => access.assertCanCreateCollection('delivery_carriers', admin, carrier));
+  assert.doesNotThrow(() => access.assertCanUpdateEntity('delivery_carriers', carrier, admin));
+  assert.doesNotThrow(() => access.assertCanDeleteEntity('delivery_carriers', carrier, admin));
+  assert.doesNotThrow(() => access.assertCanBulkReplace('delivery_carriers', admin));
 });
 
 test('unknown collections and roles are denied by default', () => {

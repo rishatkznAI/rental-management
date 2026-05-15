@@ -54,6 +54,13 @@ function createDeliveryApp(deliveryOverrides = {}) {
       phone: '+7 900 123-45-67',
       email: 'admin@example.test',
     }, {
+      id: 'U-manager',
+      name: 'Руслан',
+      role: 'Менеджер по аренде',
+      status: 'Активен',
+      phone: '+7 900 111-22-33',
+      email: 'manager@example.test',
+    }, {
       id: 'U-head',
       name: 'Руководитель',
       role: 'Руководитель',
@@ -114,7 +121,7 @@ function createDeliveryApp(deliveryOverrides = {}) {
     const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const sessionUserId = token === 'admin-token'
       ? 'U-admin'
-      : (token === 'head-token' ? 'U-head' : (token === 'carrier-token' ? 'U-carrier' : null));
+      : (token === 'manager-token' ? 'U-manager' : (token === 'head-token' ? 'U-head' : (token === 'carrier-token' ? 'U-carrier' : null)));
     if (!sessionUserId) return res.status(401).json({ ok: false, error: 'Unauthorized' });
     const user = state.users.find(item => item.id === sessionUserId);
     if (!user) return res.status(401).json({ ok: false, error: 'Unauthorized' });
@@ -257,6 +264,61 @@ test('frontend-enabled carrier reads only own active deliveries as sanitized ope
     assert.equal((await request(baseUrl, 'GET', '/api/deliveries/DL-closed', undefined, 'carrier-token')).status, 403);
     assert.equal((await request(baseUrl, 'GET', '/api/delivery-carriers', undefined, 'carrier-token')).status, 403);
     assert.equal((await request(baseUrl, 'PATCH', '/api/deliveries/DL-own', { status: 'in_transit' }, 'carrier-token')).status, 403);
+  });
+});
+
+test('delivery carrier directory is safe for rental manager while raw MAX connections stay admin-only', async () => {
+  const { app, state } = createDeliveryApp();
+  state.delivery_carriers.push({
+    id: 'carrier-2',
+    key: 'carrier-2',
+    name: 'Неактивный перевозчик',
+    phone: '+7 900 999-99-99',
+    status: 'inactive',
+    maxCarrierKey: '777',
+  });
+  state.bot_users['777'] = {
+    userId: 'U-other-carrier',
+    userName: 'Неактивный перевозчик',
+    userRole: 'Перевозчик',
+    role: 'carrier',
+    botMode: 'delivery',
+    carrierId: 'carrier-2',
+    replyTarget: { user_id: 777, chat_id: 12345 },
+  };
+
+  await withServer(app, async (baseUrl) => {
+    const managerDirectory = await request(baseUrl, 'GET', '/api/delivery-carriers', undefined, 'manager-token');
+
+    assert.equal(managerDirectory.status, 200);
+    assert.deepEqual(managerDirectory.body.map(item => item.id), ['carrier-1']);
+    assert.equal(managerDirectory.body[0].name, 'ИП Сабитов Алмаз');
+    assert.equal(managerDirectory.body[0].maxConnected, true);
+    for (const forbiddenField of [
+      'maxCarrierKey',
+      'chatId',
+      'userId',
+      'systemUserId',
+      'systemUserName',
+      'systemUserEmail',
+      'maxUserName',
+      'email',
+      'role',
+    ]) {
+      assert.equal(Object.hasOwn(managerDirectory.body[0], forbiddenField), false, `${forbiddenField} must not be exposed`);
+    }
+
+    const managerConnections = await request(baseUrl, 'GET', '/api/delivery-carrier-connections', undefined, 'manager-token');
+    assert.equal(managerConnections.status, 403);
+
+    const carrierConnections = await request(baseUrl, 'GET', '/api/delivery-carrier-connections', undefined, 'carrier-token');
+    assert.equal(carrierConnections.status, 403);
+
+    const adminConnections = await request(baseUrl, 'GET', '/api/delivery-carrier-connections');
+    assert.equal(adminConnections.status, 200);
+    assert.deepEqual(new Set(adminConnections.body.map(item => item.key)), new Set(['555', '777']));
+    assert.equal(adminConnections.body.find(item => item.key === '777').chatId, 12345);
+    assert.equal(adminConnections.body.find(item => item.key === '777').userId, 777);
   });
 });
 

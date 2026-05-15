@@ -723,6 +723,31 @@ function registerDeliveryRoutes(router, deps) {
     });
   }
 
+  function isAdminRequest(req) {
+    return normalizeRole(req.user?.userRole || req.user?.role || '') === 'Администратор';
+  }
+
+  function requireCarrierConnectionRead(req, res, next) {
+    if (!isAdminRequest(req)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden: insufficient role' });
+    }
+    return next();
+  }
+
+  function safeCarrierDirectoryItem(item) {
+    return {
+      id: item.id,
+      key: item.key || item.id,
+      name: item.name,
+      company: item.company,
+      inn: item.inn,
+      phone: item.phone,
+      notes: item.notes,
+      status: item.status,
+      maxConnected: Boolean(item.maxConnected),
+    };
+  }
+
   function resolveCarrierSelection(carrierKey) {
     const carriers = listCarrierDirectory();
     return carriers.find((item) =>
@@ -859,10 +884,16 @@ function registerDeliveryRoutes(router, deps) {
     if (isCarrierRequest(req)) {
       return res.status(403).json({ ok: false, error: 'Forbidden' });
     }
-    res.json(listCarrierDirectory());
+    const directory = listCarrierDirectory();
+    if (isAdminRequest(req)) {
+      return res.json(directory);
+    }
+    return res.json(directory
+      .filter(item => item.status === 'active')
+      .map(safeCarrierDirectoryItem));
   });
 
-  router.get('/delivery-carrier-connections', requireAuth, requireRead('delivery_carriers'), (req, res) => {
+  router.get('/delivery-carrier-connections', requireAuth, requireCarrierConnectionRead, (req, res) => {
     res.json(listRawCarrierConnections());
   });
 

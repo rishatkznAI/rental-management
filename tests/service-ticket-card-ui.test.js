@@ -80,3 +80,17 @@ test('service ticket card reads related entities without changing service ticket
   assert.doesNotMatch(serviceDetailSource, /api\.post<.*service_field_trips/);
   assert.doesNotMatch(serviceDetailSource, /api\.put<.*service_field_trips/);
 });
+
+test('service photo surfaces use authenticated media loader for protected uploads', () => {
+  assert.match(servicePageSource, /import \{ AuthenticatedImage \} from '\.\.\/components\/ui\/AuthenticatedImage'/);
+  assert.match(servicePageSource, /function TicketThumbnail[\s\S]*<AuthenticatedImage[\s\S]*photo=\{photo\}/);
+
+  assert.match(serviceDetailSource, /import \{ AuthenticatedImage \} from '\.\.\/components\/ui\/AuthenticatedImage'/);
+  assert.match(serviceDetailSource, /function RepairPhotoGroup[\s\S]*<AuthenticatedImage[\s\S]*photo=\{normalizedPhoto\}/);
+  assert.match(serviceDetailSource, /currentEquipment\?\.photo[\s\S]*<AuthenticatedImage[\s\S]*normalizePhotoReference\(currentEquipment\.photo/);
+  assert.match(serviceDetailSource, /idPrefix: `\$\{ticket\.id\}-photo-\$\{i\}`[\s\S]*<AuthenticatedImage[\s\S]*photo=\{normalizedPhoto\}/);
+  assert.match(serviceDetailSource, /idPrefix: `\$\{ticket\.id\}-photos-tab-\$\{index\}`[\s\S]*<AuthenticatedImage[\s\S]*photo=\{normalizedPhoto\}/);
+
+  assert.doesNotMatch(servicePageSource, /<img\s+src=\{src\}/);
+  assert.doesNotMatch(serviceDetailSource, /absoluteMediaUrl\(photoSource\(/);
+});

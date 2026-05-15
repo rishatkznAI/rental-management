@@ -30,6 +30,7 @@ import {
 import { getServicePriorityBadge, getServiceStatusBadge } from '../components/ui/badge';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { AuthenticatedImage } from '../components/ui/AuthenticatedImage';
 import { ServiceDayPlanBoard } from '../components/service/ServiceDayPlanBoard';
 import { WarrantyClaimsTab } from '../components/service/WarrantyClaimsTab';
 import ServiceDetail from './ServiceDetail';
@@ -38,7 +39,7 @@ import { canManageServiceDayPlan, canViewServiceDayPlan, usePermissions } from '
 import { isMechanicRole, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { formatDate } from '../lib/utils';
-import { absoluteMediaUrl, photoSource } from '../lib/media';
+import { normalizePhotoReference, type NormalizedPhoto } from '../lib/media';
 import type { Client, Mechanic, ServiceTicket } from '../types';
 import { getServiceScenarioLabel, inferServiceKind } from '../lib/serviceScenarios';
 import { buildServiceQueue } from '../lib/serviceQueue';
@@ -382,10 +383,11 @@ function getMechanicInitials(name: string) {
     .toUpperCase();
 }
 
-function getTicketPhotoSrc(ticket: ServiceTicket) {
+function getTicketPhoto(ticket: ServiceTicket): NormalizedPhoto | null {
   const [firstPhoto] = Array.isArray(ticket.photos) ? ticket.photos : [];
-  const source = photoSource(firstPhoto);
-  return source ? absoluteMediaUrl(source) : '';
+  if (!firstPhoto) return null;
+  const photo = normalizePhotoReference(firstPhoto, { idPrefix: `${ticket.id || 'service'}-thumbnail` });
+  return photo.fullUrl ? photo : null;
 }
 
 function ServiceMetricCard({
@@ -462,11 +464,17 @@ function ServiceMetricCard({
 }
 
 function TicketThumbnail({ ticket }: { ticket: ServiceTicket }) {
-  const src = getTicketPhotoSrc(ticket);
+  const photo = getTicketPhoto(ticket);
   return (
     <div className="flex h-11 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gray-200 bg-gray-100 dark:border-white/10 dark:bg-white/8">
-      {src ? (
-        <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+      {photo ? (
+        <AuthenticatedImage
+          photo={photo}
+          alt=""
+          className="h-full w-full rounded-none border-0 bg-transparent"
+          fallbackClassName="min-h-0 h-full rounded-none border-0 px-1 py-0 text-[10px]"
+          imgClassName="h-full w-full object-cover"
+        />
       ) : (
         <ImageIcon className="h-5 w-5 text-gray-400" aria-hidden="true" />
       )}

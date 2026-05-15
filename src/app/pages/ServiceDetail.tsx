@@ -9,6 +9,7 @@ import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { AuthenticatedImage } from '../components/ui/AuthenticatedImage';
 import {
   ArrowLeft, Wrench, User, Clock, MapPin, Tag, FileText,
   CheckCircle, XCircle, AlertTriangle, Play, Package, History,
@@ -62,7 +63,7 @@ import {
   openPrintableHtml,
 } from '../lib/serviceWorkOrder';
 import { buildServiceQuickActions } from '../lib/quickActions.js';
-import { absoluteMediaUrl, photoFallbackSource, photoSource } from '../lib/media';
+import { normalizePhotoReference } from '../lib/media';
 import { normalizeUserRole } from '../lib/userStorage';
 import { animationDurations, useAnimatedPresence } from '../lib/animations';
 
@@ -391,25 +392,19 @@ function RepairPhotoGroup({
       {safePhotos.length > 0 ? (
         <div className="grid grid-cols-3 gap-2">
           {safePhotos.map((photo, index) => {
-            const src = absoluteMediaUrl(photoSource(photo));
-            const fallback = absoluteMediaUrl(photoFallbackSource(photo));
+            const normalizedPhoto = normalizePhotoReference(photo, { idPrefix: `${title}-${index}` });
             return (
-            <button
-              type="button"
-              key={`${title}-${index}`}
-              onClick={() => window.open(src, '_blank')}
-              className="group relative aspect-square overflow-hidden rounded-md border border-gray-200 dark:border-gray-700"
-            >
-              <img
-                src={src}
+              <AuthenticatedImage
+                key={normalizedPhoto.id || `${title}-${index}`}
+                photo={normalizedPhoto}
                 alt={`${title} ${index + 1}`}
-                className="h-full w-full object-cover group-hover:opacity-90"
-                onError={(event) => {
-                  if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-                }}
+                onOpen={(url) => window.open(url, '_blank')}
+                className="group aspect-square rounded-md border-gray-200 dark:border-gray-700"
+                fallbackClassName="aspect-square min-h-0 rounded-md border-gray-200 p-2 dark:border-gray-700"
+                imgClassName="h-full w-full object-cover group-hover:opacity-90"
               />
-            </button>
-          );})}
+            );
+          })}
         </div>
       ) : (
         <div className="flex items-center gap-2 rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:bg-gray-800 dark:text-gray-400">
@@ -1515,14 +1510,13 @@ export default function ServiceDetail({
               <CardContent className="space-y-4">
                 <div className="aspect-[4/3] overflow-hidden rounded-lg border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-800">
                   {currentEquipment?.photo ? (
-                    <img
-                      src={absoluteMediaUrl(photoSource(currentEquipment.photo))}
+                    <AuthenticatedImage
+                      photo={normalizePhotoReference(currentEquipment.photo, { idPrefix: `${currentEquipment.id || ticket.id}-equipment` })}
                       alt={ticket.equipment}
-                      className="h-full w-full object-cover"
-                      onError={(event) => {
-                        const fallback = absoluteMediaUrl(photoFallbackSource(currentEquipment.photo));
-                        if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-                      }}
+                      onOpen={(url) => window.open(url, '_blank')}
+                      className="h-full w-full rounded-none border-0 bg-transparent"
+                      fallbackClassName="h-full min-h-0 rounded-none border-0"
+                      imgClassName="h-full w-full object-cover"
                     />
                   ) : (
                     <div className="flex h-full flex-col items-center justify-center text-gray-400 dark:text-gray-500">
@@ -2074,18 +2068,16 @@ export default function ServiceDetail({
               {(ticket.photos ?? []).length > 0 ? (
                 <div className="grid grid-cols-3 gap-2">
                   {(ticket.photos ?? []).map((photo, i) => {
-                    const src = absoluteMediaUrl(photoSource(photo));
-                    const fallback = absoluteMediaUrl(photoFallbackSource(photo));
+                    const normalizedPhoto = normalizePhotoReference(photo, { idPrefix: `${ticket.id}-photo-${i}` });
                     return (
                     <div key={i} className="group relative aspect-square rounded-md overflow-hidden border border-gray-200 dark:border-gray-700">
-                      <img
-                        src={src}
+                      <AuthenticatedImage
+                        photo={normalizedPhoto}
                         alt={`Фото ${i + 1}`}
-                        className="h-full w-full object-cover cursor-pointer hover:opacity-90"
-                        onError={(event) => {
-                          if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
-                        }}
-                        onClick={() => window.open(src, '_blank')}
+                        onOpen={(url) => window.open(url, '_blank')}
+                        className="h-full w-full rounded-none border-0 bg-transparent"
+                        fallbackClassName="h-full min-h-0 rounded-none border-0"
+                        imgClassName="h-full w-full object-cover cursor-pointer hover:opacity-90"
                       />
                       {canEditTicketFields && (
                         <button
@@ -2531,12 +2523,17 @@ export default function ServiceDetail({
                 {(ticket.photos ?? []).length > 0 ? (
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {(ticket.photos ?? []).map((photo, index) => {
-                      const src = absoluteMediaUrl(photoSource(photo));
-                      const fallback = absoluteMediaUrl(photoFallbackSource(photo));
+                      const normalizedPhoto = normalizePhotoReference(photo, { idPrefix: `${ticket.id}-photos-tab-${index}` });
                       return (
-                        <button key={index} type="button" onClick={() => window.open(src, '_blank')} className="group relative aspect-square overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
-                          <img src={src} alt={`Фото ${index + 1}`} className="h-full w-full object-cover group-hover:opacity-90" onError={(event) => { if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback; }} />
-                        </button>
+                        <AuthenticatedImage
+                          key={normalizedPhoto.id || `${ticket.id}-photos-tab-${index}`}
+                          photo={normalizedPhoto}
+                          alt={`Фото ${index + 1}`}
+                          onOpen={(url) => window.open(url, '_blank')}
+                          className="group aspect-square rounded-md border-gray-200 dark:border-gray-700"
+                          fallbackClassName="aspect-square min-h-0 rounded-md border-gray-200 p-2 dark:border-gray-700"
+                          imgClassName="h-full w-full object-cover group-hover:opacity-90"
+                        />
                       );
                     })}
                   </div>

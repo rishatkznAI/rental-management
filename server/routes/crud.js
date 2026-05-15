@@ -1,6 +1,7 @@
 const express = require('express');
 const { getEffectivePaidAmount, syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
 const { normalizeRole } = require('../lib/role-groups');
+const { assignCurrentUserAsMechanicIfNeeded } = require('../lib/service-assignment');
 const { normalizeServiceTicketList, normalizeServiceTicketRecord } = require('../lib/service-dto');
 const {
   SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE,
@@ -965,6 +966,12 @@ function registerCrudRoutes(deps) {
         const data = readData(collection) || [];
         let newItem = withClientLink(collection, { ...input, id: input.id || generateId(prefix) });
         newItem = normalizeClientDomainRecord(collection, newItem);
+        if (collection === 'service') {
+          newItem = assignCurrentUserAsMechanicIfNeeded(newItem, req.user, {
+            mechanics: readData('mechanics') || [],
+            users: readData('users') || [],
+          });
+        }
         if (collection === 'equipment_downtimes') {
           newItem = normalizeEquipmentDowntimeRecord(newItem, null, { user: req.user, nowIso });
           const validation = validateEquipmentDowntimeRecord(newItem, data);

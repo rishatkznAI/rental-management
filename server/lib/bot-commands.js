@@ -1706,12 +1706,14 @@ function createBotHandlers(deps) {
     }
     const ticket = createServiceTicketFromBot(equipment, authUser, reason);
     setCurrentRepair(phone, ticket.id);
+    const mechanicCreatedOwnTicket = isMechanicRole(authUser?.userRole);
     return reply(senderId, withBotMenu([
       `✅ Создана заявка ${ticket.id}`,
       formatEquipmentForBot(equipment),
       `Причина: ${ticket.reason}`,
+      ...(mechanicCreatedOwnTicket ? [`Назначена на вас: ${ticket.assignedMechanicName || ticket.assignedTo || authUser.userName}`] : []),
       '',
-      'Заявка открыта как текущая.',
+      mechanicCreatedOwnTicket ? 'Заявка создана и назначена на вас.' : 'Заявка открыта как текущая.',
     ].join('\n'), ['итог', 'работы гидравлика', 'запчасти фильтр', 'черновик', 'готово']), {
       attachments: currentRepairKeyboardFor(ticket),
       mechanicStage: resultStage,

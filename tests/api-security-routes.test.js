@@ -1636,6 +1636,82 @@ test('spare part catalog accepts omitted defaultPrice', async () => {
   });
 });
 
+const servicePayload = {
+  equipmentId: 'EQ-own',
+  equipment: 'Mantall HZ160 (INV: 100)',
+  inventoryNumber: '100',
+  reason: 'Течь гидравлики',
+  description: 'Проверить гидролинию',
+  priority: 'medium',
+  sla: '24 ч',
+  status: 'new',
+};
+
+test('mechanic service create assigns current mechanic through API', async () => {
+  const { app, state } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service', 'mechanic-token', servicePayload);
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.assignedMechanicId, 'M-1');
+    assert.equal(response.body.mechanicId, 'M-1');
+    assert.equal(response.body.assignedMechanicName, 'Петров');
+    assert.equal(response.body.assignedTo, 'Петров');
+    assert.equal(state.service.at(-1).assignedMechanicId, 'M-1');
+  });
+});
+
+test('mechanic service create ignores another mechanic in payload', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service', 'mechanic-token', {
+      ...servicePayload,
+      assignedMechanicId: 'M-other',
+      mechanicId: 'M-other',
+      assignedMechanicName: 'Другой механик',
+      assignedTo: 'Другой механик',
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.assignedMechanicId, 'M-1');
+    assert.equal(response.body.mechanicId, 'M-1');
+    assert.equal(response.body.assignedMechanicName, 'Петров');
+    assert.equal(response.body.assignedTo, 'Петров');
+  });
+});
+
+test('admin service create keeps selected mechanic through API', async () => {
+  const { app, state } = createSecurityApp();
+  state.mechanics.push({ id: 'M-2', name: 'Другой механик', userId: 'U-other' });
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service', 'admin-token', {
+      ...servicePayload,
+      assignedMechanicId: 'M-2',
+      mechanicId: 'M-2',
+      assignedMechanicName: 'Другой механик',
+      assignedTo: 'Другой механик',
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.assignedMechanicId, 'M-2');
+    assert.equal(response.body.mechanicId, 'M-2');
+    assert.equal(response.body.assignedMechanicName, 'Другой механик');
+    assert.equal(response.body.assignedTo, 'Другой механик');
+  });
+});
+
+test('admin service create may leave mechanic unassigned through API', async () => {
+  const { app } = createSecurityApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/service', 'admin-token', servicePayload);
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.assignedMechanicId, undefined);
+    assert.equal(response.body.assignedMechanicName, undefined);
+    assert.equal(response.body.assignedTo, undefined);
+  });
+});
+
 test('MAX webhook accepts header secret and rejects missing, wrong, or query secrets', async () => {
   const { app, auditEntries } = createSecurityApp();
 

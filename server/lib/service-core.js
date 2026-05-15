@@ -1,5 +1,6 @@
 const { createAuditEntry } = require('./audit-history');
 const { isUniqueInventoryNumber } = require('./equipment-matching');
+const { resolveCurrentUserAsMechanic } = require('./service-assignment');
 const { isPdiServiceTicket } = require('./service-ticket-kind');
 
 function createServiceCore(deps) {
@@ -128,9 +129,16 @@ function createServiceCore(deps) {
   }
 
   function getMechanicReferenceByUser(authUser) {
-    const mechanics = readData('mechanics') || [];
-    const targetName = String(authUser?.userName || '').trim().toLowerCase();
-    return mechanics.find(item => item.status === 'active' && String(item.name || '').trim().toLowerCase() === targetName) || null;
+    const mechanic = resolveCurrentUserAsMechanic(authUser, {
+      mechanics: readData('mechanics') || [],
+      users: readData('users') || [],
+    });
+    if (!mechanic) return null;
+    return {
+      id: mechanic.mechanicId,
+      name: mechanic.mechanicName,
+      userId: mechanic.userId,
+    };
   }
 
   function syncEquipmentStatusForService(ticket, newStatus) {

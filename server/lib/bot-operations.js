@@ -519,6 +519,7 @@ function createBotOperations(deps) {
     const now = nowIso();
     const mechanicRef = getMechanicReferenceByUser(authUser);
     const assignedName = mechanicRef?.name || authUser.userName;
+    const assignedMechanicId = mechanicRef?.id || undefined;
     const newTicket = {
       id: generateId(idPrefixes.service),
       equipmentId: equipment.id,
@@ -534,8 +535,10 @@ function createBotOperations(deps) {
       priority: 'medium',
       sla: '24 ч',
       assignedTo: assignedName,
-      assignedMechanicId: mechanicRef?.id,
+      assignedMechanicId,
       assignedMechanicName: assignedName,
+      mechanicId: assignedMechanicId,
+      mechanicName: assignedMechanicId ? assignedName : undefined,
       createdBy: authUser.userName,
       createdByUserId: authUser.userId,
       createdByUserName: authUser.userName,
@@ -578,6 +581,8 @@ function createBotOperations(deps) {
     const today = now.slice(0, 10);
     const maintenanceLabel = MAINTENANCE_REASON_LABELS[maintenanceKind] || 'ТО';
     const mechanicRef = getMechanicReferenceByUser(authUser);
+    const assignedName = mechanicRef?.name || authUser.userName;
+    const assignedMechanicId = mechanicRef?.id || undefined;
     const ticket = {
       id: generateId(idPrefixes.service),
       equipmentId: equipment.id,
@@ -592,9 +597,11 @@ function createBotOperations(deps) {
       description: summary || `${maintenanceLabel} выполнено через MAX`,
       priority: 'low',
       sla: '24 ч',
-      assignedTo: authUser.userName,
-      assignedMechanicId: mechanicRef?.id,
-      assignedMechanicName: authUser.userName,
+      assignedTo: assignedName,
+      assignedMechanicId,
+      assignedMechanicName: assignedName,
+      mechanicId: assignedMechanicId,
+      mechanicName: assignedMechanicId ? assignedName : undefined,
       createdBy: authUser.userName,
       createdByUserId: authUser.userId,
       createdByUserName: authUser.userName,
@@ -654,6 +661,9 @@ function createBotOperations(deps) {
     const now = nowIso();
     const openExisting = getOpenTicketByEquipment(equipment);
     if (openExisting) return openExisting;
+    const mechanicRef = getMechanicReferenceByUser(authUser);
+    const assignedName = mechanicRef?.name || '';
+    const assignedMechanicId = mechanicRef?.id || undefined;
 
     const newTicket = {
       id: generateId(idPrefixes.service),
@@ -670,9 +680,11 @@ function createBotOperations(deps) {
         : 'Техника принята с аренды, требуется осмотр и дефектовка после возврата.',
       priority: 'medium',
       sla: '24 ч',
-      assignedTo: undefined,
-      assignedMechanicId: undefined,
-      assignedMechanicName: undefined,
+      assignedTo: assignedName || undefined,
+      assignedMechanicId,
+      assignedMechanicName: assignedName || undefined,
+      mechanicId: assignedMechanicId,
+      mechanicName: assignedName || undefined,
       createdBy: authUser.userName,
       createdByUserId: authUser.userId,
       createdByUserName: authUser.userName,

@@ -143,7 +143,8 @@ export function filterRentalManagerUsers<T extends UserWithManagerRole>(users: T
 }
 
 export function isMechanicRole(role: UserRole | string | null | undefined): boolean {
-  return MECHANIC_ROLES.some(item => item === normalizeUserRole(role));
+  const normalized = normalizeUserRole(role);
+  return MECHANIC_ROLES.some(item => item === normalized) || normalized === WARRANTY_MECHANIC_ROLE;
 }
 
 export function isWarrantyMechanicRole(role: UserRole | string | null | undefined): boolean {

@@ -48,7 +48,8 @@ const ROLE_ALIASES = new Map([
 ]);
 
 function isMechanicRole(role) {
-  return MECHANIC_ROLES.includes(normalizeRole(role));
+  const normalized = normalizeRole(role);
+  return MECHANIC_ROLES.includes(normalized) || normalized === WARRANTY_MECHANIC_ROLE;
 }
 
 function isWarrantyMechanicRole(role) {

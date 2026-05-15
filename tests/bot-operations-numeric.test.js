@@ -30,7 +30,9 @@ function createOperations() {
     readServiceTickets: () => state.service,
     writeServiceTickets: value => { state.service = value; },
     appendServiceLog: ticket => ticket,
-    getMechanicReferenceByUser: () => null,
+    getMechanicReferenceByUser: user => user?.userRole === 'Механик'
+      ? { id: user.userId, name: user.userName, userId: user.userId }
+      : null,
     syncEquipmentStatusForService: () => {},
     getOpenTicketByEquipment: () => null,
     formatEquipmentForBot: () => '',
@@ -98,6 +100,29 @@ test('helper rejects negative and NaN snapshots', () => {
   );
   assert.equal(state.repair_work_items.length, 0);
   assert.equal(state.repair_part_items.length, 0);
+});
+
+test('MAX service ticket created by mechanic is assigned to that bot user', () => {
+  const { operations, state } = createOperations();
+  const equipment = {
+    id: 'EQ-1',
+    manufacturer: 'Mantall',
+    model: 'HZ160',
+    inventoryNumber: '083',
+    serialNumber: 'SN-083',
+    type: 'boom',
+    location: 'Склад',
+  };
+  const mechanic = { userId: 'U-mechanic', userName: 'Петров', userRole: 'Механик' };
+
+  const ticket = operations.createServiceTicketFromBot(equipment, mechanic, 'Течь гидравлики');
+
+  assert.equal(ticket.assignedMechanicId, 'U-mechanic');
+  assert.equal(ticket.mechanicId, 'U-mechanic');
+  assert.equal(ticket.assignedMechanicName, 'Петров');
+  assert.equal(ticket.assignedTo, 'Петров');
+  assert.equal(state.service[0].id, ticket.id);
+  assert.equal(state.service[0].assignedMechanicId, 'U-mechanic');
 });
 
 test('admin MAX helper writes bot-sourced service audit entries', () => {

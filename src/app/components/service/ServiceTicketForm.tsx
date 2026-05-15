@@ -14,6 +14,7 @@ import { EQUIPMENT_KEYS, useEquipmentList } from '../../hooks/useEquipment';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
 import type { ServiceTicket } from '../../types';
 import { getEquipmentTypeLabel } from '../../lib/equipmentClassification';
+import { isMechanicRole } from '../../lib/userStorage';
 import {
   getServiceScenarioLabel,
   SERVICE_SCENARIO_DESCRIPTION_HINTS,
@@ -84,6 +85,7 @@ export function ServiceTicketForm({
   );
   const isRepairScenario = formData.serviceKind === 'repair';
   const scenarioLabel = getServiceScenarioLabel(formData.serviceKind);
+  const currentUserIsMechanic = isMechanicRole(user?.role);
 
   useEffect(() => {
     if (!initialEquipmentId) return;
@@ -603,6 +605,11 @@ export function ServiceTicketForm({
             </label>
             <Input value={user?.name || 'Оператор'} readOnly />
           </div>
+          {currentUserIsMechanic && (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200">
+              Назначенный механик: вы
+            </div>
+          )}
           <div className="space-y-1.5">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
               Контактное лицо

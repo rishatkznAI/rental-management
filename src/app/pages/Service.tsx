@@ -1,7 +1,23 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Archive, ArrowDown, ClipboardList, MoreHorizontal, Plus, Search, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Archive,
+  ArrowDown,
+  CalendarClock,
+  CheckCircle2,
+  ClipboardList,
+  Filter,
+  ImageIcon,
+  MoreHorizontal,
+  PackageSearch,
+  Plus,
+  Search,
+  ShieldAlert,
+  UserRound,
+  Wrench,
+} from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import {
@@ -17,12 +33,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { ServiceDayPlanBoard } from '../components/service/ServiceDayPlanBoard';
 import { WarrantyClaimsTab } from '../components/service/WarrantyClaimsTab';
 import ServiceDetail from './ServiceDetail';
-import type { AuthUser } from '../contexts/AuthContext';
 import { useAuth } from '../contexts/AuthContext';
 import { canManageServiceDayPlan, canViewServiceDayPlan, usePermissions } from '../lib/permissions';
 import { isMechanicRole, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { formatDate } from '../lib/utils';
+import { absoluteMediaUrl, photoSource } from '../lib/media';
 import type { Client, Mechanic, ServiceTicket } from '../types';
 import { getServiceScenarioLabel, inferServiceKind } from '../lib/serviceScenarios';
 import { buildServiceQueue } from '../lib/serviceQueue';
@@ -206,8 +222,8 @@ function formatShortDate(value?: string) {
   return new Date(timestamp).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 }
 
-function getTicketClientName(ticket: ServiceTicket) {
-  return ticket.client || '—';
+function getTicketClientObject(ticket: ServiceTicket) {
+  return ticket.objectName || ticket.location || ticket.objectAddress || ticket.contractNumber || '';
 }
 
 function getTicketDueLabel(ticket: ServiceTicket) {
@@ -225,19 +241,6 @@ function closureDays(ticket: ServiceTicket) {
   const closed = Date.parse(String(ticket.closedAt || ''));
   if (!Number.isFinite(created) || !Number.isFinite(closed) || closed < created) return null;
   return Math.max(1, Math.ceil((closed - created) / 86_400_000));
-}
-
-function ticketResultWorksCount(ticket: ServiceTicket) {
-  const resultWorks = ticket.resultData?.worksPerformed;
-  if (Array.isArray(resultWorks)) return resultWorks.length;
-  const legacyWorks = (ticket as ServiceTicket & { works?: unknown[] }).works;
-  return Array.isArray(legacyWorks) ? legacyWorks.length : 0;
-}
-
-function ticketResultPartsCount(ticket: ServiceTicket) {
-  const resultParts = ticket.resultData?.partsUsed;
-  if (Array.isArray(resultParts)) return resultParts.length;
-  return Array.isArray(ticket.parts) ? ticket.parts.length : 0;
 }
 
 function serviceStatusLabel(status: ServiceTicket['status']) {
@@ -368,282 +371,21 @@ function queueNextAction(item: ReturnType<typeof buildServiceQueue>['rows'][numb
   return 'Открыть заявку';
 }
 
-function formatRub(value: number) {
-  const amount = Number.isFinite(value) ? Math.round(value) : 0;
-  return `${amount.toLocaleString('ru-RU')} ₽`;
+function getMechanicInitials(name: string) {
+  const normalized = name.trim();
+  if (!normalized || normalized === 'Не назначен') return '—';
+  return normalized
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(part => part[0])
+    .join('')
+    .toUpperCase();
 }
 
-function getTicketMoneyValue(ticket: ServiceTicket, keys: string[]) {
-  const source = ticket as ServiceTicket & Record<string, unknown>;
-  for (const key of keys) {
-    const value = source[key];
-    const numberValue = typeof value === 'number' ? value : Number(value);
-    if (Number.isFinite(numberValue) && numberValue > 0) return numberValue;
-  }
-  return 0;
-}
-
-function getTicketActualCost(ticket: ServiceTicket) {
-  const worksCost = (ticket.resultData?.worksPerformed ?? [])
-    .reduce((sum, work) => sum + (Number.isFinite(work.totalCost) ? work.totalCost : 0), 0);
-  const partsCost = (ticket.resultData?.partsUsed ?? ticket.parts ?? [])
-    .reduce((sum, part) => {
-      const qty = Number.isFinite(part.qty) ? part.qty : 0;
-      const cost = Number.isFinite(part.cost) ? part.cost : 0;
-      return sum + qty * cost;
-    }, 0);
-
-  return worksCost + partsCost;
-}
-
-function isCurrentUserAssignedToTicket(ticket: ServiceTicket, user: AuthUser | null) {
-  if (!user) return false;
-  return [user.id, user.name, user.email]
-    .filter(Boolean)
-    .some(value => [
-      ticket.assignedMechanicId,
-      ticket.assignedMechanicName,
-      ticket.assignedTo,
-      ticket.assignedUserId,
-      ticket.responsibleUserId,
-    ].filter(Boolean).some(ticketValue => String(ticketValue).trim().toLowerCase() === String(value).trim().toLowerCase()));
-}
-
-function ServiceSidePanel({
-  ticket,
-  clientLookup,
-  currentUser,
-  canEditService,
-  canViewDocuments,
-  canCreateDocuments,
-  onOpenTicket,
-  onClose,
-}: {
-  ticket: ServiceTicket | null;
-  clientLookup: Map<string, Client>;
-  currentUser: AuthUser | null;
-  canEditService: boolean;
-  canViewDocuments: boolean;
-  canCreateDocuments: boolean;
-  onOpenTicket: (ticketId: string) => void;
-  onClose: () => void;
-}) {
-  const [activeTab, setActiveTab] = React.useState<'overview' | 'works' | 'parts' | 'documents' | 'history'>('overview');
-
-  React.useEffect(() => {
-    setActiveTab('overview');
-  }, [ticket?.id]);
-
-  if (!ticket) {
-    return (
-      <aside className="hidden rounded-lg border border-dashed border-gray-200 bg-white p-5 text-sm text-gray-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-gray-400 2xl:block">
-        Выберите заявку в списке, чтобы увидеть краткий обзор, работы, запчасти, документы и историю.
-      </aside>
-    );
-  }
-
-  const dueLabel = getTicketDueLabel(ticket);
-  const worksCount = ticketResultWorksCount(ticket);
-  const partsCount = ticketResultPartsCount(ticket);
-  const clientDetails = getTicketClientDetails(ticket, clientLookup);
-  const assignedMechanic = ticket.assignedMechanicName || ticket.assignedTo || 'Не назначен';
-  const responsible = ticket.createdByUserName || ticket.createdBy || '—';
-  const repairType = getTicketRepairTypeLabel(ticket);
-  const estimateAmount = getTicketMoneyValue(ticket, ['preliminaryEstimate', 'estimatedAmount', 'estimateAmount', 'plannedCost']);
-  const agreedAmount = getTicketMoneyValue(ticket, ['agreedAmount', 'approvedAmount', 'approvedCost', 'customerApprovedAmount']);
-  const actualCost = getTicketActualCost(ticket);
-  const normalizedRole = normalizeUserRole(currentUser?.normalizedRole || currentUser?.role || currentUser?.rawRole);
-  const isAdmin = normalizedRole === 'Администратор';
-  const isAssigned = isCurrentUserAssignedToTicket(ticket, currentUser);
-  const canEditTicketFields = canEditService && (normalizeServiceStatus(ticket.status) !== 'closed' || isAdmin);
-  const canAddRepairItems = canEditTicketFields && (isAdmin || (normalizeServiceStatus(ticket.status) === 'needs_revision' && isAssigned));
-  const canCloseTicket = canEditService && normalizeServiceStatus(ticket.status) === 'ready';
-  const openTicket = () => onOpenTicket(ticket.id);
-  const panelTabs = [
-    { id: 'overview', label: 'Обзор' },
-    { id: 'works', label: 'Работы' },
-    { id: 'parts', label: 'Запчасти' },
-    { id: 'documents', label: 'Документы' },
-    { id: 'history', label: 'История' },
-  ] as const;
-
-  return (
-    <aside className="rounded-lg border border-gray-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
-      <div className="flex items-start justify-between gap-3 border-b border-gray-100 p-4 dark:border-white/10">
-        <div className="min-w-0">
-          <div className="truncate font-mono text-sm font-bold text-[--color-primary]">Заявка {ticket.id}</div>
-          <h3 className="mt-1 truncate text-lg font-black text-gray-900 dark:text-white">{getTicketEquipmentTitle(ticket)}</h3>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {getServiceStatusBadge(normalizeServiceStatus(ticket.status))}
-            {getServicePriorityBadge(normalizeServicePriority(ticket.priority))}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/10 dark:hover:text-white"
-          aria-label="Закрыть панель заявки"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      <div className="flex gap-1 overflow-x-auto border-b border-gray-100 px-3 py-2 dark:border-white/10">
-        {panelTabs.map(tab => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className="app-filter-chip whitespace-nowrap"
-            data-active={String(activeTab === tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="space-y-4 p-4">
-        {activeTab === 'overview' && (
-          <>
-            <div className="grid gap-3 text-sm">
-              <div>
-                <p className="text-xs font-bold uppercase text-gray-500">Техника</p>
-                <p className="mt-1 font-semibold text-gray-900 dark:text-white">{getTicketEquipmentTitle(ticket)}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3 rounded-lg bg-gray-50 p-3 dark:bg-white/[0.04]">
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">INV</p>
-                  <p className="mt-1 font-mono text-sm text-gray-900 dark:text-white">{getTicketInventory(ticket)}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">SN</p>
-                  <p className="mt-1 font-mono text-sm text-gray-900 dark:text-white">{ticket.serialNumber || '—'}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">Клиент</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{clientDetails.name}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">ИНН</p>
-                  <p className="mt-1 font-mono text-sm text-gray-900 dark:text-white">{clientDetails.inn || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">Договор / аренда</p>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-white">{ticket.contractNumber || ticket.rentalId || ticket.contractId || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">Дата заявки</p>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-white">{formatTicketDate(ticket.createdAt)}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">Плановый срок</p>
-                  <p className={`mt-1 text-sm font-semibold ${isTicketOverdue(ticket) ? 'text-red-500' : 'text-gray-900 dark:text-white'}`}>
-                    {dueLabel ? formatShortDate(dueLabel) : '—'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">Тип ремонта</p>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-white">{repairType}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">Приоритет</p>
-                  <div className="mt-1">{getServicePriorityPill(ticket.priority)}</div>
-                </div>
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">Статус</p>
-                  <div className="mt-1">{getServiceStatusBadge(normalizeServiceStatus(ticket.status))}</div>
-                </div>
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">Мастер</p>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-white">{assignedMechanic}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-bold uppercase text-gray-500">Ответственный</p>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-white">{responsible}</p>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-bold uppercase text-gray-500">Описание проблемы</p>
-                <p className="mt-1 line-clamp-5 text-gray-700 dark:text-gray-200">{ticket.description || ticket.reason || '—'}</p>
-              </div>
-              <div className="grid grid-cols-3 gap-2 rounded-lg border border-gray-100 p-3 dark:border-white/10">
-                <div>
-                  <p className="text-[11px] font-bold uppercase text-gray-500">Предв. оценка</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{estimateAmount > 0 ? formatRub(estimateAmount) : '—'}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-bold uppercase text-gray-500">Согласовано</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{agreedAmount > 0 ? formatRub(agreedAmount) : '—'}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-bold uppercase text-gray-500">Факт. затраты</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{actualCost > 0 ? formatRub(actualCost) : '—'}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              {canEditTicketFields && (
-                <Button type="button" className="w-full" variant="secondary" onClick={openTicket}>Изменить заявку</Button>
-              )}
-              {canAddRepairItems && (
-                <div className="grid grid-cols-2 gap-2">
-                  <Button type="button" className="w-full" variant="secondary" onClick={openTicket}>Добавить работу</Button>
-                  <Button type="button" className="w-full" variant="secondary" onClick={openTicket}>Заказать запчасть</Button>
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-2">
-                {canCreateDocuments && (
-                  <Button type="button" className="w-full" variant="outline" onClick={openTicket}>Создать документ</Button>
-                )}
-                {canCloseTicket && (
-                  <Button type="button" className="w-full" onClick={openTicket}>Закрыть заявку</Button>
-                )}
-              </div>
-            </div>
-            <Button type="button" className="w-full" variant="outline" onClick={openTicket}>Открыть полную карточку</Button>
-          </>
-        )}
-
-        {activeTab === 'works' && (
-          <div className="rounded-lg bg-gray-50 p-4 text-sm text-gray-600 dark:bg-white/[0.04] dark:text-gray-300">
-            <p className="font-semibold text-gray-900 dark:text-white">Работы: {worksCount}</p>
-            <p className="mt-1">Подробное добавление и редактирование работ сохранено в полной карточке заявки.</p>
-          </div>
-        )}
-
-        {activeTab === 'parts' && (
-          <div className="rounded-lg bg-gray-50 p-4 text-sm text-gray-600 dark:bg-white/[0.04] dark:text-gray-300">
-            <p className="font-semibold text-gray-900 dark:text-white">Запчасти: {partsCount}</p>
-            <p className="mt-1">Списание и подбор запчастей остаются в текущей карточке заявки и MAX-сценариях механика.</p>
-          </div>
-        )}
-
-        {activeTab === 'documents' && (
-          <div className="rounded-lg bg-gray-50 p-4 text-sm text-gray-600 dark:bg-white/[0.04] dark:text-gray-300">
-            <p className="font-semibold text-gray-900 dark:text-white">Документы</p>
-            <p className="mt-1">{canViewDocuments ? 'Заказ-наряд и документы доступны в полной карточке.' : 'Для этой роли документы скрыты правами доступа.'}</p>
-          </div>
-        )}
-
-        {activeTab === 'history' && (
-          <div className="space-y-2 text-sm">
-            {(ticket.workLog ?? []).slice(-4).reverse().map((entry, index) => (
-              <div key={`${entry.date}-${index}`} className="rounded-lg border border-gray-100 p-3 dark:border-white/10">
-                <p className="text-gray-900 dark:text-white">{entry.text || 'Событие'}</p>
-                <p className="mt-1 text-xs text-gray-500">{entry.author || 'Система'} · {formatTicketDate(entry.date)}</p>
-              </div>
-            ))}
-            {(ticket.workLog ?? []).length === 0 && (
-              <p className="rounded-lg bg-gray-50 p-4 text-gray-500 dark:bg-white/[0.04]">История пока пуста.</p>
-            )}
-          </div>
-        )}
-      </div>
-    </aside>
-  );
+function getTicketPhotoSrc(ticket: ServiceTicket) {
+  const [firstPhoto] = Array.isArray(ticket.photos) ? ticket.photos : [];
+  const source = photoSource(firstPhoto);
+  return source ? absoluteMediaUrl(source) : '';
 }
 
 function ServiceMetricCard({
@@ -651,59 +393,108 @@ function ServiceMetricCard({
   value,
   caption,
   tone,
+  icon,
 }: {
   title: string;
   value: number;
   caption: string;
   tone: 'lime' | 'blue' | 'green' | 'red' | 'amber' | 'orange' | 'purple' | 'neutral';
+  icon?: React.ReactNode;
 }) {
   const safeValue = Number.isFinite(value) ? value : 0;
   const toneClasses = {
     lime: {
       value: 'text-[--color-primary]',
       accent: 'bg-[--color-primary]/20',
+      icon: 'bg-[--color-primary]/12 text-[--color-primary]',
     },
     blue: {
       value: 'text-blue-600 dark:text-blue-300',
       accent: 'bg-blue-500/20',
+      icon: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300',
     },
     green: {
       value: 'text-emerald-600 dark:text-emerald-300',
       accent: 'bg-emerald-500/20',
+      icon: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300',
     },
     red: {
       value: 'text-red-600 dark:text-red-300',
       accent: 'bg-red-500/20',
+      icon: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300',
     },
     amber: {
       value: 'text-amber-600 dark:text-amber-300',
       accent: 'bg-amber-500/20',
+      icon: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300',
     },
     orange: {
       value: 'text-orange-600 dark:text-orange-300',
       accent: 'bg-orange-500/20',
+      icon: 'bg-orange-50 text-orange-600 dark:bg-orange-500/15 dark:text-orange-300',
     },
     purple: {
       value: 'text-violet-600 dark:text-violet-300',
       accent: 'bg-violet-500/20',
+      icon: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300',
     },
     neutral: {
       value: 'text-gray-900 dark:text-white',
       accent: 'bg-gray-500/10',
+      icon: 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300',
     },
   }[tone];
 
   return (
-    <div className="flex min-h-[112px] flex-col justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-bold uppercase text-gray-500 dark:text-gray-500">{title}</div>
-        <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.accent}`} aria-hidden="true" />
+    <div className="flex min-h-[116px] flex-col justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+      <div className="flex items-start justify-between gap-3">
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${toneClasses.icon}`} aria-hidden="true">
+          {icon ?? <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.accent}`} />}
+        </div>
+        <div className="min-w-0 flex-1 text-right text-xs font-bold uppercase text-gray-500 dark:text-gray-500">{title}</div>
       </div>
       <div>
-        <div className={`mt-2 text-3xl font-black leading-none ${toneClasses.value}`}>{safeValue}</div>
+        <div className={`mt-3 text-3xl font-black leading-none ${toneClasses.value}`}>{safeValue}</div>
         <div className="mt-2 text-sm text-gray-500 dark:text-gray-500">{caption}</div>
       </div>
     </div>
+  );
+}
+
+function TicketThumbnail({ ticket }: { ticket: ServiceTicket }) {
+  const src = getTicketPhotoSrc(ticket);
+  return (
+    <div className="flex h-11 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gray-200 bg-gray-100 dark:border-white/10 dark:bg-white/8">
+      {src ? (
+        <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+      ) : (
+        <ImageIcon className="h-5 w-5 text-gray-400" aria-hidden="true" />
+      )}
+    </div>
+  );
+}
+
+function MechanicAvatar({ name }: { name: string }) {
+  const unassigned = !name || name === 'Не назначен';
+  return (
+    <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-black ${
+      unassigned
+        ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-900'
+        : 'bg-blue-50 text-blue-700 ring-1 ring-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-900'
+    }`}>
+      {getMechanicInitials(name || 'Не назначен')}
+    </span>
+  );
+}
+
+function RequestSubTabLabel({ label, count }: { label: string; count: number }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span>{label}</span>
+      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500 group-data-[active=true]:bg-[--color-primary]/15 group-data-[active=true]:text-[--color-primary] dark:bg-white/8 dark:text-gray-300">
+        {count}
+      </span>
+    </span>
   );
 }
 
@@ -977,6 +768,152 @@ function ServiceQueueTab({
   );
 }
 
+function ServiceManagementPanel({
+  metrics,
+  queue,
+  canCreateService,
+  canManageDayPlan,
+  canManageWarrantyClaims,
+  onOpenTicket,
+  onShowPlanner,
+  onShowWarranty,
+}: {
+  metrics: {
+    inProgress: number;
+    waitingParts: number;
+    ready: number;
+    unassigned: number;
+    overdue: number;
+    total: number;
+  };
+  queue: ReturnType<typeof buildServiceQueue>;
+  canCreateService: boolean;
+  canManageDayPlan: boolean;
+  canManageWarrantyClaims: boolean;
+  onOpenTicket: (ticketId: string) => void;
+  onShowPlanner: () => void;
+  onShowWarranty: () => void;
+}) {
+  const quickActions = [
+    { label: 'Создать заявку', icon: <Plus className="h-4 w-4" />, to: '/service/new', show: canCreateService },
+    { label: 'Создать рекламацию', icon: <ShieldAlert className="h-4 w-4" />, action: 'warranty', show: canManageWarrantyClaims },
+    { label: 'Назначение через планировщик', icon: <CalendarClock className="h-4 w-4" />, action: 'planner', show: canManageDayPlan },
+    { label: 'Заказать запчасти', icon: <PackageSearch className="h-4 w-4" />, action: 'parts', show: true },
+    { label: 'Выезд механика', icon: <Wrench className="h-4 w-4" />, action: 'field-trip', show: true },
+  ];
+  const statRows = [
+    { label: 'В работе', value: metrics.inProgress, tone: 'text-blue-600 dark:text-blue-300' },
+    { label: 'Ожидание запчастей', value: metrics.waitingParts, tone: 'text-orange-600 dark:text-orange-300' },
+    { label: 'Готовы к закрытию', value: metrics.ready, tone: 'text-emerald-600 dark:text-emerald-300' },
+    { label: 'Очередь', value: queue.metrics.totalOpen || metrics.total, tone: 'text-gray-900 dark:text-white' },
+    { label: 'Просрочено', value: metrics.overdue, tone: 'text-red-600 dark:text-red-300' },
+  ];
+  const problemGroups = [
+    {
+      title: 'Просроченные заявки',
+      icon: <AlertTriangle className="h-4 w-4 text-red-500" />,
+      rows: queue.rows.filter(item => item.ageDays >= 7).slice(0, 4),
+      empty: 'Просрочек нет.',
+    },
+    {
+      title: 'Ожидание запчастей',
+      icon: <PackageSearch className="h-4 w-4 text-orange-500" />,
+      rows: queue.rows.filter(item => item.waitingParts).slice(0, 4),
+      empty: 'Нет заявок в ожидании.',
+    },
+    {
+      title: 'Без механика',
+      icon: <UserRound className="h-4 w-4 text-amber-500" />,
+      rows: queue.rows.filter(item => item.unassigned).slice(0, 4),
+      empty: 'Все заявки назначены.',
+    },
+  ];
+
+  return (
+    <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start">
+      <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+        <h3 className="text-sm font-black uppercase text-gray-800 dark:text-white">Быстрые действия</h3>
+        <div className="mt-3 grid gap-2">
+          {quickActions.filter(action => action.show).map(action => (
+            action.to ? (
+              <Link key={action.label} to={action.to}>
+                <Button type="button" variant="secondary" className="w-full justify-start">
+                  {action.icon}
+                  {action.label}
+                </Button>
+              </Link>
+            ) : (
+              <Button
+                key={action.label}
+                type="button"
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => {
+                  if (action.action === 'planner') onShowPlanner();
+                  if (action.action === 'warranty') onShowWarranty();
+                  if (action.action !== 'planner') {
+                    if (action.action === 'warranty') return;
+                    const target = action.action === 'parts'
+                      ? queue.rows.find(item => item.waitingParts)
+                      : queue.rows.find(item => item.unassigned) ?? queue.rows[0];
+                    if (target) onOpenTicket(target.ticketId);
+                  }
+                }}
+              >
+                {action.icon}
+                {action.label}
+              </Button>
+            )
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+        <h3 className="text-sm font-black uppercase text-gray-800 dark:text-white">Статистика</h3>
+        <div className="mt-3 divide-y divide-gray-100 dark:divide-white/8">
+          {statRows.map(row => (
+            <div key={row.label} className="flex items-center justify-between gap-3 py-2.5">
+              <span className="text-sm text-gray-600 dark:text-gray-300">{row.label}</span>
+              <span className={`text-lg font-black ${row.tone}`}>{row.value}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {problemGroups.map(group => (
+        <section key={group.title} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+          <div className="flex items-center gap-2">
+            {group.icon}
+            <h3 className="text-sm font-black text-gray-900 dark:text-white">{group.title}</h3>
+            <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500 dark:bg-white/8 dark:text-gray-300">{group.rows.length}</span>
+          </div>
+          {group.rows.length === 0 ? (
+            <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:bg-white/[0.04] dark:text-gray-400">{group.empty}</p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {group.rows.map(item => (
+                <button
+                  key={`${group.title}-${item.ticketId}`}
+                  type="button"
+                  onClick={() => onOpenTicket(item.ticketId)}
+                  className="w-full rounded-lg border border-gray-100 p-3 text-left transition hover:border-[--color-primary]/40 hover:bg-[--color-primary]/5 dark:border-white/8"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-xs font-bold text-[--color-primary]">{item.ticketId}</span>
+                    <span className="text-xs text-gray-500">{item.ageDays} дн.</span>
+                  </div>
+                  <div className="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{item.equipmentTitle}</div>
+                  <div className="mt-0.5 truncate text-xs text-gray-500">{item.mechanic || item.groupLabel}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      ))}
+    </aside>
+  );
+}
+
 function ServiceTicketCardModal({
   ticketId,
   onClose,
@@ -1039,7 +976,6 @@ export default function Service() {
   const canViewRentals = can('view', 'rentals');
   const canViewClients = can('view', 'clients');
   const canViewFinance = can('view', 'finance');
-  const canViewDocuments = can('view', 'documents');
   const showDayPlan = canViewServiceDayPlan(normalizedRole);
   const canManageDayPlan = canManageServiceDayPlan(normalizedRole);
   const [search, setSearch] = React.useState('');
@@ -1060,6 +996,8 @@ export default function Service() {
   const [viewMode, setViewMode] = React.useState<'list' | 'kanban'>('list');
   const [selectedTicketId, setSelectedTicketId] = React.useState<string | null>(null);
   const [openTicketId, setOpenTicketId] = React.useState<string | null>(null);
+  const [activeTopTab, setActiveTopTab] = React.useState('tickets');
+  const [requestTab, setRequestTab] = React.useState<'actual' | 'in_progress' | 'waiting_parts' | 'ready' | 'archive'>('actual');
 
   const openTicketCard = React.useCallback((ticketId: string) => {
     setSelectedTicketId(ticketId);
@@ -1294,6 +1232,13 @@ export default function Service() {
     setDateTo('');
   };
 
+  const handleRequestTabChange = (tab: typeof requestTab) => {
+    setRequestTab(tab);
+    if (tab === 'archive') return;
+    const nextStatus = tab === 'actual' ? 'all' : tab;
+    setStatusFilter(nextStatus);
+  };
+
   const activeFilterCount = [
     search.trim() !== '',
     priorityFilter !== 'all',
@@ -1307,21 +1252,22 @@ export default function Service() {
     dateTo !== '',
   ].filter(Boolean).length;
 
-  const serviceTabTriggerClass = 'group flex-none rounded-lg border border-transparent px-4 py-2.5 text-sm font-bold text-gray-500 transition data-[state=active]:border-[--color-primary]/30 data-[state=active]:bg-[--color-primary]/10 data-[state=active]:text-[--color-primary] dark:text-gray-400 dark:data-[state=active]:bg-[--color-primary]/15';
+  const serviceTabTriggerClass = 'group flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-4 py-3 text-sm font-bold text-gray-500 shadow-none transition data-[state=active]:border-[--color-primary] data-[state=active]:bg-transparent data-[state=active]:text-[--color-primary] dark:text-gray-400 dark:data-[state=active]:bg-transparent';
+  const requestTabCounts = {
+    actual: activeTickets.length,
+    in_progress: metrics.inProgress,
+    waiting_parts: metrics.waitingParts,
+    ready: metrics.ready,
+    archive: archivedTickets.length,
+  };
 
   return (
     <div className="space-y-5 p-4 sm:p-6 md:p-8">
-      <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm shadow-slate-200/50 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+      <section className="border-b border-gray-200 pb-4 dark:border-white/10">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase text-gray-500 dark:text-gray-400">
-              <ClipboardList className="h-4 w-4 text-[--color-primary]" />
-              Управление ремонтом и качеством
-            </div>
-            <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Сервис</h1>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-500 dark:text-gray-400">
-              Активные заявки, архив ремонтов, рекламации, планировщик механиков и очередь сервисных рисков.
-            </p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Сервис</h1>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Заявки, рекламации и планирование механиков.</p>
           </div>
           <div className="flex flex-wrap gap-2">
           {can('create', 'service') && (
@@ -1333,10 +1279,6 @@ export default function Service() {
               </Button>
             </Link>
           )}
-          <Button type="button" variant="secondary" className="h-10" onClick={() => setShowFilters(true)}>
-            <Search className="h-4 w-4" />
-            Фильтры
-          </Button>
           </div>
         </div>
       </section>
@@ -1485,13 +1427,10 @@ export default function Service() {
         </div>
       </FilterDialog>
 
-      <Tabs defaultValue="tickets" className="space-y-5">
-        <TabsList className="h-auto w-full justify-start gap-2 overflow-x-auto rounded-lg border border-gray-200 bg-white p-1.5 dark:border-white/10 dark:bg-white/[0.03]">
+      <Tabs value={activeTopTab} onValueChange={setActiveTopTab} className="space-y-5">
+        <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto border-b border-gray-200 bg-transparent p-0 dark:border-white/10">
           <TabsTrigger value="tickets" className={serviceTabTriggerClass}>
             <ServiceTabLabel label="Заявки" count={activeTickets.length} />
-          </TabsTrigger>
-          <TabsTrigger value="archive" className={serviceTabTriggerClass}>
-            <ServiceTabLabel label="Архив" count={archivedTickets.length} />
           </TabsTrigger>
           {canManageWarrantyClaims && (
             <TabsTrigger value="warranty" className={serviceTabTriggerClass}>
@@ -1503,23 +1442,42 @@ export default function Service() {
               <ServiceTabLabel label="Планировщик" count={mechanicsQuery.data?.length ?? 0} />
             </TabsTrigger>
           )}
-          <TabsTrigger value="queue" className={serviceTabTriggerClass}>
-            <ServiceTabLabel label="Очередь" count={serviceQueue.metrics.totalOpen} />
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="tickets" className="space-y-5">
+          <div className="flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-white/10">
+            {[
+              { value: 'actual' as const, label: 'Актуальные' },
+              { value: 'in_progress' as const, label: 'В работе' },
+              { value: 'waiting_parts' as const, label: 'Ожидание запчастей' },
+              { value: 'ready' as const, label: 'Готовы к закрытию' },
+              { value: 'archive' as const, label: 'Архив' },
+            ].map(tab => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => handleRequestTabChange(tab.value)}
+                data-active={String(requestTab === tab.value)}
+                className="group flex-none border-b-2 border-transparent px-3 py-2.5 text-sm font-bold text-gray-500 transition hover:text-gray-900 data-[active=true]:border-[--color-primary] data-[active=true]:text-[--color-primary] dark:text-gray-400 dark:hover:text-white"
+              >
+                <RequestSubTabLabel label={tab.label} count={requestTabCounts[tab.value]} />
+              </button>
+            ))}
+          </div>
+
+          {requestTab !== 'archive' ? (
+            <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-            <ServiceMetricCard title="Актуальные" value={metrics.total} caption="Активных сейчас" tone="blue" />
-            <ServiceMetricCard title="В работе" value={metrics.inProgress} caption="У механиков" tone="orange" />
-            <ServiceMetricCard title="Ожидают запчасти" value={metrics.waitingParts} caption="Требуют снабжения" tone="purple" />
-            <ServiceMetricCard title="Готовы к выдаче" value={metrics.ready} caption="Можно закрывать/выдавать" tone="green" />
-            <ServiceMetricCard title="Без механика" value={metrics.unassigned} caption="Нужно назначить" tone="amber" />
-            <ServiceMetricCard title="Просрочено" value={metrics.overdue} caption="Нарушен срок" tone="red" />
+            <ServiceMetricCard title="Актуальные" value={metrics.total} caption="Активных сейчас" tone="blue" icon={<ClipboardList className="h-5 w-5" />} />
+            <ServiceMetricCard title="В работе" value={metrics.inProgress} caption="У механиков" tone="orange" icon={<Wrench className="h-5 w-5" />} />
+            <ServiceMetricCard title="Ожидают запчасти" value={metrics.waitingParts} caption="Требуют снабжения" tone="purple" icon={<PackageSearch className="h-5 w-5" />} />
+            <ServiceMetricCard title="Готовы к выдаче" value={metrics.ready} caption="Можно закрывать" tone="green" icon={<CheckCircle2 className="h-5 w-5" />} />
+            <ServiceMetricCard title="Без механика" value={metrics.unassigned} caption="Нужно назначить" tone="amber" icon={<UserRound className="h-5 w-5" />} />
+            <ServiceMetricCard title="Просрочено" value={metrics.overdue} caption="Нарушен срок" tone="red" icon={<AlertTriangle className="h-5 w-5" />} />
           </div>
 
           <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-            <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-[minmax(240px,1.4fr)_repeat(4,minmax(120px,1fr))_auto]">
+            <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-[minmax(220px,1.3fr)_repeat(5,minmax(120px,0.9fr))_auto]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -1529,14 +1487,6 @@ export default function Service() {
                   className="h-11 pl-10"
                 />
               </div>
-              <Select value={datePreset} onValueChange={(value) => setDatePreset(value as typeof datePreset)}>
-                <SelectTrigger className="h-11"><SelectValue placeholder="Период" /></SelectTrigger>
-                <SelectContent>
-                  {datePresetOptions.map(option => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="h-11"><SelectValue placeholder="Статус" /></SelectTrigger>
                 <SelectContent>
@@ -1549,13 +1499,23 @@ export default function Service() {
                 </SelectContent>
               </Select>
               <Select value={scenarioFilter} onValueChange={setScenarioFilter}>
-                <SelectTrigger className="h-11"><SelectValue placeholder="Тип ремонта" /></SelectTrigger>
+                <SelectTrigger className="h-11"><SelectValue placeholder="Тип работ" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Все типы</SelectItem>
                   <SelectItem value="repair">Ремонт</SelectItem>
                   <SelectItem value="to">ТО</SelectItem>
                   <SelectItem value="chto">ЧТО</SelectItem>
                   <SelectItem value="pto">ПТО</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                <SelectTrigger className="h-11"><SelectValue placeholder="Приоритет" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все приоритеты</SelectItem>
+                  <SelectItem value="critical">Критический</SelectItem>
+                  <SelectItem value="high">Высокий</SelectItem>
+                  <SelectItem value="medium">Средний</SelectItem>
+                  <SelectItem value="low">Низкий</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={mechanicFilter} onValueChange={setMechanicFilter}>
@@ -1567,8 +1527,17 @@ export default function Service() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button type="button" variant="secondary" className="h-11" onClick={resetFilters}>
-                Сбросить
+              <Select value={datePreset} onValueChange={(value) => setDatePreset(value as typeof datePreset)}>
+                <SelectTrigger className="h-11"><SelectValue placeholder="Период" /></SelectTrigger>
+                <SelectContent>
+                  {datePresetOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button type="button" variant="secondary" className="h-11" onClick={() => setShowFilters(true)}>
+                <Filter className="h-4 w-4" />
+                Фильтры
               </Button>
             </div>
           </section>
@@ -1602,7 +1571,7 @@ export default function Service() {
             </div>
           </div>
 
-          <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className="min-w-0 space-y-4">
               {viewMode === 'kanban' ? (
                 <div className="grid gap-3 lg:grid-cols-3">
@@ -1639,16 +1608,16 @@ export default function Service() {
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-                  <div className="hidden gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] 2xl:grid 2xl:grid-cols-[32px_minmax(150px,0.8fr)_115px_minmax(190px,1fr)_minmax(170px,0.9fr)_minmax(190px,1fr)_minmax(120px,0.7fr)_100px_120px_42px]">
-                    <div></div>
-                    <div>№ заявки / дата</div>
-                    <div>Статус</div>
+                  <div className="hidden gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] 2xl:grid 2xl:grid-cols-[minmax(135px,0.75fr)_minmax(220px,1fr)_minmax(180px,0.9fr)_minmax(120px,0.65fr)_118px_110px_minmax(150px,0.8fr)_100px_110px_42px]">
+                    <div>№ заявки</div>
                     <div>Техника</div>
-                    <div>Клиент / проблема</div>
-                    <div>Описание</div>
+                    <div>Клиент / Объект</div>
+                    <div>Тип работ</div>
+                    <div>Статус</div>
+                    <div>Приоритет</div>
                     <div>Механик</div>
                     <div>Срок</div>
-                    <div>Тип / приоритет</div>
+                    <div>Обновлено</div>
                     <div></div>
                   </div>
                   {visibleTickets.length === 0 ? (
@@ -1667,7 +1636,7 @@ export default function Service() {
                       const serialNumber = ticket.serialNumber || '';
                       const clientDetails = getTicketClientDetails(ticket, clientLookup);
                       const assignedMechanic = ticket.assignedMechanicName || ticket.assignedTo || '';
-                      const description = ticket.description ? truncateText(ticket.description, 90) : '';
+                      const objectLabel = getTicketClientObject(ticket);
                       const dueLabel = getTicketDueLabel(ticket);
                       const dueMeta = getTicketDueMeta(ticket);
                       const repairType = getTicketRepairTypeLabel(ticket);
@@ -1687,51 +1656,46 @@ export default function Service() {
                               openTicket();
                             }
                           }}
-                          className={`grid cursor-pointer gap-3 border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 hover:bg-[--color-primary]/5 dark:border-white/6 md:grid-cols-[32px_minmax(170px,0.9fr)_110px_minmax(220px,1fr)] lg:grid-cols-[32px_minmax(180px,0.9fr)_115px_minmax(220px,1fr)_minmax(180px,0.8fr)] 2xl:grid-cols-[32px_minmax(150px,0.8fr)_115px_minmax(190px,1fr)_minmax(170px,0.9fr)_minmax(190px,1fr)_minmax(120px,0.7fr)_100px_120px_42px] lg:items-start ${
+                          className={`grid cursor-pointer gap-3 border-b border-gray-100 px-4 py-3 transition-colors last:border-b-0 hover:bg-[--color-primary]/5 dark:border-white/6 md:grid-cols-[minmax(160px,0.9fr)_minmax(220px,1.1fr)] lg:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_minmax(190px,0.9fr)_minmax(160px,0.8fr)] 2xl:grid-cols-[minmax(135px,0.75fr)_minmax(220px,1fr)_minmax(180px,0.9fr)_minmax(120px,0.65fr)_118px_110px_minmax(150px,0.8fr)_100px_110px_42px] lg:items-center ${
                             isSelected
                               ? 'bg-[--color-primary]/10'
                               : index % 2 === 0 ? 'bg-gray-50/60 dark:bg-white/[0.015]' : 'bg-white dark:bg-transparent'
                           }`}
                         >
-                          <div onClick={(event) => event.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              aria-label={`Выбрать заявку ${ticket.id}`}
-                              checked={isSelected}
-                              onChange={(event) => setSelectedTicketId(event.target.checked ? ticket.id : null)}
-                              className="h-4 w-4 rounded border-gray-300 text-[--color-primary] focus:ring-[--color-primary]"
-                            />
-                          </div>
                           <div className="min-w-0 text-left">
                             <div className="truncate font-mono text-sm font-bold text-[--color-primary]">{ticket.id}</div>
                             <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
                           </div>
-                          <div>{getServiceStatusBadge(normalizeServiceStatus(ticket.status))}</div>
-                          <div className="min-w-0 text-left">
-                            <div className="truncate text-sm font-bold text-gray-900 dark:text-white">{getTicketEquipmentTitle(ticket)}</div>
-                            <div className="mt-0.5 truncate font-mono text-xs text-gray-500">
-                              INV: {inventory}{serialNumber ? ` · SN: ${serialNumber}` : ''}
+                          <div className="flex min-w-0 items-center gap-3 text-left">
+                            <TicketThumbnail ticket={ticket} />
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-bold text-gray-900 dark:text-white">{getTicketEquipmentTitle(ticket)}</div>
+                              <div className="mt-0.5 truncate font-mono text-xs text-gray-500">
+                                INV: {inventory}{serialNumber ? ` · SN: ${serialNumber}` : ''}
+                              </div>
                             </div>
                           </div>
                           <div className="min-w-0">
                             <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{clientDetails.name}</div>
-                            <div className="mt-0.5 truncate text-xs text-gray-500">{clientDetails.inn ? `ИНН ${clientDetails.inn}` : 'ИНН не указан'}</div>
+                            <div className="mt-0.5 truncate text-xs text-gray-500">{objectLabel || (clientDetails.inn ? `ИНН ${clientDetails.inn}` : 'Объект не указан')}</div>
                           </div>
                           <div className="min-w-0 text-left">
-                            <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{ticket.reason || '—'}</div>
-                            {description && <div className="mt-0.5 truncate text-xs text-gray-500">{description}</div>}
+                            <div className="truncate text-sm font-medium text-gray-700 dark:text-gray-200">{repairType}</div>
+                            <div className="mt-0.5 truncate text-xs text-gray-500">{ticket.reason || '—'}</div>
                           </div>
-                          <div className="min-w-0 truncate text-sm text-gray-600 dark:text-gray-300">{assignedMechanic || 'Не назначен'}</div>
+                          <div>{getServiceStatusBadge(normalizeServiceStatus(ticket.status))}</div>
+                          <div>{getServicePriorityPill(ticket.priority)}</div>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <MechanicAvatar name={assignedMechanic || 'Не назначен'} />
+                            <span className="min-w-0 truncate text-sm text-gray-600 dark:text-gray-300">{assignedMechanic || 'Не назначен'}</span>
+                          </div>
                           <div>
                             <span className={`inline-flex flex-col rounded-lg px-2.5 py-1 text-xs font-semibold ${dueMeta.className}`}>
                               <span>{dueLabel ? formatShortDate(dueLabel) : '—'}</span>
                               <span className="font-medium opacity-75">{dueMeta.hint}</span>
                             </span>
                           </div>
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-gray-600 dark:text-gray-300">{repairType}</div>
-                            <div className="mt-1">{getServicePriorityPill(ticket.priority)}</div>
-                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-300">{formatShortDate(ticket.completedAt || ticket.closedAt || ticket.createdAt)}</div>
                           <button
                             type="button"
                             onClick={(event) => {
@@ -1752,15 +1716,15 @@ export default function Service() {
               )}
             </div>
 
-            <ServiceSidePanel
-              ticket={selectedTicket}
-              clientLookup={clientLookup}
-              currentUser={user}
-              canEditService={can('edit', 'service')}
-              canViewDocuments={canViewDocuments}
-              canCreateDocuments={can('create', 'documents')}
+            <ServiceManagementPanel
+              metrics={metrics}
+              queue={serviceQueue}
+              canCreateService={can('create', 'service')}
+              canManageDayPlan={canManageDayPlan}
+              canManageWarrantyClaims={canManageWarrantyClaims}
               onOpenTicket={openTicketCard}
-              onClose={() => setSelectedTicketId(null)}
+              onShowPlanner={() => setActiveTopTab('day-plan')}
+              onShowWarranty={() => setActiveTopTab('warranty')}
             />
           </div>
 
@@ -1779,6 +1743,140 @@ export default function Service() {
                 </Button>
               )}
             </div>
+          )}
+            </>
+          ) : (
+            <>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="flex items-center gap-2 text-sm font-bold text-gray-600 dark:text-gray-300">
+                  <Archive className="h-4 w-4" />
+                  Архивные заявки доступны только для просмотра и управленческого анализа.
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <ServiceMetricCard title="Всего в архиве" value={archiveMetrics.total} caption="Закрытые заявки" tone="neutral" icon={<Archive className="h-5 w-5" />} />
+                <ServiceMetricCard title="Закрыто за месяц" value={archiveMetrics.closedThisMonth} caption="Финальный статус" tone="green" icon={<CheckCircle2 className="h-5 w-5" />} />
+                <ServiceMetricCard title="Среднее закрытие" value={archiveMetrics.averageClosureDays} caption="Дней по закрытым" tone="amber" icon={<CalendarClock className="h-5 w-5" />} />
+                <ServiceMetricCard title="Найдено" value={filteredArchiveTickets.length} caption="По текущим фильтрам" tone="blue" icon={<Search className="h-5 w-5" />} />
+              </div>
+
+              <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+                <div className="grid gap-3 md:grid-cols-[minmax(240px,1fr)_220px_auto]">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Поиск в архиве: № заявки, техника, клиент..."
+                      value={archiveSearch}
+                      onChange={(e) => setArchiveSearch(e.target.value)}
+                      className="h-11 pl-10"
+                    />
+                  </div>
+                  <Select value={archiveStatusFilter} onValueChange={(value) => setArchiveStatusFilter(value as 'closed')}>
+                    <SelectTrigger className="h-11"><SelectValue placeholder="Статус" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="closed">Закрыта</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="secondary" className="h-11" onClick={() => setArchiveSearch('')}>
+                    Сбросить
+                  </Button>
+                </div>
+              </section>
+
+              <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+                <div className="hidden grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] lg:grid">
+                  <div>№ заявки / дата</div>
+                  <div>Статус</div>
+                  <div>Техника</div>
+                  <div>Клиент / проблема</div>
+                  <div>Закрыта</div>
+                  <div></div>
+                </div>
+                {visibleArchiveTickets.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-14 text-center">
+                    <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 dark:bg-white/8">
+                      <Search className="h-7 w-7 text-gray-400 dark:text-gray-500" />
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-900 dark:text-white">Архивные заявки не найдены</h3>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Попробуйте изменить поиск по архиву.</p>
+                  </div>
+                ) : (
+                  visibleArchiveTickets.map((ticket, index) => {
+                    const inventory = getTicketInventory(ticket);
+                    const serialNumber = ticket.serialNumber || '';
+                    const clientDetails = getTicketClientDetails(ticket, clientLookup);
+                    const description = ticket.description ? truncateText(ticket.description, 90) : '';
+                    const openTicket = () => openTicketCard(ticket.id);
+
+                    return (
+                      <div
+                        key={ticket.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Открыть архивную заявку ${ticket.id}`}
+                        onClick={openTicket}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            openTicket();
+                          }
+                        }}
+                        className={`grid cursor-pointer gap-3 border-b border-gray-100 px-4 py-3 text-gray-600 transition-colors last:border-b-0 hover:bg-gray-50 dark:border-white/6 dark:text-gray-300 dark:hover:bg-white/[0.04] lg:grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] lg:items-start ${
+                          index % 2 === 0 ? 'bg-gray-50/60 dark:bg-white/[0.015]' : 'bg-white dark:bg-transparent'
+                        }`}
+                      >
+                        <div className="min-w-0 text-left">
+                          <div className="truncate font-mono text-sm font-bold text-[--color-primary]">{ticket.id}</div>
+                          <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
+                        </div>
+                        <div>{getServiceStatusBadge(normalizeServiceStatus(ticket.status))}</div>
+                        <div className="min-w-0 text-left">
+                          <div className="truncate text-sm font-bold text-gray-900 dark:text-white">{getTicketEquipmentTitle(ticket)}</div>
+                          <div className="mt-0.5 truncate font-mono text-xs text-gray-500">
+                            INV: {inventory}{serialNumber ? ` · SN: ${serialNumber}` : ''}
+                          </div>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{clientDetails.name}</div>
+                          <div className="mt-0.5 truncate text-xs text-gray-500">{ticket.reason || description || '—'}</div>
+                        </div>
+                        <div className="text-sm text-gray-600 dark:text-gray-300">{ticket.closedAt ? formatShortDate(ticket.closedAt) : '—'}</div>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openTicket();
+                          }}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-[--color-primary] dark:hover:bg-white/10"
+                          title="Открыть полную карточку"
+                          aria-label={`Открыть полную карточку архивной заявки ${ticket.id}`}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {filteredArchiveTickets.length > 0 && (
+                <div className="flex flex-col gap-3 text-sm text-gray-500 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between">
+                  <p>Показано {visibleArchiveTickets.length} из {filteredArchiveTickets.length} архивных заявок</p>
+                  {visibleArchiveTickets.length < filteredArchiveTickets.length && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setArchiveVisibleCount(count => count + RESULT_BATCH_SIZE)}
+                      className="w-full rounded-full sm:w-auto"
+                    >
+                      <ArrowDown className="h-4 w-4" />
+                      Показать ещё
+                    </Button>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </TabsContent>
 

@@ -1164,8 +1164,9 @@ function canAccessEntity(collection, entity, user, readData) {
       return isOfficeManager(user) || isServiceForeman(user) || isMechanic(user) || isWarrantyMechanic(user);
     case 'service_work_catalog':
     case 'spare_parts_catalog':
-    case 'delivery_carriers':
       return false;
+    case 'delivery_carriers':
+      return isOfficeManager(user) || isRentalManager(user);
     case 'company_expenses':
     case 'finance_accounts':
     case 'finance_operations':

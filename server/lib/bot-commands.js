@@ -446,6 +446,91 @@ function createBotHandlers(deps) {
     return carrierDeliveryTypeLabel(type);
   }
 
+  function isActiveDeliveryCarrier(carrier) {
+    const status = String(carrier?.status || 'active').trim().toLowerCase();
+    return status !== 'inactive' && status !== 'неактивен' && Boolean(String(carrier?.name || '').trim());
+  }
+
+  function getActiveDeliveryCarriers() {
+    return (readData('delivery_carriers') || [])
+      .filter(isActiveDeliveryCarrier)
+      .map((carrier) => ({
+        ...carrier,
+        id: String(carrier.id || carrier.key || '').trim(),
+        key: String(carrier.key || carrier.id || '').trim(),
+        name: String(carrier.name || '').trim(),
+        phone: carrier.phone ? String(carrier.phone).trim() : null,
+        maxCarrierKey: carrier.maxCarrierKey ? String(carrier.maxCarrierKey).trim() : null,
+      }))
+      .filter(carrier => carrier.id)
+      .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+  }
+
+  function findActiveDeliveryCarrier(carrierId) {
+    const id = String(carrierId || '').trim();
+    if (!id) return null;
+    return getActiveDeliveryCarriers().find(carrier =>
+      carrier.id === id || carrier.key === id || carrier.maxCarrierKey === id
+    ) || null;
+  }
+
+  function managerDeliveryCarrierKeyboard(carriers) {
+    const rows = chunkButtons(
+      carriers.map(carrier => button(carrier.name, `deliverycreate:carrier:${encodeURIComponent(carrier.id)}`)),
+      1,
+    );
+    rows.push([button('Отмена', 'deliverycreate:cancel')]);
+    return keyboard(rows);
+  }
+
+  function createDeliveryConfirmKeyboard() {
+    return keyboard([
+      [button('Создать доставку', 'deliverycreate:confirm')],
+      [button('Изменить перевозчика', 'deliverycreate:change_carrier')],
+      [button('Отмена', 'deliverycreate:cancel')],
+    ]);
+  }
+
+  function formatManagerDeliverySummary(draft = {}) {
+    return [
+      'Проверьте заявку перед созданием:',
+      `Клиент: ${draft.client || 'не указан'}`,
+      `Техника/груз: ${draft.cargo || 'не указано'}`,
+      `Тип доставки: ${deliveryTypeLabel(draft.type)}`,
+      `Дата: ${draft.transportDate || 'не указана'}`,
+      `Адрес: ${draft.origin || 'не указано'} → ${draft.destination || 'не указано'}`,
+      `Перевозчик: ${draft.carrierName || 'не выбран'}`,
+    ].join('\n');
+  }
+
+  function promptManagerDeliveryCarrier(senderId, phone, authUser, draft, uiContext = {}) {
+    const carriers = getActiveDeliveryCarriers();
+    if (!carriers.length) {
+      updateBotSession(phone, {
+        pendingAction: 'manager_delivery_carrier',
+        pendingPayload: { managerDeliveryDraft: draft },
+      });
+      return reply(senderId, 'Нет доступных перевозчиков. Добавьте перевозчика в справочнике или создайте доставку без назначения, если это разрешено логикой.', {
+        attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
+        ...managerStageOptions(authUser.userRole, 'manager_delivery'),
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+      });
+    }
+    updateBotSession(phone, {
+      pendingAction: 'manager_delivery_carrier',
+      pendingPayload: { managerDeliveryDraft: draft },
+    });
+    return reply(senderId, '🚚 Выберите перевозчика для доставки.', {
+      attachments: managerDeliveryCarrierKeyboard(carriers),
+      ...managerStageOptions(authUser.userRole, 'manager_delivery'),
+      phone,
+      callbackContext: uiContext.callbackContext,
+      replaceMessage: Boolean(uiContext.callbackContext),
+    });
+  }
+
   function getManagerSummaryData(managerName) {
     const classicRentalIds = new Set((readData('rentals') || []).map(item => String(item?.id || '').trim()).filter(Boolean));
     const rentals = (readData('gantt_rentals') || []).filter(item =>
@@ -505,6 +590,9 @@ function createBotHandlers(deps) {
 
   function createDeliveryFromBot(authUser, draft) {
     const deliveries = readData('deliveries') || [];
+    if (!draft.carrierId || !draft.carrierName) {
+      throw new Error('Перед созданием доставки выберите перевозчика.');
+    }
     const delivery = {
       id: generateId(idPrefixes.deliveries),
       type: draft.type === 'receiving' ? 'receiving' : 'shipping',
@@ -519,19 +607,21 @@ function createBotHandlers(deps) {
       cost: 0,
       comment: draft.comment || '',
       client: draft.client,
-      clientId: null,
+      clientId: draft.clientId || null,
       manager: authUser.userName,
-      carrierId: null,
-      carrierKey: null,
-      carrierName: null,
-      carrierPhone: null,
+      managerId: authUser.userId || null,
+      carrierId: String(draft.carrierId),
+      carrierKey: String(draft.carrierKey || draft.carrierId),
+      carrierName: String(draft.carrierName || ''),
+      carrierPhone: draft.carrierPhone || null,
       carrierChatId: null,
       carrierUserId: null,
-      ganttRentalId: null,
-      classicRentalId: null,
-      equipmentId: null,
-      equipmentInv: null,
-      equipmentLabel: null,
+      ganttRentalId: draft.ganttRentalId || null,
+      classicRentalId: draft.classicRentalId || draft.rentalId || null,
+      rentalId: draft.rentalId || draft.classicRentalId || null,
+      equipmentId: draft.equipmentId || null,
+      equipmentInv: draft.equipmentInv || draft.inventoryNumber || null,
+      equipmentLabel: draft.equipmentLabel || null,
       botSentAt: null,
       botSendError: null,
       carrierInvoiceReceived: false,
@@ -550,6 +640,89 @@ function createBotHandlers(deps) {
     deliveries.push(delivery);
     writeData('deliveries', deliveries);
     return delivery;
+  }
+
+  async function sendDeliveryToCarrierFromBot(delivery) {
+    const carrier = findActiveDeliveryCarrier(resolveDeliveryCarrierId(delivery));
+    if (!carrier) {
+      return updateStoredDelivery({
+        ...delivery,
+        botSendError: 'Перевозчик не найден в справочнике',
+      });
+    }
+    if (!carrier.maxCarrierKey) {
+      return updateStoredDelivery({
+        ...delivery,
+        botSendError: 'Для перевозчика не привязан пользователь MAX',
+      });
+    }
+    const botUser = getBotUsers()?.[carrier.maxCarrierKey];
+    if (!isCarrierBotUser({
+      ...(botUser || {}),
+      userRole: botUser?.userRole || 'Перевозчик',
+      role: botUser?.role || 'carrier',
+      botMode: botUser?.botMode || 'delivery',
+      carrierId: botUser?.carrierId || carrier.id,
+      isActive: botUser?.isActive !== false,
+    })) {
+      return updateStoredDelivery({
+        ...delivery,
+        botSendError: 'Перевозчик не подключён к боту MAX',
+      });
+    }
+
+    const carrierBotUser = {
+      ...botUser,
+      userRole: botUser.userRole || 'Перевозчик',
+      role: 'carrier',
+      botMode: 'delivery',
+      carrierId: botUser.carrierId || carrier.id,
+      isActive: botUser.isActive !== false,
+    };
+    if (JSON.stringify(botUser) !== JSON.stringify(carrierBotUser)) {
+      saveBotUsers({
+        ...getBotUsers(),
+        [carrier.maxCarrierKey]: carrierBotUser,
+      });
+    }
+
+    const equipment = delivery.equipmentId
+      ? (readData('equipment') || []).find(item => item.id === delivery.equipmentId)
+      : null;
+    const text = [
+      delivery.type === 'shipping'
+        ? 'Появилась новая заявка на отгрузку'
+        : 'Появилась новая заявка на приёмку',
+      '',
+      formatCarrierDeliveryMessage({ ...delivery, carrierId: carrier.id }, { equipment }),
+    ].join('\n');
+
+    try {
+      await sendMessage(carrierBotUser.replyTarget || { user_id: Number(carrier.maxCarrierKey) }, text, {
+        attachments: deliveryStatusKeyboard({ ...delivery, status: delivery.status === 'new' ? 'sent' : delivery.status }),
+      });
+      return updateStoredDelivery({
+        ...delivery,
+        carrierId: carrier.id,
+        carrierKey: carrier.key || carrier.id,
+        carrierName: carrier.name || delivery.carrierName,
+        carrierPhone: carrier.phone || delivery.carrierPhone || null,
+        status: delivery.status === 'new' ? 'sent' : delivery.status,
+        botSentAt: nowIso(),
+        botSendError: null,
+      });
+    } catch (error) {
+      return updateStoredDelivery({
+        ...delivery,
+        botSendError: error?.message || 'Не удалось отправить заявку в MAX',
+      });
+    }
+  }
+
+  function updateStoredDelivery(nextDelivery) {
+    const deliveries = readData('deliveries') || [];
+    writeData('deliveries', deliveries.map(item => item.id === nextDelivery.id ? nextDelivery : item));
+    return nextDelivery;
   }
 
   function deliveryStatusLabel(status) {
@@ -2607,18 +2780,162 @@ function createBotHandlers(deps) {
           replaceMessage: true,
         });
       }
-      const delivery = createDeliveryFromBot(authUser, draft);
+      return promptManagerDeliveryCarrier(senderId, phone, authUser, { ...draft, comment: '' }, {
+        callbackContext,
+      });
+    }
+
+    if (normalized === 'deliverycreate:change_carrier') {
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const draft = getBotSession(phone).pendingPayload?.managerDeliveryDraft || null;
+      if (!draft) {
+        resetBotFlow(phone);
+        return reply(senderId, '❌ Черновик доставки не найден. Начните заново.', {
+          attachments: managerSummaryKeyboard(),
+          ...managerStageOptions(authUser.userRole, 'manager_main'),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      return promptManagerDeliveryCarrier(senderId, phone, authUser, {
+        ...draft,
+        carrierId: null,
+        carrierKey: null,
+        carrierName: null,
+        carrierPhone: null,
+      }, {
+        callbackContext,
+      });
+    }
+
+    if (normalized.startsWith('deliverycreate:carrier:')) {
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const session = getBotSession(phone);
+      const draft = session.pendingPayload?.managerDeliveryDraft || null;
+      if (!draft) {
+        resetBotFlow(phone);
+        return reply(senderId, '❌ Черновик доставки не найден. Начните заново.', {
+          attachments: managerSummaryKeyboard(),
+          ...managerStageOptions(authUser.userRole, 'manager_main'),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      let carrierId = normalized.slice('deliverycreate:carrier:'.length);
+      try {
+        carrierId = decodeURIComponent(carrierId);
+      } catch (_error) {
+        carrierId = String(carrierId || '').trim();
+      }
+      const carrier = findActiveDeliveryCarrier(carrierId);
+      if (!carrier) {
+        return promptManagerDeliveryCarrier(senderId, phone, authUser, {
+          ...draft,
+          carrierId: null,
+          carrierKey: null,
+          carrierName: null,
+          carrierPhone: null,
+        }, {
+          callbackContext,
+        });
+      }
+      const nextDraft = {
+        ...draft,
+        carrierId: carrier.id,
+        carrierKey: carrier.key || carrier.id,
+        carrierName: carrier.name,
+        carrierPhone: carrier.phone || null,
+      };
+      updateBotSession(phone, {
+        pendingAction: 'manager_delivery_confirm',
+        pendingPayload: { managerDeliveryDraft: nextDraft },
+      });
+      return reply(senderId, [
+        `Перевозчик выбран: ${carrier.name}.`,
+        '',
+        formatManagerDeliverySummary(nextDraft),
+      ].join('\n'), {
+        attachments: createDeliveryConfirmKeyboard(),
+        ...managerStageOptions(authUser.userRole, 'manager_delivery'),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized === 'deliverycreate:confirm') {
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const draft = getBotSession(phone).pendingPayload?.managerDeliveryDraft || null;
+      if (!draft) {
+        resetBotFlow(phone);
+        return reply(senderId, '❌ Черновик доставки не найден. Начните заново.', {
+          attachments: managerSummaryKeyboard(),
+          ...managerStageOptions(authUser.userRole, 'manager_main'),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const carrier = findActiveDeliveryCarrier(draft.carrierId);
+      if (!carrier) {
+        return promptManagerDeliveryCarrier(senderId, phone, authUser, {
+          ...draft,
+          carrierId: null,
+          carrierKey: null,
+          carrierName: null,
+          carrierPhone: null,
+        }, {
+          callbackContext,
+        });
+      }
+      let delivery = createDeliveryFromBot(authUser, {
+        ...draft,
+        carrierId: carrier.id,
+        carrierKey: carrier.key || carrier.id,
+        carrierName: carrier.name,
+        carrierPhone: carrier.phone || null,
+      });
+      delivery = await sendDeliveryToCarrierFromBot(delivery);
       if (notificationService?.notifyDeliveryCreated) {
         await notificationService.notifyDeliveryCreated(delivery);
       }
       resetBotFlow(phone);
+      const sendWarning = delivery.botSendError ? `\nMAX перевозчику: ${delivery.botSendError}` : '';
       return reply(senderId, withBotMenu([
         `✅ Доставка создана: ${delivery.id}`,
         `${deliveryTypeLabel(delivery.type)} · ${delivery.transportDate}`,
         `${delivery.origin} → ${delivery.destination}`,
         `Груз: ${delivery.cargo}`,
         `Клиент: ${delivery.client}`,
-      ].join('\n'), ['моя сводка', 'аренды', 'новая доставка']), {
+        `Перевозчик: ${delivery.carrierName}`,
+        sendWarning,
+      ].filter(Boolean).join('\n'), ['моя сводка', 'аренды', 'новая доставка']), {
         attachments: managerSummaryKeyboard(),
         ...managerStageOptions(authUser.userRole, 'manager_summary'),
         phone,
@@ -4154,24 +4471,7 @@ function createBotHandlers(deps) {
           ...(session.pendingPayload?.managerDeliveryDraft || {}),
           comment: trimmed,
         };
-        const delivery = createDeliveryFromBot(authUser, draft);
-        if (notificationService?.notifyDeliveryCreated) {
-          await notificationService.notifyDeliveryCreated(delivery);
-        }
-        resetBotFlow(phone);
-        return reply(senderId, withBotMenu([
-          `✅ Доставка создана: ${delivery.id}`,
-          `${deliveryTypeLabel(delivery.type)} · ${delivery.transportDate}`,
-          `${delivery.origin} → ${delivery.destination}`,
-          `Груз: ${delivery.cargo}`,
-          `Клиент: ${delivery.client}`,
-        ].join('\n'), ['моя сводка', 'аренды', 'новая доставка']), {
-          attachments: managerSummaryKeyboard(),
-          mechanicStage: 'manager_summary',
-          phone,
-          callbackContext: uiContext.callbackContext,
-          replaceMessage: Boolean(uiContext.callbackContext),
-        });
+        return promptManagerDeliveryCarrier(senderId, phone, authUser, draft, uiContext);
       }
       if (session.pendingAction === 'work_search') {
         if (!currentTicket) return sendMessage(senderId, 'ℹ️ Сначала выберите сервисную заявку, к которой нужно добавить работу.');

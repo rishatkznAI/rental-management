@@ -370,6 +370,122 @@ test('start command returns menu for an authorized manager', async () => {
   assert.equal(menu.payload.buttons[1][1].text, 'Новая доставка');
 });
 
+test('rental manager creates delivery with selected carrier in MAX bot', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.delivery_carriers = [
+    { id: 'carrier-1', key: 'carrier-1', name: 'Быстрая доставка', phone: '+7 900 000-00-00', status: 'active', maxCarrierKey: '200' },
+    { id: 'carrier-2', key: 'carrier-2', name: 'Неактивный перевозчик', status: 'inactive', maxCarrierKey: '300' },
+  ];
+  state.bot_users['200'] = {
+    userId: 'carrier-1',
+    userName: 'Быстрая доставка',
+    userRole: 'Перевозчик',
+    role: 'carrier',
+    botMode: 'delivery',
+    isActive: true,
+    carrierId: 'carrier-1',
+    replyTarget: { user_id: 200, chat_id: null },
+  };
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/новаядоставка');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'deliverycreate:type:shipping');
+  await handlers.handleCommand({ user_id: 100 }, '100', '2026-05-20');
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Mantall XE120W');
+  await handlers.handleCommand({ user_id: 100 }, '100', 'ООО Клиент');
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Склад');
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Объект клиента');
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Иван');
+  await handlers.handleCommand({ user_id: 100 }, '100', '+7 999 000-00-00');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'deliverycreate:skip_comment');
+
+  assert.equal(state.deliveries.length, 0);
+  assert.equal(state.bot_sessions['100'].pendingAction, 'manager_delivery_carrier');
+  assert.match(messages.at(-1).text, /Выберите перевозчика/);
+  assert.deepEqual(keyboardTexts(lastKeyboard(messages)), ['Быстрая доставка', 'Отмена']);
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'deliverycreate:carrier:carrier-1');
+
+  assert.equal(state.bot_sessions['100'].pendingAction, 'manager_delivery_confirm');
+  assert.match(messages.at(-1).text, /Перевозчик выбран: Быстрая доставка\./);
+  assert.match(messages.at(-1).text, /Клиент: ООО Клиент/);
+  assert.match(messages.at(-1).text, /Перевозчик: Быстрая доставка/);
+  assert.deepEqual(keyboardTexts(lastKeyboard(messages)), ['Создать доставку', 'Изменить перевозчика', 'Отмена']);
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'deliverycreate:confirm');
+
+  assert.equal(state.deliveries.length, 1);
+  assert.equal(state.deliveries[0].carrierId, 'carrier-1');
+  assert.equal(state.deliveries[0].carrierKey, 'carrier-1');
+  assert.equal(state.deliveries[0].carrierName, 'Быстрая доставка');
+  assert.equal(state.deliveries[0].carrierPhone, '+7 900 000-00-00');
+  assert.equal(state.deliveries[0].status, 'sent');
+  assert.equal(state.bot_sessions['100'].pendingAction, null);
+  assert.match(messages.at(-1).text, /✅ Доставка создана: DL-1/);
+  assert.match(messages.at(-1).text, /Перевозчик: Быстрая доставка/);
+
+  const carrierNotification = messages.find(message => message.target?.user_id === 200 && /Появилась новая заявка/.test(message.text));
+  assert.ok(carrierNotification);
+  assert.match(carrierNotification.text, /Mantall XE120W/);
+
+  await handlers.handleCommand({ user_id: 200 }, '200', '/доставки');
+  assert.match(messages.at(-1).text, /Мои активные доставки: 1/);
+  assert.match(messages.at(-1).text, /Mantall XE120W/);
+});
+
+test('rental manager cannot create MAX delivery when no active carriers exist', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.delivery_carriers = [
+    { id: 'carrier-1', name: 'Старый перевозчик', status: 'inactive', maxCarrierKey: '200' },
+  ];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/новаядоставка');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'deliverycreate:type:receiving');
+  await handlers.handleCommand({ user_id: 100 }, '100', '2026-05-21');
+  await handlers.handleCommand({ user_id: 100 }, '100', 'JLG 1930ES');
+  await handlers.handleCommand({ user_id: 100 }, '100', 'ООО Клиент');
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Объект клиента');
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Склад');
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Петр');
+  await handlers.handleCommand({ user_id: 100 }, '100', '+7 999 111-11-11');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'deliverycreate:skip_comment');
+
+  assert.equal(state.deliveries.length, 0);
+  assert.equal(state.bot_sessions['100'].pendingAction, 'manager_delivery_carrier');
+  assert.match(messages.at(-1).text, /Нет доступных перевозчиков/);
+  assert.deepEqual(keyboardTexts(lastKeyboard(messages)), ['Отмена']);
+});
+
+test('rental manager stale carrier callback asks to choose carrier again', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  state.delivery_carriers = [
+    { id: 'carrier-1', key: 'carrier-1', name: 'Быстрая доставка', status: 'active', maxCarrierKey: '200' },
+    { id: 'carrier-2', key: 'carrier-2', name: 'Новый перевозчик', status: 'active', maxCarrierKey: '201' },
+  ];
+  state.bot_sessions['100'] = {
+    pendingAction: 'manager_delivery_carrier',
+    pendingPayload: {
+      managerDeliveryDraft: {
+        type: 'shipping',
+        transportDate: '2026-05-22',
+        cargo: 'Подъёмник',
+        client: 'ООО Клиент',
+        origin: 'Склад',
+        destination: 'Объект',
+        contactName: 'Иван',
+        contactPhone: '+7',
+      },
+    },
+  };
+  state.delivery_carriers[0].status = 'inactive';
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'deliverycreate:carrier:carrier-1');
+
+  assert.equal(state.deliveries.length, 0);
+  assert.equal(state.bot_sessions['100'].pendingAction, 'manager_delivery_carrier');
+  assert.match(messages.at(-1).text, /Выберите перевозчика/);
+  assert.deepEqual(keyboardTexts(lastKeyboard(messages)), ['Новый перевозчик', 'Отмена']);
+});
+
 test('regular start returns delivery menu for an authorized carrier session', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.bot_users['100'] = {

@@ -82,9 +82,9 @@ function taskMatchesFilter(task: DayPlanTask, filter: DayPlanFilter) {
 function MetricCard({ label, value, tone }: { label: string; value: number; tone: string }) {
   const safeValue = Number.isFinite(value) ? value : 0;
   return (
-    <div className="min-h-[88px] rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-      <div className="text-xs font-semibold leading-tight text-gray-500 dark:text-gray-500">{label}</div>
-      <div className={`mt-2 text-2xl font-black leading-none ${tone}`}>{safeValue}</div>
+    <div className="min-h-[88px] rounded-lg border border-[#E5EAF3] bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+      <div className="text-xs font-medium leading-tight text-gray-500 dark:text-gray-500">{label}</div>
+      <div className={`mt-2 text-2xl font-bold leading-none ${tone}`}>{safeValue}</div>
     </div>
   );
 }
@@ -264,10 +264,10 @@ function ProblemList({
 }) {
   const isAttentionBlock = title === 'Без механика';
   return (
-    <section className={`rounded-lg border bg-white shadow-sm shadow-slate-200/40 dark:bg-white/[0.03] dark:shadow-none ${
+    <section className={`rounded-lg border bg-white shadow-[0_10px_30px_rgba(15,23,42,0.07)] dark:bg-white/[0.03] dark:shadow-none ${
       isAttentionBlock
         ? 'border-amber-300 dark:border-amber-900/60'
-        : 'border-gray-200 dark:border-white/10'
+        : 'border-[#E5EAF3] dark:border-white/10'
     }`}>
       <div className={`flex items-center gap-2 border-b px-4 py-3 ${
         isAttentionBlock
@@ -275,7 +275,7 @@ function ProblemList({
           : 'border-gray-100 dark:border-white/8'
       }`}>
         {icon}
-        <h3 className="text-sm font-black uppercase text-gray-800 dark:text-white">{title}</h3>
+        <h3 className="text-sm font-semibold text-gray-800 dark:text-white">{title}</h3>
         <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500 dark:bg-white/8 dark:text-gray-300">{items.length}</span>
       </div>
       {items.length === 0 ? (
@@ -375,7 +375,7 @@ export function ServiceDayPlanBoard({
 
   return (
     <div className="space-y-3">
-      <section className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+      <section className="rounded-lg border border-[#E5EAF3] bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-gray-500 dark:text-gray-400">
@@ -463,7 +463,7 @@ export function ServiceDayPlanBoard({
               По выбранным фильтрам задач нет.
             </div>
           ) : filteredMechanics.map(mechanic => (
-            <article key={mechanic.key} className="flex min-h-[360px] min-w-0 flex-col rounded-lg border border-gray-200 bg-white shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+            <article key={mechanic.key} className="flex min-h-[360px] min-w-0 flex-col rounded-lg border border-[#E5EAF3] bg-white shadow-[0_10px_30px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
               <div className="border-b border-gray-100 p-4 dark:border-white/8">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

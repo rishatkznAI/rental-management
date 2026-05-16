@@ -89,6 +89,13 @@ test('authenticated image handles 401 403 404 fallbacks and only opens loaded ph
   assert.match(source, /if \(canOpen && onOpen\) onOpen\(visibleUrl\)/);
 });
 
+test('service photos mark unverified archived upload records as display-only fallbacks', () => {
+  const source = fs.readFileSync('src/app/lib/media.ts', 'utf8');
+  assert.match(source, /isUnverifiedArchivedUploadPhoto/);
+  assert.match(source, /archiveStatus !== 'archived'/);
+  assert.match(source, /unavailableReason: 'Файл не найден'/);
+});
+
 test('head role keeps read-only access to shipping photos without write access', () => {
   const serverSource = fs.readFileSync('server/server.js', 'utf8');
   const equipmentDetailSource = fs.readFileSync('src/app/pages/EquipmentDetail.tsx', 'utf8');

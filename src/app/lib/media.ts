@@ -51,6 +51,29 @@ export function normalizePhotoReference(
   return normalizePhotoReferenceImpl(photo, { ...options, apiBaseUrl: API_BASE_URL }) as NormalizedPhoto;
 }
 
+export function isUnverifiedArchivedUploadPhoto(photo: PhotoReference | null | undefined): boolean {
+  if (!photo || typeof photo !== 'object' || Array.isArray(photo)) return false;
+  const localPath = typeof photo.localPath === 'string' ? photo.localPath : '';
+  if (!/^\/uploads\/external-photos\//i.test(localPath)) return false;
+  return photo.archiveStatus !== 'archived';
+}
+
+export function normalizePhotoForDisplay(
+  photo: PhotoReference | null | undefined,
+  options: { idPrefix?: string; index?: number } = {},
+): NormalizedPhoto {
+  const normalized = normalizePhotoReference(photo, options);
+  if (!isUnverifiedArchivedUploadPhoto(photo)) return normalized;
+  return {
+    ...normalized,
+    url: null,
+    thumbnailUrl: null,
+    fullUrl: null,
+    isBroken: true,
+    unavailableReason: 'Файл не найден',
+  };
+}
+
 export function normalizePhotoList(
   photos: PhotoReference[] | null | undefined,
   options: { idPrefix?: string } = {},

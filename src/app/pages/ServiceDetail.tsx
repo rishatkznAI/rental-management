@@ -63,7 +63,7 @@ import {
   openPrintableHtml,
 } from '../lib/serviceWorkOrder';
 import { buildServiceQuickActions } from '../lib/quickActions.js';
-import { normalizePhotoReference } from '../lib/media';
+import { normalizePhotoForDisplay, normalizePhotoReference } from '../lib/media';
 import { normalizeUserRole } from '../lib/userStorage';
 import { animationDurations, useAnimatedPresence } from '../lib/animations';
 
@@ -392,7 +392,7 @@ function RepairPhotoGroup({
       {safePhotos.length > 0 ? (
         <div className="grid grid-cols-3 gap-2">
           {safePhotos.map((photo, index) => {
-            const normalizedPhoto = normalizePhotoReference(photo, { idPrefix: `${title}-${index}` });
+            const normalizedPhoto = normalizePhotoForDisplay(photo, { idPrefix: `${title}-${index}` });
             return (
               <AuthenticatedImage
                 key={normalizedPhoto.id || `${title}-${index}`}
@@ -2068,7 +2068,7 @@ export default function ServiceDetail({
               {(ticket.photos ?? []).length > 0 ? (
                 <div className="grid grid-cols-3 gap-2">
                   {(ticket.photos ?? []).map((photo, i) => {
-                    const normalizedPhoto = normalizePhotoReference(photo, { idPrefix: `${ticket.id}-photo-${i}` });
+                    const normalizedPhoto = normalizePhotoForDisplay(photo, { idPrefix: `${ticket.id}-photo-${i}` });
                     return (
                     <div key={i} className="group relative aspect-square rounded-md overflow-hidden border border-gray-200 dark:border-gray-700">
                       <AuthenticatedImage
@@ -2523,7 +2523,7 @@ export default function ServiceDetail({
                 {(ticket.photos ?? []).length > 0 ? (
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {(ticket.photos ?? []).map((photo, index) => {
-                      const normalizedPhoto = normalizePhotoReference(photo, { idPrefix: `${ticket.id}-photos-tab-${index}` });
+                      const normalizedPhoto = normalizePhotoForDisplay(photo, { idPrefix: `${ticket.id}-photos-tab-${index}` });
                       return (
                         <AuthenticatedImage
                           key={normalizedPhoto.id || `${ticket.id}-photos-tab-${index}`}

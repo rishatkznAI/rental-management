@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import {
   AlertTriangle,
   Archive,
@@ -39,7 +40,7 @@ import { canManageServiceDayPlan, canViewServiceDayPlan, usePermissions } from '
 import { isMechanicRole, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { formatDate } from '../lib/utils';
-import { normalizePhotoReference, type NormalizedPhoto } from '../lib/media';
+import { normalizePhotoForDisplay, type NormalizedPhoto } from '../lib/media';
 import type { Client, Mechanic, ServiceTicket } from '../types';
 import { getServiceScenarioLabel, inferServiceKind } from '../lib/serviceScenarios';
 import { buildServiceQueue } from '../lib/serviceQueue';
@@ -69,6 +70,14 @@ const SERVICE_STATUS_ORDER: Record<ServiceTicket['status'], number> = {
 
 const SERVICE_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
 const SERVICE_STATUSES = ['new', 'in_progress', 'waiting_parts', 'needs_revision', 'ready', 'closed'] as const;
+const SERVICE_DONUT_COLORS = {
+  inProgress: '#2563EB',
+  waitingParts: '#7C3AED',
+  ready: '#059669',
+  unassigned: '#F59E0B',
+  overdue: '#DC2626',
+  other: '#94A3B8',
+} as const;
 
 const WORKFLOW_FILTER_OPTIONS = [
   { value: 'all', label: 'Все' },
@@ -276,7 +285,7 @@ function getServicePriorityPill(priority: ServiceTicket['priority']) {
   }[normalized];
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold ${meta.className}`} title={servicePriorityLabel(normalized)}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset ring-black/5 dark:ring-white/10 ${meta.className}`} title={servicePriorityLabel(normalized)}>
       <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
       {meta.label}
     </span>
@@ -295,7 +304,7 @@ function getCompactServiceStatusPill(status: ServiceTicket['status']) {
   }[normalized];
 
   return (
-    <span className={`inline-flex max-w-full truncate rounded-full px-2 py-1 text-xs font-semibold ${meta.className}`} title={serviceStatusLabel(normalized)}>
+    <span className={`inline-flex max-w-full truncate rounded-full px-2.5 py-1 text-xs font-medium ${meta.className}`} title={serviceStatusLabel(normalized)}>
       {meta.label}
     </span>
   );
@@ -405,8 +414,8 @@ function getMechanicInitials(name: string) {
 function getTicketPhoto(ticket: ServiceTicket): NormalizedPhoto | null {
   const [firstPhoto] = Array.isArray(ticket.photos) ? ticket.photos : [];
   if (!firstPhoto) return null;
-  const photo = normalizePhotoReference(firstPhoto, { idPrefix: `${ticket.id || 'service'}-thumbnail` });
-  return photo.fullUrl ? photo : null;
+  const photo = normalizePhotoForDisplay(firstPhoto, { idPrefix: `${ticket.id || 'service'}-thumbnail` });
+  return photo.fullUrl || photo.isBroken ? photo : null;
 }
 
 function ServiceMetricCard({
@@ -467,16 +476,14 @@ function ServiceMetricCard({
   }[tone];
 
   return (
-    <div data-service-kpi-card="true" className="flex min-h-[96px] flex-col justify-between rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-      <div className="flex items-start justify-between gap-2">
-        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${toneClasses.icon}`} aria-hidden="true">
+    <div data-service-kpi-card="true" className="flex min-h-[104px] rounded-lg border border-[#E5EAF3] bg-white p-3.5 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${toneClasses.icon}`} aria-hidden="true">
           {icon ?? <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.accent}`} />}
-        </div>
-        <div className="min-w-0 flex-1 text-right text-xs font-semibold leading-tight text-gray-500 dark:text-gray-500">{title}</div>
       </div>
-      <div>
-        <div className={`mt-2 text-2xl font-black leading-none ${toneClasses.value}`}>{safeValue}</div>
-        <div className="mt-1 text-xs text-gray-500 dark:text-gray-500">{caption}</div>
+      <div className="ml-3 min-w-0">
+        <div className={`text-[26px] font-bold leading-none ${toneClasses.value}`}>{safeValue}</div>
+        <div className="mt-1 truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{title}</div>
+        <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-500">{caption}</div>
       </div>
     </div>
   );
@@ -535,6 +542,78 @@ function ServiceTabLabel({ label, count }: { label: string; count?: number }) {
         </span>
       )}
     </span>
+  );
+}
+
+function ServiceStatDonut({
+  metrics,
+  queue,
+}: {
+  metrics: {
+    inProgress: number;
+    waitingParts: number;
+    ready: number;
+    unassigned: number;
+    overdue: number;
+    total: number;
+  };
+  queue: ReturnType<typeof buildServiceQueue>;
+}) {
+  const chartRows = React.useMemo(() => {
+    const overdue = queue.rows.filter(item => item.ageDays >= 7).length;
+    const waitingParts = queue.rows.filter(item => item.ageDays < 7 && item.waitingParts).length;
+    const ready = queue.rows.filter(item => item.ageDays < 7 && !item.waitingParts && item.ticketStatus === 'ready').length;
+    const unassigned = queue.rows.filter(item => item.ageDays < 7 && !item.waitingParts && item.ticketStatus !== 'ready' && item.unassigned).length;
+    const inProgress = queue.rows.filter(item => item.ageDays < 7 && !item.waitingParts && item.ticketStatus === 'in_progress' && !item.unassigned).length;
+    const used = overdue + waitingParts + ready + unassigned + inProgress;
+    const other = Math.max(metrics.total - used, 0);
+    return [
+      { key: 'inProgress', label: 'В работе', value: inProgress, color: SERVICE_DONUT_COLORS.inProgress },
+      { key: 'waitingParts', label: 'Ожидание запчастей', value: waitingParts, color: SERVICE_DONUT_COLORS.waitingParts },
+      { key: 'ready', label: 'Готовы к закрытию', value: ready, color: SERVICE_DONUT_COLORS.ready },
+      { key: 'unassigned', label: 'Без механика / Очередь', value: unassigned, color: SERVICE_DONUT_COLORS.unassigned },
+      { key: 'overdue', label: 'Просрочено', value: overdue, color: SERVICE_DONUT_COLORS.overdue },
+      { key: 'other', label: 'Прочие', value: other, color: SERVICE_DONUT_COLORS.other },
+    ].filter(row => row.value > 0);
+  }, [metrics.total, queue.rows]);
+  const chartTotal = chartRows.reduce((sum, row) => sum + row.value, 0);
+  const chartData = chartRows.length ? chartRows : [{ key: 'empty', label: 'Нет активных', value: 1, color: '#E5EAF3' }];
+
+  return (
+    <div className="mt-3">
+      <div className="relative mx-auto h-40 w-full max-w-[220px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={chartData} dataKey="value" nameKey="label" innerRadius="66%" outerRadius="88%" startAngle={90} endAngle={-270} paddingAngle={chartRows.length > 1 ? 3 : 0} stroke="none">
+              {chartData.map(row => (
+                <Cell key={row.key} fill={row.color} />
+              ))}
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <div className="text-3xl font-bold leading-none text-gray-900 dark:text-white">{metrics.total}</div>
+          <div className="mt-1 text-xs font-medium text-gray-500 dark:text-gray-400">актуальных</div>
+        </div>
+      </div>
+      <div className="mt-2 space-y-2">
+        {chartRows.length === 0 ? (
+          <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:bg-white/[0.04] dark:text-gray-400">Активных заявок нет.</div>
+        ) : (
+          chartRows.map(row => {
+            const percent = chartTotal > 0 ? Math.round((row.value / chartTotal) * 100) : 0;
+            return (
+              <div key={row.key} className="flex items-center gap-2 text-sm">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: row.color }} />
+                <span className="min-w-0 flex-1 truncate text-gray-600 dark:text-gray-300">{row.label}</span>
+                <span className="font-semibold text-gray-900 dark:text-white">{row.value}</span>
+                <span className="w-9 text-right text-xs text-gray-400">{percent}%</span>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -828,53 +907,43 @@ function ServiceManagementPanel({
     { label: 'Заказать запчасти', icon: <PackageSearch className="h-4 w-4" />, action: 'parts', show: true },
     { label: 'Выезд механика', icon: <Wrench className="h-4 w-4" />, action: 'field-trip', show: true },
   ];
-  const statRows = [
-    { label: 'В работе', value: metrics.inProgress, tone: 'text-blue-600 dark:text-blue-300' },
-    { label: 'Ожидание запчастей', value: metrics.waitingParts, tone: 'text-orange-600 dark:text-orange-300' },
-    { label: 'Готовы к закрытию', value: metrics.ready, tone: 'text-emerald-600 dark:text-emerald-300' },
-    { label: 'Очередь', value: queue.metrics.totalOpen || metrics.total, tone: 'text-gray-900 dark:text-white' },
-    { label: 'Просрочено', value: metrics.overdue, tone: 'text-red-600 dark:text-red-300' },
-  ];
   const problemGroups = [
     {
       title: 'Просроченные заявки',
       icon: <AlertTriangle className="h-4 w-4 text-red-500" />,
       rows: queue.rows.filter(item => item.ageDays >= 7).slice(0, 4),
       empty: 'Просрочек нет.',
+      accent: 'bg-red-500',
+      label: (ageDays: number) => `${ageDays} дн. просрочки`,
     },
     {
       title: 'Ожидание запчастей',
-      icon: <PackageSearch className="h-4 w-4 text-orange-500" />,
+      icon: <PackageSearch className="h-4 w-4 text-violet-500" />,
       rows: queue.rows.filter(item => item.waitingParts).slice(0, 4),
       empty: 'Нет заявок в ожидании.',
-    },
-    {
-      title: 'Без механика',
-      icon: <UserRound className="h-4 w-4 text-amber-500" />,
-      rows: queue.rows.filter(item => item.unassigned).slice(0, 4),
-      empty: 'Все заявки назначены.',
+      accent: 'bg-violet-500',
+      label: (ageDays: number) => `${ageDays} дн. ожидает`,
     },
   ];
 
   return (
     <aside className="space-y-3 xl:sticky xl:top-4 xl:self-start">
-      <section className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-        <h3 className="text-sm font-bold text-gray-800 dark:text-white">Быстрые действия</h3>
-        <div className="mt-2 grid gap-1.5">
+      <section className="rounded-lg border border-[#E5EAF3] bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.07)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Быстрые действия</h3>
+        <div className="mt-2 grid gap-1">
           {quickActions.filter(action => action.show).map(action => (
             action.to ? (
               <Link key={action.label} to={action.to}>
-                <Button type="button" variant="secondary" className="h-9 w-full justify-start text-sm">
-                  {action.icon}
+                <span className="flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-sm font-medium text-gray-700 transition hover:bg-blue-50 hover:text-[--color-primary] dark:text-gray-200 dark:hover:bg-blue-500/10">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-50 text-[--color-primary] dark:bg-blue-500/15">{action.icon}</span>
                   {action.label}
-                </Button>
+                </span>
               </Link>
             ) : (
-              <Button
+              <button
                 key={action.label}
                 type="button"
-                variant="outline"
-                className="h-9 w-full justify-start text-sm"
+                className="flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm font-medium text-gray-700 transition hover:bg-blue-50 hover:text-[--color-primary] dark:text-gray-200 dark:hover:bg-blue-500/10"
                 onClick={() => {
                   if (action.action === 'planner') onShowPlanner();
                   if (action.action === 'warranty') onShowWarranty();
@@ -887,31 +956,24 @@ function ServiceManagementPanel({
                   }
                 }}
               >
-                {action.icon}
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-50 text-[--color-primary] dark:bg-blue-500/15">{action.icon}</span>
                 {action.label}
-              </Button>
+              </button>
             )
           ))}
         </div>
       </section>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-        <h3 className="text-sm font-bold text-gray-800 dark:text-white">Статистика</h3>
-        <div className="mt-2 divide-y divide-gray-100 dark:divide-white/8">
-          {statRows.map(row => (
-            <div key={row.label} className="flex items-center justify-between gap-3 py-2">
-              <span className="text-sm text-gray-600 dark:text-gray-300">{row.label}</span>
-              <span className={`text-lg font-black ${row.tone}`}>{row.value}</span>
-            </div>
-          ))}
-        </div>
+      <section className="rounded-lg border border-[#E5EAF3] bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.07)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Статистика</h3>
+        <ServiceStatDonut metrics={metrics} queue={queue} />
       </section>
 
       {problemGroups.map(group => (
-        <section key={group.title} className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+        <section key={group.title} className="rounded-lg border border-[#E5EAF3] bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.07)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
           <div className="flex items-center gap-2">
             {group.icon}
-            <h3 className="text-sm font-black text-gray-900 dark:text-white">{group.title}</h3>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{group.title}</h3>
             <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500 dark:bg-white/8 dark:text-gray-300">{group.rows.length}</span>
           </div>
           {group.rows.length === 0 ? (
@@ -926,13 +988,26 @@ function ServiceManagementPanel({
                   className="w-full rounded-lg border border-gray-100 p-2.5 text-left transition hover:border-[--color-primary]/40 hover:bg-[--color-primary]/5 dark:border-white/8"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-xs font-bold text-[--color-primary]">{item.ticketId}</span>
-                    <span className="text-xs text-gray-500">{item.ageDays} дн.</span>
+                    <span className="inline-flex min-w-0 items-center gap-1.5 font-mono text-xs font-bold text-[--color-primary]">
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${group.accent}`} />
+                      {item.ticketId}
+                    </span>
+                    <span className="text-xs text-gray-500">{group.label(item.ageDays)}</span>
                   </div>
                   <div className="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{item.equipmentTitle}</div>
                   <div className="mt-0.5 truncate text-xs text-gray-500">{item.mechanic || item.groupLabel}</div>
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  const [first] = group.rows;
+                  if (first) onOpenTicket(first.ticketId);
+                }}
+                className="mt-1 text-xs font-semibold text-[--color-primary] hover:underline"
+              >
+                Смотреть все
+              </button>
             </div>
           )}
         </section>
@@ -1279,7 +1354,12 @@ export default function Service() {
     dateTo !== '',
   ].filter(Boolean).length;
 
-  const serviceTabTriggerClass = 'group flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-4 py-2 text-sm font-bold text-gray-500 shadow-none transition data-[state=active]:border-[--color-primary] data-[state=active]:bg-transparent data-[state=active]:text-[--color-primary] dark:text-gray-400 dark:data-[state=active]:bg-transparent';
+  const serviceTabTriggerBaseClass = 'group flex-none rounded-none border-0 border-b-2 bg-transparent px-4 py-2.5 text-sm font-semibold shadow-none transition hover:bg-blue-50/60 hover:text-gray-900 dark:hover:bg-blue-500/10 dark:hover:text-white';
+  const serviceTabTriggerClass = (tab: string) => `${serviceTabTriggerBaseClass} ${
+    activeTopTab === tab
+      ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-300'
+      : 'border-transparent text-gray-500 dark:text-gray-400'
+  }`;
   const requestTabCounts = {
     actual: activeTickets.length,
     in_progress: metrics.inProgress,
@@ -1289,7 +1369,7 @@ export default function Service() {
   };
 
   return (
-    <div className="space-y-3 p-4 sm:p-5 md:p-6">
+    <div className="space-y-3 bg-slate-50/70 p-4 sm:p-5 md:p-6 dark:bg-gray-950">
       <section className="border-b border-gray-200 pb-3 dark:border-white/10">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
@@ -1455,58 +1535,65 @@ export default function Service() {
       </FilterDialog>
 
       <Tabs value={activeTopTab} onValueChange={setActiveTopTab} className="space-y-3">
-        <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto border-b border-gray-200 bg-transparent p-0 dark:border-white/10">
-          <TabsTrigger value="tickets" className={serviceTabTriggerClass}>
+        <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-lg border border-[#E5EAF3] bg-white px-2 pt-1 shadow-[0_8px_24px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.03]">
+          <TabsTrigger value="tickets" className={serviceTabTriggerClass('tickets')}>
             <ServiceTabLabel label="Заявки" count={activeTickets.length} />
           </TabsTrigger>
           {canManageWarrantyClaims && (
-            <TabsTrigger value="warranty" className={serviceTabTriggerClass}>
+            <TabsTrigger value="warranty" className={serviceTabTriggerClass('warranty')}>
               <ServiceTabLabel label="Рекламации" />
             </TabsTrigger>
           )}
           {showDayPlan && (
-            <TabsTrigger value="day-plan" className={serviceTabTriggerClass}>
+            <TabsTrigger value="day-plan" className={serviceTabTriggerClass('day-plan')}>
               <ServiceTabLabel label="Планировщик" count={mechanicsQuery.data?.length ?? 0} />
             </TabsTrigger>
           )}
         </TabsList>
 
         <TabsContent value="tickets" className="space-y-3">
-          <div className="flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-white/10">
+          <div className="flex gap-1 overflow-x-auto rounded-lg border border-[#E5EAF3] bg-white px-2 pt-1 shadow-[0_8px_24px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.03]">
             {[
               { value: 'actual' as const, label: 'Актуальные' },
               { value: 'in_progress' as const, label: 'В работе' },
               { value: 'waiting_parts' as const, label: 'Ожидание запчастей' },
               { value: 'ready' as const, label: 'Готовы к закрытию' },
               { value: 'archive' as const, label: 'Архив' },
-            ].map(tab => (
-              <button
-                key={tab.value}
-                type="button"
-                onClick={() => handleRequestTabChange(tab.value)}
-                data-active={String(requestTab === tab.value)}
-                className="group flex-none border-b-2 border-transparent px-3 py-2 text-sm font-bold text-gray-500 transition hover:text-gray-900 data-[active=true]:border-[--color-primary] data-[active=true]:text-[--color-primary] dark:text-gray-400 dark:hover:text-white"
-              >
-                <RequestSubTabLabel label={tab.label} count={requestTabCounts[tab.value]} />
-              </button>
-            ))}
+            ].map(tab => {
+              const isActive = requestTab === tab.value;
+              return (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => handleRequestTabChange(tab.value)}
+                  data-active={String(isActive)}
+                  className={`group flex-none border-b-2 px-3 py-2 text-sm font-semibold transition hover:bg-blue-50/60 hover:text-gray-900 dark:hover:bg-blue-500/10 dark:hover:text-white ${
+                    isActive
+                      ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-300'
+                      : 'border-transparent text-gray-500 dark:text-gray-400'
+                  }`}
+                >
+                  <RequestSubTabLabel label={tab.label} count={requestTabCounts[tab.value]} />
+                </button>
+              );
+            })}
           </div>
 
           {requestTab !== 'archive' ? (
             <>
-          <section className="rounded-lg border border-gray-200 bg-white p-2.5 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.6fr)_repeat(5,minmax(112px,0.8fr))_auto]">
+          <section className="rounded-lg border border-[#E5EAF3] bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(280px,1.65fr)_repeat(5,minmax(116px,0.8fr))_auto]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder="№ заявки, техника, клиент, проблема..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="h-9 pl-10 text-sm"
+                  className="h-9 border-gray-200 bg-white pl-10 text-sm shadow-none dark:border-white/10"
                 />
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Статус" /></SelectTrigger>
+                <SelectTrigger className="h-9 border-gray-200 bg-white text-sm shadow-none dark:border-white/10"><SelectValue placeholder="Статус" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Все статусы</SelectItem>
                   <SelectItem value="new">Новая</SelectItem>
@@ -1517,7 +1604,7 @@ export default function Service() {
                 </SelectContent>
               </Select>
               <Select value={scenarioFilter} onValueChange={setScenarioFilter}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Тип работ" /></SelectTrigger>
+                <SelectTrigger className="h-9 border-gray-200 bg-white text-sm shadow-none dark:border-white/10"><SelectValue placeholder="Тип работ" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Все типы</SelectItem>
                   <SelectItem value="repair">Ремонт</SelectItem>
@@ -1527,7 +1614,7 @@ export default function Service() {
                 </SelectContent>
               </Select>
               <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Приоритет" /></SelectTrigger>
+                <SelectTrigger className="h-9 border-gray-200 bg-white text-sm shadow-none dark:border-white/10"><SelectValue placeholder="Приоритет" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Все приоритеты</SelectItem>
                   <SelectItem value="critical">Критический</SelectItem>
@@ -1537,7 +1624,7 @@ export default function Service() {
                 </SelectContent>
               </Select>
               <Select value={mechanicFilter} onValueChange={setMechanicFilter}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Механик" /></SelectTrigger>
+                <SelectTrigger className="h-9 border-gray-200 bg-white text-sm shadow-none dark:border-white/10"><SelectValue placeholder="Механик" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Все мастера</SelectItem>
                   {mechanicOptions.map(mechanic => (
@@ -1546,7 +1633,7 @@ export default function Service() {
                 </SelectContent>
               </Select>
               <Select value={datePreset} onValueChange={(value) => setDatePreset(value as typeof datePreset)}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Период" /></SelectTrigger>
+                <SelectTrigger className="h-9 border-gray-200 bg-white text-sm shadow-none dark:border-white/10"><SelectValue placeholder="Период" /></SelectTrigger>
                 <SelectContent>
                   {datePresetOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
@@ -1556,6 +1643,9 @@ export default function Service() {
               <Button type="button" variant="secondary" className="h-9 px-3 text-sm" onClick={() => setShowFilters(true)}>
                 <Filter className="h-4 w-4" />
                 Фильтры
+                {activeFilterCount > 0 && (
+                  <span className="ml-1 rounded-full bg-[--color-primary]/15 px-1.5 py-0.5 text-[11px] font-bold text-[--color-primary]">{activeFilterCount}</span>
+                )}
               </Button>
             </div>
           </section>
@@ -1598,7 +1688,7 @@ export default function Service() {
             </div>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_348px]">
             <div className="min-w-0 space-y-3">
               {viewMode === 'kanban' ? (
                 <div className="grid gap-3 lg:grid-cols-3">
@@ -1634,8 +1724,8 @@ export default function Service() {
                   })}
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-                  <div className="hidden gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-[11px] font-bold text-gray-500 dark:border-white/10 dark:bg-white/[0.04] xl:grid xl:grid-cols-[90px_minmax(150px,1fr)_minmax(130px,0.8fr)_88px_88px_82px_minmax(110px,0.7fr)_72px_72px_28px]">
+                <div className="overflow-hidden rounded-lg border border-[#E5EAF3] bg-white shadow-[0_12px_34px_rgba(15,23,42,0.07)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+                  <div className="hidden gap-2 border-b border-gray-100 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-gray-500 dark:border-white/10 dark:bg-white/[0.04] xl:grid xl:grid-cols-[92px_minmax(160px,1fr)_minmax(138px,0.8fr)_90px_92px_86px_minmax(116px,0.7fr)_74px_74px_28px]">
                     <div>№ заявки</div>
                     <div>Техника</div>
                     <div>Клиент / Объект</div>
@@ -1683,10 +1773,10 @@ export default function Service() {
                               openTicket();
                             }
                           }}
-                          className={`grid cursor-pointer gap-2 border-b border-gray-100 px-3 py-2.5 transition-colors last:border-b-0 hover:bg-[--color-primary]/5 dark:border-white/6 md:grid-cols-[minmax(160px,0.9fr)_minmax(220px,1.1fr)] lg:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_minmax(190px,0.9fr)_minmax(160px,0.8fr)] xl:grid-cols-[90px_minmax(150px,1fr)_minmax(130px,0.8fr)_88px_88px_82px_minmax(110px,0.7fr)_72px_72px_28px] lg:items-center ${
+                          className={`grid cursor-pointer gap-2 border-b border-gray-100 px-3 py-2.5 transition-colors last:border-b-0 hover:bg-blue-50/70 dark:border-white/6 dark:hover:bg-blue-500/10 md:grid-cols-[minmax(160px,0.9fr)_minmax(220px,1.1fr)] lg:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_minmax(190px,0.9fr)_minmax(160px,0.8fr)] xl:grid-cols-[92px_minmax(160px,1fr)_minmax(138px,0.8fr)_90px_92px_86px_minmax(116px,0.7fr)_74px_74px_28px] lg:items-center ${
                             isSelected
-                              ? 'bg-[--color-primary]/10'
-                              : index % 2 === 0 ? 'bg-gray-50/60 dark:bg-white/[0.015]' : 'bg-white dark:bg-transparent'
+                              ? 'bg-blue-50 ring-1 ring-inset ring-[--color-primary]/25 dark:bg-blue-500/10'
+                              : index % 2 === 0 ? 'bg-white dark:bg-transparent' : 'bg-slate-50/35 dark:bg-white/[0.015]'
                           }`}
                         >
                           <div className="min-w-0 text-left">

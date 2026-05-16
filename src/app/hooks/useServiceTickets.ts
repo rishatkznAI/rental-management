@@ -1,9 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { serviceTicketsService } from '../services/service-tickets.service';
+import type { PaginatedQueryParams } from '../lib/api';
 import type { ServiceTicket } from '../types';
 
 export const SERVICE_TICKET_KEYS = {
   all: ['serviceTickets'] as const,
+  paginated: (params: PaginatedQueryParams) => ['serviceTickets', 'paginated', params] as const,
   detail: (id: string) => ['serviceTickets', id] as const,
   byEquipment: (equipmentId: string) => ['serviceTickets', 'equipment', equipmentId] as const,
 };
@@ -14,6 +16,16 @@ export function useServiceTicketsList(options: { enabled?: boolean } = {}) {
     queryFn: serviceTicketsService.getAll,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 2,
+  });
+}
+
+export function usePaginatedServiceTickets(params: PaginatedQueryParams, options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: SERVICE_TICKET_KEYS.paginated(params),
+    queryFn: () => serviceTicketsService.getPaginated(params),
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60,
+    placeholderData: previous => previous,
   });
 }
 

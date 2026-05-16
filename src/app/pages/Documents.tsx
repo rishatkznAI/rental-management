@@ -48,9 +48,10 @@ import {
   useAssignDocumentNumber,
   useCreateDocument,
   useDeleteDocument,
+  useDocumentReferences,
   useDuplicateDocument,
   useDocumentRegistrySummary,
-  useDocumentsList,
+  usePaginatedDocuments,
   useGenerateDocument,
   useMarkDocumentSent,
   useMarkDocumentSigned,
@@ -86,6 +87,8 @@ import { serviceVehiclesService } from '../services/service-vehicles.service';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { normalizeUserRole } from '../lib/userStorage';
+import { useServerPagination } from '../hooks/useServerPagination';
+import { PaginationControls } from '../components/common/PaginationControls';
 import type {
   Client,
   Document as Doc,
@@ -712,7 +715,25 @@ export default function Documents() {
     isAdmin ||
     normalizedRole === 'Офис-менеджер' ||
     normalizedRole.includes('Механик');
-  const { data: documentList = [] } = useDocumentsList();
+  const documentPagination = useServerPagination<{
+    type: string;
+    status: string;
+    clientId: string;
+    rentalId: string;
+  }>({
+    initialSortBy: 'date',
+    initialSortDir: 'desc',
+    initialFilters: { type: 'all', status: 'all', clientId: 'all', rentalId: 'all' },
+    storageKey: 'documents',
+  });
+  const documentsQuery = usePaginatedDocuments({
+    page: documentPagination.page,
+    pageSize: documentPagination.pageSize,
+    search: documentPagination.debouncedSearch,
+    sortBy: documentPagination.sortBy,
+    sortDir: documentPagination.sortDir,
+    filters: documentPagination.filters,
+  });
   const { data: registrySummary } = useDocumentRegistrySummary();
   const { data: clients = [] } = useClientsList();
   const { data: rentals = [] } = useRentalsList();
@@ -750,14 +771,20 @@ export default function Documents() {
     queryFn: isAdmin ? appSettingsService.getAll : appSettingsService.getPublic,
   });
 
-  const [search, setSearch] = React.useState('');
+  const search = documentPagination.search;
+  const setSearch = documentPagination.setSearch;
   const [unsignedOnly, setUnsignedOnly] = React.useState(false);
   const [withoutNumberOnly, setWithoutNumberOnly] = React.useState(false);
   const [duplicatesOnly, setDuplicatesOnly] = React.useState(false);
-  const [clientFilter, setClientFilter] = React.useState<string>('all');
-  const [rentalFilter, setRentalFilter] = React.useState<string>('all');
-  const [typeFilter, setTypeFilter] = React.useState<string>('all');
-  const [statusFilter, setStatusFilter] = React.useState<string>('all');
+  const clientFilter = documentPagination.filters.clientId;
+  const rentalFilter = documentPagination.filters.rentalId;
+  const typeFilter = documentPagination.filters.type;
+  const statusFilter = documentPagination.filters.status;
+  const setDocumentFilters = documentPagination.setFilters;
+  const setClientFilter = React.useCallback((value: string) => setDocumentFilters({ clientId: value }), [setDocumentFilters]);
+  const setRentalFilter = React.useCallback((value: string) => setDocumentFilters({ rentalId: value }), [setDocumentFilters]);
+  const setTypeFilter = React.useCallback((value: string) => setDocumentFilters({ type: value }), [setDocumentFilters]);
+  const setStatusFilter = React.useCallback((value: string) => setDocumentFilters({ status: value }), [setDocumentFilters]);
   const [managerFilter, setManagerFilter] = React.useState<string>('all');
   const [quickTypeFilter, setQuickTypeFilter] = React.useState<DocumentQuickFilter>('all');
   const [controlRiskFilter, setControlRiskFilter] = React.useState<string>('all');
@@ -809,7 +836,32 @@ export default function Documents() {
   const signedScanInputRef = React.useRef<HTMLInputElement | null>(null);
   const appliedQuickActionRef = React.useRef('');
   const [signedScanTargetDoc, setSignedScanTargetDoc] = React.useState<Doc | null>(null);
-  const documents = Array.isArray(documentList) ? documentList : [];
+  const documents = documentsQuery.data?.items ?? [];
+  const referenceDocumentIds = React.useMemo(() => [
+    wizardForm.parentDocumentId,
+    wizardForm.specificationId,
+    selectedDocument?.parentDocumentId || '',
+    selectedDocument?.specificationId || '',
+  ].filter(Boolean).join(','), [
+    selectedDocument?.parentDocumentId,
+    selectedDocument?.specificationId,
+    wizardForm.parentDocumentId,
+    wizardForm.specificationId,
+  ]);
+  const documentReferencesQuery = useDocumentReferences({
+    page: 1,
+    pageSize: 100,
+    types: 'rental_contract,rental_specification',
+    ids: referenceDocumentIds || undefined,
+    filters: {
+      clientId: wizardForm.clientId || undefined,
+      rentalId: wizardForm.rentalId || undefined,
+      parentDocumentId: wizardForm.parentDocumentId || undefined,
+    },
+  }, { enabled: documentWizardOpen });
+  const referenceDocuments = documentWizardOpen
+    ? (documentReferencesQuery.data?.items ?? [])
+    : documents;
   const mechanicList = Array.isArray(mechanics) ? mechanics : [];
   const salesSettings = React.useMemo(() => {
     const record = appSettings.find(item => item.key === SALES_SETTINGS_KEY);
@@ -909,7 +961,7 @@ export default function Documents() {
   }, [equipment, rentalEquipmentIds, selectedRental]);
   const managerOptions = React.useMemo(() => {
     const names = new Set<string>();
-    documents.forEach(doc => {
+    referenceDocuments.forEach(doc => {
       if (displayText(doc.manager, '')) names.add(displayText(doc.manager, ''));
       const rentalId = getDocumentRentalId(doc);
       const rental = rentalId ? rentalsById.get(rentalId) : undefined;
@@ -919,11 +971,11 @@ export default function Documents() {
       if (displayText(rental.manager, '')) names.add(displayText(rental.manager, ''));
     });
     return Array.from(names).sort((a, b) => a.localeCompare(b, 'ru'));
-  }, [documents, rentals, rentalsById]);
+  }, [referenceDocuments, rentals, rentalsById]);
 
   const duplicateDocumentIds = React.useMemo(() => {
     const counts = new Map<string, number>();
-    documents.forEach(doc => {
+    referenceDocuments.forEach(doc => {
       const number = getDocumentNumber(doc).toLowerCase();
       if (!number) return;
       const year = getDocumentDate(doc).slice(0, 4);
@@ -931,10 +983,10 @@ export default function Documents() {
       counts.set(key, (counts.get(key) || 0) + 1);
     });
     const duplicates = new Set([...counts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
-    return new Set(documents
+    return new Set(referenceDocuments
       .filter(doc => duplicates.has(`${doc.type}:${getDocumentDate(doc).slice(0, 4)}:${getDocumentNumber(doc).toLowerCase()}`))
       .map(doc => doc.id));
-  }, [documents]);
+  }, [referenceDocuments]);
 
   React.useEffect(() => {
     const hasContext = hasClientContext(quickActionContext)
@@ -1148,13 +1200,13 @@ export default function Documents() {
   );
 
   const generatedContractNumber = React.useMemo(
-    () => nextContractNumber(documents, createContractKind, contractForm.date),
-    [createContractKind, contractForm.date, documents],
+    () => nextContractNumber(referenceDocuments, createContractKind, contractForm.date),
+    [createContractKind, contractForm.date, referenceDocuments],
   );
   const wizardTypeMeta = getDocumentRegistryItem(wizardForm.type) || DOCUMENT_WORKSPACE_TYPES[0];
   const wizardRental = wizardForm.rentalId ? rentalsById.get(wizardForm.rentalId) : undefined;
-  const wizardParentDocument = wizardForm.parentDocumentId ? documents.find(doc => doc.id === wizardForm.parentDocumentId) : undefined;
-  const wizardSpecification = wizardForm.specificationId ? documents.find(doc => doc.id === wizardForm.specificationId) : undefined;
+  const wizardParentDocument = wizardForm.parentDocumentId ? referenceDocuments.find(doc => doc.id === wizardForm.parentDocumentId) : undefined;
+  const wizardSpecification = wizardForm.specificationId ? referenceDocuments.find(doc => doc.id === wizardForm.specificationId) : undefined;
   const wizardResolvedClientId = wizardForm.clientId || wizardParentDocument?.clientId || wizardSpecification?.clientId || wizardRental?.clientId || '';
   const wizardClient = wizardResolvedClientId ? clientsById.get(wizardResolvedClientId) : undefined;
   const wizardEquipment = wizardForm.equipmentId ? equipmentById.get(wizardForm.equipmentId) : undefined;
@@ -1333,7 +1385,7 @@ export default function Documents() {
   }
 
   function applyParentDocumentToWizard(value: string) {
-    const parent = value === 'none' ? undefined : documents.find(doc => doc.id === value);
+    const parent = value === 'none' ? undefined : referenceDocuments.find(doc => doc.id === value);
     setWizardForm(current => ({
       ...current,
       parentDocumentId: value === 'none' ? '' : value,
@@ -1342,7 +1394,7 @@ export default function Documents() {
   }
 
   function applySpecificationToWizard(value: string) {
-    const specification = value === 'none' ? undefined : documents.find(doc => doc.id === value);
+    const specification = value === 'none' ? undefined : referenceDocuments.find(doc => doc.id === value);
     setWizardForm(current => ({
       ...current,
       specificationId: value === 'none' ? '' : value,
@@ -2271,11 +2323,12 @@ export default function Documents() {
             )}
           </div>
 
-          {filteredDocuments.length > 0 && (
-            <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-              <p>Показано {filteredDocuments.length} из {documents.length} документов</p>
-            </div>
-          )}
+          <PaginationControls
+            pagination={documentsQuery.data?.pagination}
+            loading={documentsQuery.isFetching}
+            onPageChange={documentPagination.setPage}
+            onPageSizeChange={documentPagination.setPageSize}
+          />
 
           <Dialog open={documentWizardOpen} onOpenChange={setDocumentWizardOpen}>
             <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-4xl">
@@ -2485,7 +2538,7 @@ export default function Documents() {
                           <SelectTrigger><SelectValue placeholder="Выберите договор" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">Не выбран</SelectItem>
-                            {documents.filter(doc => doc.type === 'rental_contract').map(doc => <SelectItem key={doc.id} value={doc.id}>{getDocumentNumber(doc)} · {doc.client || doc.clientId}</SelectItem>)}
+                            {referenceDocuments.filter(doc => doc.type === 'rental_contract').map(doc => <SelectItem key={doc.id} value={doc.id}>{getDocumentNumber(doc)} · {doc.client || doc.clientId}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -2498,7 +2551,7 @@ export default function Documents() {
                             <SelectTrigger><SelectValue placeholder="Выберите договор" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">Не выбран</SelectItem>
-                              {documents.filter(doc => doc.type === 'rental_contract').map(doc => <SelectItem key={doc.id} value={doc.id}>{getDocumentNumber(doc)} · {doc.client || doc.clientId}</SelectItem>)}
+                              {referenceDocuments.filter(doc => doc.type === 'rental_contract').map(doc => <SelectItem key={doc.id} value={doc.id}>{getDocumentNumber(doc)} · {doc.client || doc.clientId}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -2508,7 +2561,7 @@ export default function Documents() {
                             <SelectTrigger><SelectValue placeholder="Выберите спецификацию" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">Не выбрана</SelectItem>
-                              {documents.filter(doc => doc.type === 'rental_specification' && (!wizardForm.parentDocumentId || doc.parentDocumentId === wizardForm.parentDocumentId)).map(doc => <SelectItem key={doc.id} value={doc.id}>{getDocumentNumber(doc)} · {doc.client || doc.clientId}</SelectItem>)}
+                              {referenceDocuments.filter(doc => doc.type === 'rental_specification' && (!wizardForm.parentDocumentId || doc.parentDocumentId === wizardForm.parentDocumentId)).map(doc => <SelectItem key={doc.id} value={doc.id}>{getDocumentNumber(doc)} · {doc.client || doc.clientId}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>

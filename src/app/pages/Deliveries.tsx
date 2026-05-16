@@ -23,6 +23,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '../components/ui/sheet';
 import { deliveriesService } from '../services/deliveries.service';
+import { usePaginatedDeliveries } from '../hooks/useDeliveries';
 import { rentalsService } from '../services/rentals.service';
 import { equipmentService } from '../services/equipment.service';
 import { clientsService } from '../services/clients.service';
@@ -39,6 +40,8 @@ import type { GanttRentalData } from '../mock-data';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { normalizeUserRole } from '../lib/userStorage';
+import { useServerPagination } from '../hooks/useServerPagination';
+import { PaginationControls } from '../components/common/PaginationControls';
 import { chooseBestGanttRentalEntry, getGanttRentalSourceId } from '../lib/rentalPlannerRows.js';
 import {
   ACTIVE_DELIVERY_STATUSES,
@@ -504,19 +507,58 @@ export default function Deliveries() {
   const normalizedRole = normalizeUserRole(user?.role);
   const isCarrierView = normalizedRole === 'Перевозчик';
   const canManageDeliveries = canCreate || canEdit || canDelete;
-  const deliveryListQueryKey = useMemo(
-    () => [...DELIVERY_KEYS.all, normalizedRole, user?.id || 'anonymous'] as const,
-    [normalizedRole, user?.id],
-  );
-
-  const { data: deliveriesResponse = [], isLoading, isError, error, refetch } = useQuery({
-    queryKey: deliveryListQueryKey,
-    queryFn: deliveriesService.getAll,
+  const [search, setSearch] = useState('');
+  const [periodFilter, setPeriodFilter] = useState<DeliveryPeriodFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<DeliveryStatusFilter>('');
+  const [typeFilter, setTypeFilter] = useState<DeliveryType | ''>('');
+  const [carrierFilter, setCarrierFilter] = useState('');
+  const [activeTab, setActiveTab] = useState<DeliveryWorkspaceTab>('all');
+  const todayKey = todayIso();
+  const deliveryDateRange = useMemo(() => {
+    if (periodFilter === 'today') return { dateFrom: todayKey, dateTo: todayKey };
+    if (periodFilter === 'tomorrow') {
+      const next = new Date();
+      next.setDate(next.getDate() + 1);
+      const key = next.toISOString().slice(0, 10);
+      return { dateFrom: key, dateTo: key };
+    }
+    if (periodFilter === 'week') {
+      const end = new Date();
+      end.setDate(end.getDate() + 7);
+      return { dateFrom: todayKey, dateTo: end.toISOString().slice(0, 10) };
+    }
+    return {};
+  }, [periodFilter, todayKey]);
+  const serverStatusFilter = statusFilter || (activeTab === 'all' ? '' : activeTab);
+  const deliveryPagination = useServerPagination<{
+    status: string;
+    type: string;
+    carrier: string;
+  }>({
+    initialSortBy: 'transportDate',
+    initialSortDir: 'desc',
+    initialFilters: { status: '', type: '', carrier: '' },
+    storageKey: 'deliveries',
   });
-  const deliveries = useMemo(
-    () => normalizeDeliveriesResponse(deliveriesResponse) as Delivery[],
-    [deliveriesResponse],
-  );
+  const deliveriesQuery = usePaginatedDeliveries({
+    page: deliveryPagination.page,
+    pageSize: deliveryPagination.pageSize,
+    search: deliveryPagination.debouncedSearch,
+    sortBy: deliveryPagination.sortBy,
+    sortDir: deliveryPagination.sortDir,
+    dateFrom: deliveryDateRange.dateFrom,
+    dateTo: deliveryDateRange.dateTo,
+    filters: {
+      status: serverStatusFilter,
+      type: typeFilter,
+      carrier: carrierFilter,
+    },
+  }, { scope: `${normalizedRole}:${user?.id || 'anonymous'}` });
+  const deliveries = deliveriesQuery.data?.items ?? [];
+  const isLoading = deliveriesQuery.isLoading;
+  const isError = deliveriesQuery.isError;
+  const error = deliveriesQuery.error;
+  const refetch = deliveriesQuery.refetch;
   const { data: carriers = [] } = useQuery({
     queryKey: DELIVERY_KEYS.carriers,
     queryFn: deliveriesService.getCarriers,
@@ -543,12 +585,6 @@ export default function Deliveries() {
     enabled: canManageDeliveries,
   });
 
-  const [search, setSearch] = useState('');
-  const [periodFilter, setPeriodFilter] = useState<DeliveryPeriodFilter>('all');
-  const [statusFilter, setStatusFilter] = useState<DeliveryStatusFilter>('');
-  const [typeFilter, setTypeFilter] = useState<DeliveryType | ''>('');
-  const [carrierFilter, setCarrierFilter] = useState('');
-  const [activeTab, setActiveTab] = useState<DeliveryWorkspaceTab>('all');
   const [viewMode, setViewMode] = useState<DeliveryViewMode>('list');
   const [actionsOpen, setActionsOpen] = useState(false);
   const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null);
@@ -559,6 +595,14 @@ export default function Deliveries() {
   const [editingDelivery, setEditingDelivery] = useState<Delivery | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [form, setForm] = useState<DeliveryFormState>(makeEmptyForm(user?.name || ''));
+
+  useEffect(() => {
+    deliveryPagination.setSearch(search);
+  }, [deliveryPagination.setSearch, search]);
+
+  useEffect(() => {
+    deliveryPagination.setPage(1);
+  }, [activeTab, carrierFilter, periodFilter, statusFilter, typeFilter, deliveryPagination.setPage]);
 
   const rentalOptions = useMemo<RentalOption[]>(() => {
     const equipmentById = new Map(equipment.map((item) => [item.id, item]));
@@ -616,9 +660,9 @@ export default function Deliveries() {
   }, [classicRentals, clients, equipment, ganttRentals]);
 
   const carrierOptions = useMemo(() => {
-    return [...new Set(deliveries.map((item) => item.carrierName || item.carrierKey || item.carrierId).filter(Boolean))]
+    return [...new Set(carriers.map((item) => item.name || item.key || item.id).filter(Boolean))]
       .sort((a, b) => a.localeCompare(b, 'ru'));
-  }, [deliveries]);
+  }, [carriers]);
 
   const clientsById = useMemo(() => new Map((clients as Client[]).map((item) => [item.id, item])), [clients]);
   const clientsByName = useMemo(() => {
@@ -630,33 +674,21 @@ export default function Deliveries() {
     return map;
   }, [clients]);
 
-  const todayKey = todayIso();
-
-  const filtered = useMemo(
-    () => filterDeliveriesForView(deliveries, {
-      activeTab,
-      carrierFilter,
-      periodFilter,
-      search,
-      statusFilter,
-      typeFilter,
-    }, todayKey) as Delivery[],
-    [activeTab, carrierFilter, deliveries, periodFilter, search, statusFilter, todayKey, typeFilter],
-  );
+  const filtered = deliveries;
 
   const kpis = useMemo(() => ({
-    total: deliveries.length,
-    active: deliveries.filter((item) => ACTIVE_DELIVERY_STATUSES.includes(item.status)).length,
+    total: deliveriesQuery.data?.pagination.total ?? deliveries.length,
+    active: Number(deliveriesQuery.data?.summary?.active ?? deliveries.filter((item) => ACTIVE_DELIVERY_STATUSES.includes(item.status)).length),
     needInvoice: deliveries.filter((item) => item.status === 'completed' && !item.carrierInvoiceReceived).length,
     unpaidByClient: deliveries.filter((item) => item.status === 'completed' && !item.clientPaymentVerified).length,
     sentToCarrier: deliveries.filter((item) => Boolean(item.botSentAt)).length,
     today: deliveries.filter((item) => isDeliveryToday(item, todayKey)).length,
-    inTransit: deliveries.filter((item) => item.status === 'in_transit').length,
-    completedPeriod: deliveries.filter((item) => item.status === 'completed' && isDeliveryInPeriod(item, periodFilter, todayKey)).length,
-    overdue: deliveries.filter((item) => isDeliveryOverdue(item, todayKey)).length,
-    unassigned: deliveries.filter((item) => isUnassignedDelivery(item) && !CLOSED_DELIVERY_STATUSES.includes(item.status)).length,
-    risks: deliveries.filter((item) => isDeliveryOverdue(item, todayKey) || (isUnassignedDelivery(item) && !CLOSED_DELIVERY_STATUSES.includes(item.status))).length,
-  }), [deliveries, periodFilter, todayKey]);
+    inTransit: Number(deliveriesQuery.data?.summary?.inTransit ?? deliveries.filter((item) => item.status === 'in_transit').length),
+    completedPeriod: Number(deliveriesQuery.data?.summary?.completed ?? deliveries.filter((item) => item.status === 'completed' && isDeliveryInPeriod(item, periodFilter, todayKey)).length),
+    overdue: Number(deliveriesQuery.data?.summary?.overdue ?? deliveries.filter((item) => isDeliveryOverdue(item, todayKey)).length),
+    unassigned: Number(deliveriesQuery.data?.summary?.unassigned ?? deliveries.filter((item) => isUnassignedDelivery(item) && !CLOSED_DELIVERY_STATUSES.includes(item.status)).length),
+    risks: Number(deliveriesQuery.data?.summary?.overdue ?? 0) + Number(deliveriesQuery.data?.summary?.unassigned ?? 0),
+  }), [deliveries, deliveriesQuery.data?.pagination.total, deliveriesQuery.data?.summary, periodFilter, todayKey]);
   const kpiCards = isCarrierView
     ? [
         { label: 'Мои активные доставки', value: kpis.total, icon: Truck, tone: 'text-slate-900 dark:text-white', hint: 'Только назначенные вам активные заявки', card: 'border-slate-200 bg-white dark:border-gray-800 dark:bg-gray-900' },
@@ -674,20 +706,20 @@ export default function Deliveries() {
     [deliveries, selectedDeliveryId],
   );
   const emptyState = useMemo(
-    () => getDeliveryEmptyState({ totalCount: deliveries.length, isCarrierView }),
-    [deliveries.length, isCarrierView],
+    () => getDeliveryEmptyState({ totalCount: deliveriesQuery.data?.pagination.total ?? deliveries.length, isCarrierView }),
+    [deliveries.length, deliveriesQuery.data?.pagination.total, isCarrierView],
   );
   const errorMessage = getDeliveryErrorMessage(error);
 
   const tabItems = useMemo(() => [
-    { id: 'all' as const, label: 'Все доставки', count: deliveries.length },
-    { id: 'active' as const, label: 'Активные', count: deliveries.filter((item) => ACTIVE_DELIVERY_STATUSES.includes(item.status)).length },
-    { id: 'in_transit' as const, label: 'В пути', count: deliveries.filter((item) => item.status === 'in_transit').length },
+    { id: 'all' as const, label: 'Все доставки', count: kpis.total },
+    { id: 'active' as const, label: 'Активные', count: kpis.active },
+    { id: 'in_transit' as const, label: 'В пути', count: kpis.inTransit },
     { id: 'planned' as const, label: 'Запланированы', count: deliveries.filter((item) => ['new', 'sent', 'accepted'].includes(item.status)).length },
-    { id: 'completed' as const, label: 'Завершённые', count: deliveries.filter((item) => CLOSED_DELIVERY_STATUSES.includes(item.status)).length },
-    { id: 'overdue' as const, label: 'Просрочены', count: deliveries.filter((item) => isDeliveryOverdue(item, todayKey)).length },
+    { id: 'completed' as const, label: 'Завершённые', count: kpis.completedPeriod },
+    { id: 'overdue' as const, label: 'Просрочены', count: kpis.overdue },
     { id: 'cancelled' as const, label: 'Отменены', count: deliveries.filter((item) => item.status === 'cancelled').length },
-  ], [deliveries, todayKey]);
+  ], [deliveries, kpis]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -1578,6 +1610,12 @@ export default function Deliveries() {
             </table>
           </div>
         )}
+        <PaginationControls
+          pagination={deliveriesQuery.data?.pagination}
+          loading={deliveriesQuery.isFetching}
+          onPageChange={deliveryPagination.setPage}
+          onPageSizeChange={deliveryPagination.setPageSize}
+        />
       </section>
 
       {selectedDelivery && (

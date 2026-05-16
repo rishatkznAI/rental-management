@@ -1,9 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { documentsService } from '../services/documents.service';
+import type { PaginatedQueryParams } from '../lib/api';
 import type { Document } from '../types';
 
 export const DOCUMENT_KEYS = {
   all: ['documents'] as const,
+  paginated: (params: PaginatedQueryParams) => ['documents', 'paginated', params] as const,
+  references: (params: PaginatedQueryParams) => ['documents', 'references', params] as const,
   summary: ['documents', 'summary'] as const,
   detail: (id: string) => ['documents', id] as const,
   byRental: (rentalId: string) => ['documents', 'rental', rentalId] as const,
@@ -13,12 +16,37 @@ type QueryOptions = {
   enabled?: boolean;
 };
 
+type DocumentReferenceQueryParams = PaginatedQueryParams & {
+  types?: string;
+  ids?: string;
+};
+
 export function useDocumentsList(options: QueryOptions = {}) {
   return useQuery({
     queryKey: DOCUMENT_KEYS.all,
     queryFn: documentsService.getAll,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 5,
+  });
+}
+
+export function usePaginatedDocuments(params: PaginatedQueryParams, options: QueryOptions = {}) {
+  return useQuery({
+    queryKey: DOCUMENT_KEYS.paginated(params),
+    queryFn: () => documentsService.getPaginated(params),
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60,
+    placeholderData: previous => previous,
+  });
+}
+
+export function useDocumentReferences(params: DocumentReferenceQueryParams, options: QueryOptions = {}) {
+  return useQuery({
+    queryKey: DOCUMENT_KEYS.references(params),
+    queryFn: () => documentsService.getReferences(params),
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60,
+    placeholderData: previous => previous,
   });
 }
 

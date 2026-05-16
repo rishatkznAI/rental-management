@@ -38,7 +38,7 @@ import ServiceDetail from './ServiceDetail';
 import { useAuth } from '../contexts/AuthContext';
 import { canManageServiceDayPlan, canViewServiceDayPlan, usePermissions } from '../lib/permissions';
 import { isMechanicRole, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
-import { useServiceTicketsList } from '../hooks/useServiceTickets';
+import { usePaginatedServiceTickets } from '../hooks/useServiceTickets';
 import { formatDate } from '../lib/utils';
 import { normalizePhotoForDisplay, type NormalizedPhoto } from '../lib/media';
 import type { Client, Mechanic, ServiceTicket } from '../types';
@@ -49,6 +49,8 @@ import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { clientsService } from '../services/clients.service';
 import { mechanicsService } from '../services/mechanics.service';
+import { useServerPagination } from '../hooks/useServerPagination';
+import { PaginationControls } from '../components/common/PaginationControls';
 
 const RESULT_BATCH_SIZE = 80;
 
@@ -1067,19 +1069,26 @@ function ServiceTicketCardModal({
 export default function Service() {
   const { user } = useAuth();
   const { can } = usePermissions();
-  const ticketsQuery = useServiceTicketsList();
-  const ticketList = React.useMemo(
-    () => (ticketsQuery.data ?? []).filter(isRegularServiceTicket),
-    [ticketsQuery.data],
-  );
-  const normalizedRole = normalizeUserRole(user?.role);
-  const canManageWarrantyClaims = ['Администратор', 'Офис-менеджер'].includes(normalizedRole) || isWarrantyMechanicRole(normalizedRole);
-  const canViewEquipment = can('view', 'equipment');
-  const canViewRentals = can('view', 'rentals');
-  const canViewClients = can('view', 'clients');
-  const canViewFinance = can('view', 'finance');
-  const showDayPlan = canViewServiceDayPlan(normalizedRole);
-  const canManageDayPlan = canManageServiceDayPlan(normalizedRole);
+  const servicePagination = useServerPagination<{
+    priority: string;
+    status: string;
+    scenario: string;
+    mechanic: string;
+    workflow: string;
+    preset: string;
+  }>({
+    initialSortBy: 'createdAt',
+    initialSortDir: 'desc',
+    initialFilters: {
+      priority: 'all',
+      status: 'all',
+      scenario: 'all',
+      mechanic: 'all',
+      workflow: 'all',
+      preset: 'all',
+    },
+    storageKey: 'service',
+  });
   const [search, setSearch] = React.useState('');
   const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
@@ -1090,8 +1099,66 @@ export default function Service() {
   const [datePreset, setDatePreset] = React.useState<'all' | 'today' | 'last7' | 'month'>('all');
   const [dateFrom, setDateFrom] = React.useState('');
   const [dateTo, setDateTo] = React.useState('');
+  const todayIso = React.useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const monthStartIso = React.useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  }, []);
+  const last7StartIso = React.useMemo(() => {
+    const now = new Date();
+    const start = new Date(now);
+    start.setDate(start.getDate() - 6);
+    return start.toISOString().slice(0, 10);
+  }, []);
+  const effectiveDateFrom = dateFrom || (
+    datePreset === 'today'
+      ? todayIso
+      : datePreset === 'last7'
+        ? last7StartIso
+        : datePreset === 'month'
+          ? monthStartIso
+          : ''
+  );
+  const effectiveDateTo = dateTo || (datePreset === 'all' ? '' : todayIso);
+  React.useEffect(() => {
+    servicePagination.setSearch(search);
+  }, [search, servicePagination.setSearch]);
+  React.useEffect(() => {
+    servicePagination.setFilters({
+      priority: priorityFilter,
+      status: statusFilter,
+      scenario: scenarioFilter,
+      mechanic: mechanicFilter,
+      workflow: workflowFilter,
+      preset,
+    });
+  }, [mechanicFilter, preset, priorityFilter, scenarioFilter, servicePagination.setFilters, statusFilter, workflowFilter]);
+  React.useEffect(() => {
+    servicePagination.setPage(1);
+  }, [datePreset, dateFrom, dateTo, servicePagination.setPage]);
+  const ticketsQuery = usePaginatedServiceTickets({
+    page: servicePagination.page,
+    pageSize: servicePagination.pageSize,
+    search: servicePagination.debouncedSearch,
+    sortBy: servicePagination.sortBy,
+    sortDir: servicePagination.sortDir,
+    dateFrom: effectiveDateFrom,
+    dateTo: effectiveDateTo,
+    filters: servicePagination.filters,
+  });
+  const ticketList = React.useMemo(
+    () => (ticketsQuery.data?.items ?? []).filter(isRegularServiceTicket),
+    [ticketsQuery.data],
+  );
+  const normalizedRole = normalizeUserRole(user?.role);
+  const canManageWarrantyClaims = ['Администратор', 'Офис-менеджер'].includes(normalizedRole) || isWarrantyMechanicRole(normalizedRole);
+  const canViewEquipment = can('view', 'equipment');
+  const canViewRentals = can('view', 'rentals');
+  const canViewClients = can('view', 'clients');
+  const canViewFinance = can('view', 'finance');
+  const showDayPlan = canViewServiceDayPlan(normalizedRole);
+  const canManageDayPlan = canManageServiceDayPlan(normalizedRole);
   const [showFilters, setShowFilters] = React.useState(false);
-  const [visibleCount, setVisibleCount] = React.useState(RESULT_BATCH_SIZE);
   const [archiveSearch, setArchiveSearch] = React.useState('');
   const [archiveStatusFilter, setArchiveStatusFilter] = React.useState<'closed'>('closed');
   const [archiveVisibleCount, setArchiveVisibleCount] = React.useState(RESULT_BATCH_SIZE);
@@ -1135,17 +1202,6 @@ export default function Service() {
     staleTime: 1000 * 60 * 2,
   });
 
-  const todayIso = React.useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const monthStartIso = React.useMemo(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-  }, []);
-  const last7StartIso = React.useMemo(() => {
-    const now = new Date();
-    const start = new Date(now);
-    start.setDate(start.getDate() - 6);
-    return start.toISOString().slice(0, 10);
-  }, []);
 
   const clientLookup = React.useMemo(() => {
     const lookup = new Map<string, Client>();
@@ -1184,14 +1240,23 @@ export default function Service() {
     }, { all: 0, repair: 0, diagnostics: 0, receiving: 0 })
   ), [activeTickets]);
 
+  const serviceSummary = ticketsQuery.data?.summary as {
+    active?: number;
+    inProgress?: number;
+    waitingParts?: number;
+    ready?: number;
+    unassigned?: number;
+    overdue?: number;
+    archived?: number;
+  } | undefined;
   const metrics = React.useMemo(() => ({
-    total: activeTickets.length,
-    inProgress: activeTickets.filter(ticket => normalizeServiceStatus(ticket.status) === 'in_progress').length,
-    waitingParts: activeTickets.filter(ticket => normalizeServiceStatus(ticket.status) === 'waiting_parts').length,
-    ready: activeTickets.filter(ticket => normalizeServiceStatus(ticket.status) === 'ready').length,
-    unassigned: activeTickets.filter(ticket => !ticket.assignedMechanicId && !ticket.assignedTo && !ticket.assignedMechanicName).length,
-    overdue: activeTickets.filter(isTicketOverdue).length,
-  }), [activeTickets]);
+    total: serviceSummary?.active ?? ticketsQuery.data?.pagination.total ?? activeTickets.length,
+    inProgress: serviceSummary?.inProgress ?? activeTickets.filter(ticket => normalizeServiceStatus(ticket.status) === 'in_progress').length,
+    waitingParts: serviceSummary?.waitingParts ?? activeTickets.filter(ticket => normalizeServiceStatus(ticket.status) === 'waiting_parts').length,
+    ready: serviceSummary?.ready ?? activeTickets.filter(ticket => normalizeServiceStatus(ticket.status) === 'ready').length,
+    unassigned: serviceSummary?.unassigned ?? activeTickets.filter(ticket => !ticket.assignedMechanicId && !ticket.assignedTo && !ticket.assignedMechanicName).length,
+    overdue: serviceSummary?.overdue ?? activeTickets.filter(isTicketOverdue).length,
+  }), [activeTickets, serviceSummary, ticketsQuery.data?.pagination.total]);
 
   const archiveMetrics = React.useMemo(() => {
     const closedThisMonth = archivedTickets.filter(ticket => {
@@ -1219,65 +1284,7 @@ export default function Service() {
     canViewFinance,
   }), [canViewClients, canViewEquipment, canViewFinance, canViewRentals, clients, equipmentList, ganttRentals, ticketList]);
 
-  const filteredTickets = React.useMemo(() => {
-    const query = normalizeSearch(search);
-    const effectiveDateFrom = dateFrom || (
-      datePreset === 'today'
-        ? todayIso
-        : datePreset === 'last7'
-          ? last7StartIso
-          : datePreset === 'month'
-            ? monthStartIso
-            : ''
-    );
-    const effectiveDateTo = dateTo || (datePreset === 'all' ? '' : todayIso);
-
-    return activeTickets
-      .filter(ticket => {
-        const matchesSearch = query === '' || getTicketSearchText(ticket).includes(query);
-        const ticketPriority = normalizeServicePriority(ticket.priority);
-        const ticketStatus = normalizeServiceStatus(ticket.status);
-        const matchesPriority = priorityFilter === 'all' || ticketPriority === priorityFilter;
-        const matchesStatus = statusFilter === 'all' || ticketStatus === statusFilter;
-        const matchesScenario = scenarioFilter === 'all' || inferServiceKind(ticket) === scenarioFilter;
-        const assignedMechanic = ticket.assignedMechanicName || ticket.assignedTo || '';
-        const matchesMechanic = mechanicFilter === 'all' || assignedMechanic === mechanicFilter;
-        const matchesWorkflow = workflowFilter === 'all' || getTicketWorkflowKind(ticket) === workflowFilter;
-        const createdDate = typeof ticket.createdAt === 'string' ? ticket.createdAt.slice(0, 10) : '';
-        const matchesDate =
-          (!effectiveDateFrom || (createdDate && createdDate >= effectiveDateFrom))
-          && (!effectiveDateTo || (createdDate && createdDate <= effectiveDateTo));
-        const matchesPreset =
-          preset === 'all'
-          || (preset === 'unassigned' && !ticket.assignedMechanicId && !ticket.assignedTo)
-          || (preset === 'urgent' && ['high', 'critical'].includes(ticketPriority))
-          || (preset === 'waiting_parts' && ticketStatus === 'waiting_parts')
-          || (preset === 'needs_revision' && ticketStatus === 'needs_revision')
-          || (preset === 'maintenance' && ['to', 'chto', 'pto'].includes(inferServiceKind(ticket)));
-
-        return matchesSearch && matchesPriority && matchesStatus && matchesScenario && matchesMechanic && matchesWorkflow && matchesDate && matchesPreset;
-      })
-      .sort((left, right) => (
-        (SERVICE_STATUS_ORDER[normalizeServiceStatus(left.status)] ?? 99) - (SERVICE_STATUS_ORDER[normalizeServiceStatus(right.status)] ?? 99)
-        || (SERVICE_PRIORITY_ORDER[normalizeServicePriority(left.priority)] ?? 99) - (SERVICE_PRIORITY_ORDER[normalizeServicePriority(right.priority)] ?? 99)
-        || String(right.createdAt || '').localeCompare(String(left.createdAt || ''))
-      ));
-  }, [
-    dateFrom,
-    datePreset,
-    dateTo,
-    last7StartIso,
-    mechanicFilter,
-    monthStartIso,
-    preset,
-    priorityFilter,
-    scenarioFilter,
-    search,
-    statusFilter,
-    todayIso,
-    workflowFilter,
-    activeTickets,
-  ]);
+  const filteredTickets = activeTickets;
 
   const filteredArchiveTickets = React.useMemo(() => {
     const query = normalizeSearch(archiveSearch);
@@ -1290,14 +1297,10 @@ export default function Service() {
   }, [archiveSearch, archiveStatusFilter, archivedTickets]);
 
   React.useEffect(() => {
-    setVisibleCount(RESULT_BATCH_SIZE);
-  }, [search, priorityFilter, statusFilter, scenarioFilter, mechanicFilter, workflowFilter, preset, datePreset, dateFrom, dateTo]);
-
-  React.useEffect(() => {
     setArchiveVisibleCount(RESULT_BATCH_SIZE);
   }, [archiveSearch, archiveStatusFilter]);
 
-  const visibleTickets = filteredTickets.slice(0, visibleCount);
+  const visibleTickets = filteredTickets;
   const visibleArchiveTickets = filteredArchiveTickets.slice(0, archiveVisibleCount);
   const selectedTicket = React.useMemo(() => (
     selectedTicketId
@@ -1845,22 +1848,12 @@ export default function Service() {
             />
           </div>
 
-          {filteredTickets.length > 0 && (
-            <div className="flex flex-col gap-3 text-sm text-gray-500 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between">
-              <p>Показано {visibleTickets.length} из {filteredTickets.length} заявок</p>
-              {visibleTickets.length < filteredTickets.length && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setVisibleCount(count => count + RESULT_BATCH_SIZE)}
-                  className="w-full rounded-full sm:w-auto"
-                >
-                  <ArrowDown className="h-4 w-4" />
-                  Показать ещё
-                </Button>
-              )}
-            </div>
-          )}
+          <PaginationControls
+            pagination={ticketsQuery.data?.pagination}
+            loading={ticketsQuery.isFetching}
+            onPageChange={servicePagination.setPage}
+            onPageSizeChange={servicePagination.setPageSize}
+          />
             </>
           ) : (
             <>

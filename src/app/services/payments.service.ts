@@ -1,9 +1,12 @@
-import { api } from '../lib/api';
+import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import type { Payment, PaymentAllocation } from '../types';
 
 export const paymentsService = {
   getAll: (): Promise<Payment[]> =>
     api.get<Payment[]>('/api/payments'),
+
+  getPaginated: (params?: PaginatedQueryParams): Promise<PaginatedResponse<Payment>> =>
+    api.get<PaginatedResponse<Payment>>(`/api/payments${buildPaginatedQuery(params)}`),
 
   getAllocations: (): Promise<PaymentAllocation[]> =>
     api.get<PaymentAllocation[]>('/api/payment_allocations'),

@@ -7,36 +7,30 @@ import { Search, Plus } from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { Link } from 'react-router-dom';
 import { usePermissions } from '../lib/permissions';
-import { useClientsList } from '../hooks/useClients';
-import { useGanttData } from '../hooks/useRentals';
-import { usePaymentsList } from '../hooks/usePayments';
+import { usePaginatedClients } from '../hooks/useClients';
 import { formatCurrency, formatDate } from '../lib/utils';
-import type { Client } from '../types';
-import { mergeClientsWithFinancials } from '../lib/finance';
+import { useServerPagination } from '../hooks/useServerPagination';
+import { PaginationControls } from '../components/common/PaginationControls';
 
 export default function Clients() {
   const { can } = usePermissions();
-  const { data: clientList = [] } = useClientsList();
-  const { data: ganttRentals = [] } = useGanttData();
-  const { data: payments = [] } = usePaymentsList();
-  const [search, setSearch] = React.useState('');
+  const pagination = useServerPagination({
+    initialSortBy: 'company',
+    initialSortDir: 'asc',
+    storageKey: 'clients',
+  });
+  const clientsQuery = usePaginatedClients({
+    page: pagination.page,
+    pageSize: pagination.pageSize,
+    search: pagination.debouncedSearch,
+    sortBy: pagination.sortBy,
+    sortDir: pagination.sortDir,
+    filters: pagination.filters,
+  });
+  const computedClients = clientsQuery.data?.items ?? [];
   const [showFilters, setShowFilters] = React.useState(false);
 
-  const computedClients = React.useMemo(
-    () => mergeClientsWithFinancials(clientList, ganttRentals, payments),
-    [clientList, ganttRentals, payments],
-  );
-
-  const filteredClients = computedClients.filter(client => {
-    const matchesSearch = search === '' ||
-      client.company.toLowerCase().includes(search.toLowerCase()) ||
-      String(client.inn || '').includes(search) ||
-      client.contact.toLowerCase().includes(search.toLowerCase());
-
-    return matchesSearch;
-  });
-
-  const activeFilterCount = search.trim() ? 1 : 0;
+  const activeFilterCount = pagination.search.trim() ? 1 : 0;
 
   return (
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
@@ -66,15 +60,15 @@ export default function Clients() {
         onOpenChange={setShowFilters}
         title="Фильтры клиентов"
         description="Поиск по названию компании, ИНН или контактному лицу."
-        onReset={() => setSearch('')}
+        onReset={() => pagination.setSearch('')}
       >
         <FilterField label="Поиск">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Поиск по названию, ИНН, контакту..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={pagination.search}
+              onChange={(e) => pagination.setSearch(e.target.value)}
               className="app-filter-input pl-10"
             />
           </div>
@@ -83,12 +77,12 @@ export default function Clients() {
 
       {/* Mobile: card list */}
       <div className="sm:hidden space-y-3">
-        {filteredClients.length === 0 ? (
+        {computedClients.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
             <Search className="h-8 w-8 text-gray-400 dark:text-gray-500 mb-3" />
             <h3 className="text-base font-medium text-gray-900 dark:text-white">Клиенты не найдены</h3>
           </div>
-        ) : filteredClients.map((client) => (
+        ) : computedClients.map((client) => (
           <Link
             key={client.id}
             to={`/clients/${client.id}`}
@@ -130,7 +124,7 @@ export default function Clients() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredClients.map((client) => (
+            {computedClients.map((client) => (
               <TableRow key={client.id}>
                 <TableCell>
                   <Link
@@ -178,7 +172,7 @@ export default function Clients() {
           </TableBody>
         </Table>
 
-        {filteredClients.length === 0 && (
+        {computedClients.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
               <Search className="h-8 w-8 text-gray-400 dark:text-gray-500" />
@@ -191,12 +185,12 @@ export default function Clients() {
         )}
       </div>
 
-      {/* Results info */}
-      {filteredClients.length > 0 && (
-        <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-          <p>Показано {filteredClients.length} из {computedClients.length} клиентов</p>
-        </div>
-      )}
+      <PaginationControls
+        pagination={clientsQuery.data?.pagination}
+        loading={clientsQuery.isFetching}
+        onPageChange={pagination.setPage}
+        onPageSizeChange={pagination.setPageSize}
+      />
     </div>
   );
 }

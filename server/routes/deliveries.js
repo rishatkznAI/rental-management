@@ -12,6 +12,12 @@ const {
 } = require('../lib/client-relations');
 const { normalizeRole } = require('../lib/role-groups');
 
+const {
+  buildPaginatedResponse,
+  itemMatchesSearch,
+  wantsPaginatedResponse,
+} = require('../lib/pagination');
+
 function registerDeliveryRoutes(router, deps) {
   const {
     readData,
@@ -162,6 +168,33 @@ function registerDeliveryRoutes(router, deps) {
 
   function deliveryResponse(delivery, req) {
     return isCarrierRequest(req) ? carrierDeliveryResponse(delivery) : delivery;
+  }
+
+  function todayKey() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function deliveryDateKey(delivery) {
+    return String(delivery?.transportDate || delivery?.neededBy || delivery?.date || delivery?.createdAt || '').slice(0, 10);
+  }
+
+  function isDeliveryOverdueForPagination(delivery, now = todayKey()) {
+    if (isClosedDelivery(delivery)) return false;
+    const date = deliveryDateKey(delivery);
+    return Boolean(date && date < now);
+  }
+
+  function isDeliveryUnassignedForPagination(delivery) {
+    return !delivery?.carrierId && !delivery?.carrierKey && !delivery?.carrierName;
+  }
+
+  function matchesDeliveryStatusFilter(delivery, value) {
+    if (!value || value === 'all') return true;
+    if (value === 'active') return !isClosedDelivery(delivery);
+    if (value === 'planned') return ['new', 'sent', 'accepted'].includes(String(delivery?.status || ''));
+    if (value === 'overdue') return isDeliveryOverdueForPagination(delivery);
+    if (value === 'unassigned') return isDeliveryUnassignedForPagination(delivery) && !isClosedDelivery(delivery);
+    return delivery?.status === value;
   }
 
   function appendGanttHistoryEntry(rental, text, author) {
@@ -915,7 +948,71 @@ function registerDeliveryRoutes(router, deps) {
       return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
     });
     const sanitized = accessControl.sanitizeCollectionForRead('deliveries', deliveries, req.user);
-    res.json(sanitized.map(item => deliveryResponse(item, req)));
+    const responseItems = sanitized.map(item => deliveryResponse(item, req));
+    if (wantsPaginatedResponse(req.query)) {
+      let rows = responseItems.filter(item => itemMatchesSearch(item, req.query.search, [
+        'id',
+        'client',
+        'clientName',
+        'clientId',
+        'rentalId',
+        'equipment',
+        'cargo',
+        'equipmentInv',
+        'origin',
+        'destination',
+        'fromAddress',
+        'toAddress',
+        'carrierName',
+        'manager',
+      ]));
+      const statusValue = String(req.query.status || req.query.statusGroup || '').trim();
+      if (statusValue) {
+        rows = rows.filter(item => matchesDeliveryStatusFilter(item, statusValue));
+      }
+      const filterMap = {
+        carrierId: item => item.carrierId,
+        carrier: item => item.carrierName || item.carrierKey || item.carrierId,
+        clientId: item => item.clientId,
+        rentalId: item => item.rentalId,
+        type: item => item.type,
+        manager: item => item.manager,
+      };
+      Object.entries(filterMap).forEach(([name, getter]) => {
+        const value = String(req.query[name] || '').trim();
+        if (value && value !== 'all') rows = rows.filter(item => String(getter(item) || '') === value);
+      });
+      const dateFrom = String(req.query.dateFrom || '').trim();
+      const dateTo = String(req.query.dateTo || '').trim();
+      if (dateFrom || dateTo) {
+        rows = rows.filter(item => {
+          const date = String(item.transportDate || item.date || item.createdAt || '').slice(0, 10);
+          if (!date) return false;
+          if (dateFrom && date < dateFrom) return false;
+          if (dateTo && date > dateTo) return false;
+          return true;
+        });
+      }
+      return res.json(buildPaginatedResponse(rows, req.query, {
+        sortFields: {
+          transportDate: item => item.transportDate || item.date,
+          createdAt: item => item.createdAt,
+          status: item => item.status,
+          client: item => item.clientName || item.client,
+          carrierName: item => item.carrierName,
+        },
+        defaultSort: { sortBy: 'transportDate', sortDir: 'desc' },
+        summary: {
+          total: rows.length,
+          active: rows.filter(item => !isClosedDelivery(item)).length,
+          inTransit: rows.filter(item => item.status === 'in_transit').length,
+          completed: rows.filter(item => item.status === 'completed').length,
+          overdue: rows.filter(item => isDeliveryOverdueForPagination(item)).length,
+          unassigned: rows.filter(item => isDeliveryUnassignedForPagination(item) && !isClosedDelivery(item)).length,
+        },
+      }));
+    }
+    res.json(responseItems);
   });
 
   router.get('/deliveries/:id', requireAuth, requireRead('deliveries'), (req, res) => {

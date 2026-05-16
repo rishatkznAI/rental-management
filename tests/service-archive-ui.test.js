@@ -8,7 +8,7 @@ test('service page routes active and archived tickets into request-level tabs', 
   assert.match(servicePageSource, /import \{ isActiveServiceTicket, isArchivedServiceTicket, isRegularServiceTicket \}/);
   assert.match(servicePageSource, /const activeTickets = React\.useMemo\(\s*\(\) => ticketList\.filter\(isActiveServiceTicket\)/);
   assert.match(servicePageSource, /const archivedTickets = React\.useMemo\(\s*\(\) => ticketList\.filter\(isArchivedServiceTicket\)/);
-  assert.match(servicePageSource, /return activeTickets\s*\.filter\(ticket => \{/);
+  assert.match(servicePageSource, /const filteredTickets = activeTickets/);
   assert.match(servicePageSource, /label: 'Архив'/);
   assert.match(servicePageSource, /requestTab !== 'archive'/);
   assert.doesNotMatch(servicePageSource, /<TabsTrigger\s+value="archive"/);

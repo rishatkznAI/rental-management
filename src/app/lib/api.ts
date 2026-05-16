@@ -81,6 +81,49 @@ export class ApiError extends Error {
   }
 }
 
+export type PaginationMeta = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+};
+
+export type PaginatedResponse<T, Summary = Record<string, unknown>> = {
+  items: T[];
+  pagination: PaginationMeta;
+  summary?: Summary;
+};
+
+export type PaginatedQueryParams = {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
+  dateFrom?: string;
+  dateTo?: string;
+  filters?: Record<string, string | number | boolean | null | undefined>;
+};
+
+export function buildPaginatedQuery(params: PaginatedQueryParams = {}): string {
+  const searchParams = new URLSearchParams();
+  searchParams.set('paginated', 'true');
+  if (params.page) searchParams.set('page', String(params.page));
+  if (params.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  if (params.search) searchParams.set('search', params.search);
+  if (params.sortBy) searchParams.set('sortBy', params.sortBy);
+  if (params.sortDir) searchParams.set('sortDir', params.sortDir);
+  if (params.dateFrom) searchParams.set('dateFrom', params.dateFrom);
+  if (params.dateTo) searchParams.set('dateTo', params.dateTo);
+  Object.entries(params.filters || {}).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === '' || value === 'all') return;
+    searchParams.set(key, String(value));
+  });
+  return `?${searchParams.toString()}`;
+}
+
 export function shouldClearTokenForUnauthorized(path: string): boolean {
   const normalizedPath = path.split('?')[0];
   return normalizedPath.startsWith('/api/auth/');

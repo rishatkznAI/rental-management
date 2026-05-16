@@ -2,6 +2,11 @@ const express = require('express');
 const { normalizeRole } = require('../lib/role-groups');
 const { calculateRentalBilling } = require('../lib/rental-billing');
 const {
+  buildPaginatedResponse,
+  itemMatchesSearch,
+  wantsPaginatedResponse,
+} = require('../lib/pagination');
+const {
   buildDocumentRegistrySummary,
   documentNumber,
   prepareGeneratedDocument,
@@ -209,6 +214,89 @@ function registerDocumentRoutes(router, deps) {
     return readNumberingSettings(readData('app_settings') || []);
   }
 
+  function filterDocumentsForList(documents, query) {
+    let rows = Array.isArray(documents) ? documents : [];
+    rows = rows.filter(item => itemMatchesSearch(item, query.search, [
+      'number',
+      'documentNumber',
+      'type',
+      'documentType',
+      'client',
+      'clientName',
+      'clientId',
+      'rentalId',
+      'rental',
+      'equipmentInv',
+      'equipmentId',
+      'deliveryId',
+      'status',
+      'signatoryName',
+      'signatoryBasis',
+    ]));
+    const filters = {
+      status: item => item.status,
+      type: item => item.type || item.documentType,
+      clientId: item => item.clientId,
+      rentalId: item => item.rentalId || item.rental,
+      equipmentId: item => item.equipmentId,
+      parentDocumentId: item => item.parentDocumentId,
+    };
+    Object.entries(filters).forEach(([name, getter]) => {
+      const value = String(query[name] || '').trim();
+      if (value && value !== 'all') rows = rows.filter(item => String(getter(item) || '') === value);
+    });
+    const dateFrom = String(query.dateFrom || '').trim();
+    const dateTo = String(query.dateTo || '').trim();
+    if (dateFrom || dateTo) {
+      rows = rows.filter(item => {
+        const date = String(item.date || item.documentDate || item.createdAt || item.updatedAt || '').slice(0, 10);
+        if (!date) return false;
+        if (dateFrom && date < dateFrom) return false;
+        if (dateTo && date > dateTo) return false;
+        return true;
+      });
+    }
+    return rows;
+  }
+
+  function buildDocumentsPaginatedResponse(documents, query) {
+    return buildPaginatedResponse(filterDocumentsForList(documents, query), query, {
+      sortFields: {
+        date: item => item.date || item.documentDate || item.createdAt,
+        number: item => item.number || item.documentNumber,
+        client: item => item.clientName || item.client,
+        status: item => item.status,
+        createdAt: item => item.createdAt,
+      },
+      defaultSort: { sortBy: 'date', sortDir: 'desc' },
+      summary: buildDocumentRegistrySummary(documents, String(query.today || nowIso())),
+    });
+  }
+
+  function compactDocumentReference(doc) {
+    return {
+      id: doc.id,
+      type: doc.type || doc.documentType,
+      documentType: doc.documentType || doc.type,
+      number: doc.number || doc.documentNumber || '',
+      documentNumber: doc.documentNumber || doc.number || '',
+      clientId: doc.clientId || '',
+      client: doc.client || doc.clientName || '',
+      date: doc.date || doc.documentDate || '',
+      documentDate: doc.documentDate || doc.date || '',
+      status: doc.status,
+      parentDocumentId: doc.parentDocumentId || '',
+      specificationId: doc.specificationId || '',
+      rentalId: doc.rentalId || doc.rental || '',
+      equipmentId: doc.equipmentId || '',
+      rentalStartDate: doc.rentalStartDate || '',
+      rentalEndDate: doc.rentalEndDate || '',
+      dailyRate: doc.dailyRate || '',
+      quantityDays: doc.quantityDays || '',
+      amount: doc.amount,
+    };
+  }
+
   function saveSettings(settings) {
     const next = writeNumberingSettings(readData('app_settings') || [], settings, nowIso);
     writeData('app_settings', next);
@@ -275,7 +363,59 @@ function registerDocumentRoutes(router, deps) {
         accessControl.filterCollectionByScope('documents', readData('documents') || [], req.user),
         req.user,
       );
+      if (wantsPaginatedResponse(req.query)) {
+        return res.json(buildDocumentsPaginatedResponse(documents, req.query));
+      }
       return res.json(documents);
+    } catch (error) {
+      return sendAccessError(res, error);
+    }
+  });
+
+  documentsRouter.get('/documents/references', requireAuth, requireRead('documents'), (req, res) => {
+    try {
+      accessControl.assertCanReadCollection('documents', req.user);
+      const scoped = accessControl.sanitizeCollectionForRead(
+        'documents',
+        accessControl.filterCollectionByScope('documents', readData('documents') || [], req.user),
+        req.user,
+      );
+      const requestedTypes = String(req.query.types || req.query.type || '')
+        .split(',')
+        .map(value => value.trim())
+        .filter(Boolean);
+      const requestedIds = new Set(String(req.query.ids || '')
+        .split(',')
+        .map(value => value.trim())
+        .filter(Boolean));
+      const query = {
+        ...req.query,
+        page: req.query.page || '1',
+        pageSize: req.query.pageSize || '25',
+      };
+      let rows = filterDocumentsForList(scoped, query);
+      if (requestedTypes.length > 0) {
+        rows = rows.filter(item => requestedTypes.includes(String(item.type || item.documentType || '')));
+      }
+      if (requestedIds.size > 0) {
+        const byId = new Map(scoped.map(item => [String(item.id || ''), item]));
+        requestedIds.forEach(id => {
+          const item = byId.get(id);
+          if (item && !rows.some(row => row.id === item.id)) rows.push(item);
+        });
+      }
+      const response = buildPaginatedResponse(rows, query, {
+        sortFields: {
+          date: item => item.date || item.documentDate || item.createdAt,
+          number: item => item.number || item.documentNumber,
+          client: item => item.clientName || item.client,
+        },
+        defaultSort: { sortBy: 'date', sortDir: 'desc' },
+      });
+      return res.json({
+        ...response,
+        items: response.items.map(compactDocumentReference),
+      });
     } catch (error) {
       return sendAccessError(res, error);
     }

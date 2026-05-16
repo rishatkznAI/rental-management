@@ -219,8 +219,8 @@ test('frontend does not mask equipment and service API failures as empty warrant
   assert.match(equipmentPageSource, /GET \/api\/access-diagnostics/);
   assert.match(equipmentPageSource, /\/api\/equipment/);
 
-  assert.match(servicePageSource, /const ticketsQuery = useServiceTicketsList\(\)/);
-  assert.match(servicePageSource, /ticketsQuery\.data \?\? \[\]/);
+  assert.match(servicePageSource, /const ticketsQuery = usePaginatedServiceTickets\(/);
+  assert.match(servicePageSource, /ticketsQuery\.data\?\.items \?\? \[\]/);
   assert.match(servicePageSource, /GET \/api\/service/);
   assert.match(servicePageSource, /GET \/api\/access-diagnostics/);
 
@@ -316,8 +316,8 @@ test('frontend investor rental surfaces avoid forbidden background reads', () =>
 
 test('carrier deliveries page does not prefetch forbidden context or show finance controls', () => {
   assert.match(deliveriesPageSource, /const isCarrierView = normalizedRole === 'Перевозчик'/);
-  assert.match(deliveriesPageSource, /const deliveryListQueryKey = useMemo/);
-  assert.match(deliveriesPageSource, /queryKey: deliveryListQueryKey/);
+  assert.match(deliveriesPageSource, /usePaginatedDeliveries\(/);
+  assert.match(deliveriesPageSource, /scope: `\$\{normalizedRole\}:\$\{user\?\.id \|\| 'anonymous'\}`/);
   assert.match(deliveriesPageSource, /enabled: canManageDeliveries/);
   assert.match(deliveriesPageSource, /Мои активные доставки/);
   assert.match(deliveriesPageSource, /!isCarrierView && <th className="px-4 py-3 font-semibold">Клиент<\/th>/);

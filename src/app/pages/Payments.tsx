@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -16,6 +16,7 @@ import {
   useDeletePaymentAllocation,
   usePaymentAllocationsList,
   usePaymentsList,
+  usePaginatedPayments,
   useUpdatePaymentAllocation,
 } from '../hooks/usePayments';
 import { useClientsList } from '../hooks/useClients';
@@ -25,16 +26,17 @@ import { useDocumentsList, DOCUMENT_KEYS } from '../hooks/useDocuments';
 import type { GanttRentalData } from '../mock-data';
 import { formatDate, formatCurrency } from '../lib/utils';
 import type { Client, ClientContract, ClientObject, Document, Payment, PaymentAllocation, PaymentStatus } from '../types';
-import { buildClientReceivables, buildRentalDebtRows } from '../lib/finance';
+import { buildRentalDebtRows } from '../lib/finance';
 import { financeService } from '../services/finance.service';
 import {
   buildQuickActionContext,
   contextFilterLabel,
   hasClientContext,
-  matchesClientContext,
   normalizeContextName,
 } from '../lib/quickActionContext.js';
 import { animationDurations, useAnimatedPresence } from '../lib/animations';
+import { useServerPagination } from '../hooks/useServerPagination';
+import { PaginationControls } from '../components/common/PaginationControls';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -773,7 +775,6 @@ function PaymentAllocationPanel({
 export default function Payments() {
   const [searchParams] = useSearchParams();
   const { can } = usePermissions();
-  const { data: paymentList = [] } = usePaymentsList();
   const { data: paymentAllocations = [] } = usePaymentAllocationsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: clients = [] } = useClientsList();
@@ -781,46 +782,56 @@ export default function Payments() {
   const { data: clientContracts = [] } = useClientContractsList();
   const { data: documents = [] } = useDocumentsList();
   const createPayment = useCreatePayment();
-  const [search, setSearch] = React.useState('');
-  const [statusFilter, setStatusFilter] = React.useState<string>('all');
-  const [clientFilter, setClientFilter] = React.useState<string>('all');
+  const pagination = useServerPagination<{ status: string; clientId: string }>({
+    initialSortBy: 'date',
+    initialSortDir: 'desc',
+    initialFilters: { status: 'all', clientId: 'all' },
+    storageKey: 'payments',
+  });
+  const paymentsQuery = usePaginatedPayments({
+    page: pagination.page,
+    pageSize: pagination.pageSize,
+    search: pagination.debouncedSearch,
+    sortBy: pagination.sortBy,
+    sortDir: pagination.sortDir,
+    filters: pagination.filters,
+  });
+  const paymentList = paymentsQuery.data?.items ?? [];
+  const paymentSummary = paymentsQuery.data?.summary as {
+    pendingAmount?: number;
+    paidAmount?: number;
+    overdueAmount?: number;
+    partialAmount?: number;
+    count?: number;
+  } | undefined;
   const [showAddModal, setShowAddModal] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedPaymentId, setSelectedPaymentId] = useState('');
+  const { data: allPaymentsForAllocation = [] } = usePaymentsList({
+    enabled: showAddModal || Boolean(selectedPaymentId),
+  });
+  const receivablesQuery = useQuery({
+    queryKey: ['finance', 'receivables', 'payments-page'],
+    queryFn: () => financeService.getReceivables(),
+    enabled: can('view', 'payments') || can('view', 'finance'),
+    staleTime: 1000 * 60,
+  });
   const quickActionContext = React.useMemo(() => buildQuickActionContext(searchParams), [searchParams]);
   const hasQuickClientContext = hasClientContext(quickActionContext);
   const clientsById = useMemo(() => new Map(clients.map(client => [client.id, client])), [clients]);
+  const setPaginationFilters = pagination.setFilters;
 
   React.useEffect(() => {
     if (!hasQuickClientContext) return;
     if (quickActionContext.clientId && clientsById.has(quickActionContext.clientId)) {
-      setClientFilter(quickActionContext.clientId);
+      setPaginationFilters({ clientId: quickActionContext.clientId });
       return;
     }
     const wantedName = normalizeContextName(quickActionContext.clientName);
     if (!wantedName) return;
     const client = clients.find(item => normalizeContextName(item.company) === wantedName);
-    if (client) setClientFilter(client.id);
-  }, [clients, clientsById, hasQuickClientContext, quickActionContext.clientId, quickActionContext.clientName]);
-
-  const filteredPayments = useMemo(() => paymentList.filter(p => {
-    const q = search.toLowerCase();
-    const selectedClient = clientFilter !== 'all' ? clientsById.get(clientFilter) : undefined;
-    const clientContext = selectedClient
-      ? { clientId: selectedClient.id, clientName: selectedClient.company }
-      : quickActionContext;
-    const matchesSearch = !search ||
-      p.invoiceNumber.toLowerCase().includes(q) ||
-      p.client.toLowerCase().includes(q) ||
-      p.rentalId?.toLowerCase().includes(q) ||
-      p.comment?.toLowerCase().includes(q);
-    const matchesClient = matchesClientContext({
-      clientId: p.clientId,
-      clientName: p.client,
-    }, clientContext);
-    const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
-    return matchesSearch && matchesClient && matchesStatus;
-  }), [clientFilter, clientsById, paymentList, quickActionContext, search, statusFilter]);
+    if (client) setPaginationFilters({ clientId: client.id });
+  }, [clients, clientsById, hasQuickClientContext, quickActionContext.clientId, quickActionContext.clientName, setPaginationFilters]);
 
   const handleAddPayment = (p: Payment) => {
     // id is already pre-generated in the modal; pass it through
@@ -832,12 +843,29 @@ export default function Payments() {
   };
 
   // KPI sums
-  const totalPending = paymentList.filter(p => p.status === 'pending' || p.status === 'partial').reduce((s, p) => s + (p.amount - (p.paidAmount ?? 0)), 0);
-  const totalPaid = paymentList.filter(p => p.status === 'paid').reduce((s, p) => s + (p.paidAmount ?? p.amount), 0);
-  const totalOverdue = paymentList.filter(p => p.status === 'overdue').reduce((s, p) => s + (p.amount - (p.paidAmount ?? 0)), 0);
-  const totalPartial = paymentList.filter(p => p.status === 'partial').reduce((s, p) => s + (p.paidAmount ?? 0), 0);
-  const rentalDebtRows = useMemo(() => buildRentalDebtRows(ganttRentals as GanttRentalData[], paymentList, paymentAllocations), [ganttRentals, paymentAllocations, paymentList]);
-  const clientReceivables = useMemo(() => buildClientReceivables(clients, rentalDebtRows), [clients, rentalDebtRows]);
+  const totalPending = paymentSummary?.pendingAmount ?? 0;
+  const totalPaid = paymentSummary?.paidAmount ?? 0;
+  const totalOverdue = paymentSummary?.overdueAmount ?? 0;
+  const totalPartial = paymentSummary?.partialAmount ?? 0;
+  const rentalDebtRows = useMemo(() => (
+    receivablesQuery.data?.rows.flatMap(row => row.rentals.map(rental => ({
+      ...rental,
+      client: row.client,
+      clientId: row.clientId,
+      expectedPaymentDate: rental.dueDate,
+    }))) ?? []
+  ), [receivablesQuery.data]);
+  const clientReceivables = useMemo(() => (
+    receivablesQuery.data?.rows.map(row => ({
+      client: row.client,
+      clientId: row.clientId,
+      currentDebt: row.totalDebt,
+      creditLimit: clientsById.get(row.clientId || '')?.creditLimit ?? 0,
+      exceededLimit: Boolean((clientsById.get(row.clientId || '')?.creditLimit ?? 0) > 0 && row.totalDebt > (clientsById.get(row.clientId || '')?.creditLimit ?? 0)),
+      unpaidRentals: row.rentals.length,
+      overdueRentals: row.rentals.filter(rental => rental.overdueDays > 0).length,
+    })) ?? []
+  ), [clientsById, receivablesQuery.data]);
   const selectedPayment = useMemo(
     () => paymentList.find(payment => payment.id === selectedPaymentId),
     [paymentList, selectedPaymentId],
@@ -850,9 +878,9 @@ export default function Payments() {
     [rentalDebtRows],
   );
   const activeFilterCount = [
-    search.trim() !== '',
-    clientFilter !== 'all' || hasQuickClientContext,
-    statusFilter !== 'all',
+    pagination.search.trim() !== '',
+    pagination.filters.clientId !== 'all' || hasQuickClientContext,
+    pagination.filters.status !== 'all',
   ].filter(Boolean).length;
 
   return (
@@ -861,10 +889,10 @@ export default function Payments() {
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
         onSave={handleAddPayment}
-        existing={paymentList}
+        existing={allPaymentsForAllocation}
         rentals={ganttRentals as GanttRentalData[]}
         clients={clients}
-        allPayments={paymentList}
+        allPayments={allPaymentsForAllocation}
       />
 
       {/* Header */}
@@ -916,7 +944,7 @@ export default function Payments() {
           </div>
           <div>
             <p className="text-xs text-gray-500 dark:text-gray-400">Всего платежей</p>
-            <p className="text-lg font-bold text-gray-900 dark:text-white">{paymentList.length}</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-white">{paymentSummary?.count ?? paymentsQuery.data?.pagination.total ?? 0}</p>
           </div>
         </div>
       </div>
@@ -1035,7 +1063,7 @@ export default function Payments() {
       {selectedPayment && (
         <PaymentAllocationPanel
           payment={selectedPayment}
-          allPayments={paymentList}
+          allPayments={allPaymentsForAllocation}
           allocations={paymentAllocations}
           rentals={ganttRentals as GanttRentalData[]}
           objects={clientObjects}
@@ -1051,9 +1079,8 @@ export default function Payments() {
         title="Фильтры платежей"
         description="Поиск по счёту, клиенту, аренде и статусу оплаты."
         onReset={() => {
-          setSearch('');
-          setClientFilter('all');
-          setStatusFilter('all');
+          pagination.setSearch('');
+          pagination.setFilters({ clientId: 'all', status: 'all' });
         }}
       >
         <div className="grid gap-4 md:grid-cols-2">
@@ -1062,16 +1089,16 @@ export default function Payments() {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="Поиск по счёту, клиенту, аренде..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={pagination.search}
+                onChange={(e) => pagination.setSearch(e.target.value)}
                 className="app-filter-input pl-10"
               />
             </div>
           </FilterField>
           <FilterField label="Клиент">
             <select
-              value={clientFilter}
-              onChange={(e) => setClientFilter(e.target.value)}
+              value={pagination.filters.clientId}
+              onChange={(e) => pagination.setFilters({ clientId: e.target.value })}
               className="app-filter-input"
             >
               <option value="all">Все клиенты</option>
@@ -1082,8 +1109,8 @@ export default function Payments() {
           </FilterField>
           <FilterField label="Статус оплаты">
             <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              value={pagination.filters.status}
+              onChange={(e) => pagination.setFilters({ status: e.target.value })}
               className="app-filter-input"
             >
               <option value="all">Все статусы</option>
@@ -1114,7 +1141,7 @@ export default function Payments() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredPayments.map((payment) => {
+            {paymentList.map((payment) => {
               const paid = payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0);
               const remaining = payment.amount - paid;
               return (
@@ -1177,28 +1204,28 @@ export default function Payments() {
           </TableBody>
         </Table>
 
-        {filteredPayments.length === 0 && (
+        {paymentList.length === 0 && (
           <div className="flex flex-col items-center justify-center py-14 text-center">
             <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
               <DollarSign className="h-8 w-8 text-gray-400 dark:text-gray-500" />
             </div>
             <h3 className="text-base font-medium text-gray-900 dark:text-white">
-              {paymentList.length === 0
+              {(paymentsQuery.data?.pagination.total ?? 0) === 0
                 ? 'Платежей ещё нет'
-                : hasQuickClientContext || clientFilter !== 'all'
+                : hasQuickClientContext || pagination.filters.clientId !== 'all'
                   ? 'Платежи по клиенту не найдены'
                   : 'Платежи не найдены'}
             </h3>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {paymentList.length === 0
+              {(paymentsQuery.data?.pagination.total ?? 0) === 0
                 ? 'Добавьте первый платёж по аренде'
-                : hasQuickClientContext || clientFilter !== 'all'
-                  ? `Для ${contextFilterLabel(clientFilter !== 'all'
-                    ? { clientId: clientFilter, clientName: clientsById.get(clientFilter)?.company }
+                : hasQuickClientContext || pagination.filters.clientId !== 'all'
+                  ? `Для ${contextFilterLabel(pagination.filters.clientId !== 'all'
+                    ? { clientId: pagination.filters.clientId, clientName: clientsById.get(pagination.filters.clientId)?.company }
                     : quickActionContext)} нет платежей по выбранным фильтрам`
                   : 'Попробуйте изменить параметры поиска или фильтры'}
             </p>
-            {paymentList.length === 0 && can('create', 'payments') && (
+            {(paymentsQuery.data?.pagination.total ?? 0) === 0 && can('create', 'payments') && (
               <Button size="sm" className="mt-4" onClick={() => setShowAddModal(true)}>
                 <Plus className="h-4 w-4" />
                 Добавить платёж
@@ -1208,12 +1235,12 @@ export default function Payments() {
         )}
       </div>
 
-      {/* Results counter */}
-      {filteredPayments.length > 0 && (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Показано {filteredPayments.length} из {paymentList.length} платежей
-        </p>
-      )}
+      <PaginationControls
+        pagination={paymentsQuery.data?.pagination}
+        loading={paymentsQuery.isFetching}
+        onPageChange={pagination.setPage}
+        onPageSizeChange={pagination.setPageSize}
+      />
     </div>
   );
 }

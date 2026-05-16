@@ -2,10 +2,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsService } from '../services/payments.service';
 import { RENTAL_KEYS } from './useRentals';
 import { usePermissions } from '../lib/permissions';
+import type { PaginatedQueryParams } from '../lib/api';
 import type { Payment, PaymentAllocation } from '../types';
 
 export const PAYMENT_KEYS = {
   all: ['payments'] as const,
+  paginated: (params: PaginatedQueryParams) => ['payments', 'paginated', params] as const,
   allocations: ['payment_allocations'] as const,
   detail: (id: string) => ['payments', id] as const,
 };
@@ -20,6 +22,16 @@ export function usePaymentsList(options: QueryOptions = {}) {
     queryFn: paymentsService.getAll,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 2,
+  });
+}
+
+export function usePaginatedPayments(params: PaginatedQueryParams, options: QueryOptions = {}) {
+  return useQuery({
+    queryKey: PAYMENT_KEYS.paginated(params),
+    queryFn: () => paymentsService.getPaginated(params),
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60,
+    placeholderData: previous => previous,
   });
 }
 

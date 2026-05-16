@@ -1,6 +1,12 @@
 const express = require('express');
 const { getEffectivePaidAmount, syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
 const { normalizeRole } = require('../lib/role-groups');
+const {
+  buildPaginatedResponse,
+  itemMatchesSearch,
+  wantsPaginatedResponse,
+} = require('../lib/pagination');
+const { buildClientFinancialSnapshots } = require('../lib/finance-core');
 const { assignCurrentUserAsMechanicIfNeeded } = require('../lib/service-assignment');
 const { normalizeServiceTicketList, normalizeServiceTicketRecord } = require('../lib/service-dto');
 const {
@@ -233,6 +239,36 @@ function registerCrudRoutes(deps) {
 
   function text(value) {
     return String(value ?? '').trim();
+  }
+
+  function lowerText(value) {
+    return text(value).toLowerCase().replaceAll('ё', 'е');
+  }
+
+  function inferServiceKindForPagination(ticket) {
+    const kind = lowerText(ticket?.serviceKind || ticket?.scenario || ticket?.type);
+    if (['repair', 'to', 'chto', 'pto'].includes(kind)) return kind;
+    const reason = lowerText(ticket?.reason);
+    if (reason === 'то') return 'to';
+    if (reason === 'что') return 'chto';
+    if (reason === 'пто') return 'pto';
+    return 'repair';
+  }
+
+  function getServiceWorkflowKindForPagination(ticket) {
+    const kind = inferServiceKindForPagination(ticket);
+    if (kind !== 'repair') return 'maintenance';
+    const value = lowerText(`${ticket?.reason || ''} ${ticket?.description || ''}`);
+    if (value.includes('прием') || value.includes('возврат') || value.includes('аренд')) return 'receiving';
+    if (value.includes('диагност')) return 'diagnostics';
+    return 'repair';
+  }
+
+  function isServiceTicketOverdueForPagination(ticket) {
+    const status = lowerText(ticket?.status);
+    if (status === 'closed') return false;
+    const due = text(ticket?.dueDate || ticket?.deadline || ticket?.targetDate || ticket?.plannedDate || ticket?.scheduledDate).slice(0, 10);
+    return Boolean(due && due < new Date().toISOString().slice(0, 10));
   }
 
   function findRentalForServiceLink(rentalId) {
@@ -844,6 +880,233 @@ function registerCrudRoutes(deps) {
     return 'Недостаточно прав: удалять учебные модули может только администратор.';
   }
 
+  const PAGINATED_COLLECTION_CONFIG = {
+    equipment: {
+      searchFields: ['inventoryNumber', 'serialNumber', 'manufacturer', 'model', 'location', 'ownerName'],
+      sortFields: {
+        inventoryNumber: item => item.inventoryNumber,
+        manufacturer: item => item.manufacturer,
+        model: item => item.model,
+        status: item => item.status,
+        ownerName: item => item.ownerName || item.owner,
+        location: item => item.location,
+        updatedAt: item => item.updatedAt || item.createdAt || item.id,
+      },
+      defaultSort: { sortBy: 'inventoryNumber', sortDir: 'asc' },
+      filters: {
+        status: (item, value) => item.status === value,
+        ownerId: (item, value) => item.ownerId === value || item.owner === value,
+        type: (item, value) => item.type === value || item.equipmentType === value,
+      },
+      summary: items => ({
+        total: items.length,
+        available: items.filter(item => item.status === 'available').length,
+        rented: items.filter(item => item.status === 'rented').length,
+        inService: items.filter(item => item.status === 'in_service').length,
+      }),
+    },
+    service: {
+      searchFields: ['id', 'equipment', 'inventoryNumber', 'serialNumber', 'reason', 'description', 'client', 'clientName', 'assignedMechanicName', 'assignedTo', 'createdByUserName', 'contractNumber'],
+      sortFields: {
+        createdAt: item => item.createdAt,
+        updatedAt: item => item.updatedAt || item.createdAt,
+        priority: item => item.priority,
+        status: item => item.status,
+        plannedDate: item => item.plannedDate || item.scheduledDate || item.dueDate,
+      },
+      defaultSort: { sortBy: 'createdAt', sortDir: 'desc' },
+      filters: {
+        status: (item, value) => item.status === value,
+        mechanicId: (item, value) => item.mechanicId === value || item.assignedMechanicId === value || item.assignedUserId === value,
+        mechanic: (item, value) => item.mechanicId === value || item.assignedMechanicId === value || item.assignedUserId === value || item.assignedMechanicName === value || item.assignedTo === value,
+        equipmentId: (item, value) => item.equipmentId === value,
+        clientId: (item, value) => item.clientId === value,
+        priority: (item, value) => item.priority === value,
+        scenario: (item, value) => inferServiceKindForPagination(item) === value,
+        workflow: (item, value) => getServiceWorkflowKindForPagination(item) === value,
+        preset: (item, value) => {
+          const status = lowerText(item.status);
+          const priority = lowerText(item.priority);
+          if (value === 'unassigned') return !item.assignedMechanicId && !item.assignedTo && !item.assignedMechanicName;
+          if (value === 'urgent') return ['high', 'critical'].includes(priority);
+          if (value === 'waiting_parts') return status === 'waiting_parts';
+          if (value === 'needs_revision') return status === 'needs_revision';
+          if (value === 'maintenance') return ['to', 'chto', 'pto'].includes(inferServiceKindForPagination(item));
+          return true;
+        },
+      },
+      summary: items => ({
+        total: items.length,
+        open: items.filter(item => !['closed', 'done'].includes(lowerText(item.status))).length,
+        active: items.filter(item => !['closed', 'done'].includes(lowerText(item.status))).length,
+        archived: items.filter(item => ['closed', 'done'].includes(lowerText(item.status))).length,
+        inProgress: items.filter(item => lowerText(item.status) === 'in_progress').length,
+        waitingParts: items.filter(item => lowerText(item.status) === 'waiting_parts').length,
+        ready: items.filter(item => lowerText(item.status) === 'ready').length,
+        unassigned: items.filter(item => !item.assignedMechanicId && !item.assignedTo && !item.assignedMechanicName).length,
+        overdue: items.filter(isServiceTicketOverdueForPagination).length,
+      }),
+    },
+    warranty_claims: {
+      searchFields: ['id', 'equipmentLabel', 'factoryName', 'clientName', 'responsibleName', 'description'],
+      sortFields: {
+        createdAt: item => item.createdAt,
+        updatedAt: item => item.updatedAt || item.createdAt,
+        status: item => item.status,
+        equipmentLabel: item => item.equipmentLabel,
+      },
+      defaultSort: { sortBy: 'createdAt', sortDir: 'desc' },
+      filters: {
+        status: (item, value) => item.status === value,
+        equipmentId: (item, value) => item.equipmentId === value,
+        clientId: (item, value) => item.clientId === value,
+      },
+    },
+    clients: {
+      searchFields: ['company', 'name', 'inn', 'contact', 'phone', 'email', 'manager'],
+      sortFields: {
+        company: item => item.company || item.name,
+        inn: item => item.inn,
+        contact: item => item.contact,
+        createdAt: item => item.createdAt || item.id,
+      },
+      defaultSort: { sortBy: 'company', sortDir: 'asc' },
+      filters: {
+        managerId: (item, value) => item.managerId === value || item.ownerId === value,
+        status: (item, value) => item.status === value,
+      },
+    },
+    documents: {
+      searchFields: ['number', 'documentNumber', 'type', 'documentType', 'client', 'clientName', 'clientId', 'rentalId', 'rental', 'equipmentInv', 'equipmentId', 'deliveryId', 'status', 'signatoryName', 'signatoryBasis'],
+      sortFields: {
+        date: item => item.date || item.documentDate || item.createdAt,
+        number: item => item.number || item.documentNumber,
+        client: item => item.clientName || item.client,
+        status: item => item.status,
+        createdAt: item => item.createdAt,
+      },
+      defaultSort: { sortBy: 'date', sortDir: 'desc' },
+      filters: {
+        status: (item, value) => item.status === value,
+        type: (item, value) => item.type === value || item.documentType === value,
+        clientId: (item, value) => item.clientId === value,
+        rentalId: (item, value) => item.rentalId === value || item.rental === value,
+        equipmentId: (item, value) => item.equipmentId === value,
+      },
+    },
+    payments: {
+      searchFields: ['id', 'invoiceNumber', 'documentNumber', 'documentId', 'client', 'clientName', 'clientId', 'rentalId', 'method', 'status', 'comment', 'purpose'],
+      sortFields: {
+        date: item => item.date || item.paymentDate || item.createdAt,
+        amount: item => Number(item.amount || 0),
+        client: item => item.clientName || item.client,
+        status: item => item.status,
+        createdAt: item => item.createdAt,
+      },
+      defaultSort: { sortBy: 'date', sortDir: 'desc' },
+      filters: {
+        status: (item, value) => item.status === value,
+        clientId: (item, value) => item.clientId === value,
+        rentalId: (item, value) => item.rentalId === value,
+        managerId: (item, value) => item.managerId === value || item.responsibleManagerId === value,
+      },
+      summary: items => ({
+        totalAmount: items.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+        count: items.length,
+        pendingAmount: items.filter(item => ['pending', 'partial'].includes(lowerText(item.status))).reduce((sum, item) => sum + Math.max(0, Number(item.amount || 0) - Number(item.paidAmount || 0)), 0),
+        paidAmount: items.filter(item => lowerText(item.status) === 'paid').reduce((sum, item) => sum + Number(item.paidAmount ?? item.amount ?? 0), 0),
+        overdueAmount: items.filter(item => lowerText(item.status) === 'overdue').reduce((sum, item) => sum + Math.max(0, Number(item.amount || 0) - Number(item.paidAmount || 0)), 0),
+        partialAmount: items.filter(item => lowerText(item.status) === 'partial').reduce((sum, item) => sum + Number(item.paidAmount || 0), 0),
+      }),
+    },
+    company_expenses: {
+      searchFields: ['category', 'description', 'counterparty', 'comment'],
+      sortFields: {
+        date: item => item.date || item.createdAt,
+        amount: item => Number(item.amount || 0),
+        category: item => item.category,
+      },
+      defaultSort: { sortBy: 'date', sortDir: 'desc' },
+    },
+    finance_operations: {
+      searchFields: ['category', 'description', 'counterparty', 'accountName', 'comment'],
+      sortFields: {
+        date: item => item.date || item.createdAt,
+        amount: item => Number(item.amount || 0),
+        category: item => item.category,
+      },
+      defaultSort: { sortBy: 'date', sortDir: 'desc' },
+    },
+  };
+
+  function filterPaginatedCollection(collection, data, query) {
+    const config = PAGINATED_COLLECTION_CONFIG[collection] || {};
+    let rows = Array.isArray(data) ? data : [];
+    rows = rows.filter(item => itemMatchesSearch(item, query.search, config.searchFields || ['id']));
+    Object.entries(config.filters || {}).forEach(([name, predicate]) => {
+      const value = String(query[name] || '').trim();
+      if (value && value !== 'all') rows = rows.filter(item => predicate(item, value));
+    });
+    const dateFrom = String(query.dateFrom || '').trim();
+    const dateTo = String(query.dateTo || '').trim();
+    if (dateFrom || dateTo) {
+      rows = rows.filter(item => {
+        const date = String(item.date || item.documentDate || item.paymentDate || item.createdAt || item.updatedAt || '').slice(0, 10);
+        if (!date) return false;
+        if (dateFrom && date < dateFrom) return false;
+        if (dateTo && date > dateTo) return false;
+        return true;
+      });
+    }
+    return rows;
+  }
+
+  function buildPaginatedCollectionResponse(collection, data, query) {
+    const config = PAGINATED_COLLECTION_CONFIG[collection] || {};
+    const rows = filterPaginatedCollection(collection, data, query);
+    return buildPaginatedResponse(rows, query, {
+      sortFields: config.sortFields || { id: item => item.id },
+      defaultSort: config.defaultSort || { sortBy: 'id', sortDir: 'asc' },
+      summary: typeof config.summary === 'function' ? config.summary(rows) : undefined,
+    });
+  }
+
+  function canReadCollectionForSummary(collection, user) {
+    try {
+      accessControl.assertCanReadCollection(collection, user);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function enrichClientsWithBackendFinancials(clients, user) {
+    if (!Array.isArray(clients) || clients.length === 0) return clients;
+    const canReadRentals = canReadCollectionForSummary('gantt_rentals', user);
+    const canReadPayments = canReadCollectionForSummary('payments', user);
+    if (!canReadRentals || !canReadPayments) return clients;
+
+    const scopedRentals = accessControl.filterCollectionByScope('gantt_rentals', readData('gantt_rentals') || [], user);
+    const scopedPayments = accessControl.filterCollectionByScope('payments', readData('payments') || [], user);
+    const scopedAllocations = canReadCollectionForSummary('payment_allocations', user)
+      ? accessControl.filterCollectionByScope('payment_allocations', readData('payment_allocations') || [], user)
+      : [];
+    const snapshots = buildClientFinancialSnapshots(clients, scopedRentals, scopedPayments, new Date().toISOString().slice(0, 10), {
+      paymentAllocations: scopedAllocations,
+    });
+    const byClientId = new Map(snapshots.map(item => [String(item.clientId || ''), item]));
+    return clients.map(client => {
+      const summary = byClientId.get(String(client.id || ''));
+      if (!summary) return client;
+      return {
+        ...client,
+        debt: summary.currentDebt,
+        totalRentals: summary.totalRentals,
+        lastRentalDate: summary.lastRentalDate,
+      };
+    });
+  }
+
   function registerCRUD(collection) {
     if (collection === 'rentals' || collection === 'gantt_rentals') {
       return;
@@ -898,6 +1161,12 @@ function registerCrudRoutes(deps) {
         accessControl.filterCollectionByScope(collection, data, req.user),
         req.user,
       );
+      if (wantsPaginatedResponse(req.query)) {
+        if (collection === 'clients') {
+          data = enrichClientsWithBackendFinancials(data, req.user);
+        }
+        return res.json(buildPaginatedCollectionResponse(collection, data, req.query));
+      }
       return res.json(data);
     });
 

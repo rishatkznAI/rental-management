@@ -24,7 +24,7 @@ test('Payments page applies quick action client filter without touching Finance 
 
   assert.match(source, /useSearchParams/);
   assert.match(source, /buildQuickActionContext/);
-  assert.match(source, /matchesClientContext/);
+  assert.match(source, /setPaginationFilters\(\{ clientId:/);
   assert.match(source, /Платежи по клиенту не найдены/);
 });
 

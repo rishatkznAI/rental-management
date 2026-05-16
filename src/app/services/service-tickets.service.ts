@@ -1,4 +1,4 @@
-import { api } from '../lib/api';
+import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import type { PhotoReference, ServicePriority, ServiceScenario, ServiceStatus, ServiceTicket } from '../types';
 
 export interface ServiceAuditLogEntry {
@@ -194,6 +194,14 @@ export function normalizeServiceTicketList(value: unknown): ServiceTicket[] {
 export const serviceTicketsService = {
   getAll: async (): Promise<ServiceTicket[]> =>
     normalizeServiceTicketList(await api.get<unknown>('/api/service')),
+
+  getPaginated: async (params?: PaginatedQueryParams): Promise<PaginatedResponse<ServiceTicket>> => {
+    const response = await api.get<PaginatedResponse<unknown>>(`/api/service${buildPaginatedQuery(params)}`);
+    return {
+      ...response,
+      items: normalizeServiceTicketList(response.items),
+    };
+  },
 
   getById: async (id: string): Promise<ServiceTicket | undefined> =>
     normalizeServiceTicketDto(await api.get<unknown>(`/api/service/${id}`).catch(() => undefined)) ?? undefined,

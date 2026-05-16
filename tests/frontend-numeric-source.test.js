@@ -24,7 +24,9 @@ test('CRM form validates budget and probability instead of silently clamping', (
 test('Documents page guards legacy optional fields before filtering and rendering', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Documents.tsx'), 'utf-8');
 
-  assert.match(source, /Array\.isArray\(documentList\) \? documentList : \[\]/);
+  assert.match(source, /documentsQuery\.data\?\.items \?\? \[\]/);
+  assert.match(source, /useDocumentReferences\(/);
+  assert.match(source, /documentReferencesQuery\.data\?\.items \?\? \[\]/);
   assert.match(source, /searchText\(doc\.number\)/);
   assert.match(source, /const normalizedClient = doc\.client \|\| rental\?\.client \|\| clientsById\.get\(normalizedClientId\)\?\.company \|\| ''/);
   assert.match(source, /searchText\(normalizedClient\)/);

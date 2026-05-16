@@ -1,4 +1,5 @@
 import { api, API_BASE_URL, ApiError, getToken } from '../lib/api';
+import { buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import type { Document, DocumentNumberingSetting, DocumentRegistrySummary, DocumentType } from '../types';
 
 export function getDocumentPrintPath(id: string) {
@@ -29,16 +30,39 @@ async function getDocumentPrintHtml(id: string): Promise<string> {
   return text;
 }
 
+type DocumentReferenceQueryParams = PaginatedQueryParams & {
+  types?: string;
+  ids?: string;
+};
+
+function buildDocumentReferenceQuery(params: DocumentReferenceQueryParams = {}): string {
+  const query = buildPaginatedQuery(params);
+  const searchParams = new URLSearchParams(query.slice(1));
+  if (params.types) searchParams.set('types', params.types);
+  if (params.ids) searchParams.set('ids', params.ids);
+  return `?${searchParams.toString()}`;
+}
+
 export const documentsService = {
   getAll: (): Promise<Document[]> =>
     api.get<Document[]>('/api/documents'),
+
+  getPaginated: (params?: PaginatedQueryParams): Promise<PaginatedResponse<Document>> =>
+    api.get<PaginatedResponse<Document>>(`/api/documents${buildPaginatedQuery(params)}`),
+
+  getReferences: (params?: DocumentReferenceQueryParams): Promise<PaginatedResponse<Document>> =>
+    api.get<PaginatedResponse<Document>>(`/api/documents/references${buildDocumentReferenceQuery(params)}`),
 
   getById: (id: string): Promise<Document | undefined> =>
     api.get<Document>(`/api/documents/${id}`).catch(() => undefined),
 
   getByRentalId: async (rentalId: string): Promise<Document[]> => {
-    const all = await api.get<Document[]>('/api/documents');
-    return all.filter(d => d.rentalId === rentalId || d.rental === rentalId);
+    const response = await documentsService.getReferences({
+      page: 1,
+      pageSize: 100,
+      filters: { rentalId },
+    });
+    return response.items;
   },
 
   getRegistrySummary: (): Promise<DocumentRegistrySummary> =>

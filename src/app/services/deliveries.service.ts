@@ -1,4 +1,4 @@
-import { api } from '../lib/api';
+import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import { normalizeDeliveriesResponse, normalizeDeliveryRecord } from '../lib/deliveries-view.js';
 import type { Delivery, DeliveryCarrier } from '../types';
 
@@ -12,6 +12,13 @@ export type UpdateDeliveryPayload = Partial<CreateDeliveryPayload> & {
 export const deliveriesService = {
   getAll: (): Promise<Delivery[]> =>
     api.get<unknown>('/api/deliveries').then((response) => normalizeDeliveriesResponse(response) as Delivery[]),
+
+  getPaginated: (params?: PaginatedQueryParams): Promise<PaginatedResponse<Delivery>> =>
+    api.get<PaginatedResponse<unknown>>(`/api/deliveries${buildPaginatedQuery(params)}`)
+      .then((response) => ({
+        ...response,
+        items: normalizeDeliveriesResponse(response.items) as Delivery[],
+      })),
 
   getById: (id: string): Promise<Delivery> =>
     api.get<unknown>(`/api/deliveries/${id}`).then((response) => normalizeDeliveryRecord(response) as Delivery),

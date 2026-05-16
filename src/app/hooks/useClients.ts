@@ -1,9 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { clientsService } from '../services/clients.service';
+import type { PaginatedQueryParams } from '../lib/api';
 import type { Client } from '../types';
 
 export const CLIENT_KEYS = {
   all: ['clients'] as const,
+  paginated: (params: PaginatedQueryParams) => ['clients', 'paginated', params] as const,
   detail: (id: string) => ['clients', id] as const,
 };
 
@@ -17,6 +19,16 @@ export function useClientsList(options: QueryOptions = {}) {
     queryFn: clientsService.getAll,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 5,
+  });
+}
+
+export function usePaginatedClients(params: PaginatedQueryParams, options: QueryOptions = {}) {
+  return useQuery({
+    queryKey: CLIENT_KEYS.paginated(params),
+    queryFn: () => clientsService.getPaginated(params),
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60,
+    placeholderData: previous => previous,
   });
 }
 

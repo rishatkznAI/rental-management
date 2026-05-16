@@ -145,3 +145,35 @@ test('clients page receives backend financial summary without frontend full rent
   assert.match(routeSource, /enrichClientsWithBackendFinancials/);
   assert.match(routeSource, /collection === 'clients'[\s\S]*enrichClientsWithBackendFinancials/);
 });
+
+test('rentals page uses paginated list and lazy bounded drawer context', () => {
+  const pageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Rentals.tsx'), 'utf8');
+  const serviceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/rentals.service.ts'), 'utf8');
+  const routeSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/rentals.js'), 'utf8');
+
+  assert.match(pageSource, /rentalsService\.getPaginated\(rentalListQuery\)/);
+  assert.doesNotMatch(pageSource, /queryFn: rentalsService\.getAll/);
+  assert.doesNotMatch(pageSource, /queryFn: rentalsService\.getGanttData,\s*\n\s*\}\)/);
+  assert.match(pageSource, /enabled: shouldLoadTimelineData/);
+  assert.match(pageSource, /rentalsService\.getContext\(selectedRentalContextId\)/);
+  assert.match(pageSource, /drawerPayments/);
+  assert.match(serviceSource, /\/api\/rentals\/.+\/context/);
+  assert.match(routeSource, /\/:id\/context/);
+  assert.match(routeSource, /summary: buildRentalsSummary\(rows\)/);
+});
+
+test('planner page and route use bounded date windows', () => {
+  const pageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Planner.tsx'), 'utf8');
+  const hookSource = fs.readFileSync(path.join(process.cwd(), 'src/app/hooks/usePlanner.ts'), 'utf8');
+  const serviceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/planner.service.ts'), 'utf8');
+  const routeSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/planner.js'), 'utf8');
+
+  assert.match(pageSource, /plannerDateWindow\(filters\)/);
+  assert.match(pageSource, /dateFrom: plannerWindow\.dateFrom/);
+  assert.match(pageSource, /dateTo: plannerWindow\.dateTo/);
+  assert.match(hookSource, /PlannerRowsQuery/);
+  assert.match(serviceSource, /params\.set\('dateFrom', dateFrom\)/);
+  assert.match(serviceSource, /params\.set\('dateTo', dateTo\)/);
+  assert.match(routeSource, /resolvePlannerDateWindow\(req\.query\)/);
+  assert.match(routeSource, /MAX_PLANNER_WINDOW_DAYS/);
+});

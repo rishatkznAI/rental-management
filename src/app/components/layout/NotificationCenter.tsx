@@ -72,11 +72,11 @@ export function NotificationCenter() {
 
   const results = useQueries({
     queries: [
-      { queryKey: ['notif-gantt-rentals'], queryFn: rentalsService.getGanttData, enabled: canViewRentals && canReadCollection('gantt_rentals') },
+      { queryKey: ['notif-gantt-rentals'], queryFn: rentalsService.getGanttData, enabled: open && canViewRentals && canReadCollection('gantt_rentals') },
       { queryKey: ['notif-service'], queryFn: serviceTicketsService.getAll, enabled: open && canViewService && canReadCollection('service') },
-      { queryKey: ['notif-equipment'], queryFn: equipmentService.getAll, enabled: canViewEquipment && canReadCollection('equipment') },
-      { queryKey: ['notif-payments'], queryFn: paymentsService.getAll, enabled: canViewPayments && canReadCollection('payments') },
-      { queryKey: ['notif-shipping-photos'], queryFn: equipmentService.getAllShippingPhotos, enabled: canViewShippingPhotos },
+      { queryKey: ['notif-equipment'], queryFn: equipmentService.getAll, enabled: open && canViewEquipment && canReadCollection('equipment') },
+      { queryKey: ['notif-payments'], queryFn: paymentsService.getAll, enabled: open && canViewPayments && canReadCollection('payments') },
+      { queryKey: ['notif-shipping-photos'], queryFn: equipmentService.getAllShippingPhotos, enabled: open && canViewShippingPhotos },
       { queryKey: ['notif-rental-change-requests'], queryFn: rentalChangeRequestsService.getAll, enabled: canViewApprovals && canReadCollection('rental_change_requests') },
     ],
   });

@@ -28,6 +28,56 @@ function requirePlannerDeps(deps) {
   }
 }
 
+const DEFAULT_PLANNER_PAST_DAYS = 7;
+const DEFAULT_PLANNER_FUTURE_DAYS = 45;
+const MAX_PLANNER_WINDOW_DAYS = 180;
+
+function dateKey(value) {
+  if (!value) return '';
+  const raw = String(value).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const date = value instanceof Date ? value : new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().slice(0, 10);
+}
+
+function addDaysKey(base, days) {
+  const [year, month, day] = String(base).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function daysBetween(from, to) {
+  const [fromYear, fromMonth, fromDay] = String(from).split('-').map(Number);
+  const [toYear, toMonth, toDay] = String(to).split('-').map(Number);
+  return Math.round((Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay)) / 86400000);
+}
+
+function resolvePlannerDateWindow(query, today = new Date().toISOString().slice(0, 10)) {
+  const requestedFrom = dateKey(query.dateFrom);
+  const requestedTo = dateKey(query.dateTo);
+  const dateFrom = requestedFrom || addDaysKey(today, -DEFAULT_PLANNER_PAST_DAYS);
+  const dateTo = requestedTo || addDaysKey(today, DEFAULT_PLANNER_FUTURE_DAYS);
+  if (!dateFrom || !dateTo || dateFrom > dateTo) {
+    return { ok: false, status: 400, error: 'Некорректный период планировщика.' };
+  }
+  const span = daysBetween(dateFrom, dateTo);
+  if (span > MAX_PLANNER_WINDOW_DAYS) {
+    return {
+      ok: false,
+      status: 400,
+      error: `Период планировщика не может превышать ${MAX_PLANNER_WINDOW_DAYS} дней.`,
+    };
+  }
+  return { ok: true, dateFrom, dateTo };
+}
+
+function rowInPlannerWindow(row, dateFrom, dateTo) {
+  const startDate = dateKey(row?.startDate);
+  return Boolean(startDate && startDate >= dateFrom && startDate <= dateTo);
+}
+
 function registerPlannerRoutes(apiRouter, deps) {
   requirePlannerDeps(deps);
 
@@ -45,9 +95,17 @@ function registerPlannerRoutes(apiRouter, deps) {
   apiRouter.get('/planner', requireAuth, requireRead('planner_items'), (req, res) => {
     try {
       const includeShipped = req.query.include_shipped === '1';
+      const window = resolvePlannerDateWindow(req.query);
+      if (!window.ok) return res.status(window.status).json({ ok: false, error: window.error });
       const collections = readScopedPlannerCollections({ readData, accessControl, user: req.user });
-      const rows = buildPlannerRows(collections, { includeShipped });
-      res.json(rows);
+      const rows = buildPlannerRows(collections, { includeShipped })
+        .filter(row => rowInPlannerWindow(row, window.dateFrom, window.dateTo));
+      res.json({
+        items: rows,
+        dateFrom: window.dateFrom,
+        dateTo: window.dateTo,
+        total: rows.length,
+      });
     } catch (err) {
       console.error('[PLANNER] GET /api/planner error:', err.message);
       res.status(500).json({ ok: false, error: err.message });
@@ -115,4 +173,5 @@ function registerPlannerRoutes(apiRouter, deps) {
 
 module.exports = {
   registerPlannerRoutes,
+  resolvePlannerDateWindow,
 };

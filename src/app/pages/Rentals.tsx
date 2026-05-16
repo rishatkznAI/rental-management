@@ -395,6 +395,45 @@ function canonicalizeGanttRentalFromClassic(
   };
 }
 
+function ganttRentalFromClassicRental(rental: Rental, equipmentList: Equipment[] = []): GanttRentalData {
+  const fields = rental as RentalEquipmentFields;
+  const resolved = resolveRentalEquipment(fields, equipmentList);
+  const equipment = resolved.equipment;
+  const endDate = rental.plannedReturnDate || fields.endDate || rental.startDate || '';
+  return {
+    id: rental.id,
+    rentalId: rental.id,
+    sourceRentalId: rental.id,
+    originalRentalId: rental.id,
+    clientId: rental.clientId || '',
+    client: rental.client || (rental as Rental & { clientName?: string }).clientName || '',
+    clientShort: (rental.client || (rental as Rental & { clientName?: string }).clientName || '').substring(0, 20),
+    equipmentId: fields.equipmentId || equipment?.id || '',
+    equipmentInv: fields.equipmentInv || fields.inventoryNumber || equipment?.inventoryNumber || (Array.isArray(rental.equipment) ? String(rental.equipment[0] || '') : ''),
+    serialNumber: fields.serialNumber || equipment?.serialNumber || '',
+    startDate: rental.startDate || '',
+    endDate,
+    manager: rental.manager || '',
+    status: (rental.status === 'closed' ? 'closed' : rental.status || 'created') as GanttRentalData['status'],
+    paymentStatus: (fields.paymentStatus || 'unpaid') as GanttRentalData['paymentStatus'],
+    amount: fields.amount || rental.price || 0,
+    expectedPaymentDate: (rental as Rental & { expectedPaymentDate?: string }).expectedPaymentDate,
+    updSigned: (rental as Rental & { updSigned?: boolean }).updSigned,
+    updDate: (rental as Rental & { updDate?: string }).updDate,
+    downtimeDays: rental.downtimeDays,
+    downtimeReason: rental.downtimeReason,
+    downtimeStartDate: rental.downtimeStartDate,
+    downtimeEndDate: rental.downtimeEndDate,
+    downtimeComment: rental.downtimeComment,
+    downtimeStatus: rental.downtimeStatus,
+    downtimeAffectsBilling: rental.downtimeAffectsBilling,
+    downtimeBillableDays: rental.downtimeBillableDays,
+    billableDays: rental.billableDays,
+    activeRentalDays: rental.activeRentalDays,
+    downtimePeriods: rental.downtimePeriods as DowntimePeriod[] | undefined,
+  } as GanttRentalData;
+}
+
 function getBrokenRentalLinkReason(
   ganttRental: GanttRentalData,
   candidates: Rental[] = [],
@@ -1270,18 +1309,58 @@ export default function Rentals() {
   const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>([]);
   const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<RentalWorkspaceTab>('list');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_RENTAL_LIST_PAGE_SIZE);
+  const [filterModel, setFilterModel] = useState('');
+  const [filterManager, setFilterManager] = useState('');
+  const [filterOwner, setFilterOwner] = useState('');
+  const [filterClient, setFilterClient] = useState('');
+  const [filterUpd, setFilterUpd] = useState('');
+  const [filterPayment, setFilterPayment] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterEquipmentStatus, setFilterEquipmentStatus] = useState<FleetEquipmentStatusFilter>('');
+  const [returnStateFilter, setReturnStateFilter] = useState<ReturnStateFilter>('');
+  const [returnDeliveryFilter, setReturnDeliveryFilter] = useState<ReturnDeliveryFilter>('');
+  const [returnServiceFilter, setReturnServiceFilter] = useState<ReturnServiceFilter>('');
+  const [debtDocsProblemFilter, setDebtDocsProblemFilter] = useState<DebtDocsProblemFilter>('');
+  const [debtDocsDocumentFilter, setDebtDocsDocumentFilter] = useState<DebtDocsDocumentFilter>('');
+  const [rentalPreset, setRentalPreset] = useState<'all' | 'returns_today' | 'overdue' | 'unpaid' | 'with_service'>('all');
+
+  const rentalListQuery = useMemo(() => ({
+    page: currentPage,
+    pageSize,
+    search: filterModel.trim(),
+    sortBy: 'plannedReturnDate',
+    sortDir: 'asc' as const,
+    filters: {
+      managerId: filterManager,
+      client: filterClient,
+      status: filterStatus && filterStatus !== AVAILABLE_EQUIPMENT_STATUS_FILTER ? filterStatus : '',
+      paymentStatus: filterPayment,
+      updSigned: filterUpd,
+      ownerId: filterOwner,
+      preset: rentalPreset !== 'all' && rentalPreset !== 'with_service' ? rentalPreset : '',
+    },
+  }), [currentPage, filterClient, filterManager, filterModel, filterOwner, filterPayment, filterStatus, filterUpd, pageSize, rentalPreset]);
+  const { data: rentalsPage } = useQuery({
+    queryKey: RENTAL_KEYS.paginated(rentalListQuery),
+    queryFn: () => rentalsService.getPaginated(rentalListQuery),
+    placeholderData: previous => previous,
+  });
+  const classicRentalData = rentalsPage?.items ?? EMPTY_RENTALS;
+  const shouldLoadTimelineData = activeWorkspaceTab === 'planner' || activeWorkspaceTab === 'movement';
 
   const { data: ganttData = EMPTY_GANTT_RENTALS } = useQuery({
     queryKey: RENTAL_KEYS.gantt,
     queryFn: rentalsService.getGanttData,
-  });
-  const { data: classicRentalData = EMPTY_RENTALS } = useQuery({
-    queryKey: RENTAL_KEYS.all,
-    queryFn: rentalsService.getAll,
+    enabled: false,
   });
   const { data: equipmentData = EMPTY_EQUIPMENT } = useQuery({
-    queryKey: EQUIPMENT_KEYS.all,
-    queryFn: equipmentService.getAll,
+    queryKey: EQUIPMENT_KEYS.paginated({ page: 1, pageSize: 100 }),
+    queryFn: () => equipmentService.getPaginated({ page: 1, pageSize: 100 }),
+    select: response => response.items,
+    enabled: shouldLoadTimelineData,
   });
   const { data: downtimeData = EMPTY_DOWNTIMES } = useQuery({
     queryKey: RENTAL_KEYS.downtimes,
@@ -1289,25 +1368,25 @@ export default function Rentals() {
     enabled: canViewDowntimes,
   });
   const { data: paymentData = EMPTY_PAYMENTS } = useQuery({
-    queryKey: PAYMENT_KEYS.all,
-    queryFn: paymentsService.getAll,
+    queryKey: ['payments', 'rentals-page', rentalListQuery],
+    queryFn: () => paymentsService.getPaginated({ page: 1, pageSize: 100, filters: { preset: '' } }).then(response => response.items),
     enabled: canViewPayments,
   });
-  const { data: documentsData = EMPTY_DOCUMENTS } = useDocumentsList({ enabled: canViewDocuments });
+  const { data: documentsData = EMPTY_DOCUMENTS } = useDocumentsList({ enabled: false });
   const { data: deliveriesData = EMPTY_DELIVERIES } = useQuery<Delivery[]>({
-    queryKey: ['deliveries'],
-    queryFn: deliveriesService.getAll,
-    enabled: canViewDeliveries && canReadCollection('deliveries'),
+    queryKey: ['deliveries', 'rentals-page'],
+    queryFn: () => deliveriesService.getPaginated({ page: 1, pageSize: 100 }).then(response => response.items),
+    enabled: shouldLoadTimelineData && canViewDeliveries && canReadCollection('deliveries'),
   });
   const { data: shippingPhotos = EMPTY_SHIPPING_PHOTOS } = useQuery<ShippingPhoto[]>({
     queryKey: ['shippingPhotos', 'all'],
     queryFn: equipmentService.getAllShippingPhotos,
-    enabled: canViewShippingPhotos,
+    enabled: shouldLoadTimelineData && canViewShippingPhotos,
   });
   const { data: serviceTickets = EMPTY_SERVICE_TICKETS } = useQuery<ServiceTicket[]>({
-    queryKey: SERVICE_TICKET_KEYS.all,
-    queryFn: serviceTicketsService.getAll,
-    enabled: canViewService,
+    queryKey: ['service', 'rentals-page'],
+    queryFn: () => serviceTicketsService.getPaginated({ page: 1, pageSize: 100 }).then(response => response.items),
+    enabled: shouldLoadTimelineData && canViewService,
   });
   const { data: usersData = EMPTY_STAFF_OPTIONS } = useQuery<StaffOption[]>({
     queryKey: ['staff', 'manager-options'],
@@ -1315,8 +1394,8 @@ export default function Rentals() {
     enabled: canViewStaffOptions,
   });
   const { data: clientsData = EMPTY_CLIENTS } = useQuery({
-    queryKey: ['clients'],
-    queryFn: clientsService.getAll,
+    queryKey: ['clients', 'rentals-page'],
+    queryFn: () => clientsService.getPaginated({ page: 1, pageSize: 100 }).then(response => response.items),
     enabled: canViewClients,
   });
 
@@ -1364,6 +1443,10 @@ export default function Rentals() {
   }, [equipmentData, investorBinding, isInvestorRole]);
 
   useEffect(() => {
+    if (!shouldLoadTimelineData) {
+      setGanttRentals(classicRentalData.map(rental => ganttRentalFromClassicRental(rental, equipmentData)));
+      return;
+    }
     const classicById = new Map(classicRentalData.map(item => [item.id, item]));
     const canonicalGanttData = ganttData.map(item => {
       const sourceRentalId = getGanttRentalSourceId(item);
@@ -1387,15 +1470,24 @@ export default function Rentals() {
       (item.equipmentId && investorEquipmentIds.has(item.equipmentId))
       || (!item.equipmentId && investorInventoryNumbers.has(item.equipmentInv)),
     ));
-  }, [classicRentalData, equipmentData, ganttData, investorEquipmentIds, investorInventoryNumbers, isInvestorRole]);
+  }, [classicRentalData, equipmentData, ganttData, investorEquipmentIds, investorInventoryNumbers, isInvestorRole, shouldLoadTimelineData]);
 
   useEffect(() => {
+    if (!shouldLoadTimelineData) {
+      const pageEquipment = new Map<string, Equipment>();
+      classicRentalData.forEach(rental => {
+        const inline = (rental as Rental & { equipmentDetails?: Equipment }).equipmentDetails;
+        if (inline?.id) pageEquipment.set(inline.id, inline);
+      });
+      setEquipmentList([...pageEquipment.values()]);
+      return;
+    }
     if (!isInvestorRole || !investorEquipmentIds) {
       setEquipmentList(equipmentData);
       return;
     }
     setEquipmentList(equipmentData.filter(item => investorEquipmentIds.has(item.id)));
-  }, [equipmentData, investorEquipmentIds, isInvestorRole]);
+  }, [classicRentalData, equipmentData, investorEquipmentIds, isInvestorRole, shouldLoadTimelineData]);
 
   useEffect(() => {
     setPayments(paymentData);
@@ -1672,6 +1764,30 @@ export default function Rentals() {
   const [customRangeStart, setCustomRangeStart] = useState(format(currentMonthStart, 'yyyy-MM-dd'));
   const [customRangeEnd, setCustomRangeEnd] = useState(format(currentMonthEnd, 'yyyy-MM-dd'));
   const [selectedRental, setSelectedRental] = useState<GanttRentalData | null>(null);
+  const selectedRentalContextId = selectedRental ? getDrawerCanonicalRentalId(selectedRental) : '';
+  const { data: selectedRentalContext } = useQuery({
+    queryKey: ['rentals', selectedRentalContextId, 'context'],
+    queryFn: () => rentalsService.getContext(selectedRentalContextId),
+    enabled: Boolean(selectedRentalContextId),
+  });
+  const drawerClassicRentals = useMemo(
+    () => [
+      ...(selectedRentalContext?.rental ? [selectedRentalContext.rental] : []),
+      ...classicRentalData,
+    ],
+    [classicRentalData, selectedRentalContext?.rental],
+  );
+  const drawerGanttRentals = selectedRentalContext?.ganttRentals?.length
+    ? selectedRentalContext.ganttRentals
+    : ganttRentals;
+  const drawerEquipmentList = selectedRentalContext?.equipment?.length
+    ? selectedRentalContext.equipment
+    : equipmentList;
+  const drawerPayments = selectedRentalContext?.payments ?? EMPTY_PAYMENTS;
+  const drawerDocuments = selectedRentalContext?.documents ?? EMPTY_DOCUMENTS;
+  const drawerDeliveries = selectedRentalContext?.deliveries ?? EMPTY_DELIVERIES;
+  const drawerServiceTickets = selectedRentalContext?.serviceTickets ?? EMPTY_SERVICE_TICKETS;
+  const drawerClients = selectedRentalContext?.clients?.length ? selectedRentalContext.clients : clientsData;
   const [linkDiagnosticRow, setLinkDiagnosticRow] = useState<{
     rental: GanttRentalData;
     classicRental?: Rental | null;
@@ -1690,12 +1806,9 @@ export default function Rentals() {
   const [returnRental, setReturnRental] = useState<GanttRentalData | null>(null);
   const [editingDowntime, setEditingDowntime] = useState<DowntimePeriod | null>(null);
   const [downtimeRentalContext, setDowntimeRentalContext] = useState<GanttRentalData | null>(null);
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<RentalWorkspaceTab>('list');
   const [compactView, setCompactView] = useState<CompactView>('cards');
   const [densityMode, setDensityMode] = useState<DensityMode>('comfortable');
   const [rentalMovementScale, setRentalMovementScale] = useState<RentalMovementScale>('days');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_RENTAL_LIST_PAGE_SIZE);
   const [movementFilter, setMovementFilter] = useState<'all' | 'shipping' | 'receiving'>('all');
   const [isDesktopViewport, setIsDesktopViewport] = useState(() => (
     typeof window !== 'undefined'
@@ -1713,20 +1826,6 @@ export default function Rentals() {
   );
 
   // Filters (always live — no explicit "apply" gate needed)
-  const [filterModel, setFilterModel] = useState('');
-  const [filterManager, setFilterManager] = useState('');
-  const [filterOwner, setFilterOwner] = useState('');
-  const [filterClient, setFilterClient] = useState('');
-  const [filterUpd, setFilterUpd] = useState('');
-  const [filterPayment, setFilterPayment] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterEquipmentStatus, setFilterEquipmentStatus] = useState<FleetEquipmentStatusFilter>('');
-  const [returnStateFilter, setReturnStateFilter] = useState<ReturnStateFilter>('');
-  const [returnDeliveryFilter, setReturnDeliveryFilter] = useState<ReturnDeliveryFilter>('');
-  const [returnServiceFilter, setReturnServiceFilter] = useState<ReturnServiceFilter>('');
-  const [debtDocsProblemFilter, setDebtDocsProblemFilter] = useState<DebtDocsProblemFilter>('');
-  const [debtDocsDocumentFilter, setDebtDocsDocumentFilter] = useState<DebtDocsDocumentFilter>('');
-  const [rentalPreset, setRentalPreset] = useState<'all' | 'returns_today' | 'overdue' | 'unpaid' | 'with_service'>('all');
   const [fleetLayers, setFleetLayers] = useState<Record<FleetLayerKey, boolean>>({
     returns: true,
     deliveries: true,
@@ -2620,11 +2719,21 @@ export default function Rentals() {
 
     return rentalRows
       .map(rental => {
-        const sourceRentalId = getGanttRentalSourceId(rental);
-        const classicRental = sourceRentalId ? classicRentalsById.get(sourceRentalId) : undefined;
+        const canonicalRentalId = String((rental as GanttRentalData & { __canonicalRentalId?: string }).__canonicalRentalId || '').trim();
+        const sourceRentalId = getGanttRentalSourceId(rental) || canonicalRentalId || (String(rental.id || '').startsWith('R-') ? String(rental.id) : '');
+        const classicRental = sourceRentalId
+          ? classicRentalsById.get(sourceRentalId)
+            || (sourceRentalId === rental.id && String(rental.id || '').startsWith('R-') ? (rental as unknown as Rental) : undefined)
+          : undefined;
         const equipment = rental.equipmentId
           ? equipmentById.get(rental.equipmentId)
           : equipmentList.find(item => item.inventoryNumber === rental.equipmentInv);
+        const linkEquipment = equipment || (!shouldLoadTimelineData && classicRental && (rental.equipmentId || rental.equipmentInv)
+          ? ({
+              id: rental.equipmentId || rental.equipmentInv,
+              inventoryNumber: rental.equipmentInv || '',
+            } as Equipment)
+          : undefined);
         const linkedPayments = payments.filter(payment =>
           payment.rentalId === rental.id ||
           (!!sourceRentalId && payment.rentalId === sourceRentalId),
@@ -2672,7 +2781,7 @@ export default function Rentals() {
         const linkStatus = classifyRentalLinkStatus({
           ganttRental: rental,
           classicRental,
-          equipment,
+          equipment: linkEquipment,
           relatedDocuments,
           duplicateGanttCount: sourceRentalId ? (duplicateGanttCountByRentalId.get(sourceRentalId) || 1) : 1,
           candidateCount: (rental as DrawerRentalData).__brokenRentalLinkReason === 'MULTIPLE_CANDIDATES' ? 2 : 0,
@@ -2771,31 +2880,33 @@ export default function Rentals() {
     payments,
     rentalRows,
     serviceTickets,
+    shouldLoadTimelineData,
     today,
     viewEnd,
     viewStart,
   ]);
 
   const rentalWorkspaceKpis = useMemo(() => {
+    const summary = rentalsPage?.summary;
     const todayKey = format(today, 'yyyy-MM-dd');
     const tomorrowKey = format(addDays(today, 1), 'yyyy-MM-dd');
     const activeRows = rentalDealRows.filter(row => row.isActive);
     const deliveryToday = movementEntries.filter(entry => entry.type === 'shipping' && String(entry.date || '').slice(0, 10) === todayKey).length;
-    const returnsToday = activeRows.filter(row => row.rental.endDate === todayKey).length;
+    const returnsToday = summary?.returnsToday ?? activeRows.filter(row => row.rental.endDate === todayKey).length;
     const returnsTomorrow = activeRows.filter(row => row.rental.endDate === tomorrowKey).length;
     return {
-      activeRentals: activeRows.filter(row => row.rental.status === 'active').length,
-      newDrafts: rentalDealRows.filter(row => row.rental.status === 'created').length,
+      activeRentals: summary?.active ?? activeRows.filter(row => row.rental.status === 'active').length,
+      newDrafts: summary?.created ?? rentalDealRows.filter(row => row.rental.status === 'created').length,
       onDelivery: activeRows.filter(row => row.hasShippingDelivery && !row.hasReturnDelivery).length || deliveryToday,
       returnsToday,
       returnsTomorrow,
       returnsTodayTomorrow: returnsToday + returnsTomorrow,
-      overdueReturns: activeRows.filter(row => row.rental.endDate < todayKey).length,
+      overdueReturns: summary?.overdueReturns ?? activeRows.filter(row => row.rental.endDate < todayKey).length,
       rentalDebt: activeRows.reduce((sum, row) => sum + row.debtAmount, 0),
       missingDocs: activeRows.filter(row => !row.rental.updSigned || !row.sourceRentalId).length,
       deliveryToday,
     };
-  }, [movementEntries, rentalDealRows, today]);
+  }, [movementEntries, rentalDealRows, rentalsPage?.summary, today]);
 
   const returnsWorkspaceRows = useMemo(
     () => rentalDealRows
@@ -2850,10 +2961,24 @@ export default function Rentals() {
     return rentalDealRows;
   }, [activeWorkspaceTab, debtDocsWorkspaceRows, rentalDealRows, returnsWorkspaceRows]);
 
-  const rentalListPagination = useMemo(
-    () => getRentalListPageState(filteredRentalRows, currentPage, pageSize),
-    [currentPage, filteredRentalRows, pageSize],
-  );
+  const rentalListPagination = useMemo(() => {
+    const server = rentalsPage?.pagination;
+    if (server && activeWorkspaceTab === 'list') {
+      const total = server.total;
+      const start = total === 0 ? 0 : (server.page - 1) * server.pageSize + 1;
+      const end = Math.min(total, start + filteredRentalRows.length - 1);
+      return {
+        currentPage: server.page,
+        maxPage: server.totalPages,
+        total,
+        pageItems: filteredRentalRows,
+        rangeLabel: total === 0 ? 'Ничего не найдено' : `Показано ${start}–${end} из ${total}`,
+        hasPreviousPage: server.hasPrevPage,
+        hasNextPage: server.hasNextPage,
+      };
+    }
+    return getRentalListPageState(filteredRentalRows, currentPage, pageSize);
+  }, [activeWorkspaceTab, currentPage, filteredRentalRows, pageSize, rentalsPage?.pagination]);
   const paginatedRentalRows = rentalListPagination.pageItems;
 
   useEffect(() => {
@@ -5791,14 +5916,14 @@ export default function Rentals() {
       {/* ===== Drawer ===== */}
       <RentalDrawer
         rental={selectedRental}
-        equipment={selectedRental ? equipmentList.find(e => matchesEquipmentRow(selectedRental, e)) : undefined}
-        allRentals={rentalRows}
-        classicRentals={classicRentalData}
-        payments={payments}
-        documents={documentsData}
-        serviceTickets={serviceTickets}
-        clients={computedClients}
-        deliveries={deliveriesData}
+        equipment={selectedRental ? drawerEquipmentList.find(e => matchesEquipmentRow(selectedRental, e)) : undefined}
+        allRentals={drawerGanttRentals}
+        classicRentals={drawerClassicRentals}
+        payments={drawerPayments}
+        documents={drawerDocuments}
+        serviceTickets={drawerServiceTickets}
+        clients={drawerClients}
+        deliveries={drawerDeliveries}
         clientReceivables={clientReceivables}
         managers={managersList}
         canEditRentals={canEditRentals}

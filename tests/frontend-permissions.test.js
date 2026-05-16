@@ -238,13 +238,13 @@ test('frontend warranty service detail avoids forbidden service vehicle fetches 
 test('frontend warranty pages do not prefetch forbidden operational collections', () => {
   assert.match(equipmentHookSource, /enabled: options\.enabled \?\? true/);
   assert.match(serviceTicketsHookSource, /enabled: options\.enabled \?\? true/);
-  assert.match(sidebarSource, /useEquipmentList\(\{ enabled: canSearchEquipment \}\)/);
+  assert.match(sidebarSource, /useEquipmentList\(\{ enabled: hasSearchInput && canSearchEquipment \}\)/);
   assert.match(sidebarSource, /useServiceTicketsList\(\{ enabled: hasSearchInput && canSearchService \}\)/);
   assert.match(sidebarSource, /queryKey: \['deliveries', 'global-search', user\?\.id \|\| 'anonymous', user\?\.role \|\| 'anonymous'\]/);
 
   assert.match(notificationCenterSource, /const \{ canView, canReadCollection \} = usePermissions\(\)/);
   assert.match(notificationCenterSource, /const canViewShippingPhotos = canReadCollection\('shipping_photos'\)/);
-  assert.match(notificationCenterSource, /enabled: canViewShippingPhotos/);
+  assert.match(notificationCenterSource, /enabled: open && canViewShippingPhotos/);
 
   assert.match(rentalsPageSource, /const canViewClients = can\('view', 'clients'\)/);
   assert.match(rentalsPageSource, /const canViewPayments = can\('view', 'payments'\) \|\| can\('view', 'finance'\)/);
@@ -253,7 +253,7 @@ test('frontend warranty pages do not prefetch forbidden operational collections'
   assert.match(rentalsPageSource, /enabled: canViewStaffOptions/);
   assert.match(rentalsPageSource, /enabled: canViewClients/);
   assert.match(rentalsPageSource, /const canViewService = can\('view', 'service'\)/);
-  assert.match(rentalsPageSource, /enabled: canViewService/);
+  assert.match(rentalsPageSource, /enabled: shouldLoadTimelineData && canViewService/);
   assert.match(rentalsPageSource, /const canViewApprovals = can\('view', 'approvals'\)/);
   assert.match(rentalsPageSource, /useRentalChangeRequestsList\(canViewApprovals\)/);
 
@@ -297,7 +297,7 @@ test('frontend investor rental surfaces avoid forbidden background reads', () =>
   assert.match(rentalsPageSource, /const canViewApprovals = can\('view', 'approvals'\)/);
   assert.match(rentalsPageSource, /enabled: canViewClients/);
   assert.match(rentalsPageSource, /enabled: canViewPayments/);
-  assert.match(rentalsPageSource, /enabled: canViewService/);
+  assert.match(rentalsPageSource, /enabled: shouldLoadTimelineData && canViewService/);
   assert.match(rentalsPageSource, /useRentalChangeRequestsList\(canViewApprovals\)/);
 
   assert.match(rentalDetailSource, /const canViewClients = can\('view', 'clients'\)/);

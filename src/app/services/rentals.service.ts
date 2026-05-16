@@ -1,5 +1,6 @@
 import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import type { Rental } from '../types';
+import type { Client, Delivery, Document, Equipment, Payment, ServiceTicket } from '../types';
 import type { DowntimePeriod, GanttRentalData } from '../mock-data';
 
 export type RentalExtensionConflict = {
@@ -47,6 +48,28 @@ export type RentalDowntimeResponse = {
   };
 };
 
+export type RentalsSummary = {
+  total: number;
+  active: number;
+  created: number;
+  returned: number;
+  closed: number;
+  overdueReturns: number;
+  returnsToday: number;
+  unpaid: number;
+};
+
+export type RentalContextResponse = {
+  rental: Rental | null;
+  ganttRentals: GanttRentalData[];
+  equipment: Equipment[];
+  clients: Client[];
+  payments: Payment[];
+  documents: Document[];
+  deliveries: Delivery[];
+  serviceTickets: ServiceTicket[];
+};
+
 export type GanttRentalRepairResponse = {
   ok: boolean;
   applied: boolean;
@@ -72,11 +95,14 @@ export const rentalsService = {
   getAll: (): Promise<Rental[]> =>
     api.get<Rental[]>('/api/rentals'),
 
-  getPaginated: (params?: PaginatedQueryParams): Promise<PaginatedResponse<Rental>> =>
-    api.get<PaginatedResponse<Rental>>(`/api/rentals${buildPaginatedQuery(params)}`),
+  getPaginated: (params?: PaginatedQueryParams): Promise<PaginatedResponse<Rental, RentalsSummary>> =>
+    api.get<PaginatedResponse<Rental, RentalsSummary>>(`/api/rentals${buildPaginatedQuery(params)}`),
 
   getById: (id: string): Promise<Rental | undefined> =>
     api.get<Rental>(`/api/rentals/${id}`).catch(() => undefined),
+
+  getContext: (id: string): Promise<RentalContextResponse> =>
+    api.get<RentalContextResponse>(`/api/rentals/${encodeURIComponent(id)}/context`),
 
   getAuditHistory: (id: string): Promise<{
     ok: boolean;

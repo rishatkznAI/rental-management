@@ -9,6 +9,7 @@ const express = serverRequire('express');
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { normalizeRole } = require('../server/lib/role-groups.js');
 const { registerPlannerRoutes } = require('../server/routes/planner.js');
+const { resolvePlannerDateWindow } = require('../server/routes/planner.js');
 const {
   buildPlannerRows,
   resolvePlannerRowSource,
@@ -265,22 +266,27 @@ async function request(baseUrl, method, path, token, body) {
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
 
+function plannerItems(body) {
+  return Array.isArray(body) ? body : body.items;
+}
+
 test('mechanic GET /api/planner returns only assigned service rows', async () => {
   await withServer(createApp(), async (baseUrl) => {
-    const response = await request(baseUrl, 'GET', '/api/planner', 'mechanic-token');
+    const response = await request(baseUrl, 'GET', '/api/planner?dateFrom=2026-05-08&dateTo=2026-05-11', 'mechanic-token');
     assert.equal(response.status, 200);
-    assert.deepEqual(response.body.map(row => row.id), ['service:S-own__INV-3']);
-    assert.equal(response.body[0].sourceType, 'service');
+    assert.deepEqual(plannerItems(response.body).map(row => row.id), ['service:S-own__INV-3']);
+    assert.equal(plannerItems(response.body)[0].sourceType, 'service');
   });
 });
 
 test('mechanic GET /api/planner does not expose rental or delivery client/address data', async () => {
   await withServer(createApp(), async (baseUrl) => {
-    const response = await request(baseUrl, 'GET', '/api/planner', 'mechanic-token');
+    const response = await request(baseUrl, 'GET', '/api/planner?dateFrom=2026-05-08&dateTo=2026-05-11', 'mechanic-token');
     assert.equal(response.status, 200);
-    assert.equal(response.body.some(row => row.sourceType === 'rental'), false);
-    assert.equal(response.body.some(row => row.sourceType === 'delivery'), false);
-    const payload = JSON.stringify(response.body);
+    const rows = plannerItems(response.body);
+    assert.equal(rows.some(row => row.sourceType === 'rental'), false);
+    assert.equal(rows.some(row => row.sourceType === 'delivery'), false);
+    const payload = JSON.stringify(rows);
     assert.equal(payload.includes('Секретный адрес аренды'), false);
     assert.equal(payload.includes('ООО Чужой клиент'), false);
     assert.equal(payload.includes('Адрес доставки 2'), false);
@@ -296,10 +302,10 @@ test('mechanic GET /api/planner keeps overlays only for accessible service rows'
     ],
   });
   await withServer(createApp(state), async (baseUrl) => {
-    const response = await request(baseUrl, 'GET', '/api/planner', 'mechanic-token');
+    const response = await request(baseUrl, 'GET', '/api/planner?dateFrom=2026-05-08&dateTo=2026-05-11', 'mechanic-token');
     assert.equal(response.status, 200);
-    assert.deepEqual(response.body.map(row => row.id), ['service:S-own__INV-3']);
-    assert.equal(response.body[0].prepStatus, 'ready');
+    assert.deepEqual(plannerItems(response.body).map(row => row.id), ['service:S-own__INV-3']);
+    assert.equal(plannerItems(response.body)[0].prepStatus, 'ready');
   });
 });
 
@@ -317,9 +323,9 @@ test('mechanic cannot PUT planner overlay for rental, delivery, or another servi
 test('admin keeps GET and PUT access to planner rows', async () => {
   const state = createState();
   await withServer(createApp(state), async (baseUrl) => {
-    const list = await request(baseUrl, 'GET', '/api/planner', 'admin-token');
+    const list = await request(baseUrl, 'GET', '/api/planner?dateFrom=2026-05-08&dateTo=2026-05-11', 'admin-token');
     assert.equal(list.status, 200);
-    assert.deepEqual(new Set(list.body.map(row => row.id)), new Set([
+    assert.deepEqual(new Set(plannerItems(list.body).map(row => row.id)), new Set([
       'R-1__INV-1',
       'R-2__INV-2',
       'delivery:D-1__INV-1',
@@ -340,9 +346,9 @@ test('admin keeps GET and PUT access to planner rows', async () => {
 test('office keeps GET and PUT access to planner rows', async () => {
   const state = createState();
   await withServer(createApp(state), async (baseUrl) => {
-    const list = await request(baseUrl, 'GET', '/api/planner', 'office-token');
+    const list = await request(baseUrl, 'GET', '/api/planner?dateFrom=2026-05-08&dateTo=2026-05-11', 'office-token');
     assert.equal(list.status, 200);
-    assert.equal(list.body.length, 6);
+    assert.equal(plannerItems(list.body).length, 6);
 
     const updated = await request(baseUrl, 'PUT', '/api/planner/delivery:D-1__INV-1', 'office-token', { prepStatus: 'ready' });
     assert.equal(updated.status, 200);
@@ -356,6 +362,38 @@ test('PUT /api/planner returns 404 when source row does not exist', async () => 
     const response = await request(baseUrl, 'PUT', '/api/planner/R-missing__INV-1', 'admin-token', { prepStatus: 'ready' });
     assert.equal(response.status, 404);
   });
+});
+
+test('planner route applies a safe default date window and bounded response metadata', async () => {
+  await withServer(createApp(), async (baseUrl) => {
+    const response = await request(baseUrl, 'GET', '/api/planner?dateFrom=2026-05-08&dateTo=2026-05-11', 'admin-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.dateFrom <= response.body.dateTo, true);
+    assert.equal(Array.isArray(response.body.items), true);
+    assert.equal(response.body.items.every(row => row.startDate >= response.body.dateFrom && row.startDate <= response.body.dateTo), true);
+  });
+});
+
+test('planner route honors explicit dateFrom/dateTo and rejects oversized windows', async () => {
+  await withServer(createApp(), async (baseUrl) => {
+    const bounded = await request(baseUrl, 'GET', '/api/planner?dateFrom=2026-05-09&dateTo=2026-05-10', 'admin-token');
+    assert.equal(bounded.status, 200);
+    assert.deepEqual(new Set(plannerItems(bounded.body).map(row => row.id)), new Set([
+      'R-1__INV-1',
+      'delivery:D-1__INV-1',
+      'delivery:D-2__INV-2',
+    ]));
+
+    const tooLarge = await request(baseUrl, 'GET', '/api/planner?dateFrom=2026-01-01&dateTo=2026-12-31', 'admin-token');
+    assert.equal(tooLarge.status, 400);
+  });
+});
+
+test('resolvePlannerDateWindow defaults without exposing all history', () => {
+  const window = resolvePlannerDateWindow({}, '2026-05-16');
+  assert.equal(window.ok, true);
+  assert.equal(window.dateFrom, '2026-05-09');
+  assert.equal(window.dateTo, '2026-06-30');
 });
 
 test('investor planner collections are owner-scoped when planner access is enabled', () => {

@@ -229,7 +229,7 @@ test('orphan gantt planner rows are excluded from rental workspace calculations 
   assert.match(rentalsSource, /return rentalDealRows/);
   assert.match(rentalsSource, /if \(activeWorkspaceTab === 'returns'\) return returnsWorkspaceRows/);
   assert.match(rentalsSource, /if \(activeWorkspaceTab === 'debt_docs'\) return debtDocsWorkspaceRows/);
-  assert.match(rentalsSource, /allRentals=\{rentalRows\}/);
+  assert.match(rentalsSource, /allRentals=\{drawerGanttRentals\}/);
   assert.match(rentalsSource, /ganttRentals=\{rentalRows\}/);
   assert.doesNotMatch(rentalsSource, /const totalRentals = ganttRentals\.length/);
 });

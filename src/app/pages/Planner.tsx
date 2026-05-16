@@ -7,7 +7,7 @@
  */
 
 import React, { useMemo, useState, useCallback, useRef } from 'react';
-import { format, parseISO } from 'date-fns';
+import { addDays, format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import {
   AlertTriangle,
@@ -127,6 +127,34 @@ const DEFAULT_FILTERS: Filters = {
   riskOnly:     false,
   search:       '',
 };
+
+function plannerDateWindow(filters: Filters) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (filters.dateRange === 'today') {
+    const key = format(today, 'yyyy-MM-dd');
+    return { dateFrom: key, dateTo: key };
+  }
+  if (filters.dateRange === 'tomorrow') {
+    const key = format(addDays(today, 1), 'yyyy-MM-dd');
+    return { dateFrom: key, dateTo: key };
+  }
+  if (filters.dateRange === 'custom' && filters.customFrom && filters.customTo) {
+    return filters.customFrom <= filters.customTo
+      ? { dateFrom: filters.customFrom, dateTo: filters.customTo }
+      : { dateFrom: filters.customTo, dateTo: filters.customFrom };
+  }
+  if (filters.dateRange === 'all') {
+    return {
+      dateFrom: format(addDays(today, -7), 'yyyy-MM-dd'),
+      dateTo: format(addDays(today, 173), 'yyyy-MM-dd'),
+    };
+  }
+  return {
+    dateFrom: format(today, 'yyyy-MM-dd'),
+    dateTo: format(addDays(today, 7), 'yyyy-MM-dd'),
+  };
+}
 
 // ── Вспомогательные функции ────────────────────────────────────────────────────
 
@@ -336,11 +364,17 @@ export default function Planner() {
   const canEdit = can('edit', 'planner');
 
   const [includeShipped, setIncludeShipped] = useState(false);
-  const { data: rows = [], isLoading, isFetching, refetch } = usePlannerRows(includeShipped);
-  const { mutate: updateItem } = useUpdatePlannerItem(includeShipped);
-
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
+  const plannerWindow = useMemo(() => plannerDateWindow(filters), [filters]);
+  const plannerQuery = useMemo(() => ({
+    includeShipped,
+    dateFrom: plannerWindow.dateFrom,
+    dateTo: plannerWindow.dateTo,
+  }), [includeShipped, plannerWindow.dateFrom, plannerWindow.dateTo]);
+  const { data: rowsResponse, isLoading, isFetching, refetch } = usePlannerRows(plannerQuery);
+  const rows = rowsResponse?.items ?? [];
+  const { mutate: updateItem } = useUpdatePlannerItem(includeShipped);
 
   // Уникальные менеджеры из данных
   const managers = useMemo(() => {

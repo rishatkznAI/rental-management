@@ -1,14 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { plannerService, type UpdatePlannerItemPayload } from '../services/planner.service';
+import { plannerService, type PlannerRowsQuery, type UpdatePlannerItemPayload } from '../services/planner.service';
 
 export const PLANNER_KEYS = {
-  rows:          (includeShipped: boolean) => ['planner', 'rows', includeShipped] as const,
+  rows:          (query: PlannerRowsQuery) => ['planner', 'rows', query] as const,
 };
 
-export function usePlannerRows(includeShipped = false) {
+export function usePlannerRows(query: PlannerRowsQuery) {
   return useQuery({
-    queryKey: PLANNER_KEYS.rows(includeShipped),
-    queryFn:  () => plannerService.getRows(includeShipped),
+    queryKey: PLANNER_KEYS.rows(query),
+    queryFn:  () => plannerService.getRows(query),
     staleTime: 1000 * 60,   // 1 минута
     refetchOnWindowFocus: true,
   });

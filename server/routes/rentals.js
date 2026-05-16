@@ -88,6 +88,24 @@ const RENTAL_PAGINATION_CONFIG = {
   defaultSort: { sortBy: 'startDate', sortDir: 'desc' },
 };
 
+function isActiveRentalForSummary(item) {
+  return !isClosedRentalStatus(item?.status) && !item?.actualReturnDate;
+}
+
+function buildRentalsSummary(rows, today = new Date().toISOString().slice(0, 10)) {
+  const active = rows.filter(isActiveRentalForSummary);
+  return {
+    total: rows.length,
+    active: active.length,
+    created: rows.filter(item => String(item?.status || '') === 'created').length,
+    returned: rows.filter(item => String(item?.status || '') === 'returned').length,
+    closed: rows.filter(item => isClosedRentalStatus(item?.status)).length,
+    overdueReturns: active.filter(item => String(item?.plannedReturnDate || item?.endDate || '').slice(0, 10) < today).length,
+    returnsToday: active.filter(item => String(item?.plannedReturnDate || item?.endDate || '').slice(0, 10) === today).length,
+    unpaid: rows.filter(item => String(item?.paymentStatus || '') !== 'paid').length,
+  };
+}
+
 function filterRentalsForPagination(data, query) {
   let rows = Array.isArray(data) ? data : [];
   rows = rows.filter(item => itemMatchesSearch(item, query.search, RENTAL_PAGINATION_CONFIG.searchFields));
@@ -104,6 +122,20 @@ function filterRentalsForPagination(data, query) {
     const value = String(query[name] || '').trim();
     if (value && value !== 'all') rows = rows.filter(item => String(getter(item) || '') === value);
   });
+  const client = String(query.client || '').trim().toLowerCase();
+  if (client) {
+    rows = rows.filter(item => String(item.clientName || item.client || '').toLowerCase().includes(client));
+  }
+  const equipment = String(query.equipment || '').trim().toLowerCase();
+  if (equipment) {
+    rows = rows.filter(item => [
+      item.equipmentId,
+      item.equipmentInv,
+      item.inventoryNumber,
+      item.serialNumber,
+      ...(Array.isArray(item.equipment) ? item.equipment : []),
+    ].filter(Boolean).join(' ').toLowerCase().includes(equipment));
+  }
   const dateFrom = String(query.dateFrom || '').trim();
   const dateTo = String(query.dateTo || '').trim();
   if (dateFrom || dateTo) {
@@ -1119,10 +1151,98 @@ function registerRentalRoutes(deps) {
       );
       if (wantsPaginatedResponse(req.query)) {
         const rows = filterRentalsForPagination(scoped, req.query);
-        return res.json(buildPaginatedResponse(rows, req.query, RENTAL_PAGINATION_CONFIG));
+        return res.json(buildPaginatedResponse(rows, req.query, {
+          ...RENTAL_PAGINATION_CONFIG,
+          summary: buildRentalsSummary(rows),
+        }));
       }
       return res.json(scoped);
     });
+
+    if (collection === 'rentals') {
+      router.get(`/${collection}/:id/context`, requireAuth, requireRead(collection), (req, res) => {
+        const routeId = normalizeAuditText(req.params.id);
+        const rentals = readData('rentals') || [];
+        const ganttRentals = readData('gantt_rentals') || [];
+        let rental = rentals.find(item => normalizeAuditText(item?.id) === routeId) || null;
+        let ganttRental = ganttRentals.find(item => normalizeAuditText(item?.id) === routeId) || null;
+
+        if (!rental && ganttRental) {
+          const linkedId = normalizeAuditText(ganttRental.rentalId || ganttRental.sourceRentalId || ganttRental.originalRentalId);
+          rental = linkedId ? rentals.find(item => normalizeAuditText(item?.id) === linkedId) || null : null;
+        }
+        if (!rental && !ganttRental) return res.status(404).json({ ok: false, error: 'Not found' });
+        const accessEntity = rental || ganttRental;
+        const accessCollection = rental ? 'rentals' : 'gantt_rentals';
+        if (!accessControl.canAccessEntity(accessCollection, accessEntity, req.user)) {
+          return res.status(403).json({ ok: false, error: 'Forbidden' });
+        }
+
+        const ids = new Set([
+          routeId,
+          rental?.id,
+          ganttRental?.id,
+          ganttRental?.rentalId,
+          ganttRental?.sourceRentalId,
+          ganttRental?.originalRentalId,
+        ].map(normalizeAuditText).filter(Boolean));
+        const linkedGanttRentals = ganttRentals.filter(item => ids.has(normalizeAuditText(item?.id)) || ids.has(normalizeAuditText(item?.rentalId)) || ids.has(normalizeAuditText(item?.sourceRentalId)) || ids.has(normalizeAuditText(item?.originalRentalId)));
+        linkedGanttRentals.forEach(item => ids.add(normalizeAuditText(item?.id)));
+
+        const equipmentRefs = new Set([
+          rental?.equipmentId,
+          rental?.equipmentInv,
+          rental?.inventoryNumber,
+          rental?.serialNumber,
+          ...(Array.isArray(rental?.equipment) ? rental.equipment : []),
+          ganttRental?.equipmentId,
+          ganttRental?.equipmentInv,
+          ganttRental?.inventoryNumber,
+          ganttRental?.serialNumber,
+          ...linkedGanttRentals.flatMap(item => [item?.equipmentId, item?.equipmentInv, item?.inventoryNumber, item?.serialNumber]),
+        ].map(normalizeAuditText).filter(Boolean));
+        const scopedEquipment = accessControl.filterCollectionByScope('equipment', readData('equipment') || [], req.user);
+        const equipment = scopedEquipment.filter(item => equipmentRefs.has(normalizeAuditText(item?.id)) || equipmentRefs.has(normalizeAuditText(item?.inventoryNumber)) || equipmentRefs.has(normalizeAuditText(item?.serialNumber)));
+        const clientId = normalizeAuditText(rental?.clientId || ganttRental?.clientId);
+        let clients = [];
+        if (clientId) {
+          try {
+            accessControl.assertCanReadCollection('clients', req.user);
+            clients = accessControl.filterCollectionByScope('clients', readData('clients') || [], req.user).filter(item => normalizeAuditText(item?.id) === clientId);
+          } catch {
+            clients = [];
+          }
+        }
+
+        function scopedRelated(collectionName, predicate) {
+          try {
+            accessControl.assertCanReadCollection(collectionName, req.user);
+          } catch {
+            return [];
+          }
+          return accessControl
+            .sanitizeCollectionForRead(collectionName, accessControl.filterCollectionByScope(collectionName, readData(collectionName) || [], req.user), req.user)
+            .filter(predicate)
+            .slice(0, 100);
+        }
+
+        const payments = scopedRelated('payments', item => ids.has(normalizeAuditText(item?.rentalId)) || (!!clientId && normalizeAuditText(item?.clientId) === clientId));
+        const documents = scopedRelated('documents', item => ids.has(normalizeAuditText(item?.rentalId || item?.rental)) || (!!clientId && normalizeAuditText(item?.clientId) === clientId));
+        const deliveries = scopedRelated('deliveries', item => ids.has(normalizeAuditText(item?.rentalId)) || equipmentRefs.has(normalizeAuditText(item?.equipmentId)) || equipmentRefs.has(normalizeAuditText(item?.equipmentInv)));
+        const serviceTickets = scopedRelated('service', item => equipmentRefs.has(normalizeAuditText(item?.equipmentId)) || equipmentRefs.has(normalizeAuditText(item?.inventoryNumber)));
+
+        return res.json({
+          rental: rental ? accessControl.sanitizeEntityForRead('rentals', rental, req.user) : null,
+          ganttRentals: accessControl.sanitizeCollectionForRead('gantt_rentals', linkedGanttRentals, req.user),
+          equipment: accessControl.sanitizeCollectionForRead('equipment', equipment, req.user),
+          clients: accessControl.sanitizeCollectionForRead('clients', clients, req.user),
+          payments,
+          documents,
+          deliveries,
+          serviceTickets,
+        });
+      });
+    }
 
     router.get(`/${collection}/:id`, requireAuth, requireRead(collection), (req, res) => {
       const data = readData(collection) || [];

@@ -173,14 +173,14 @@ export function Sidebar({
   const canSearchClients = canView('clients');
   const canSearchRentals = canView('rentals');
   const canSearchService = canView('service');
-  const { data: equipment = [] } = useEquipmentList({ enabled: canSearchEquipment });
-  const { data: clients = [] } = useClientsList({ enabled: canSearchClients });
-  const { data: rentals = [] } = useRentalsList({ enabled: canSearchRentals });
-  const { data: ganttRentals = [] } = useGanttData({ enabled: canSearchRentals });
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 180);
   const deferredSearch = useDeferredValue(debouncedSearch);
   const hasSearchInput = deferredSearch.trim().length > 0;
+  const { data: equipment = [] } = useEquipmentList({ enabled: hasSearchInput && canSearchEquipment });
+  const { data: clients = [] } = useClientsList({ enabled: hasSearchInput && canSearchClients });
+  const { data: rentals = [] } = useRentalsList({ enabled: hasSearchInput && canSearchRentals });
+  const { data: ganttRentals = [] } = useGanttData({ enabled: hasSearchInput && canSearchRentals });
   const { data: serviceTickets = [] } = useServiceTicketsList({ enabled: hasSearchInput && canSearchService });
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);

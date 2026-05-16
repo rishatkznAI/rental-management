@@ -87,6 +87,11 @@ test('document tab lists linked rental documents and opens create with canonical
   assert.match(drawerSource, /label: 'Акт возврата'/);
   assert.match(documentsBlock, /Открыть/);
   assert.match(documentsBlock, /Печать/);
+  assert.match(drawerSource, /documentsService\.getPrintHtml\(doc\.id\)/);
+  assert.match(drawerSource, /openPrintableHtml\(html\)/);
+  assert.match(drawerSource, /onClick=\{\(\) => void openRentalDocument\(row\.doc\)\}/);
+  assert.doesNotMatch(documentsBlock, /href=\{`\/api\/documents\//);
+  assert.doesNotMatch(documentsBlock, /\/api\/documents\/\$\{encodeURIComponent\(row\.doc\.id\)\}\/print/);
   assert.match(documentsBlock, /Создать договор/);
   assert.match(documentsBlock, /Создать спецификацию/);
   assert.match(documentsBlock, /Документы по аренде:/);

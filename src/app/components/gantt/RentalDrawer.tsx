@@ -27,6 +27,8 @@ import {
 } from '../../lib/rentalExtension.js';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
 import { rentalsService } from '../../services/rentals.service';
+import { documentsService } from '../../services/documents.service';
+import { openPrintableHtml } from '../../lib/serviceWorkOrder';
 import type { RentalExtensionResponse } from '../../services/rentals.service';
 import type { GanttRentalData } from '../../mock-data';
 import type { Client, Delivery, Document, Equipment, Payment, Rental, ServiceTicket } from '../../types';
@@ -232,6 +234,8 @@ export function RentalDrawer({
   const [extensionInfo, setExtensionInfo] = useState('');
   const [isExtending, setIsExtending] = useState(false);
   const [rentalDetailNotice, setRentalDetailNotice] = useState('');
+  const [documentActionError, setDocumentActionError] = useState('');
+  const [documentActionPendingId, setDocumentActionPendingId] = useState('');
 
   // Early return state
   const [showEarlyReturn, setShowEarlyReturn] = useState(false);
@@ -583,6 +587,19 @@ export function RentalDrawer({
       setExtensionError(error instanceof Error ? error.message : 'Не удалось продлить аренду.');
     } finally {
       setIsExtending(false);
+    }
+  };
+
+  const openRentalDocument = async (doc: Document) => {
+    setDocumentActionError('');
+    setDocumentActionPendingId(doc.id);
+    try {
+      const html = doc.printHtml || doc.generatedContent || doc.contentHtml || await documentsService.getPrintHtml(doc.id);
+      openPrintableHtml(html);
+    } catch (error) {
+      setDocumentActionError(error instanceof Error ? error.message : 'Не удалось открыть документ.');
+    } finally {
+      setDocumentActionPendingId('');
     }
   };
 
@@ -1585,6 +1602,11 @@ export function RentalDrawer({
                   </Link>
                 </Button>
               </div>
+              {documentActionError ? (
+                <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+                  {documentActionError}
+                </div>
+              ) : null}
               <div className="mt-3 space-y-2">
                 {rentalDocumentChainRows.map(row => {
                   const docNumber = row.doc?.documentNumber || row.doc?.number || '';
@@ -1622,17 +1644,25 @@ export function RentalDrawer({
                         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                           {row.doc ? (
                             <>
-                              <Button size="sm" variant="secondary" className="h-7 rounded-lg px-2" asChild>
-                                <a href={`/api/documents/${encodeURIComponent(row.doc.id)}/print`} target="_blank" rel="noreferrer">
-                                  <Eye className="h-3.5 w-3.5" />
-                                  Открыть
-                                </a>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="h-7 rounded-lg px-2"
+                                onClick={() => void openRentalDocument(row.doc)}
+                                disabled={documentActionPendingId === row.doc.id}
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                Открыть
                               </Button>
-                              <Button size="sm" variant="secondary" className="h-7 rounded-lg px-2" asChild>
-                                <a href={`/api/documents/${encodeURIComponent(row.doc.id)}/print`} target="_blank" rel="noreferrer">
-                                  <Printer className="h-3.5 w-3.5" />
-                                  Печать
-                                </a>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="h-7 rounded-lg px-2"
+                                onClick={() => void openRentalDocument(row.doc)}
+                                disabled={documentActionPendingId === row.doc.id}
+                              >
+                                <Printer className="h-3.5 w-3.5" />
+                                Печать
                               </Button>
                             </>
                           ) : canCreateDocuments ? (

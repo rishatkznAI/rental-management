@@ -1,5 +1,33 @@
-import { api } from '../lib/api';
+import { api, API_BASE_URL, ApiError, getToken } from '../lib/api';
 import type { Document, DocumentNumberingSetting, DocumentRegistrySummary, DocumentType } from '../types';
+
+export function getDocumentPrintPath(id: string) {
+  return `/api/documents/${encodeURIComponent(id)}/print`;
+}
+
+export function getDocumentPrintUrl(id: string) {
+  return `${API_BASE_URL}${getDocumentPrintPath(id)}`;
+}
+
+async function getDocumentPrintHtml(id: string): Promise<string> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(getDocumentPrintUrl(id), {
+    method: 'GET',
+    headers,
+    credentials: 'include',
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new ApiError(text || `HTTP ${response.status}`, response.status, undefined, text);
+  }
+  return text;
+}
 
 export const documentsService = {
   getAll: (): Promise<Document[]> =>
@@ -51,4 +79,10 @@ export const documentsService = {
 
   bulkReplace: (list: Document[]): Promise<void> =>
     api.put('/api/documents', list),
+
+  getPrintPath: getDocumentPrintPath,
+
+  getPrintUrl: getDocumentPrintUrl,
+
+  getPrintHtml: getDocumentPrintHtml,
 };

@@ -1,4 +1,4 @@
-import { api } from '../lib/api';
+import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import type {
   GsmGatewayCommand,
   GsmGatewayAnalytics,
@@ -64,6 +64,19 @@ export const gsmGatewayService = {
   getPackets: (params?: PacketQuery): Promise<GsmGatewayPacket[]> =>
     api.get<GsmGatewayPacket[]>(`/api/gsm/packets${buildQuery(params)}`),
 
+  getPacketsPaginated: (params?: PaginatedQueryParams & PacketQuery): Promise<PaginatedResponse<GsmGatewayPacket>> =>
+    api.get<PaginatedResponse<GsmGatewayPacket>>(`/api/gsm/packets${buildPaginatedQuery({
+      ...params,
+      filters: {
+        equipmentId: params?.equipmentId,
+        deviceId: params?.deviceId,
+        imei: params?.imei,
+        parseStatus: params?.parseStatus,
+      },
+      dateFrom: params?.dateFrom || params?.from,
+      dateTo: params?.dateTo || params?.to,
+    })}`),
+
   getDevices: (): Promise<GsmGatewayDevice[]> =>
     api.get<GsmGatewayDevice[]>('/api/gsm/devices'),
 
@@ -81,6 +94,15 @@ export const gsmGatewayService = {
 
   getCommands: (params?: PacketQuery): Promise<GsmGatewayCommand[]> =>
     api.get<GsmGatewayCommand[]>(`/api/gsm/gateway/commands${buildQuery(params)}`),
+
+  getCommandsPaginated: (params?: PaginatedQueryParams & PacketQuery): Promise<PaginatedResponse<GsmGatewayCommand>> =>
+    api.get<PaginatedResponse<GsmGatewayCommand>>(`/api/gsm/gateway/commands${buildPaginatedQuery({
+      ...params,
+      filters: {
+        equipmentId: params?.equipmentId,
+        deviceId: params?.deviceId,
+      },
+    })}`),
 
   getAnalytics: (params?: PacketQuery): Promise<GsmGatewayAnalytics> =>
     api.get<GsmGatewayAnalytics>(`/api/gsm/gateway/analytics${buildQuery(params)}`),

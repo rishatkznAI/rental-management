@@ -1,4 +1,4 @@
-import { api } from '../lib/api';
+import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import type { Rental } from '../types';
 import type { DowntimePeriod, GanttRentalData } from '../mock-data';
 
@@ -71,6 +71,9 @@ export type GanttRentalRepairResponse = {
 export const rentalsService = {
   getAll: (): Promise<Rental[]> =>
     api.get<Rental[]>('/api/rentals'),
+
+  getPaginated: (params?: PaginatedQueryParams): Promise<PaginatedResponse<Rental>> =>
+    api.get<PaginatedResponse<Rental>>(`/api/rentals${buildPaginatedQuery(params)}`),
 
   getById: (id: string): Promise<Rental | undefined> =>
     api.get<Rental>(`/api/rentals/${id}`).catch(() => undefined),

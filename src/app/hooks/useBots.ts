@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { botsService } from '../services/bots.service';
+import type { PaginatedQueryParams } from '../lib/api';
 import type { BotConnectionRole } from '../types';
 
 export const BOT_KEYS = {
   all: ['bots'] as const,
   detail: (botId: string) => ['bots', botId] as const,
+  detailPaginated: (botId: string, params: PaginatedQueryParams) => ['bots', botId, 'paginated', params] as const,
 };
 
 export function useBotsList() {
@@ -21,6 +23,16 @@ export function useBotById(botId: string) {
     queryFn: () => botsService.getById(botId),
     enabled: Boolean(botId),
     staleTime: 1000 * 30,
+  });
+}
+
+export function usePaginatedBotById(botId: string, params: PaginatedQueryParams) {
+  return useQuery({
+    queryKey: BOT_KEYS.detailPaginated(botId, params),
+    queryFn: () => botsService.getByIdPaginated(botId, params),
+    enabled: Boolean(botId),
+    staleTime: 1000 * 30,
+    placeholderData: previous => previous,
   });
 }
 

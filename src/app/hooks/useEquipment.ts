@@ -1,9 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { equipmentService } from '../services/equipment.service';
+import type { PaginatedQueryParams } from '../lib/api';
 import type { Equipment } from '../types';
 
 export const EQUIPMENT_KEYS = {
   all: ['equipment'] as const,
+  paginated: (params: PaginatedQueryParams) => ['equipment', 'paginated', params] as const,
   detail: (id: string) => ['equipment', id] as const,
   repairs: (id: string) => ['equipment', id, 'repairs'] as const,
   photos: (id: string) => ['equipment', id, 'photos'] as const,
@@ -15,6 +17,16 @@ export function useEquipmentList(options: { enabled?: boolean } = {}) {
     queryFn: equipmentService.getAll,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 2, // 2 минуты
+  });
+}
+
+export function usePaginatedEquipment(params: PaginatedQueryParams, options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: EQUIPMENT_KEYS.paginated(params),
+    queryFn: () => equipmentService.getPaginated(params),
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60,
+    placeholderData: previous => previous,
   });
 }
 

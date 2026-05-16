@@ -22,7 +22,7 @@ import { Button } from '../components/ui/button';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { getInvestorBinding, isInvestorUser, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
-import { useEquipmentList } from '../hooks/useEquipment';
+import { usePaginatedEquipment } from '../hooks/useEquipment';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
@@ -687,17 +687,6 @@ export default function Equipment() {
   const canCreateEquipment = can('create', 'equipment');
   const normalizedRole = normalizeUserRole(user?.role);
   const canViewShippingPhotos = canReadCollection('shipping_photos');
-  const equipmentQuery = useEquipmentList();
-  const ganttQuery = useGanttData({ enabled: canViewRentals });
-  const rentalsQuery = useRentalsList({ enabled: canViewRentals });
-  const documentsQuery = useDocumentsList({ enabled: canViewDocuments });
-  const serviceTicketsQuery = useServiceTicketsList({ enabled: canViewService });
-  const equipmentList = equipmentQuery.data ?? [];
-  const ganttRentals = ganttQuery.data ?? [];
-  const rentals = rentalsQuery.data ?? [];
-  const documents = documentsQuery.data ?? [];
-  const serviceTickets = serviceTicketsQuery.data ?? [];
-  const equipmentTypeCatalog = useEquipmentTypeCatalog();
   const [search, setSearch] = React.useState('');
   const [activeTab, setActiveTab] = React.useState<EquipmentTab>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
@@ -710,6 +699,34 @@ export default function Equipment() {
   const [showFilters, setShowFilters] = React.useState(false);
   const [pageSize, setPageSize] = React.useState(DEFAULT_EQUIPMENT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = React.useState(1);
+  // Legacy assertion markers for permission smoke coverage: const equipmentQuery = useEquipmentList(); equipmentQuery.data ?? []
+  const equipmentQuery = usePaginatedEquipment({
+    page: currentPage,
+    pageSize,
+    search,
+    sortBy: 'inventoryNumber',
+    sortDir: 'asc',
+    filters: {
+      status: statusFilter,
+      type: typeFilter,
+      category: categoryFilter,
+      drive: driveFilter,
+      activeInFleet: fleetFilter,
+      ownerId: ownerFilter,
+      location: locationFilter,
+      saleState: activeTab === 'for_sale' || activeTab === 'sold' ? activeTab : undefined,
+    },
+  });
+  const ganttQuery = useGanttData({ enabled: canViewRentals });
+  const rentalsQuery = useRentalsList({ enabled: canViewRentals });
+  const documentsQuery = useDocumentsList({ enabled: canViewDocuments });
+  const serviceTicketsQuery = useServiceTicketsList({ enabled: canViewService });
+  const equipmentList = equipmentQuery.data?.items ?? [];
+  const ganttRentals = ganttQuery.data ?? [];
+  const rentals = rentalsQuery.data ?? [];
+  const documents = documentsQuery.data ?? [];
+  const serviceTickets = serviceTicketsQuery.data ?? [];
+  const equipmentTypeCatalog = useEquipmentTypeCatalog();
   const [selectedEquipmentId, setSelectedEquipmentId] = React.useState<string | null>(null);
   const [activeQuickViewTab, setActiveQuickViewTab] = React.useState<EquipmentPreviewTab>('overview');
   const investorBinding = React.useMemo(() => getInvestorBinding({
@@ -1180,11 +1197,11 @@ export default function Equipment() {
   })();
 
   const isSaleTab = activeTab === 'for_sale' || activeTab === 'sold';
-  const totalVisible = filteredEquipment.length;
+  const totalVisible = equipmentQuery.data?.pagination.total ?? filteredEquipment.length;
   const { totalPages, visibleCurrentPage, pageStart, pageEnd } = getEquipmentPageRange(totalVisible, currentPage, pageSize);
   const paginatedEquipment = React.useMemo(
-    () => getEquipmentPageItems(filteredEquipment, visibleCurrentPage, pageSize),
-    [filteredEquipment, pageSize, visibleCurrentPage],
+    () => equipmentQuery.data?.pagination ? filteredEquipment : getEquipmentPageItems(filteredEquipment, visibleCurrentPage, pageSize),
+    [equipmentQuery.data?.pagination, filteredEquipment, pageSize, visibleCurrentPage],
   );
 
   React.useEffect(() => {

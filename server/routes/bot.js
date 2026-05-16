@@ -1,5 +1,10 @@
 const express = require('express');
 const crypto = require('crypto');
+const {
+  buildPaginatedResponse,
+  itemMatchesSearch,
+  wantsPaginatedResponse,
+} = require('../lib/pagination');
 
 const processedWebhookUpdates = new Map();
 const webhookRateLimits = new Map();
@@ -563,12 +568,49 @@ function registerBotApiRoutes(router, deps) {
     if (!config) return;
 
     const { summary, connections, activity } = buildBotPayload(config);
-
-    return res.json({
+    const payload = {
       bot: summary,
       connections,
       activity,
-    });
+    };
+    if (wantsPaginatedResponse(req.query)) {
+      const filteredActivity = activity.filter(item => itemMatchesSearch(item, req.query.search, [
+        'id',
+        'phone',
+        'userName',
+        'userRole',
+        'command',
+        'message',
+        'text',
+        'status',
+      ])).filter(item => {
+        const botId = String(req.query.botId || '').trim();
+        const userId = String(req.query.userId || '').trim();
+        const role = String(req.query.role || '').trim();
+        const action = String(req.query.action || '').trim().toLowerCase();
+        const dateFrom = String(req.query.dateFrom || '').trim();
+        const dateTo = String(req.query.dateTo || '').trim();
+        const createdAt = String(item.createdAt || item.date || item.timestamp || '').slice(0, 10);
+        if (botId && String(item.botId || '') !== botId) return false;
+        if (userId && ![item.userId, item.maxUserId, item.phone].map(value => String(value || '')).includes(userId)) return false;
+        if (role && String(item.userRole || '') !== role) return false;
+        if (action && !String(item.action || item.command || item.eventType || '').toLowerCase().includes(action)) return false;
+        if (dateFrom && createdAt && createdAt < dateFrom) return false;
+        if (dateTo && createdAt && createdAt > dateTo) return false;
+        return true;
+      });
+      payload.activity = buildPaginatedResponse(filteredActivity, req.query, {
+        sortFields: {
+          createdAt: item => item.createdAt || item.date || item.timestamp,
+          userName: item => item.userName,
+          userRole: item => item.userRole,
+          status: item => item.status,
+        },
+        defaultSort: { sortBy: 'createdAt', sortDir: 'desc' },
+      });
+    }
+
+    return res.json(payload);
   });
 
   botRouter.patch('/bots/:botId/connections/:phone', requireAuth, requireBotAdmin, (req, res) => {

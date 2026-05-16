@@ -648,7 +648,7 @@ export default function Gsm() {
   });
   const { data: recentGatewayPackets = [] } = useQuery<GsmGatewayPacket[]>({
     queryKey: ['gsmGateway', 'packets', 'recent'],
-    queryFn: () => gsmGatewayService.getPackets({ limit: 100 }).catch(() => []),
+    queryFn: () => gsmGatewayService.getPacketsPaginated({ page: 1, pageSize: 100 }).then(response => response.items).catch(() => []),
     refetchInterval: 5_000,
     staleTime: 3_000,
   });
@@ -823,22 +823,24 @@ export default function Gsm() {
 
   const { data: gatewayPackets = [] } = useQuery<GsmGatewayPacket[]>({
     queryKey: ['gsmGateway', 'packets', selectedSnapshot?.equipment.id || 'all', selectedTrackerId || 'none'],
-    queryFn: () => gsmGatewayService.getPackets({
+    queryFn: () => gsmGatewayService.getPacketsPaginated({
       equipmentId: selectedSnapshot?.equipment.id || undefined,
       deviceId: selectedTrackerId || undefined,
-      limit: 60,
-    }).catch(() => []),
+      page: 1,
+      pageSize: 50,
+    }).then(response => response.items).catch(() => []),
     refetchInterval: 5_000,
     staleTime: 3_000,
   });
 
   const { data: gatewayCommands = [] } = useQuery<GsmGatewayCommand[]>({
     queryKey: ['gsmGateway', 'commands', selectedSnapshot?.equipment.id || 'all', selectedTrackerId || 'none'],
-    queryFn: () => gsmGatewayService.getCommands({
+    queryFn: () => gsmGatewayService.getCommandsPaginated({
       equipmentId: selectedSnapshot?.equipment.id || undefined,
       deviceId: selectedTrackerId || undefined,
-      limit: 40,
-    }).catch(() => []),
+      page: 1,
+      pageSize: 50,
+    }).then(response => response.items).catch(() => []),
     refetchInterval: 5_000,
     staleTime: 3_000,
   });

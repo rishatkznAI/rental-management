@@ -705,9 +705,10 @@ function createGprsGateway({
       .slice(safeOffset, safeOffset + safeLimit);
   }
 
-  function listCommands({ limit = 50, equipmentId = '', deviceId = '' } = {}) {
+  function listCommands({ limit = 50, offset = 0, equipmentId = '', deviceId = '' } = {}) {
     ensureStorage();
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 500);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
     return asArray(readData('gsm_commands'))
       .filter((item) => {
         if (equipmentId && item.equipmentId !== equipmentId) return false;
@@ -715,7 +716,7 @@ function createGprsGateway({
         return true;
       })
       .sort((left, right) => Date.parse(right.createdAt || '') - Date.parse(left.createdAt || ''))
-      .slice(0, safeLimit);
+      .slice(safeOffset, safeOffset + safeLimit);
   }
 
   function deriveEquipmentGsmStatus(equipment) {

@@ -26,6 +26,11 @@ const {
   isStandalonePlannerRow,
   validateGanttRentalLinkRequirement,
 } = require('../lib/gantt-rental-link-guard');
+const {
+  buildPaginatedResponse,
+  itemMatchesSearch,
+  wantsPaginatedResponse,
+} = require('../lib/pagination');
 
 const AUDIT_COLLECTION = 'audit_logs';
 const RENTAL_AUDIT_LIMIT = 20;
@@ -67,6 +72,60 @@ const RENTAL_AUDIT_FIELD_LABELS = {
   serviceTicketId: 'Сервисная заявка',
   equipmentStatus: 'Статус техники',
 };
+
+const RENTAL_PAGINATION_CONFIG = {
+  searchFields: ['id', 'client', 'clientName', 'clientId', 'equipmentInv', 'equipment', 'manager', 'managerName', 'objectName', 'contractNumber'],
+  sortFields: {
+    startDate: item => item.startDate,
+    endDate: item => item.endDate || item.plannedReturnDate,
+    plannedReturnDate: item => item.plannedReturnDate || item.endDate,
+    client: item => item.clientName || item.client,
+    status: item => item.status,
+    manager: item => item.managerName || item.manager,
+    amount: item => Number(item.amount || item.totalAmount || 0),
+    createdAt: item => item.createdAt || item.id,
+  },
+  defaultSort: { sortBy: 'startDate', sortDir: 'desc' },
+};
+
+function filterRentalsForPagination(data, query) {
+  let rows = Array.isArray(data) ? data : [];
+  rows = rows.filter(item => itemMatchesSearch(item, query.search, RENTAL_PAGINATION_CONFIG.searchFields));
+  const filters = {
+    status: item => item.status,
+    managerId: item => item.managerId || item.manager,
+    clientId: item => item.clientId,
+    equipmentId: item => item.equipmentId,
+    ownerId: item => item.ownerId,
+    paymentStatus: item => item.paymentStatus,
+    updSigned: item => item.updSigned ? 'yes' : 'no',
+  };
+  Object.entries(filters).forEach(([name, getter]) => {
+    const value = String(query[name] || '').trim();
+    if (value && value !== 'all') rows = rows.filter(item => String(getter(item) || '') === value);
+  });
+  const dateFrom = String(query.dateFrom || '').trim();
+  const dateTo = String(query.dateTo || '').trim();
+  if (dateFrom || dateTo) {
+    rows = rows.filter(item => {
+      const start = String(item.startDate || '').slice(0, 10);
+      const end = String(item.endDate || item.plannedReturnDate || '').slice(0, 10);
+      if (dateFrom && end && end < dateFrom) return false;
+      if (dateTo && start && start > dateTo) return false;
+      return true;
+    });
+  }
+  const preset = String(query.preset || '').trim();
+  const today = new Date().toISOString().slice(0, 10);
+  if (preset === 'returns_today') {
+    rows = rows.filter(item => String(item.endDate || item.plannedReturnDate || '').slice(0, 10) === today && !['returned', 'closed'].includes(String(item.status || '')));
+  } else if (preset === 'overdue') {
+    rows = rows.filter(item => String(item.endDate || item.plannedReturnDate || '').slice(0, 10) < today && !['returned', 'closed'].includes(String(item.status || '')));
+  } else if (preset === 'unpaid') {
+    rows = rows.filter(item => item.paymentStatus !== 'paid');
+  }
+  return rows;
+}
 
 function normalizeAuditText(value) {
   return String(value ?? '').trim();
@@ -1053,11 +1112,16 @@ function registerRentalRoutes(deps) {
 
     router.get(`/${collection}`, requireAuth, requireRead(collection), (req, res) => {
       const data = readData(collection) || [];
-      return res.json(accessControl.sanitizeCollectionForRead(
+      const scoped = accessControl.sanitizeCollectionForRead(
         collection,
         accessControl.filterCollectionByScope(collection, data, req.user),
         req.user,
-      ));
+      );
+      if (wantsPaginatedResponse(req.query)) {
+        const rows = filterRentalsForPagination(scoped, req.query);
+        return res.json(buildPaginatedResponse(rows, req.query, RENTAL_PAGINATION_CONFIG));
+      }
+      return res.json(scoped);
     });
 
     router.get(`/${collection}/:id`, requireAuth, requireRead(collection), (req, res) => {

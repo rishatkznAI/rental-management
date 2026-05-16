@@ -1,9 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { rentalsService } from '../services/rentals.service';
+import type { PaginatedQueryParams } from '../lib/api';
 import type { Rental } from '../types';
 
 export const RENTAL_KEYS = {
   all: ['rentals'] as const,
+  paginated: (params: PaginatedQueryParams) => ['rentals', 'paginated', params] as const,
   detail: (id: string) => ['rentals', id] as const,
   audit: (id: string) => ['rentals', id, 'audit'] as const,
   gantt: ['rentals', 'gantt'] as const,
@@ -20,6 +22,16 @@ export function useRentalsList(options: QueryOptions = {}) {
     queryFn: rentalsService.getAll,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 2,
+  });
+}
+
+export function usePaginatedRentals(params: PaginatedQueryParams, options: QueryOptions = {}) {
+  return useQuery({
+    queryKey: RENTAL_KEYS.paginated(params),
+    queryFn: () => rentalsService.getPaginated(params),
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60,
+    placeholderData: previous => previous,
   });
 }
 

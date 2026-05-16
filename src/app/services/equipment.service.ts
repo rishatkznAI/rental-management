@@ -1,10 +1,14 @@
-import { api } from '../lib/api';
+import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import { normalizeEquipment, normalizeEquipmentList, normalizeEquipmentPatch } from '../lib/equipmentClassification';
 import type { Equipment, RepairRecord, ShippingPhoto } from '../types';
 
 export const equipmentService = {
   getAll: (): Promise<Equipment[]> =>
     api.get<Equipment[]>('/api/equipment').then(normalizeEquipmentList),
+
+  getPaginated: (params?: PaginatedQueryParams): Promise<PaginatedResponse<Equipment>> =>
+    api.get<PaginatedResponse<Equipment>>(`/api/equipment${buildPaginatedQuery(params)}`)
+      .then(response => ({ ...response, items: normalizeEquipmentList(response.items) })),
 
   getById: (id: string): Promise<Equipment | undefined> =>
     api.get<Equipment>(`/api/equipment/${id}`).then(normalizeEquipment).catch(() => undefined),

@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Bot, Clock3, History, LogOut, Search, ShieldCheck, UserRound, Workflow } from 'lucide-react';
 import { toast } from 'sonner';
-import { useBotById, useDisconnectBotConnection, useUpdateBotConnection } from '../hooks/useBots';
+import { usePaginatedBotById, useDisconnectBotConnection, useUpdateBotConnection } from '../hooks/useBots';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -50,12 +50,25 @@ function renderConnectionState(connection: BotConnection) {
 
 export default function BotDetail() {
   const { botId = '' } = useParams();
-  const { data, isLoading, error } = useBotById(botId);
+  const [search, setSearch] = React.useState('');
+  const [activityPage, setActivityPage] = React.useState(1);
+  const [activityPageSize] = React.useState(25);
+  const { data, isLoading, error } = usePaginatedBotById(botId, {
+    page: activityPage,
+    pageSize: activityPageSize,
+    search,
+    sortBy: 'createdAt',
+    sortDir: 'desc',
+  });
   const updateConnection = useUpdateBotConnection(botId);
   const disconnectConnection = useDisconnectBotConnection(botId);
-  const [search, setSearch] = React.useState('');
   const [tab, setTab] = React.useState('history');
   const normalizedSearch = search.trim().toLowerCase();
+  const activityPagination = data?.activity.pagination;
+
+  React.useEffect(() => {
+    setActivityPage(1);
+  }, [search]);
 
   const handleRoleChange = React.useCallback(async (connection: BotConnection, userRole: BotConnectionRole) => {
     if (connection.userRole === userRole) return;
@@ -92,7 +105,7 @@ export default function BotDetail() {
   ), [data?.connections, normalizedSearch]);
 
   const filteredActivity = React.useMemo(() => (
-    (data?.activity || []).filter(entry => matchesSearch([
+    (data?.activity.items || []).filter(entry => matchesSearch([
       entry.userName,
       entry.userRole,
       entry.email,
@@ -101,7 +114,7 @@ export default function BotDetail() {
       entry.details,
       entry.eventType,
     ], normalizedSearch))
-  ), [data?.activity, normalizedSearch]);
+  ), [data?.activity.items, normalizedSearch]);
 
   const renderConnectionActions = (connection: BotConnection) => {
     const busy = updateConnection.isPending || disconnectConnection.isPending;
@@ -310,6 +323,33 @@ export default function BotDetail() {
                   </div>
                 </>
               )}
+              {activityPagination && activityPagination.totalPages > 1 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  <span>
+                    Страница {activityPagination.page} из {activityPagination.totalPages}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!activityPagination.hasPrevPage}
+                      onClick={() => setActivityPage(page => Math.max(1, page - 1))}
+                    >
+                      Назад
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!activityPagination.hasNextPage}
+                      onClick={() => setActivityPage(page => page + 1)}
+                    >
+                      Вперёд
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -394,7 +434,7 @@ export default function BotDetail() {
 
       <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
         <span className="inline-flex items-center gap-2"><UserRound className="h-4 w-4" /> Пользователей: {data.connections.length}</span>
-        <span className="inline-flex items-center gap-2"><Clock3 className="h-4 w-4" /> Событий: {data.activity.length}</span>
+        <span className="inline-flex items-center gap-2"><Clock3 className="h-4 w-4" /> Событий: {data.activity.pagination.total}</span>
         <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> Доступ только у администратора</span>
       </div>
     </div>

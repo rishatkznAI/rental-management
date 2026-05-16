@@ -235,6 +235,24 @@ test('GET /api/gsm/packets returns stored packets', async () => {
   });
 });
 
+test('GET /api/gsm/packets supports bounded paginated response', async () => {
+  const packets = Array.from({ length: 5 }, (_, index) => ({
+    id: `P-${index + 1}`,
+    imei: 'IMEI-1',
+    equipmentId: 'EQ-1',
+    parseStatus: 'parsed',
+    receivedAt: `2026-05-16T10:0${index}:00.000Z`,
+  }));
+  const { app } = createGsmApiApp({ gsm_packets: packets });
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'GET', '/api/gsm/packets?paginated=true&page=1&pageSize=2', 'viewer-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.items.length, 2);
+    assert.equal(response.body.pagination.pageSize, 2);
+    assert.equal(response.body.pagination.hasNextPage, true);
+  });
+});
+
 test('GET /api/gsm/packets rejects invalid parseStatus', async () => {
   const { app } = createGsmApiApp();
 
@@ -358,6 +376,25 @@ test('POST /api/gsm/commands creates queued command', async () => {
     assert.equal(response.body.status, 'queued');
     assert.equal(response.body.imei, '866123456789012');
     assert.equal(state.gsm_commands.length, 1);
+  });
+});
+
+test('GET /api/gsm/gateway/commands supports bounded pagination', async () => {
+  const commands = Array.from({ length: 4 }, (_, index) => ({
+    id: `CMD-${index + 1}`,
+    equipmentId: 'EQ-1',
+    deviceId: 'DEV-1',
+    command: `PING-${index + 1}`,
+    status: 'queued',
+    createdAt: `2026-05-16T10:0${index}:00.000Z`,
+  }));
+  const { app } = createGsmApiApp({ gsm_commands: commands });
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'GET', '/api/gsm/gateway/commands?paginated=true&page=2&pageSize=2&deviceId=DEV-1', 'viewer-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.items.length, 2);
+    assert.equal(response.body.pagination.page, 2);
+    assert.equal(response.body.pagination.hasPrevPage, true);
   });
 });
 

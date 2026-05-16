@@ -897,6 +897,16 @@ function registerCrudRoutes(deps) {
         status: (item, value) => item.status === value,
         ownerId: (item, value) => item.ownerId === value || item.owner === value,
         type: (item, value) => item.type === value || item.equipmentType === value,
+        category: (item, value) => item.category === value,
+        drive: (item, value) => item.drive === value,
+        location: (item, value) => item.location === value,
+        activeInFleet: (item, value) => String(item.activeInFleet) === value,
+        saleState: (item, value) => {
+          if (value === 'for_sale') return Boolean(item.saleMode || item.forSale || item.isForSale) && item.saleStatus !== 'sold';
+          if (value === 'sold') return item.saleStatus === 'sold' || item.status === 'sold';
+          if (value === 'available_for_rent') return item.status === 'available' && !item.saleMode && !item.forSale && !item.isForSale;
+          return true;
+        },
       },
       summary: items => ({
         total: items.length,

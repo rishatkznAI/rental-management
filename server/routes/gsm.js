@@ -1,3 +1,10 @@
+const {
+  buildPaginationMeta,
+  itemMatchesSearch,
+  normalizePaginationParams,
+  wantsPaginatedResponse,
+} = require('../lib/pagination');
+
 function registerGsmRoutes(router, deps) {
   const {
     requireAuth,
@@ -142,6 +149,22 @@ function registerGsmRoutes(router, deps) {
   router.get('/gsm/packets', requireAuth, requireGsmView, (req, res) => {
     const filters = packetFilters(req);
     if (!validatePacketFilters(filters, res)) return;
+    if (wantsPaginatedResponse(req.query)) {
+      const params = normalizePaginationParams(req.query);
+      const packets = gprsGateway.listPackets({ ...filters, limit: params.pageSize, offset: params.offset })
+        .filter(item => itemMatchesSearch(item, req.query.search, ['id', 'imei', 'deviceId', 'equipmentId', 'raw', 'parseStatus']));
+      const hasNextProbe = gprsGateway.listPackets({ ...filters, limit: 1, offset: params.offset + params.pageSize }).length > 0;
+      return res.json({
+        items: packets,
+        pagination: {
+          ...buildPaginationMeta(params.offset + packets.length + (hasNextProbe ? 1 : 0), params.page, params.pageSize),
+          total: params.offset + packets.length + (hasNextProbe ? 1 : 0),
+          totalPages: hasNextProbe ? params.page + 1 : params.page,
+          hasNextPage: hasNextProbe,
+          hasPrevPage: params.page > 1,
+        },
+      });
+    }
     res.json(gprsGateway.listPackets(filters));
   });
 
@@ -233,15 +256,53 @@ function registerGsmRoutes(router, deps) {
   router.get('/gsm/gateway/packets', requireAuth, requireGsmView, (req, res) => {
     const filters = packetFilters(req);
     if (!validatePacketFilters(filters, res)) return;
+    if (wantsPaginatedResponse(req.query)) {
+      const params = normalizePaginationParams(req.query);
+      const packets = gprsGateway.listPackets({ ...filters, limit: params.pageSize, offset: params.offset })
+        .filter(item => itemMatchesSearch(item, req.query.search, ['id', 'imei', 'deviceId', 'equipmentId', 'raw', 'parseStatus']));
+      const hasNextProbe = gprsGateway.listPackets({ ...filters, limit: 1, offset: params.offset + params.pageSize }).length > 0;
+      return res.json({
+        items: packets,
+        pagination: {
+          ...buildPaginationMeta(params.offset + packets.length + (hasNextProbe ? 1 : 0), params.page, params.pageSize),
+          total: params.offset + packets.length + (hasNextProbe ? 1 : 0),
+          totalPages: hasNextProbe ? params.page + 1 : params.page,
+          hasNextPage: hasNextProbe,
+          hasPrevPage: params.page > 1,
+        },
+      });
+    }
     res.json(gprsGateway.listPackets(filters));
   });
 
   router.get('/gsm/gateway/commands', requireAuth, requireGsmView, (req, res) => {
-    res.json(gprsGateway.listCommands({
+    const params = normalizePaginationParams(req.query);
+    const commands = gprsGateway.listCommands({
       equipmentId: String(req.query.equipmentId || '').trim(),
       deviceId: String(req.query.deviceId || '').trim(),
-      limit: Number(req.query.limit) || 50,
-    }));
+      limit: wantsPaginatedResponse(req.query) ? params.pageSize : Number(req.query.limit) || 50,
+      offset: wantsPaginatedResponse(req.query) ? params.offset : 0,
+    });
+    if (wantsPaginatedResponse(req.query)) {
+      const rows = commands.filter(item => itemMatchesSearch(item, req.query.search, ['id', 'imei', 'deviceId', 'equipmentId', 'command', 'status']));
+      const hasNextProbe = gprsGateway.listCommands({
+        equipmentId: String(req.query.equipmentId || '').trim(),
+        deviceId: String(req.query.deviceId || '').trim(),
+        limit: 1,
+        offset: params.offset + params.pageSize,
+      }).length > 0;
+      return res.json({
+        items: rows,
+        pagination: {
+          ...buildPaginationMeta(params.offset + rows.length + (hasNextProbe ? 1 : 0), params.page, params.pageSize),
+          total: params.offset + rows.length + (hasNextProbe ? 1 : 0),
+          totalPages: hasNextProbe ? params.page + 1 : params.page,
+          hasNextPage: hasNextProbe,
+          hasPrevPage: params.page > 1,
+        },
+      });
+    }
+    res.json(commands);
   });
 
   router.get('/gsm/gateway/analytics', requireAuth, requireGsmView, (req, res) => {

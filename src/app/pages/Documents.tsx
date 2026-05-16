@@ -43,7 +43,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
-import { useClientsList } from '../hooks/useClients';
+import { usePaginatedClients } from '../hooks/useClients';
 import {
   useAssignDocumentNumber,
   useCreateDocument,
@@ -57,9 +57,9 @@ import {
   useMarkDocumentSigned,
   useUpdateDocument,
 } from '../hooks/useDocuments';
-import { useEquipmentList } from '../hooks/useEquipment';
-import { useGanttData, useRentalsList } from '../hooks/useRentals';
-import { useServiceTicketsList } from '../hooks/useServiceTickets';
+import { usePaginatedEquipment } from '../hooks/useEquipment';
+import { useGanttData, usePaginatedRentals } from '../hooks/useRentals';
+import { usePaginatedServiceTickets } from '../hooks/useServiceTickets';
 import { buildDocumentControl, getDocumentControlStatusLabel } from '../lib/documentControl.js';
 import { DOCUMENT_WORKSPACE_TYPES, getDocumentRegistryItem } from '../lib/documentRegistry';
 import {
@@ -82,13 +82,13 @@ import { formatDate, formatCurrency, formatDateTime } from '../lib/utils';
 import { mechanicsService } from '../services/mechanics.service';
 import { mechanicDocumentsService } from '../services/mechanic-documents.service';
 import { appSettingsService } from '../services/app-settings.service';
-import { deliveriesService } from '../services/deliveries.service';
 import { serviceVehiclesService } from '../services/service-vehicles.service';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { normalizeUserRole } from '../lib/userStorage';
 import { useServerPagination } from '../hooks/useServerPagination';
 import { PaginationControls } from '../components/common/PaginationControls';
+import { usePaginatedDeliveries } from '../hooks/useDeliveries';
 import type {
   Client,
   Document as Doc,
@@ -735,15 +735,21 @@ export default function Documents() {
     filters: documentPagination.filters,
   });
   const { data: registrySummary } = useDocumentRegistrySummary();
-  const { data: clients = [] } = useClientsList();
-  const { data: rentals = [] } = useRentalsList();
-  const { data: ganttRentals = [] } = useGanttData();
-  const { data: equipment = [] } = useEquipmentList();
-  const { data: serviceTickets = [] } = useServiceTicketsList();
-  const { data: deliveries = [] } = useQuery<Delivery[]>({
-    queryKey: ['deliveries', 'documents'],
-    queryFn: deliveriesService.getAll,
-  });
+  const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
+  const [commercialOfferDialogOpen, setCommercialOfferDialogOpen] = React.useState(false);
+  const [documentWizardOpen, setDocumentWizardOpen] = React.useState(false);
+  const referenceLoadEnabled = createDialogOpen || commercialOfferDialogOpen || documentWizardOpen;
+  const { data: clientsReference } = usePaginatedClients({ page: 1, pageSize: 100, sortBy: 'company', sortDir: 'asc' }, { enabled: referenceLoadEnabled });
+  const { data: rentalsReference } = usePaginatedRentals({ page: 1, pageSize: 100, sortBy: 'startDate', sortDir: 'desc' }, { enabled: referenceLoadEnabled });
+  const { data: ganttRentals = [] } = useGanttData({ enabled: referenceLoadEnabled });
+  const { data: equipmentReference } = usePaginatedEquipment({ page: 1, pageSize: 100, sortBy: 'inventoryNumber', sortDir: 'asc' }, { enabled: referenceLoadEnabled });
+  const { data: serviceTicketsReference } = usePaginatedServiceTickets({ page: 1, pageSize: 100, sortBy: 'createdAt', sortDir: 'desc' }, { enabled: referenceLoadEnabled });
+  const { data: deliveriesReference } = usePaginatedDeliveries({ page: 1, pageSize: 100, sortBy: 'date', sortDir: 'desc' }, { enabled: referenceLoadEnabled, scope: 'documents' });
+  const clients = clientsReference?.items ?? [];
+  const rentals = rentalsReference?.items ?? [];
+  const equipment = equipmentReference?.items ?? [];
+  const serviceTickets = serviceTicketsReference?.items ?? [];
+  const deliveries = deliveriesReference?.items ?? [];
   const { data: serviceVehicles = [] } = useQuery<ServiceVehicle[]>({
     queryKey: ['service-vehicles', 'documents'],
     queryFn: serviceVehiclesService.getAll,
@@ -800,9 +806,6 @@ export default function Documents() {
   const [mechanicSearch, setMechanicSearch] = React.useState('');
   const [selectedMechanicId, setSelectedMechanicId] = React.useState<string>('');
   const [mechanicDocuments, setMechanicDocuments] = React.useState<MechanicDocument[]>([]);
-  const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
-  const [commercialOfferDialogOpen, setCommercialOfferDialogOpen] = React.useState(false);
-  const [documentWizardOpen, setDocumentWizardOpen] = React.useState(false);
   const [wizardStep, setWizardStep] = React.useState(1);
   const [wizardForm, setWizardForm] = React.useState<DocumentWizardState>(EMPTY_WIZARD);
   const [selectedDocument, setSelectedDocument] = React.useState<Doc | null>(null);

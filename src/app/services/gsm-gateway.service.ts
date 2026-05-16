@@ -28,6 +28,18 @@ type SendGsmCommandPayload = {
   appendNewline: boolean;
 };
 
+type LinkGsmDevicePayload = {
+  equipmentId?: string;
+  model?: string;
+  inventoryNumber?: string;
+  imei: string;
+  deviceType?: string;
+  protocol?: string;
+  sim1?: string;
+  oldServer?: string;
+  targetServer?: string;
+};
+
 function buildQuery(params: PacketQuery = {}) {
   const searchParams = new URLSearchParams();
   if (params.equipmentId) searchParams.set('equipmentId', params.equipmentId);
@@ -54,6 +66,15 @@ export const gsmGatewayService = {
 
   getDevices: (): Promise<GsmGatewayDevice[]> =>
     api.get<GsmGatewayDevice[]>('/api/gsm/devices'),
+
+  getDevice: (imei: string): Promise<GsmGatewayDevice> =>
+    api.get<GsmGatewayDevice>(`/api/gsm/devices/${encodeURIComponent(imei)}`),
+
+  getEquipmentTelemetry: (equipmentId: string): Promise<{ equipmentId: string; devices: GsmGatewayDevice[]; packets: GsmGatewayPacket[] }> =>
+    api.get(`/api/gsm/equipment/${encodeURIComponent(equipmentId)}`),
+
+  linkDevice: (payload: LinkGsmDevicePayload): Promise<{ ok: boolean; device: GsmGatewayDevice; equipment: unknown }> =>
+    api.post('/api/gsm/devices/link', payload),
 
   getRoute: (params: { equipmentId: string; from?: string; to?: string }): Promise<GsmGatewayRoutePoint[]> =>
     api.get<GsmGatewayRoutePoint[]>(`/api/gsm/route${buildQuery(params)}`),

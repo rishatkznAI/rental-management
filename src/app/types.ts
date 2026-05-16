@@ -174,13 +174,13 @@ export interface Equipment {
   gsmLastSpeed?: number | null;
   gsmLastVoltage?: number | null;
   gsmLastMotoHours?: number | null;
+  gsmIgnitionOn?: boolean | null;
   gsmStatus?: EquipmentGsmStatus;
   gsmLatitude?: number;
   gsmLongitude?: number;
   gsmAddress?: string;
   gsmLastSignalAt?: string;
   gsmSignalStatus?: EquipmentGsmSignalState;
-  gsmIgnitionOn?: boolean;
   gsmBatteryVoltage?: number;
   gsmHourmeter?: number;
   gsmSpeedKph?: number;
@@ -292,8 +292,18 @@ export interface GsmGatewayPacket {
   speed?: number | null;
   course?: number | null;
   satellites?: number | null;
+  altitude?: number | null;
+  hdop?: number | null;
   gsmSignal?: number | null;
   voltage?: number | null;
+  BoardVoltage?: number | null;
+  ignition?: boolean | null;
+  iobits0?: number | null;
+  iobits1?: number | null;
+  param1?: string | number | null;
+  param9?: string | number | null;
+  param12?: string | number | null;
+  hasValidLocation?: boolean;
   motoHours?: number | null;
   alarmType?: string | null;
   parsed?: Record<string, unknown> | null;
@@ -343,15 +353,29 @@ export interface GsmGatewayDevice {
   inventoryNumber?: string | null;
   imei?: string | null;
   deviceId?: string | null;
+  deviceType?: string | null;
   simNumber?: string | null;
+  sim1?: string | null;
+  oldServer?: string | null;
+  targetServer?: string | null;
   protocol?: string | null;
   status: EquipmentGsmStatus;
   lastSeenAt?: string | null;
+  lastPacketAt?: string | null;
+  lastOnlineAt?: string | null;
   lastLat?: number | null;
   lastLng?: number | null;
+  lastLatitude?: number | null;
+  lastLongitude?: number | null;
   lastSpeed?: number | null;
+  lastCourse?: number | null;
+  lastSatellites?: number | null;
   lastVoltage?: number | null;
+  lastIgnition?: boolean | null;
+  lastRawPacket?: string | null;
   lastMotoHours?: number | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }
 
 export interface GsmGatewayRoutePoint {

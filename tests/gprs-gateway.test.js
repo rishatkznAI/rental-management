@@ -8,11 +8,14 @@ const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const express = serverRequire('express');
 const { createGprsGateway } = require('../server/lib/gprs-gateway.js');
+const { parseWialonIpsPacket } = require('../server/lib/gsm/wialon-ips-parser.js');
+const { createWialonIpsGateway } = require('../server/lib/gsm/wialon-ips-gateway.js');
 const { registerGsmRoutes } = require('../server/routes/gsm.js');
 
 function createMemoryGateway(stateOverrides = {}, gatewayOptions = {}) {
   const state = {
     equipment: [],
+    gsm_devices: [],
     gsm_packets: [],
     gsm_commands: [],
     ...stateOverrides,
@@ -89,15 +92,67 @@ function createGsmApiApp(stateOverrides = {}) {
 
   function requireWrite(collection) {
     return (req, res, next) => {
-      if (collection === 'gsm_commands' && req.user.userRole === 'Администратор') return next();
+      if (['gsm_commands', 'gsm_devices'].includes(collection) && req.user.userRole === 'Администратор') return next();
       return res.status(403).json({ ok: false, error: 'Forbidden' });
     };
   }
 
-  registerGsmRoutes(apiRouter, { requireAuth, requireWrite, gprsGateway: gateway });
+  registerGsmRoutes(apiRouter, {
+    requireAuth,
+    requireWrite,
+    gprsGateway: gateway,
+    readData: name => state[name],
+    writeData: (name, value) => {
+      state[name] = value;
+    },
+    generateId: prefix => `${prefix}-test`,
+    nowIso: () => '2026-05-16T10:00:00.000Z',
+  });
   app.use('/api', apiRouter);
   return { app, gateway, state };
 }
+
+test('WIALON IPS parser handles login packet', () => {
+  const parsed = parseWialonIpsPacket('#L#869132070808689;secret');
+
+  assert.equal(parsed.parseStatus, 'parsed');
+  assert.equal(parsed.packetType, 'login');
+  assert.equal(parsed.imei, '869132070808689');
+  assert.equal(parsed.ack.toString(), '#AL#1\r\n');
+});
+
+test('WIALON IPS parser handles ping packet', () => {
+  const parsed = parseWialonIpsPacket('#P#');
+
+  assert.equal(parsed.parseStatus, 'parsed');
+  assert.equal(parsed.packetType, 'ping');
+  assert.equal(parsed.ack.toString(), '#AP#\r\n');
+});
+
+test('WIALON IPS parser stores zero coordinates as invalid location', () => {
+  const parsed = parseWialonIpsPacket('#SD#160526;101500;0;N;0;E;0;0;0;0');
+
+  assert.equal(parsed.parseStatus, 'parsed');
+  assert.equal(parsed.lat, 0);
+  assert.equal(parsed.lng, 0);
+  assert.equal(parsed.hasValidLocation, false);
+});
+
+test('WIALON IPS parser extracts extended params BoardVoltage and iobits', () => {
+  const parsed = parseWialonIpsPacket('#D#160526;101500;5547.7676;N;04906.3848;E;12;180;90;7;1.1;3;0;12.2;NA;BoardVoltage:2:13.7,iobits0:1:1,param1:2:44,param9:2:99,param12:2:120');
+
+  assert.equal(parsed.parseStatus, 'parsed');
+  assert.equal(parsed.packetType, 'extended-data');
+  assert.equal(Number(parsed.lat.toFixed(5)), 55.79613);
+  assert.equal(Number(parsed.lng.toFixed(5)), 49.10641);
+  assert.equal(parsed.BoardVoltage, 13.7);
+  assert.equal(parsed.iobits0, 1);
+  assert.equal(parsed.iobits1, 1);
+  assert.equal(parsed.ignition, true);
+  assert.equal(parsed.param1, '44');
+  assert.equal(parsed.param9, '99');
+  assert.equal(parsed.param12, '120');
+});
 
 test('TCP gateway accepts raw buffer and stores gsm_packets', async () => {
   const { gateway, state } = createMemoryGateway({}, { host: '127.0.0.1', port: 0 });
@@ -304,6 +359,110 @@ test('POST /api/gsm/commands creates queued command', async () => {
     assert.equal(response.body.imei, '866123456789012');
     assert.equal(state.gsm_commands.length, 1);
   });
+});
+
+test('POST /api/gsm/devices/link links IMEI to equipment and creates gsm_devices record', async () => {
+  const { app, state } = createGsmApiApp({
+    equipment: [
+      { id: 'EQ-MANTALL', manufacturer: 'MANTALL', model: 'XE140W', inventoryNumber: '03300976' },
+    ],
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/gsm/devices/link', 'admin-token', {
+      inventoryNumber: '03300976',
+      model: 'MANTALL XE140W',
+      imei: '869132070808689',
+      deviceType: 'UMKA',
+      sim1: '+79625678660',
+      oldServer: 'gw1.glonasssoft.ru:15050',
+      targetServer: 'tcp.proxy.railway.app:12345',
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.device.equipmentId, 'EQ-MANTALL');
+    assert.equal(response.body.device.imei, '869132070808689');
+    assert.equal(response.body.device.targetServer, 'tcp.proxy.railway.app:12345');
+    assert.equal(state.gsm_devices.length, 1);
+    assert.equal(state.equipment[0].gsmImei, '869132070808689');
+    assert.equal(state.equipment[0].gsmProtocol, 'WIALON IPS TCP');
+  });
+});
+
+test('GSM devices link API denies non-admin write access', async () => {
+  const { app } = createGsmApiApp({
+    equipment: [
+      { id: 'EQ-MANTALL', manufacturer: 'MANTALL', model: 'XE140W', inventoryNumber: '03300976' },
+    ],
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/gsm/devices/link', 'viewer-token', {
+      inventoryNumber: '03300976',
+      imei: '869132070808689',
+    });
+    assert.equal(response.status, 403);
+  });
+});
+
+test('WIALON IPS gateway saves raw packet to gsm_packets and updates gsm_devices', () => {
+  const state = {
+    equipment: [{ id: 'EQ-MANTALL', manufacturer: 'MANTALL', model: 'XE140W', inventoryNumber: '03300976' }],
+    gsm_devices: [{ id: 'GDEV-1', equipmentId: 'EQ-MANTALL', imei: '869132070808689', deviceType: 'UMKA', protocol: 'WIALON IPS TCP' }],
+    gsm_packets: [],
+  };
+  const gateway = createWialonIpsGateway({
+    readData: name => state[name] ?? [],
+    writeData: (name, value) => {
+      state[name] = value;
+    },
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+    enabled: false,
+  });
+
+  gateway.processLine('#L#869132070808689;', { sourceIp: '127.0.0.1' });
+  const result = gateway.processLine('#D#160526;101500;5547.7676;N;04906.3848;E;0;0;90;7;1.0;1;0;12.4;NA;BoardVoltage:2:13.1', {
+    sourceIp: '127.0.0.1',
+    connection: { id: 'CONN-1', imei: '869132070808689', sourceIp: '127.0.0.1' },
+  });
+
+  assert.equal(result.ack.toString(), '#AD#1\r\n');
+  assert.equal(state.gsm_packets.length, 2);
+  assert.equal(state.gsm_packets[0].rawText.startsWith('#D#160526'), true);
+  assert.equal(state.gsm_packets[0].equipmentId, 'EQ-MANTALL');
+  assert.equal(state.gsm_devices[0].lastVoltage, 13.1);
+  assert.equal(state.equipment[0].gsmLastVoltage, 13.1);
+});
+
+test('local WIALON IPS TCP smoke client receives ACK', async () => {
+  const state = {
+    equipment: [],
+    gsm_devices: [],
+    gsm_packets: [],
+  };
+  const gateway = createWialonIpsGateway({
+    readData: name => state[name] ?? [],
+    writeData: (name, value) => {
+      state[name] = value;
+    },
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+    host: '127.0.0.1',
+    port: 0,
+    enabled: true,
+  });
+  const server = gateway.start();
+  await once(server, 'listening');
+  const { port } = server.address();
+
+  const socket = net.createConnection({ host: '127.0.0.1', port });
+  await once(socket, 'connect');
+  socket.write('#L#869132070808689;\r\n');
+  const [ack] = await once(socket, 'data');
+  socket.destroy();
+  await gateway.stop();
+
+  assert.equal(ack.toString(), '#AL#1\r\n');
+  assert.equal(state.gsm_packets.length, 1);
 });
 
 test('too large packet is stored as failed and does not break next packet', () => {

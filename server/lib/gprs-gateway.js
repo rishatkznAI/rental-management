@@ -154,6 +154,7 @@ function createGprsGateway({
   let packetsReceivedTotal = 0;
 
   function ensureStorage() {
+    if (!Array.isArray(readData('gsm_devices'))) writeData('gsm_devices', []);
     if (!Array.isArray(readData('gsm_packets'))) writeData('gsm_packets', []);
     if (!Array.isArray(readData('gsm_commands'))) writeData('gsm_commands', []);
   }
@@ -201,6 +202,55 @@ function createGprsGateway({
         || (deviceId && legacyTrackerId && deviceId === legacyTrackerId),
       );
     }) || null;
+  }
+
+  function findDeviceByIdentity(identity = {}) {
+    const imei = toText(identity.imei);
+    const deviceId = toText(identity.deviceId);
+    if (!imei && !deviceId) return null;
+    return asArray(readData('gsm_devices')).find(item => Boolean(
+      (imei && toText(item.imei) === imei)
+      || (deviceId && toText(item.imei) === deviceId)
+      || (deviceId && toText(item.id) === deviceId),
+    )) || null;
+  }
+
+  function resolveEquipmentByDevice(device) {
+    if (!device?.equipmentId) return null;
+    return asArray(readData('equipment')).find(item => item.id === device.equipmentId) || null;
+  }
+
+  function updateGsmDeviceFromPacket(device, parsed, rawText, receivedAt) {
+    const imei = toText(parsed.imei || device?.imei);
+    if (!imei) return;
+    const devices = asArray(readData('gsm_devices'));
+    const index = devices.findIndex(item => toText(item.imei) === imei);
+    const current = index >= 0 ? devices[index] : {
+      id: `GSM-${imei}`,
+      imei,
+      protocol: parsed.protocol || 'GPRS',
+      status: 'unknown',
+      createdAt: receivedAt,
+    };
+    const next = {
+      ...current,
+      imei,
+      protocol: current.protocol || parsed.protocol || 'GPRS',
+      status: 'online',
+      lastPacketAt: receivedAt,
+      lastOnlineAt: receivedAt,
+      lastLatitude: toNumberOrNull(parsed.lat) ?? current.lastLatitude ?? null,
+      lastLongitude: toNumberOrNull(parsed.lng) ?? current.lastLongitude ?? null,
+      lastSpeed: toNumberOrNull(parsed.speed) ?? current.lastSpeed ?? null,
+      lastCourse: toNumberOrNull(parsed.course) ?? current.lastCourse ?? null,
+      lastSatellites: toNumberOrNull(parsed.satellites) ?? current.lastSatellites ?? null,
+      lastVoltage: toNumberOrNull(parsed.voltage) ?? current.lastVoltage ?? null,
+      lastRawPacket: rawText || current.lastRawPacket || null,
+      updatedAt: receivedAt,
+    };
+    if (index >= 0) devices[index] = next;
+    else devices.unshift(next);
+    writeData('gsm_devices', devices);
   }
 
   function updateEquipmentFromPacket(equipmentId, parsed, receivedAt) {
@@ -387,9 +437,11 @@ function createGprsGateway({
       }
     }
 
-    const equipment = resolveEquipmentByIdentity(parsed);
+    const device = findDeviceByIdentity(parsed);
+    const equipment = resolveEquipmentByDevice(device) || resolveEquipmentByIdentity(parsed);
     bindConnection(connection, parsed, equipment);
     updateEquipmentFromPacket(equipment?.id || null, parsed, receivedAt);
+    updateGsmDeviceFromPacket(device, parsed, bufferToReadableText(buffer), receivedAt);
 
     const packet = buildPacket({ connection, buffer, parsed, receivedAt, equipment, parseError, tooLarge });
     persistPacket(packet);
@@ -675,8 +727,10 @@ function createGprsGateway({
   }
 
   function listDevices() {
+    ensureStorage();
     const onlineEquipmentIds = new Set([...connections.values()].map(item => item.equipmentId).filter(Boolean));
-    return asArray(readData('equipment'))
+    const equipment = asArray(readData('equipment'));
+    const legacyDevices = equipment
       .filter(item => toText(item.gsmImei) || toText(item.gsmDeviceId) || toText(item.gsmTrackerId))
       .map(item => {
         const status = onlineEquipmentIds.has(item.id) ? 'online' : deriveEquipmentGsmStatus(item);
@@ -700,7 +754,51 @@ function createGprsGateway({
           lastVoltage: toNumberOrNull(item.gsmLastVoltage ?? item.gsmBatteryVoltage),
           lastMotoHours: toNumberOrNull(item.gsmLastMotoHours ?? item.gsmHourmeter),
         };
-      })
+      });
+
+    const byEquipmentOrImei = new Map(legacyDevices.map(item => [item.equipmentId || item.imei || item.id, item]));
+    for (const device of asArray(readData('gsm_devices'))) {
+      const item = equipment.find(eq => eq.id === device.equipmentId) || null;
+      const statusAt = device.lastOnlineAt || device.lastPacketAt || null;
+      const status = Date.now() - Date.parse(statusAt || '') <= ONLINE_WINDOW_MS ? 'online' : (device.status || 'unknown');
+      const key = device.equipmentId || device.imei || device.id;
+      byEquipmentOrImei.set(key, {
+        ...(byEquipmentOrImei.get(key) || {}),
+        id: device.id || key,
+        equipmentId: device.equipmentId || item?.id || key,
+        equipmentName: equipmentLabel(item) || device.equipmentLabel || null,
+        manufacturer: item?.manufacturer || null,
+        model: item?.model || null,
+        serialNumber: item?.serialNumber || null,
+        inventoryNumber: item?.inventoryNumber || null,
+        imei: device.imei || item?.gsmImei || null,
+        deviceId: device.imei || item?.gsmDeviceId || item?.gsmTrackerId || null,
+        deviceType: device.deviceType || null,
+        simNumber: device.sim1 || item?.gsmSimNumber || null,
+        sim1: device.sim1 || item?.gsmSimNumber || null,
+        oldServer: device.oldServer || null,
+        targetServer: device.targetServer || null,
+        protocol: device.protocol || item?.gsmProtocol || null,
+        status,
+        lastSeenAt: statusAt,
+        lastPacketAt: device.lastPacketAt || null,
+        lastOnlineAt: device.lastOnlineAt || null,
+        lastLat: toNumberOrNull(device.lastLatitude),
+        lastLng: toNumberOrNull(device.lastLongitude),
+        lastLatitude: toNumberOrNull(device.lastLatitude),
+        lastLongitude: toNumberOrNull(device.lastLongitude),
+        lastSpeed: toNumberOrNull(device.lastSpeed),
+        lastCourse: toNumberOrNull(device.lastCourse),
+        lastSatellites: toNumberOrNull(device.lastSatellites),
+        lastVoltage: toNumberOrNull(device.lastVoltage),
+        lastIgnition: typeof device.lastIgnition === 'boolean' ? device.lastIgnition : null,
+        lastRawPacket: device.lastRawPacket || null,
+        createdAt: device.createdAt || null,
+        updatedAt: device.updatedAt || null,
+      });
+    }
+
+    return [...byEquipmentOrImei.values()]
       .sort((left, right) => String(right.lastSeenAt || '').localeCompare(String(left.lastSeenAt || '')));
   }
 

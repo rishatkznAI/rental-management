@@ -97,6 +97,7 @@ const {
 } = require('./lib/bot-notifications');
 const { getBuildInfo } = require('./lib/build-info');
 const { createGprsGateway } = require('./lib/gprs-gateway');
+const { createWialonIpsGateway } = require('./lib/gsm/wialon-ips-gateway');
 const { createMaxApiClient } = require('./lib/max-api');
 const { getDemoPublicInfo, isDemoMode } = require('./lib/demo-mode');
 const { seedDemoData } = require('./scripts/seed-demo-data');
@@ -416,6 +417,14 @@ const gprsGateway = createGprsGateway({
   logger: console,
   enabled: !DEMO_MODE,
 });
+const wialonIpsGateway = createWialonIpsGateway({
+  readData,
+  writeData,
+  logger: console,
+  enabled: !DEMO_MODE && String(process.env.ENABLE_GSM_TCP_GATEWAY || '').toLowerCase() === 'true',
+  port: Number(process.env.GSM_TCP_PORT || 5050),
+  host: '0.0.0.0',
+});
 
 // ── Сессии (SQLite-backed, Bearer-токен) ──────────────────────────────────────
 
@@ -474,6 +483,7 @@ const WRITE_PERMISSIONS = {
   knowledge_base_modules: ['Администратор', 'Офис-менеджер'],
   knowledge_base_progress: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
   app_settings: ['Администратор'],
+  gsm_devices: ['Администратор'],
   gsm_commands:  ['Администратор', 'Офис-менеджер'],
   documents:      ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
@@ -525,6 +535,7 @@ const READ_PERMISSIONS = {
   knowledge_base_modules: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
   knowledge_base_progress: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
   app_settings: ['Администратор'],
+  gsm_devices: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', ...MECHANIC_ROLES],
   gsm_packets: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', ...MECHANIC_ROLES],
   gsm_commands: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', ...MECHANIC_ROLES],
   documents:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
@@ -1315,6 +1326,10 @@ registerGsmRoutes(apiRouter, {
   requireAuth,
   requireWrite,
   gprsGateway,
+  readData,
+  writeData,
+  generateId,
+  nowIso,
 });
 
 registerDeliveryRoutes(apiRouter, {
@@ -2484,6 +2499,7 @@ startServer({
     },
     startBotPolling: startMaxBotPolling,
     startGprsGateway: () => gprsGateway.start(),
+    startWialonIpsGateway: () => wialonIpsGateway.start(),
     dbPath: DB_PATH,
     botToken: BOT_TOKEN,
     readData,

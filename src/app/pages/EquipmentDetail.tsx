@@ -40,6 +40,7 @@ import { serviceTicketsService } from '../services/service-tickets.service';
 import { documentsService } from '../services/documents.service';
 import { clientsService } from '../services/clients.service';
 import { deliveriesService } from '../services/deliveries.service';
+import { gsmGatewayService } from '../services/gsm-gateway.service';
 import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
 import { RENTAL_KEYS } from '../hooks/useRentals';
 import { PAYMENT_KEYS } from '../hooks/usePayments';
@@ -943,6 +944,7 @@ export default function EquipmentDetail() {
   const canManageAcceptance = canEditEquipment || canEditSales || canCreateService || isMechanicRole(user?.role);
   const normalizedRole = normalizeUserRole(user?.role);
   const canViewShippingPhotos = canReadCollection('shipping_photos');
+  const canViewGsm = canReadCollection('gsm_packets');
   const canReadDeliveries = canReadCollection('deliveries');
   const { id } = useParams();
   const location = useLocation();
@@ -996,6 +998,13 @@ export default function EquipmentDetail() {
     queryKey: ['shippingPhotos'],
     queryFn: equipmentService.getAllShippingPhotos,
     enabled: !!id && canViewShippingPhotos,
+  });
+  const { data: gsmTelemetry = { equipmentId: '', devices: [], packets: [] } } = useQuery({
+    queryKey: ['gsmGateway', 'equipment', id || 'none'],
+    queryFn: () => id ? gsmGatewayService.getEquipmentTelemetry(id).catch(() => ({ equipmentId: id, devices: [], packets: [] })) : Promise.resolve({ equipmentId: '', devices: [], packets: [] }),
+    enabled: !!id && canViewGsm,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
   });
 
   useEffect(() => {
@@ -2083,6 +2092,12 @@ export default function EquipmentDetail() {
   const assetCurrentRental = equipment360.occupancy.currentRental;
   const assetDocuments = equipment360.documents.latest;
   const assetGsmState = deriveSignalState(equipment, equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || null);
+  const assetGsmDevice = gsmTelemetry.devices[0] || null;
+  const assetGsmPacket = gsmTelemetry.packets[0] || null;
+  const assetGsmLat = assetGsmDevice?.lastLat ?? assetGsmDevice?.lastLatitude ?? equipment.gsmLastLat ?? equipment.gsmLatitude ?? null;
+  const assetGsmLng = assetGsmDevice?.lastLng ?? assetGsmDevice?.lastLongitude ?? equipment.gsmLastLng ?? equipment.gsmLongitude ?? null;
+  const assetGsmSatellites = assetGsmDevice?.lastSatellites ?? assetGsmPacket?.satellites ?? null;
+  const assetGsmGpsWarning = (assetGsmLat === 0 && assetGsmLng === 0) || assetGsmSatellites === 0 || assetGsmPacket?.hasValidLocation === false;
   const assetHasServiceAttention = criticalTickets.length > 0 || equipment.status === 'in_service';
   const assetMaintenanceOverdue = daysUntilMaintenance <= 0;
   const assetMaintenanceSoon = daysUntilMaintenance > 0 && daysUntilMaintenance <= 30;
@@ -2866,11 +2881,16 @@ export default function EquipmentDetail() {
                 </SalePanel>
 
                 <SalePanel title="GSM / Трекер">
-                  <SaleField label="Устройство" value={equipment.gsmDeviceId || equipment.gsmTrackerId || equipment.gsmImei || '—'} mono />
-                  <SaleField label="SIM" value={equipment.gsmSimNumber || '—'} />
+                  <SaleField label="Устройство" value={assetGsmDevice?.deviceType || equipment.gsmDeviceId || equipment.gsmTrackerId || equipment.gsmImei || '—'} mono />
+                  <SaleField label="IMEI" value={assetGsmDevice?.imei || equipment.gsmImei || '—'} mono />
+                  <SaleField label="SIM" value={assetGsmDevice?.sim1 || equipment.gsmSimNumber || '—'} />
+                  <SaleField label="Протокол" value={assetGsmDevice?.protocol || equipment.gsmProtocol || '—'} />
                   <SaleStatusRow label="Связь" value={assetGsmState === 'online' ? 'Онлайн' : assetGsmState === 'offline' ? 'Офлайн' : 'Неизвестно'} tone={assetGsmState === 'online' ? 'success' : 'warning'} />
-                  <SaleField label="Последний сигнал" value={equipment.gsmLastSeenAt || equipment.gsmLastSignalAt ? formatDateTime(equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || '') : '—'} />
-                  <Link to="/gsm" className="inline-flex text-sm font-medium text-blue-300 hover:underline">Открыть трекинг →</Link>
+                  <SaleField label="Последний пакет" value={assetGsmDevice?.lastPacketAt || equipment.gsmLastSeenAt || equipment.gsmLastSignalAt ? formatDateTime(assetGsmDevice?.lastPacketAt || equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || '') : '—'} />
+                  <SaleField label="Напряжение" value={typeof (assetGsmDevice?.lastVoltage ?? equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage) === 'number' ? `${(assetGsmDevice?.lastVoltage ?? equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage)!.toFixed(1)} В` : '—'} />
+                  <SaleField label="Зажигание" value={(assetGsmDevice?.lastIgnition ?? equipment.gsmIgnitionOn) === true ? 'Вкл.' : (assetGsmDevice?.lastIgnition ?? equipment.gsmIgnitionOn) === false ? 'Выкл.' : '—'} />
+                  <SaleStatusRow label="GPS" value={assetGsmGpsWarning ? 'Проверьте координаты / спутники' : 'Данные валидны'} tone={assetGsmGpsWarning ? 'warning' : 'success'} />
+                  <Link to={`/gsm?equipmentId=${encodeURIComponent(equipment.id)}`} className="inline-flex text-sm font-medium text-blue-300 hover:underline">История пакетов →</Link>
                 </SalePanel>
 
                 <SalePanel title="Техническое обслуживание">
@@ -3527,9 +3547,9 @@ export default function EquipmentDetail() {
               </div>
               <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
                 <InfoField label="GSM IMEI" value={equipment.gsmImei || '—'} mono />
-                <InfoField label="Device ID" value={equipment.gsmDeviceId || equipment.gsmTrackerId || '—'} mono />
-                <InfoField label="SIM-карта" value={equipment.gsmSimNumber || '—'} />
-                <InfoField label="Протокол" value={equipment.gsmProtocol || '—'} />
+                <InfoField label="Устройство" value={assetGsmDevice?.deviceType || equipment.gsmDeviceId || equipment.gsmTrackerId || '—'} mono />
+                <InfoField label="SIM-карта" value={assetGsmDevice?.sim1 || equipment.gsmSimNumber || '—'} />
+                <InfoField label="Протокол" value={assetGsmDevice?.protocol || equipment.gsmProtocol || '—'} />
                 <InfoField
                   label="Последняя связь"
                   value={equipment.gsmLastSeenAt || equipment.gsmLastSignalAt ? formatDateTime(equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || '') : '—'}
@@ -3544,7 +3564,9 @@ export default function EquipmentDetail() {
                   }
                 />
                 <InfoField label="Напряжение" value={typeof (equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage) === 'number' ? `${(equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage)!.toFixed(1)} В` : '—'} />
-                <InfoField label="Моточасы" value={typeof (equipment.gsmLastMotoHours ?? equipment.gsmHourmeter) === 'number' ? `${(equipment.gsmLastMotoHours ?? equipment.gsmHourmeter)!.toLocaleString('ru-RU')} м/ч` : '—'} />
+                <InfoField label="Зажигание" value={(assetGsmDevice?.lastIgnition ?? equipment.gsmIgnitionOn) === true ? 'Вкл.' : (assetGsmDevice?.lastIgnition ?? equipment.gsmIgnitionOn) === false ? 'Выкл.' : '—'} />
+                <InfoField label="GPS статус" value={assetGsmGpsWarning ? 'GPS 0/0 или 0 спутников' : 'Валидный'} />
+                <InfoField label="Raw пакет" value={assetGsmDevice?.lastRawPacket || assetGsmPacket?.rawText || '—'} mono />
               </div>
             </div>}
 

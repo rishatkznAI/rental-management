@@ -132,6 +132,7 @@ async function startServer({ app, port, deps, logger = console }) {
     startWebhookWatchdog,
     startBotPolling,
     startGprsGateway,
+    startWialonIpsGateway,
     dbPath,
     botToken,
   } = deps;
@@ -231,6 +232,9 @@ async function startServer({ app, port, deps, logger = console }) {
     applyAdminResetFromEnv();
     if (typeof startGprsGateway === 'function') {
       startGprsGateway();
+    }
+    if (typeof startWialonIpsGateway === 'function') {
+      startWialonIpsGateway();
     }
     const crmCleanupTimer = setInterval(() => {
       cleanupArchivedCrm({

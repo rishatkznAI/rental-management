@@ -3,6 +3,10 @@ function registerGsmRoutes(router, deps) {
     requireAuth,
     requireWrite,
     gprsGateway,
+    readData,
+    writeData,
+    generateId = prefix => `${prefix}-${Date.now()}`,
+    nowIso = () => new Date().toISOString(),
   } = deps;
 
   const GSM_VIEW_ROLES = new Set([
@@ -43,6 +47,94 @@ function registerGsmRoutes(router, deps) {
     return true;
   }
 
+  function asArray(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  function toText(value) {
+    return String(value || '').trim();
+  }
+
+  function equipmentLabel(equipment) {
+    if (!equipment) return null;
+    return [
+      equipment.manufacturer,
+      equipment.model,
+      equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
+    ].filter(Boolean).join(' · ') || equipment.id || null;
+  }
+
+  function findEquipmentForLink({ equipmentId, model, inventoryNumber }) {
+    const equipment = asArray(readData?.('equipment'));
+    const safeEquipmentId = toText(equipmentId);
+    const safeModel = toText(model).toLowerCase();
+    const safeInventoryNumber = toText(inventoryNumber);
+    return equipment.find(item => safeEquipmentId && item.id === safeEquipmentId)
+      || equipment.find(item => (
+        safeInventoryNumber
+        && toText(item.inventoryNumber) === safeInventoryNumber
+        && (!safeModel || [item.manufacturer, item.model].filter(Boolean).join(' ').toLowerCase().includes(safeModel))
+      ))
+      || null;
+  }
+
+  function upsertGsmDevice(payload = {}) {
+    const imei = toText(payload.imei);
+    if (!imei) throw new Error('Укажите IMEI устройства');
+    const devices = asArray(readData?.('gsm_devices'));
+    const timestamp = nowIso();
+    const index = devices.findIndex(item => toText(item.imei) === imei);
+    const current = index >= 0 ? devices[index] : {
+      id: generateId('GDEV'),
+      imei,
+      createdAt: timestamp,
+    };
+    const next = {
+      ...current,
+      equipmentId: toText(payload.equipmentId) || current.equipmentId || null,
+      imei,
+      deviceType: toText(payload.deviceType) || current.deviceType || 'UMKA',
+      protocol: toText(payload.protocol) || current.protocol || 'WIALON IPS TCP',
+      sim1: toText(payload.sim1) || current.sim1 || null,
+      oldServer: toText(payload.oldServer) || current.oldServer || null,
+      targetServer: toText(payload.targetServer) || current.targetServer || null,
+      status: current.status || 'unknown',
+      lastPacketAt: current.lastPacketAt || null,
+      lastOnlineAt: current.lastOnlineAt || null,
+      lastLatitude: current.lastLatitude ?? null,
+      lastLongitude: current.lastLongitude ?? null,
+      lastSpeed: current.lastSpeed ?? null,
+      lastCourse: current.lastCourse ?? null,
+      lastSatellites: current.lastSatellites ?? null,
+      lastVoltage: current.lastVoltage ?? null,
+      lastIgnition: current.lastIgnition ?? null,
+      lastRawPacket: current.lastRawPacket || null,
+      updatedAt: timestamp,
+    };
+    if (index >= 0) devices[index] = next;
+    else devices.unshift(next);
+    writeData('gsm_devices', devices);
+    return next;
+  }
+
+  function patchEquipmentGsm(equipmentId, device) {
+    if (!equipmentId) return null;
+    const equipment = asArray(readData?.('equipment'));
+    const index = equipment.findIndex(item => item.id === equipmentId);
+    if (index === -1) return null;
+    const current = equipment[index];
+    const next = {
+      ...current,
+      gsmImei: device.imei || current.gsmImei || null,
+      gsmDeviceId: device.imei || current.gsmDeviceId || null,
+      gsmSimNumber: device.sim1 || current.gsmSimNumber || null,
+      gsmProtocol: device.protocol || current.gsmProtocol || null,
+    };
+    equipment[index] = next;
+    writeData('equipment', equipment);
+    return next;
+  }
+
   router.get('/gsm/status', requireAuth, requireGsmView, (_req, res) => {
     res.json(gprsGateway.getStatus());
   });
@@ -55,6 +147,55 @@ function registerGsmRoutes(router, deps) {
 
   router.get('/gsm/devices', requireAuth, requireGsmView, (_req, res) => {
     res.json(gprsGateway.listDevices());
+  });
+
+  router.get('/gsm/devices/:imei', requireAuth, requireGsmView, (req, res) => {
+    const imei = toText(req.params.imei);
+    const device = gprsGateway.listDevices().find(item => toText(item.imei) === imei || toText(item.id) === imei);
+    if (!device) return res.status(404).json({ ok: false, error: 'GSM устройство не найдено' });
+    return res.json(device);
+  });
+
+  router.get('/gsm/equipment/:equipmentId', requireAuth, requireGsmView, (req, res) => {
+    const equipmentId = toText(req.params.equipmentId);
+    const devices = gprsGateway.listDevices().filter(item => item.equipmentId === equipmentId);
+    const packets = gprsGateway.listPackets({ equipmentId, limit: Number(req.query.limit) || 100 });
+    res.json({ equipmentId, devices, packets });
+  });
+
+  router.post('/gsm/devices/link', requireAuth, requireWrite('gsm_devices'), (req, res) => {
+    try {
+      const equipment = findEquipmentForLink({
+        equipmentId: req.body?.equipmentId,
+        model: req.body?.model || 'MANTALL XE140W',
+        inventoryNumber: req.body?.inventoryNumber || '03300976',
+      });
+      if (!equipment) return res.status(404).json({ ok: false, error: 'Техника для привязки не найдена' });
+
+      const device = upsertGsmDevice({
+        equipmentId: equipment.id,
+        imei: req.body?.imei || '869132070808689',
+        deviceType: req.body?.deviceType || 'UMKA',
+        protocol: req.body?.protocol || 'WIALON IPS TCP',
+        sim1: req.body?.sim1 || '+79625678660',
+        oldServer: req.body?.oldServer || 'gw1.glonasssoft.ru:15050',
+        targetServer: req.body?.targetServer,
+      });
+      const updatedEquipment = patchEquipmentGsm(equipment.id, device);
+      res.status(201).json({
+        ok: true,
+        device,
+        equipment: updatedEquipment ? {
+          id: updatedEquipment.id,
+          label: equipmentLabel(updatedEquipment),
+          inventoryNumber: updatedEquipment.inventoryNumber || null,
+          gsmImei: updatedEquipment.gsmImei || null,
+          gsmProtocol: updatedEquipment.gsmProtocol || null,
+        } : null,
+      });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
   });
 
   router.get('/gsm/route', requireAuth, requireGsmView, (req, res) => {

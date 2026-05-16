@@ -283,6 +283,18 @@ function formatCoordinates(lat?: number | null, lng?: number | null) {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
+function hasGpsWarning(device: GsmGatewayDevice) {
+  const lat = device.lastLat ?? device.lastLatitude ?? null;
+  const lng = device.lastLng ?? device.lastLongitude ?? null;
+  return (lat === 0 && lng === 0) || device.lastSatellites === 0;
+}
+
+function formatIgnition(value?: boolean | null) {
+  if (value === true) return 'Вкл.';
+  if (value === false) return 'Выкл.';
+  return '—';
+}
+
 function formatGsmStatus(status?: string | null) {
   if (status === 'online') return 'Онлайн';
   if (status === 'offline') return 'Офлайн';
@@ -601,7 +613,7 @@ export default function Gsm() {
   const [gsmBindingOpen, setGsmBindingOpen] = React.useState(false);
   const [gsmBindingForm, setGsmBindingForm] = React.useState<GsmBindingForm>(EMPTY_GSM_BINDING_FORM);
   const canSendGprsCommands = user?.role === 'Администратор' || user?.role === 'Офис-менеджер';
-  const canBindGsmEquipment = user?.role === 'Администратор' || user?.role === 'Офис-менеджер';
+  const canBindGsmEquipment = user?.role === 'Администратор';
 
   React.useEffect(() => {
     if (selectedPacket) setRetainedPacket(selectedPacket);
@@ -860,18 +872,20 @@ export default function Gsm() {
         throw new Error('Укажите GSM IMEI или Device ID трекера.');
       }
 
-      return equipmentService.update(equipmentId, {
-        gsmImei: gsmImei || null,
-        gsmDeviceId: gsmDeviceId || null,
-        gsmSimNumber: gsmSimNumber || null,
-        gsmProtocol: gsmProtocol || null,
+      return gsmGatewayService.linkDevice({
+        equipmentId,
+        imei: gsmImei || gsmDeviceId,
+        deviceType: 'UMKA',
+        protocol: gsmProtocol || 'WIALON IPS TCP',
+        sim1: gsmSimNumber,
+        oldServer: 'gw1.glonasssoft.ru:15050',
       });
     },
-    onSuccess: (updated) => {
+    onSuccess: (result) => {
       toast.success('GSM-устройство привязано к технике');
       setGsmBindingOpen(false);
-      setSelectedId(updated.id);
-      setRouteEquipmentId(current => current || updated.id);
+      setSelectedId(result.device.equipmentId);
+      setRouteEquipmentId(current => current || result.device.equipmentId);
       queryClient.invalidateQueries({ queryKey: ['equipment'] });
       queryClient.invalidateQueries({ queryKey: ['gsmGateway'] });
     },
@@ -1233,21 +1247,24 @@ export default function Gsm() {
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[1280px] text-left text-sm">
+                    <table className="w-full min-w-[1520px] text-left text-sm">
                       <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
                         <tr>
                           <th className="px-3 py-2">Техника</th>
                           <th className="px-3 py-2">Модель</th>
                           <th className="px-3 py-2">Серийный номер</th>
                           <th className="px-3 py-2">IMEI</th>
+                          <th className="px-3 py-2">Устройство</th>
                           <th className="px-3 py-2">SIM</th>
                           <th className="px-3 py-2">Протокол</th>
                           <th className="px-3 py-2">Статус</th>
                           <th className="px-3 py-2">Последняя связь</th>
                           <th className="px-3 py-2">Координаты</th>
+                          <th className="px-3 py-2">GPS</th>
                           <th className="px-3 py-2">Скорость</th>
                           <th className="px-3 py-2">Напряжение</th>
-                          <th className="px-3 py-2">Моточасы</th>
+                          <th className="px-3 py-2">Зажигание</th>
+                          <th className="px-3 py-2">Raw</th>
                           {canBindGsmEquipment ? <th className="px-3 py-2">Действия</th> : null}
                         </tr>
                       </thead>
@@ -1262,7 +1279,8 @@ export default function Gsm() {
                             <td className="px-3 py-2 text-slate-300">{[device.manufacturer, device.model].filter(Boolean).join(' ') || '—'}</td>
                             <td className="px-3 py-2 font-mono text-xs text-slate-300">{device.serialNumber || '—'}</td>
                             <td className="px-3 py-2 font-mono text-xs text-slate-300">{device.imei || '—'}</td>
-                            <td className="px-3 py-2 text-slate-300">{device.simNumber || '—'}</td>
+                            <td className="px-3 py-2 text-slate-300">{device.deviceType || device.deviceId || '—'}</td>
+                            <td className="px-3 py-2 text-slate-300">{device.sim1 || device.simNumber || '—'}</td>
                             <td className="px-3 py-2 text-slate-300">{device.protocol || '—'}</td>
                             <td className="px-3 py-2">
                               <Badge variant={device.status === 'online' ? 'success' : device.status === 'offline' ? 'warning' : 'default'}>
@@ -1270,10 +1288,20 @@ export default function Gsm() {
                               </Badge>
                             </td>
                             <td className="px-3 py-2 text-slate-300">{formatDateTime(device.lastSeenAt)}</td>
-                            <td className="px-3 py-2 text-slate-300">{formatCoordinates(device.lastLat, device.lastLng)}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatCoordinates(device.lastLat ?? device.lastLatitude, device.lastLng ?? device.lastLongitude)}</td>
+                            <td className="px-3 py-2">
+                              {hasGpsWarning(device) ? (
+                                <Badge variant="warning">GPS 0/0 или 0 спутников</Badge>
+                              ) : (
+                                <span className="text-slate-300">{device.lastSatellites ?? '—'} спутн.</span>
+                              )}
+                            </td>
                             <td className="px-3 py-2 text-slate-300">{formatSpeed(device.lastSpeed ?? null)}</td>
                             <td className="px-3 py-2 text-slate-300">{formatVoltage(device.lastVoltage ?? null)}</td>
-                            <td className="px-3 py-2 text-slate-300">{formatEngineHours(device.lastMotoHours ?? null)}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatIgnition(device.lastIgnition)}</td>
+                            <td className="max-w-[240px] px-3 py-2 font-mono text-xs text-slate-300">
+                              <span className="block truncate">{device.lastRawPacket || '—'}</span>
+                            </td>
                             {canBindGsmEquipment ? (
                               <td className="px-3 py-2">
                                 <Button

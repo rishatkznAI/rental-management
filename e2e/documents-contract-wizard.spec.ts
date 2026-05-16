@@ -48,11 +48,23 @@ test('admin creates rental contract draft with selected client in document wizar
   });
 
   const issues: UiIssue[] = [];
+  const apiRequests: string[] = [];
   installDocumentWizardGuards(page, issues);
+  page.on('request', request => {
+    const url = request.url();
+    if (/\/api\//.test(url)) apiRequests.push(url);
+  });
 
   await loginAsAdmin(page);
+  apiRequests.length = 0;
   await navigateInApp(page, '/documents');
+  await expect(page.getByRole('heading', { name: 'Документы' })).toBeVisible();
+  expect(apiRequests.filter(url => /\/api\/gantt_rentals(?:$|\?)/.test(url))).toHaveLength(0);
+  const ganttReferencesResponse = page.waitForResponse(response => response.url().includes('/api/documents/gantt-references'));
   await page.getByRole('button', { name: /^Создать документ$/ }).first().click();
+  await ganttReferencesResponse;
+  expect(apiRequests.filter(url => /\/api\/gantt_rentals(?:$|\?)/.test(url))).toHaveLength(0);
+  expect(apiRequests.some(url => url.includes('/api/documents/gantt-references'))).toBe(true);
 
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
@@ -158,10 +170,14 @@ test('admin creates rental contract draft with selected client in document wizar
   });
 
   await navigateInApp(page, '/documents');
+  await page.getByRole('button', { name: 'Фильтры' }).click();
+  await page.getByPlaceholder('Поиск по номеру, клиенту, технике, аренде, сервисной заявке...').fill(document.number);
   await expect(page.getByText(document.number).first()).toBeVisible();
+  await page.getByPlaceholder('Поиск по номеру, клиенту, технике, аренде, сервисной заявке...').fill(seed.client.company);
   await expect(page.getByText(chain.spec.number).first()).toBeVisible();
   await expect(page.getByText(chain.transfer.number).first()).toBeVisible();
   await expect(page.getByText(chain.returnAct.number).first()).toBeVisible();
+  await page.keyboard.press('Escape');
 
   await page.getByRole('button', { name: /Контроль/ }).click();
   await expect(page.getByRole('heading', { name: 'Контроль документов' })).toBeVisible();
@@ -169,5 +185,6 @@ test('admin creates rental contract draft with selected client in document wizar
   await expect(page.locator('tr').filter({ hasText: seed.rental.id }).filter({ hasText: 'Нет спецификации' })).toHaveCount(0);
   await expect(page.locator('tr').filter({ hasText: seed.rental.id }).filter({ hasText: 'Нет акта передачи' })).toHaveCount(0);
 
+  expect(apiRequests.filter(url => /\/api\/gantt_rentals(?:$|\?)/.test(url))).toHaveLength(0);
   expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);
 });

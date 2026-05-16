@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { documentsService } from '../services/documents.service';
+import { documentsService, type DocumentGanttReferenceQueryParams } from '../services/documents.service';
 import type { PaginatedQueryParams } from '../lib/api';
 import type { Document } from '../types';
 
@@ -7,6 +7,7 @@ export const DOCUMENT_KEYS = {
   all: ['documents'] as const,
   paginated: (params: PaginatedQueryParams) => ['documents', 'paginated', params] as const,
   references: (params: PaginatedQueryParams) => ['documents', 'references', params] as const,
+  ganttReferences: (params: DocumentGanttReferenceQueryParams) => ['documents', 'gantt-references', params] as const,
   summary: ['documents', 'summary'] as const,
   detail: (id: string) => ['documents', id] as const,
   byRental: (rentalId: string) => ['documents', 'rental', rentalId] as const,
@@ -44,6 +45,16 @@ export function useDocumentReferences(params: DocumentReferenceQueryParams, opti
   return useQuery({
     queryKey: DOCUMENT_KEYS.references(params),
     queryFn: () => documentsService.getReferences(params),
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60,
+    placeholderData: previous => previous,
+  });
+}
+
+export function useDocumentGanttReferences(params: DocumentGanttReferenceQueryParams, options: QueryOptions = {}) {
+  return useQuery({
+    queryKey: DOCUMENT_KEYS.ganttReferences(params),
+    queryFn: () => documentsService.getGanttReferences(params),
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60,
     placeholderData: previous => previous,

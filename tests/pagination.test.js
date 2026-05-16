@@ -99,15 +99,23 @@ test('documents page uses bounded reference search instead of loading full regis
 
   assert.doesNotMatch(pageSource, /useDocumentsList\(/);
   assert.match(pageSource, /useDocumentReferences\(/);
+  assert.match(pageSource, /useDocumentGanttReferences\(/);
   assert.match(pageSource, /documentWizardOpen/);
   assert.match(pageSource, /enabled: documentWizardOpen/);
+  assert.match(pageSource, /enabled: referenceLoadEnabled/);
+  assert.doesNotMatch(pageSource, /useGanttData\(/);
+  assert.doesNotMatch(pageSource, /\/api\/gantt_rentals/);
   assert.match(pageSource, /usePaginatedDocuments\(\{/);
   assert.doesNotMatch(sidebarSource, /queryFn: documentsService\.getAll/);
   assert.match(sidebarSource, /documentsService\.getReferences\(\{/);
   assert.match(sidebarSource, /enabled: hasSearchInput && canView\('documents'\)/);
   assert.match(serviceSource, /\/api\/documents\/references/);
+  assert.match(serviceSource, /\/api\/documents\/gantt-references/);
   assert.match(routeSource, /documentsRouter\.get\('\/documents\/references'/);
+  assert.match(routeSource, /documentsRouter\.get\('\/documents\/gantt-references'/);
+  assert.match(routeSource, /clampGanttReferenceLimit/);
   assert.match(routeSource, /compactDocumentReference/);
+  assert.match(routeSource, /compactGanttReference/);
   assert.match(routeSource, /pageSize: req\.query\.pageSize \|\| '25'/);
 });
 

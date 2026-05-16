@@ -1,5 +1,6 @@
 import { api, API_BASE_URL, ApiError, getToken } from '../lib/api';
 import { buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
+import type { GanttRentalData } from '../mock-data';
 import type { Document, DocumentNumberingSetting, DocumentRegistrySummary, DocumentType } from '../types';
 
 export function getDocumentPrintPath(id: string) {
@@ -35,12 +36,34 @@ type DocumentReferenceQueryParams = PaginatedQueryParams & {
   ids?: string;
 };
 
+export type DocumentGanttReferenceQueryParams = {
+  search?: string;
+  clientId?: string;
+  rentalId?: string;
+  equipmentId?: string;
+  contractId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  status?: string;
+  limit?: number;
+};
+
 function buildDocumentReferenceQuery(params: DocumentReferenceQueryParams = {}): string {
   const query = buildPaginatedQuery(params);
   const searchParams = new URLSearchParams(query.slice(1));
   if (params.types) searchParams.set('types', params.types);
   if (params.ids) searchParams.set('ids', params.ids);
   return `?${searchParams.toString()}`;
+}
+
+function buildGanttReferenceQuery(params: DocumentGanttReferenceQueryParams = {}): string {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    searchParams.set(key, String(value));
+  });
+  const query = searchParams.toString();
+  return query ? `?${query}` : '';
 }
 
 export const documentsService = {
@@ -52,6 +75,9 @@ export const documentsService = {
 
   getReferences: (params?: DocumentReferenceQueryParams): Promise<PaginatedResponse<Document>> =>
     api.get<PaginatedResponse<Document>>(`/api/documents/references${buildDocumentReferenceQuery(params)}`),
+
+  getGanttReferences: (params?: DocumentGanttReferenceQueryParams): Promise<PaginatedResponse<GanttRentalData>> =>
+    api.get<PaginatedResponse<GanttRentalData>>(`/api/documents/gantt-references${buildGanttReferenceQuery(params)}`),
 
   getById: (id: string): Promise<Document | undefined> =>
     api.get<Document>(`/api/documents/${id}`).catch(() => undefined),

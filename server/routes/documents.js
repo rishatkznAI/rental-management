@@ -343,6 +343,112 @@ function registerDocumentRoutes(router, deps) {
     };
   }
 
+  function clampGanttReferenceLimit(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 25;
+    return Math.min(Math.max(Math.floor(parsed), 1), 100);
+  }
+
+  function dateOnly(value) {
+    return String(value || '').slice(0, 10);
+  }
+
+  function addDays(date, days) {
+    const next = new Date(date);
+    next.setUTCDate(next.getUTCDate() + days);
+    return next.toISOString().slice(0, 10);
+  }
+
+  function defaultGanttReferenceWindow() {
+    const today = dateOnly(nowIso()) || new Date().toISOString().slice(0, 10);
+    return {
+      dateFrom: addDays(`${today}T00:00:00.000Z`, -90),
+      dateTo: addDays(`${today}T00:00:00.000Z`, 180),
+    };
+  }
+
+  function compactGanttReference(item) {
+    return {
+      id: item.id,
+      rentalId: canonicalRentalId(item),
+      ganttRentalId: item.id,
+      sourceRentalId: item.sourceRentalId || '',
+      originalRentalId: item.originalRentalId || '',
+      clientId: item.clientId || '',
+      client: item.client || item.clientName || item.clientShort || '',
+      equipmentId: item.equipmentId || '',
+      equipmentInv: item.equipmentInv || item.inventoryNumber || '',
+      inventoryNumber: item.inventoryNumber || item.equipmentInv || '',
+      serialNumber: item.serialNumber || '',
+      startDate: item.startDate || '',
+      endDate: item.endDate || item.plannedReturnDate || '',
+      plannedReturnDate: item.plannedReturnDate || item.endDate || '',
+      status: item.status || '',
+      manager: item.manager || '',
+      managerId: item.managerId || '',
+      objectId: item.objectId || '',
+      contractId: item.contractId || '',
+      amount: item.amount,
+      price: item.price,
+      rate: item.rate || '',
+    };
+  }
+
+  function filterGanttReferences(rows, query) {
+    let list = Array.isArray(rows) ? rows : [];
+    let hasNarrowingFilter = false;
+    const filters = {
+      clientId: item => item.clientId,
+      rentalId: item => canonicalRentalId(item),
+      equipmentId: item => item.equipmentId,
+      contractId: item => item.contractId,
+      status: item => item.status,
+    };
+    Object.entries(filters).forEach(([name, getter]) => {
+      const value = String(query[name] || '').trim();
+      if (value && value !== 'all') {
+        hasNarrowingFilter = true;
+        list = list.filter(item => String(getter(item) || '') === value);
+      }
+    });
+
+    const search = String(query.search || '').trim();
+    if (search) hasNarrowingFilter = true;
+    list = list.filter(item => itemMatchesSearch(item, search, [
+      'id',
+      'rentalId',
+      'sourceRentalId',
+      'originalRentalId',
+      'client',
+      'clientName',
+      'clientShort',
+      'clientId',
+      'equipmentInv',
+      'inventoryNumber',
+      'equipmentId',
+      'serialNumber',
+      'manager',
+      'managerId',
+      'objectId',
+      'contractId',
+      'status',
+    ]));
+
+    const hasDateFilter = Boolean(dateOnly(query.dateFrom) || dateOnly(query.dateTo));
+    const fallbackWindow = !hasDateFilter && !hasNarrowingFilter ? defaultGanttReferenceWindow() : {};
+    const dateFrom = dateOnly(query.dateFrom) || fallbackWindow.dateFrom || '';
+    const dateTo = dateOnly(query.dateTo) || fallbackWindow.dateTo || '';
+    if (!dateFrom && !dateTo) return list;
+    return list.filter(item => {
+      const start = dateOnly(item.startDate);
+      const end = dateOnly(item.endDate || item.plannedReturnDate || item.startDate);
+      if (!start && !end) return false;
+      if (dateFrom && end && end < dateFrom) return false;
+      if (dateTo && start && start > dateTo) return false;
+      return true;
+    });
+  }
+
   function saveSettings(settings) {
     const next = writeNumberingSettings(readData('app_settings') || [], settings, nowIso);
     writeData('app_settings', next);
@@ -461,6 +567,36 @@ function registerDocumentRoutes(router, deps) {
       return res.json({
         ...response,
         items: response.items.map(compactDocumentReference),
+      });
+    } catch (error) {
+      return sendAccessError(res, error);
+    }
+  });
+
+  documentsRouter.get('/documents/gantt-references', requireAuth, requireRead('documents'), (req, res) => {
+    try {
+      accessControl.assertCanReadCollection('documents', req.user);
+      const scoped = accessControl.filterCollectionByScope('gantt_rentals', readData('gantt_rentals') || [], req.user);
+      const limit = clampGanttReferenceLimit(req.query.limit || req.query.pageSize);
+      const query = {
+        ...req.query,
+        page: '1',
+        pageSize: String(limit),
+      };
+      const rows = filterGanttReferences(scoped, query);
+      const response = buildPaginatedResponse(rows, query, {
+        sortFields: {
+          startDate: item => item.startDate,
+          endDate: item => item.endDate || item.plannedReturnDate,
+          client: item => item.client || item.clientName || item.clientShort,
+          status: item => item.status,
+        },
+        defaultSort: { sortBy: 'startDate', sortDir: 'desc' },
+      });
+      return res.json({
+        ...response,
+        limit,
+        items: response.items.map(compactGanttReference),
       });
     } catch (error) {
       return sendAccessError(res, error);

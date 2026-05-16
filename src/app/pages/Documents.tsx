@@ -48,6 +48,7 @@ import {
   useAssignDocumentNumber,
   useCreateDocument,
   useDeleteDocument,
+  useDocumentGanttReferences,
   useDocumentReferences,
   useDuplicateDocument,
   useDocumentRegistrySummary,
@@ -58,7 +59,7 @@ import {
   useUpdateDocument,
 } from '../hooks/useDocuments';
 import { usePaginatedEquipment } from '../hooks/useEquipment';
-import { useGanttData, usePaginatedRentals } from '../hooks/useRentals';
+import { usePaginatedRentals } from '../hooks/useRentals';
 import { usePaginatedServiceTickets } from '../hooks/useServiceTickets';
 import { buildDocumentControl, getDocumentControlStatusLabel } from '../lib/documentControl.js';
 import { DOCUMENT_WORKSPACE_TYPES, getDocumentRegistryItem } from '../lib/documentRegistry';
@@ -447,6 +448,14 @@ function getRentalLabel(rental: Rental | undefined) {
   return [rental.id, rental.client, start].filter(Boolean).join(' · ');
 }
 
+function getGanttReferenceLabel(entry: GanttRentalData | undefined) {
+  if (!entry) return '';
+  const rentalId = getRentalSourceId(entry) || entry.id;
+  const start = entry.startDate ? formatDate(entry.startDate) : '';
+  const equipment = entry.equipmentInv || entry.equipmentId || '';
+  return [rentalId, entry.client, equipment, start].filter(Boolean).join(' · ');
+}
+
 function getEquipmentLabel(item: Equipment | undefined) {
   if (!item) return '';
   return [item.inventoryNumber, item.manufacturer, item.model].filter(Boolean).join(' · ');
@@ -738,10 +747,13 @@ export default function Documents() {
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [commercialOfferDialogOpen, setCommercialOfferDialogOpen] = React.useState(false);
   const [documentWizardOpen, setDocumentWizardOpen] = React.useState(false);
+  const [rentalReferenceSearch, setRentalReferenceSearch] = React.useState('');
+  const debouncedRentalReferenceSearch = React.useDeferredValue(rentalReferenceSearch);
+  const [wizardStep, setWizardStep] = React.useState(1);
+  const [wizardForm, setWizardForm] = React.useState<DocumentWizardState>(EMPTY_WIZARD);
   const referenceLoadEnabled = createDialogOpen || commercialOfferDialogOpen || documentWizardOpen;
   const { data: clientsReference } = usePaginatedClients({ page: 1, pageSize: 100, sortBy: 'company', sortDir: 'asc' }, { enabled: referenceLoadEnabled });
   const { data: rentalsReference } = usePaginatedRentals({ page: 1, pageSize: 100, sortBy: 'startDate', sortDir: 'desc' }, { enabled: referenceLoadEnabled });
-  const { data: ganttRentals = [] } = useGanttData({ enabled: referenceLoadEnabled });
   const { data: equipmentReference } = usePaginatedEquipment({ page: 1, pageSize: 100, sortBy: 'inventoryNumber', sortDir: 'asc' }, { enabled: referenceLoadEnabled });
   const { data: serviceTicketsReference } = usePaginatedServiceTickets({ page: 1, pageSize: 100, sortBy: 'createdAt', sortDir: 'desc' }, { enabled: referenceLoadEnabled });
   const { data: deliveriesReference } = usePaginatedDeliveries({ page: 1, pageSize: 100, sortBy: 'date', sortDir: 'desc' }, { enabled: referenceLoadEnabled, scope: 'documents' });
@@ -806,8 +818,6 @@ export default function Documents() {
   const [mechanicSearch, setMechanicSearch] = React.useState('');
   const [selectedMechanicId, setSelectedMechanicId] = React.useState<string>('');
   const [mechanicDocuments, setMechanicDocuments] = React.useState<MechanicDocument[]>([]);
-  const [wizardStep, setWizardStep] = React.useState(1);
-  const [wizardForm, setWizardForm] = React.useState<DocumentWizardState>(EMPTY_WIZARD);
   const [selectedDocument, setSelectedDocument] = React.useState<Doc | null>(null);
   const [sortKey, setSortKey] = React.useState<'date' | 'number' | 'client' | 'status' | 'createdAt'>('date');
   const [createContractKind, setCreateContractKind] = React.useState<DocumentContractKind>('rental');
@@ -834,6 +844,14 @@ export default function Documents() {
     kitComment: DEFAULT_SALES_SETTINGS.packageCommentTemplate.text,
     comment: '',
   });
+  const ganttReferencesQuery = useDocumentGanttReferences({
+    limit: 100,
+    search: debouncedRentalReferenceSearch.trim() || undefined,
+    clientId: wizardForm.clientId || contractForm.clientId || commercialOfferForm.clientId || undefined,
+    rentalId: wizardForm.rentalId || contractForm.rentalId || undefined,
+    equipmentId: wizardForm.equipmentId || contractForm.equipmentId || commercialOfferForm.equipmentId || undefined,
+  }, { enabled: referenceLoadEnabled });
+  const ganttRentals = ganttReferencesQuery.data?.items ?? [];
 
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const signedScanInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -896,9 +914,21 @@ export default function Documents() {
     (ganttRentals as GanttRentalData[]).forEach(entry => {
       const rentalId = getRentalSourceId(entry);
       if (rentalId && !map.has(rentalId)) map.set(rentalId, entry);
+      if (entry.id && !map.has(entry.id)) map.set(entry.id, entry);
     });
     return map;
   }, [ganttRentals]);
+  const rentalReferenceOptions = React.useMemo(() => {
+    const options = new Map<string, { id: string; label: string }>();
+    (rentals as Rental[]).forEach(rental => {
+      if (rental.id) options.set(rental.id, { id: rental.id, label: getRentalLabel(rental) });
+    });
+    (ganttRentals as GanttRentalData[]).forEach(entry => {
+      const id = getRentalSourceId(entry) || entry.id;
+      if (id && !options.has(id)) options.set(id, { id, label: getGanttReferenceLabel(entry) });
+    });
+    return Array.from(options.values());
+  }, [ganttRentals, rentals]);
   const equipmentById = React.useMemo(
     () => new Map((equipment as Equipment[]).map(item => [item.id, item])),
     [equipment],
@@ -939,13 +969,17 @@ export default function Documents() {
     if (quickActionContext.equipmentInv) return equipmentByInventory.get(quickActionContext.equipmentInv);
     return undefined;
   }, [equipmentById, equipmentByInventory, quickActionContext.equipmentId, quickActionContext.equipmentInv]);
-  const relatedRentals = React.useMemo(() => {
-    if (!contractForm.clientId && !contractForm.client) return rentals as Rental[];
-    return (rentals as Rental[]).filter(rental => (
-      rental.clientId === contractForm.clientId
-      || rental.client === contractForm.client
-    ));
-  }, [contractForm.client, contractForm.clientId, rentals]);
+  const relatedRentalOptions = React.useMemo(() => {
+    if (!contractForm.clientId && !contractForm.client) return rentalReferenceOptions;
+    return rentalReferenceOptions.filter(option => {
+      const rental = rentalsById.get(option.id);
+      const gantt = ganttByRentalId.get(option.id);
+      return rental?.clientId === contractForm.clientId
+        || rental?.client === contractForm.client
+        || gantt?.clientId === contractForm.clientId
+        || gantt?.client === contractForm.client;
+    });
+  }, [contractForm.client, contractForm.clientId, ganttByRentalId, rentalReferenceOptions, rentalsById]);
   const selectedRental = contractForm.rentalId ? rentalsById.get(contractForm.rentalId) : undefined;
   const rentalEquipmentIds = React.useMemo(() => {
     if (!selectedRental) return new Set<string>();
@@ -1208,9 +1242,10 @@ export default function Documents() {
   );
   const wizardTypeMeta = getDocumentRegistryItem(wizardForm.type) || DOCUMENT_WORKSPACE_TYPES[0];
   const wizardRental = wizardForm.rentalId ? rentalsById.get(wizardForm.rentalId) : undefined;
+  const wizardGanttRental = wizardForm.rentalId ? ganttByRentalId.get(wizardForm.rentalId) : undefined;
   const wizardParentDocument = wizardForm.parentDocumentId ? referenceDocuments.find(doc => doc.id === wizardForm.parentDocumentId) : undefined;
   const wizardSpecification = wizardForm.specificationId ? referenceDocuments.find(doc => doc.id === wizardForm.specificationId) : undefined;
-  const wizardResolvedClientId = wizardForm.clientId || wizardParentDocument?.clientId || wizardSpecification?.clientId || wizardRental?.clientId || '';
+  const wizardResolvedClientId = wizardForm.clientId || wizardParentDocument?.clientId || wizardSpecification?.clientId || wizardRental?.clientId || wizardGanttRental?.clientId || '';
   const wizardClient = wizardResolvedClientId ? clientsById.get(wizardResolvedClientId) : undefined;
   const wizardEquipment = wizardForm.equipmentId ? equipmentById.get(wizardForm.equipmentId) : undefined;
   const wizardServiceTicket = wizardForm.serviceTicketId ? serviceTicketsById.get(wizardForm.serviceTicketId) : undefined;
@@ -1246,7 +1281,7 @@ export default function Documents() {
     ['Тип', wizardTypeMeta.label],
     ['Дата', wizardForm.type === 'rental_contract' ? 'Будет установлена автоматически' : new Date().toISOString().slice(0, 10)],
     ['Номер', 'Будет сгенерирован автоматически'],
-    ['Клиент', wizardClient ? clientLabel(wizardClient) : wizardRental?.client || '—'],
+    ['Клиент', wizardClient ? clientLabel(wizardClient) : wizardRental?.client || wizardGanttRental?.client || '—'],
     ['Договор', wizardParentDocument ? `${getDocumentNumber(wizardParentDocument)} от ${formatDate(getDocumentDate(wizardParentDocument))}` : '—'],
     ['Спецификация', wizardSpecification ? `${getDocumentNumber(wizardSpecification)} от ${formatDate(getDocumentDate(wizardSpecification))}` : '—'],
     ...(wizardForm.type === 'rental_contract' ? [
@@ -1271,12 +1306,12 @@ export default function Documents() {
     ['Механик', wizardMechanic?.name || '—'],
     ['Служебная машина', wizardServiceVehicle ? [wizardServiceVehicle.make, wizardServiceVehicle.model, wizardServiceVehicle.plateNumber].filter(Boolean).join(' ') : '—'],
     ['Статус', 'Черновик'],
-    ['Сумма', wizardRental?.amount || wizardRental?.price ? formatCurrency(Number(wizardRental?.amount || wizardRental?.price)) : '—'],
+    ['Сумма', wizardRental?.amount || wizardRental?.price || wizardGanttRental?.amount ? formatCurrency(Number(wizardRental?.amount || wizardRental?.price || wizardGanttRental?.amount)) : '—'],
   ]).filter(([label]) => {
     if (wizardForm.type === 'rental_contract') return !['Договор', 'Спецификация', 'Техника', 'Аренда', 'Период', 'Ставка', 'Количество дней', 'Сервис', 'Доставка', 'Механик', 'Служебная машина', 'Сумма'].includes(label);
     if (wizardForm.type !== 'rental_specification') return label !== 'Ставка' && label !== 'Количество дней';
     return label !== 'Спецификация';
-  }), [wizardClient, wizardDelivery, wizardEquipment, wizardForm, wizardMechanic, wizardParentDocument, wizardRental, wizardServiceTicket, wizardServiceVehicle, wizardSpecification, wizardTypeMeta]);
+  }), [wizardClient, wizardDelivery, wizardEquipment, wizardForm, wizardGanttRental, wizardMechanic, wizardParentDocument, wizardRental, wizardServiceTicket, wizardServiceVehicle, wizardSpecification, wizardTypeMeta]);
 
   const persistMechanicDocuments = React.useCallback(async (next: MechanicDocument[]) => {
     setMechanicDocuments(next);
@@ -1314,6 +1349,7 @@ export default function Documents() {
   };
 
   function openContractCreate(kind: DocumentContractKind, initial: Partial<ContractFormState> = {}) {
+    setRentalReferenceSearch('');
     setCreateContractKind(kind);
     setContractForm({
       clientId: '',
@@ -1330,6 +1366,7 @@ export default function Documents() {
   }
 
   function openCommercialOfferCreate(initial: Partial<CommercialOfferFormState> = {}) {
+    setRentalReferenceSearch('');
     const equipmentItem = initial.equipmentId ? equipmentById.get(initial.equipmentId) : undefined;
     const validUntil = new Date();
     validUntil.setDate(validUntil.getDate() + Math.max(1, salesSettings.quoteTemplate.validityDays));
@@ -1356,6 +1393,7 @@ export default function Documents() {
   }
 
   function openDocumentWizard(initial: Partial<DocumentWizardState> = {}) {
+    setRentalReferenceSearch('');
     const nextForm = {
       ...EMPTY_WIZARD,
       ...initial,
@@ -1369,21 +1407,26 @@ export default function Documents() {
 
   function applyRentalToWizard(value: string) {
     const rental = value === 'none' ? undefined : rentalsById.get(value);
-    const rentalEndDate = rental?.plannedReturnDate || (rental as unknown as Record<string, string | undefined> | undefined)?.endDate || '';
-    const rentalInv = getRentalEquipmentInventory(rental);
+    const gantt = value === 'none' ? undefined : ganttByRentalId.get(value);
+    const rentalEndDate = rental?.plannedReturnDate
+      || (rental as unknown as Record<string, string | undefined> | undefined)?.endDate
+      || gantt?.plannedReturnDate
+      || gantt?.endDate
+      || '';
+    const rentalInv = getRentalEquipmentInventory(rental) || gantt?.equipmentInv || gantt?.inventoryNumber || '';
     const rentalEquipment = rentalInv ? equipmentByInventory.get(rentalInv) : undefined;
     const rate = rentalDailyRate(rental);
     const quantityDays = countRentalDays(rental?.startDate, rentalEndDate);
     setWizardForm(current => ({
       ...current,
       rentalId: value === 'none' ? '' : value,
-      clientId: rental?.clientId || current.clientId || '',
-      equipmentId: current.equipmentId || rentalEquipment?.id || '',
-      rentalStartDate: current.rentalStartDate || rental?.startDate || '',
+      clientId: rental?.clientId || gantt?.clientId || current.clientId || '',
+      equipmentId: current.equipmentId || rentalEquipment?.id || gantt?.equipmentId || '',
+      rentalStartDate: current.rentalStartDate || rental?.startDate || gantt?.startDate || '',
       rentalEndDate: current.rentalEndDate || rentalEndDate,
-      dailyRate: current.dailyRate || rate,
+      dailyRate: current.dailyRate || rate || String(gantt?.rate || ''),
       quantityDays: current.quantityDays || quantityDays,
-      amount: current.amount || String((rental as unknown as Record<string, unknown> | undefined)?.amount || rental?.price || ''),
+      amount: current.amount || String((rental as unknown as Record<string, unknown> | undefined)?.amount || rental?.price || gantt?.amount || gantt?.price || ''),
     }));
   }
 
@@ -1449,7 +1492,7 @@ export default function Documents() {
         date: new Date().toISOString().slice(0, 10),
         status: 'draft',
         clientId: wizardResolvedClientId || undefined,
-        client: wizardClient ? clientLabel(wizardClient) : wizardRental?.client || '',
+        client: wizardClient ? clientLabel(wizardClient) : wizardRental?.client || wizardGanttRental?.client || '',
         rentalId: wizardForm.rentalId || undefined,
         equipmentId: wizardForm.equipmentId || undefined,
         deliveryId: wizardForm.deliveryId || undefined,
@@ -1458,8 +1501,8 @@ export default function Documents() {
         serviceCarId: wizardForm.serviceCarId || undefined,
         parentDocumentId: wizardForm.parentDocumentId || undefined,
         specificationId: wizardForm.specificationId || undefined,
-        objectId: wizardRental?.objectId,
-        contractId: wizardRental?.contractId,
+        objectId: wizardRental?.objectId || wizardGanttRental?.objectId,
+        contractId: wizardRental?.contractId || wizardGanttRental?.contractId,
         dueDate: wizardForm.dueDate || undefined,
         signerName: wizardForm.signerName.trim() || undefined,
         signerPosition: wizardForm.signerPosition.trim() || undefined,
@@ -2574,11 +2617,16 @@ export default function Documents() {
                       <>
                         <div className="space-y-2">
                           <div className="text-sm font-medium text-foreground">Аренда</div>
+                          <Input
+                            value={rentalReferenceSearch}
+                            onChange={(event) => setRentalReferenceSearch(event.target.value)}
+                            placeholder="Поиск аренды, клиента или техники"
+                          />
                           <Select value={wizardForm.rentalId || 'none'} onValueChange={applyRentalToWizard}>
                             <SelectTrigger><SelectValue placeholder="Выберите аренду" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">Не выбрана</SelectItem>
-                              {(rentals as Rental[]).map(rental => <SelectItem key={rental.id} value={rental.id}>{getRentalLabel(rental)}</SelectItem>)}
+                              {rentalReferenceOptions.map(rental => <SelectItem key={rental.id} value={rental.id}>{rental.label}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -2825,6 +2873,11 @@ export default function Documents() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <div className="text-sm font-medium text-foreground">Связанная аренда</div>
+                    <Input
+                      value={rentalReferenceSearch}
+                      onChange={(event) => setRentalReferenceSearch(event.target.value)}
+                      placeholder="Поиск аренды, клиента или техники"
+                    />
                     <Select
                       value={contractForm.rentalId || 'none'}
                       onValueChange={(value) => setContractForm(current => ({
@@ -2838,8 +2891,8 @@ export default function Documents() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Без аренды</SelectItem>
-                        {relatedRentals.map(rental => (
-                          <SelectItem key={rental.id} value={rental.id}>{getRentalLabel(rental)}</SelectItem>
+                        {relatedRentalOptions.map(rental => (
+                          <SelectItem key={rental.id} value={rental.id}>{rental.label}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

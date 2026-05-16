@@ -15,7 +15,9 @@ function createApp() {
       { id: 'U-admin', name: 'Админ', role: 'Администратор', status: 'Активен' },
       { id: 'U-office', name: 'Офис', role: 'Офис-менеджер', status: 'Активен' },
       { id: 'U-manager', name: 'Руслан', role: 'Менеджер по аренде', status: 'Активен' },
+      { id: 'U-other', name: 'Анна', role: 'Менеджер по аренде', status: 'Активен' },
       { id: 'U-mechanic', name: 'Петров', role: 'Механик', status: 'Активен' },
+      { id: 'U-investor', name: 'Инвестор', role: 'Инвестор', status: 'Активен', ownerId: 'OWN-1' },
     ],
     clients: [{
       id: 'C-1',
@@ -32,7 +34,10 @@ function createApp() {
     }],
     rentals: [{ id: 'R-1', clientId: 'C-1', client: 'ООО Клиент', manager: 'Руслан', managerId: 'U-manager', startDate: '2026-05-10', plannedReturnDate: '2026-05-12', equipment: ['A-1'], rate: '10000/день', price: 30000 }],
     gantt_rentals: [],
-    equipment: [{ id: 'EQ-1', inventoryNumber: 'A-1', manufacturer: 'Genie', model: 'GS-1932', serialNumber: 'SN-1' }],
+    equipment: [
+      { id: 'EQ-1', inventoryNumber: 'A-1', manufacturer: 'Genie', model: 'GS-1932', serialNumber: 'SN-1', ownerId: 'OWN-1' },
+      { id: 'EQ-2', inventoryNumber: 'B-2', manufacturer: 'JLG', model: '1930ES', serialNumber: 'SN-2', ownerId: 'OWN-2' },
+    ],
     documents: [],
     app_settings: [],
   };
@@ -40,7 +45,9 @@ function createApp() {
     admin: { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' },
     office: { userId: 'U-office', userName: 'Офис', userRole: 'Офис-менеджер' },
     manager: { userId: 'U-manager', userName: 'Руслан', userRole: 'Менеджер по аренде' },
+    other: { userId: 'U-other', userName: 'Анна', userRole: 'Менеджер по аренде' },
     mechanic: { userId: 'U-mechanic', userName: 'Петров', userRole: 'Механик' },
+    investor: { userId: 'U-investor', userName: 'Инвестор', userRole: 'Инвестор', ownerId: 'OWN-1' },
   };
   const app = express();
   const router = express.Router();
@@ -107,6 +114,98 @@ async function request(baseUrl, method, path, token, body) {
   const json = await response.json().catch(() => null);
   return { response, json };
 }
+
+test('documents gantt references are bounded, scoped and compact', async () => {
+  const { app, state } = createApp();
+  state.gantt_rentals = Array.from({ length: 130 }, (_, index) => ({
+    id: `GR-${index + 1}`,
+    rentalId: `R-${index + 1}`,
+    clientId: index % 2 === 0 ? 'C-1' : 'C-2',
+    client: index % 2 === 0 ? 'ООО Клиент' : 'ООО Другой',
+    equipmentId: index % 2 === 0 ? 'EQ-1' : 'EQ-2',
+    equipmentInv: index % 2 === 0 ? 'A-1' : 'B-2',
+    manager: index % 2 === 0 ? 'Руслан' : 'Анна',
+    managerId: index % 2 === 0 ? 'U-manager' : 'U-other',
+    startDate: '2026-05-10',
+    endDate: '2026-05-12',
+    status: index % 3 === 0 ? 'active' : 'created',
+    amount: 30000,
+    paymentStatus: 'unpaid',
+    debt: 30000,
+    comments: [{ text: 'internal' }],
+  }));
+
+  await withServer(app, async (baseUrl) => {
+    const office = await request(baseUrl, 'GET', '/api/documents/gantt-references?limit=500', 'office');
+    assert.equal(office.response.status, 200);
+    assert.equal(office.json.items.length, 100);
+    assert.equal(office.json.limit, 100);
+    assert.equal(office.json.items[0].paymentStatus, undefined);
+    assert.equal(office.json.items[0].debt, undefined);
+    assert.equal(office.json.items[0].comments, undefined);
+
+    const manager = await request(baseUrl, 'GET', '/api/documents/gantt-references?limit=100', 'manager');
+    assert.equal(manager.response.status, 200);
+    assert.ok(manager.json.items.length > 0);
+    assert.deepEqual(new Set(manager.json.items.map(item => item.managerId)), new Set(['U-manager']));
+
+    const mechanic = await request(baseUrl, 'GET', '/api/documents/gantt-references', 'mechanic');
+    assert.equal(mechanic.response.status, 403);
+
+    const investor = await request(baseUrl, 'GET', '/api/documents/gantt-references', 'investor');
+    assert.equal(investor.response.status, 403);
+  });
+});
+
+test('documents gantt references support search and stable-id filters', async () => {
+  const { app, state } = createApp();
+  state.gantt_rentals = [
+    { id: 'GR-own', rentalId: 'R-own', clientId: 'C-1', client: 'ООО Альфа', equipmentId: 'EQ-1', equipmentInv: 'A-1', contractId: 'CON-1', manager: 'Руслан', managerId: 'U-manager', startDate: '2026-05-10', endDate: '2026-05-12', status: 'active', amount: 30000 },
+    { id: 'GR-other', rentalId: 'R-other', clientId: 'C-2', client: 'ООО Бета', equipmentId: 'EQ-2', equipmentInv: 'B-2', contractId: 'CON-2', manager: 'Анна', managerId: 'U-other', startDate: '2026-06-10', endDate: '2026-06-12', status: 'closed', amount: 50000 },
+    { id: 'GR-old', rentalId: 'R-old', clientId: 'C-1', client: 'ООО Старый', equipmentId: 'EQ-1', equipmentInv: 'A-1', contractId: 'CON-1', manager: 'Руслан', managerId: 'U-manager', startDate: '2024-01-10', endDate: '2024-01-12', status: 'closed', amount: 20000 },
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const search = await request(baseUrl, 'GET', '/api/documents/gantt-references?search=Альфа', 'office');
+    assert.equal(search.response.status, 200);
+    assert.deepEqual(search.json.items.map(item => item.id), ['GR-own']);
+
+    const client = await request(baseUrl, 'GET', '/api/documents/gantt-references?clientId=C-1&limit=10', 'office');
+    assert.equal(client.response.status, 200);
+    assert.deepEqual(new Set(client.json.items.map(item => item.id)), new Set(['GR-own', 'GR-old']));
+
+    const rental = await request(baseUrl, 'GET', '/api/documents/gantt-references?rentalId=R-other', 'office');
+    assert.equal(rental.response.status, 200);
+    assert.deepEqual(rental.json.items.map(item => item.id), ['GR-other']);
+
+    const equipment = await request(baseUrl, 'GET', '/api/documents/gantt-references?equipmentId=EQ-1&contractId=CON-1&limit=10', 'office');
+    assert.equal(equipment.response.status, 200);
+    assert.deepEqual(new Set(equipment.json.items.map(item => item.id)), new Set(['GR-own', 'GR-old']));
+
+    const status = await request(baseUrl, 'GET', '/api/documents/gantt-references?status=active', 'office');
+    assert.equal(status.response.status, 200);
+    assert.deepEqual(status.json.items.map(item => item.id), ['GR-own']);
+  });
+});
+
+test('documents gantt references apply date bounds when no narrowing filter is provided', async () => {
+  const { app, state } = createApp();
+  state.gantt_rentals = [
+    { id: 'GR-recent', rentalId: 'R-recent', clientId: 'C-1', client: 'ООО Клиент', equipmentId: 'EQ-1', equipmentInv: 'A-1', manager: 'Руслан', managerId: 'U-manager', startDate: '2026-05-10', endDate: '2026-05-12', status: 'active' },
+    { id: 'GR-future', rentalId: 'R-future', clientId: 'C-1', client: 'ООО Клиент', equipmentId: 'EQ-1', equipmentInv: 'A-1', manager: 'Руслан', managerId: 'U-manager', startDate: '2027-01-10', endDate: '2027-01-12', status: 'active' },
+    { id: 'GR-old', rentalId: 'R-old', clientId: 'C-1', client: 'ООО Клиент', equipmentId: 'EQ-1', equipmentInv: 'A-1', manager: 'Руслан', managerId: 'U-manager', startDate: '2024-01-10', endDate: '2024-01-12', status: 'closed' },
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const defaultWindow = await request(baseUrl, 'GET', '/api/documents/gantt-references?limit=100', 'office');
+    assert.equal(defaultWindow.response.status, 200);
+    assert.deepEqual(defaultWindow.json.items.map(item => item.id), ['GR-recent']);
+
+    const explicitWindow = await request(baseUrl, 'GET', '/api/documents/gantt-references?dateFrom=2024-01-01&dateTo=2024-01-31', 'office');
+    assert.equal(explicitWindow.response.status, 200);
+    assert.deepEqual(explicitWindow.json.items.map(item => item.id), ['GR-old']);
+  });
+});
 
 test('documents API creates documents with automatic numbers and separate sequences', async () => {
   const { app, state } = createApp();

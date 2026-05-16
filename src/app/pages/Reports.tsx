@@ -29,16 +29,7 @@ import type { Equipment, PaymentAllocation, ServiceTicket } from '../types';
 import type { Document } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import ManagerReport from './ManagerReport';
-import { equipmentService } from '../services/equipment.service';
 import { reportsService, type MechanicFieldTripRow, type MechanicsWorkloadReport } from '../services/reports.service';
-import { clientsService } from '../services/clients.service';
-import { paymentsService } from '../services/payments.service';
-import { rentalsService } from '../services/rentals.service';
-import { serviceTicketsService } from '../services/service-tickets.service';
-import { documentsService } from '../services/documents.service';
-import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
-import { RENTAL_KEYS } from '../hooks/useRentals';
-import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -88,6 +79,17 @@ const TICKET_STATUS_COLORS: Record<string, string> = {
 
 const FALLBACK_COLORS = ['#3b82f6', '#ef4444', '#f59e0b', '#22c55e', '#8b5cf6', '#6b7280'];
 const SERVICE_REPORT_PRESETS_KEY = 'service_report_presets_v1';
+const DEFAULT_REPORT_PAGE_SIZE = 25;
+
+function defaultDateRange(days = 30) {
+  const to = new Date();
+  const from = new Date(to);
+  from.setDate(from.getDate() - (days - 1));
+  return {
+    dateFrom: from.toISOString().slice(0, 10),
+    dateTo: to.toISOString().slice(0, 10),
+  };
+}
 
 interface ServiceReportPreset {
   id: string;
@@ -115,6 +117,44 @@ function EmptyChart({ message }: { message: string }) {
         <BarChart2 className="h-7 w-7 text-gray-400 dark:text-gray-500" />
       </div>
       <p className="max-w-[240px] text-sm text-gray-500 dark:text-gray-400">{message}</p>
+    </div>
+  );
+}
+
+function ReportPagination({
+  pagination,
+  onPageChange,
+  pageSize,
+  onPageSizeChange,
+}: {
+  pagination?: { page: number; pageSize: number; total: number; totalPages: number; hasNextPage: boolean; hasPrevPage: boolean };
+  onPageChange: (page: number) => void;
+  pageSize: number;
+  onPageSizeChange: (pageSize: number) => void;
+}) {
+  if (!pagination) return null;
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500 dark:text-gray-400">
+      <div>
+        Страница {pagination.totalPages === 0 ? 0 : pagination.page} из {pagination.totalPages} · строк: {pagination.total}
+      </div>
+      <div className="flex items-center gap-2">
+        <select
+          value={pageSize}
+          onChange={event => onPageSizeChange(Number(event.target.value))}
+          className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800"
+        >
+          {[10, 25, 50, 100].map(size => (
+            <option key={size} value={size}>{size}</option>
+          ))}
+        </select>
+        <Button variant="secondary" size="sm" onClick={() => onPageChange(pagination.page - 1)} disabled={!pagination.hasPrevPage}>
+          Назад
+        </Button>
+        <Button variant="secondary" size="sm" onClick={() => onPageChange(pagination.page + 1)} disabled={!pagination.hasNextPage}>
+          Вперёд
+        </Button>
+      </div>
     </div>
   );
 }
@@ -183,8 +223,23 @@ export default function Reports() {
   const queryClient = useQueryClient();
   const [loadedAt, setLoadedAt] = useState(Date.now());
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [serviceDateFrom, setServiceDateFrom] = useState('');
-  const [serviceDateTo, setServiceDateTo] = useState('');
+  const initialRange = useMemo(() => defaultDateRange(30), []);
+  const [financeDateFrom, setFinanceDateFrom] = useState(initialRange.dateFrom);
+  const [financeDateTo, setFinanceDateTo] = useState(initialRange.dateTo);
+  const [financeClientPage, setFinanceClientPage] = useState(1);
+  const [financeManagerPage, setFinanceManagerPage] = useState(1);
+  const [financeDebtPage, setFinanceDebtPage] = useState(1);
+  const [financePageSize, setFinancePageSize] = useState(DEFAULT_REPORT_PAGE_SIZE);
+  const [financeSearch, setFinanceSearch] = useState('');
+  const [serviceDateFrom, setServiceDateFrom] = useState(initialRange.dateFrom);
+  const [serviceDateTo, setServiceDateTo] = useState(initialRange.dateTo);
+  const [serviceWorkPage, setServiceWorkPage] = useState(1);
+  const [serviceTripPage, setServiceTripPage] = useState(1);
+  const [serviceProductivityPage, setServiceProductivityPage] = useState(1);
+  const [servicePageSize, setServicePageSize] = useState(DEFAULT_REPORT_PAGE_SIZE);
+  const [serviceSearch, setServiceSearch] = useState('');
+  const [salesStockPage, setSalesStockPage] = useState(1);
+  const [salesStockPageSize, setSalesStockPageSize] = useState(DEFAULT_REPORT_PAGE_SIZE);
   const [serviceMechanic, setServiceMechanic] = useState('all');
   const [serviceScenario, setServiceScenario] = useState('all');
   const [serviceStatus, setServiceStatus] = useState('all');
@@ -200,38 +255,104 @@ export default function Reports() {
   const [salesPdiFilter, setSalesPdiFilter] = useState('all');
   const [salesDocsFilter, setSalesDocsFilter] = useState('all');
   const [servicePresets, setServicePresets] = useState<ServiceReportPreset[]>([]);
-  const { data: equipment = [] } = useQuery<Equipment[]>({
-    queryKey: EQUIPMENT_KEYS.all,
-    queryFn: equipmentService.getAll,
+  const { data: overview } = useQuery({
+    queryKey: ['reports', 'overview'],
+    queryFn: reportsService.getOverview,
   });
-  const { data: ganttRentals = [] } = useQuery<GanttRentalData[]>({
-    queryKey: RENTAL_KEYS.gantt,
-    queryFn: rentalsService.getGanttData,
+  const financeParams = useMemo(() => ({
+    dateFrom: financeDateFrom,
+    dateTo: financeDateTo,
+    search: financeSearch,
+    pageSize: financePageSize,
+  }), [financeDateFrom, financeDateTo, financePageSize, financeSearch]);
+  const serviceParams = useMemo(() => ({
+    dateFrom: serviceDateFrom,
+    dateTo: serviceDateTo,
+    search: serviceSearch,
+    pageSize: servicePageSize,
+    filters: {
+      mechanic: serviceMechanic,
+      scenario: serviceScenario,
+      status: serviceStatus,
+      equipmentType: serviceEquipmentType,
+      workCategory: serviceWorkCategory,
+      partName: servicePartName,
+      workStatus: serviceWorkStatus,
+      workSource: serviceWorkSource,
+    },
+  }), [serviceDateFrom, serviceDateTo, serviceEquipmentType, serviceMechanic, servicePageSize, servicePartName, serviceScenario, serviceSearch, serviceStatus, serviceWorkCategory, serviceWorkSource, serviceWorkStatus]);
+  const salesStockParams = useMemo(() => ({
+    page: salesStockPage,
+    pageSize: salesStockPageSize,
+    filters: {
+      condition: salesConditionFilter,
+      readiness: salesReadinessFilter,
+      pdi: salesPdiFilter,
+      docs: salesDocsFilter,
+    },
+  }), [salesConditionFilter, salesDocsFilter, salesPdiFilter, salesReadinessFilter, salesStockPage, salesStockPageSize]);
+  const { data: salesStockDetail } = useQuery({
+    queryKey: ['reports', 'sales-stock', salesStockParams],
+    queryFn: () => reportsService.getSalesStockDetails(salesStockParams),
+    enabled: activeTab === 'sales-stock',
+    placeholderData: previous => previous,
   });
-  const { data: clients = [] } = useQuery({
-    queryKey: ['clients'],
-    queryFn: clientsService.getAll,
+  const { data: financeSummary } = useQuery({
+    queryKey: ['reports', 'finance', 'summary', financeDateFrom, financeDateTo],
+    queryFn: () => reportsService.getFinanceSummary({ dateFrom: financeDateFrom, dateTo: financeDateTo }),
+    enabled: activeTab === 'finance',
+    placeholderData: previous => previous,
   });
-  const { data: payments = [] } = useQuery({
-    queryKey: ['payments'],
-    queryFn: paymentsService.getAll,
+  const { data: financeClientDebtPageData } = useQuery({
+    queryKey: ['reports', 'finance', 'client-debt', financeParams, financeClientPage],
+    queryFn: () => reportsService.getFinanceDetails('client-debt', { ...financeParams, page: financeClientPage }),
+    enabled: activeTab === 'finance',
+    placeholderData: previous => previous,
   });
-  const { data: paymentAllocations = [] } = useQuery<PaymentAllocation[]>({
-    queryKey: ['payment_allocations'],
-    queryFn: paymentsService.getAllocations,
+  const { data: financeManagerPageData } = useQuery({
+    queryKey: ['reports', 'finance', 'manager-receivables', financeParams, financeManagerPage],
+    queryFn: () => reportsService.getFinanceDetails('manager-receivables', { ...financeParams, page: financeManagerPage }),
+    enabled: activeTab === 'finance',
+    placeholderData: previous => previous,
   });
-  const { data: tickets = [] } = useQuery<ServiceTicket[]>({
-    queryKey: SERVICE_TICKET_KEYS.all,
-    queryFn: serviceTicketsService.getAll,
+  const { data: financeDebtPageData } = useQuery({
+    queryKey: ['reports', 'finance', 'unpaid-rentals', financeParams, financeDebtPage],
+    queryFn: () => reportsService.getFinanceDetails('unpaid-rentals', { ...financeParams, page: financeDebtPage }),
+    enabled: activeTab === 'finance',
+    placeholderData: previous => previous,
   });
-  const { data: documents = [] } = useQuery<Document[]>({
-    queryKey: ['documents'],
-    queryFn: documentsService.getAll,
+  const { data: serviceSummary } = useQuery({
+    queryKey: ['reports', 'service', 'summary', serviceParams],
+    queryFn: () => reportsService.getServiceSummary(serviceParams),
+    enabled: activeTab === 'service',
+    placeholderData: previous => previous,
   });
-  const { data: mechanicWorkload } = useQuery<MechanicsWorkloadReport>({
-    queryKey: ['reports', 'mechanicsWorkload'],
-    queryFn: reportsService.getMechanicsWorkload,
+  const { data: serviceWorkPageData } = useQuery({
+    queryKey: ['reports', 'service', 'work-details', serviceParams, serviceWorkPage],
+    queryFn: () => reportsService.getServiceDetails('work-details', { ...serviceParams, page: serviceWorkPage }),
+    enabled: activeTab === 'service',
+    placeholderData: previous => previous,
   });
+  const { data: serviceTripPageData } = useQuery({
+    queryKey: ['reports', 'service', 'field-trips', serviceParams, serviceTripPage],
+    queryFn: () => reportsService.getServiceDetails('field-trips', { ...serviceParams, page: serviceTripPage }),
+    enabled: activeTab === 'service',
+    placeholderData: previous => previous,
+  });
+  const { data: serviceProductivityPageData } = useQuery({
+    queryKey: ['reports', 'service', 'productivity-details', serviceParams, serviceProductivityPage],
+    queryFn: () => reportsService.getServiceDetails('productivity-details', { ...serviceParams, page: serviceProductivityPage }),
+    enabled: activeTab === 'service',
+    placeholderData: previous => previous,
+  });
+  const equipment: Equipment[] = [];
+  const ganttRentals: GanttRentalData[] = [];
+  const clients: any[] = [];
+  const payments: any[] = [];
+  const paymentAllocations: PaymentAllocation[] = [];
+  const tickets: ServiceTicket[] = [];
+  const documents: Document[] = [];
+  const mechanicWorkload: MechanicsWorkloadReport | undefined = undefined;
 
   useEffect(() => {
     try {
@@ -242,6 +363,22 @@ export default function Reports() {
     }
   }, []);
 
+  useEffect(() => {
+    setFinanceClientPage(1);
+    setFinanceManagerPage(1);
+    setFinanceDebtPage(1);
+  }, [financeDateFrom, financeDateTo, financePageSize, financeSearch]);
+
+  useEffect(() => {
+    setServiceWorkPage(1);
+    setServiceTripPage(1);
+    setServiceProductivityPage(1);
+  }, [serviceDateFrom, serviceDateTo, serviceEquipmentType, serviceMechanic, servicePageSize, servicePartName, serviceScenario, serviceSearch, serviceStatus, serviceWorkCategory, serviceWorkSource, serviceWorkStatus]);
+
+  useEffect(() => {
+    setSalesStockPage(1);
+  }, [salesConditionFilter, salesDocsFilter, salesPdiFilter, salesReadinessFilter, salesStockPageSize]);
+
   const persistPresets = useCallback((next: ServiceReportPreset[]) => {
     setServicePresets(next);
     localStorage.setItem(SERVICE_REPORT_PRESETS_KEY, JSON.stringify(next));
@@ -251,19 +388,22 @@ export default function Reports() {
     const names = Array.from(new Set([
       ...(mechanicWorkload?.summary ?? []).map(item => item.mechanicName),
       ...(mechanicWorkload?.productivity?.mechanics ?? []).map(item => item.mechanicName),
+      ...(serviceWorkPageData?.items ?? []).map(item => item.mechanicName),
+      ...(serviceTripPageData?.items ?? []).map(item => item.mechanicName),
+      ...(serviceProductivityPageData?.items ?? []).map(item => item.mechanicName),
     ])).filter((value): value is string => Boolean(value)).sort((a, b) => a.localeCompare(b, 'ru'));
     return names;
-  }, [mechanicWorkload]);
+  }, [mechanicWorkload, serviceProductivityPageData, serviceTripPageData, serviceWorkPageData]);
 
   const serviceStatusOptions = useMemo(() => {
-    const statuses = Array.from(new Set((mechanicWorkload?.rows ?? []).map(item => item.repairStatus).filter(Boolean)));
+    const statuses = Array.from(new Set([...(mechanicWorkload?.rows ?? []), ...(serviceWorkPageData?.items ?? [])].map(item => item.repairStatus).filter(Boolean)));
     return statuses.sort((a, b) => formatServiceStatus(a).localeCompare(formatServiceStatus(b), 'ru'));
-  }, [mechanicWorkload]);
+  }, [mechanicWorkload, serviceWorkPageData]);
 
   const serviceScenarioOptions = useMemo(() => {
-    const scenarios = Array.from(new Set((mechanicWorkload?.rows ?? []).map(item => item.serviceKind).filter(Boolean)));
+    const scenarios = Array.from(new Set([...(mechanicWorkload?.rows ?? []), ...(serviceWorkPageData?.items ?? [])].map(item => item.serviceKind).filter(Boolean)));
     return scenarios.sort((a, b) => getServiceScenarioLabel(a).localeCompare(getServiceScenarioLabel(b), 'ru'));
-  }, [mechanicWorkload]);
+  }, [mechanicWorkload, serviceWorkPageData]);
 
   const serviceEquipmentTypeOptions = useMemo(() => {
     const types = Array.from(new Set([
@@ -296,65 +436,25 @@ export default function Reports() {
     return sources.sort((a, b) => a.localeCompare(b, 'ru'));
   }, [mechanicWorkload]);
 
-  const financeDebtRows = useMemo(
-    () => buildRentalDebtRows(ganttRentals, payments, paymentAllocations),
-    [ganttRentals, paymentAllocations, payments],
-  );
-  const financeClientSnapshots = useMemo(
-    () => buildClientFinancialSnapshots(clients, ganttRentals, payments, paymentAllocations),
-    [clients, ganttRentals, paymentAllocations, payments],
-  );
-  const financeManagerSnapshots = useMemo(
-    () => buildManagerReceivables(financeDebtRows, undefined, clients),
-    [financeDebtRows, clients],
-  );
-  const financeOverdueBuckets = useMemo(
-    () => buildOverdueBuckets(financeDebtRows),
-    [financeDebtRows],
-  );
-  const financeClientDebtAgingRows = useMemo(
-    () => buildClientDebtAgingRows(clients, financeDebtRows),
-    [clients, financeDebtRows],
-  );
-  const financeTotals = useMemo(() => ({
-    debt: financeClientSnapshots.reduce((sum, item) => sum + item.currentDebt, 0),
-    overdueClients: financeClientSnapshots.filter(item => item.overdueRentals > 0).length,
-    exceededClients: financeClientSnapshots.filter(item => item.exceededLimit).length,
-    unpaidRentals: financeDebtRows.length,
-    overdueDebt: financeManagerSnapshots.reduce((sum, item) => sum + item.overdueDebt, 0),
-  }), [financeClientSnapshots, financeDebtRows, financeManagerSnapshots]);
+  const financeDebtRows = useMemo(() => financeDebtPageData?.items ?? [], [financeDebtPageData]);
+  const financeManagerSnapshots = useMemo(() => financeManagerPageData?.items ?? [], [financeManagerPageData]);
+  const financeOverdueBuckets = useMemo(() => financeSummary?.overdueBuckets ?? [], [financeSummary]);
+  const financeClientDebtAgingRows = useMemo(() => financeClientDebtPageData?.items ?? [], [financeClientDebtPageData]);
+  const financeTotals = useMemo(() => financeSummary?.summary ?? {
+    debt: 0,
+    overdueClients: 0,
+    exceededClients: 0,
+    unpaidRentals: 0,
+    overdueDebt: 0,
+  }, [financeSummary]);
 
   const filteredMechanicRows = useMemo(() => {
-    const rows = mechanicWorkload?.rows ?? [];
-    return rows.filter(row => {
-      if (serviceMechanic !== 'all' && row.mechanicName !== serviceMechanic) return false;
-      if (serviceScenario !== 'all' && row.serviceKind !== serviceScenario) return false;
-      if (serviceStatus !== 'all' && row.repairStatus !== serviceStatus) return false;
-      if (serviceEquipmentType !== 'all' && (row.equipmentTypeLabel || row.equipmentType) !== serviceEquipmentType) return false;
-      if (serviceWorkCategory !== 'all' && row.workCategory !== serviceWorkCategory) return false;
-      if (servicePartName !== 'all' && !row.partNames.includes(servicePartName)) return false;
-      const created = row.createdAt ? row.createdAt.slice(0, 10) : '';
-      if (serviceDateFrom && created && created < serviceDateFrom) return false;
-      if (serviceDateTo && created && created > serviceDateTo) return false;
-      return true;
-    });
-  }, [mechanicWorkload, serviceDateFrom, serviceDateTo, serviceMechanic, serviceScenario, serviceStatus, serviceEquipmentType, serviceWorkCategory, servicePartName]);
+    return (serviceWorkPageData?.items ?? []) as any[];
+  }, [serviceWorkPageData]);
 
   const filteredFieldTrips = useMemo(() => {
-    const trips = mechanicWorkload?.fieldTrips ?? [];
-    return trips.filter((trip: MechanicFieldTripRow) => {
-      if (serviceMechanic !== 'all' && trip.mechanicName !== serviceMechanic) return false;
-      if (serviceScenario !== 'all' && trip.serviceKind !== serviceScenario) return false;
-      if (serviceStatus !== 'all' && trip.repairStatus !== serviceStatus) return false;
-      if (serviceEquipmentType !== 'all' && (trip.equipmentTypeLabel || trip.equipmentType) !== serviceEquipmentType) return false;
-      if (serviceWorkCategory !== 'all') return false;
-      if (servicePartName !== 'all') return false;
-      const created = trip.createdAt ? trip.createdAt.slice(0, 10) : '';
-      if (serviceDateFrom && created && created < serviceDateFrom) return false;
-      if (serviceDateTo && created && created > serviceDateTo) return false;
-      return true;
-    });
-  }, [mechanicWorkload, serviceDateFrom, serviceDateTo, serviceMechanic, serviceScenario, serviceStatus, serviceEquipmentType, serviceWorkCategory, servicePartName]);
+    return (serviceTripPageData?.items ?? []) as MechanicFieldTripRow[];
+  }, [serviceTripPageData]);
 
   const filteredMechanicSummary = useMemo(() => {
     const map = new Map<string, {
@@ -436,20 +536,8 @@ export default function Reports() {
   }, [filteredFieldTrips, filteredMechanicRows]);
 
   const filteredProductivityDetails = useMemo(() => {
-    const rows = mechanicWorkload?.productivity?.details ?? [];
-    return rows.filter(row => {
-      if (serviceMechanic !== 'all' && row.mechanicName !== serviceMechanic) return false;
-      if (serviceStatus !== 'all' && row.repairStatus !== serviceStatus) return false;
-      if (serviceEquipmentType !== 'all' && row.equipmentType !== serviceEquipmentType) return false;
-      if (serviceWorkCategory !== 'all' && row.category !== serviceWorkCategory) return false;
-      if (serviceWorkStatus !== 'all' && row.status !== serviceWorkStatus) return false;
-      if (serviceWorkSource !== 'all' && row.source !== serviceWorkSource) return false;
-      const created = row.date ? row.date.slice(0, 10) : '';
-      if (serviceDateFrom && created && created < serviceDateFrom) return false;
-      if (serviceDateTo && created && created > serviceDateTo) return false;
-      return true;
-    });
-  }, [mechanicWorkload, serviceDateFrom, serviceDateTo, serviceMechanic, serviceStatus, serviceEquipmentType, serviceWorkCategory, serviceWorkStatus, serviceWorkSource]);
+    return (serviceProductivityPageData?.items ?? []) as any[];
+  }, [serviceProductivityPageData]);
 
   const filteredProductivitySummary = useMemo(() => {
     const map = new Map<string, {
@@ -497,6 +585,17 @@ export default function Reports() {
   }, [filteredProductivityDetails, mechanicWorkload]);
 
   const productivityKpi = useMemo(() => {
+    if (serviceSummary?.summary.productivityKpi) {
+      return {
+        completedWorks: serviceSummary.summary.productivityKpi.completedWorks ?? 0,
+        totalNormHours: serviceSummary.summary.productivityKpi.totalNormHours ?? 0,
+        totalAmount: serviceSummary.summary.productivityKpi.totalAmount ?? 0,
+        averagePerMechanic: serviceSummary.summary.productivityKpi.averagePerMechanic ?? 0,
+        missingNormHours: serviceSummary.summary.productivityKpi.missingNormHours ?? 0,
+        missingMechanic: serviceSummary.summary.productivityKpi.missingMechanic ?? 0,
+        closedTicketsWithUnfinishedWorks: serviceSummary.summary.productivityKpi.closedTicketsWithUnfinishedWorks ?? 0,
+      };
+    }
     const completed = filteredProductivityDetails.filter(item => item.status === 'completed');
     const totalNormHours = completed.reduce((sum, item) => sum + item.normHours * item.quantity, 0);
     const totalAmount = completed.reduce((sum, item) => sum + item.amount, 0);
@@ -510,7 +609,7 @@ export default function Reports() {
       missingMechanic: warnings.filter(item => item.type === 'missing_mechanic').length,
       closedTicketsWithUnfinishedWorks: warnings.filter(item => item.type === 'closed_ticket_unfinished_work').length,
     };
-  }, [filteredProductivityDetails, filteredProductivitySummary, mechanicWorkload]);
+  }, [filteredProductivityDetails, filteredProductivitySummary, mechanicWorkload, serviceSummary]);
 
   const equipmentServiceSummary = useMemo(() => {
     const map = new Map<string, {
@@ -902,7 +1001,12 @@ export default function Reports() {
     setServicePresetId('none');
   }, [persistPresets, servicePresetId, servicePresets]);
 
-  const exportServiceCsv = useCallback(() => {
+  const exportServiceCsv = useCallback(async () => {
+    const exportData = await reportsService.getServiceExport(serviceParams);
+    const exportRows = exportData.rows;
+    const exportTrips = exportData.fieldTrips;
+    const exportProductivityDetails = exportData.productivity?.details ?? [];
+    const exportProductivityWarnings = exportData.productivity?.warnings ?? [];
     const header = [
       'Тип строки',
       'Механик',
@@ -926,7 +1030,7 @@ export default function Reports() {
 
     const lines = [
       header.map(escapeCsv).join(','),
-      ...filteredMechanicRows.map(row => [
+      ...exportRows.map(row => [
         'Работа',
         row.mechanicName,
         getServiceScenarioLabel(row.serviceKind),
@@ -946,7 +1050,7 @@ export default function Reports() {
         '',
         '',
       ].map(escapeCsv).join(',')),
-      ...filteredFieldTrips.map(trip => [
+      ...exportTrips.map(trip => [
         'Выезд',
         trip.mechanicName,
         getServiceScenarioLabel(trip.serviceKind),
@@ -981,7 +1085,7 @@ export default function Reports() {
       '',
       ['Детализация начислений'].map(escapeCsv).join(','),
       ['Дата', 'Заявка', 'Механик', 'Техника', 'Работа', 'Категория', 'Статус работы', 'Н/ч', 'Ставка', 'Сумма', 'Источник', 'Комментарий'].map(escapeCsv).join(','),
-      ...filteredProductivityDetails.map(row => [
+      ...exportProductivityDetails.map(row => [
         row.date,
         row.serviceTicketId,
         row.mechanicName,
@@ -998,7 +1102,7 @@ export default function Reports() {
       '',
       ['Проблемы учёта'].map(escapeCsv).join(','),
       ['Тип', 'Сообщение', 'Заявка', 'Работа', 'Механик'].map(escapeCsv).join(','),
-      ...(mechanicWorkload?.productivity?.warnings ?? []).map(row => [
+      ...exportProductivityWarnings.map(row => [
         row.type,
         row.message,
         row.serviceTicketId,
@@ -1008,9 +1112,12 @@ export default function Reports() {
     ].join('\n');
 
     downloadFile(`\ufeff${lines}`, `service-report-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
-  }, [filteredFieldTrips, filteredMechanicRows, filteredProductivityDetails, filteredProductivitySummary, mechanicWorkload]);
+  }, [filteredProductivitySummary, serviceParams]);
 
-  const exportServiceXls = useCallback(() => {
+  const exportServiceXls = useCallback(async () => {
+    const exportData = await reportsService.getServiceExport(serviceParams);
+    const exportRows = exportData.rows;
+    const exportTrips = exportData.fieldTrips;
     const summaryRowsXml = filteredMechanicSummary.map(item => `
       <Row>
         <Cell><Data ss:Type="String">${escapeXml(item.mechanicName)}</Data></Cell>
@@ -1040,7 +1147,7 @@ export default function Reports() {
       </Row>
     `).join('');
 
-    const rowsXml = filteredMechanicRows.map(row => `
+    const rowsXml = exportRows.map(row => `
       <Row>
         <Cell><Data ss:Type="String">${escapeXml(row.mechanicName)}</Data></Cell>
         <Cell><Data ss:Type="String">${escapeXml(getServiceScenarioLabel(row.serviceKind))}</Data></Cell>
@@ -1060,7 +1167,7 @@ export default function Reports() {
       </Row>
     `).join('');
 
-    const fieldTripRowsXml = filteredFieldTrips.map(trip => `
+    const fieldTripRowsXml = exportTrips.map(trip => `
       <Row>
         <Cell><Data ss:Type="String">${escapeXml(trip.mechanicName)}</Data></Cell>
         <Cell><Data ss:Type="String">${escapeXml(getServiceScenarioLabel(trip.serviceKind))}</Data></Cell>
@@ -1163,10 +1270,15 @@ export default function Reports() {
       </Workbook>`;
 
     downloadFile(xls, `service-report-${new Date().toISOString().slice(0, 10)}.xls`, 'application/vnd.ms-excel');
-  }, [equipmentServiceSummary, filteredFieldTrips, filteredMechanicRows, filteredMechanicSummary]);
+  }, [equipmentServiceSummary, filteredMechanicSummary, serviceParams]);
 
-  const exportFinanceXls = useCallback(() => {
-    const clientRowsXml = financeClientDebtAgingRows
+  const exportFinanceXls = useCallback(async () => {
+    const exportData = await reportsService.getFinanceExport({
+      dateFrom: financeDateFrom,
+      dateTo: financeDateTo,
+      search: financeSearch,
+    });
+    const clientRowsXml = exportData.clientDebtAgingRows
       .map(item => `
         <Row>
           <Cell><Data ss:Type="String">${escapeXml(item.client)}</Data></Cell>
@@ -1179,7 +1291,7 @@ export default function Reports() {
         </Row>
       `).join('');
 
-    const managerRowsXml = financeManagerSnapshots.map(item => `
+    const managerRowsXml = exportData.managerReceivables.map(item => `
       <Row>
         <Cell><Data ss:Type="String">${escapeXml(item.manager)}</Data></Cell>
         <Cell><Data ss:Type="Number">${escapeXml(item.currentDebt.toFixed(2))}</Data></Cell>
@@ -1190,7 +1302,7 @@ export default function Reports() {
       </Row>
     `).join('');
 
-    const overdueRowsXml = financeOverdueBuckets.map(item => `
+    const overdueRowsXml = exportData.overdueBuckets.map(item => `
       <Row>
         <Cell><Data ss:Type="String">${escapeXml(item.label)}</Data></Cell>
         <Cell><Data ss:Type="Number">${escapeXml(item.rentals)}</Data></Cell>
@@ -1198,7 +1310,7 @@ export default function Reports() {
       </Row>
     `).join('');
 
-    const debtRowsXml = financeDebtRows.map(row => `
+    const debtRowsXml = exportData.items.map(row => `
       <Row>
         <Cell><Data ss:Type="String">${escapeXml(row.client)}</Data></Cell>
         <Cell><Data ss:Type="String">${escapeXml(row.manager)}</Data></Cell>
@@ -1275,13 +1387,18 @@ export default function Reports() {
       </Workbook>`;
 
     downloadFile(xls, `finance-report-${new Date().toISOString().slice(0, 10)}.xls`, 'application/vnd.ms-excel');
-  }, [financeClientDebtAgingRows, financeDebtRows, financeManagerSnapshots, financeOverdueBuckets]);
+  }, [financeDateFrom, financeDateTo, financeSearch]);
 
-  const exportFinancePdf = useCallback(() => {
+  const exportFinancePdf = useCallback(async () => {
+    const exportData = await reportsService.getFinanceExport({
+      dateFrom: financeDateFrom,
+      dateTo: financeDateTo,
+      search: financeSearch,
+    });
     const popup = window.open('', '_blank', 'width=1100,height=800');
     if (!popup) return;
 
-    const clientRows = financeClientDebtAgingRows
+    const clientRows = exportData.clientDebtAgingRows
       .map(item => `
         <tr>
           <td>${escapeXml(item.client)}</td>
@@ -1294,7 +1411,7 @@ export default function Reports() {
         </tr>
       `).join('');
 
-    const managerRows = financeManagerSnapshots.map(item => `
+    const managerRows = exportData.managerReceivables.map(item => `
       <tr>
         <td>${escapeXml(item.manager)}</td>
         <td>${escapeXml(formatCurrency(item.currentDebt))}</td>
@@ -1305,7 +1422,7 @@ export default function Reports() {
       </tr>
     `).join('');
 
-    const overdueRows = financeOverdueBuckets.map(item => `
+    const overdueRows = exportData.overdueBuckets.map(item => `
       <tr>
         <td>${escapeXml(item.label)}</td>
         <td>${escapeXml(item.rentals)}</td>
@@ -1313,7 +1430,7 @@ export default function Reports() {
       </tr>
     `).join('');
 
-    const detailRows = financeDebtRows.slice(0, 25).map(row => `
+    const detailRows = exportData.items.slice(0, 100).map(row => `
       <tr>
         <td>${escapeXml(row.client)}</td>
         <td>${escapeXml(row.manager)}</td>
@@ -1347,10 +1464,10 @@ export default function Reports() {
           <h1>Финансовый отчёт</h1>
           <div class="meta">Сформировано ${escapeXml(new Date().toLocaleString('ru-RU'))}</div>
           <div class="cards">
-            <div class="card"><div class="card-label">Общая дебиторка</div><div class="card-value">${escapeXml(formatCurrency(financeTotals.debt))}</div></div>
-            <div class="card"><div class="card-label">Просроченный долг</div><div class="card-value">${escapeXml(formatCurrency(financeTotals.overdueDebt))}</div></div>
-            <div class="card"><div class="card-label">Неоплаченные аренды</div><div class="card-value">${escapeXml(financeTotals.unpaidRentals)}</div></div>
-            <div class="card"><div class="card-label">Клиенты с просрочкой</div><div class="card-value">${escapeXml(financeTotals.overdueClients)}</div></div>
+            <div class="card"><div class="card-label">Общая дебиторка</div><div class="card-value">${escapeXml(formatCurrency(exportData.summary.debt))}</div></div>
+            <div class="card"><div class="card-label">Просроченный долг</div><div class="card-value">${escapeXml(formatCurrency(exportData.summary.overdueDebt))}</div></div>
+            <div class="card"><div class="card-label">Неоплаченные аренды</div><div class="card-value">${escapeXml(exportData.summary.unpaidRentals)}</div></div>
+            <div class="card"><div class="card-label">Клиенты с просрочкой</div><div class="card-value">${escapeXml(exportData.summary.overdueClients)}</div></div>
           </div>
           <h2>Дебиторка по клиентам</h2>
           <table><thead><tr><th>Клиент</th><th>Менеджер</th><th>Возраст</th><th>Активная аренда</th><th>Долг</th><th>Аренды</th><th>Просроченные</th></tr></thead><tbody>${clientRows}</tbody></table>
@@ -1365,15 +1482,12 @@ export default function Reports() {
       </html>
     `);
     popup.document.close();
-  }, [financeClientDebtAgingRows, financeDebtRows, financeManagerSnapshots, financeOverdueBuckets, financeTotals]);
+  }, [financeDateFrom, financeDateTo, financeSearch]);
 
   const refresh = useCallback(() => {
     setIsRefreshing(true);
     Promise.all([
-      queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
-      queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
-      queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
-      queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] }),
+      queryClient.invalidateQueries({ queryKey: ['reports'] }),
     ]).finally(() => {
       setLoadedAt(Date.now());
       setIsRefreshing(false);
@@ -1381,151 +1495,32 @@ export default function Reports() {
   }, [queryClient]);
 
   // ─── KPI ──────────────────────────────────────────────────────────────────
-  const totalEquipment = equipment.length;
-  const fleetUtilization = useMemo(
-    () => calculateCurrentFleetUtilization(equipment, ganttRentals),
-    [equipment, ganttRentals],
-  );
-  const activeEquipment = fleetUtilization.activeEquipment;
-  const rentedEquipment = fleetUtilization.rentedEquipment;
-  const activeRentals = ganttRentals.filter(r => r.status === 'active').length;
-  const openTickets = tickets.filter(t => t.status !== 'closed').length;
-  const inProgressTickets = tickets.filter(t => t.status === 'in_progress').length;
-  const utilization = activeEquipment === 0
-    ? null
-    : fleetUtilization.utilization;
+  const totalEquipment = overview?.summary.totalEquipment ?? 0;
+  const activeEquipment = overview?.summary.activeEquipment ?? 0;
+  const rentedEquipment = overview?.summary.rentedEquipment ?? 0;
+  const activeRentals = overview?.summary.activeRentals ?? 0;
+  const openTickets = overview?.summary.openTickets ?? 0;
+  const inProgressTickets = overview?.summary.inProgressTickets ?? 0;
+  const utilization = overview?.summary.utilization ?? null;
 
   // ─── Utilization by month (last 6 months) ────────────────────────────────
-  const utilizationData = useMemo(() => {
-    const months = lastNMonths(6);
-    return months.map(({ year, month, label }) => {
-      const mStart = new Date(year, month, 1);
-      const mEnd = new Date(year, month + 1, 0);
-      const monthUtilization = calculateMonthlyFleetUtilization(equipment, ganttRentals, mStart, mEnd);
-      return { month: label, utilization: monthUtilization.utilization };
-    });
-  }, [equipment, ganttRentals]);
+  const utilizationData = useMemo(() => overview?.utilizationData ?? [], [overview]);
 
   const hasUtilizationData = utilizationData.some(d => d.utilization > 0);
 
-  const avgUtilization6m = utilizationData.length === 0 ? 0
-    : Math.round(utilizationData.reduce((s, d) => s + d.utilization, 0) / utilizationData.length);
+  const avgUtilization6m = overview?.summary.avgUtilization6m ?? 0;
 
   // ─── Revenue by client (top 5) ────────────────────────────────────────────
-  const revenueByClient = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const r of ganttRentals) {
-      if (r.client && r.amount > 0) {
-        map.set(r.client, (map.get(r.client) ?? 0) + r.amount);
-      }
-    }
-    return [...map.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([clientFull, revenue]) => ({
-        clientFull,
-        client: clientFull.length > 14 ? clientFull.substring(0, 12) + '…' : clientFull,
-        revenue,
-      }));
-  }, [ganttRentals]);
+  const revenueByClient = useMemo(() => overview?.revenueByClient ?? [], [overview]);
 
   // ─── Downtime reasons — active service tickets grouped by status ──────────
-  const downtimeData = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const t of tickets) {
-      if (t.status === 'closed') continue;
-      counts[t.status] = (counts[t.status] ?? 0) + 1;
-    }
-    return Object.entries(counts)
-      .map(([status, count], i) => ({
-        reason: TICKET_STATUS_LABELS[status] ?? status,
-        count,
-        color: TICKET_STATUS_COLORS[status] ?? FALLBACK_COLORS[i % FALLBACK_COLORS.length],
-      }))
-      .sort((a, b) => b.count - a.count);
-  }, [tickets]);
+  const downtimeData = useMemo(() => overview?.downtimeData ?? [], [overview]);
 
   // ─── Fleet structure ──────────────────────────────────────────────────────
-  const salesStockRows = useMemo(() => equipment
-    .filter(item => isSaleModeEquipment(item))
-    .map(item => {
-      const itemDocuments = getEquipmentDocuments(item, documents);
-      const price = item.salePrice1 ?? 0;
-      const cost = item.salePrice3 ?? 0;
-      const margin = price - cost;
-      const marginPercent = price > 0 && cost > 0 ? Math.round((margin / price) * 100) : 0;
-      const saleDate = item.actualArrivalDate || item.plannedArrivalDate || item.acceptedAt || item.history?.[0]?.date || '';
-      const daysOnSale = daysBetweenToday(saleDate);
-      const lastPriceDate = item.history?.find(entry => /цен|price|salePrice/i.test(entry.text))?.date || saleDate;
-      const blockers = [
-        price <= 0 ? 'нет цены' : '',
-        item.salePdiStatus !== 'ready' ? 'PDI' : '',
-        itemDocuments.length === 0 ? 'нет документов' : '',
-        !item.photo ? 'нет фото' : '',
-        item.saleReceiptStatus && item.saleReceiptStatus !== 'accepted' ? 'отгрузка' : '',
-      ].filter(Boolean);
+  const filteredSalesStockRows = useMemo(() => salesStockDetail?.items ?? [], [salesStockDetail]);
+  const salesStockTotals = useMemo(() => overview?.salesStockTotals ?? salesStockDetail?.summary ?? {}, [overview, salesStockDetail]);
 
-      return {
-        id: item.id,
-        model: `${item.manufacturer} ${item.model}`.trim(),
-        inventoryNumber: item.inventoryNumber,
-        condition: saleConditionLabel(item),
-        price,
-        cost,
-        margin,
-        marginPercent,
-        pdi: item.salePdiStatus ?? 'not_started',
-        documentsCount: itemDocuments.length,
-        blockers,
-        daysOnSale,
-        lastPriceDate,
-        owner: item.ownerName || item.owner,
-        location: item.location,
-        raw: item,
-      };
-    }), [documents, equipment]);
-
-  const filteredSalesStockRows = useMemo(() => salesStockRows.filter(row => {
-    if (salesConditionFilter !== 'all' && !row.condition.toLowerCase().includes(salesConditionFilter)) return false;
-    if (salesReadinessFilter === 'ready' && row.blockers.length > 0) return false;
-    if (salesReadinessFilter === 'blocked' && row.blockers.length === 0) return false;
-    if (salesPdiFilter !== 'all' && row.pdi !== salesPdiFilter) return false;
-    if (salesDocsFilter === 'with' && row.documentsCount === 0) return false;
-    if (salesDocsFilter === 'without' && row.documentsCount > 0) return false;
-    return true;
-  }), [salesConditionFilter, salesDocsFilter, salesPdiFilter, salesReadinessFilter, salesStockRows]);
-
-  const salesStockTotals = useMemo(() => {
-    const totalPrice = salesStockRows.reduce((sum, row) => sum + row.price, 0);
-    const totalCost = salesStockRows.reduce((sum, row) => sum + row.cost, 0);
-    const totalMargin = totalPrice - totalCost;
-    const pricedRows = salesStockRows.filter(row => row.price > 0);
-    return {
-      count: salesStockRows.length,
-      totalPrice,
-      totalCost,
-      totalMargin,
-      averageMargin: pricedRows.length === 0 ? 0 : Math.round(pricedRows.reduce((sum, row) => sum + row.marginPercent, 0) / pricedRows.length),
-      pdiReady: salesStockRows.filter(row => row.pdi === 'ready').length,
-      withBlockers: salesStockRows.filter(row => row.blockers.length > 0).length,
-      withoutPrice: salesStockRows.filter(row => row.price <= 0).length,
-      withoutDocuments: salesStockRows.filter(row => row.documentsCount === 0).length,
-      withoutPhoto: salesStockRows.filter(row => !row.raw.photo).length,
-      notReadyForShipment: salesStockRows.filter(row => row.raw.saleReceiptStatus && row.raw.saleReceiptStatus !== 'accepted').length,
-      over30: salesStockRows.filter(row => row.daysOnSale > 30).length,
-      over60: salesStockRows.filter(row => row.daysOnSale > 60).length,
-      over90: salesStockRows.filter(row => row.daysOnSale > 90).length,
-      stalePrice30: salesStockRows.filter(row => daysBetweenToday(row.lastPriceDate) > 30).length,
-      stalePrice45: salesStockRows.filter(row => daysBetweenToday(row.lastPriceDate) > 45).length,
-      stalePrice60: salesStockRows.filter(row => daysBetweenToday(row.lastPriceDate) > 60).length,
-    };
-  }, [salesStockRows]);
-
-  const fleetStats = useMemo(() => [
-    { label: 'Ножничные', count: equipment.filter(e => e.type === 'scissor').length, colorClass: 'bg-blue-500' },
-    { label: 'Коленчатые', count: equipment.filter(e => e.type === 'articulated').length, colorClass: 'bg-green-500' },
-    { label: 'Телескопические', count: equipment.filter(e => e.type === 'telescopic').length, colorClass: 'bg-purple-500' },
-  ], [equipment]);
+  const fleetStats = useMemo(() => overview?.fleetStats ?? [], [overview]);
 
   // ─── tooltip styles (dark-mode compatible via CSS vars) ───────────────────
   const tooltipStyle = {
@@ -1606,7 +1601,7 @@ export default function Reports() {
             <p className="text-sm text-gray-500 dark:text-gray-400">
               {totalEquipment === 0
                 ? 'Техника не добавлена'
-                : `В аренде: ${rentedEquipment} · Свободно: ${equipment.filter(e => e.status === 'available').length}`}
+                : `В аренде: ${rentedEquipment} · Свободно: ${overview?.summary.availableEquipment ?? 0}`}
             </p>
           </CardContent>
         </Card>
@@ -1620,7 +1615,7 @@ export default function Reports() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              {activeRentals === 0 ? 'Нет активных аренд' : `Всего в системе: ${ganttRentals.length}`}
+              {activeRentals === 0 ? 'Нет активных аренд' : `Всего в системе: ${overview?.summary.totalRentals ?? 0}`}
             </p>
           </CardContent>
         </Card>
@@ -1841,7 +1836,7 @@ export default function Reports() {
                   </div>
                 ))}
                 <p className="border-t border-gray-100 pt-2 text-xs text-gray-400 dark:border-gray-700 dark:text-gray-500">
-                  Активных: {activeEquipment} · В аренде: {rentedEquipment} · В сервисе: {equipment.filter(e => e.status === 'in_service').length} · Списано: {equipment.filter(e => e.status === 'inactive').length}
+                  Активных: {activeEquipment} · В аренде: {rentedEquipment} · В сервисе: {overview?.summary.inServiceEquipment ?? 0} · Списано: {overview?.summary.inactiveEquipment ?? 0}
                 </p>
               </div>
             ) : (
@@ -1955,13 +1950,58 @@ export default function Reports() {
                 {filteredSalesStockRows.length === 0 ? (
                   <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">По выбранным фильтрам продажная техника не найдена.</div>
                 ) : null}
+                <ReportPagination
+                  pagination={salesStockDetail?.pagination}
+                  pageSize={salesStockPageSize}
+                  onPageSizeChange={setSalesStockPageSize}
+                  onPageChange={setSalesStockPage}
+                />
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="finance" className="space-y-4 sm:space-y-6">
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Фильтры финансов</CardTitle>
+              <CardDescription>Период ограничен на backend, детализации грузятся постранично</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-[160px_160px_1fr_auto]">
+                <input
+                  type="date"
+                  value={financeDateFrom}
+                  onChange={event => setFinanceDateFrom(event.target.value)}
+                  className="app-filter-input"
+                />
+                <input
+                  type="date"
+                  value={financeDateTo}
+                  onChange={event => setFinanceDateTo(event.target.value)}
+                  className="app-filter-input"
+                />
+                <input
+                  value={financeSearch}
+                  onChange={event => setFinanceSearch(event.target.value)}
+                  placeholder="Поиск по клиенту, менеджеру, технике или аренде"
+                  className="app-filter-input"
+                />
+                <div className="flex gap-2">
+                  <Button variant="secondary" onClick={exportFinanceXls} disabled={financeTotals.unpaidRentals === 0}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Excel
+                  </Button>
+                  <Button variant="secondary" onClick={exportFinancePdf} disabled={financeTotals.unpaidRentals === 0}>
+                    <Download className="mr-2 h-4 w-4" />
+                    PDF
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="hidden flex-wrap items-center justify-end gap-2">
             <Button variant="secondary" onClick={exportFinanceXls} disabled={financeDebtRows.length === 0}>
               <Download className="mr-2 h-4 w-4" />
               Excel
@@ -2010,7 +2050,7 @@ export default function Reports() {
                   <EmptyChart message="Нет данных по дебиторке клиентов." />
                 ) : (
                   <div className="space-y-3">
-                    {financeClientDebtAgingRows.slice(0, 12).map(item => (
+                    {financeClientDebtAgingRows.map(item => (
                       <div
                         key={`${item.clientId || item.client}-${item.manager}-${item.ageBucket}-${item.hasActiveRental}`}
                         className={`rounded-lg border px-4 py-3 ${
@@ -2038,6 +2078,12 @@ export default function Reports() {
                         </div>
                       </div>
                     ))}
+                    <ReportPagination
+                      pagination={financeClientDebtPageData?.pagination}
+                      pageSize={financePageSize}
+                      onPageSizeChange={setFinancePageSize}
+                      onPageChange={setFinanceClientPage}
+                    />
                   </div>
                 )}
               </CardContent>
@@ -2053,7 +2099,7 @@ export default function Reports() {
                   <EmptyChart message="Все аренды закрыты по оплате." />
                 ) : (
                   <div className="space-y-3">
-                    {financeDebtRows.slice(0, 12).map(row => {
+                    {financeDebtRows.map(row => {
                       const overdue = row.expectedPaymentDate
                         ? row.expectedPaymentDate < new Date().toISOString().slice(0, 10)
                         : row.endDate < new Date().toISOString().slice(0, 10);
@@ -2088,6 +2134,12 @@ export default function Reports() {
                         </div>
                       );
                     })}
+                    <ReportPagination
+                      pagination={financeDebtPageData?.pagination}
+                      pageSize={financePageSize}
+                      onPageSizeChange={setFinancePageSize}
+                      onPageChange={setFinanceDebtPage}
+                    />
                   </div>
                 )}
               </CardContent>
@@ -2131,6 +2183,12 @@ export default function Reports() {
                         </div>
                       </div>
                     ))}
+                    <ReportPagination
+                      pagination={financeManagerPageData?.pagination}
+                      pageSize={financePageSize}
+                      onPageSizeChange={setFinancePageSize}
+                      onPageChange={setFinanceManagerPage}
+                    />
                   </div>
                 )}
               </CardContent>
@@ -2182,6 +2240,23 @@ export default function Reports() {
               <CardDescription>Ограничьте отчёт по периоду, механику, статусу заявки и типу техники</CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="mb-3 grid gap-3 md:grid-cols-[1fr_160px]">
+                <input
+                  value={serviceSearch}
+                  onChange={event => setServiceSearch(event.target.value)}
+                  placeholder="Поиск по механику, заявке, технике или работе"
+                  className="app-filter-input"
+                />
+                <select
+                  value={servicePageSize}
+                  onChange={event => setServicePageSize(Number(event.target.value))}
+                  className="app-filter-input"
+                >
+                  {[10, 25, 50, 100].map(size => (
+                    <option key={size} value={size}>{size} строк</option>
+                  ))}
+                </select>
+              </div>
               <div className="grid gap-3 md:grid-cols-11">
                 <div>
                   <p className="mb-1 text-xs text-gray-500">Дата с</p>
@@ -2334,8 +2409,9 @@ export default function Reports() {
                     <Button
                       variant="secondary"
                       onClick={() => {
-                        setServiceDateFrom('');
-                        setServiceDateTo('');
+                        const nextRange = defaultDateRange(30);
+                        setServiceDateFrom(nextRange.dateFrom);
+                        setServiceDateTo(nextRange.dateTo);
                         setServiceMechanic('all');
                         setServiceScenario('all');
                         setServiceStatus('all');
@@ -2359,7 +2435,7 @@ export default function Reports() {
             <Card>
               <CardHeader className="pb-2">
                 <CardDescription>Механиков в отчёте</CardDescription>
-                <CardTitle className="text-3xl">{filteredMechanicSummary.length}</CardTitle>
+                <CardTitle className="text-3xl">{serviceSummary?.summary.mechanicsCount ?? 0}</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Сотрудники с работами и выездами по текущему сценарию</p>
@@ -2369,7 +2445,7 @@ export default function Reports() {
               <CardHeader className="pb-2">
                 <CardDescription>Ремонтные н/ч</CardDescription>
                 <CardTitle className="text-3xl">
-                  {serviceRepairNormHours.toFixed(1)}
+                  {(serviceSummary?.summary.repairNormHours ?? 0).toFixed(1)}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -2380,7 +2456,7 @@ export default function Reports() {
               <CardHeader className="pb-2">
                 <CardDescription>Выездные н/ч</CardDescription>
                 <CardTitle className="text-3xl">
-                  {serviceFieldTripNormHours.toFixed(1)}
+                  {(serviceSummary?.summary.fieldTripNormHours ?? 0).toFixed(1)}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -2391,7 +2467,7 @@ export default function Reports() {
               <CardHeader className="pb-2">
                 <CardDescription>Всего закрыто н/ч</CardDescription>
                 <CardTitle className="text-3xl">
-                  {serviceTotalClosedNormHours.toFixed(1)}
+                  {(serviceSummary?.summary.totalClosedNormHours ?? 0).toFixed(1)}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -2491,7 +2567,7 @@ export default function Reports() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredProductivityDetails.slice(0, 80).map(row => (
+                      {filteredProductivityDetails.map(row => (
                         <tr key={`${row.id}-${row.status}-${row.date}`} className="border-b border-gray-100 dark:border-gray-800">
                           <td className="px-3 py-2">{row.date || '—'}</td>
                           <td className="px-3 py-2 font-mono text-xs">
@@ -2522,6 +2598,12 @@ export default function Reports() {
                       ))}
                     </tbody>
                   </table>
+                  <ReportPagination
+                    pagination={serviceProductivityPageData?.pagination}
+                    pageSize={servicePageSize}
+                    onPageSizeChange={setServicePageSize}
+                    onPageChange={setServiceProductivityPage}
+                  />
                 </div>
               )}
             </CardContent>
@@ -2865,6 +2947,12 @@ export default function Reports() {
                       ))}
                     </tbody>
                   </table>
+                  <ReportPagination
+                    pagination={serviceWorkPageData?.pagination}
+                    pageSize={servicePageSize}
+                    onPageSizeChange={setServicePageSize}
+                    onPageChange={setServiceWorkPage}
+                  />
                 </div>
               ) : (
                 <EmptyChart message="Нет строк выполненных работ для детализации." />
@@ -2919,6 +3007,12 @@ export default function Reports() {
                       ))}
                     </tbody>
                   </table>
+                  <ReportPagination
+                    pagination={serviceTripPageData?.pagination}
+                    pageSize={servicePageSize}
+                    onPageSizeChange={setServicePageSize}
+                    onPageChange={setServiceTripPage}
+                  />
                 </div>
               ) : (
                 <EmptyChart message="Завершённых выездов по текущим фильтрам пока нет." />

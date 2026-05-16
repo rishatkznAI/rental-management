@@ -133,6 +133,7 @@ const { registerGsmRoutes } = require('./routes/gsm');
 const { registerLeasingRoutes } = require('./routes/leasing');
 const { registerPayrollRoutes } = require('./routes/payroll');
 const { registerPlannerRoutes } = require('./routes/planner');
+const { registerReportRoutes } = require('./routes/reports');
 const { registerRentalChangeRequestRoutes } = require('./routes/rental-change-requests');
 const { registerRentalRoutes } = require('./routes/rentals');
 const { registerServiceRoutes } = require('./routes/service');
@@ -571,7 +572,7 @@ const READ_PERMISSIONS = {
   planner_items:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   service_vehicles: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   vehicle_trips:    ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
-  reports: ['Администратор', 'Офис-менеджер', ...MECHANIC_ROLES],
+  reports: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', ...MECHANIC_ROLES],
 };
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
@@ -1474,6 +1475,13 @@ registerServiceRoutes(apiRouter, {
   resolveServiceTicketRevision,
   botNotifications,
 });
+
+apiRouter.use(registerReportRoutes({
+  readData,
+  requireAuth,
+  requireRead,
+  accessControl,
+}));
 
 registerBotApiRoutes(apiRouter, {
   requireAuth,

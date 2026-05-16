@@ -1,4 +1,4 @@
-const SHADOW_SCHEMA_VERSION = 1;
+const SHADOW_SCHEMA_VERSION = 2;
 
 const DOCUMENTS_TABLE = 'documents_sql';
 const GANTT_TABLE = 'gantt_rentals_sql';
@@ -28,6 +28,12 @@ function timestampText(value) {
   const date = new Date(raw);
   if (!Number.isNaN(date.getTime())) return date.toISOString();
   return dateOnly(raw);
+}
+
+function ensureTableColumn(db, table, name, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (columns.some(column => column.name === name)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
 }
 
 function canonicalGanttRentalId(record) {
@@ -96,6 +102,8 @@ function normalizeDocumentRecord(record) {
     equipmentId: nullableText(record?.equipmentId),
     objectId: nullableText(record?.objectId),
     contractId: nullableText(record?.contractId),
+    date: dateOnly(record?.date),
+    documentDate: dateOnly(record?.documentDate),
     createdAt: timestampText(record?.createdAt || record?.date || record?.documentDate),
     updatedAt: timestampText(record?.updatedAt || record?.createdAt || record?.date || record?.documentDate),
     signedAt: timestampText(record?.signedAt),
@@ -149,6 +157,8 @@ function ensureSqlShadowSchema(db) {
       equipmentId TEXT,
       objectId TEXT,
       contractId TEXT,
+      date TEXT,
+      documentDate TEXT,
       createdAt TEXT,
       updatedAt TEXT,
       signedAt TEXT,
@@ -159,17 +169,6 @@ function ensureSqlShadowSchema(db) {
       searchText TEXT,
       rawJson TEXT NOT NULL
     );
-
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_type ON ${DOCUMENTS_TABLE}(type);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_status ON ${DOCUMENTS_TABLE}(status);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_client ON ${DOCUMENTS_TABLE}(clientId);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_rental ON ${DOCUMENTS_TABLE}(rentalId);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_equipment ON ${DOCUMENTS_TABLE}(equipmentId);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_contract ON ${DOCUMENTS_TABLE}(contractId);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_created ON ${DOCUMENTS_TABLE}(createdAt);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_updated ON ${DOCUMENTS_TABLE}(updatedAt);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_number ON ${DOCUMENTS_TABLE}(number);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_refs ON ${DOCUMENTS_TABLE}(type, status, clientId, rentalId, equipmentId, contractId, createdAt);
 
     CREATE TABLE IF NOT EXISTS ${GANTT_TABLE} (
       id TEXT PRIMARY KEY,
@@ -204,6 +203,22 @@ function ensureSqlShadowSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_overlap ON ${GANTT_TABLE}(startDate, endDate);
     CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_status_overlap ON ${GANTT_TABLE}(status, startDate, endDate);
   `);
+  ensureTableColumn(db, DOCUMENTS_TABLE, 'date', 'TEXT');
+  ensureTableColumn(db, DOCUMENTS_TABLE, 'documentDate', 'TEXT');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_type ON ${DOCUMENTS_TABLE}(type);
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_status ON ${DOCUMENTS_TABLE}(status);
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_client ON ${DOCUMENTS_TABLE}(clientId);
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_rental ON ${DOCUMENTS_TABLE}(rentalId);
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_equipment ON ${DOCUMENTS_TABLE}(equipmentId);
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_contract ON ${DOCUMENTS_TABLE}(contractId);
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_date ON ${DOCUMENTS_TABLE}(date);
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_document_date ON ${DOCUMENTS_TABLE}(documentDate);
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_created ON ${DOCUMENTS_TABLE}(createdAt);
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_updated ON ${DOCUMENTS_TABLE}(updatedAt);
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_number ON ${DOCUMENTS_TABLE}(number);
+    CREATE INDEX IF NOT EXISTS idx_documents_sql_refs ON ${DOCUMENTS_TABLE}(type, status, clientId, rentalId, equipmentId, contractId, date, documentDate, createdAt);
+  `);
   db.prepare(`
     INSERT INTO sql_shadow_schema_migrations (name, version)
     VALUES ('documents_gantt_shadow_indexes', ?)
@@ -235,10 +250,10 @@ function upsertDocuments(db, records) {
   const stmt = db.prepare(`
     INSERT INTO ${DOCUMENTS_TABLE} (
       id, number, type, status, clientId, rentalId, equipmentId, objectId, contractId,
-      createdAt, updatedAt, signedAt, sentAt, managerId, ownerId, parentDocumentId, searchText, rawJson
+      date, documentDate, createdAt, updatedAt, signedAt, sentAt, managerId, ownerId, parentDocumentId, searchText, rawJson
     ) VALUES (
       @id, @number, @type, @status, @clientId, @rentalId, @equipmentId, @objectId, @contractId,
-      @createdAt, @updatedAt, @signedAt, @sentAt, @managerId, @ownerId, @parentDocumentId, @searchText, @rawJson
+      @date, @documentDate, @createdAt, @updatedAt, @signedAt, @sentAt, @managerId, @ownerId, @parentDocumentId, @searchText, @rawJson
     )
     ON CONFLICT(id) DO UPDATE SET
       number = excluded.number,
@@ -249,6 +264,8 @@ function upsertDocuments(db, records) {
       equipmentId = excluded.equipmentId,
       objectId = excluded.objectId,
       contractId = excluded.contractId,
+      date = excluded.date,
+      documentDate = excluded.documentDate,
       createdAt = excluded.createdAt,
       updatedAt = excluded.updatedAt,
       signedAt = excluded.signedAt,
@@ -407,6 +424,7 @@ function queryDocumentsIndex(db, query = {}) {
     clientId: 'clientId',
     rentalId: 'rentalId',
     equipmentId: 'equipmentId',
+    contractId: 'contractId',
     parentDocumentId: 'parentDocumentId',
   })) {
     const value = text(query[field]);
@@ -417,13 +435,14 @@ function queryDocumentsIndex(db, query = {}) {
   }
   const dateFrom = dateOnly(query.dateFrom);
   const dateTo = dateOnly(query.dateTo);
+  const businessDate = 'COALESCE(date, documentDate, substr(createdAt, 1, 10), substr(updatedAt, 1, 10))';
   if (dateFrom) {
-    where.push('COALESCE(createdAt, updatedAt, sentAt, signedAt) >= @dateFrom');
+    where.push(`${businessDate} >= @dateFrom`);
     params.dateFrom = dateFrom;
   }
   if (dateTo) {
-    where.push('COALESCE(createdAt, updatedAt, sentAt, signedAt) <= @dateToEnd');
-    params.dateToEnd = `${dateTo}T23:59:59.999Z`;
+    where.push(`${businessDate} <= @dateTo`);
+    params.dateTo = dateTo;
   }
   const search = text(query.search).toLowerCase();
   if (search) {
@@ -503,7 +522,7 @@ function diagnoseSqlShadowConsistency(db) {
   const ganttRentals = readAppDataCollection(db, 'gantt_rentals');
   const rentals = readAppDataCollection(db, 'rentals');
   const equipment = readAppDataCollection(db, 'equipment');
-  const docSqlRows = db.prepare(`SELECT id, updatedAt FROM ${DOCUMENTS_TABLE}`).all();
+  const docSqlRows = db.prepare(`SELECT id, date, documentDate, updatedAt FROM ${DOCUMENTS_TABLE}`).all();
   const ganttSqlRows = db.prepare(`SELECT id, rentalId, sourceRentalId, originalRentalId, equipmentId, startDate, endDate, plannedReturnDate FROM ${GANTT_TABLE}`).all();
   const sourceDocuments = documents.value;
   const sourceGantt = ganttRentals.value;
@@ -521,6 +540,20 @@ function diagnoseSqlShadowConsistency(db) {
     if (!sql) return [];
     const sourceUpdatedAt = timestampText(item?.updatedAt || item?.createdAt || item?.date || item?.documentDate);
     return text(sourceUpdatedAt) !== text(sql.updatedAt) ? [{ id, sourceUpdatedAt, sqlUpdatedAt: sql.updatedAt || null }] : [];
+  });
+  const mismatchedDocumentBusinessDates = [...sourceDocsById.entries()].flatMap(([id, item]) => {
+    const sql = docSqlById.get(id);
+    if (!sql) return [];
+    const sourceDate = dateOnly(item?.date);
+    const sourceDocumentDate = dateOnly(item?.documentDate);
+    if (text(sourceDate) === text(sql.date) && text(sourceDocumentDate) === text(sql.documentDate)) return [];
+    return [{
+      id,
+      sourceDate,
+      sqlDate: sql.date || null,
+      sourceDocumentDate,
+      sqlDocumentDate: sql.documentDate || null,
+    }];
   });
   const invalidRentalLinks = [...sourceGanttById.values()].flatMap(item => {
     const ids = [item?.rentalId, item?.sourceRentalId, item?.originalRentalId].map(text).filter(Boolean);
@@ -547,6 +580,7 @@ function diagnoseSqlShadowConsistency(db) {
       duplicateIds: duplicateIds(sourceDocuments),
       missingIds: sourceDocuments.filter(item => !text(item?.id)).length,
       mismatchedUpdatedAt: mismatchedDocumentUpdatedAt,
+      mismatchedBusinessDates: mismatchedDocumentBusinessDates,
       invalidDates: invalidDateRows(sourceDocuments, ['createdAt', 'updatedAt', 'date', 'documentDate', 'sentAt', 'signedAt']),
       invalidDocumentChains,
     },
@@ -569,7 +603,8 @@ function diagnoseSqlShadowConsistency(db) {
     summary.documents.missingInSql.length > 0 ||
     summary.gantt_rentals.missingInSql.length > 0 ||
     summary.documents.duplicateIds.length > 0 ||
-    summary.gantt_rentals.duplicateIds.length > 0;
+    summary.gantt_rentals.duplicateIds.length > 0 ||
+    summary.documents.mismatchedBusinessDates.length > 0;
   return { ...summary, criticalMismatch };
 }
 

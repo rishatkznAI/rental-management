@@ -281,6 +281,78 @@ test('documents references can use SQL shadow index behind disabled-by-default f
   }
 });
 
+test('documents references SQL path matches JSON filters and compact response shape', async () => {
+  const previousDocumentsFlag = process.env.USE_SQL_DOCUMENTS_INDEX;
+  const documents = [
+    { id: 'D-date', type: 'act', number: 'ACT-1', clientId: 'C-1', client: 'ООО Альфа', rentalId: 'R-1', equipmentId: 'EQ-1', contractId: 'CON-1', status: 'signed', date: '2026-05-01', createdAt: '2026-05-14T19:07:53.327Z', managerId: 'U-manager', password: 'hidden', token: 'hidden', secret: 'hidden' },
+    { id: 'D-documentDate', type: 'act', number: 'ACT-2', clientId: 'C-1', client: 'ООО Альфа', rentalId: 'R-1', equipmentId: 'EQ-1', contractId: 'CON-1', status: 'draft', documentDate: '2026-05-01', createdAt: '2026-05-14T19:07:53.327Z', managerId: 'U-manager' },
+    { id: 'D-createdAt', type: 'invoice', number: 'INV-1', clientId: 'C-2', client: 'ООО Бета', rentalId: 'R-2', equipmentId: 'EQ-2', contractId: 'CON-2', status: 'draft', createdAt: '2026-05-01T12:00:00.000Z', managerId: 'U-other' },
+    { id: 'D-updatedAt', type: 'invoice', number: 'INV-2', clientId: 'C-2', client: 'ООО Бета', rentalId: 'R-2', equipmentId: 'EQ-2', contractId: 'CON-2', status: 'signed', updatedAt: '2026-05-01T12:00:00.000Z', managerId: 'U-other' },
+    { id: 'D-outside', type: 'act', number: 'ACT-3', clientId: 'C-1', client: 'ООО Альфа', rentalId: 'R-1', equipmentId: 'EQ-1', contractId: 'CON-1', status: 'signed', date: '2026-05-02', createdAt: '2026-05-01T12:00:00.000Z', managerId: 'U-manager' },
+  ];
+  const sql = makeSqlDb({ documents, gantt_rentals: [] });
+  try {
+    const { app, state } = createApp({ getDb: () => sql.db });
+    state.documents = documents;
+
+    await withServer(app, async (baseUrl) => {
+      async function fetchIds(path, flag) {
+        process.env.USE_SQL_DOCUMENTS_INDEX = flag ? 'true' : 'false';
+        const result = await request(baseUrl, 'GET', path, 'office');
+        assert.equal(result.response.status, 200, `${flag ? 'sql' : 'json'} ${path}`);
+        return {
+          ids: result.json.items.map(item => item.id),
+          total: result.json.pagination.total,
+          pageSize: result.json.pagination.pageSize,
+          items: result.json.items,
+        };
+      }
+
+      const cases = [
+        '/api/documents/references?pageSize=100',
+        '/api/documents/references?search=%D0%90%D0%BB%D1%8C%D1%84%D0%B0&pageSize=100',
+        '/api/documents/references?clientId=C-1&pageSize=100',
+        '/api/documents/references?rentalId=R-2&pageSize=100',
+        '/api/documents/references?equipmentId=EQ-1&pageSize=100',
+        '/api/documents/references?contractId=CON-2&pageSize=100',
+        '/api/documents/references?type=act&status=signed&pageSize=100',
+        '/api/documents/references?dateFrom=2026-05-01&dateTo=2026-05-01&pageSize=100',
+        '/api/documents/references?pageSize=500',
+      ];
+      for (const path of cases) {
+        const json = await fetchIds(path, false);
+        const sqlResult = await fetchIds(path, true);
+        assert.deepEqual(sqlResult.ids, json.ids, path);
+        assert.equal(sqlResult.total, json.total, path);
+        assert.equal(sqlResult.pageSize, json.pageSize, path);
+      }
+
+      const dateRange = await fetchIds('/api/documents/references?dateFrom=2026-05-01&dateTo=2026-05-01&pageSize=100', true);
+      assert.deepEqual(new Set(dateRange.ids), new Set(['D-date', 'D-documentDate', 'D-createdAt', 'D-updatedAt']));
+      assert.equal(dateRange.ids.includes('D-outside'), false);
+      for (const item of dateRange.items) {
+        assert.equal(item.password, undefined);
+        assert.equal(item.token, undefined);
+        assert.equal(item.secret, undefined);
+      }
+
+      process.env.USE_SQL_DOCUMENTS_INDEX = 'true';
+      assert.equal((await request(baseUrl, 'GET', '/api/documents/references', 'admin')).response.status, 200);
+      assert.equal((await request(baseUrl, 'GET', '/api/documents/references', 'office')).response.status, 200);
+      const manager = await request(baseUrl, 'GET', '/api/documents/references?pageSize=100', 'manager');
+      assert.equal(manager.response.status, 200);
+      assert.deepEqual(new Set(manager.json.items.map(item => item.id)), new Set(['D-outside', 'D-date', 'D-documentDate']));
+      assert.equal((await request(baseUrl, 'GET', '/api/documents/references', 'mechanic')).response.status, 403);
+      assert.equal((await request(baseUrl, 'GET', '/api/documents/references', 'investor')).response.status, 403);
+    });
+  } finally {
+    if (previousDocumentsFlag === undefined) delete process.env.USE_SQL_DOCUMENTS_INDEX;
+    else process.env.USE_SQL_DOCUMENTS_INDEX = previousDocumentsFlag;
+    sql.db.close();
+    fs.rmSync(sql.dir, { recursive: true, force: true });
+  }
+});
+
 test('documents API creates documents with automatic numbers and separate sequences', async () => {
   const { app, state } = createApp();
   await withServer(app, async (baseUrl) => {

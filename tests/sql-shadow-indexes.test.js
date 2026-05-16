@@ -16,6 +16,7 @@ const {
   ensureSqlShadowSchema,
   queryDocumentsIndex,
   queryGanttIndex,
+  syncSqlShadowIndexForCollection,
 } = require('../server/lib/sql-shadow-indexes.js');
 
 function makeDb() {
@@ -49,7 +50,10 @@ test('SQL shadow schema creates documents and gantt tables idempotently', () => 
     assert.ok(tables.includes(DOCUMENTS_TABLE));
     assert.ok(tables.includes(GANTT_TABLE));
     const migration = db.prepare("SELECT version FROM sql_shadow_schema_migrations WHERE name = 'documents_gantt_shadow_indexes'").get();
-    assert.equal(migration.version, 1);
+    assert.equal(migration.version, 2);
+    const documentColumns = db.prepare(`PRAGMA table_info(${DOCUMENTS_TABLE})`).all().map(row => row.name);
+    assert.ok(documentColumns.includes('date'));
+    assert.ok(documentColumns.includes('documentDate'));
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -60,7 +64,7 @@ test('backfill indexes documents and gantt_rentals and preserves rawJson', () =>
   const { db, dir } = makeDb();
   try {
     setCollection(db, 'documents', [
-      { id: 'D-1', number: 'ACT-1', type: 'act', status: 'signed', clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1', createdAt: '2026-05-01T12:00:00.000Z', signedAt: '2026-05-02' },
+      { id: 'D-1', number: 'ACT-1', type: 'act', status: 'signed', clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1', date: '2026-05-01', documentDate: '2026-05-02', createdAt: '2026-05-01T12:00:00.000Z', signedAt: '2026-05-02' },
       { number: 'BROKEN-NO-ID', type: 'invoice' },
     ]);
     setCollection(db, 'gantt_rentals', [
@@ -72,6 +76,8 @@ test('backfill indexes documents and gantt_rentals and preserves rawJson', () =>
     assert.equal(result.gantt_rentals.inserted, 1);
     const document = db.prepare(`SELECT * FROM ${DOCUMENTS_TABLE} WHERE id = 'D-1'`).get();
     assert.equal(document.number, 'ACT-1');
+    assert.equal(document.date, '2026-05-01');
+    assert.equal(document.documentDate, '2026-05-02');
     assert.equal(JSON.parse(document.rawJson).clientId, 'C-1');
     const gantt = db.prepare(`SELECT * FROM ${GANTT_TABLE} WHERE id = 'GR-1'`).get();
     assert.equal(gantt.rentalId, 'R-1');
@@ -147,6 +153,50 @@ test('SQL read helpers support document filters/search and gantt date overlap', 
     assert.deepEqual(queryDocumentsIndex(db, { clientId: 'C-2', dateFrom: '2026-06-01', dateTo: '2026-06-30' }).map(item => item.id), ['D-2']);
     assert.deepEqual(queryGanttIndex(db, { equipmentId: 'EQ-1', dateFrom: '2026-05-05', dateTo: '2026-05-20' }).map(item => item.id), ['GR-1']);
     assert.deepEqual(queryGanttIndex(db, { rentalId: 'R-2' }).map(item => item.id), ['GR-2']);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('documents SQL date range uses JSON business date fallback order', () => {
+  const { db, dir } = makeDb();
+  try {
+    setCollection(db, 'documents', [
+      { id: 'D-date', number: 'DATE-1', type: 'act', status: 'signed', clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1', contractId: 'CON-1', date: '2026-05-01', createdAt: '2026-05-14T19:07:53.327Z' },
+      { id: 'D-documentDate', number: 'DATE-2', type: 'act', status: 'signed', clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1', contractId: 'CON-1', documentDate: '2026-05-01', createdAt: '2026-05-14T19:07:53.327Z' },
+      { id: 'D-createdAt', number: 'DATE-3', type: 'invoice', status: 'draft', clientId: 'C-2', rentalId: 'R-2', equipmentId: 'EQ-2', contractId: 'CON-2', createdAt: '2026-05-01T12:00:00.000Z' },
+      { id: 'D-updatedAt', number: 'DATE-4', type: 'invoice', status: 'draft', clientId: 'C-2', rentalId: 'R-2', equipmentId: 'EQ-2', contractId: 'CON-2', updatedAt: '2026-05-01T12:00:00.000Z' },
+      { id: 'D-outside', number: 'DATE-5', type: 'act', status: 'signed', clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1', contractId: 'CON-1', date: '2026-05-02', createdAt: '2026-05-01T12:00:00.000Z' },
+    ]);
+    setCollection(db, 'gantt_rentals', []);
+    backfillSqlShadowIndexes(db);
+    assert.deepEqual(
+      queryDocumentsIndex(db, { dateFrom: '2026-05-01', dateTo: '2026-05-01' }).map(item => item.id).sort(),
+      ['D-createdAt', 'D-date', 'D-documentDate', 'D-updatedAt'],
+    );
+    assert.deepEqual(queryDocumentsIndex(db, { contractId: 'CON-2' }).map(item => item.id).sort(), ['D-createdAt', 'D-updatedAt']);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('documents SQL sync updates business date columns on dual-write', () => {
+  const { db, dir } = makeDb();
+  try {
+    ensureSqlShadowSchema(db);
+    syncSqlShadowIndexForCollection(db, 'documents', [
+      { id: 'D-1', date: '2026-05-01', documentDate: '2026-05-01', status: 'draft', updatedAt: '2026-05-01T10:00:00.000Z' },
+    ]);
+    let row = db.prepare(`SELECT date, documentDate, status FROM ${DOCUMENTS_TABLE} WHERE id = 'D-1'`).get();
+    assert.deepEqual(row, { date: '2026-05-01', documentDate: '2026-05-01', status: 'draft' });
+
+    syncSqlShadowIndexForCollection(db, 'documents', [
+      { id: 'D-1', date: '2026-05-03', documentDate: '2026-05-04', status: 'signed', updatedAt: '2026-05-04T10:00:00.000Z' },
+    ]);
+    row = db.prepare(`SELECT date, documentDate, status FROM ${DOCUMENTS_TABLE} WHERE id = 'D-1'`).get();
+    assert.deepEqual(row, { date: '2026-05-03', documentDate: '2026-05-04', status: 'signed' });
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });

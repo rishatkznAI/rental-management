@@ -318,6 +318,7 @@ function registerDocumentRoutes(router, deps) {
       clientId: item => item.clientId,
       rentalId: item => item.rentalId || item.rental,
       equipmentId: item => item.equipmentId,
+      contractId: item => item.contractId,
       parentDocumentId: item => item.parentDocumentId,
     };
     Object.entries(filters).forEach(([name, getter]) => {

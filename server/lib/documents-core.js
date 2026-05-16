@@ -334,6 +334,9 @@ function fieldLabel(field) {
     mechanicId: 'механик',
     serviceCarId: 'служебный автомобиль',
     parentDocumentId: 'родительский документ',
+    signerName: 'подписанта',
+    signerPosition: 'должность подписанта',
+    signerBasis: 'основание подписания',
   };
   return labels[field] || field;
 }
@@ -390,11 +393,33 @@ function buildSnapshot(input, collections = {}, nowIso = () => new Date().toISOS
     client: client ? {
       id: client.id,
       company: client.company || client.name || input.client,
-      inn: client.inn,
-      address: client.address,
+      legalName: input.clientLegalName || client.legalName || client.fullName || client.company || client.name,
+      inn: input.clientInn || client.inn,
+      kpp: input.clientKpp || client.kpp,
+      ogrn: input.clientOgrn || client.ogrn,
+      address: input.clientLegalAddress || client.legalAddress || client.address,
+      legalAddress: input.clientLegalAddress || client.legalAddress || client.address,
+      postalAddress: input.clientPostalAddress || client.postalAddress || client.mailingAddress || client.actualAddress || client.address,
+      bankName: input.clientBankName || client.bankName || client.bank,
+      bankBik: input.clientBankBik || client.bankBik || client.bik,
+      bankAccount: input.clientBankAccount || client.bankAccount || client.settlementAccount || client.account,
+      corrAccount: input.clientCorrAccount || client.corrAccount || client.correspondentAccount || client.bankCorrAccount,
       phone: client.phone,
       email: client.email,
-    } : (input.client ? { id: input.clientId, company: input.client } : null),
+    } : (input.client || input.clientId ? {
+      id: input.clientId,
+      company: input.client,
+      legalName: input.clientLegalName || input.client,
+      inn: input.clientInn,
+      kpp: input.clientKpp,
+      ogrn: input.clientOgrn,
+      legalAddress: input.clientLegalAddress,
+      postalAddress: input.clientPostalAddress,
+      bankName: input.clientBankName,
+      bankBik: input.clientBankBik,
+      bankAccount: input.clientBankAccount,
+      corrAccount: input.clientCorrAccount,
+    } : null),
     rental: rental ? {
       id: rental.id,
       clientId: rental.clientId,
@@ -440,6 +465,25 @@ function buildSnapshot(input, collections = {}, nowIso = () => new Date().toISOS
 
 function linesForDocument(type, snapshot, input) {
   const client = snapshot.client?.company || input.client || '—';
+  const signer = input.signer || input.payload?.signer || {};
+  const requisites = input.requisites || input.payload?.requisites || {};
+  const bank = input.bank || input.payload?.bank || {};
+  const signerName = text(input.signerName || signer.name || input.signatoryName);
+  const signerPosition = text(input.signerPosition || signer.position);
+  const signerBasis = text(input.signerBasis || signer.basis || input.signatoryBasis);
+  const basisDetails = signerBasis === 'Доверенность'
+    ? [input.signerBasisNumber || signer.basisNumber, input.signerBasisDate || signer.basisDate].map(text).filter(Boolean).join(' от ')
+    : '';
+  const legalName = text(input.clientLegalName || requisites.legalName || snapshot.client?.legalName || client);
+  const inn = text(input.clientInn || requisites.inn || snapshot.client?.inn);
+  const kpp = text(input.clientKpp || requisites.kpp || snapshot.client?.kpp);
+  const ogrn = text(input.clientOgrn || requisites.ogrn || snapshot.client?.ogrn);
+  const legalAddress = text(input.clientLegalAddress || requisites.legalAddress || snapshot.client?.legalAddress || snapshot.client?.address);
+  const postalAddress = text(input.clientPostalAddress || requisites.postalAddress || snapshot.client?.postalAddress);
+  const bankName = text(input.clientBankName || bank.bankName || snapshot.client?.bankName);
+  const bik = text(input.clientBankBik || bank.bik || snapshot.client?.bankBik);
+  const bankAccount = text(input.clientBankAccount || bank.account || snapshot.client?.bankAccount);
+  const corrAccount = text(input.clientCorrAccount || bank.corrAccount || snapshot.client?.corrAccount);
   const equipment = equipmentLabel(snapshot.equipment) || input.equipmentInv || input.equipment || '—';
   const rental = snapshot.rental;
   const service = snapshot.serviceTicket;
@@ -451,14 +495,18 @@ function linesForDocument(type, snapshot, input) {
   const common = {
     rental_contract: [
       ['Клиент', client],
-      ['Техника', equipment],
-      ['Срок аренды', [rental?.startDate, rental?.endDate].filter(Boolean).join(' — ') || '—'],
-      ['Ставка / сумма', amount ? String(amount) : '—'],
-      ['Объект', input.objectId || rental?.objectId || '—'],
-      ['Условия возврата', input.returnTerms || 'Возврат в согласованном состоянии и комплектации.'],
-      ['Ответственность сторон', input.liabilityTerms || 'Стороны несут ответственность по условиям договора.'],
-      ['Реквизиты', snapshot.client?.inn ? `ИНН ${snapshot.client.inn}` : '—'],
-      ['Подписи сторон', 'Skytech / Клиент'],
+      ['Юридическое название', legalName || '—'],
+      ['ИНН / КПП', [inn ? `ИНН ${inn}` : '', kpp ? `КПП ${kpp}` : ''].filter(Boolean).join(' / ') || '—'],
+      ['ОГРН', ogrn || '—'],
+      ['Юридический адрес', legalAddress || '—'],
+      ['Почтовый адрес', postalAddress || '—'],
+      ['Подписант', [signerPosition, signerName].filter(Boolean).join(' ') || '—'],
+      ['Основание подписания', [signerBasis, basisDetails].filter(Boolean).join(' · ') || '—'],
+      ['Банк', bankName || '—'],
+      ['БИК', bik || '—'],
+      ['Расчётный счёт', bankAccount || '—'],
+      ['Корреспондентский счёт', corrAccount || '—'],
+      ['Комментарий', input.notes || input.comment || '—'],
     ],
     rental_specification: [
       ['Договор', snapshot.parentDocument?.number || input.parentDocumentId || input.contractId || '—'],
@@ -475,10 +523,10 @@ function linesForDocument(type, snapshot, input) {
       ['Дата передачи', input.transferDate || date],
       ['Клиент', client],
       ['Техника', equipment],
-      ['Состояние при передаче', input.condition || 'Исправна, рабочее состояние.'],
+      ['Состояние при передаче', input.equipmentCondition || input.condition || 'Исправна, рабочее состояние.'],
       ['Комплектность', input.completeness || 'Согласно карточке техники и договору.'],
       ['Фото/замечания', input.notes || input.comment || '—'],
-      ['Представитель компании', input.responsibleName || 'Skytech'],
+      ['Представитель компании', input.companyRepresentative || input.responsibleName || 'Skytech'],
       ['Представитель клиента', input.clientRepresentative || '—'],
       ['Подписи', 'Стороны'],
     ],
@@ -486,11 +534,13 @@ function linesForDocument(type, snapshot, input) {
       ['Дата возврата', input.returnDate || date],
       ['Клиент', client],
       ['Техника', equipment],
-      ['Состояние при возврате', input.condition || 'Требует проверки после возврата.'],
-      ['Повреждения', input.damageNotes || 'Не указаны'],
+      ['Состояние при возврате', input.returnCondition || input.condition || 'Требует проверки после возврата.'],
+      ['Повреждения', input.damages || input.damageNotes || 'Не указаны'],
       ['Недостача', input.missingItems || 'Не указана'],
       ['Необходимость сервиса', input.serviceRequired || (input.serviceTicketId ? 'Да' : 'Нет')],
       ['Сервисная заявка', service?.id || input.serviceTicketId || '—'],
+      ['Представитель компании', input.companyRepresentative || input.responsibleName || 'Skytech'],
+      ['Представитель клиента', input.clientRepresentative || '—'],
       ['Подписи', 'Стороны'],
     ],
     work_order: [
@@ -501,12 +551,12 @@ function linesForDocument(type, snapshot, input) {
       ['Выполненные работы', input.works || service?.works || '—'],
       ['Запчасти', input.parts || service?.parts || '—'],
       ['Трудозатраты', input.laborHours || '—'],
-      ['Итог ремонта', input.result || service?.result || '—'],
+      ['Итог ремонта', input.repairResult || input.result || service?.result || '—'],
       ['Сумма', amount ? String(amount) : '—'],
       ['Подпись ответственного', input.responsibleName || '—'],
     ],
     trip_ticket: [
-      ['Дата', date],
+      ['Дата', input.tripDate || date],
       ['Служебный автомобиль', snapshot.serviceCar?.label || input.serviceCarId || '—'],
       ['Водитель/механик', mechanic],
       ['Маршрут', route],
@@ -514,7 +564,7 @@ function linesForDocument(type, snapshot, input) {
       ['Связанная заявка/доставка', service?.id || delivery?.id || '—'],
       ['Начальный пробег', input.startMileage || input.odometerStart || '—'],
       ['Конечный пробег', input.endMileage || input.odometerEnd || '—'],
-      ['Топливо', input.fuel || [input.fuelStart, input.fuelAdded, input.fuelEnd].filter(Boolean).join(' / ') || '—'],
+      ['Топливо', input.fuelIssued || input.fuel || [input.fuelStart, input.fuelAdded, input.fuelEnd].filter(Boolean).join(' / ') || '—'],
       ['Комментарии', input.notes || input.comment || '—'],
     ],
   };
@@ -563,6 +613,31 @@ function prepareGeneratedDocument(input, collections = {}, options = {}) {
   const snapshot = input.snapshot || buildSnapshot({ ...input, type }, collections, nowIso);
   const payload = {
     ...(input.payload && typeof input.payload === 'object' ? input.payload : {}),
+    ...(type === 'rental_contract' ? {
+      clientSnapshot: snapshot.client,
+      signer: {
+        name: input.signerName || input.payload?.signer?.name || '',
+        position: input.signerPosition || input.payload?.signer?.position || '',
+        basis: input.signerBasis || input.payload?.signer?.basis || '',
+        basisNumber: input.signerBasisNumber || input.payload?.signer?.basisNumber || '',
+        basisDate: input.signerBasisDate || input.payload?.signer?.basisDate || '',
+      },
+      requisites: {
+        legalName: input.clientLegalName || input.payload?.requisites?.legalName || snapshot.client?.legalName || '',
+        inn: input.clientInn || input.payload?.requisites?.inn || snapshot.client?.inn || '',
+        kpp: input.clientKpp || input.payload?.requisites?.kpp || snapshot.client?.kpp || '',
+        ogrn: input.clientOgrn || input.payload?.requisites?.ogrn || snapshot.client?.ogrn || '',
+        legalAddress: input.clientLegalAddress || input.payload?.requisites?.legalAddress || snapshot.client?.legalAddress || '',
+        postalAddress: input.clientPostalAddress || input.payload?.requisites?.postalAddress || snapshot.client?.postalAddress || '',
+      },
+      bank: {
+        bankName: input.clientBankName || input.payload?.bank?.bankName || snapshot.client?.bankName || '',
+        bik: input.clientBankBik || input.payload?.bank?.bik || snapshot.client?.bankBik || '',
+        account: input.clientBankAccount || input.payload?.bank?.account || snapshot.client?.bankAccount || '',
+        corrAccount: input.clientCorrAccount || input.payload?.bank?.corrAccount || snapshot.client?.corrAccount || '',
+      },
+      notes: input.notes || input.comment || input.payload?.notes || '',
+    } : {}),
     lines: linesForDocument(type, snapshot, input),
   };
   const generatedContent = input.generatedContent || input.printHtml || buildDocumentPrintHtml({ ...input, type }, snapshot, payload.lines);

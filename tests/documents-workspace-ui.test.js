@@ -23,7 +23,7 @@ test('documents workspace exposes required document types and quick filters', ()
   }
 });
 
-test('documents workspace has KPI cards and unified generation wizard', () => {
+test('documents workspace has KPI cards and type-specific generation wizard', () => {
   for (const label of ['Всего документов', 'Черновики', 'На подписи', 'Подписано', 'Просрочено', 'За месяц']) {
     assert.match(source, new RegExp(label));
   }
@@ -33,13 +33,43 @@ test('documents workspace has KPI cards and unified generation wizard', () => {
   assert.match(source, /useGenerateDocument/);
   assert.match(source, /Предпросмотр/);
   assert.match(source, /Проверка обязательных полей/);
+  assert.match(source, /Создайте юридическую рамку договора с клиентом/);
 });
 
-test('document generation wizard uses searchable client selection and sends clientId', () => {
+test('rental contract wizard uses searchable client selection and sends signer payload', () => {
   assert.match(source, /ClientCombobox/);
   assert.match(source, /valueId=\{wizardResolvedClientId\}/);
   assert.match(source, /clientId: wizardResolvedClientId \|\| undefined/);
   assert.match(source, /Клиенты не найдены/);
   assert.match(source, /field === 'clientId'[\s\S]*!\s*wizardResolvedClientId/);
-  assert.match(source, /clientId: rental\?\.clientId \|\| current\.clientId \|\| ''/);
+  assert.match(source, /fillWizardClientFields/);
+  assert.match(source, /signer:\s*\{/);
+  assert.match(source, /requisites:\s*\{/);
+  assert.match(source, /bank:\s*\{/);
+  assert.match(source, /signerName: wizardForm\.signerName/);
+  assert.match(source, /signerBasis: wizardForm\.signerBasis/);
+  assert.match(source, /clientBankName/);
+  assert.match(source, /Будет сгенерирован автоматически/);
+  assert.match(source, /Будет установлена автоматически/);
+});
+
+test('rental contract form does not render universal operational fields in contract branch', () => {
+  const contractBranch = source.slice(
+    source.indexOf("wizardStep === 2 && wizardForm.type === 'rental_contract'"),
+    source.indexOf("wizardStep === 3 && wizardForm.type === 'rental_contract'"),
+  );
+
+  for (const label of ['Аренда', 'Техника', 'Сервисная заявка', 'Доставка', 'Механик', 'Служебная машина', 'Срок подписи']) {
+    assert.doesNotMatch(contractBranch, new RegExp(`>${label}<`));
+  }
+
+  for (const label of ['Клиент', 'Юридическое название клиента', 'ИНН', 'КПП', 'ОГРН', 'Юридический адрес', 'Почтовый адрес']) {
+    assert.match(contractBranch, new RegExp(`>${label}<`));
+  }
+
+  assert.match(source, /ФИО подписанта/);
+  assert.match(source, /Должность подписанта/);
+  assert.match(source, /Основание подписания/);
+  assert.match(source, /Расчётный счёт/);
+  assert.match(source, /Корреспондентский счёт/);
 });

@@ -17,7 +17,18 @@ function createApp() {
       { id: 'U-manager', name: 'Руслан', role: 'Менеджер по аренде', status: 'Активен' },
       { id: 'U-mechanic', name: 'Петров', role: 'Механик', status: 'Активен' },
     ],
-    clients: [{ id: 'C-1', company: 'ООО Клиент' }],
+    clients: [{
+      id: 'C-1',
+      company: 'ООО Клиент',
+      inn: '7701000000',
+      kpp: '770101001',
+      ogrn: '1027700000000',
+      legalAddress: 'Москва, ул. Тестовая, 1',
+      bankName: 'АО Тест Банк',
+      bankBik: '044525000',
+      bankAccount: '40702810000000000001',
+      corrAccount: '30101810000000000000',
+    }],
     rentals: [{ id: 'R-1', clientId: 'C-1', client: 'ООО Клиент', manager: 'Руслан', managerId: 'U-manager' }],
     gantt_rentals: [],
     equipment: [{ id: 'EQ-1', inventoryNumber: 'A-1' }],
@@ -408,7 +419,7 @@ test('documents generate API creates every workspace document type with snapshot
   state.service_vehicles = [{ id: 'CAR-1', make: 'УАЗ', model: 'Профи', plateNumber: 'А001АА' }];
 
   const cases = [
-    ['rental_contract', { clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1' }, 'DA-2026-0001'],
+    ['rental_contract', { clientId: 'C-1', signerName: 'Иванов Иван', signerPosition: 'директор', signerBasis: 'Устав' }, 'DA-2026-0001'],
     ['rental_specification', { clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1' }, 'SP-2026-0001'],
     ['transfer_act_to_client', { clientId: 'C-1', rentalId: 'R-1', deliveryId: 'DEL-1', equipmentId: 'EQ-1' }, 'AP-2026-0001'],
     ['return_act_from_client', { clientId: 'C-1', rentalId: 'R-1', deliveryId: 'DEL-1', equipmentId: 'EQ-1', serviceTicketId: 'S-1' }, 'AR-2026-0001'],
@@ -432,6 +443,12 @@ test('documents generate API creates every workspace document type with snapshot
       assert.ok(generated.json.snapshot.generatedAt);
       assert.match(generated.json.printHtml, /<!doctype html>/i);
       assert.ok(Array.isArray(generated.json.payload.lines));
+      if (type === 'rental_contract') {
+        assert.equal(generated.json.rentalId, undefined);
+        assert.equal(generated.json.payload.signer.name, 'Иванов Иван');
+        assert.equal(generated.json.payload.requisites.inn, '7701000000');
+        assert.equal(generated.json.payload.bank.bankName, 'АО Тест Банк');
+      }
     }
   });
 });
@@ -441,7 +458,9 @@ test('documents generate API rejects missing required data and supports status e
   await withServer(app, async (baseUrl) => {
     const missingClient = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
       type: 'rental_contract',
-      rentalId: 'R-1',
+      signerName: 'Иванов Иван',
+      signerPosition: 'директор',
+      signerBasis: 'Устав',
       date: '2026-05-09',
     });
     assert.equal(missingClient.response.status, 400);
@@ -450,15 +469,29 @@ test('documents generate API rejects missing required data and supports status e
     const missing = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
       type: 'rental_contract',
       clientId: 'C-1',
+      signerName: 'Иванов Иван',
+      signerPosition: 'директор',
       date: '2026-05-09',
     });
     assert.equal(missing.response.status, 400);
     assert.equal(missing.json.code, 'DOCUMENT_REQUIRED_FIELDS');
 
+    const missingSigner = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'rental_contract',
+      clientId: 'C-1',
+      signerPosition: 'директор',
+      signerBasis: 'Устав',
+      date: '2026-05-09',
+    });
+    assert.equal(missingSigner.response.status, 400);
+    assert.equal(missingSigner.json.code, 'DOCUMENT_REQUIRED_FIELDS');
+
     const created = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
       type: 'rental_contract',
       clientId: 'C-1',
-      rentalId: 'R-1',
+      signerName: 'Иванов Иван',
+      signerPosition: 'директор',
+      signerBasis: 'Устав',
       date: '2026-05-09',
     });
     assert.equal(created.response.status, 201);

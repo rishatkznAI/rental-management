@@ -157,6 +157,46 @@ type DocumentWizardState = {
   serviceCarId: string;
   parentDocumentId: string;
   dueDate: string;
+  signerName: string;
+  signerPosition: string;
+  signerBasis: string;
+  signerBasisNumber: string;
+  signerBasisDate: string;
+  clientLegalName: string;
+  clientInn: string;
+  clientKpp: string;
+  clientOgrn: string;
+  clientLegalAddress: string;
+  clientPostalAddress: string;
+  clientBankName: string;
+  clientBankBik: string;
+  clientBankAccount: string;
+  clientCorrAccount: string;
+  rentalStartDate: string;
+  rentalEndDate: string;
+  dailyRate: string;
+  amount: string;
+  transferDate: string;
+  equipmentCondition: string;
+  completeness: string;
+  companyRepresentative: string;
+  clientRepresentative: string;
+  returnDate: string;
+  returnCondition: string;
+  damages: string;
+  missingItems: string;
+  serviceRequired: string;
+  works: string;
+  parts: string;
+  laborHours: string;
+  repairResult: string;
+  tripDate: string;
+  routeFrom: string;
+  routeTo: string;
+  purpose: string;
+  startMileage: string;
+  endMileage: string;
+  fuelIssued: string;
   notes: string;
 };
 
@@ -171,8 +211,77 @@ const EMPTY_WIZARD: DocumentWizardState = {
   serviceCarId: '',
   parentDocumentId: '',
   dueDate: '',
+  signerName: '',
+  signerPosition: '',
+  signerBasis: '',
+  signerBasisNumber: '',
+  signerBasisDate: '',
+  clientLegalName: '',
+  clientInn: '',
+  clientKpp: '',
+  clientOgrn: '',
+  clientLegalAddress: '',
+  clientPostalAddress: '',
+  clientBankName: '',
+  clientBankBik: '',
+  clientBankAccount: '',
+  clientCorrAccount: '',
+  rentalStartDate: '',
+  rentalEndDate: '',
+  dailyRate: '',
+  amount: '',
+  transferDate: '',
+  equipmentCondition: '',
+  completeness: '',
+  companyRepresentative: '',
+  clientRepresentative: '',
+  returnDate: '',
+  returnCondition: '',
+  damages: '',
+  missingItems: '',
+  serviceRequired: '',
+  works: '',
+  parts: '',
+  laborHours: '',
+  repairResult: '',
+  tripDate: '',
+  routeFrom: '',
+  routeTo: '',
+  purpose: '',
+  startMileage: '',
+  endMileage: '',
+  fuelIssued: '',
   notes: '',
 };
+
+function clientField(client: Client | null | undefined, keys: string[]): string {
+  const record = client as unknown as Record<string, unknown> | null | undefined;
+  for (const key of keys) {
+    const value = record?.[key];
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+  }
+  return '';
+}
+
+function fillWizardClientFields(current: DocumentWizardState, client: Client | null): DocumentWizardState {
+  if (!client) {
+    return { ...current, clientId: '' };
+  }
+  return {
+    ...current,
+    clientId: client.id,
+    clientLegalName: current.clientLegalName || clientField(client, ['legalName', 'fullName', 'company']),
+    clientInn: current.clientInn || clientField(client, ['inn', 'taxId']),
+    clientKpp: current.clientKpp || clientField(client, ['kpp']),
+    clientOgrn: current.clientOgrn || clientField(client, ['ogrn']),
+    clientLegalAddress: current.clientLegalAddress || clientField(client, ['legalAddress', 'address']),
+    clientPostalAddress: current.clientPostalAddress || clientField(client, ['postalAddress', 'mailingAddress', 'actualAddress', 'address']),
+    clientBankName: current.clientBankName || clientField(client, ['bankName', 'bank']),
+    clientBankBik: current.clientBankBik || clientField(client, ['bankBik', 'bik']),
+    clientBankAccount: current.clientBankAccount || clientField(client, ['bankAccount', 'settlementAccount', 'account']),
+    clientCorrAccount: current.clientCorrAccount || clientField(client, ['corrAccount', 'correspondentAccount', 'bankCorrAccount']),
+  };
+}
 
 type ContractFormState = {
   clientId: string;
@@ -1005,7 +1114,7 @@ export default function Documents() {
   const wizardServiceVehicle = wizardForm.serviceCarId ? serviceVehiclesById.get(wizardForm.serviceCarId) : undefined;
   const wizardMissingFields = React.useMemo(() => {
     const labels: Record<string, string> = {
-      clientId: 'Клиент',
+      clientId: 'Выберите клиента',
       rentalId: 'Аренда',
       equipmentId: 'Техника',
       serviceTicketId: 'Сервисная заявка',
@@ -1013,6 +1122,9 @@ export default function Documents() {
       mechanicId: 'Механик',
       serviceCarId: 'Служебный автомобиль',
       parentDocumentId: 'Родительский документ',
+      signerName: 'Укажите подписанта',
+      signerPosition: 'Укажите должность подписанта',
+      signerBasis: 'Укажите основание подписания',
     };
     return (wizardTypeMeta.requiredFields || [])
       .filter(field => field === 'clientId'
@@ -1022,8 +1134,21 @@ export default function Documents() {
   }, [wizardForm, wizardResolvedClientId, wizardTypeMeta]);
   const wizardPreviewRows = React.useMemo(() => ([
     ['Тип', wizardTypeMeta.label],
-    ['Дата', new Date().toISOString().slice(0, 10)],
+    ['Дата', wizardForm.type === 'rental_contract' ? 'Будет установлена автоматически' : new Date().toISOString().slice(0, 10)],
+    ['Номер', 'Будет сгенерирован автоматически'],
     ['Клиент', wizardClient ? clientLabel(wizardClient) : wizardRental?.client || '—'],
+    ...(wizardForm.type === 'rental_contract' ? [
+      ['Подписант', wizardForm.signerName || '—'],
+      ['Должность', wizardForm.signerPosition || '—'],
+      ['Основание подписания', [
+        wizardForm.signerBasis,
+        wizardForm.signerBasis === 'Доверенность'
+          ? [wizardForm.signerBasisNumber, wizardForm.signerBasisDate].filter(Boolean).join(' от ')
+          : '',
+      ].filter(Boolean).join(' · ') || '—'],
+      ['Реквизиты', [wizardForm.clientLegalName, wizardForm.clientInn ? `ИНН ${wizardForm.clientInn}` : '', wizardForm.clientKpp ? `КПП ${wizardForm.clientKpp}` : ''].filter(Boolean).join(' · ') || '—'],
+      ['Банк', [wizardForm.clientBankName, wizardForm.clientBankBik ? `БИК ${wizardForm.clientBankBik}` : '', wizardForm.clientBankAccount].filter(Boolean).join(' · ') || '—'],
+    ] : []),
     ['Техника', wizardEquipment ? getEquipmentLabel(wizardEquipment) : '—'],
     ['Аренда', wizardRental?.id || '—'],
     ['Сервис', wizardServiceTicket?.id || '—'],
@@ -1032,7 +1157,7 @@ export default function Documents() {
     ['Служебная машина', wizardServiceVehicle ? [wizardServiceVehicle.make, wizardServiceVehicle.model, wizardServiceVehicle.plateNumber].filter(Boolean).join(' ') : '—'],
     ['Статус', 'Черновик'],
     ['Сумма', wizardRental?.amount || wizardRental?.price ? formatCurrency(Number(wizardRental?.amount || wizardRental?.price)) : '—'],
-  ]), [wizardClient, wizardDelivery, wizardEquipment, wizardMechanic, wizardRental, wizardServiceTicket, wizardServiceVehicle, wizardTypeMeta]);
+  ]).filter(([label]) => wizardForm.type !== 'rental_contract' || !['Техника', 'Аренда', 'Сервис', 'Доставка', 'Механик', 'Служебная машина', 'Сумма'].includes(label)), [wizardClient, wizardDelivery, wizardEquipment, wizardForm, wizardMechanic, wizardRental, wizardServiceTicket, wizardServiceVehicle, wizardTypeMeta]);
 
   const persistMechanicDocuments = React.useCallback(async (next: MechanicDocument[]) => {
     setMechanicDocuments(next);
@@ -1150,6 +1275,72 @@ export default function Documents() {
         objectId: wizardRental?.objectId,
         contractId: wizardRental?.contractId,
         dueDate: wizardForm.dueDate || undefined,
+        signerName: wizardForm.signerName.trim() || undefined,
+        signerPosition: wizardForm.signerPosition.trim() || undefined,
+        signerBasis: wizardForm.signerBasis || undefined,
+        signerBasisNumber: wizardForm.signerBasisNumber.trim() || undefined,
+        signerBasisDate: wizardForm.signerBasisDate || undefined,
+        signatoryName: wizardForm.signerName.trim() || undefined,
+        signatoryBasis: wizardForm.signerBasis || undefined,
+        clientLegalName: wizardForm.clientLegalName.trim() || undefined,
+        clientInn: wizardForm.clientInn.trim() || undefined,
+        clientKpp: wizardForm.clientKpp.trim() || undefined,
+        clientOgrn: wizardForm.clientOgrn.trim() || undefined,
+        clientLegalAddress: wizardForm.clientLegalAddress.trim() || undefined,
+        clientPostalAddress: wizardForm.clientPostalAddress.trim() || undefined,
+        clientBankName: wizardForm.clientBankName.trim() || undefined,
+        clientBankBik: wizardForm.clientBankBik.trim() || undefined,
+        clientBankAccount: wizardForm.clientBankAccount.trim() || undefined,
+        clientCorrAccount: wizardForm.clientCorrAccount.trim() || undefined,
+        rentalStartDate: wizardForm.rentalStartDate || undefined,
+        rentalEndDate: wizardForm.rentalEndDate || undefined,
+        dailyRate: wizardForm.dailyRate.trim() || undefined,
+        amount: wizardForm.amount.trim() ? Number(wizardForm.amount.replace(',', '.')) : undefined,
+        transferDate: wizardForm.transferDate || undefined,
+        equipmentCondition: wizardForm.equipmentCondition.trim() || undefined,
+        completeness: wizardForm.completeness.trim() || undefined,
+        companyRepresentative: wizardForm.companyRepresentative.trim() || undefined,
+        clientRepresentative: wizardForm.clientRepresentative.trim() || undefined,
+        returnDate: wizardForm.returnDate || undefined,
+        returnCondition: wizardForm.returnCondition.trim() || undefined,
+        damages: wizardForm.damages.trim() || undefined,
+        missingItems: wizardForm.missingItems.trim() || undefined,
+        serviceRequired: wizardForm.serviceRequired || undefined,
+        works: wizardForm.works.trim() || undefined,
+        parts: wizardForm.parts.trim() || undefined,
+        laborHours: wizardForm.laborHours.trim() || undefined,
+        repairResult: wizardForm.repairResult.trim() || undefined,
+        tripDate: wizardForm.tripDate || undefined,
+        routeFrom: wizardForm.routeFrom.trim() || undefined,
+        routeTo: wizardForm.routeTo.trim() || undefined,
+        purpose: wizardForm.purpose.trim() || undefined,
+        startMileage: wizardForm.startMileage.trim() || undefined,
+        endMileage: wizardForm.endMileage.trim() || undefined,
+        fuelIssued: wizardForm.fuelIssued.trim() || undefined,
+        payload: wizardForm.type === 'rental_contract' ? {
+          signer: {
+            name: wizardForm.signerName.trim(),
+            position: wizardForm.signerPosition.trim(),
+            basis: wizardForm.signerBasis,
+            basisNumber: wizardForm.signerBasisNumber.trim(),
+            basisDate: wizardForm.signerBasisDate,
+          },
+          requisites: {
+            legalName: wizardForm.clientLegalName.trim(),
+            inn: wizardForm.clientInn.trim(),
+            kpp: wizardForm.clientKpp.trim(),
+            ogrn: wizardForm.clientOgrn.trim(),
+            legalAddress: wizardForm.clientLegalAddress.trim(),
+            postalAddress: wizardForm.clientPostalAddress.trim(),
+          },
+          bank: {
+            bankName: wizardForm.clientBankName.trim(),
+            bik: wizardForm.clientBankBik.trim(),
+            account: wizardForm.clientBankAccount.trim(),
+            corrAccount: wizardForm.clientCorrAccount.trim(),
+          },
+          notes: wizardForm.notes.trim(),
+        } : undefined,
         notes: wizardForm.notes.trim() || undefined,
         comment: wizardForm.notes.trim() || undefined,
         responsibleId: user?.id,
@@ -1934,13 +2125,13 @@ export default function Documents() {
                   Создать документ
                 </DialogTitle>
                 <DialogDescription>
-                  Единый мастер создаёт черновик с номером, snapshot и печатной формой.
+                  Выберите тип документа, затем заполните только поля, которые относятся к этому документу.
                 </DialogDescription>
               </DialogHeader>
 
               <div className="max-h-[64vh] space-y-5 overflow-y-auto pr-1">
                 <div className="flex flex-wrap gap-2">
-                  {[1, 2, 3, 4, 5, 6].map(step => (
+                  {[1, 2, 3, 4, 5].map(step => (
                     <Button
                       key={step}
                       type="button"
@@ -1982,114 +2173,338 @@ export default function Documents() {
                   </div>
                 ) : null}
 
-                {wizardStep === 2 ? (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-foreground">Клиент</div>
-                      <ClientCombobox
-                        clients={clients as Client[]}
-                        value={wizardClient ? clientLabel(wizardClient) : ''}
-                        valueId={wizardResolvedClientId}
-                        onChange={(value) => {
-                          if (!value) setWizardForm(current => ({ ...current, clientId: '' }));
-                        }}
-                        onClientSelect={(client) => setWizardForm(current => ({
-                          ...current,
-                          clientId: client?.id ?? '',
-                        }))}
-                        placeholder={(clients as Client[]).length > 0 ? 'Выберите клиента из базы' : 'Клиенты не найдены'}
-                        initialLimit={20}
-                      />
-                      {(clients as Client[]).length === 0 ? (
-                        <p className="text-xs text-muted-foreground">Клиенты не найдены</p>
-                      ) : null}
+                {wizardStep === 2 && wizardForm.type === 'rental_contract' ? (
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Договор аренды</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">Создайте юридическую рамку договора с клиентом. Техника, сроки и ставки добавляются в спецификации.</p>
+                      <p className="mt-2 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-950/30 dark:text-blue-200">Договор фиксирует стороны и реквизиты. Конкретная техника и цена указываются в спецификации к договору.</p>
                     </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-foreground">Аренда</div>
-                      <Select value={wizardForm.rentalId || 'none'} onValueChange={(value) => {
-                        const rental = value === 'none' ? undefined : rentalsById.get(value);
-                        setWizardForm(current => ({ ...current, rentalId: value === 'none' ? '' : value, clientId: rental?.clientId || current.clientId || '' }));
-                      }}>
-                        <SelectTrigger><SelectValue placeholder="Выберите аренду" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Не выбрана</SelectItem>
-                          {(rentals as Rental[]).map(rental => <SelectItem key={rental.id} value={rental.id}>{getRentalLabel(rental)}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-foreground">Техника</div>
-                      <Select value={wizardForm.equipmentId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, equipmentId: value === 'none' ? '' : value }))}>
-                        <SelectTrigger><SelectValue placeholder="Выберите технику" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Не выбрана</SelectItem>
-                          {(equipment as Equipment[]).map(item => <SelectItem key={item.id} value={item.id}>{getEquipmentLabel(item)}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-foreground">Сервисная заявка</div>
-                      <Select value={wizardForm.serviceTicketId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, serviceTicketId: value === 'none' ? '' : value }))}>
-                        <SelectTrigger><SelectValue placeholder="Выберите заявку" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Не выбрана</SelectItem>
-                          {(serviceTickets as ServiceTicket[]).map(ticket => <SelectItem key={ticket.id} value={ticket.id}>{ticket.id} · {ticket.reason || ticket.description || 'Сервис'}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-foreground">Доставка</div>
-                      <Select value={wizardForm.deliveryId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, deliveryId: value === 'none' ? '' : value }))}>
-                        <SelectTrigger><SelectValue placeholder="Выберите доставку" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Не выбрана</SelectItem>
-                          {(deliveries as Delivery[]).map(delivery => <SelectItem key={delivery.id} value={delivery.id}>{delivery.id} · {delivery.status}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-foreground">Механик</div>
-                      <Select value={wizardForm.mechanicId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, mechanicId: value === 'none' ? '' : value }))}>
-                        <SelectTrigger><SelectValue placeholder="Выберите механика" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Не выбран</SelectItem>
-                          {mechanicList.map(mechanic => <SelectItem key={mechanic.id} value={mechanic.id}>{mechanic.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-foreground">Служебная машина</div>
-                      <Select value={wizardForm.serviceCarId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, serviceCarId: value === 'none' ? '' : value }))}>
-                        <SelectTrigger><SelectValue placeholder="Выберите машину" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Не выбрана</SelectItem>
-                          {(serviceVehicles as ServiceVehicle[]).map(vehicle => <SelectItem key={vehicle.id} value={vehicle.id}>{[vehicle.make, vehicle.model, vehicle.plateNumber].filter(Boolean).join(' ')}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-foreground">Срок подписи</div>
-                      <Input type="date" value={wizardForm.dueDate} onChange={(event) => setWizardForm(current => ({ ...current, dueDate: event.target.value }))} />
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2 md:col-span-2">
+                        <div className="text-sm font-medium text-foreground">Клиент</div>
+                        <ClientCombobox
+                          clients={clients as Client[]}
+                          value={wizardClient ? clientLabel(wizardClient) : ''}
+                          valueId={wizardResolvedClientId}
+                          onChange={(value) => {
+                            if (!value) setWizardForm(current => ({ ...current, clientId: '' }));
+                          }}
+                          onClientSelect={(client) => setWizardForm(current => fillWizardClientFields(current, client))}
+                          placeholder={(clients as Client[]).length > 0 ? 'Выберите клиента из базы' : 'Клиенты не найдены'}
+                          initialLimit={20}
+                        />
+                        {(clients as Client[]).length === 0 ? (
+                          <p className="text-xs text-muted-foreground">Клиенты не найдены</p>
+                        ) : null}
+                        {wizardClient && !wizardForm.clientInn && !wizardForm.clientLegalAddress ? (
+                          <p className="text-xs text-amber-700 dark:text-amber-300">Реквизиты клиента не заполнены. Можно создать черновик и дозаполнить позже.</p>
+                        ) : null}
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">Юридическое название клиента</div>
+                        <Input value={wizardForm.clientLegalName} onChange={(event) => setWizardForm(current => ({ ...current, clientLegalName: event.target.value }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">ИНН</div>
+                        <Input value={wizardForm.clientInn} onChange={(event) => setWizardForm(current => ({ ...current, clientInn: event.target.value }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">КПП</div>
+                        <Input value={wizardForm.clientKpp} onChange={(event) => setWizardForm(current => ({ ...current, clientKpp: event.target.value }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">ОГРН</div>
+                        <Input value={wizardForm.clientOgrn} onChange={(event) => setWizardForm(current => ({ ...current, clientOgrn: event.target.value }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">Юридический адрес</div>
+                        <Textarea rows={2} value={wizardForm.clientLegalAddress} onChange={(event) => setWizardForm(current => ({ ...current, clientLegalAddress: event.target.value }))} />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">Почтовый адрес</div>
+                        <Textarea rows={2} value={wizardForm.clientPostalAddress} onChange={(event) => setWizardForm(current => ({ ...current, clientPostalAddress: event.target.value }))} />
+                      </div>
                     </div>
                   </div>
                 ) : null}
 
-                {wizardStep === 3 ? (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {wizardPreviewRows.slice(2).map(([label, value]) => (
-                      <div key={label} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-                        <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
-                        <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{value}</p>
+                {wizardStep === 3 && wizardForm.type === 'rental_contract' ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">ФИО подписанта</div>
+                      <Input value={wizardForm.signerName} onChange={(event) => setWizardForm(current => ({ ...current, signerName: event.target.value }))} />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Должность подписанта</div>
+                      <Input value={wizardForm.signerPosition} onChange={(event) => setWizardForm(current => ({ ...current, signerPosition: event.target.value }))} />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Основание подписания</div>
+                      <Select value={wizardForm.signerBasis || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, signerBasis: value === 'none' ? '' : value }))}>
+                        <SelectTrigger><SelectValue placeholder="Выберите основание" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Не выбрано</SelectItem>
+                          {['Устав', 'Доверенность', 'Приказ', 'Иное'].map(item => <SelectItem key={item} value={item}>{item}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {wizardForm.signerBasis === 'Доверенность' ? (
+                      <>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Номер доверенности</div>
+                          <Input value={wizardForm.signerBasisNumber} onChange={(event) => setWizardForm(current => ({ ...current, signerBasisNumber: event.target.value }))} />
+                        </div>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Дата доверенности</div>
+                          <Input type="date" value={wizardForm.signerBasisDate} onChange={(event) => setWizardForm(current => ({ ...current, signerBasisDate: event.target.value }))} />
+                        </div>
+                      </>
+                    ) : null}
+                    <div className="space-y-2 md:col-span-2">
+                      <div className="text-sm font-medium text-foreground">Комментарий</div>
+                      <Textarea rows={3} value={wizardForm.notes} onChange={(event) => setWizardForm(current => ({ ...current, notes: event.target.value }))} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {wizardStep === 4 && wizardForm.type === 'rental_contract' ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Банк</div>
+                      <Input value={wizardForm.clientBankName} onChange={(event) => setWizardForm(current => ({ ...current, clientBankName: event.target.value }))} />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">БИК</div>
+                      <Input value={wizardForm.clientBankBik} onChange={(event) => setWizardForm(current => ({ ...current, clientBankBik: event.target.value }))} />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Расчётный счёт</div>
+                      <Input value={wizardForm.clientBankAccount} onChange={(event) => setWizardForm(current => ({ ...current, clientBankAccount: event.target.value }))} />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Корреспондентский счёт</div>
+                      <Input value={wizardForm.clientCorrAccount} onChange={(event) => setWizardForm(current => ({ ...current, clientCorrAccount: event.target.value }))} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {wizardStep === 2 && wizardForm.type !== 'rental_contract' ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {['rental_specification', 'transfer_act_to_client', 'return_act_from_client'].includes(wizardForm.type) ? (
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">Клиент</div>
+                        <ClientCombobox
+                          clients={clients as Client[]}
+                          value={wizardClient ? clientLabel(wizardClient) : ''}
+                          valueId={wizardResolvedClientId}
+                          onChange={(value) => {
+                            if (!value) setWizardForm(current => ({ ...current, clientId: '' }));
+                          }}
+                          onClientSelect={(client) => setWizardForm(current => ({ ...current, clientId: client?.id ?? '' }))}
+                          placeholder={(clients as Client[]).length > 0 ? 'Выберите клиента из базы' : 'Клиенты не найдены'}
+                          initialLimit={20}
+                        />
                       </div>
-                    ))}
-                    <div className="space-y-2 sm:col-span-2">
+                    ) : null}
+                    {wizardForm.type === 'rental_specification' ? (
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">Договор аренды</div>
+                        <Select value={wizardForm.parentDocumentId || 'none'} onValueChange={(value) => {
+                          const parent = value === 'none' ? undefined : documents.find(doc => doc.id === value);
+                          setWizardForm(current => ({
+                            ...current,
+                            parentDocumentId: value === 'none' ? '' : value,
+                            clientId: parent?.clientId || current.clientId,
+                          }));
+                        }}>
+                          <SelectTrigger><SelectValue placeholder="Выберите договор" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Не выбран</SelectItem>
+                            {documents.filter(doc => doc.type === 'rental_contract').map(doc => <SelectItem key={doc.id} value={doc.id}>{getDocumentNumber(doc)} · {doc.client || doc.clientId}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                    {['rental_specification', 'transfer_act_to_client', 'return_act_from_client'].includes(wizardForm.type) ? (
+                      <>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Аренда</div>
+                          <Select value={wizardForm.rentalId || 'none'} onValueChange={(value) => {
+                            const rental = value === 'none' ? undefined : rentalsById.get(value);
+                            setWizardForm(current => ({
+                              ...current,
+                              rentalId: value === 'none' ? '' : value,
+                              clientId: rental?.clientId || current.clientId || '',
+                              rentalStartDate: current.rentalStartDate || rental?.startDate || '',
+                              rentalEndDate: current.rentalEndDate || rental?.endDate || '',
+                              amount: current.amount || String(rental?.amount || rental?.price || ''),
+                            }));
+                          }}>
+                            <SelectTrigger><SelectValue placeholder="Выберите аренду" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Не выбрана</SelectItem>
+                              {(rentals as Rental[]).map(rental => <SelectItem key={rental.id} value={rental.id}>{getRentalLabel(rental)}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Техника</div>
+                          <Select value={wizardForm.equipmentId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, equipmentId: value === 'none' ? '' : value }))}>
+                            <SelectTrigger><SelectValue placeholder="Выберите технику" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Не выбрана</SelectItem>
+                              {(equipment as Equipment[]).map(item => <SelectItem key={item.id} value={item.id}>{getEquipmentLabel(item)}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </>
+                    ) : null}
+                    {['work_order', 'trip_ticket'].includes(wizardForm.type) ? (
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">Сервисная заявка</div>
+                        <Select value={wizardForm.serviceTicketId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, serviceTicketId: value === 'none' ? '' : value }))}>
+                          <SelectTrigger><SelectValue placeholder="Выберите заявку" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Не выбрана</SelectItem>
+                            {(serviceTickets as ServiceTicket[]).map(ticket => <SelectItem key={ticket.id} value={ticket.id}>{ticket.id} · {ticket.reason || ticket.description || 'Сервис'}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                    {wizardForm.type === 'work_order' ? (
+                      <>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Техника</div>
+                          <Select value={wizardForm.equipmentId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, equipmentId: value === 'none' ? '' : value }))}>
+                            <SelectTrigger><SelectValue placeholder="Выберите технику" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Не выбрана</SelectItem>
+                              {(equipment as Equipment[]).map(item => <SelectItem key={item.id} value={item.id}>{getEquipmentLabel(item)}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Механик</div>
+                          <Select value={wizardForm.mechanicId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, mechanicId: value === 'none' ? '' : value }))}>
+                            <SelectTrigger><SelectValue placeholder="Выберите механика" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Не выбран</SelectItem>
+                              {mechanicList.map(mechanic => <SelectItem key={mechanic.id} value={mechanic.id}>{mechanic.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </>
+                    ) : null}
+                    {wizardForm.type === 'trip_ticket' ? (
+                      <>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Служебная машина</div>
+                          <Select value={wizardForm.serviceCarId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, serviceCarId: value === 'none' ? '' : value }))}>
+                            <SelectTrigger><SelectValue placeholder="Выберите машину" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Не выбрана</SelectItem>
+                              {(serviceVehicles as ServiceVehicle[]).map(vehicle => <SelectItem key={vehicle.id} value={vehicle.id}>{[vehicle.make, vehicle.model, vehicle.plateNumber].filter(Boolean).join(' ')}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Водитель/механик</div>
+                          <Select value={wizardForm.mechanicId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, mechanicId: value === 'none' ? '' : value }))}>
+                            <SelectTrigger><SelectValue placeholder="Выберите водителя" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Не выбран</SelectItem>
+                              {mechanicList.map(mechanic => <SelectItem key={mechanic.id} value={mechanic.id}>{mechanic.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Доставка</div>
+                          <Select value={wizardForm.deliveryId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, deliveryId: value === 'none' ? '' : value }))}>
+                            <SelectTrigger><SelectValue placeholder="Выберите доставку" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Не выбрана</SelectItem>
+                              {(deliveries as Delivery[]).map(delivery => <SelectItem key={delivery.id} value={delivery.id}>{delivery.id} · {delivery.status}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </>
+                    ) : null}
+                    {['transfer_act_to_client', 'return_act_from_client'].includes(wizardForm.type) ? (
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-foreground">Доставка</div>
+                        <Select value={wizardForm.deliveryId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, deliveryId: value === 'none' ? '' : value }))}>
+                          <SelectTrigger><SelectValue placeholder="Выберите доставку" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Не выбрана</SelectItem>
+                            {(deliveries as Delivery[]).map(delivery => <SelectItem key={delivery.id} value={delivery.id}>{delivery.id} · {delivery.status}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {wizardStep === 3 && wizardForm.type !== 'rental_contract' ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {wizardForm.type === 'rental_specification' ? (
+                      <>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Период с</div><Input type="date" value={wizardForm.rentalStartDate} onChange={(event) => setWizardForm(current => ({ ...current, rentalStartDate: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Период по</div><Input type="date" value={wizardForm.rentalEndDate} onChange={(event) => setWizardForm(current => ({ ...current, rentalEndDate: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Ставка</div><Input value={wizardForm.dailyRate} onChange={(event) => setWizardForm(current => ({ ...current, dailyRate: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Сумма</div><Input value={wizardForm.amount} onChange={(event) => setWizardForm(current => ({ ...current, amount: event.target.value }))} /></div>
+                      </>
+                    ) : null}
+                    {wizardForm.type === 'transfer_act_to_client' ? (
+                      <>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Дата передачи</div><Input type="date" value={wizardForm.transferDate} onChange={(event) => setWizardForm(current => ({ ...current, transferDate: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Состояние техники</div><Input value={wizardForm.equipmentCondition} onChange={(event) => setWizardForm(current => ({ ...current, equipmentCondition: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Комплектность</div><Input value={wizardForm.completeness} onChange={(event) => setWizardForm(current => ({ ...current, completeness: event.target.value }))} /></div>
+                      </>
+                    ) : null}
+                    {wizardForm.type === 'return_act_from_client' ? (
+                      <>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Дата возврата</div><Input type="date" value={wizardForm.returnDate} onChange={(event) => setWizardForm(current => ({ ...current, returnDate: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Состояние при возврате</div><Input value={wizardForm.returnCondition} onChange={(event) => setWizardForm(current => ({ ...current, returnCondition: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Повреждения</div><Input value={wizardForm.damages} onChange={(event) => setWizardForm(current => ({ ...current, damages: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Недостача</div><Input value={wizardForm.missingItems} onChange={(event) => setWizardForm(current => ({ ...current, missingItems: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Нужна сервисная заявка</div><Select value={wizardForm.serviceRequired || 'Нет'} onValueChange={(value) => setWizardForm(current => ({ ...current, serviceRequired: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Нет">Нет</SelectItem><SelectItem value="Да">Да</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Сервисная заявка</div><Select value={wizardForm.serviceTicketId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, serviceTicketId: value === 'none' ? '' : value }))}><SelectTrigger><SelectValue placeholder="Выберите заявку" /></SelectTrigger><SelectContent><SelectItem value="none">Не выбрана</SelectItem>{(serviceTickets as ServiceTicket[]).map(ticket => <SelectItem key={ticket.id} value={ticket.id}>{ticket.id} · {ticket.reason || ticket.description || 'Сервис'}</SelectItem>)}</SelectContent></Select></div>
+                      </>
+                    ) : null}
+                    {wizardForm.type === 'work_order' ? (
+                      <>
+                        <div className="space-y-2 md:col-span-2"><div className="text-sm font-medium text-foreground">Работы</div><Textarea rows={3} value={wizardForm.works} onChange={(event) => setWizardForm(current => ({ ...current, works: event.target.value }))} /></div>
+                        <div className="space-y-2 md:col-span-2"><div className="text-sm font-medium text-foreground">Запчасти</div><Textarea rows={3} value={wizardForm.parts} onChange={(event) => setWizardForm(current => ({ ...current, parts: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Трудозатраты</div><Input value={wizardForm.laborHours} onChange={(event) => setWizardForm(current => ({ ...current, laborHours: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Итог ремонта</div><Input value={wizardForm.repairResult} onChange={(event) => setWizardForm(current => ({ ...current, repairResult: event.target.value }))} /></div>
+                      </>
+                    ) : null}
+                    {wizardForm.type === 'trip_ticket' ? (
+                      <>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Дата поездки</div><Input type="date" value={wizardForm.tripDate} onChange={(event) => setWizardForm(current => ({ ...current, tripDate: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Откуда</div><Input value={wizardForm.routeFrom} onChange={(event) => setWizardForm(current => ({ ...current, routeFrom: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Куда</div><Input value={wizardForm.routeTo} onChange={(event) => setWizardForm(current => ({ ...current, routeTo: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Цель</div><Input value={wizardForm.purpose} onChange={(event) => setWizardForm(current => ({ ...current, purpose: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Начальный пробег</div><Input value={wizardForm.startMileage} onChange={(event) => setWizardForm(current => ({ ...current, startMileage: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Конечный пробег</div><Input value={wizardForm.endMileage} onChange={(event) => setWizardForm(current => ({ ...current, endMileage: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Топливо</div><Input value={wizardForm.fuelIssued} onChange={(event) => setWizardForm(current => ({ ...current, fuelIssued: event.target.value }))} /></div>
+                      </>
+                    ) : null}
+                    {['transfer_act_to_client', 'return_act_from_client'].includes(wizardForm.type) ? (
+                      <>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Представитель компании</div><Input value={wizardForm.companyRepresentative} onChange={(event) => setWizardForm(current => ({ ...current, companyRepresentative: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Представитель клиента</div><Input value={wizardForm.clientRepresentative} onChange={(event) => setWizardForm(current => ({ ...current, clientRepresentative: event.target.value }))} /></div>
+                      </>
+                    ) : null}
+                    <div className="space-y-2 md:col-span-2">
                       <div className="text-sm font-medium text-foreground">Комментарий / примечания</div>
                       <Textarea rows={3} value={wizardForm.notes} onChange={(event) => setWizardForm(current => ({ ...current, notes: event.target.value }))} />
                     </div>
                   </div>
                 ) : null}
 
-                {wizardStep === 4 ? (
+                {wizardStep === 4 && wizardForm.type !== 'rental_contract' ? (
                   <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                     <p className="font-medium text-gray-900 dark:text-white">Проверка обязательных полей</p>
                     {wizardMissingFields.length > 0 ? (

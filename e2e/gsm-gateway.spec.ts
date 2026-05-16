@@ -14,8 +14,41 @@ function sendTcpPacket(payload: string, port = 5023) {
 }
 
 test('GSM page shows gateway status, latest packets and packet details', async ({ page }) => {
+  const apiErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const requests: Array<{ method: string; path: string }> = [];
+  page.on('console', message => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith('/api/')) requests.push({ method: request.method(), path: `${url.pathname}${url.search}` });
+  });
+  page.on('response', response => {
+    const url = new URL(response.url());
+    if (url.pathname.startsWith('/api/') && [401, 403, 500].includes(response.status())) {
+      apiErrors.push(`${response.status()} ${url.pathname}${url.search}`);
+    }
+  });
+
+  const suffix = `gsm-open-${Date.now()}`;
+  await withAdminApi(async (api) => {
+    const equipment = await createEquipment(api, suffix);
+    const patch = await api.patch(`/api/equipment/${equipment.id}`, {
+      data: {
+        gsmImei: '866123456789012',
+        gsmDeviceId: '866123456789012',
+        gsmProtocol: 'fallback-text',
+      },
+    });
+    expect(patch.ok()).toBeTruthy();
+  });
+
   await loginAsAdmin(page);
   await sendTcpPacket('IMEI:866123456789012 LAT:55.796 LNG:49.108 SPEED:0');
+  requests.length = 0;
+  apiErrors.length = 0;
+  consoleErrors.length = 0;
 
   await navigateInApp(page, '/gsm');
   await expect(page.getByRole('heading', { name: /Геозоны, уведомления и маршруты техники/ })).toBeVisible();
@@ -24,9 +57,31 @@ test('GSM page shows gateway status, latest packets and packet details', async (
 
   await page.getByRole('tab', { name: 'Последние пакеты' }).click();
   await expect(page.getByText('866123456789012').first()).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Маршрут', exact: true }).click();
+  await expect.poll(() => requests.some(item => (
+    item.method === 'GET'
+    && item.path.startsWith('/api/gsm/route?')
+    && item.path.includes('dateFrom=')
+    && item.path.includes('dateTo=')
+  ))).toBeTruthy();
+
+  await page.getByRole('tab', { name: 'Последние пакеты' }).click();
   await page.getByRole('button', { name: 'Детали' }).first().click();
   await expect(page.getByRole('heading', { name: 'Детали пакета' })).toBeVisible();
   await expect(page.getByText('rawHex').last()).toBeVisible();
+
+  await expect.poll(() => requests.some(item => item.method === 'GET' && item.path.startsWith('/api/gsm/dashboard'))).toBeTruthy();
+  await expect.poll(() => requests.some(item => item.method === 'GET' && item.path.startsWith('/api/gsm/packets?') && item.path.includes('paginated=true'))).toBeTruthy();
+  await expect.poll(() => requests.some(item => item.method === 'GET' && item.path.startsWith('/api/gsm/gateway/commands?') && item.path.includes('paginated=true'))).toBeTruthy();
+
+  const fullReferenceLoads = requests.filter(item => (
+    item.method === 'GET'
+    && ['/api/equipment', '/api/rentals', '/api/gantt_rentals', '/api/clients'].includes(item.path)
+  ));
+  expect(fullReferenceLoads, `Unexpected full GSM refs: ${fullReferenceLoads.map(item => item.path).join(', ')}`).toEqual([]);
+  expect(apiErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
 });
 
 test('equipment card shows GSM block with editable IMEI data', async ({ page }) => {
@@ -47,7 +102,8 @@ test('equipment card shows GSM block with editable IMEI data', async ({ page }) 
 
   await loginAsAdmin(page);
   await navigateInApp(page, `/equipment/${equipment.id}`);
-  await expect(page.getByText('GSM IMEI')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'GSM / Трекер' })).toBeVisible();
+  await expect(page.getByText('IMEI')).toBeVisible();
   await expect(page.getByText('866123456789012')).toBeVisible();
   await expect(page.getByText('TRACKER-E2E')).toBeVisible();
 });

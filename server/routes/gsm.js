@@ -62,6 +62,41 @@ function registerGsmRoutes(router, deps) {
     return String(value || '').trim();
   }
 
+  function toNumberOrNull(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function toSafeLimit(value, fallback = 50, max = 200) {
+    return Math.min(Math.max(Number(value) || fallback, 1), max);
+  }
+
+  function parseDateMs(value) {
+    const ms = Date.parse(String(value || ''));
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  function routeWindow(req, res) {
+    const from = toText(req.query.dateFrom || req.query.from);
+    const to = toText(req.query.dateTo || req.query.to);
+    const fromMs = parseDateMs(from);
+    const toMs = parseDateMs(to);
+    if (!from || !to || fromMs === null || toMs === null) {
+      res.status(400).json({ ok: false, error: 'Для маршрута укажите dateFrom и dateTo' });
+      return null;
+    }
+    if (toMs < fromMs) {
+      res.status(400).json({ ok: false, error: 'dateTo должен быть позже dateFrom' });
+      return null;
+    }
+    const maxWindowMs = 7 * 24 * 60 * 60 * 1000;
+    if (toMs - fromMs > maxWindowMs) {
+      res.status(400).json({ ok: false, error: 'Период маршрута не должен превышать 7 дней' });
+      return null;
+    }
+    return { from, to };
+  }
+
   function equipmentLabel(equipment) {
     if (!equipment) return null;
     return [
@@ -69,6 +104,211 @@ function registerGsmRoutes(router, deps) {
       equipment.model,
       equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
     ].filter(Boolean).join(' · ') || equipment.id || null;
+  }
+
+  function equipmentTrackerId(equipment = {}) {
+    return toText(equipment.gsmDeviceId || equipment.gsmTrackerId || equipment.gsmImei);
+  }
+
+  function sanitizeEquipmentForGsm(equipment = {}) {
+    return {
+      id: equipment.id,
+      manufacturer: equipment.manufacturer || '',
+      model: equipment.model || '',
+      serialNumber: equipment.serialNumber || '',
+      inventoryNumber: equipment.inventoryNumber || '',
+      status: equipment.status || 'inactive',
+      location: equipment.location || '',
+      currentClient: equipment.currentClient || '',
+      returnDate: equipment.returnDate || '',
+      gsmImei: equipment.gsmImei || null,
+      gsmDeviceId: equipment.gsmDeviceId || equipment.gsmTrackerId || null,
+      gsmTrackerId: equipment.gsmTrackerId || null,
+      gsmSimNumber: equipment.gsmSimNumber || null,
+      gsmProtocol: equipment.gsmProtocol || null,
+      gsmStatus: equipment.gsmStatus || null,
+      gsmSignalStatus: equipment.gsmSignalStatus || null,
+      gsmLastSeenAt: equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || null,
+      gsmLastSignalAt: equipment.gsmLastSignalAt || equipment.gsmLastSeenAt || null,
+      gsmLastLat: toNumberOrNull(equipment.gsmLastLat ?? equipment.gsmLatitude),
+      gsmLastLng: toNumberOrNull(equipment.gsmLastLng ?? equipment.gsmLongitude),
+      gsmLatitude: toNumberOrNull(equipment.gsmLatitude ?? equipment.gsmLastLat),
+      gsmLongitude: toNumberOrNull(equipment.gsmLongitude ?? equipment.gsmLastLng),
+      gsmLastSpeed: toNumberOrNull(equipment.gsmLastSpeed ?? equipment.gsmSpeedKph),
+      gsmSpeedKph: toNumberOrNull(equipment.gsmSpeedKph ?? equipment.gsmLastSpeed),
+      gsmLastVoltage: toNumberOrNull(equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage),
+      gsmBatteryVoltage: toNumberOrNull(equipment.gsmBatteryVoltage ?? equipment.gsmLastVoltage),
+      gsmLastMotoHours: toNumberOrNull(equipment.gsmLastMotoHours ?? equipment.gsmHourmeter),
+      gsmHourmeter: toNumberOrNull(equipment.gsmHourmeter ?? equipment.gsmLastMotoHours),
+      gsmIgnitionOn: typeof equipment.gsmIgnitionOn === 'boolean' ? equipment.gsmIgnitionOn : null,
+    };
+  }
+
+  function isActiveRental(row = {}) {
+    const status = toText(row.status || row.ganttStatus).toLowerCase();
+    return !['closed', 'returned', 'cancelled', 'canceled', 'completed', 'archived'].includes(status);
+  }
+
+  function rentalMatchesEquipment(row = {}, equipment = {}) {
+    const equipmentId = toText(equipment.id);
+    if (equipmentId && toText(row.equipmentId) === equipmentId) return true;
+    const inventory = toText(equipment.inventoryNumber);
+    return Boolean(inventory && toText(row.equipmentInv || row.inventoryNumber) === inventory);
+  }
+
+  function clientDisplayName(client = {}) {
+    return client.company || client.name || client.client || client.contact || '';
+  }
+
+  function buildGsmBinding(equipment, rentals, ganttRentals, clientsById) {
+    const row = [...ganttRentals, ...rentals].find(item => isActiveRental(item) && rentalMatchesEquipment(item, equipment));
+    if (!row) return null;
+    const clientId = toText(row.clientId);
+    const client = clientId ? clientsById.get(clientId) : null;
+    const clientName = client ? clientDisplayName(client) : (row.client || row.clientName || equipment.currentClient || '');
+    return {
+      rentalId: row.rentalId || row.id || '',
+      clientName,
+      manager: row.manager || '',
+      startDate: row.startDate || '',
+      endDate: row.endDate || '',
+      deliveryAddress: row.deliveryAddress || row.objectAddress || row.location || '',
+      objectAddress: row.objectAddress || row.deliveryAddress || row.location || '',
+      ganttStatus: row.ganttStatus || row.status || '',
+      rentalStatus: row.status || '',
+    };
+  }
+
+  function resolveGsmPoint(equipment, packet, binding) {
+    const lat = toNumberOrNull(packet?.lat ?? equipment.gsmLastLat ?? equipment.gsmLatitude);
+    const lng = toNumberOrNull(packet?.lng ?? equipment.gsmLastLng ?? equipment.gsmLongitude);
+    if (lat !== null && lng !== null && !(lat === 0 && lng === 0)) {
+      return {
+        lat,
+        lng,
+        source: packet ? 'gps' : 'approximate',
+        address: packet?.address || equipment.gsmAddress || equipment.location || binding?.objectAddress || 'GSM точка',
+      };
+    }
+    return null;
+  }
+
+  function deriveSignalState(equipment, packet) {
+    const status = equipment.gsmStatus || equipment.gsmSignalStatus;
+    if (status === 'online') return 'online';
+    const at = parseDateMs(packet?.receivedAt || packet?.createdAt || equipment.gsmLastSeenAt || equipment.gsmLastSignalAt);
+    if (at !== null && Date.now() - at <= 24 * 60 * 60 * 1000) return 'online';
+    if (equipment.location) return 'location_only';
+    return 'offline';
+  }
+
+  function buildDashboardSnapshot(equipment, packet, binding, routePackets) {
+    const point = resolveGsmPoint(equipment, packet, binding);
+    const signalState = deriveSignalState(equipment, packet);
+    const lastSeenAt = packet?.receivedAt || packet?.createdAt || equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || null;
+    const routePoints = asArray(routePackets)
+      .filter(item => toNumberOrNull(item.lat) !== null && toNumberOrNull(item.lng) !== null)
+      .map(item => ({
+        lat: Number(item.lat),
+        lng: Number(item.lng),
+        source: 'gps',
+        address: item.address || equipment.location || 'GSM точка',
+        at: item.receivedAt || item.createdAt,
+        label: item.summary || 'GSM пакет',
+      }));
+    const movementEntries = routePoints.slice(0, 10).map((item, index) => ({
+      id: `${equipment.id}:telemetry:${index}:${item.at}`,
+      equipmentId: equipment.id,
+      occurredAt: item.at,
+      kind: 'telemetry',
+      title: 'GSM точка',
+      description: item.label,
+      location: item.address,
+      point: {
+        lat: item.lat,
+        lng: item.lng,
+        source: item.source,
+        address: item.address,
+      },
+    }));
+    const notifications = signalState === 'offline' && equipmentTrackerId(equipment)
+      ? [{
+        id: `${equipment.id}:signal-loss`,
+        type: 'signal_loss',
+        occurredAt: lastSeenAt || new Date().toISOString(),
+        title: 'Нет свежего сигнала',
+        description: 'По трекеру нет свежих GSM/GPRS данных.',
+        severity: 'danger',
+      }]
+      : [];
+
+    return {
+      equipment: sanitizeEquipmentForGsm(equipment),
+      point,
+      hasRealTracker: Boolean(equipmentTrackerId(equipment)),
+      signalState,
+      lastSeenAt,
+      binding,
+      telemetry: {
+        engineHours: toNumberOrNull(equipment.gsmLastMotoHours ?? equipment.gsmHourmeter),
+        ignitionOn: typeof equipment.gsmIgnitionOn === 'boolean' ? equipment.gsmIgnitionOn : null,
+        batteryVoltage: toNumberOrNull(equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage),
+        speedKph: toNumberOrNull(equipment.gsmLastSpeed ?? equipment.gsmSpeedKph),
+      },
+      zones: [],
+      notifications,
+      movementEntries,
+      routePoints,
+    };
+  }
+
+  function buildGsmDashboard(req) {
+    const limit = toSafeLimit(req.query.limit, 100, 200);
+    const recentLimit = toSafeLimit(req.query.recentLimit, 50, 100);
+    const equipment = asArray(readData?.('equipment'));
+    const rentals = asArray(readData?.('rentals'));
+    const ganttRentals = asArray(readData?.('gantt_rentals'));
+    const clientsById = new Map(asArray(readData?.('clients')).map(item => [toText(item.id), item]));
+    const devices = gprsGateway.listDevices().slice(0, limit);
+    const recentPackets = gprsGateway.listPackets({ limit: recentLimit });
+    const packetByEquipmentId = new Map();
+    for (const packet of recentPackets) {
+      if (packet.equipmentId && !packetByEquipmentId.has(packet.equipmentId)) packetByEquipmentId.set(packet.equipmentId, packet);
+    }
+    const neededEquipmentIds = new Set([
+      ...devices.map(item => item.equipmentId).filter(Boolean),
+      ...recentPackets.map(item => item.equipmentId).filter(Boolean),
+    ]);
+    const trackedEquipment = equipment
+      .filter(item => neededEquipmentIds.has(item.id) || equipmentTrackerId(item))
+      .slice(0, limit);
+    const snapshots = trackedEquipment.map((item) => {
+      const packet = packetByEquipmentId.get(item.id) || null;
+      return buildDashboardSnapshot(
+        item,
+        packet,
+        buildGsmBinding(item, rentals, ganttRentals, clientsById),
+        packet ? gprsGateway.listPackets({ equipmentId: item.id, limit: 25 }) : [],
+      );
+    });
+    const counters = {
+      total: snapshots.length,
+      mapped: snapshots.filter(item => item.point).length,
+      realGps: snapshots.filter(item => item.point?.source === 'gps').length,
+      locationDerived: snapshots.filter(item => item.point && item.point.source !== 'gps').length,
+      rented: snapshots.filter(item => item.equipment.status === 'rented').length,
+      alerts: snapshots.reduce((sum, item) => sum + item.notifications.length, 0),
+    };
+    return {
+      status: gprsGateway.getStatus(),
+      analytics: gprsGateway.getAnalytics({}),
+      counters,
+      devices,
+      snapshots,
+      recentPackets,
+      generatedAt: nowIso(),
+      limits: { equipment: limit, recentPackets: recentLimit },
+    };
   }
 
   function findEquipmentForLink({ equipmentId, model, inventoryNumber }) {
@@ -144,6 +384,32 @@ function registerGsmRoutes(router, deps) {
 
   router.get('/gsm/status', requireAuth, requireGsmView, (_req, res) => {
     res.json(gprsGateway.getStatus());
+  });
+
+  router.get('/gsm/dashboard', requireAuth, requireGsmView, (req, res) => {
+    res.json(buildGsmDashboard(req));
+  });
+
+  router.get('/gsm/bindings', requireAuth, requireGsmView, (req, res) => {
+    const search = toText(req.query.search).toLowerCase();
+    const limit = toSafeLimit(req.query.limit, 25, 50);
+    const rows = asArray(readData?.('equipment'))
+      .filter((item) => {
+        if (!search) return true;
+        return [
+          item.id,
+          item.inventoryNumber,
+          item.serialNumber,
+          item.manufacturer,
+          item.model,
+          item.gsmImei,
+          item.gsmDeviceId,
+          item.gsmTrackerId,
+        ].some(value => toText(value).toLowerCase().includes(search));
+      })
+      .slice(0, limit)
+      .map(item => sanitizeEquipmentForGsm(item));
+    res.json({ items: rows, limit });
   });
 
   router.get('/gsm/packets', requireAuth, requireGsmView, (req, res) => {
@@ -222,10 +488,12 @@ function registerGsmRoutes(router, deps) {
   });
 
   router.get('/gsm/route', requireAuth, requireGsmView, (req, res) => {
+    const window = routeWindow(req, res);
+    if (!window) return;
     res.json(gprsGateway.listRoute({
       equipmentId: String(req.query.equipmentId || '').trim(),
-      from: String(req.query.from || '').trim(),
-      to: String(req.query.to || '').trim(),
+      from: window.from,
+      to: window.to,
     }));
   });
 

@@ -36,15 +36,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '../components/ui/sheet';
 import { cn } from '../lib/utils';
 import { animationDurations, useAnimatedPresence } from '../lib/animations';
-import { useEquipmentList } from '../hooks/useEquipment';
-import { useClientsList } from '../hooks/useClients';
-import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useAuth } from '../contexts/AuthContext';
-import { usePermissions } from '../lib/permissions';
-import { equipmentService } from '../services/equipment.service';
-import { gsmGatewayService } from '../services/gsm-gateway.service';
+import { gsmGatewayService, type GsmDashboardResponse } from '../services/gsm-gateway.service';
 import {
-  buildGsmSnapshot,
   isPointInsideZone,
   type GsmEquipmentSnapshot,
   type GsmMovementEntry,
@@ -64,7 +58,6 @@ import type {
   GsmGatewayPacket,
   GsmGatewayRoutePoint,
   GsmGatewayStatus,
-  ShippingPhoto,
 } from '../types';
 
 declare global {
@@ -156,6 +149,27 @@ const DEFAULT_GATEWAY_ANALYTICS: GsmGatewayAnalytics = {
   },
 };
 
+const DEFAULT_GSM_DASHBOARD: GsmDashboardResponse = {
+  status: DEFAULT_GATEWAY_STATUS,
+  analytics: DEFAULT_GATEWAY_ANALYTICS,
+  counters: {
+    total: 0,
+    mapped: 0,
+    realGps: 0,
+    locationDerived: 0,
+    rented: 0,
+    alerts: 0,
+  },
+  devices: [],
+  snapshots: [],
+  recentPackets: [],
+  generatedAt: '',
+  limits: {
+    equipment: 0,
+    recentPackets: 0,
+  },
+};
+
 const SIGNAL_META: Record<EquipmentGsmSignalState, {
   label: string;
   hint: string;
@@ -206,6 +220,19 @@ function formatDateTime(value?: string | null) {
   } catch {
     return value;
   }
+}
+
+function toDateTimeLocalValue(date: Date) {
+  const timezoneOffsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - timezoneOffsetMs).toISOString().slice(0, 16);
+}
+
+function defaultRouteFrom() {
+  return toDateTimeLocalValue(new Date(Date.now() - 24 * 60 * 60 * 1000));
+}
+
+function defaultRouteTo() {
+  return toDateTimeLocalValue(new Date());
 }
 
 function formatRelativeSignal(value?: string | null) {
@@ -581,18 +608,7 @@ function filterRoutePoints(points: GsmRoutePoint[], period: RoutePeriod) {
 
 export default function Gsm() {
   const { user } = useAuth();
-  const { canView, canReadCollection } = usePermissions();
   const queryClient = useQueryClient();
-  const { data: equipment = [] } = useEquipmentList();
-  const { data: rentals = [] } = useRentalsList({ enabled: canView('rentals') });
-  const { data: ganttRentals = [] } = useGanttData({ enabled: canView('rentals') });
-  const { data: clients = [] } = useClientsList({ enabled: canView('clients') });
-  const { data: shippingPhotos = [] } = useQuery<ShippingPhoto[]>({
-    queryKey: ['shippingPhotos', 'all'],
-    queryFn: equipmentService.getAllShippingPhotos,
-    enabled: canReadCollection('shipping_photos'),
-    staleTime: 1000 * 60,
-  });
 
   const [tab, setTab] = React.useState<GsmTab>('overview');
   const [search, setSearch] = React.useState('');
@@ -603,8 +619,8 @@ export default function Gsm() {
   const packetDrawerPresence = useAnimatedPresence(Boolean(selectedPacket), animationDurations.relaxed);
   const [retainedPacket, setRetainedPacket] = React.useState<GsmGatewayPacket | null>(selectedPacket);
   const [routeEquipmentId, setRouteEquipmentId] = React.useState('');
-  const [routeFrom, setRouteFrom] = React.useState('');
-  const [routeTo, setRouteTo] = React.useState('');
+  const [routeFrom, setRouteFrom] = React.useState(defaultRouteFrom);
+  const [routeTo, setRouteTo] = React.useState(defaultRouteTo);
   const [routePeriod, setRoutePeriod] = React.useState<RoutePeriod>('day');
   const [commandPayload, setCommandPayload] = React.useState('');
   const [commandEncoding, setCommandEncoding] = React.useState<GsmCommandEncoding>('text');
@@ -612,6 +628,7 @@ export default function Gsm() {
   const [commandDeviceId, setCommandDeviceId] = React.useState('');
   const [gsmBindingOpen, setGsmBindingOpen] = React.useState(false);
   const [gsmBindingForm, setGsmBindingForm] = React.useState<GsmBindingForm>(EMPTY_GSM_BINDING_FORM);
+  const [bindingSearch, setBindingSearch] = React.useState('');
   const canSendGprsCommands = user?.role === 'Администратор' || user?.role === 'Офис-менеджер';
   const canBindGsmEquipment = user?.role === 'Администратор';
 
@@ -628,63 +645,60 @@ export default function Gsm() {
     return () => window.removeEventListener('keydown', handleEscape);
   }, [selectedPacket]);
 
-  const { data: gatewayStatus = DEFAULT_GATEWAY_STATUS } = useQuery({
-    queryKey: ['gsmGateway', 'status'],
-    queryFn: () => gsmGatewayService.getStatus().catch(() => DEFAULT_GATEWAY_STATUS),
+  const { data: gsmDashboard = DEFAULT_GSM_DASHBOARD } = useQuery<GsmDashboardResponse>({
+    queryKey: ['gsmGateway', 'dashboard'],
+    queryFn: () => gsmGatewayService.getDashboard({ limit: 100, recentLimit: 50 }).catch(() => DEFAULT_GSM_DASHBOARD),
     refetchInterval: 10_000,
     staleTime: 5_000,
   });
+  const gatewayStatus = gsmDashboard.status || DEFAULT_GATEWAY_STATUS;
+  const gsmDevices = gsmDashboard.devices || [];
+  const recentGatewayPackets = gsmDashboard.recentPackets || [];
+  const snapshots = gsmDashboard.snapshots || [];
   const { data: gatewayConnections = [] } = useQuery<GsmGatewayConnection[]>({
     queryKey: ['gsmGateway', 'connections'],
     queryFn: () => gsmGatewayService.getConnections().catch(() => []),
     refetchInterval: 5_000,
     staleTime: 3_000,
   });
-  const { data: gsmDevices = [] } = useQuery<GsmGatewayDevice[]>({
-    queryKey: ['gsmGateway', 'devices'],
-    queryFn: () => gsmGatewayService.getDevices().catch(() => []),
-    refetchInterval: 10_000,
-    staleTime: 5_000,
-  });
-  const { data: recentGatewayPackets = [] } = useQuery<GsmGatewayPacket[]>({
-    queryKey: ['gsmGateway', 'packets', 'recent'],
-    queryFn: () => gsmGatewayService.getPacketsPaginated({ page: 1, pageSize: 100 }).then(response => response.items).catch(() => []),
-    refetchInterval: 5_000,
-    staleTime: 3_000,
-  });
   const { data: apiRoutePoints = [] } = useQuery<GsmGatewayRoutePoint[]>({
     queryKey: ['gsmGateway', 'route', routeEquipmentId || 'none', routeFrom || 'from-empty', routeTo || 'to-empty'],
     queryFn: () => routeEquipmentId
-      ? gsmGatewayService.getRoute({ equipmentId: routeEquipmentId, from: routeFrom || undefined, to: routeTo || undefined }).catch(() => [])
+      ? gsmGatewayService.getRoute({ equipmentId: routeEquipmentId, dateFrom: routeFrom, dateTo: routeTo }).catch(() => [])
       : Promise.resolve([]),
-    enabled: Boolean(routeEquipmentId),
+    enabled: Boolean(routeEquipmentId && routeFrom && routeTo),
     refetchInterval: 10_000,
     staleTime: 5_000,
   });
 
-  const snapshots = React.useMemo(
-    () => equipment
-      .map((item) => {
-        try {
-          return buildGsmSnapshot(item, shippingPhotos, ganttRentals, rentals, clients);
-        } catch (error) {
-          console.error('GSM snapshot build failed for equipment', item?.id, error);
-          return null;
-        }
-      })
-      .filter(Boolean) as GsmEquipmentSnapshot[],
-    [clients, equipment, ganttRentals, rentals, shippingPhotos],
-  );
-
   const equipmentOptions = React.useMemo(
-    () => [...equipment].sort((left, right) => (
+    () => [...(gsmDashboard.snapshots || []).map(item => item.equipment)].sort((left, right) => (
       buildEquipmentOptionLabel(left).localeCompare(buildEquipmentOptionLabel(right), 'ru', {
         numeric: true,
         sensitivity: 'base',
       })
     )),
-    [equipment],
+    [gsmDashboard.snapshots],
   );
+
+  const { data: bindingSearchResult = { items: [], limit: 25 } } = useQuery({
+    queryKey: ['gsmGateway', 'bindings', bindingSearch],
+    queryFn: () => gsmGatewayService.searchBindings({ search: bindingSearch, limit: 25 }).catch(() => ({ items: [], limit: 25 })),
+    enabled: gsmBindingOpen,
+    staleTime: 30_000,
+  });
+
+  const bindingEquipmentOptions = React.useMemo(() => {
+    const byId = new Map<string, Equipment>();
+    for (const item of equipmentOptions) byId.set(item.id, item);
+    for (const item of bindingSearchResult.items) byId.set(item.id, item);
+    return [...byId.values()].sort((left, right) => (
+      buildEquipmentOptionLabel(left).localeCompare(buildEquipmentOptionLabel(right), 'ru', {
+        numeric: true,
+        sensitivity: 'base',
+      })
+    ));
+  }, [bindingSearchResult.items, equipmentOptions]);
 
   const filteredSnapshots = React.useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -753,8 +767,19 @@ export default function Gsm() {
   }, [selectedTrackerId]);
 
   const selectedRoutePoints = React.useMemo(
-    () => selectedSnapshot ? filterRoutePoints(selectedSnapshot.routePoints, routePeriod) : [],
-    [routePeriod, selectedSnapshot],
+    () => {
+      const apiPoints = apiRoutePoints.map((point, index) => ({
+        lat: point.lat,
+        lng: point.lng,
+        source: 'gps' as const,
+        address: 'GSM точка',
+        at: point.receivedAt || point.deviceTime || new Date().toISOString(),
+        label: `GSM точка ${index + 1}`,
+      }));
+      if (apiPoints.length > 0 && routeEquipmentId === selectedSnapshot?.equipment.id) return apiPoints;
+      return selectedSnapshot ? filterRoutePoints(selectedSnapshot.routePoints, routePeriod) : [];
+    },
+    [apiRoutePoints, routeEquipmentId, routePeriod, selectedSnapshot],
   );
 
   const mapMarkers = React.useMemo(() => (
@@ -888,7 +913,6 @@ export default function Gsm() {
       setGsmBindingOpen(false);
       setSelectedId(result.device.equipmentId);
       setRouteEquipmentId(current => current || result.device.equipmentId);
-      queryClient.invalidateQueries({ queryKey: ['equipment'] });
       queryClient.invalidateQueries({ queryKey: ['gsmGateway'] });
     },
     onError: (error: Error) => {
@@ -897,17 +921,18 @@ export default function Gsm() {
   });
 
   const openGsmBinding = React.useCallback((equipmentId?: string) => {
-    const selectedEquipment = equipment.find(item => item.id === equipmentId)
-      || equipment.find(item => !String(item.gsmImei || '').trim() && !String(item.gsmDeviceId || item.gsmTrackerId || '').trim())
-      || equipment[0]
+    const selectedEquipment = bindingEquipmentOptions.find(item => item.id === equipmentId)
+      || bindingEquipmentOptions.find(item => !String(item.gsmImei || '').trim() && !String(item.gsmDeviceId || item.gsmTrackerId || '').trim())
+      || bindingEquipmentOptions[0]
       || null;
     setGsmBindingForm(makeGsmBindingForm(selectedEquipment));
+    setBindingSearch('');
     setGsmBindingOpen(true);
-  }, [equipment]);
+  }, [bindingEquipmentOptions]);
 
   const handleGsmBindingEquipmentChange = React.useCallback((equipmentId: string) => {
-    setGsmBindingForm(makeGsmBindingForm(equipment.find(item => item.id === equipmentId) || null));
-  }, [equipment]);
+    setGsmBindingForm(makeGsmBindingForm(bindingEquipmentOptions.find(item => item.id === equipmentId) || null));
+  }, [bindingEquipmentOptions]);
 
   const updateGsmBindingForm = React.useCallback((field: keyof GsmBindingForm, value: string) => {
     setGsmBindingForm(current => ({ ...current, [field]: value }));
@@ -1425,13 +1450,13 @@ export default function Gsm() {
                       ))}
                     </select>
                     <Input
-                      type="date"
+                      type="datetime-local"
                       value={routeFrom}
                       onChange={event => setRouteFrom(event.target.value)}
                       className="h-11 rounded-2xl border-white/10 bg-white/5 text-white"
                     />
                     <Input
-                      type="date"
+                      type="datetime-local"
                       value={routeTo}
                       onChange={event => setRouteTo(event.target.value)}
                       className="h-11 rounded-2xl border-white/10 bg-white/5 text-white"
@@ -2408,6 +2433,16 @@ export default function Gsm() {
 
             <div className="space-y-5 px-6 py-5">
               <label className="block space-y-2">
+                <span className="text-sm font-medium text-slate-200">Поиск техники</span>
+                <Input
+                  value={bindingSearch}
+                  onChange={event => setBindingSearch(event.target.value)}
+                  placeholder="Инвентарный номер, модель, IMEI"
+                  className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                />
+              </label>
+
+              <label className="block space-y-2">
                 <span className="text-sm font-medium text-slate-200">Техника</span>
                 <select
                   value={gsmBindingForm.equipmentId}
@@ -2415,7 +2450,7 @@ export default function Gsm() {
                   className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-3 text-sm text-white outline-none focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/20"
                 >
                   <option value="">Выберите технику</option>
-                  {equipmentOptions.map(item => (
+                  {bindingEquipmentOptions.map(item => (
                     <option key={item.id} value={item.id}>
                       {buildEquipmentOptionLabel(item)}
                     </option>

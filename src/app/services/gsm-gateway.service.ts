@@ -1,5 +1,6 @@
 import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import type {
+  Equipment,
   GsmGatewayCommand,
   GsmGatewayAnalytics,
   GsmGatewayConnection,
@@ -8,6 +9,7 @@ import type {
   GsmGatewayRoutePoint,
   GsmGatewayStatus,
 } from '../types';
+import type { GsmEquipmentSnapshot } from '../lib/gsm';
 
 type PacketQuery = {
   equipmentId?: string;
@@ -16,7 +18,11 @@ type PacketQuery = {
   parseStatus?: string;
   from?: string;
   to?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
   limit?: number;
+  recentLimit?: number;
   offset?: number;
 };
 
@@ -40,6 +46,32 @@ type LinkGsmDevicePayload = {
   targetServer?: string;
 };
 
+export type GsmDashboardResponse = {
+  status: GsmGatewayStatus;
+  analytics: GsmGatewayAnalytics;
+  counters: {
+    total: number;
+    mapped: number;
+    realGps: number;
+    locationDerived: number;
+    rented: number;
+    alerts: number;
+  };
+  devices: GsmGatewayDevice[];
+  snapshots: GsmEquipmentSnapshot[];
+  recentPackets: GsmGatewayPacket[];
+  generatedAt: string;
+  limits: {
+    equipment: number;
+    recentPackets: number;
+  };
+};
+
+export type GsmBindingSearchResponse = {
+  items: Equipment[];
+  limit: number;
+};
+
 function buildQuery(params: PacketQuery = {}) {
   const searchParams = new URLSearchParams();
   if (params.equipmentId) searchParams.set('equipmentId', params.equipmentId);
@@ -48,7 +80,11 @@ function buildQuery(params: PacketQuery = {}) {
   if (params.parseStatus) searchParams.set('parseStatus', params.parseStatus);
   if (params.from) searchParams.set('from', params.from);
   if (params.to) searchParams.set('to', params.to);
+  if (params.dateFrom) searchParams.set('dateFrom', params.dateFrom);
+  if (params.dateTo) searchParams.set('dateTo', params.dateTo);
+  if (params.search) searchParams.set('search', params.search);
   if (params.limit) searchParams.set('limit', String(params.limit));
+  if (params.recentLimit) searchParams.set('recentLimit', String(params.recentLimit));
   if (params.offset) searchParams.set('offset', String(params.offset));
   const query = searchParams.toString();
   return query ? `?${query}` : '';
@@ -57,6 +93,9 @@ function buildQuery(params: PacketQuery = {}) {
 export const gsmGatewayService = {
   getStatus: (): Promise<GsmGatewayStatus> =>
     api.get<GsmGatewayStatus>('/api/gsm/status'),
+
+  getDashboard: (params: { limit?: number; recentLimit?: number } = {}): Promise<GsmDashboardResponse> =>
+    api.get<GsmDashboardResponse>(`/api/gsm/dashboard${buildQuery(params)}`),
 
   getConnections: (): Promise<GsmGatewayConnection[]> =>
     api.get<GsmGatewayConnection[]>('/api/gsm/gateway/connections'),
@@ -89,8 +128,11 @@ export const gsmGatewayService = {
   linkDevice: (payload: LinkGsmDevicePayload): Promise<{ ok: boolean; device: GsmGatewayDevice; equipment: unknown }> =>
     api.post('/api/gsm/devices/link', payload),
 
-  getRoute: (params: { equipmentId: string; from?: string; to?: string }): Promise<GsmGatewayRoutePoint[]> =>
+  getRoute: (params: { equipmentId: string; dateFrom: string; dateTo: string }): Promise<GsmGatewayRoutePoint[]> =>
     api.get<GsmGatewayRoutePoint[]>(`/api/gsm/route${buildQuery(params)}`),
+
+  searchBindings: (params: { search?: string; limit?: number } = {}): Promise<GsmBindingSearchResponse> =>
+    api.get<GsmBindingSearchResponse>(`/api/gsm/bindings${buildQuery(params)}`),
 
   getCommands: (params?: PacketQuery): Promise<GsmGatewayCommand[]> =>
     api.get<GsmGatewayCommand[]>(`/api/gsm/gateway/commands${buildQuery(params)}`),

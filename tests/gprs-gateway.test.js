@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import { once } from 'node:events';
+import { readFile } from 'node:fs/promises';
 
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
@@ -75,6 +76,7 @@ function createGsmApiApp(stateOverrides = {}) {
     users: [
       { id: 'U-1', name: 'Admin', role: 'Администратор' },
       { id: 'U-2', name: 'Viewer', role: 'Менеджер по аренде' },
+      { id: 'U-3', name: 'Investor', role: 'Инвестор' },
     ],
     ...stateOverrides,
   });
@@ -84,7 +86,13 @@ function createGsmApiApp(stateOverrides = {}) {
 
   function requireAuth(req, res, next) {
     const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-    const user = token === 'admin-token' ? state.users[0] : token === 'viewer-token' ? state.users[1] : null;
+    const user = token === 'admin-token'
+      ? state.users[0]
+      : token === 'viewer-token'
+        ? state.users[1]
+        : token === 'investor-token'
+          ? state.users[2]
+          : null;
     if (!user) return res.status(401).json({ ok: false, error: 'Unauthorized' });
     req.user = { userId: user.id, userName: user.name, userRole: user.role };
     return next();
@@ -303,7 +311,7 @@ test('GET /api/gsm/devices and route tolerate empty data', async () => {
     assert.equal(devices.status, 200);
     assert.deepEqual(devices.body, []);
 
-    const route = await request(baseUrl, 'GET', '/api/gsm/route?equipmentId=missing', 'viewer-token');
+    const route = await request(baseUrl, 'GET', '/api/gsm/route?equipmentId=missing&dateFrom=2026-05-16T00:00:00.000Z&dateTo=2026-05-16T23:59:59.000Z', 'viewer-token');
     assert.equal(route.status, 200);
     assert.deepEqual(route.body, []);
   });
@@ -320,12 +328,82 @@ test('GET /api/gsm/route returns coordinate packets for equipment', async () => 
   });
 
   await withExpressApp(app, async (baseUrl) => {
-    const response = await request(baseUrl, 'GET', '/api/gsm/route?equipmentId=EQ-1', 'viewer-token');
+    const response = await request(baseUrl, 'GET', '/api/gsm/route?equipmentId=EQ-1&dateFrom=2026-05-16T00:00:00.000Z&dateTo=2026-05-16T23:59:59.000Z', 'viewer-token');
     assert.equal(response.status, 200);
     assert.equal(response.body.length, 1);
     assert.equal(response.body[0].lat, 55.796);
     assert.equal(response.body[0].lng, 49.108);
     assert.equal(response.body[0].speed, 0);
+  });
+});
+
+test('GET /api/gsm/route requires a bounded date window', async () => {
+  const { app } = createGsmApiApp();
+
+  await withExpressApp(app, async (baseUrl) => {
+    const missingWindow = await request(baseUrl, 'GET', '/api/gsm/route?equipmentId=EQ-1', 'viewer-token');
+    assert.equal(missingWindow.status, 400);
+    assert.match(missingWindow.body.error, /dateFrom/);
+
+    const tooLarge = await request(baseUrl, 'GET', '/api/gsm/route?equipmentId=EQ-1&dateFrom=2026-05-01T00:00:00.000Z&dateTo=2026-05-16T00:00:00.000Z', 'viewer-token');
+    assert.equal(tooLarge.status, 400);
+    assert.match(tooLarge.body.error, /7 дней/);
+  });
+});
+
+test('GET /api/gsm/dashboard returns bounded snapshot without full references', async () => {
+  const equipment = Array.from({ length: 25 }, (_, index) => ({
+    id: `EQ-${index + 1}`,
+    manufacturer: 'Mantall',
+    model: `XE-${index + 1}`,
+    inventoryNumber: `INV-${index + 1}`,
+    status: index === 0 ? 'rented' : 'available',
+    gsmImei: `IMEI-${index + 1}`,
+    gsmLastSeenAt: '2026-05-16T10:00:00.000Z',
+    gsmLastLat: 55 + index / 1000,
+    gsmLastLng: 49 + index / 1000,
+  }));
+  const packets = Array.from({ length: 10 }, (_, index) => ({
+    id: `P-${index + 1}`,
+    imei: 'IMEI-1',
+    equipmentId: 'EQ-1',
+    parseStatus: 'parsed',
+    lat: 55.7,
+    lng: 49.1,
+    receivedAt: `2026-05-16T10:0${index}:00.000Z`,
+  }));
+  const { app } = createGsmApiApp({
+    equipment,
+    clients: [{ id: 'CL-1', company: 'Client A', inn: '123', balance: 999 }],
+    rentals: [{ id: 'R-1', equipmentId: 'EQ-1', clientId: 'CL-1', status: 'active', manager: 'Manager A', total: 500000 }],
+    gantt_rentals: [{ id: 'G-1', rentalId: 'R-1', equipmentId: 'EQ-1', clientId: 'CL-1', status: 'active' }],
+    gsm_packets: packets,
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'GET', '/api/gsm/dashboard?limit=5&recentLimit=3', 'viewer-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.snapshots.length, 5);
+    assert.equal(response.body.recentPackets.length, 3);
+    assert.equal(response.body.counters.total, 5);
+    assert.equal(response.body.snapshots[0].binding.clientName, 'Client A');
+    assert.equal(response.body.equipment, undefined);
+    assert.equal(response.body.rentals, undefined);
+    assert.equal(response.body.gantt_rentals, undefined);
+    assert.equal(response.body.clients, undefined);
+    assert.equal(response.body.snapshots[0].binding.total, undefined);
+    assert.equal(response.body.snapshots[0].binding.balance, undefined);
+  });
+});
+
+test('GSM dashboard RBAC denies investor before returning context', async () => {
+  const { app } = createGsmApiApp({
+    equipment: [{ id: 'EQ-1', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '044', gsmImei: '866123456789012' }],
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const denied = await request(baseUrl, 'GET', '/api/gsm/dashboard', 'investor-token');
+    assert.equal(denied.status, 403);
   });
 });
 
@@ -573,4 +651,18 @@ test('GPRS analytics summarizes tracker quality and selected device traffic', ()
   assert.equal(analytics.selected.lastProtocol, 'generic-text');
   assert.equal(analytics.selected.commandStatus.sent, 1);
   assert.equal(analytics.protocols[0].protocol, 'generic-text');
+});
+
+test('GSM page uses bounded dashboard context instead of full reference hooks', async () => {
+  const source = await readFile(new URL('../src/app/pages/Gsm.tsx', import.meta.url), 'utf8');
+
+  assert.equal(source.includes('useEquipmentList'), false);
+  assert.equal(source.includes('useRentalsList'), false);
+  assert.equal(source.includes('useGanttData'), false);
+  assert.equal(source.includes('useClientsList'), false);
+  assert.equal(source.includes('buildGsmSnapshot'), false);
+  assert.match(source, /getDashboard\(\{ limit: 100, recentLimit: 50 \}\)/);
+  assert.match(source, /getPacketsPaginated/);
+  assert.match(source, /getCommandsPaginated/);
+  assert.match(source, /getRoute\(\{ equipmentId: routeEquipmentId, dateFrom: routeFrom, dateTo: routeTo \}\)/);
 });

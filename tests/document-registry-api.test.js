@@ -1,14 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const express = serverRequire('express');
+const Database = serverRequire('better-sqlite3');
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { registerDocumentRoutes } = require('../server/routes/documents.js');
+const { backfillSqlShadowIndexes } = require('../server/lib/sql-shadow-indexes.js');
 
-function createApp() {
+function createApp(options = {}) {
   let idCounter = 0;
   const state = {
     users: [
@@ -85,9 +90,30 @@ function createApp() {
     nowIso: () => '2026-05-09T10:00:00.000Z',
     auditLog: null,
     normalizeRecordClientLink: item => item,
+    getDb: options.getDb,
   });
   app.use('/api', router);
   return { app, state };
+}
+
+function makeSqlDb(seed) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'document-route-sql-'));
+  const db = new Database(path.join(dir, 'app.sqlite'));
+  db.exec(`
+    CREATE TABLE app_data (
+      name TEXT PRIMARY KEY,
+      json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  const upsert = db.prepare(`
+    INSERT INTO app_data (name, json)
+    VALUES (?, ?)
+    ON CONFLICT(name) DO UPDATE SET json = excluded.json, updated_at = CURRENT_TIMESTAMP
+  `);
+  for (const [name, value] of Object.entries(seed)) upsert.run(name, JSON.stringify(value));
+  backfillSqlShadowIndexes(db);
+  return { db, dir };
 }
 
 async function withServer(app, fn) {
@@ -205,6 +231,54 @@ test('documents gantt references apply date bounds when no narrowing filter is p
     assert.equal(explicitWindow.response.status, 200);
     assert.deepEqual(explicitWindow.json.items.map(item => item.id), ['GR-old']);
   });
+});
+
+test('documents references can use SQL shadow index behind disabled-by-default feature flag', async () => {
+  const previousDocumentsFlag = process.env.USE_SQL_DOCUMENTS_INDEX;
+  const previousGanttFlag = process.env.USE_SQL_GANTT_INDEX;
+  const sql = makeSqlDb({
+    documents: [
+      { id: 'D-sql', type: 'act', number: 'SQL-1', clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1', createdAt: '2026-05-09', client: 'ООО SQL' },
+    ],
+    gantt_rentals: [
+      { id: 'GR-sql', rentalId: 'R-1', clientId: 'C-1', client: 'ООО SQL', equipmentId: 'EQ-1', equipmentInv: 'A-1', managerId: 'U-manager', manager: 'Руслан', startDate: '2026-05-09', endDate: '2026-05-11', status: 'active' },
+    ],
+  });
+  try {
+    const { app, state } = createApp({ getDb: () => sql.db });
+    state.documents = [
+      { id: 'D-json', type: 'act', number: 'JSON-1', clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1', createdAt: '2026-05-09', client: 'ООО JSON' },
+    ];
+    state.gantt_rentals = [
+      { id: 'GR-json', rentalId: 'R-json', clientId: 'C-1', client: 'ООО JSON', equipmentId: 'EQ-1', equipmentInv: 'A-1', managerId: 'U-manager', manager: 'Руслан', startDate: '2026-05-09', endDate: '2026-05-11', status: 'active' },
+    ];
+    await withServer(app, async (baseUrl) => {
+      process.env.USE_SQL_DOCUMENTS_INDEX = 'false';
+      process.env.USE_SQL_GANTT_INDEX = 'false';
+      const jsonDocs = await request(baseUrl, 'GET', '/api/documents/references?type=act', 'office');
+      assert.equal(jsonDocs.response.status, 200);
+      assert.deepEqual(jsonDocs.json.items.map(item => item.id), ['D-json']);
+      const jsonGantt = await request(baseUrl, 'GET', '/api/documents/gantt-references?rentalId=R-json', 'office');
+      assert.equal(jsonGantt.response.status, 200);
+      assert.deepEqual(jsonGantt.json.items.map(item => item.id), ['GR-json']);
+
+      process.env.USE_SQL_DOCUMENTS_INDEX = 'true';
+      process.env.USE_SQL_GANTT_INDEX = 'true';
+      const sqlDocs = await request(baseUrl, 'GET', '/api/documents/references?search=SQL', 'office');
+      assert.equal(sqlDocs.response.status, 200);
+      assert.deepEqual(sqlDocs.json.items.map(item => item.id), ['D-sql']);
+      const sqlGantt = await request(baseUrl, 'GET', '/api/documents/gantt-references?rentalId=R-1', 'manager');
+      assert.equal(sqlGantt.response.status, 200);
+      assert.deepEqual(sqlGantt.json.items.map(item => item.id), ['GR-sql']);
+    });
+  } finally {
+    if (previousDocumentsFlag === undefined) delete process.env.USE_SQL_DOCUMENTS_INDEX;
+    else process.env.USE_SQL_DOCUMENTS_INDEX = previousDocumentsFlag;
+    if (previousGanttFlag === undefined) delete process.env.USE_SQL_GANTT_INDEX;
+    else process.env.USE_SQL_GANTT_INDEX = previousGanttFlag;
+    sql.db.close();
+    fs.rmSync(sql.dir, { recursive: true, force: true });
+  }
 });
 
 test('documents API creates documents with automatic numbers and separate sequences', async () => {

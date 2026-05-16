@@ -22,6 +22,10 @@ const {
   normalizeClientRelationLinks,
 } = require('../lib/client-relations');
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
+const {
+  queryDocumentsIndex,
+  queryGanttIndex,
+} = require('../lib/sql-shadow-indexes');
 
 function registerDocumentRoutes(router, deps) {
   const {
@@ -36,6 +40,7 @@ function registerDocumentRoutes(router, deps) {
     nowIso,
     auditLog,
     normalizeRecordClientLink,
+    getDb,
   } = deps;
 
   const documentsRouter = express.Router();
@@ -50,6 +55,34 @@ function registerDocumentRoutes(router, deps) {
 
   function isOffice(user) {
     return normalizeRole(user?.userRole) === 'Офис-менеджер';
+  }
+
+  function enabledEnvFlag(name) {
+    return ['1', 'true', 'yes', 'on'].includes(String(process.env[name] || '').trim().toLowerCase());
+  }
+
+  function readDocumentsForBoundedEndpoint(query) {
+    if (!enabledEnvFlag('USE_SQL_DOCUMENTS_INDEX') || typeof getDb !== 'function') {
+      return { rows: readData('documents') || [], source: 'app_data' };
+    }
+    try {
+      return { rows: queryDocumentsIndex(getDb(), query), source: 'documents_sql' };
+    } catch (error) {
+      console.warn(`[documents] USE_SQL_DOCUMENTS_INDEX fallback to app_data: ${error.message}`);
+      return { rows: readData('documents') || [], source: 'app_data_fallback' };
+    }
+  }
+
+  function readGanttForBoundedEndpoint(query) {
+    if (!enabledEnvFlag('USE_SQL_GANTT_INDEX') || typeof getDb !== 'function') {
+      return { rows: readData('gantt_rentals') || [], source: 'app_data' };
+    }
+    try {
+      return { rows: queryGanttIndex(getDb(), query), source: 'gantt_rentals_sql' };
+    } catch (error) {
+      console.warn(`[documents] USE_SQL_GANTT_INDEX fallback to app_data: ${error.message}`);
+      return { rows: readData('gantt_rentals') || [], source: 'app_data_fallback' };
+    }
   }
 
   function canManualNumber(user) {
@@ -527,9 +560,10 @@ function registerDocumentRoutes(router, deps) {
   documentsRouter.get('/documents/references', requireAuth, requireRead('documents'), (req, res) => {
     try {
       accessControl.assertCanReadCollection('documents', req.user);
+      const indexed = readDocumentsForBoundedEndpoint(req.query);
       const scoped = accessControl.sanitizeCollectionForRead(
         'documents',
-        accessControl.filterCollectionByScope('documents', readData('documents') || [], req.user),
+        accessControl.filterCollectionByScope('documents', indexed.rows, req.user),
         req.user,
       );
       const requestedTypes = String(req.query.types || req.query.type || '')
@@ -550,7 +584,14 @@ function registerDocumentRoutes(router, deps) {
         rows = rows.filter(item => requestedTypes.includes(String(item.type || item.documentType || '')));
       }
       if (requestedIds.size > 0) {
-        const byId = new Map(scoped.map(item => [String(item.id || ''), item]));
+        const allRowsForRequestedIds = indexed.source === 'documents_sql'
+          ? accessControl.sanitizeCollectionForRead(
+              'documents',
+              accessControl.filterCollectionByScope('documents', queryDocumentsIndex(getDb(), {}), req.user),
+              req.user,
+            )
+          : scoped;
+        const byId = new Map(allRowsForRequestedIds.map(item => [String(item.id || ''), item]));
         requestedIds.forEach(id => {
           const item = byId.get(id);
           if (item && !rows.some(row => row.id === item.id)) rows.push(item);
@@ -576,13 +617,14 @@ function registerDocumentRoutes(router, deps) {
   documentsRouter.get('/documents/gantt-references', requireAuth, requireRead('documents'), (req, res) => {
     try {
       accessControl.assertCanReadCollection('documents', req.user);
-      const scoped = accessControl.filterCollectionByScope('gantt_rentals', readData('gantt_rentals') || [], req.user);
       const limit = clampGanttReferenceLimit(req.query.limit || req.query.pageSize);
       const query = {
         ...req.query,
         page: '1',
         pageSize: String(limit),
       };
+      const indexed = readGanttForBoundedEndpoint(query);
+      const scoped = accessControl.filterCollectionByScope('gantt_rentals', indexed.rows, req.user);
       const rows = filterGanttReferences(scoped, query);
       const response = buildPaginatedResponse(rows, query, {
         sortFields: {

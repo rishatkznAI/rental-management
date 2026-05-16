@@ -150,6 +150,7 @@ const {
   cleanupExpiredSessions,
   deleteSession,
   deleteSessionsForUserIds,
+  ensureDb,
   getData,
   getSession: getStoredSession,
   migrateJsonFilesToDb,
@@ -1393,6 +1394,7 @@ registerDocumentRoutes(apiRouter, {
   nowIso,
   auditLog,
   normalizeRecordClientLink,
+  getDb: ensureDb,
 });
 
 registerPayrollRoutes(apiRouter, {

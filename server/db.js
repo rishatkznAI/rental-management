@@ -2,6 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 const {
+  ensureSqlShadowSchema,
+  syncSqlShadowIndexForCollection,
+} = require('./lib/sql-shadow-indexes');
+const {
   assertClientInnListUnique,
   assertClientInnWriteAllowed,
   buildClientInnDuplicateReport,
@@ -110,6 +114,7 @@ function ensureDb() {
     );
   `);
   dbInstance = db;
+  ensureSqlShadowSchema(db);
   syncClientInnIndex({ throwOnDuplicates: false });
   return db;
 }
@@ -207,6 +212,9 @@ function setData(name, value) {
     `);
   const tx = db.transaction(() => {
     upsert.run(name, JSON.stringify(nextValue));
+    if ((name === 'documents' || name === 'gantt_rentals') && Array.isArray(nextValue)) {
+      syncSqlShadowIndexForCollection(db, name, nextValue);
+    }
     if (name === 'clients') {
       const duplicateCheck = checkClientInnDuplicates(nextValue, { throwOnDuplicates: false });
       if (duplicateCheck.ok) {
@@ -344,6 +352,7 @@ module.exports = {
   cleanupExpiredSessions,
   deleteSession,
   deleteSessionsForUserIds,
+  ensureDb,
   getData,
   getSession,
   JSON_COLLECTIONS,

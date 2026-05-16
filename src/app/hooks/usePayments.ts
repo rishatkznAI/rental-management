@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsService } from '../services/payments.service';
 import { RENTAL_KEYS } from './useRentals';
+import { usePermissions } from '../lib/permissions';
 import type { Payment, PaymentAllocation } from '../types';
 
 export const PAYMENT_KEYS = {
@@ -23,10 +24,11 @@ export function usePaymentsList(options: QueryOptions = {}) {
 }
 
 export function usePaymentAllocationsList(options: QueryOptions = {}) {
+  const { canReadCollection } = usePermissions();
   return useQuery({
     queryKey: PAYMENT_KEYS.allocations,
     queryFn: paymentsService.getAllocations,
-    enabled: options.enabled ?? true,
+    enabled: (options.enabled ?? true) && canReadCollection('payment_allocations'),
     staleTime: 1000 * 60 * 2,
   });
 }

@@ -928,7 +928,7 @@ function getComparisonLabel(pair: ShippingComparisonPair) {
 
 export default function EquipmentDetail() {
   const { user } = useAuth();
-  const { can } = usePermissions();
+  const { can, canReadCollection } = usePermissions();
   const queryClient = useQueryClient();
   const canEditEquipment = can('edit', 'equipment');
   const canEditSales = can('edit', 'sales');
@@ -942,8 +942,8 @@ export default function EquipmentDetail() {
   const canCreateService = can('create', 'service');
   const canManageAcceptance = canEditEquipment || canEditSales || canCreateService || isMechanicRole(user?.role);
   const normalizedRole = normalizeUserRole(user?.role);
-  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Руководитель'].includes(normalizedRole)
-    || isMechanicRole(normalizedRole);
+  const canViewShippingPhotos = canReadCollection('shipping_photos');
+  const canReadDeliveries = canReadCollection('deliveries');
   const { id } = useParams();
   const location = useLocation();
   const routeSearchParams = new URLSearchParams(location.search);
@@ -990,7 +990,7 @@ export default function EquipmentDetail() {
   const { data: deliveryData = EMPTY_DELIVERIES } = useQuery({
     queryKey: ['deliveries'],
     queryFn: deliveriesService.getAll,
-    enabled: !!id && canViewShippingPhotos,
+    enabled: !!id && canReadDeliveries,
   });
   const { data: shippingPhotoData = EMPTY_SHIPPING_PHOTOS } = useQuery({
     queryKey: ['shippingPhotos'],

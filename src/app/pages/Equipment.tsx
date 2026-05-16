@@ -21,7 +21,7 @@ import {
 import { Button } from '../components/ui/button';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
-import { getInvestorBinding, isInvestorUser, isMechanicRole, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
+import { getInvestorBinding, isInvestorUser, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useDocumentsList } from '../hooks/useDocuments';
@@ -679,15 +679,14 @@ function apiErrorMessage(error: unknown, fallback: string) {
 
 export default function Equipment() {
   const { user } = useAuth();
-  const { can, canView } = usePermissions();
+  const { can, canView, canReadCollection } = usePermissions();
   const canViewRentals = canView('rentals');
   const canViewService = canView('service');
   const canViewDocuments = canView('documents');
   const canViewSales = canView('sales');
   const canCreateEquipment = can('create', 'equipment');
   const normalizedRole = normalizeUserRole(user?.role);
-  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
-    || isMechanicRole(normalizedRole);
+  const canViewShippingPhotos = canReadCollection('shipping_photos');
   const equipmentQuery = useEquipmentList();
   const ganttQuery = useGanttData({ enabled: canViewRentals });
   const rentalsQuery = useRentalsList({ enabled: canViewRentals });

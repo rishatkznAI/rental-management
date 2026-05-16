@@ -569,7 +569,7 @@ function filterRoutePoints(points: GsmRoutePoint[], period: RoutePeriod) {
 
 export default function Gsm() {
   const { user } = useAuth();
-  const { canView } = usePermissions();
+  const { canView, canReadCollection } = usePermissions();
   const queryClient = useQueryClient();
   const { data: equipment = [] } = useEquipmentList();
   const { data: rentals = [] } = useRentalsList({ enabled: canView('rentals') });
@@ -578,6 +578,7 @@ export default function Gsm() {
   const { data: shippingPhotos = [] } = useQuery<ShippingPhoto[]>({
     queryKey: ['shippingPhotos', 'all'],
     queryFn: equipmentService.getAllShippingPhotos,
+    enabled: canReadCollection('shipping_photos'),
     staleTime: 1000 * 60,
   });
 

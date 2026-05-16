@@ -242,7 +242,8 @@ test('frontend warranty pages do not prefetch forbidden operational collections'
   assert.match(sidebarSource, /useServiceTicketsList\(\{ enabled: canSearchService \}\)/);
   assert.match(sidebarSource, /queryKey: \['deliveries', 'global-search', user\?\.id \|\| 'anonymous', user\?\.role \|\| 'anonymous'\]/);
 
-  assert.match(notificationCenterSource, /const canViewShippingPhotos = \['Администратор', 'Офис-менеджер', 'Менеджер по аренде'\]\.includes\(normalizedRole\)[\s\S]*isMechanicRole\(normalizedRole\)/);
+  assert.match(notificationCenterSource, /const \{ canView, canReadCollection \} = usePermissions\(\)/);
+  assert.match(notificationCenterSource, /const canViewShippingPhotos = canReadCollection\('shipping_photos'\)/);
   assert.match(notificationCenterSource, /enabled: canViewShippingPhotos/);
 
   assert.match(rentalsPageSource, /const canViewClients = can\('view', 'clients'\)/);
@@ -256,8 +257,10 @@ test('frontend warranty pages do not prefetch forbidden operational collections'
   assert.match(rentalsPageSource, /const canViewApprovals = can\('view', 'approvals'\)/);
   assert.match(rentalsPageSource, /useRentalChangeRequestsList\(canViewApprovals\)/);
 
-  assert.match(equipmentDetailSource, /const canViewShippingPhotos = \['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Руководитель'\]\.includes\(normalizedRole\)[\s\S]*isMechanicRole\(normalizedRole\)/);
+  assert.match(equipmentDetailSource, /const canViewShippingPhotos = canReadCollection\('shipping_photos'\)/);
+  assert.match(equipmentDetailSource, /const canReadDeliveries = canReadCollection\('deliveries'\)/);
   assert.match(equipmentDetailSource, /enabled: !!id && canViewShippingPhotos/);
+  assert.match(equipmentDetailSource, /enabled: !!id && canReadDeliveries/);
 
   assert.match(rentalApprovalHistorySheetSource, /useClientsList\(\{ enabled: open \}\)/);
 });

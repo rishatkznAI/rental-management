@@ -31,7 +31,7 @@ import {
 import { RentalDrawer } from '../components/gantt/RentalDrawer';
 import { ReturnModal, DowntimeModal, NewRentalModal } from '../components/gantt/GanttModals';
 import { RentalApprovalHistorySheet } from '../components/gantt/RentalApprovalHistorySheet';
-import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser, isMechanicRole, normalizeUserRole } from '../lib/userStorage';
+import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser, normalizeUserRole } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
@@ -1240,7 +1240,7 @@ function hasOpenServiceTicketForEquipment(serviceTickets: ServiceTicket[], equip
 
 // ========== Main Component ==========
 export default function Rentals() {
-  const { can } = usePermissions();
+  const { can, canReadCollection } = usePermissions();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const historyAuthor = user?.name || 'Система';
@@ -1264,8 +1264,7 @@ export default function Rentals() {
   const isHeadRole = normalizedRole === 'Руководитель';
   const canViewDowntimes = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole);
   const canViewStaffOptions = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'].includes(normalizedRole);
-  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Руководитель'].includes(normalizedRole)
-    || isMechanicRole(normalizedRole);
+  const canViewShippingPhotos = canReadCollection('shipping_photos');
   const today = useMemo(() => startOfDay(new Date()), []);
   const todayStr = format(today, 'yyyy-MM-dd');
   const [ganttRentals, setGanttRentals] = useState<GanttRentalData[]>([]);
@@ -1298,7 +1297,7 @@ export default function Rentals() {
   const { data: deliveriesData = EMPTY_DELIVERIES } = useQuery<Delivery[]>({
     queryKey: ['deliveries'],
     queryFn: deliveriesService.getAll,
-    enabled: canViewDeliveries,
+    enabled: canViewDeliveries && canReadCollection('deliveries'),
   });
   const { data: shippingPhotos = EMPTY_SHIPPING_PHOTOS } = useQuery<ShippingPhoto[]>({
     queryKey: ['shippingPhotos', 'all'],

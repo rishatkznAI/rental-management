@@ -101,5 +101,5 @@ test('head role keeps read-only access to shipping photos without write access',
   const equipmentDetailSource = fs.readFileSync('src/app/pages/EquipmentDetail.tsx', 'utf8');
   assert.match(serverSource, /READ_PERMISSIONS[\s\S]*shipping_photos:\['Администратор', 'Менеджер по аренде', 'Офис-менеджер', HEAD_ROLE/);
   assert.match(serverSource, /WRITE_PERMISSIONS[\s\S]*shipping_photos:\['Администратор', \.\.\.MECHANIC_ROLES, 'Менеджер по аренде'\]/);
-  assert.match(equipmentDetailSource, /'Руководитель'\]\.includes\(normalizedRole\)/);
+  assert.match(equipmentDetailSource, /canReadCollection\('shipping_photos'\)/);
 });

@@ -47,6 +47,10 @@ export type Action = 'view' | 'create' | 'edit' | 'delete';
 export type AppPermission = 'service_day_plan_view' | 'service_day_plan_manage';
 
 type RolePermissions = Partial<Record<Section, Action[]>>;
+type BackendPermissions = {
+  readableCollections?: unknown;
+  writableCollections?: unknown;
+};
 
 // ── Матрица прав ──────────────────────────────────────────────────────────────
 
@@ -279,6 +283,7 @@ export function usePermissions() {
   const { user } = useAuth();
   const role = normalizeUserRole(user?.role);
   const perms: RolePermissions = useMemo(() => PERMISSIONS[role] ?? {}, [role]);
+  const backendPermissions = user?.permissions as BackendPermissions | undefined;
 
   /** Проверяет, разрешено ли конкретное действие в разделе */
   const can = useCallback((action: Action, section: Section): boolean => {
@@ -290,6 +295,16 @@ export function usePermissions() {
     return can('view', section);
   }, [can]);
 
+  const canReadCollection = useCallback((collection: string): boolean => {
+    const readable = backendPermissions?.readableCollections;
+    return Array.isArray(readable) && readable.includes(collection);
+  }, [backendPermissions]);
+
+  const canWriteCollection = useCallback((collection: string): boolean => {
+    const writable = backendPermissions?.writableCollections;
+    return Array.isArray(writable) && writable.includes(collection);
+  }, [backendPermissions]);
+
   /** Первый разрешённый URL для редиректа (если текущий запрещён) */
   const defaultPath = useCallback((): string => {
     for (const [section, path] of SECTION_PATHS) {
@@ -298,5 +313,8 @@ export function usePermissions() {
     return '/login';
   }, [canView]);
 
-  return useMemo(() => ({ can, canView, defaultPath }), [can, canView, defaultPath]);
+  return useMemo(
+    () => ({ can, canView, canReadCollection, canWriteCollection, defaultPath }),
+    [can, canView, canReadCollection, canWriteCollection, defaultPath],
+  );
 }

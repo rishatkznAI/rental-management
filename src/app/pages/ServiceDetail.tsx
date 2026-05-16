@@ -439,7 +439,7 @@ export default function ServiceDetail({
   const params = useParams<{ id: string }>();
   const id = ticketId ?? params.id ?? '';
   const navigate = useNavigate();
-  const { can } = usePermissions();
+  const { can, canReadCollection } = usePermissions();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = [
@@ -461,6 +461,9 @@ export default function ServiceDetail({
   const canViewDeliveries = can('view', 'deliveries');
   const canViewServiceVehicles = can('view', 'service_vehicles');
   const canCreateDocuments = can('create', 'documents');
+  const canReadDeliveries = canReadCollection('deliveries');
+  const canReadWarrantyClaims = canReadCollection('warranty_claims');
+  const canReadServiceFieldTrips = canReadCollection('service_field_trips');
 
   const ticketQuery = useServiceTicketById(id);
   const { data: fetchedTicket } = ticketQuery;
@@ -483,12 +486,12 @@ export default function ServiceDetail({
   const { data: deliveries = [] } = useQuery<Delivery[]>({
     queryKey: ['deliveries', 'service-detail'],
     queryFn: deliveriesService.getAll,
-    enabled: canViewDeliveries,
+    enabled: canViewDeliveries && canReadDeliveries,
   });
   const { data: warrantyClaims = [] } = useQuery<WarrantyClaim[]>({
     queryKey: ['warrantyClaims', 'service-detail'],
     queryFn: warrantyClaimsService.getAll,
-    enabled: canViewServiceVehicles || canViewDocuments || canEdit,
+    enabled: canReadWarrantyClaims && (canViewServiceVehicles || canViewDocuments || canEdit),
   });
   const { data: equipmentList = [] } = useQuery<Equipment[]>({
     queryKey: EQUIPMENT_KEYS.all,
@@ -507,7 +510,7 @@ export default function ServiceDetail({
   const { data: serviceFieldTrips = [] } = useQuery<ServiceFieldTrip[]>({
     queryKey: ['serviceFieldTrips', id],
     queryFn: serviceFieldTripsService.getAll,
-    enabled: Boolean(id) && canViewServiceVehicles,
+    enabled: Boolean(id) && canViewServiceVehicles && canReadServiceFieldTrips,
   });
   const { data: workCatalog = [] } = useQuery<ServiceWork[]>({
     queryKey: ['serviceWorks', 'active'],

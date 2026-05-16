@@ -4245,15 +4245,16 @@ interface DataCounts {
 
 function DataResetSection() {
   const queryClient = useQueryClient();
-  const { data: classicRentals = [] } = useQuery({ queryKey: RENTAL_KEYS.all, queryFn: rentalsService.getAll });
-  const { data: ganttRentals = [] } = useQuery({ queryKey: RENTAL_KEYS.gantt, queryFn: rentalsService.getGanttData });
-  const { data: serviceTickets = [] } = useQuery({ queryKey: SERVICE_TICKET_KEYS.all, queryFn: serviceTicketsService.getAll });
-  const { data: clients = [] } = useQuery({ queryKey: ['clients'], queryFn: clientsService.getAll });
-  const { data: payments = [] } = useQuery({ queryKey: PAYMENT_KEYS.all, queryFn: paymentsService.getAll });
-  const { data: documents = [] } = useQuery({ queryKey: ['documents'], queryFn: documentsService.getAll });
-  const { data: deliveries = [] } = useQuery({ queryKey: ['deliveries'], queryFn: deliveriesService.getAll });
-  const { data: shippingPhotos = [] } = useQuery({ queryKey: ['shippingPhotos', 'all'], queryFn: equipmentService.getAllShippingPhotos });
-  const { data: equipment = [] } = useQuery({ queryKey: EQUIPMENT_KEYS.all, queryFn: equipmentService.getAll });
+  const { canReadCollection } = usePermissions();
+  const { data: classicRentals = [] } = useQuery({ queryKey: RENTAL_KEYS.all, queryFn: rentalsService.getAll, enabled: canReadCollection('rentals') });
+  const { data: ganttRentals = [] } = useQuery({ queryKey: RENTAL_KEYS.gantt, queryFn: rentalsService.getGanttData, enabled: canReadCollection('gantt_rentals') });
+  const { data: serviceTickets = [] } = useQuery({ queryKey: SERVICE_TICKET_KEYS.all, queryFn: serviceTicketsService.getAll, enabled: canReadCollection('service') });
+  const { data: clients = [] } = useQuery({ queryKey: ['clients'], queryFn: clientsService.getAll, enabled: canReadCollection('clients') });
+  const { data: payments = [] } = useQuery({ queryKey: PAYMENT_KEYS.all, queryFn: paymentsService.getAll, enabled: canReadCollection('payments') });
+  const { data: documents = [] } = useQuery({ queryKey: ['documents'], queryFn: documentsService.getAll, enabled: canReadCollection('documents') });
+  const { data: deliveries = [] } = useQuery({ queryKey: ['deliveries'], queryFn: deliveriesService.getAll, enabled: canReadCollection('deliveries') });
+  const { data: shippingPhotos = [] } = useQuery({ queryKey: ['shippingPhotos', 'all'], queryFn: equipmentService.getAllShippingPhotos, enabled: canReadCollection('shipping_photos') });
+  const { data: equipment = [] } = useQuery({ queryKey: EQUIPMENT_KEYS.all, queryFn: equipmentService.getAll, enabled: canReadCollection('equipment') });
   const [dialogOpen, setDialogOpen]   = React.useState(false);
   const [confirmText, setConfirmText] = React.useState('');
   const [done, setDone]               = React.useState(false);

@@ -392,7 +392,7 @@ function groupCountChart<T>(
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { can } = usePermissions();
+  const { can, canReadCollection } = usePermissions();
   const qc = useQueryClient();
   const canViewReports = can('view', 'reports');
   const canViewFinance = can('view', 'finance');
@@ -428,7 +428,7 @@ export default function Dashboard() {
   const { data: deliveries = [] } = useQuery<Delivery[]>({
     queryKey: ['deliveries', 'dashboard'],
     queryFn: deliveriesService.getAll,
-    enabled: canViewDeliveries,
+    enabled: canViewDeliveries && canReadCollection('deliveries'),
     staleTime: 1000 * 60 * 2,
   });
   const { data: mechanicWorkload } = useQuery<MechanicsWorkloadReport>({

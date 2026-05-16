@@ -11,7 +11,6 @@ import { buildAppNotifications, type AppNotification, type NotificationPriority 
 import { cn, formatDate } from '../../lib/utils';
 import { usePermissions } from '../../lib/permissions';
 import { useAuth } from '../../contexts/AuthContext';
-import { isMechanicRole, normalizeUserRole } from '../../lib/userStorage';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '../ui/sheet';
 
 const READ_KEY = 'app_notification_reads_v1';
@@ -60,7 +59,7 @@ function getIcon(notification: AppNotification) {
 }
 
 export function NotificationCenter() {
-  const { canView } = usePermissions();
+  const { canView, canReadCollection } = usePermissions();
   const { user } = useAuth();
   const [open, setOpen] = React.useState(false);
   const [readIds, setReadIds] = React.useState<string[]>(() => readIdsFromStorage());
@@ -69,18 +68,16 @@ export function NotificationCenter() {
   const canViewEquipment = canView('equipment');
   const canViewPayments = canView('payments') || canView('finance');
   const canViewApprovals = canView('approvals');
-  const normalizedRole = normalizeUserRole(user?.role);
-  const canViewShippingPhotos = ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'].includes(normalizedRole)
-    || isMechanicRole(normalizedRole);
+  const canViewShippingPhotos = canReadCollection('shipping_photos');
 
   const results = useQueries({
     queries: [
-      { queryKey: ['notif-gantt-rentals'], queryFn: rentalsService.getGanttData, enabled: canViewRentals },
-      { queryKey: ['notif-service'], queryFn: serviceTicketsService.getAll, enabled: canViewService },
-      { queryKey: ['notif-equipment'], queryFn: equipmentService.getAll, enabled: canViewEquipment },
-      { queryKey: ['notif-payments'], queryFn: paymentsService.getAll, enabled: canViewPayments },
+      { queryKey: ['notif-gantt-rentals'], queryFn: rentalsService.getGanttData, enabled: canViewRentals && canReadCollection('gantt_rentals') },
+      { queryKey: ['notif-service'], queryFn: serviceTicketsService.getAll, enabled: canViewService && canReadCollection('service') },
+      { queryKey: ['notif-equipment'], queryFn: equipmentService.getAll, enabled: canViewEquipment && canReadCollection('equipment') },
+      { queryKey: ['notif-payments'], queryFn: paymentsService.getAll, enabled: canViewPayments && canReadCollection('payments') },
       { queryKey: ['notif-shipping-photos'], queryFn: equipmentService.getAllShippingPhotos, enabled: canViewShippingPhotos },
-      { queryKey: ['notif-rental-change-requests'], queryFn: rentalChangeRequestsService.getAll, enabled: canViewApprovals },
+      { queryKey: ['notif-rental-change-requests'], queryFn: rentalChangeRequestsService.getAll, enabled: canViewApprovals && canReadCollection('rental_change_requests') },
     ],
   });
 

@@ -130,3 +130,65 @@ test('document is not attached to rental by unreliable client name match', () =>
   assert.equal(control.getRentalSummary('R-6').status, DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT);
   assert.ok(control.rows.some(row => row.status === DOCUMENT_CONTROL_STATUSES.ORPHAN_DOCUMENT));
 });
+
+test('rental document chain resolves framework contract through specification parent', () => {
+  const control = buildDocumentControl({
+    today: '2026-05-13',
+    rentals: [
+      { id: 'R-chain', clientId: 'C-1', client: 'ООО Альфа', equipmentId: 'E-1', status: 'active', manager: 'Руслан' },
+    ],
+    documents: [
+      { id: 'D-contract', type: 'rental_contract', status: 'signed', clientId: 'C-1', date: '2026-05-09' },
+      { id: 'D-spec', type: 'rental_specification', status: 'signed', rentalId: 'R-chain', parentDocumentId: 'D-contract', clientId: 'C-1', equipmentId: 'E-1', date: '2026-05-10' },
+      { id: 'D-transfer', type: 'transfer_act_to_client', status: 'signed', parentDocumentId: 'D-contract', specificationId: 'D-spec', clientId: 'C-1', equipmentId: 'E-1', date: '2026-05-10' },
+      { id: 'D-return', type: 'return_act_from_client', status: 'signed', parentDocumentId: 'D-contract', specificationId: 'D-spec', clientId: 'C-1', equipmentId: 'E-1', date: '2026-05-12' },
+    ],
+    clients,
+    equipment,
+  });
+
+  const summary = control.getRentalSummary('R-chain');
+  assert.equal(summary.contract.exists, true);
+  assert.equal(summary.specification.exists, true);
+  assert.equal(summary.transferAct.exists, true);
+  assert.equal(summary.returnAct.exists, true);
+  assert.notEqual(summary.status, DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT);
+});
+
+test('cancelled or deleted chain documents do not close rental document control', () => {
+  const control = buildDocumentControl({
+    today: '2026-05-13',
+    rentals: [
+      { id: 'R-cancelled', clientId: 'C-1', client: 'ООО Альфа', equipmentId: 'E-1', status: 'active', manager: 'Руслан' },
+    ],
+    documents: [
+      { id: 'D-contract-cancelled', type: 'rental_contract', status: 'cancelled', clientId: 'C-1', date: '2026-05-09' },
+      { id: 'D-spec-deleted', type: 'rental_specification', status: 'deleted', rentalId: 'R-cancelled', parentDocumentId: 'D-contract-cancelled', clientId: 'C-1', equipmentId: 'E-1', date: '2026-05-10' },
+    ],
+    clients,
+    equipment,
+  });
+
+  const summary = control.getRentalSummary('R-cancelled');
+  assert.equal(summary.contract.exists, false);
+  assert.equal(summary.specification.exists, false);
+  assert.equal(summary.status, DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT);
+});
+
+test('legacy direct rentalId contract still closes contract requirement', () => {
+  const control = buildDocumentControl({
+    today: '2026-05-13',
+    rentals: [
+      { id: 'R-legacy-direct', clientId: 'C-1', client: 'ООО Альфа', equipmentId: 'E-1', status: 'active', manager: 'Руслан' },
+    ],
+    documents: [
+      { id: 'D-contract-direct', type: 'rental_contract', status: 'signed', rentalId: 'R-legacy-direct', clientId: 'C-1', date: '2026-05-09' },
+    ],
+    clients,
+    equipment,
+  });
+
+  const summary = control.getRentalSummary('R-legacy-direct');
+  assert.equal(summary.contract.exists, true);
+  assert.notEqual(summary.status, DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT);
+});

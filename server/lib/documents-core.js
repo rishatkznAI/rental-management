@@ -561,6 +561,12 @@ function linesForDocument(type, snapshot, input) {
     : (input.specificationId || '');
   const deliveryBasis = delivery ? [delivery.date, delivery.address || delivery.route].map(text).filter(Boolean).join(' · ') : '';
   const date = input.documentDate || input.date || new Date().toISOString().slice(0, 10);
+  const serviceTicketLabel = service?.id || input.serviceTicketId || '';
+  const returnActServiceRows = serviceTicketLabel
+    ? [['Сервисная заявка', serviceTicketLabel]]
+    : (input.serviceRequired === true || text(input.serviceRequired).toLowerCase() === 'true'
+      ? [['Сервисная заявка', 'Сервисная заявка требуется, но ещё не создана']]
+      : []);
   const common = {
     rental_contract: [
       ['Клиент', client],
@@ -618,7 +624,7 @@ function linesForDocument(type, snapshot, input) {
       ['Повреждения', input.damages || input.damageNotes || 'Не указаны'],
       ['Недостача', input.missingItems || 'Не указана'],
       ['Необходимость сервиса', input.serviceRequired || (input.serviceTicketId ? 'Да' : 'Нет')],
-      ['Сервисная заявка', service?.id || input.serviceTicketId || '—'],
+      ...returnActServiceRows,
       ['Представитель компании', input.companyRepresentative || input.responsibleName || 'Skytech'],
       ['Представитель клиента', input.clientRepresentative || '—'],
       ['Подписи', 'Стороны'],

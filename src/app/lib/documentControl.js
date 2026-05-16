@@ -1,7 +1,8 @@
 const RENTAL_OPEN_STATUSES = new Set(['active', 'confirmed', 'return_planned', 'planned']);
 const RENTAL_CLOSED_STATUSES = new Set(['closed', 'returned', 'completed', 'done']);
-const DOCUMENT_TYPES = new Set(['rental_contract', 'rental_specification', 'transfer_act_to_client', 'return_act_from_client', 'contract', 'act', 'invoice', 'work_order', 'upd']);
+const DOCUMENT_TYPES = new Set(['rental_contract', 'rental_specification', 'specification', 'spec', 'transfer_act_to_client', 'transfer_act', 'return_act_from_client', 'return_act', 'contract', 'act', 'invoice', 'work_order', 'upd']);
 const DOCUMENT_STATUSES = new Set(['draft', 'sent', 'signed']);
+const INACTIVE_DOCUMENT_STATUSES = new Set(['cancelled', 'canceled', 'deleted']);
 
 export const DOCUMENT_CONTROL_STATUSES = {
   OK: 'ok',
@@ -85,6 +86,18 @@ function getDocumentEquipmentId(doc) {
   return safeId(doc?.equipmentId);
 }
 
+function getDocumentEquipmentInv(doc) {
+  return safeId(doc?.equipmentInv, doc?.inventoryNumber, doc?.equipment);
+}
+
+function getDocumentParentId(doc) {
+  return safeId(doc?.parentDocumentId, doc?.parentId);
+}
+
+function getDocumentSpecificationId(doc) {
+  return safeId(doc?.specificationId, doc?.specId);
+}
+
 function getRentalEquipmentId(rental) {
   return safeId(rental?.equipmentId, rental?.equipmentItemId);
 }
@@ -104,12 +117,16 @@ function documentStatus(doc) {
   return DOCUMENT_STATUSES.has(status) ? status : 'draft';
 }
 
+function isDocumentActive(doc) {
+  return !INACTIVE_DOCUMENT_STATUSES.has(normalizeStatus(doc?.status));
+}
+
 function documentTypeLabel(type) {
   if (type === 'contract') return 'Договор';
   if (type === 'rental_contract') return 'Договор аренды';
-  if (type === 'rental_specification') return 'Спецификация';
-  if (type === 'transfer_act_to_client') return 'Акт передачи';
-  if (type === 'return_act_from_client') return 'Акт возврата';
+  if (type === 'rental_specification' || type === 'specification' || type === 'spec') return 'Спецификация';
+  if (type === 'transfer_act_to_client' || type === 'transfer_act') return 'Акт передачи';
+  if (type === 'return_act_from_client' || type === 'return_act') return 'Акт возврата';
   if (type === 'act' || type === 'upd') return 'Акт/УПД';
   if (type === 'invoice') return 'Счёт';
   if (type === 'work_order') return 'Заказ-наряд';
@@ -128,23 +145,23 @@ function isContract(doc) {
 }
 
 function isClosingDocument(doc) {
-  return ['act', 'upd', 'return_act_from_client'].includes(documentType(doc));
+  return ['act', 'upd', 'return_act_from_client', 'return_act'].includes(documentType(doc));
 }
 
 function isSpecification(doc) {
-  return documentType(doc) === 'rental_specification';
+  return ['rental_specification', 'specification', 'spec'].includes(documentType(doc));
 }
 
 function isTransferAct(doc) {
-  return documentType(doc) === 'transfer_act_to_client';
+  return ['transfer_act_to_client', 'transfer_act'].includes(documentType(doc));
 }
 
 function isReturnAct(doc) {
-  return documentType(doc) === 'return_act_from_client';
+  return ['return_act_from_client', 'return_act'].includes(documentType(doc));
 }
 
 function isUnsigned(doc) {
-  return ['contract', 'rental_contract', 'rental_specification', 'transfer_act_to_client', 'return_act_from_client', 'act', 'upd'].includes(documentType(doc)) && documentStatus(doc) !== 'signed';
+  return isDocumentActive(doc) && ['contract', 'rental_contract', 'rental_specification', 'specification', 'spec', 'transfer_act_to_client', 'transfer_act', 'return_act_from_client', 'return_act', 'act', 'upd'].includes(documentType(doc)) && documentStatus(doc) !== 'signed';
 }
 
 function isSentUnsigned(doc) {
@@ -159,6 +176,20 @@ function isRentalClosed(rental) {
 function isRentalRelevant(rental) {
   const status = normalizeStatus(rental?.status);
   return !['cancelled', 'canceled'].includes(status) && (RENTAL_OPEN_STATUSES.has(status) || isRentalClosed(rental) || !status);
+}
+
+function documentMatchesRentalPartyAndEquipment(doc, rental) {
+  const rentalClientId = safeId(rental?.clientId);
+  const docClientId = getDocumentClientId(doc);
+  if (!rentalClientId || !docClientId || rentalClientId !== docClientId) return false;
+
+  const rentalEquipmentId = getRentalEquipmentId(rental);
+  const docEquipmentId = getDocumentEquipmentId(doc);
+  if (rentalEquipmentId && docEquipmentId) return rentalEquipmentId === docEquipmentId;
+
+  const rentalEquipmentInv = getRentalEquipmentInv(rental);
+  const docEquipmentInv = getDocumentEquipmentInv(doc);
+  return Boolean(rentalEquipmentInv && docEquipmentInv && rentalEquipmentInv === docEquipmentInv);
 }
 
 function actionForStatus(status) {
@@ -414,6 +445,77 @@ function buildRentalRows({ rentals, docsByRentalId, maps, todayKey, overdueDays 
     }));
 }
 
+function buildRentalDocumentMap({ rentals, documents }) {
+  const activeDocuments = documents.filter(isDocumentActive);
+  const documentsById = new Map();
+  activeDocuments.forEach(doc => {
+    const id = safeId(doc?.id);
+    if (id) documentsById.set(id, doc);
+  });
+
+  const specsByRentalId = new Map();
+  activeDocuments.filter(isSpecification).forEach(doc => {
+    const rentalId = getDocumentRentalId(doc);
+    if (!rentalId) return;
+    const list = specsByRentalId.get(rentalId) || [];
+    list.push(doc);
+    specsByRentalId.set(rentalId, list);
+  });
+
+  const docsByRentalId = new Map();
+  rentals.forEach(rental => {
+    const rentalId = safeId(rental?.id);
+    if (!rentalId) return;
+
+    const rentalDocs = new Map();
+    const addDoc = doc => {
+      const id = safeId(doc?.id);
+      if (id) rentalDocs.set(id, doc);
+    };
+
+    activeDocuments.forEach(doc => {
+      if (getDocumentRentalId(doc) === rentalId) addDoc(doc);
+    });
+
+    const specifications = specsByRentalId.get(rentalId) || [];
+    specifications.forEach(addDoc);
+
+    const specificationIds = new Set(specifications.map(doc => safeId(doc?.id)).filter(Boolean));
+    const contractIds = new Set();
+    specifications.forEach(specification => {
+      const parentId = getDocumentParentId(specification);
+      const contract = parentId ? documentsById.get(parentId) : null;
+      if (contract && isContract(contract)) {
+        addDoc(contract);
+        const contractId = safeId(contract?.id);
+        if (contractId) contractIds.add(contractId);
+      }
+    });
+
+    activeDocuments.filter(isContract).forEach(contract => {
+      if (getDocumentRentalId(contract) === rentalId) {
+        addDoc(contract);
+        const contractId = safeId(contract?.id);
+        if (contractId) contractIds.add(contractId);
+      }
+    });
+
+    activeDocuments.filter(doc => isTransferAct(doc) || isReturnAct(doc)).forEach(doc => {
+      const specificationId = getDocumentSpecificationId(doc);
+      const parentId = getDocumentParentId(doc);
+      if (specificationId && specificationIds.has(specificationId)) return addDoc(doc);
+      if (parentId && specificationIds.has(parentId)) return addDoc(doc);
+      if (parentId && contractIds.has(parentId) && documentMatchesRentalPartyAndEquipment(doc, rental)) return addDoc(doc);
+      if (!specificationId && !parentId && documentMatchesRentalPartyAndEquipment(doc, rental)) return addDoc(doc);
+      return undefined;
+    });
+
+    docsByRentalId.set(rentalId, Array.from(rentalDocs.values()));
+  });
+
+  return docsByRentalId;
+}
+
 export function buildDocumentControl(input = {}) {
   const rentals = Array.isArray(input.rentals) ? input.rentals : [];
   const documents = Array.isArray(input.documents) ? input.documents : [];
@@ -422,15 +524,8 @@ export function buildDocumentControl(input = {}) {
   const todayKey = dateKey(input.today) || new Date().toISOString().slice(0, 10);
   const overdueDays = Number.isFinite(Number(input.signatureOverdueDays)) ? Math.max(1, Number(input.signatureOverdueDays)) : 7;
   const maps = buildMaps({ rentals, clients, equipment });
-  const docsByRentalId = new Map();
-
-  documents.forEach(doc => {
-    const rentalId = getDocumentRentalId(doc);
-    if (!rentalId) return;
-    const list = docsByRentalId.get(rentalId) || [];
-    list.push(doc);
-    docsByRentalId.set(rentalId, list);
-  });
+  const activeDocuments = documents.filter(isDocumentActive);
+  const docsByRentalId = buildRentalDocumentMap({ rentals, documents: activeDocuments });
 
   const rentalSummaries = new Map();
   rentals.forEach(rental => {
@@ -439,7 +534,7 @@ export function buildDocumentControl(input = {}) {
     rentalSummaries.set(rentalId, buildRentalSummary(rental, docsByRentalId.get(rentalId) || [], maps, todayKey, overdueDays));
   });
 
-  const documentRows = buildDocumentRows({ documents, maps, todayKey, overdueDays })
+  const documentRows = buildDocumentRows({ documents: activeDocuments, maps, todayKey, overdueDays })
     .filter(row => row.status !== DOCUMENT_CONTROL_STATUSES.OK);
   const rentalRows = buildRentalRows({ rentals, docsByRentalId, maps, todayKey, overdueDays });
   const rows = [...rentalRows, ...documentRows].sort(sortRows);
@@ -454,8 +549,8 @@ export function buildDocumentControl(input = {}) {
 
   const kpi = {
     totalDocuments: documents.length,
-    unsignedDocuments: documents.filter(isUnsigned).length,
-    sentWaiting: documents.filter(isSentUnsigned).length,
+    unsignedDocuments: activeDocuments.filter(isUnsigned).length,
+    sentWaiting: activeDocuments.filter(isSentUnsigned).length,
     rentalsWithoutContract: relevantRentalSummaries.filter(summary => !summary.contract.exists).length,
     rentalsWithoutSpecification: relevantRentalSummaries.filter(summary => summary.contract.exists && !summary.specification.exists).length,
     rentalsWithoutTransferAct: relevantRentalSummaries.filter(summary => summary.specification.exists && !summary.transferAct.exists).length,

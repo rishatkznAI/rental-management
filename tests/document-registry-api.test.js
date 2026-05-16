@@ -625,6 +625,25 @@ test('rental document chain links specification and acts through immutable snaps
     assert.match(returned.json.printHtml, /Дата возврата/);
     assert.match(returned.json.printHtml, /Состояние при возврате/);
     assert.match(returned.json.printHtml, /Повреждения/);
+    assert.doesNotMatch(returned.json.printHtml, /<th>Сервисная заявка<\/th>\s*<td>—<\/td>/);
+    assert.doesNotMatch(returned.json.printHtml, /Сервисная заявка<\/th>/);
+
+    const returnedWithService = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'return_act_from_client',
+      parentDocumentId: contract.json.id,
+      specificationId: specification.json.id,
+      clientId: 'C-1',
+      rentalId: 'R-1',
+      equipmentId: 'EQ-1',
+      returnDate: '2026-05-12',
+      returnCondition: 'Требует ремонта',
+      damages: 'Повреждение ограждения',
+      missingItems: 'Нет',
+      serviceRequired: 'Да',
+      serviceTicketId: 'S-1',
+    });
+    assert.equal(returnedWithService.response.status, 201, JSON.stringify(returnedWithService.json));
+    assert.match(returnedWithService.json.printHtml, /<th>Сервисная заявка<\/th>\s*<td>S-1<\/td>/);
   });
 });
 

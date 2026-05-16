@@ -146,7 +146,12 @@ test('admin creates rental contract draft with selected client in document wizar
     for (const item of [document, spec, transfer, returnAct]) {
       const print = await api.get(`/api/documents/${item.id}/print`);
       expect(print.ok(), `${item.type} print`).toBeTruthy();
-      expect(await print.text()).toMatch(/<!doctype html>/i);
+      const html = await print.text();
+      expect(html).toMatch(/<!doctype html>/i);
+      if (item.id === returnAct.id) {
+        expect(html).not.toMatch(/<th>Сервисная заявка<\/th>\s*<td>—<\/td>/);
+        expect(html).not.toMatch(/Сервисная заявка<\/th>/);
+      }
     }
 
     return { spec, transfer, returnAct };
@@ -157,6 +162,12 @@ test('admin creates rental contract draft with selected client in document wizar
   await expect(page.getByText(chain.spec.number).first()).toBeVisible();
   await expect(page.getByText(chain.transfer.number).first()).toBeVisible();
   await expect(page.getByText(chain.returnAct.number).first()).toBeVisible();
+
+  await page.getByRole('button', { name: /Контроль/ }).click();
+  await expect(page.getByRole('heading', { name: 'Контроль документов' })).toBeVisible();
+  await expect(page.locator('tr').filter({ hasText: seed.rental.id }).filter({ hasText: 'Нет договора' })).toHaveCount(0);
+  await expect(page.locator('tr').filter({ hasText: seed.rental.id }).filter({ hasText: 'Нет спецификации' })).toHaveCount(0);
+  await expect(page.locator('tr').filter({ hasText: seed.rental.id }).filter({ hasText: 'Нет акта передачи' })).toHaveCount(0);
 
   expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);
 });

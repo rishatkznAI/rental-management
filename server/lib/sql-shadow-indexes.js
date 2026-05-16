@@ -188,7 +188,29 @@ function ensureSqlShadowSchema(db) {
       searchText TEXT,
       rawJson TEXT NOT NULL
     );
-
+  `);
+  ensureTableColumn(db, DOCUMENTS_TABLE, 'date', 'TEXT');
+  ensureTableColumn(db, DOCUMENTS_TABLE, 'documentDate', 'TEXT');
+  for (const [name, definition] of [
+    ['rentalId', 'TEXT'],
+    ['sourceRentalId', 'TEXT'],
+    ['originalRentalId', 'TEXT'],
+    ['equipmentId', 'TEXT'],
+    ['clientId', 'TEXT'],
+    ['managerId', 'TEXT'],
+    ['ownerId', 'TEXT'],
+    ['status', 'TEXT'],
+    ['startDate', 'TEXT'],
+    ['endDate', 'TEXT'],
+    ['plannedReturnDate', 'TEXT'],
+    ['objectId', 'TEXT'],
+    ['contractId', 'TEXT'],
+    ['searchText', 'TEXT'],
+    ['rawJson', 'TEXT'],
+  ]) {
+    ensureTableColumn(db, GANTT_TABLE, name, definition);
+  }
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_rental ON ${GANTT_TABLE}(rentalId);
     CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_source_rental ON ${GANTT_TABLE}(sourceRentalId);
     CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_original_rental ON ${GANTT_TABLE}(originalRentalId);
@@ -202,10 +224,6 @@ function ensureSqlShadowSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_equipment_overlap ON ${GANTT_TABLE}(equipmentId, startDate, endDate);
     CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_overlap ON ${GANTT_TABLE}(startDate, endDate);
     CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_status_overlap ON ${GANTT_TABLE}(status, startDate, endDate);
-  `);
-  ensureTableColumn(db, DOCUMENTS_TABLE, 'date', 'TEXT');
-  ensureTableColumn(db, DOCUMENTS_TABLE, 'documentDate', 'TEXT');
-  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_documents_sql_type ON ${DOCUMENTS_TABLE}(type);
     CREATE INDEX IF NOT EXISTS idx_documents_sql_status ON ${DOCUMENTS_TABLE}(status);
     CREATE INDEX IF NOT EXISTS idx_documents_sql_client ON ${DOCUMENTS_TABLE}(clientId);

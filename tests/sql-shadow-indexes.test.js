@@ -60,6 +60,53 @@ test('SQL shadow schema creates documents and gantt tables idempotently', () => 
   }
 });
 
+test('SQL shadow schema backfills legacy gantt table columns before sync', () => {
+  const { db, dir } = makeDb();
+  try {
+    db.exec(`
+      CREATE TABLE ${GANTT_TABLE} (
+        id TEXT PRIMARY KEY,
+        rentalId TEXT,
+        sourceRentalId TEXT,
+        originalRentalId TEXT,
+        equipmentId TEXT,
+        clientId TEXT,
+        managerId TEXT,
+        ownerId TEXT,
+        status TEXT,
+        startDate TEXT,
+        endDate TEXT,
+        plannedReturnDate TEXT,
+        searchText TEXT,
+        rawJson TEXT NOT NULL
+      );
+    `);
+    ensureSqlShadowSchema(db);
+    const columns = db.prepare(`PRAGMA table_info(${GANTT_TABLE})`).all().map(row => row.name);
+    assert.ok(columns.includes('objectId'));
+    assert.ok(columns.includes('contractId'));
+
+    const result = syncSqlShadowIndexForCollection(db, 'gantt_rentals', [{
+      id: 'GR-legacy',
+      rentalId: 'R-legacy',
+      equipmentId: 'EQ-legacy',
+      clientId: 'C-legacy',
+      objectId: 'CO-legacy',
+      contractId: 'CC-legacy',
+      startDate: '2026-05-01',
+      endDate: '2026-05-03',
+    }]);
+    assert.equal(result.inserted, 1);
+    const row = db.prepare(`SELECT objectId, contractId, rawJson FROM ${GANTT_TABLE} WHERE id = 'GR-legacy'`).get();
+    assert.equal(row.objectId, 'CO-legacy');
+    assert.equal(row.contractId, 'CC-legacy');
+    assert.equal(JSON.parse(row.rawJson).rentalId, 'R-legacy');
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('backfill indexes documents and gantt_rentals and preserves rawJson', () => {
   const { db, dir } = makeDb();
   try {

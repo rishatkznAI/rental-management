@@ -196,6 +196,7 @@ function setData(name, value) {
   const nextValue = name === 'clients' && Array.isArray(value)
     ? value.map(normalizeClientInnFields)
     : value;
+  const shouldSyncShadowIndex = (name === 'documents' || name === 'gantt_rentals') && Array.isArray(nextValue);
   if (name === 'clients') {
     if (Array.isArray(previousValue)) {
       assertClientInnWriteAllowed(previousValue, nextValue);
@@ -212,9 +213,6 @@ function setData(name, value) {
     `);
   const tx = db.transaction(() => {
     upsert.run(name, JSON.stringify(nextValue));
-    if ((name === 'documents' || name === 'gantt_rentals') && Array.isArray(nextValue)) {
-      syncSqlShadowIndexForCollection(db, name, nextValue);
-    }
     if (name === 'clients') {
       const duplicateCheck = checkClientInnDuplicates(nextValue, { throwOnDuplicates: false });
       if (duplicateCheck.ok) {
@@ -225,6 +223,16 @@ function setData(name, value) {
     }
   });
   tx();
+  if (shouldSyncShadowIndex) {
+    try {
+      const result = syncSqlShadowIndexForCollection(db, name, nextValue);
+      for (const entry of result?.errors || []) {
+        console.error(`[sql-shadow] failed to sync ${name} id=${entry.id || '(missing)'}: ${entry.error}`);
+      }
+    } catch (error) {
+      console.error(`[sql-shadow] failed to sync ${name}: ${error?.message || error}`);
+    }
+  }
 }
 
 function migrateJsonFilesToDb() {

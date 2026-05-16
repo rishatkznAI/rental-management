@@ -95,14 +95,43 @@ test('documents page uses bounded reference search instead of loading full regis
   const pageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Documents.tsx'), 'utf8');
   const serviceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/documents.service.ts'), 'utf8');
   const routeSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/documents.js'), 'utf8');
+  const sidebarSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/layout/Sidebar.tsx'), 'utf8');
 
   assert.doesNotMatch(pageSource, /useDocumentsList\(/);
   assert.match(pageSource, /useDocumentReferences\(/);
   assert.match(pageSource, /documentWizardOpen/);
+  assert.match(pageSource, /enabled: documentWizardOpen/);
+  assert.match(pageSource, /usePaginatedDocuments\(\{/);
+  assert.doesNotMatch(sidebarSource, /queryFn: documentsService\.getAll/);
+  assert.match(sidebarSource, /documentsService\.getReferences\(\{/);
+  assert.match(sidebarSource, /enabled: hasSearchInput && canView\('documents'\)/);
   assert.match(serviceSource, /\/api\/documents\/references/);
   assert.match(routeSource, /documentsRouter\.get\('\/documents\/references'/);
   assert.match(routeSource, /compactDocumentReference/);
   assert.match(routeSource, /pageSize: req\.query\.pageSize \|\| '25'/);
+});
+
+test('payments page does not call forbidden finance endpoints or full documents on initial rental manager load', () => {
+  const pageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Payments.tsx'), 'utf8');
+  const routeSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/finance.js'), 'utf8');
+
+  assert.match(pageSource, /usePaginatedPayments\(\{/);
+  assert.match(pageSource, /useDocumentsList\(\{\s*enabled: Boolean\(selectedPaymentId\),\s*\}\)/);
+  assert.match(pageSource, /financeService\.getReceivables\(\)/);
+  assert.match(routeSource, /router\.get\('\/finance\/receivables', requireAuth, requireRead\('payments'\)/);
+  assert.match(routeSource, /filterCollectionByScope\('payments'/);
+  assert.match(routeSource, /filterCollectionByScope\('gantt_rentals'/);
+});
+
+test('service page and idle global search avoid full service list loads', () => {
+  const servicePageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Service.tsx'), 'utf8');
+  const sidebarSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/layout/Sidebar.tsx'), 'utf8');
+  const notificationSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/layout/NotificationCenter.tsx'), 'utf8');
+
+  assert.match(servicePageSource, /usePaginatedServiceTickets\(\{/);
+  assert.doesNotMatch(servicePageSource, /useServiceTicketsList\(/);
+  assert.match(sidebarSource, /useServiceTicketsList\(\{ enabled: hasSearchInput && canSearchService \}\)/);
+  assert.match(notificationSource, /queryFn: serviceTicketsService\.getAll, enabled: open && canViewService && canReadCollection\('service'\)/);
 });
 
 test('clients page receives backend financial summary without frontend full rentals payments load', () => {

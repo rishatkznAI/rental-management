@@ -239,7 +239,7 @@ test('frontend warranty pages do not prefetch forbidden operational collections'
   assert.match(equipmentHookSource, /enabled: options\.enabled \?\? true/);
   assert.match(serviceTicketsHookSource, /enabled: options\.enabled \?\? true/);
   assert.match(sidebarSource, /useEquipmentList\(\{ enabled: canSearchEquipment \}\)/);
-  assert.match(sidebarSource, /useServiceTicketsList\(\{ enabled: canSearchService \}\)/);
+  assert.match(sidebarSource, /useServiceTicketsList\(\{ enabled: hasSearchInput && canSearchService \}\)/);
   assert.match(sidebarSource, /queryKey: \['deliveries', 'global-search', user\?\.id \|\| 'anonymous', user\?\.role \|\| 'anonymous'\]/);
 
   assert.match(notificationCenterSource, /const \{ canView, canReadCollection \} = usePermissions\(\)/);

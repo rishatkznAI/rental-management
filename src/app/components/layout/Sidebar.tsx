@@ -177,14 +177,20 @@ export function Sidebar({
   const { data: clients = [] } = useClientsList({ enabled: canSearchClients });
   const { data: rentals = [] } = useRentalsList({ enabled: canSearchRentals });
   const { data: ganttRentals = [] } = useGanttData({ enabled: canSearchRentals });
-  const { data: serviceTickets = [] } = useServiceTicketsList({ enabled: canSearchService });
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 180);
+  const deferredSearch = useDeferredValue(debouncedSearch);
+  const hasSearchInput = deferredSearch.trim().length > 0;
+  const { data: serviceTickets = [] } = useServiceTicketsList({ enabled: hasSearchInput && canSearchService });
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
-  const hasSearchInput = search.trim().length > 0;
   const { data: documents = [] } = useQuery({
-    queryKey: ['documents', 'global-search'],
-    queryFn: documentsService.getAll,
+    queryKey: ['documents', 'global-search', deferredSearch],
+    queryFn: async () => (await documentsService.getReferences({
+      page: 1,
+      pageSize: 25,
+      search: deferredSearch,
+    })).items,
     enabled: hasSearchInput && canView('documents'),
     staleTime: 1000 * 60 * 5,
   });
@@ -213,8 +219,6 @@ export function Sidebar({
     enabled: canReadAppSettings,
     staleTime: 1000 * 60 * 5,
   });
-  const debouncedSearch = useDebouncedValue(search, 180);
-  const deferredSearch = useDeferredValue(debouncedSearch);
   const normalizedSearch = normalizeGlobalSearchQuery(deferredSearch);
   const investorBinding = useMemo(() => getInvestorBinding(user), [user]);
   const isInvestorRole = isInvestorUser({

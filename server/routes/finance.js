@@ -734,17 +734,17 @@ function registerFinanceRoutes(router, deps) {
     }
   });
 
-  router.get('/finance/receivables', requireAuth, requireRead('finance_operations'), (req, res) => {
+  router.get('/finance/receivables', requireAuth, requireRead('payments'), (req, res) => {
     const result = receivablesResponse(req);
     res.json(result);
   });
 
-  router.get('/finance/receivables/summary', requireAuth, requireRead('finance_operations'), (req, res) => {
+  router.get('/finance/receivables/summary', requireAuth, requireRead('payments'), (req, res) => {
     const result = receivablesResponse(req);
     res.json(result.summary);
   });
 
-  router.get('/finance/receivables/:clientId', requireAuth, requireRead('finance_operations'), (req, res) => {
+  router.get('/finance/receivables/:clientId', requireAuth, requireRead('payments'), (req, res) => {
     const result = receivablesResponse(req);
     const clientId = String(req.params.clientId || '').trim();
     const row = result.rows.find(item => String(item.clientId || '') === clientId);

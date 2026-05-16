@@ -50,6 +50,8 @@ function createApp() {
   const users = {
     admin: { userId: 'u-admin', userName: 'Admin', userRole: 'Администратор' },
     office: { userId: 'u-office', userName: 'Office', userRole: 'Офис-менеджер' },
+    manager: { userId: 'u-manager', userName: 'Manager', userRole: 'Менеджер по аренде' },
+    sales: { userId: 'u-sales', userName: 'Sales', userRole: 'Менеджер по продажам' },
     mechanic: { userId: 'u-mechanic', userName: 'Mechanic', userRole: 'Механик' },
   };
   const readData = name => state[name] || [];
@@ -69,7 +71,7 @@ function createApp() {
   };
   const requireRead = collection => (req, res, next) => {
     if (collection === 'finance_operations' && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
-    if (collection === 'payments' && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
+    if (collection === 'payments' && ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'].includes(req.user?.userRole)) return next();
     if (['debt_collection_actions', 'receivable_payment_plans'].includes(collection) && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
     return res.status(403).json({ ok: false, error: 'Forbidden' });
   };
@@ -168,5 +170,67 @@ test('receivables API denies roles without finance payment access', async () => 
       actionType: 'call',
     });
     assert.equal(deniedWrite.response.status, 403);
+  });
+});
+
+test('receivables API allows rental manager scoped read without exposing other managers debt', async () => {
+  const { app, state } = createApp();
+  state.clients = [
+    { id: 'c-own', company: 'ООО Свой', manager: 'Manager', managerId: 'u-manager' },
+    { id: 'c-other', company: 'ООО Чужой', manager: 'Office', managerId: 'u-office' },
+  ];
+  state.rentals = [
+    { id: 'r-own', clientId: 'c-own', client: 'ООО Свой', manager: 'Manager', managerId: 'u-manager', status: 'active' },
+    { id: 'r-other', clientId: 'c-other', client: 'ООО Чужой', manager: 'Office', managerId: 'u-office', status: 'active' },
+  ];
+  state.gantt_rentals = [
+    {
+      id: 'gr-own',
+      rentalId: 'r-own',
+      sourceRentalId: 'r-own',
+      originalRentalId: 'r-own',
+      clientId: 'c-own',
+      client: 'ООО Свой',
+      manager: 'Manager',
+      managerId: 'u-manager',
+      equipmentInv: 'OWN-1',
+      startDate: '2026-04-01',
+      endDate: '2026-04-10',
+      expectedPaymentDate: '2026-04-15',
+      amount: 100000,
+      status: 'active',
+    },
+    {
+      id: 'gr-other',
+      rentalId: 'r-other',
+      sourceRentalId: 'r-other',
+      originalRentalId: 'r-other',
+      clientId: 'c-other',
+      client: 'ООО Чужой',
+      manager: 'Office',
+      managerId: 'u-office',
+      equipmentInv: 'OTHER-1',
+      startDate: '2026-04-01',
+      endDate: '2026-04-10',
+      expectedPaymentDate: '2026-04-15',
+      amount: 250000,
+      status: 'active',
+    },
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const managerList = await request(baseUrl, 'GET', '/api/finance/receivables?today=2026-05-09', 'manager');
+    assert.equal(managerList.response.status, 200);
+    assert.equal(managerList.json.summary.totalDebt, 100000);
+    assert.deepEqual(managerList.json.rows.map(row => row.clientId), ['c-own']);
+
+    const adminList = await request(baseUrl, 'GET', '/api/finance/receivables?today=2026-05-09', 'admin');
+    assert.equal(adminList.response.status, 200);
+    assert.equal(adminList.json.summary.totalDebt, 350000);
+    assert.deepEqual(adminList.json.rows.map(row => row.clientId).sort(), ['c-other', 'c-own']);
+
+    const officeList = await request(baseUrl, 'GET', '/api/finance/receivables?today=2026-05-09', 'office');
+    assert.equal(officeList.response.status, 200);
+    assert.equal(officeList.json.summary.totalDebt, 350000);
   });
 });

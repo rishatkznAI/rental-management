@@ -52,7 +52,7 @@ function createApp() {
   const requireRead = collection => (req, res, next) => {
     if (collection === 'finance_accounts' && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
     if (collection === 'finance_operations' && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
-    if (collection === 'payments' && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
+    if (collection === 'payments' && ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'].includes(req.user?.userRole)) return next();
     if (['debt_collection_actions', 'receivable_payment_plans'].includes(collection) && ['Администратор', 'Офис-менеджер'].includes(req.user?.userRole)) return next();
     return res.status(403).json({ ok: false, error: 'Forbidden' });
   };
@@ -291,8 +291,6 @@ test('finance endpoints do not expose amounts to roles without finance access', 
     '/api/finance/manager-breakdown?manager=Office',
     '/api/finance/aging',
     '/api/finance/report',
-    '/api/finance/receivables',
-    '/api/finance/receivables/summary',
   ];
   await withServer(app, async (baseUrl) => {
     for (const token of ['manager', 'sales', 'mechanic', 'investor']) {
@@ -300,6 +298,18 @@ test('finance endpoints do not expose amounts to roles without finance access', 
         const denied = await request(baseUrl, 'GET', path, token);
         assert.equal(denied.response.status, 403, `${token} should not read ${path}`);
       }
+    }
+    for (const token of ['manager', 'sales']) {
+      const receivables = await request(baseUrl, 'GET', '/api/finance/receivables', token);
+      assert.equal(receivables.response.status, 200, `${token} should read scoped receivables`);
+      const summary = await request(baseUrl, 'GET', '/api/finance/receivables/summary', token);
+      assert.equal(summary.response.status, 200, `${token} should read scoped receivables summary`);
+    }
+    for (const token of ['mechanic', 'investor']) {
+      const receivables = await request(baseUrl, 'GET', '/api/finance/receivables', token);
+      assert.equal(receivables.response.status, 403, `${token} should not read receivables`);
+      const summary = await request(baseUrl, 'GET', '/api/finance/receivables/summary', token);
+      assert.equal(summary.response.status, 403, `${token} should not read receivables summary`);
     }
   });
 });

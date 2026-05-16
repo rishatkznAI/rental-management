@@ -73,7 +73,7 @@ export function NotificationCenter() {
   const results = useQueries({
     queries: [
       { queryKey: ['notif-gantt-rentals'], queryFn: rentalsService.getGanttData, enabled: canViewRentals && canReadCollection('gantt_rentals') },
-      { queryKey: ['notif-service'], queryFn: serviceTicketsService.getAll, enabled: canViewService && canReadCollection('service') },
+      { queryKey: ['notif-service'], queryFn: serviceTicketsService.getAll, enabled: open && canViewService && canReadCollection('service') },
       { queryKey: ['notif-equipment'], queryFn: equipmentService.getAll, enabled: canViewEquipment && canReadCollection('equipment') },
       { queryKey: ['notif-payments'], queryFn: paymentsService.getAll, enabled: canViewPayments && canReadCollection('payments') },
       { queryKey: ['notif-shipping-photos'], queryFn: equipmentService.getAllShippingPhotos, enabled: canViewShippingPhotos },

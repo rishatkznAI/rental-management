@@ -780,7 +780,12 @@ export default function Payments() {
   const { data: clients = [] } = useClientsList();
   const { data: clientObjects = [] } = useClientObjectsList();
   const { data: clientContracts = [] } = useClientContractsList();
-  const { data: documents = [] } = useDocumentsList();
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [selectedPaymentId, setSelectedPaymentId] = useState('');
+  const { data: documents = [] } = useDocumentsList({
+    enabled: Boolean(selectedPaymentId),
+  });
   const createPayment = useCreatePayment();
   const pagination = useServerPagination<{ status: string; clientId: string }>({
     initialSortBy: 'date',
@@ -804,9 +809,6 @@ export default function Payments() {
     partialAmount?: number;
     count?: number;
   } | undefined;
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
-  const [selectedPaymentId, setSelectedPaymentId] = useState('');
   const { data: allPaymentsForAllocation = [] } = usePaymentsList({
     enabled: showAddModal || Boolean(selectedPaymentId),
   });

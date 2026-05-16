@@ -44,11 +44,11 @@ const OFFICE_SECTIONS: Array<{ name: RegExp; label: string; route: string }> = [
   { name: /^Документы/, label: 'Документы', route: '/documents' },
   { name: /^Платежи/, label: 'Платежи', route: '/payments' },
   { name: /^Финансы/, label: 'Финансы', route: '/finance' },
+  { name: /^Отчёты/, label: 'Отчёты', route: '/reports' },
 ];
 
 const FORBIDDEN_NAV_ITEMS = [
   /^Бот/,
-  /^Отчёты/,
   /^Панель администратора/,
 ];
 

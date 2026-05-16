@@ -19,6 +19,7 @@ const serviceTicketsHookSource = readFileSync(new URL('../src/app/hooks/useServi
 const serviceDetailSource = readFileSync(new URL('../src/app/pages/ServiceDetail.tsx', import.meta.url), 'utf8');
 const apiSource = readFileSync(new URL('../src/app/lib/api.ts', import.meta.url), 'utf8');
 const salesPageSource = readFileSync(new URL('../src/app/pages/Sales.tsx', import.meta.url), 'utf8');
+const reportsPageSource = readFileSync(new URL('../src/app/pages/Reports.tsx', import.meta.url), 'utf8');
 const themeSource = readFileSync(new URL('../src/styles/theme.css', import.meta.url), 'utf8');
 
 function warrantyPermissionBlock() {
@@ -74,9 +75,35 @@ test('frontend rental manager permissions match backend write limits', () => {
 
   assert.match(block, /clients:\s+VIEW_CREATE/, 'rental manager can create clients through the UI');
   assert.match(block, /payments:\s+VIEW/, 'rental manager must not see payment mutation controls');
+  assert.match(block, /reports:\s+VIEW/, 'rental manager can open scoped reports UI');
   assert.doesNotMatch(block, /payments:\s+\['view', 'create', 'edit'\]/);
   assert.doesNotMatch(block, /\bfinance:\s+/);
   assert.doesNotMatch(block, /\badmin_panel:\s+/);
+});
+
+test('frontend reports route and menu match scoped report access policy', () => {
+  const adminBlock = adminPermissionBlock();
+  const officeBlock = officeManagerPermissionBlock();
+  const rentalManagerBlock = rentalManagerPermissionBlock();
+  const investorBlock = investorPermissionBlock();
+
+  assert.match(adminBlock, /reports:\s+ALL/);
+  assert.match(officeBlock, /reports:\s+VIEW/);
+  assert.match(rentalManagerBlock, /reports:\s+VIEW/);
+  assert.doesNotMatch(investorBlock, /\breports:\s+/);
+
+  assert.match(permissionsSource, /'Офис-менеджер': \['analytics', 'finance', 'sales-stock', 'managers', 'service'\]/);
+  assert.match(permissionsSource, /'Менеджер по аренде': \['analytics', 'finance', 'managers'\]/);
+  assert.doesNotMatch(permissionsSource, /'Инвестор': \[[^\]]*reports/);
+  assert.match(permissionsSource, /pathname\.startsWith\('\/manager-report'\)\) return 'reports'/);
+
+  assert.match(sidebarSource, /section:\s*'reports'/);
+  assert.match(reportsPageSource, /getReportsTabsForRole\(user\?\.role\)/);
+  assert.match(reportsPageSource, /visibleReportTabs\.map/);
+  assert.match(reportsPageSource, /enabled: canViewFinanceReport && activeTab === 'finance'/);
+  assert.match(reportsPageSource, /enabled: canViewSalesStockReport && activeTab === 'sales-stock'/);
+  assert.match(reportsPageSource, /enabled: canViewServiceReport && activeTab === 'service'/);
+  assert.match(reportsPageSource, /canViewManagersReport \? \(/);
 });
 
 test('frontend delivery create RBAC exposes active create only to operational roles', () => {

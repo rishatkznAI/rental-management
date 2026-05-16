@@ -4,8 +4,8 @@
  * Роли:
  *  Администратор    — полный доступ ко всему
  *  Менеджер по аренде — личный дашборд (только свои данные), просмотр основных
- *                      разделов, создание сервисных заявок; без Отчётов и Настроек
- *  Офис-менеджер   — полный операционный доступ + свой дашборд (без Отчётов и Настроек)
+ *                      разделов, создание сервисных заявок и scoped-отчётов; без Настроек
+ *  Офис-менеджер   — полный операционный доступ + свой дашборд и отчёты (без Настроек)
  *  Механик          — только Техника (просмотр) + Сервис (полный CRUD)
  *  Механик по гарантии — Сервис/Рекламации + просмотр Техники и Продаж
  *  Инвестор         — только своя техника и связанные аренды
@@ -45,6 +45,7 @@ export type Section =
 
 export type Action = 'view' | 'create' | 'edit' | 'delete';
 export type AppPermission = 'service_day_plan_view' | 'service_day_plan_manage';
+export type ReportsTab = 'analytics' | 'finance' | 'sales-stock' | 'managers' | 'service';
 
 type RolePermissions = Partial<Record<Section, Action[]>>;
 type BackendPermissions = {
@@ -113,6 +114,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     documents:        VIEW_CREATE,
     payments:         VIEW,
     approvals:        VIEW,
+    reports:          VIEW,
     profile_settings: ['view', 'edit'],
   },
   'Офис-менеджер': {
@@ -133,6 +135,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     payments:         ALL,
     finance:          VIEW_CREATE_EDIT,
     approvals:        VIEW,
+    reports:          VIEW,
     profile_settings: ['view', 'edit'],
   },
   'Менеджер по продажам': {
@@ -198,6 +201,20 @@ const APP_PERMISSIONS: Record<AppPermission, string[]> = {
   ],
 };
 
+const REPORTS_TABS_BY_ROLE: Record<string, ReportsTab[]> = {
+  'Администратор': ['analytics', 'finance', 'sales-stock', 'managers', 'service'],
+  'Офис-менеджер': ['analytics', 'finance', 'sales-stock', 'managers', 'service'],
+  'Менеджер по аренде': ['analytics', 'finance', 'managers'],
+};
+
+export function getReportsTabsForRole(role: string | null | undefined): ReportsTab[] {
+  return REPORTS_TABS_BY_ROLE[normalizeUserRole(role)] ?? [];
+}
+
+export function canViewReportsTab(role: string | null | undefined, tab: ReportsTab): boolean {
+  return getReportsTabsForRole(role).includes(tab);
+}
+
 export function hasAppPermission(role: string | null | undefined, permission: AppPermission): boolean {
   const normalizedRole = normalizeUserRole(role);
   return APP_PERMISSIONS[permission]?.includes(normalizedRole) ?? false;
@@ -245,6 +262,7 @@ export function pathToSection(pathname: string): Section | null {
   if (pathname.startsWith('/payroll'))        return 'payroll';
   if (pathname.startsWith('/approvals'))      return 'approvals';
   if (pathname.startsWith('/bots'))           return 'bots';
+  if (pathname.startsWith('/manager-report')) return 'reports';
   if (pathname.startsWith('/reports'))        return 'reports';
   if (pathname.startsWith('/settings'))       return 'profile_settings';
   if (pathname.startsWith('/admin'))          return 'admin_panel';

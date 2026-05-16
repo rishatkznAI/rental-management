@@ -55,12 +55,12 @@ const RENTAL_MANAGER_SECTIONS: Array<{ name: RegExp; label: string; route: strin
   { name: /^Клиенты/, label: 'Клиенты', route: '/clients' },
   { name: /^Документы/, label: 'Документы', route: '/documents' },
   { name: /^Платежи/, label: 'Платежи', route: '/payments' },
+  { name: /^Отчёты/, label: 'Отчёты', route: '/reports' },
 ];
 
 const FORBIDDEN_NAV_ITEMS = [
   /^Финансы/,
   /^Бот/,
-  /^Отчёты/,
   /^Панель администратора/,
 ];
 
@@ -564,7 +564,7 @@ test('smoke-rental can use rental manager UI without admin access or runtime err
   await expectHealthyScreen(page, action);
 
   action = 'forbidden direct routes';
-  for (const route of ['/finance', '/bots', '/reports', '/admin']) {
+  for (const route of ['/finance', '/bots', '/admin']) {
     await navigateInApp(page, route);
     await expect(page).not.toHaveURL(new RegExp(`#${route}$`));
     await expectHealthyScreen(page, `forbidden route ${route}`);

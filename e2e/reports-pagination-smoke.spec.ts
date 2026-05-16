@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { loginAsAdmin, navigateInApp } from './helpers/auth';
+import { login, loginAsAdmin, navigateInApp } from './helpers/auth';
+import { ensureUser, withAdminApi } from './helpers/api';
 
 type UiIssue = {
   type: string;
@@ -31,6 +32,30 @@ function installGuards(page: Page, issues: UiIssue[], apiUrls: string[]) {
 async function selectTab(page: Page, name: string) {
   await page.getByRole('tab', { name }).click();
   await expect(page.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true');
+}
+
+async function ensureRoleUser(role: string, suffix: string) {
+  const roleSlug: Record<string, string> = {
+    'Офис-менеджер': 'office',
+    'Менеджер по аренде': 'rental-manager',
+    'Инвестор': 'investor',
+    'Механик': 'mechanic',
+  };
+  return withAdminApi(api => ensureUser(api, {
+    name: `Reports ${role} ${suffix}`,
+    email: `reports-${suffix}-${roleSlug[role] ?? 'role'}@example.local`,
+    role,
+    password: '1234',
+  }));
+}
+
+async function expectAuthenticated(page: Page) {
+  await expect(async () => {
+    const loginVisible = await page.getByRole('heading', { name: 'Добро пожаловать' }).isVisible().catch(() => false);
+    const shellVisible = await page.locator('aside').isVisible().catch(() => false);
+    expect(loginVisible).toBeFalsy();
+    expect(shellVisible).toBeTruthy();
+  }).toPass();
 }
 
 test('Reports summary detail pagination smoke has no full-load endpoints', async ({ page }) => {
@@ -106,4 +131,82 @@ test('Reports summary detail pagination smoke has no full-load endpoints', async
   expect(apiUrls.some(url => url.includes('/api/reports/service/details/equipment-summary'))).toBeTruthy();
   expect(apiUrls.some(url => url.includes('/api/reports/service/details/problematic-models'))).toBeTruthy();
   expect(issues).toEqual([]);
+});
+
+test('Reports route policy follows scoped backend roles', async ({ page }) => {
+  test.setTimeout(90_000);
+  const suffix = String(Date.now()).slice(-8);
+  const officeCredentials = await ensureRoleUser('Офис-менеджер', suffix);
+  const rentalManagerCredentials = await ensureRoleUser('Менеджер по аренде', suffix);
+  const investorCredentials = await ensureRoleUser('Инвестор', `${suffix}-investor`);
+  const mechanicCredentials = await ensureRoleUser('Механик', `${suffix}-mechanic`);
+
+  for (const { role, credentials } of [
+    { role: 'Офис-менеджер' as const, credentials: officeCredentials },
+    { role: 'Менеджер по аренде' as const, credentials: rentalManagerCredentials },
+  ]) {
+    const issues: UiIssue[] = [];
+    const apiUrls: string[] = [];
+    installGuards(page, issues, apiUrls);
+
+    await page.goto('./#/login', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      window.localStorage.clear();
+      window.sessionStorage.clear();
+    });
+    await login(page, credentials);
+    await expectAuthenticated(page);
+    apiUrls.length = 0;
+    await navigateInApp(page, '/reports');
+    await expect(page.getByRole('heading', { name: 'Отчёты' })).toBeVisible();
+    apiUrls.length = 0;
+    await expect(page.getByRole('button', { name: /^Отчёты/ })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Финансы' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'По менеджерам' })).toBeVisible();
+
+    if (role === 'Менеджер по аренде') {
+      await expect(page.getByRole('tab', { name: 'Продажный склад' })).toHaveCount(0);
+      await expect(page.getByRole('tab', { name: 'По сервису' })).toHaveCount(0);
+    } else {
+      await expect(page.getByRole('tab', { name: 'Продажный склад' })).toBeVisible();
+      await expect(page.getByRole('tab', { name: 'По сервису' })).toBeVisible();
+    }
+
+    await selectTab(page, 'Финансы');
+    await expect(page.getByText('Фильтры финансов')).toBeVisible();
+    await selectTab(page, 'По менеджерам');
+    await expect(page.getByRole('heading', { name: 'Отчёт по менеджерам' })).toBeVisible();
+
+    const fullLoads = apiUrls.filter(url => [
+      /\/api\/equipment(?:\?|$)/,
+      /\/api\/gantt_rentals(?:\?|$)/,
+      /\/api\/payments(?:\?|$)/,
+      /\/api\/payment_allocations(?:\?|$)/,
+    ].some(pattern => pattern.test(url)));
+    expect(fullLoads).toEqual([]);
+    expect(issues).toEqual([]);
+  }
+
+  for (const { role, credentials } of [
+    { role: 'Инвестор' as const, credentials: investorCredentials },
+    { role: 'Механик' as const, credentials: mechanicCredentials },
+  ]) {
+    const issues: UiIssue[] = [];
+    const apiUrls: string[] = [];
+    installGuards(page, issues, apiUrls);
+
+    await page.goto('./#/login', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      window.localStorage.clear();
+      window.sessionStorage.clear();
+    });
+    await login(page, credentials);
+    await expectAuthenticated(page);
+    apiUrls.length = 0;
+    await navigateInApp(page, '/reports');
+    await expect(page).not.toHaveURL(/#\/reports$/);
+    await expect(page.getByRole('button', { name: /^Отчёты/ })).toHaveCount(0);
+    expect(apiUrls.some(url => url.includes('/api/reports/'))).toBeFalsy();
+    expect(issues).toEqual([]);
+  }
 });

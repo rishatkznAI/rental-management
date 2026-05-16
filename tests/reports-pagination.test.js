@@ -177,6 +177,14 @@ test('reports role checks cover office manager rental manager investor and deny 
     await withServer(app, async baseUrl => {
       const response = await getJson(baseUrl, '/api/reports/managers/summary?dateFrom=2026-05-01&dateTo=2026-05-31');
       assert.equal(response.response.status, item.expected, item.userRole);
+      if (item.userRole === 'Инвестор') {
+        assert.equal(response.body.totals.rentalsCount, 0);
+        assert.equal(response.body.totals.accrualsCount, 0);
+      }
+      if (item.userRole === 'Механик') {
+        const finance = await getJson(baseUrl, '/api/reports/finance/summary?dateFrom=2026-05-01&dateTo=2026-05-31');
+        assert.equal(finance.response.status, 403);
+      }
     });
   }
 });

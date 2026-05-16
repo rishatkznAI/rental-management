@@ -30,6 +30,8 @@ import type { Document } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import ManagerReport from './ManagerReport';
 import { reportsService, type MechanicFieldTripRow, type MechanicsWorkloadReport } from '../services/reports.service';
+import { useAuth } from '../contexts/AuthContext';
+import { getReportsTabsForRole, type ReportsTab } from '../lib/permissions';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -220,6 +222,7 @@ function getEquipmentDocuments(equipment: Equipment, documents: Document[]) {
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function Reports() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [loadedAt, setLoadedAt] = useState(Date.now());
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -252,15 +255,32 @@ export default function Reports() {
   const [serviceWorkStatus, setServiceWorkStatus] = useState('all');
   const [serviceWorkSource, setServiceWorkSource] = useState('all');
   const [servicePresetId, setServicePresetId] = useState('none');
-  const [activeTab, setActiveTab] = useState('analytics');
+  const [activeTab, setActiveTab] = useState<ReportsTab>('analytics');
   const [salesConditionFilter, setSalesConditionFilter] = useState('all');
   const [salesReadinessFilter, setSalesReadinessFilter] = useState('all');
   const [salesPdiFilter, setSalesPdiFilter] = useState('all');
   const [salesDocsFilter, setSalesDocsFilter] = useState('all');
   const [servicePresets, setServicePresets] = useState<ServiceReportPreset[]>([]);
+  const allowedReportTabs = useMemo(() => getReportsTabsForRole(user?.role), [user?.role]);
+  const canViewAnalyticsReport = allowedReportTabs.includes('analytics');
+  const canViewFinanceReport = allowedReportTabs.includes('finance');
+  const canViewSalesStockReport = allowedReportTabs.includes('sales-stock');
+  const canViewManagersReport = allowedReportTabs.includes('managers');
+  const canViewServiceReport = allowedReportTabs.includes('service');
+  const visibleReportTabs = useMemo(
+    () => [
+      { value: 'analytics' as const, label: 'Аналитика' },
+      { value: 'finance' as const, label: 'Финансы' },
+      { value: 'sales-stock' as const, label: 'Продажный склад' },
+      { value: 'managers' as const, label: 'По менеджерам' },
+      { value: 'service' as const, label: 'По сервису' },
+    ].filter(tab => allowedReportTabs.includes(tab.value)),
+    [allowedReportTabs],
+  );
   const { data: overview } = useQuery({
     queryKey: ['reports', 'overview'],
     queryFn: reportsService.getOverview,
+    enabled: canViewAnalyticsReport,
   });
   const financeParams = useMemo(() => ({
     dateFrom: financeDateFrom,
@@ -297,73 +317,73 @@ export default function Reports() {
   const { data: salesStockDetail } = useQuery({
     queryKey: ['reports', 'sales-stock', salesStockParams],
     queryFn: () => reportsService.getSalesStockDetails(salesStockParams),
-    enabled: activeTab === 'sales-stock',
+    enabled: canViewSalesStockReport && activeTab === 'sales-stock',
     placeholderData: previous => previous,
   });
   const { data: financeSummary } = useQuery({
     queryKey: ['reports', 'finance', 'summary', financeDateFrom, financeDateTo],
     queryFn: () => reportsService.getFinanceSummary({ dateFrom: financeDateFrom, dateTo: financeDateTo }),
-    enabled: activeTab === 'finance',
+    enabled: canViewFinanceReport && activeTab === 'finance',
     placeholderData: previous => previous,
   });
   const { data: financeClientDebtPageData } = useQuery({
     queryKey: ['reports', 'finance', 'client-debt', financeParams, financeClientPage],
     queryFn: () => reportsService.getFinanceDetails('client-debt', { ...financeParams, page: financeClientPage }),
-    enabled: activeTab === 'finance',
+    enabled: canViewFinanceReport && activeTab === 'finance',
     placeholderData: previous => previous,
   });
   const { data: financeManagerPageData } = useQuery({
     queryKey: ['reports', 'finance', 'manager-receivables', financeParams, financeManagerPage],
     queryFn: () => reportsService.getFinanceDetails('manager-receivables', { ...financeParams, page: financeManagerPage }),
-    enabled: activeTab === 'finance',
+    enabled: canViewFinanceReport && activeTab === 'finance',
     placeholderData: previous => previous,
   });
   const { data: financeDebtPageData } = useQuery({
     queryKey: ['reports', 'finance', 'unpaid-rentals', financeParams, financeDebtPage],
     queryFn: () => reportsService.getFinanceDetails('unpaid-rentals', { ...financeParams, page: financeDebtPage }),
-    enabled: activeTab === 'finance',
+    enabled: canViewFinanceReport && activeTab === 'finance',
     placeholderData: previous => previous,
   });
   const { data: serviceSummary } = useQuery({
     queryKey: ['reports', 'service', 'summary', serviceParams],
     queryFn: () => reportsService.getServiceSummary(serviceParams),
-    enabled: activeTab === 'service',
+    enabled: canViewServiceReport && activeTab === 'service',
     placeholderData: previous => previous,
   });
   const { data: serviceWorkPageData } = useQuery({
     queryKey: ['reports', 'service', 'work-details', serviceParams, serviceWorkPage],
     queryFn: () => reportsService.getServiceDetails('work-details', { ...serviceParams, page: serviceWorkPage }),
-    enabled: activeTab === 'service',
+    enabled: canViewServiceReport && activeTab === 'service',
     placeholderData: previous => previous,
   });
   const { data: serviceTripPageData } = useQuery({
     queryKey: ['reports', 'service', 'field-trips', serviceParams, serviceTripPage],
     queryFn: () => reportsService.getServiceDetails('field-trips', { ...serviceParams, page: serviceTripPage }),
-    enabled: activeTab === 'service',
+    enabled: canViewServiceReport && activeTab === 'service',
     placeholderData: previous => previous,
   });
   const { data: serviceProductivityPageData } = useQuery({
     queryKey: ['reports', 'service', 'productivity-details', serviceParams, serviceProductivityPage],
     queryFn: () => reportsService.getServiceDetails('productivity-details', { ...serviceParams, page: serviceProductivityPage }),
-    enabled: activeTab === 'service',
+    enabled: canViewServiceReport && activeTab === 'service',
     placeholderData: previous => previous,
   });
   const { data: serviceRepeatedPageData } = useQuery({
     queryKey: ['reports', 'service', 'repeated-failures', serviceParams, serviceRepeatedPage],
     queryFn: () => reportsService.getServiceSecondaryDetails('repeated-failures', { ...serviceParams, page: serviceRepeatedPage }),
-    enabled: activeTab === 'service',
+    enabled: canViewServiceReport && activeTab === 'service',
     placeholderData: previous => previous,
   });
   const { data: serviceEquipmentPageData } = useQuery({
     queryKey: ['reports', 'service', 'equipment-summary', serviceParams, serviceEquipmentPage],
     queryFn: () => reportsService.getServiceSecondaryDetails('equipment-summary', { ...serviceParams, page: serviceEquipmentPage }),
-    enabled: activeTab === 'service',
+    enabled: canViewServiceReport && activeTab === 'service',
     placeholderData: previous => previous,
   });
   const { data: serviceModelsPageData } = useQuery({
     queryKey: ['reports', 'service', 'problematic-models', serviceParams, serviceModelsPage],
     queryFn: () => reportsService.getServiceSecondaryDetails('problematic-models', { ...serviceParams, page: serviceModelsPage }),
-    enabled: activeTab === 'service',
+    enabled: canViewServiceReport && activeTab === 'service',
     placeholderData: previous => previous,
   });
   const equipment: Equipment[] = [];
@@ -383,6 +403,12 @@ export default function Reports() {
       setServicePresets([]);
     }
   }, []);
+
+  useEffect(() => {
+    if (allowedReportTabs.length > 0 && !allowedReportTabs.includes(activeTab)) {
+      setActiveTab(allowedReportTabs[0] ?? 'analytics');
+    }
+  }, [activeTab, allowedReportTabs]);
 
   useEffect(() => {
     setFinanceClientPage(1);
@@ -1441,15 +1467,9 @@ export default function Reports() {
         </p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ReportsTab)} className="space-y-6">
         <TabsList className="flex h-auto w-full justify-start gap-1 rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
-          {[
-            { value: 'analytics', label: 'Аналитика' },
-            { value: 'finance',   label: 'Финансы' },
-            { value: 'sales-stock', label: 'Продажный склад' },
-            { value: 'managers',  label: 'По менеджерам' },
-            { value: 'service',   label: 'По сервису' },
-          ].map(tab => (
+          {visibleReportTabs.map(tab => (
             <TabsTrigger
               key={tab.value}
               value={tab.value}
@@ -2127,9 +2147,11 @@ export default function Reports() {
         </TabsContent>
 
         {/* ── Managers report tab ─────────────────────────────────────────── */}
-        <TabsContent value="managers">
-          <ManagerReport />
-        </TabsContent>
+        {canViewManagersReport ? (
+          <TabsContent value="managers">
+            <ManagerReport />
+          </TabsContent>
+        ) : null}
 
         <TabsContent value="service" className="space-y-4 sm:space-y-6">
           <Card>

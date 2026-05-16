@@ -376,6 +376,14 @@ test('investor sees only own owner equipment and rentals without forbidden UI/AP
     await expect(page).toHaveURL(/#\/equipment/);
     await expect(page.getByRole('heading', { name: 'Техника', exact: true })).toBeVisible();
 
+    action = 'reports route redirect';
+    {
+      const appRoot = await page.evaluate(() => `${window.location.origin}${window.location.pathname}`);
+      await page.goto(`${appRoot}?_smoke=${Date.now()}#/reports`, { waitUntil: 'domcontentloaded' });
+    }
+    await expect(page).toHaveURL(/#\/equipment/);
+    await expect(page.getByRole('heading', { name: 'Техника', exact: true })).toBeVisible();
+
     expect(issues).toEqual([]);
   } finally {
     await investorApi.dispose();

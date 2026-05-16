@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { loginAsAdmin, navigateInApp } from './helpers/auth';
-import { createClient, withAdminApi } from './helpers/api';
+import { createClient, createEquipment, createRentalPair, withAdminApi } from './helpers/api';
 
 type UiIssue = {
   type: string;
@@ -33,7 +33,18 @@ test('admin creates rental contract draft with selected client in document wizar
   const suffix = `contract-wizard-${Date.now()}`;
   const seed = await withAdminApi(async (api) => {
     const client = await createClient(api, suffix);
-    return { client };
+    const equipment = await createEquipment(api, suffix);
+    const { rental } = await createRentalPair(api, {
+      client: client.company,
+      clientId: client.id,
+      equipment,
+      startDate: '2026-05-10',
+      endDate: '2026-05-12',
+      amount: 30000,
+      status: 'active',
+      ganttStatus: 'active',
+    });
+    return { client, equipment, rental };
   });
 
   const issues: UiIssue[] = [];
@@ -82,5 +93,70 @@ test('admin creates rental contract draft with selected client in document wizar
   expect(document.payload.signer.basis).toBe('Устав');
 
   await expect(page.getByRole('heading', { name: new RegExp(document.number) })).toBeVisible();
+
+  const chain = await withAdminApi(async (api) => {
+    const specRes = await api.post('/api/documents/generate', {
+      data: {
+        type: 'rental_specification',
+        parentDocumentId: document.id,
+        clientId: seed.client.id,
+        rentalId: seed.rental.id,
+        equipmentId: seed.equipment.id,
+        dailyRate: '1000 ₽/день',
+        amount: 30000,
+        date: '2026-05-10',
+      },
+    });
+    expect(specRes.ok(), await specRes.text()).toBeTruthy();
+    const spec = await specRes.json();
+
+    const transferRes = await api.post('/api/documents/generate', {
+      data: {
+        type: 'transfer_act_to_client',
+        parentDocumentId: document.id,
+        specificationId: spec.id,
+        clientId: seed.client.id,
+        rentalId: seed.rental.id,
+        equipmentId: seed.equipment.id,
+        transferDate: '2026-05-10',
+        equipmentCondition: 'Исправна',
+      },
+    });
+    expect(transferRes.ok(), await transferRes.text()).toBeTruthy();
+    const transfer = await transferRes.json();
+
+    const returnRes = await api.post('/api/documents/generate', {
+      data: {
+        type: 'return_act_from_client',
+        parentDocumentId: document.id,
+        specificationId: spec.id,
+        clientId: seed.client.id,
+        rentalId: seed.rental.id,
+        equipmentId: seed.equipment.id,
+        returnDate: '2026-05-12',
+        returnCondition: 'Рабочее',
+        damages: 'Нет',
+        missingItems: 'Нет',
+        serviceRequired: 'Нет',
+      },
+    });
+    expect(returnRes.ok(), await returnRes.text()).toBeTruthy();
+    const returnAct = await returnRes.json();
+
+    for (const item of [document, spec, transfer, returnAct]) {
+      const print = await api.get(`/api/documents/${item.id}/print`);
+      expect(print.ok(), `${item.type} print`).toBeTruthy();
+      expect(await print.text()).toMatch(/<!doctype html>/i);
+    }
+
+    return { spec, transfer, returnAct };
+  });
+
+  await navigateInApp(page, '/documents');
+  await expect(page.getByText(document.number).first()).toBeVisible();
+  await expect(page.getByText(chain.spec.number).first()).toBeVisible();
+  await expect(page.getByText(chain.transfer.number).first()).toBeVisible();
+  await expect(page.getByText(chain.returnAct.number).first()).toBeVisible();
+
   expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);
 });

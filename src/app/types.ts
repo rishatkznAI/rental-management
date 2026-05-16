@@ -1054,6 +1054,9 @@ export interface Document {
   rentalStartDate?: string;
   rentalEndDate?: string;
   dailyRate?: string;
+  quantityDays?: string;
+  vatMode?: string;
+  vatAmount?: number;
   transferDate?: string;
   equipmentCondition?: string;
   completeness?: string;
@@ -1088,6 +1091,10 @@ export interface Document {
   mechanicId?: string;
   serviceCarId?: string;
   parentDocumentId?: string;
+  specificationId?: string;
+  equipmentModel?: string;
+  inventoryNumber?: string;
+  serialNumber?: string;
   templateId?: string;
   dueDate?: string;
   responsibleId?: string;

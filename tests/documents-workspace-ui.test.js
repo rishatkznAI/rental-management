@@ -73,3 +73,20 @@ test('rental contract form does not render universal operational fields in contr
   assert.match(source, /Расчётный счёт/);
   assert.match(source, /Корреспондентский счёт/);
 });
+
+test('document chain wizard renders type-specific fields and quick actions', () => {
+  assert.match(source, /Спецификация привязывается к договору и фиксирует технику, срок аренды, ставку и сумму/);
+  assert.match(source, /Акт подтверждает передачу конкретной техники клиенту/);
+  assert.match(source, /Акт фиксирует возврат техники, состояние и замечания/);
+  assert.match(source, /applyParentDocumentToWizard/);
+  assert.match(source, /applySpecificationToWizard/);
+  assert.match(source, /applyRentalToWizard/);
+  assert.match(source, /specificationId/);
+  assert.match(source, /Количество дней/);
+  assert.match(source, /Создать спецификацию/);
+  assert.match(source, /Создать акт передачи/);
+  assert.match(source, /Создать акт возврата/);
+  assert.match(source, /openDocumentChainAction\(doc, 'rental_specification'\)/);
+  assert.match(source, /openDocumentChainAction\(doc, 'transfer_act_to_client'\)/);
+  assert.match(source, /openDocumentChainAction\(doc, 'return_act_from_client'\)/);
+});

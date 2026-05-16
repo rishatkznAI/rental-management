@@ -30,9 +30,9 @@ function createApp() {
       bankAccount: '40702810000000000001',
       corrAccount: '30101810000000000000',
     }],
-    rentals: [{ id: 'R-1', clientId: 'C-1', client: 'ООО Клиент', manager: 'Руслан', managerId: 'U-manager' }],
+    rentals: [{ id: 'R-1', clientId: 'C-1', client: 'ООО Клиент', manager: 'Руслан', managerId: 'U-manager', startDate: '2026-05-10', plannedReturnDate: '2026-05-12', equipment: ['A-1'], rate: '10000/день', price: 30000 }],
     gantt_rentals: [],
-    equipment: [{ id: 'EQ-1', inventoryNumber: 'A-1' }],
+    equipment: [{ id: 'EQ-1', inventoryNumber: 'A-1', manufacturer: 'Genie', model: 'GS-1932', serialNumber: 'SN-1' }],
     documents: [],
     app_settings: [],
   };
@@ -421,9 +421,9 @@ test('documents generate API creates every workspace document type with snapshot
 
   const cases = [
     ['rental_contract', { clientId: 'C-1', signerName: 'Иванов Иван', signerPosition: 'директор', signerBasis: 'Устав' }, 'DA-2026-0001'],
-    ['rental_specification', { clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1' }, 'SP-2026-0001'],
-    ['transfer_act_to_client', { clientId: 'C-1', rentalId: 'R-1', deliveryId: 'DEL-1', equipmentId: 'EQ-1' }, 'AP-2026-0001'],
-    ['return_act_from_client', { clientId: 'C-1', rentalId: 'R-1', deliveryId: 'DEL-1', equipmentId: 'EQ-1', serviceTicketId: 'S-1' }, 'AR-2026-0001'],
+    ['rental_specification', { clientId: 'C-1', contractNumber: 'DA-2026-0001', rentalId: 'R-1', equipmentId: 'EQ-1', dailyRate: '10000/день' }, 'SP-2026-0001'],
+    ['transfer_act_to_client', { clientId: 'C-1', rentalId: 'R-1', deliveryId: 'DEL-1', equipmentId: 'EQ-1', transferDate: '2026-05-10' }, 'AP-2026-0001'],
+    ['return_act_from_client', { clientId: 'C-1', rentalId: 'R-1', deliveryId: 'DEL-1', equipmentId: 'EQ-1', serviceTicketId: 'S-1', returnDate: '2026-05-12' }, 'AR-2026-0001'],
     ['work_order', { serviceTicketId: 'S-1', equipmentId: 'EQ-1', mechanicId: 'M-1', clientId: 'C-1', rentalId: 'R-1' }, 'ZN-2026-0001'],
     ['trip_ticket', { mechanicId: 'M-1', serviceCarId: 'CAR-1', serviceTicketId: 'S-1' }, 'PL-2026-0001'],
   ];
@@ -546,6 +546,88 @@ test('rental contract print uses stored snapshot, preserves date, and tolerates 
   });
 });
 
+test('rental document chain links specification and acts through immutable snapshots', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async (baseUrl) => {
+    const contract = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'rental_contract',
+      clientId: 'C-1',
+      signerName: 'Иванов Иван Иванович',
+      signerPosition: 'Генеральный директор',
+      signerBasis: 'Устав',
+      date: '2026-05-09',
+    });
+    assert.equal(contract.response.status, 201);
+    assert.equal(contract.json.rentalId, undefined);
+
+    const specification = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'rental_specification',
+      parentDocumentId: contract.json.id,
+      clientId: 'C-1',
+      rentalId: 'R-1',
+      equipmentId: 'EQ-1',
+      dailyRate: '10000/день',
+      amount: 30000,
+      date: '2026-05-09',
+      notes: 'Тестовая спецификация',
+    });
+    assert.equal(specification.response.status, 201, JSON.stringify(specification.json));
+    assert.equal(specification.json.parentDocumentId, contract.json.id);
+    assert.equal(specification.json.snapshot.parentDocument.number, contract.json.number);
+    assert.equal(specification.json.snapshot.equipment.model, 'GS-1932');
+    assert.match(specification.json.printHtml, new RegExp(`Договор № ${contract.json.number}`));
+    assert.match(specification.json.printHtml, /Genie GS-1932/);
+    assert.match(specification.json.printHtml, /A-1/);
+    assert.match(specification.json.printHtml, /SN-1/);
+    assert.match(specification.json.printHtml, /10000\/день/);
+    assert.doesNotMatch(specification.json.printHtml, /Сервисная заявка|Механик|Служебный автомобиль|Пробег|Запчасти|Выполненные работы/);
+
+    state.clients[0].company = 'ООО Новое имя';
+    state.equipment[0].model = 'Changed';
+    const storedSpec = await request(baseUrl, 'GET', `/api/documents/${specification.json.id}`, 'office');
+    assert.equal(storedSpec.response.status, 200);
+    assert.equal(storedSpec.json.snapshot.client.company, 'ООО Клиент');
+    assert.equal(storedSpec.json.snapshot.equipment.model, 'GS-1932');
+
+    const transfer = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'transfer_act_to_client',
+      parentDocumentId: contract.json.id,
+      specificationId: specification.json.id,
+      clientId: 'C-1',
+      rentalId: 'R-1',
+      equipmentId: 'EQ-1',
+      transferDate: '2026-05-10',
+      equipmentCondition: 'Исправна',
+      completeness: 'АКБ, зарядное устройство',
+    });
+    assert.equal(transfer.response.status, 201, JSON.stringify(transfer.json));
+    assert.equal(transfer.json.specificationId, specification.json.id);
+    assert.match(transfer.json.printHtml, /Дата передачи/);
+    assert.match(transfer.json.printHtml, /Спецификация №/);
+    assert.match(transfer.json.printHtml, /Исправна/);
+
+    const returned = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'return_act_from_client',
+      parentDocumentId: contract.json.id,
+      specificationId: specification.json.id,
+      clientId: 'C-1',
+      rentalId: 'R-1',
+      equipmentId: 'EQ-1',
+      returnDate: '2026-05-12',
+      returnCondition: 'Рабочее',
+      damages: 'Нет',
+      missingItems: 'Нет',
+      serviceRequired: 'Нет',
+    });
+    assert.equal(returned.response.status, 201, JSON.stringify(returned.json));
+    assert.equal(returned.json.specificationId, specification.json.id);
+    assert.match(returned.json.printHtml, /Дата возврата/);
+    assert.match(returned.json.printHtml, /Состояние при возврате/);
+    assert.match(returned.json.printHtml, /Повреждения/);
+  });
+});
+
 test('documents generate API rejects missing required data and supports status endpoints, duplicate, print and delete', async () => {
   const { app } = createApp();
   await withServer(app, async (baseUrl) => {
@@ -578,6 +660,34 @@ test('documents generate API rejects missing required data and supports status e
     });
     assert.equal(missingSigner.response.status, 400);
     assert.equal(missingSigner.json.code, 'DOCUMENT_REQUIRED_FIELDS');
+
+    const missingSpecBasis = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'rental_specification',
+      clientId: 'C-1',
+      equipmentId: 'EQ-1',
+      dailyRate: '10000/день',
+      date: '2026-05-09',
+    });
+    assert.equal(missingSpecBasis.response.status, 400);
+    assert.equal(missingSpecBasis.json.code, 'DOCUMENT_REQUIRED_FIELDS');
+
+    const missingTransferEquipment = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'transfer_act_to_client',
+      clientId: 'C-1',
+      transferDate: '2026-05-10',
+      date: '2026-05-09',
+    });
+    assert.equal(missingTransferEquipment.response.status, 400);
+    assert.equal(missingTransferEquipment.json.code, 'DOCUMENT_REQUIRED_FIELDS');
+
+    const missingReturnDate = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'return_act_from_client',
+      clientId: 'C-1',
+      equipmentId: 'EQ-1',
+      date: '2026-05-09',
+    });
+    assert.equal(missingReturnDate.response.status, 400);
+    assert.equal(missingReturnDate.json.code, 'DOCUMENT_REQUIRED_FIELDS');
 
     const created = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
       type: 'rental_contract',

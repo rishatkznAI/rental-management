@@ -338,6 +338,13 @@ function fieldLabel(field) {
     signerName: 'подписанта',
     signerPosition: 'должность подписанта',
     signerBasis: 'основание подписания',
+    contractNumber: 'номер договора',
+    rentalStartDate: 'дату начала аренды',
+    rentalEndDate: 'дату окончания аренды',
+    dailyRate: 'ставку',
+    amount: 'сумму',
+    transferDate: 'дату передачи',
+    returnDate: 'дату возврата',
   };
   return labels[field] || field;
 }
@@ -353,6 +360,10 @@ function validateDocumentRequiredFields(input) {
   const type = normalizeDocumentType(input?.documentType || input?.type);
   const meta = getDocumentTypeMeta(type);
   const missing = (meta.requiredFields || []).filter(field => !text(input?.[field]));
+  if (type === 'rental_specification') {
+    if (!text(input?.parentDocumentId) && !text(input?.contractNumber)) missing.push('parentDocumentId');
+    if (!text(input?.dailyRate) && !text(input?.amount)) missing.push('dailyRate');
+  }
   return {
     ok: missing.length === 0,
     type,
@@ -369,6 +380,30 @@ function resolveById(list, id) {
 
 function equipmentLabel(item) {
   return [item?.inventoryNumber, item?.manufacturer, item?.model].map(text).filter(Boolean).join(' · ');
+}
+
+function firstArrayValue(value) {
+  return Array.isArray(value) ? value.map(text).find(Boolean) : '';
+}
+
+function resolveRentalEquipment(rental, equipmentList = [], explicitEquipmentId = '') {
+  const equipmentById = new Map((Array.isArray(equipmentList) ? equipmentList : []).filter(item => text(item?.id)).map(item => [text(item.id), item]));
+  const equipmentByInventory = new Map((Array.isArray(equipmentList) ? equipmentList : []).filter(item => text(item?.inventoryNumber)).map(item => [text(item.inventoryNumber), item]));
+  const wantedId = text(explicitEquipmentId || rental?.equipmentId || rental?.equipmentItemId);
+  if (wantedId && equipmentById.has(wantedId)) return equipmentById.get(wantedId);
+  const wantedInv = text(rental?.equipmentInv || firstArrayValue(rental?.equipment) || rental?.equipment);
+  if (wantedInv && equipmentByInventory.has(wantedInv)) return equipmentByInventory.get(wantedInv);
+  return wantedId ? { id: wantedId } : (wantedInv ? { inventoryNumber: wantedInv } : null);
+}
+
+function countDays(startDate, endDate) {
+  const start = text(startDate);
+  const end = text(endDate);
+  if (!start || !end) return 0;
+  const startMs = new Date(`${start.slice(0, 10)}T00:00:00Z`).getTime();
+  const endMs = new Date(`${end.slice(0, 10)}T00:00:00Z`).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return 0;
+  return Math.floor((endMs - startMs) / 86400000) + 1;
 }
 
 function htmlEscape(value) {
@@ -388,12 +423,13 @@ function compactRows(rows) {
 function buildSnapshot(input, collections = {}, nowIso = () => new Date().toISOString()) {
   const client = resolveById(collections.clients, input.clientId);
   const rental = resolveById(collections.rentals, input.rentalId) || resolveById(collections.gantt_rentals, input.rentalId);
-  const equipment = resolveById(collections.equipment, input.equipmentId);
+  const equipment = resolveById(collections.equipment, input.equipmentId) || resolveRentalEquipment(rental, collections.equipment, input.equipmentId);
   const serviceTicket = resolveById(collections.service, input.serviceTicketId);
   const delivery = resolveById(collections.deliveries, input.deliveryId);
   const mechanic = resolveById(collections.mechanics, input.mechanicId);
   const serviceCar = resolveById(collections.service_vehicles, input.serviceCarId);
   const parentDocument = resolveById(collections.documents, input.parentDocumentId);
+  const specification = resolveById(collections.documents, input.specificationId);
 
   return {
     generatedAt: nowIso(),
@@ -431,10 +467,12 @@ function buildSnapshot(input, collections = {}, nowIso = () => new Date().toISOS
       id: rental.id,
       clientId: rental.clientId,
       client: rental.client,
-      startDate: rental.startDate,
-      endDate: rental.endDate || rental.plannedReturnDate,
+      startDate: input.rentalStartDate || rental.startDate,
+      endDate: input.rentalEndDate || rental.endDate || rental.plannedReturnDate,
       actualReturnDate: rental.actualReturnDate,
       amount: rental.amount ?? rental.price,
+      dailyRate: input.dailyRate || rental.dailyRate || rental.rate,
+      quantityDays: input.quantityDays || countDays(input.rentalStartDate || rental.startDate, input.rentalEndDate || rental.endDate || rental.plannedReturnDate),
       manager: rental.manager,
       objectId: rental.objectId,
       contractId: rental.contractId,
@@ -463,10 +501,20 @@ function buildSnapshot(input, collections = {}, nowIso = () => new Date().toISOS
       date: delivery.date || delivery.plannedDate,
       address: delivery.address || delivery.routeTo,
       route: delivery.route || [delivery.routeFrom, delivery.routeTo].filter(Boolean).join(' → '),
+      contact: delivery.contact || delivery.contactName || delivery.phone,
     } : null,
     mechanic: mechanic ? { id: mechanic.id, name: mechanic.name, phone: mechanic.phone } : null,
     serviceCar: serviceCar ? { id: serviceCar.id, label: [serviceCar.make, serviceCar.model, serviceCar.plateNumber].filter(Boolean).join(' '), mileage: serviceCar.currentMileage } : null,
-    parentDocument: parentDocument ? { id: parentDocument.id, number: documentNumber(parentDocument), type: parentDocument.type } : null,
+    parentDocument: parentDocument ? { id: parentDocument.id, number: documentNumber(parentDocument), date: parentDocument.documentDate || parentDocument.date, type: parentDocument.type, clientId: parentDocument.clientId, client: parentDocument.client } : null,
+    specification: specification ? {
+      id: specification.id,
+      number: documentNumber(specification),
+      date: specification.documentDate || specification.date,
+      parentDocumentId: specification.parentDocumentId,
+      clientId: specification.clientId,
+      rentalId: specification.rentalId,
+      equipmentId: specification.equipmentId,
+    } : null,
   };
 }
 
@@ -492,12 +540,26 @@ function linesForDocument(type, snapshot, input) {
   const bankAccount = text(input.clientBankAccount || bank.account || snapshot.client?.bankAccount);
   const corrAccount = text(input.clientCorrAccount || bank.corrAccount || snapshot.client?.corrAccount);
   const equipment = equipmentLabel(snapshot.equipment) || input.equipmentInv || input.equipment || '—';
+  const equipmentModel = text(input.equipmentModel || [snapshot.equipment?.manufacturer, snapshot.equipment?.model].filter(Boolean).join(' '));
+  const inventoryNumber = text(input.inventoryNumber || input.equipmentInv || snapshot.equipment?.inventoryNumber);
+  const serialNumber = text(input.serialNumber || snapshot.equipment?.serialNumber);
   const rental = snapshot.rental;
   const service = snapshot.serviceTicket;
   const delivery = snapshot.delivery;
   const mechanic = snapshot.mechanic?.name || input.mechanicName || input.responsibleName || '—';
   const route = input.route || snapshot.serviceCar?.route || delivery?.route || [input.routeFrom, input.routeTo].filter(Boolean).join(' → ') || '—';
   const amount = input.amount ?? rental?.amount;
+  const rentalStartDate = text(input.rentalStartDate || rental?.startDate);
+  const rentalEndDate = text(input.rentalEndDate || rental?.endDate);
+  const quantityDays = text(input.quantityDays || rental?.quantityDays || countDays(rentalStartDate, rentalEndDate));
+  const dailyRate = text(input.dailyRate || rental?.dailyRate);
+  const contractBasis = snapshot.parentDocument?.number
+    ? `Договор № ${snapshot.parentDocument.number}${snapshot.parentDocument.date ? ` от ${snapshot.parentDocument.date}` : ''}`
+    : (input.contractNumber || input.parentDocumentId || '—');
+  const specificationBasis = snapshot.specification?.number
+    ? `Спецификация № ${snapshot.specification.number}${snapshot.specification.date ? ` от ${snapshot.specification.date}` : ''}`
+    : (input.specificationId || '');
+  const deliveryBasis = delivery ? [delivery.date, delivery.address || delivery.route].map(text).filter(Boolean).join(' · ') : '';
   const date = input.documentDate || input.date || new Date().toISOString().slice(0, 10);
   const common = {
     rental_contract: [
@@ -516,20 +578,27 @@ function linesForDocument(type, snapshot, input) {
       ['Комментарий', input.notes || input.comment || '—'],
     ],
     rental_specification: [
-      ['Договор', snapshot.parentDocument?.number || input.parentDocumentId || input.contractId || '—'],
+      ['Договор', contractBasis],
+      ['Клиент', client],
       ['Техника', equipment],
-      ['Модель', [snapshot.equipment?.manufacturer, snapshot.equipment?.model].filter(Boolean).join(' ') || '—'],
-      ['INV/SN', [snapshot.equipment?.inventoryNumber, snapshot.equipment?.serialNumber].filter(Boolean).join(' / ') || '—'],
-      ['Период', [rental?.startDate, rental?.endDate].filter(Boolean).join(' — ') || '—'],
-      ['Ставка', input.rate || '—'],
-      ['Количество дней', input.days || '—'],
+      ['Модель', equipmentModel || '—'],
+      ['Инвентарный номер', inventoryNumber || '—'],
+      ['Серийный номер', serialNumber || '—'],
+      ['Период аренды', [rentalStartDate, rentalEndDate].filter(Boolean).join(' — ') || '—'],
+      ['Ставка', dailyRate || '—'],
+      ['Количество дней', quantityDays || '—'],
       ['Сумма', amount ? String(amount) : '—'],
+      ['Объект', input.objectId || rental?.objectId || '—'],
       ['Примечания', input.notes || input.comment || '—'],
     ],
     transfer_act_to_client: [
       ['Дата передачи', input.transferDate || date],
+      ['Основание', [contractBasis, specificationBasis].filter(value => value && value !== '—').join(' · ') || '—'],
       ['Клиент', client],
       ['Техника', equipment],
+      ['Модель', equipmentModel || '—'],
+      ['INV/SN', [inventoryNumber, serialNumber].filter(Boolean).join(' / ') || '—'],
+      ['Доставка', deliveryBasis || '—'],
       ['Состояние при передаче', input.equipmentCondition || input.condition || 'Исправна, рабочее состояние.'],
       ['Комплектность', input.completeness || 'Согласно карточке техники и договору.'],
       ['Фото/замечания', input.notes || input.comment || '—'],
@@ -539,8 +608,12 @@ function linesForDocument(type, snapshot, input) {
     ],
     return_act_from_client: [
       ['Дата возврата', input.returnDate || date],
+      ['Основание', [contractBasis, specificationBasis].filter(value => value && value !== '—').join(' · ') || '—'],
       ['Клиент', client],
       ['Техника', equipment],
+      ['Модель', equipmentModel || '—'],
+      ['INV/SN', [inventoryNumber, serialNumber].filter(Boolean).join(' / ') || '—'],
+      ['Доставка', deliveryBasis || '—'],
       ['Состояние при возврате', input.returnCondition || input.condition || 'Требует проверки после возврата.'],
       ['Повреждения', input.damages || input.damageNotes || 'Не указаны'],
       ['Недостача', input.missingItems || 'Не указана'],
@@ -746,6 +819,19 @@ function prepareGeneratedDocument(input, collections = {}, options = {}) {
       },
       notes: input.notes || input.comment || input.payload?.notes || '',
     } : {}),
+    ...(type === 'rental_specification' ? {
+      contract: snapshot.parentDocument,
+      rentalSnapshot: snapshot.rental,
+      equipmentSnapshot: snapshot.equipment,
+      clientSnapshot: snapshot.client,
+    } : {}),
+    ...(['transfer_act_to_client', 'return_act_from_client'].includes(type) ? {
+      contract: snapshot.parentDocument,
+      specification: snapshot.specification,
+      rentalSnapshot: snapshot.rental,
+      equipmentSnapshot: snapshot.equipment,
+      deliverySnapshot: snapshot.delivery,
+    } : {}),
     lines: linesForDocument(type, snapshot, input),
   };
   const generatedContent = input.generatedContent || input.printHtml || buildDocumentPrintHtml({ ...input, type }, snapshot, payload.lines);
@@ -757,6 +843,13 @@ function prepareGeneratedDocument(input, collections = {}, options = {}) {
     client: input.client || snapshot.client?.company || snapshot.rental?.client || '',
     equipmentInv: input.equipmentInv || snapshot.equipment?.inventoryNumber || '',
     equipment: input.equipment || equipmentLabel(snapshot.equipment),
+    equipmentModel: input.equipmentModel || [snapshot.equipment?.manufacturer, snapshot.equipment?.model].filter(Boolean).join(' '),
+    inventoryNumber: input.inventoryNumber || input.equipmentInv || snapshot.equipment?.inventoryNumber || '',
+    serialNumber: input.serialNumber || snapshot.equipment?.serialNumber || '',
+    rentalStartDate: input.rentalStartDate || snapshot.rental?.startDate,
+    rentalEndDate: input.rentalEndDate || snapshot.rental?.endDate,
+    dailyRate: input.dailyRate || snapshot.rental?.dailyRate,
+    quantityDays: input.quantityDays || (snapshot.rental?.quantityDays ? String(snapshot.rental.quantityDays) : ''),
     amount: input.amount ?? snapshot.rental?.amount,
     manager: input.manager || snapshot.rental?.manager || input.responsibleName,
     responsibleName: input.responsibleName || input.manager || snapshot.rental?.manager,

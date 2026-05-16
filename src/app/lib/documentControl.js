@@ -1,11 +1,14 @@
 const RENTAL_OPEN_STATUSES = new Set(['active', 'confirmed', 'return_planned', 'planned']);
 const RENTAL_CLOSED_STATUSES = new Set(['closed', 'returned', 'completed', 'done']);
-const DOCUMENT_TYPES = new Set(['contract', 'act', 'invoice', 'work_order', 'upd']);
+const DOCUMENT_TYPES = new Set(['rental_contract', 'rental_specification', 'transfer_act_to_client', 'return_act_from_client', 'contract', 'act', 'invoice', 'work_order', 'upd']);
 const DOCUMENT_STATUSES = new Set(['draft', 'sent', 'signed']);
 
 export const DOCUMENT_CONTROL_STATUSES = {
   OK: 'ok',
   MISSING_CONTRACT: 'missing_contract',
+  MISSING_SPECIFICATION: 'missing_specification',
+  MISSING_TRANSFER_ACT: 'missing_transfer_act',
+  MISSING_RETURN_ACT: 'missing_return_act',
   MISSING_CLOSING_DOCS: 'missing_closing_docs',
   UNSIGNED: 'unsigned',
   SENT_WAITING: 'sent_waiting',
@@ -17,6 +20,9 @@ export const DOCUMENT_CONTROL_STATUSES = {
 export const DOCUMENT_CONTROL_LABELS = {
   ok: 'Всё закрыто',
   missing_contract: 'Нет договора',
+  missing_specification: 'Нет спецификации',
+  missing_transfer_act: 'Нет акта передачи',
+  missing_return_act: 'Нет акта возврата',
   missing_closing_docs: 'Нет закрывающих документов',
   unsigned: 'Не подписано',
   sent_waiting: 'Отправлено, ждём подпись',
@@ -100,6 +106,10 @@ function documentStatus(doc) {
 
 function documentTypeLabel(type) {
   if (type === 'contract') return 'Договор';
+  if (type === 'rental_contract') return 'Договор аренды';
+  if (type === 'rental_specification') return 'Спецификация';
+  if (type === 'transfer_act_to_client') return 'Акт передачи';
+  if (type === 'return_act_from_client') return 'Акт возврата';
   if (type === 'act' || type === 'upd') return 'Акт/УПД';
   if (type === 'invoice') return 'Счёт';
   if (type === 'work_order') return 'Заказ-наряд';
@@ -114,15 +124,27 @@ function documentStatusLabel(status) {
 }
 
 function isContract(doc) {
-  return documentType(doc) === 'contract';
+  return ['contract', 'rental_contract'].includes(documentType(doc));
 }
 
 function isClosingDocument(doc) {
-  return ['act', 'upd'].includes(documentType(doc));
+  return ['act', 'upd', 'return_act_from_client'].includes(documentType(doc));
+}
+
+function isSpecification(doc) {
+  return documentType(doc) === 'rental_specification';
+}
+
+function isTransferAct(doc) {
+  return documentType(doc) === 'transfer_act_to_client';
+}
+
+function isReturnAct(doc) {
+  return documentType(doc) === 'return_act_from_client';
 }
 
 function isUnsigned(doc) {
-  return ['contract', 'act', 'upd'].includes(documentType(doc)) && documentStatus(doc) !== 'signed';
+  return ['contract', 'rental_contract', 'rental_specification', 'transfer_act_to_client', 'return_act_from_client', 'act', 'upd'].includes(documentType(doc)) && documentStatus(doc) !== 'signed';
 }
 
 function isSentUnsigned(doc) {
@@ -141,6 +163,9 @@ function isRentalRelevant(rental) {
 
 function actionForStatus(status) {
   if (status === DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT) return 'Создать или привязать договор';
+  if (status === DOCUMENT_CONTROL_STATUSES.MISSING_SPECIFICATION) return 'Создать спецификацию';
+  if (status === DOCUMENT_CONTROL_STATUSES.MISSING_TRANSFER_ACT) return 'Создать акт передачи';
+  if (status === DOCUMENT_CONTROL_STATUSES.MISSING_RETURN_ACT) return 'Создать акт возврата';
   if (status === DOCUMENT_CONTROL_STATUSES.MISSING_CLOSING_DOCS) return 'Подготовить акт/УПД';
   if (status === DOCUMENT_CONTROL_STATUSES.OVERDUE_SIGNATURE) return 'Напомнить о подписи';
   if (status === DOCUMENT_CONTROL_STATUSES.SENT_WAITING) return 'Проверить подпись';
@@ -151,8 +176,8 @@ function actionForStatus(status) {
 }
 
 function riskForStatus(status) {
-  if ([DOCUMENT_CONTROL_STATUSES.MISSING_CLOSING_DOCS, DOCUMENT_CONTROL_STATUSES.OVERDUE_SIGNATURE].includes(status)) return 'critical';
-  if ([DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT, DOCUMENT_CONTROL_STATUSES.ORPHAN_DOCUMENT].includes(status)) return 'high';
+  if ([DOCUMENT_CONTROL_STATUSES.MISSING_CLOSING_DOCS, DOCUMENT_CONTROL_STATUSES.MISSING_RETURN_ACT, DOCUMENT_CONTROL_STATUSES.OVERDUE_SIGNATURE].includes(status)) return 'critical';
+  if ([DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT, DOCUMENT_CONTROL_STATUSES.MISSING_SPECIFICATION, DOCUMENT_CONTROL_STATUSES.MISSING_TRANSFER_ACT, DOCUMENT_CONTROL_STATUSES.ORPHAN_DOCUMENT].includes(status)) return 'high';
   if ([DOCUMENT_CONTROL_STATUSES.SENT_WAITING, DOCUMENT_CONTROL_STATUSES.UNSIGNED, DOCUMENT_CONTROL_STATUSES.UNKNOWN].includes(status)) return 'medium';
   return 'low';
 }
@@ -279,6 +304,9 @@ function buildDocumentRows({ documents, maps, todayKey, overdueDays }) {
 function buildRentalSummary(rental, rentalDocuments, maps, todayKey, overdueDays) {
   const display = resolveRentalDisplay(rental, maps);
   const contracts = rentalDocuments.filter(isContract);
+  const specifications = rentalDocuments.filter(isSpecification);
+  const transferActs = rentalDocuments.filter(isTransferAct);
+  const returnActs = rentalDocuments.filter(isReturnAct);
   const closingDocs = rentalDocuments.filter(isClosingDocument);
   const unsignedDocs = rentalDocuments.filter(isUnsigned);
   const sentUnsignedDocs = rentalDocuments.filter(isSentUnsigned);
@@ -288,14 +316,20 @@ function buildRentalSummary(rental, rentalDocuments, maps, todayKey, overdueDays
   }, 0);
   const hasSignedContract = contracts.some(doc => documentStatus(doc) === 'signed');
   const hasContract = contracts.length > 0;
+  const hasRentalContract = contracts.some(doc => documentType(doc) === 'rental_contract');
+  const hasSpecification = specifications.length > 0;
+  const hasTransferAct = transferActs.length > 0;
+  const hasReturnAct = returnActs.length > 0;
   const hasSignedClosingDoc = closingDocs.some(doc => documentStatus(doc) === 'signed');
   const hasClosingDoc = closingDocs.length > 0;
   const closed = isRentalClosed(rental);
 
   let status = DOCUMENT_CONTROL_STATUSES.OK;
   if (!hasContract) status = DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT;
+  else if (hasRentalContract && !hasSpecification) status = DOCUMENT_CONTROL_STATUSES.MISSING_SPECIFICATION;
+  else if (hasRentalContract && !hasTransferAct && !closed) status = DOCUMENT_CONTROL_STATUSES.MISSING_TRANSFER_ACT;
+  else if (hasRentalContract && closed && !hasReturnAct) status = DOCUMENT_CONTROL_STATUSES.MISSING_RETURN_ACT;
   else if (closed && !hasClosingDoc) status = DOCUMENT_CONTROL_STATUSES.MISSING_CLOSING_DOCS;
-  else if (!closed && !hasClosingDoc) status = DOCUMENT_CONTROL_STATUSES.MISSING_CLOSING_DOCS;
   else if (sentUnsignedDocs.length > 0 && maxUnsignedDays > overdueDays) status = DOCUMENT_CONTROL_STATUSES.OVERDUE_SIGNATURE;
   else if (sentUnsignedDocs.length > 0) status = DOCUMENT_CONTROL_STATUSES.SENT_WAITING;
   else if (unsignedDocs.length > 0 || !hasSignedContract || (closed && !hasSignedClosingDoc)) status = DOCUMENT_CONTROL_STATUSES.UNSIGNED;
@@ -314,6 +348,21 @@ function buildRentalSummary(rental, rentalDocuments, maps, todayKey, overdueDays
       signed: hasSignedContract,
       count: contracts.length,
       label: hasSignedContract ? 'Есть, подписан' : hasContract ? 'Есть, без подписи' : 'Нет договора',
+    },
+    specification: {
+      exists: hasSpecification,
+      count: specifications.length,
+      label: hasSpecification ? 'Есть' : 'Нет спецификации',
+    },
+    transferAct: {
+      exists: hasTransferAct,
+      count: transferActs.length,
+      label: hasTransferAct ? 'Есть' : 'Нет акта передачи',
+    },
+    returnAct: {
+      exists: hasReturnAct,
+      count: returnActs.length,
+      label: hasReturnAct ? 'Есть' : 'Нет акта возврата',
     },
     closing: {
       exists: hasClosingDoc,
@@ -349,7 +398,15 @@ function buildRentalRows({ rentals, docsByRentalId, maps, todayKey, overdueDays 
       clientId: summary.clientId,
       rentalId: summary.rentalId,
       equipment: summary.equipment,
-      documentType: summary.status === DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT ? 'Договор' : 'Акт/УПД',
+      documentType: summary.status === DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT
+        ? 'Договор'
+        : summary.status === DOCUMENT_CONTROL_STATUSES.MISSING_SPECIFICATION
+          ? 'Спецификация'
+          : summary.status === DOCUMENT_CONTROL_STATUSES.MISSING_TRANSFER_ACT
+            ? 'Акт передачи'
+            : summary.status === DOCUMENT_CONTROL_STATUSES.MISSING_RETURN_ACT
+              ? 'Акт возврата'
+              : 'Акт/УПД',
       documentStatus: summary.statusLabel,
       daysWithoutSignature: summary.maxDaysWithoutSignature,
       responsible: summary.responsible,
@@ -400,6 +457,9 @@ export function buildDocumentControl(input = {}) {
     unsignedDocuments: documents.filter(isUnsigned).length,
     sentWaiting: documents.filter(isSentUnsigned).length,
     rentalsWithoutContract: relevantRentalSummaries.filter(summary => !summary.contract.exists).length,
+    rentalsWithoutSpecification: relevantRentalSummaries.filter(summary => summary.contract.exists && !summary.specification.exists).length,
+    rentalsWithoutTransferAct: relevantRentalSummaries.filter(summary => summary.specification.exists && !summary.transferAct.exists).length,
+    closedRentalsWithoutReturnAct: closedRentalSummaries.filter(summary => !summary.returnAct.exists).length,
     closedRentalsWithoutClosingDocs: closedRentalSummaries.filter(summary => !summary.closing.exists).length,
     overdueSignature: rows.filter(row => row.status === DOCUMENT_CONTROL_STATUSES.OVERDUE_SIGNATURE).length,
     orphanDocuments: documentRows.filter(row => row.status === DOCUMENT_CONTROL_STATUSES.ORPHAN_DOCUMENT).length,

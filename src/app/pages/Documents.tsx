@@ -156,6 +156,7 @@ type DocumentWizardState = {
   mechanicId: string;
   serviceCarId: string;
   parentDocumentId: string;
+  specificationId: string;
   dueDate: string;
   signerName: string;
   signerPosition: string;
@@ -175,6 +176,7 @@ type DocumentWizardState = {
   rentalStartDate: string;
   rentalEndDate: string;
   dailyRate: string;
+  quantityDays: string;
   amount: string;
   transferDate: string;
   equipmentCondition: string;
@@ -210,6 +212,7 @@ const EMPTY_WIZARD: DocumentWizardState = {
   mechanicId: '',
   serviceCarId: '',
   parentDocumentId: '',
+  specificationId: '',
   dueDate: '',
   signerName: '',
   signerPosition: '',
@@ -229,6 +232,7 @@ const EMPTY_WIZARD: DocumentWizardState = {
   rentalStartDate: '',
   rentalEndDate: '',
   dailyRate: '',
+  quantityDays: '',
   amount: '',
   transferDate: '',
   equipmentCondition: '',
@@ -443,6 +447,24 @@ function getRentalLabel(rental: Rental | undefined) {
 function getEquipmentLabel(item: Equipment | undefined) {
   if (!item) return '';
   return [item.inventoryNumber, item.manufacturer, item.model].filter(Boolean).join(' · ');
+}
+
+function getRentalEquipmentInventory(rental: Rental | undefined) {
+  if (!rental) return '';
+  return Array.isArray(rental.equipment) ? rental.equipment[0] || '' : '';
+}
+
+function countRentalDays(startDate: string | undefined, endDate: string | undefined) {
+  if (!startDate || !endDate) return '';
+  const start = new Date(`${startDate.slice(0, 10)}T00:00:00Z`).getTime();
+  const end = new Date(`${endDate.slice(0, 10)}T00:00:00Z`).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '';
+  return String(Math.floor((end - start) / 86400000) + 1);
+}
+
+function rentalDailyRate(rental: Rental | undefined) {
+  if (!rental) return '';
+  return displayText((rental as unknown as Record<string, unknown>).dailyRate || rental.rate, '');
 }
 
 function nextContractNumber(documents: Doc[], kind: DocumentContractKind, date: string) {
@@ -1105,7 +1127,9 @@ export default function Documents() {
   );
   const wizardTypeMeta = getDocumentRegistryItem(wizardForm.type) || DOCUMENT_WORKSPACE_TYPES[0];
   const wizardRental = wizardForm.rentalId ? rentalsById.get(wizardForm.rentalId) : undefined;
-  const wizardResolvedClientId = wizardForm.clientId || wizardRental?.clientId || '';
+  const wizardParentDocument = wizardForm.parentDocumentId ? documents.find(doc => doc.id === wizardForm.parentDocumentId) : undefined;
+  const wizardSpecification = wizardForm.specificationId ? documents.find(doc => doc.id === wizardForm.specificationId) : undefined;
+  const wizardResolvedClientId = wizardForm.clientId || wizardParentDocument?.clientId || wizardSpecification?.clientId || wizardRental?.clientId || '';
   const wizardClient = wizardResolvedClientId ? clientsById.get(wizardResolvedClientId) : undefined;
   const wizardEquipment = wizardForm.equipmentId ? equipmentById.get(wizardForm.equipmentId) : undefined;
   const wizardServiceTicket = wizardForm.serviceTicketId ? serviceTicketsById.get(wizardForm.serviceTicketId) : undefined;
@@ -1126,17 +1150,24 @@ export default function Documents() {
       signerPosition: 'Укажите должность подписанта',
       signerBasis: 'Укажите основание подписания',
     };
-    return (wizardTypeMeta.requiredFields || [])
+    const missing = (wizardTypeMeta.requiredFields || [])
       .filter(field => field === 'clientId'
         ? !wizardResolvedClientId
         : !wizardForm[field as keyof DocumentWizardState])
       .map(field => labels[field] || field);
+    if (wizardForm.type === 'rental_specification') {
+      if (!wizardForm.parentDocumentId) missing.push('Договор аренды');
+      if (!wizardForm.dailyRate && !wizardForm.amount) missing.push('Ставка или сумма');
+    }
+    return missing;
   }, [wizardForm, wizardResolvedClientId, wizardTypeMeta]);
   const wizardPreviewRows = React.useMemo(() => ([
     ['Тип', wizardTypeMeta.label],
     ['Дата', wizardForm.type === 'rental_contract' ? 'Будет установлена автоматически' : new Date().toISOString().slice(0, 10)],
     ['Номер', 'Будет сгенерирован автоматически'],
     ['Клиент', wizardClient ? clientLabel(wizardClient) : wizardRental?.client || '—'],
+    ['Договор', wizardParentDocument ? `${getDocumentNumber(wizardParentDocument)} от ${formatDate(getDocumentDate(wizardParentDocument))}` : '—'],
+    ['Спецификация', wizardSpecification ? `${getDocumentNumber(wizardSpecification)} от ${formatDate(getDocumentDate(wizardSpecification))}` : '—'],
     ...(wizardForm.type === 'rental_contract' ? [
       ['Подписант', wizardForm.signerName || '—'],
       ['Должность', wizardForm.signerPosition || '—'],
@@ -1151,13 +1182,20 @@ export default function Documents() {
     ] : []),
     ['Техника', wizardEquipment ? getEquipmentLabel(wizardEquipment) : '—'],
     ['Аренда', wizardRental?.id || '—'],
+    ['Период', [wizardForm.rentalStartDate, wizardForm.rentalEndDate].filter(Boolean).join(' — ') || '—'],
+    ['Ставка', wizardForm.dailyRate || '—'],
+    ['Количество дней', wizardForm.quantityDays || '—'],
     ['Сервис', wizardServiceTicket?.id || '—'],
     ['Доставка', wizardDelivery?.id || '—'],
     ['Механик', wizardMechanic?.name || '—'],
     ['Служебная машина', wizardServiceVehicle ? [wizardServiceVehicle.make, wizardServiceVehicle.model, wizardServiceVehicle.plateNumber].filter(Boolean).join(' ') : '—'],
     ['Статус', 'Черновик'],
     ['Сумма', wizardRental?.amount || wizardRental?.price ? formatCurrency(Number(wizardRental?.amount || wizardRental?.price)) : '—'],
-  ]).filter(([label]) => wizardForm.type !== 'rental_contract' || !['Техника', 'Аренда', 'Сервис', 'Доставка', 'Механик', 'Служебная машина', 'Сумма'].includes(label)), [wizardClient, wizardDelivery, wizardEquipment, wizardForm, wizardMechanic, wizardRental, wizardServiceTicket, wizardServiceVehicle, wizardTypeMeta]);
+  ]).filter(([label]) => {
+    if (wizardForm.type === 'rental_contract') return !['Договор', 'Спецификация', 'Техника', 'Аренда', 'Период', 'Ставка', 'Количество дней', 'Сервис', 'Доставка', 'Механик', 'Служебная машина', 'Сумма'].includes(label);
+    if (wizardForm.type !== 'rental_specification') return label !== 'Ставка' && label !== 'Количество дней';
+    return label !== 'Спецификация';
+  }), [wizardClient, wizardDelivery, wizardEquipment, wizardForm, wizardMechanic, wizardParentDocument, wizardRental, wizardServiceTicket, wizardServiceVehicle, wizardSpecification, wizardTypeMeta]);
 
   const persistMechanicDocuments = React.useCallback(async (next: MechanicDocument[]) => {
     setMechanicDocuments(next);
@@ -1246,6 +1284,70 @@ export default function Documents() {
     setDocumentWizardOpen(true);
   }
 
+  function applyRentalToWizard(value: string) {
+    const rental = value === 'none' ? undefined : rentalsById.get(value);
+    const rentalEndDate = rental?.plannedReturnDate || (rental as unknown as Record<string, string | undefined> | undefined)?.endDate || '';
+    const rentalInv = getRentalEquipmentInventory(rental);
+    const rentalEquipment = rentalInv ? equipmentByInventory.get(rentalInv) : undefined;
+    const rate = rentalDailyRate(rental);
+    const quantityDays = countRentalDays(rental?.startDate, rentalEndDate);
+    setWizardForm(current => ({
+      ...current,
+      rentalId: value === 'none' ? '' : value,
+      clientId: rental?.clientId || current.clientId || '',
+      equipmentId: current.equipmentId || rentalEquipment?.id || '',
+      rentalStartDate: current.rentalStartDate || rental?.startDate || '',
+      rentalEndDate: current.rentalEndDate || rentalEndDate,
+      dailyRate: current.dailyRate || rate,
+      quantityDays: current.quantityDays || quantityDays,
+      amount: current.amount || String((rental as unknown as Record<string, unknown> | undefined)?.amount || rental?.price || ''),
+    }));
+  }
+
+  function applyParentDocumentToWizard(value: string) {
+    const parent = value === 'none' ? undefined : documents.find(doc => doc.id === value);
+    setWizardForm(current => ({
+      ...current,
+      parentDocumentId: value === 'none' ? '' : value,
+      clientId: parent?.clientId || current.clientId,
+    }));
+  }
+
+  function applySpecificationToWizard(value: string) {
+    const specification = value === 'none' ? undefined : documents.find(doc => doc.id === value);
+    setWizardForm(current => ({
+      ...current,
+      specificationId: value === 'none' ? '' : value,
+      parentDocumentId: specification?.parentDocumentId || current.parentDocumentId,
+      clientId: specification?.clientId || current.clientId,
+      rentalId: specification?.rentalId || current.rentalId,
+      equipmentId: specification?.equipmentId || current.equipmentId,
+      rentalStartDate: specification?.rentalStartDate || current.rentalStartDate,
+      rentalEndDate: specification?.rentalEndDate || current.rentalEndDate,
+      dailyRate: specification?.dailyRate || current.dailyRate,
+      quantityDays: specification?.quantityDays || current.quantityDays,
+      amount: specification?.amount ? String(specification.amount) : current.amount,
+    }));
+  }
+
+  function openDocumentChainAction(source: Doc, type: DocumentType) {
+    if (!['rental_specification', 'transfer_act_to_client', 'return_act_from_client'].includes(type)) return;
+    setSelectedDocument(null);
+    openDocumentWizard({
+      type,
+      parentDocumentId: source.type === 'rental_contract' ? source.id : source.parentDocumentId || '',
+      specificationId: source.type === 'rental_specification' ? source.id : '',
+      clientId: source.clientId || '',
+      rentalId: source.rentalId || '',
+      equipmentId: source.equipmentId || '',
+      rentalStartDate: source.rentalStartDate || '',
+      rentalEndDate: source.rentalEndDate || '',
+      dailyRate: source.dailyRate || '',
+      quantityDays: source.quantityDays || '',
+      amount: source.amount ? String(source.amount) : '',
+    });
+  }
+
   function applyWizardType(type: DocumentType) {
     setWizardForm(current => ({ ...current, type }));
     setWizardStep(2);
@@ -1272,6 +1374,7 @@ export default function Documents() {
         mechanicId: wizardForm.mechanicId || undefined,
         serviceCarId: wizardForm.serviceCarId || undefined,
         parentDocumentId: wizardForm.parentDocumentId || undefined,
+        specificationId: wizardForm.specificationId || undefined,
         objectId: wizardRental?.objectId,
         contractId: wizardRental?.contractId,
         dueDate: wizardForm.dueDate || undefined,
@@ -1295,7 +1398,11 @@ export default function Documents() {
         rentalStartDate: wizardForm.rentalStartDate || undefined,
         rentalEndDate: wizardForm.rentalEndDate || undefined,
         dailyRate: wizardForm.dailyRate.trim() || undefined,
+        quantityDays: wizardForm.quantityDays.trim() || undefined,
         amount: wizardForm.amount.trim() ? Number(wizardForm.amount.replace(',', '.')) : undefined,
+        equipmentModel: wizardEquipment ? [wizardEquipment.manufacturer, wizardEquipment.model].filter(Boolean).join(' ') : undefined,
+        inventoryNumber: wizardEquipment?.inventoryNumber || undefined,
+        serialNumber: wizardEquipment?.serialNumber || undefined,
         transferDate: wizardForm.transferDate || undefined,
         equipmentCondition: wizardForm.equipmentCondition.trim() || undefined,
         completeness: wizardForm.completeness.trim() || undefined,
@@ -2027,6 +2134,31 @@ export default function Documents() {
                         ) : null}
                         {canManageDocuments ? (
                           <>
+                            {doc.type === 'rental_contract' ? (
+                              <>
+                                <button
+                                  onClick={() => openDocumentChainAction(doc, 'rental_specification')}
+                                  className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                                  title="Создать спецификацию"
+                                >
+                                  <ClipboardList className="h-4 w-4 text-indigo-500" />
+                                </button>
+                                <button
+                                  onClick={() => openDocumentChainAction(doc, 'transfer_act_to_client')}
+                                  className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                                  title="Создать акт передачи"
+                                >
+                                  <Send className="h-4 w-4 text-emerald-500" />
+                                </button>
+                                <button
+                                  onClick={() => openDocumentChainAction(doc, 'return_act_from_client')}
+                                  className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                                  title="Создать акт возврата"
+                                >
+                                  <Printer className="h-4 w-4 text-amber-500" />
+                                </button>
+                              </>
+                            ) : null}
                             <button
                               onClick={() => void handleMarkSent(doc, 'pending_signature')}
                               className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -2291,6 +2423,17 @@ export default function Documents() {
 
                 {wizardStep === 2 && wizardForm.type !== 'rental_contract' ? (
                   <div className="grid gap-4 md:grid-cols-2">
+                    <div className="md:col-span-2">
+                      <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
+                        {wizardForm.type === 'rental_specification'
+                          ? 'Спецификация привязывается к договору и фиксирует технику, срок аренды, ставку и сумму.'
+                          : wizardForm.type === 'transfer_act_to_client'
+                            ? 'Акт подтверждает передачу конкретной техники клиенту.'
+                            : wizardForm.type === 'return_act_from_client'
+                              ? 'Акт фиксирует возврат техники, состояние и замечания.'
+                              : 'Заполните связи документа.'}
+                      </p>
+                    </div>
                     {['rental_specification', 'transfer_act_to_client', 'return_act_from_client'].includes(wizardForm.type) ? (
                       <div className="space-y-2">
                         <div className="text-sm font-medium text-foreground">Клиент</div>
@@ -2310,14 +2453,7 @@ export default function Documents() {
                     {wizardForm.type === 'rental_specification' ? (
                       <div className="space-y-2">
                         <div className="text-sm font-medium text-foreground">Договор аренды</div>
-                        <Select value={wizardForm.parentDocumentId || 'none'} onValueChange={(value) => {
-                          const parent = value === 'none' ? undefined : documents.find(doc => doc.id === value);
-                          setWizardForm(current => ({
-                            ...current,
-                            parentDocumentId: value === 'none' ? '' : value,
-                            clientId: parent?.clientId || current.clientId,
-                          }));
-                        }}>
+                        <Select value={wizardForm.parentDocumentId || 'none'} onValueChange={applyParentDocumentToWizard}>
                           <SelectTrigger><SelectValue placeholder="Выберите договор" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">Не выбран</SelectItem>
@@ -2326,21 +2462,35 @@ export default function Documents() {
                         </Select>
                       </div>
                     ) : null}
+                    {['transfer_act_to_client', 'return_act_from_client'].includes(wizardForm.type) ? (
+                      <>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Договор аренды</div>
+                          <Select value={wizardForm.parentDocumentId || 'none'} onValueChange={applyParentDocumentToWizard}>
+                            <SelectTrigger><SelectValue placeholder="Выберите договор" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Не выбран</SelectItem>
+                              {documents.filter(doc => doc.type === 'rental_contract').map(doc => <SelectItem key={doc.id} value={doc.id}>{getDocumentNumber(doc)} · {doc.client || doc.clientId}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Спецификация</div>
+                          <Select value={wizardForm.specificationId || 'none'} onValueChange={applySpecificationToWizard}>
+                            <SelectTrigger><SelectValue placeholder="Выберите спецификацию" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Не выбрана</SelectItem>
+                              {documents.filter(doc => doc.type === 'rental_specification' && (!wizardForm.parentDocumentId || doc.parentDocumentId === wizardForm.parentDocumentId)).map(doc => <SelectItem key={doc.id} value={doc.id}>{getDocumentNumber(doc)} · {doc.client || doc.clientId}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </>
+                    ) : null}
                     {['rental_specification', 'transfer_act_to_client', 'return_act_from_client'].includes(wizardForm.type) ? (
                       <>
                         <div className="space-y-2">
                           <div className="text-sm font-medium text-foreground">Аренда</div>
-                          <Select value={wizardForm.rentalId || 'none'} onValueChange={(value) => {
-                            const rental = value === 'none' ? undefined : rentalsById.get(value);
-                            setWizardForm(current => ({
-                              ...current,
-                              rentalId: value === 'none' ? '' : value,
-                              clientId: rental?.clientId || current.clientId || '',
-                              rentalStartDate: current.rentalStartDate || rental?.startDate || '',
-                              rentalEndDate: current.rentalEndDate || rental?.endDate || '',
-                              amount: current.amount || String(rental?.amount || rental?.price || ''),
-                            }));
-                          }}>
+                          <Select value={wizardForm.rentalId || 'none'} onValueChange={applyRentalToWizard}>
                             <SelectTrigger><SelectValue placeholder="Выберите аренду" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">Не выбрана</SelectItem>
@@ -2452,6 +2602,7 @@ export default function Documents() {
                         <div className="space-y-2"><div className="text-sm font-medium text-foreground">Период с</div><Input type="date" value={wizardForm.rentalStartDate} onChange={(event) => setWizardForm(current => ({ ...current, rentalStartDate: event.target.value }))} /></div>
                         <div className="space-y-2"><div className="text-sm font-medium text-foreground">Период по</div><Input type="date" value={wizardForm.rentalEndDate} onChange={(event) => setWizardForm(current => ({ ...current, rentalEndDate: event.target.value }))} /></div>
                         <div className="space-y-2"><div className="text-sm font-medium text-foreground">Ставка</div><Input value={wizardForm.dailyRate} onChange={(event) => setWizardForm(current => ({ ...current, dailyRate: event.target.value }))} /></div>
+                        <div className="space-y-2"><div className="text-sm font-medium text-foreground">Количество дней</div><Input value={wizardForm.quantityDays} onChange={(event) => setWizardForm(current => ({ ...current, quantityDays: event.target.value }))} /></div>
                         <div className="space-y-2"><div className="text-sm font-medium text-foreground">Сумма</div><Input value={wizardForm.amount} onChange={(event) => setWizardForm(current => ({ ...current, amount: event.target.value }))} /></div>
                       </>
                     ) : null}
@@ -2880,6 +3031,19 @@ export default function Documents() {
                   </div>
 
                   <DialogFooter>
+                    {canManageDocuments && selectedDocument.type === 'rental_contract' ? (
+                      <>
+                        <Button variant="secondary" onClick={() => openDocumentChainAction(selectedDocument, 'rental_specification')}>
+                          Создать спецификацию
+                        </Button>
+                        <Button variant="secondary" onClick={() => openDocumentChainAction(selectedDocument, 'transfer_act_to_client')}>
+                          Создать акт передачи
+                        </Button>
+                        <Button variant="secondary" onClick={() => openDocumentChainAction(selectedDocument, 'return_act_from_client')}>
+                          Создать акт возврата
+                        </Button>
+                      </>
+                    ) : null}
                     {!getDocumentNumber(selectedDocument) && canManageDocuments ? (
                       <Button variant="secondary" onClick={() => void handleAssignNumber(selectedDocument)}>
                         Присвоить номер
@@ -2921,9 +3085,10 @@ export default function Documents() {
             {[
               ['Всего документов', documentControl.kpi.totalDocuments],
               ['Без подписи', documentControl.kpi.unsignedDocuments],
-              ['Отправлено без подписи', documentControl.kpi.sentWaiting],
               ['Аренды без договора', documentControl.kpi.rentalsWithoutContract],
-              ['Закрытые без акта/УПД', documentControl.kpi.closedRentalsWithoutClosingDocs],
+              ['Без спецификации', documentControl.kpi.rentalsWithoutSpecification],
+              ['Без акта передачи', documentControl.kpi.rentalsWithoutTransferAct],
+              ['Закрытые без акта возврата', documentControl.kpi.closedRentalsWithoutReturnAct],
               ['Просрочено подписание', documentControl.kpi.overdueSignature],
               ['Документы без связи', documentControl.kpi.orphanDocuments],
             ].map(([label, value]) => (

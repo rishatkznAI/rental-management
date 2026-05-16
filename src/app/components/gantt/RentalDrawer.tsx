@@ -5,7 +5,7 @@ import {
   X, CreditCard, FileText, User, MessageSquare,
   ArrowRight, RotateCcw, CirclePause as PauseCircle,
   CircleCheck, CircleAlert, Clock, Trash2, Plus, ChevronDown, ChevronUp,
-  CalendarClock, LogOut, Edit, Wrench, Truck
+  CalendarClock, LogOut, Edit, Wrench, Truck, Printer, Eye
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -20,6 +20,7 @@ import { formatCurrency, formatDate, formatDateTime } from '../../lib/utils';
 import { findConflictingRental } from '../../lib/rental-conflicts';
 import { animationDurations, useAnimatedPresence } from '../../lib/animations';
 import { resolveRentalByAnyId } from '../../lib/rentalNavigation.js';
+import { buildDocumentControl } from '../../lib/documentControl.js';
 import {
   buildExtensionConflictDisplay,
   getRentalExtensionValidation,
@@ -100,6 +101,11 @@ const paymentVariants: Record<GanttRentalData['paymentStatus'], 'success' | 'err
 };
 
 const documentTypeLabels: Record<Document['type'], string> = {
+  rental_contract: 'Договор аренды',
+  rental_specification: 'Спецификация',
+  transfer_act_to_client: 'Акт передачи',
+  return_act_from_client: 'Акт возврата',
+  trip_ticket: 'Путевой лист',
   contract: 'Договор',
   commercial_offer: 'Коммерческое предложение',
   act: 'Акт',
@@ -119,6 +125,9 @@ const documentStatusLabels: Record<Document['status'], string> = {
   draft: 'Черновик',
   sent: 'Отправлен',
   signed: 'Подписан',
+  pending_signature: 'На подписи',
+  expired: 'Просрочен',
+  cancelled: 'Отменён',
 };
 
 const serviceAlertStyles: Record<RentalServiceAlertSeverity, {
@@ -149,6 +158,16 @@ const serviceAlertStyles: Record<RentalServiceAlertSeverity, {
 
 const EMPTY_SERVICE_TICKETS: ServiceTicket[] = [];
 type RentalDrawerTab = 'overview' | 'terms' | 'payments' | 'documents' | 'delivery' | 'history';
+
+type RentalDocumentCreateType = 'rental_contract' | 'rental_specification' | 'transfer_act_to_client' | 'return_act_from_client';
+
+function countInclusiveDays(startDate?: string, endDate?: string) {
+  if (!startDate || !endDate) return '';
+  const start = new Date(`${startDate.slice(0, 10)}T00:00:00Z`).getTime();
+  const end = new Date(`${endDate.slice(0, 10)}T00:00:00Z`).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '';
+  return String(Math.floor((end - start) / 86400000) + 1);
+}
 
 const deliveryTypeLabels: Record<Delivery['type'], string> = {
   shipping: 'Доставка',
@@ -307,6 +326,29 @@ export function RentalDrawer({
     if (rental.equipmentInv || currentEquipment?.inventoryNumber) params.set('equipmentInv', rental.equipmentInv || currentEquipment?.inventoryNumber || '');
     return `/documents?${params.toString()}`;
   })();
+  const createRentalDocumentUrl = (type: RentalDocumentCreateType) => {
+    const params = new URLSearchParams({ action: 'create', type });
+    if (canonicalRentalId) params.set('rentalId', canonicalRentalId);
+    if (rental.clientId) params.set('clientId', rental.clientId);
+    if (rental.client) params.set('clientName', rental.client);
+    if (rental.equipmentId || currentEquipment?.id) params.set('equipmentId', rental.equipmentId || currentEquipment?.id || '');
+    if (rental.equipmentInv || currentEquipment?.inventoryNumber) params.set('equipmentInv', rental.equipmentInv || currentEquipment?.inventoryNumber || '');
+    if (rental.objectId) params.set('objectId', rental.objectId);
+    if (rental.contractId) params.set('contractId', rental.contractId);
+    if (rental.startDate) params.set('rentalStartDate', rental.startDate);
+    if (rental.endDate) params.set('rentalEndDate', rental.endDate);
+    if ((rental as GanttRentalData & { rate?: string }).rate) params.set('dailyRate', (rental as GanttRentalData & { rate?: string }).rate || '');
+    if (rental.amount) params.set('amount', String(rental.amount));
+    if (rental.startDate && rental.endDate) params.set('quantityDays', countInclusiveDays(rental.startDate, rental.endDate));
+    if (type === 'rental_specification' && chainContract?.id) params.set('parentDocumentId', chainContract.id);
+    if (['transfer_act_to_client', 'return_act_from_client'].includes(type)) {
+      if (chainContract?.id) params.set('parentDocumentId', chainContract.id);
+      if (chainSpecification?.id) params.set('specificationId', chainSpecification.id);
+    }
+    if (type === 'transfer_act_to_client') params.set('transferDate', rental.startDate || new Date().toISOString().slice(0, 10));
+    if (type === 'return_act_from_client') params.set('returnDate', actualReturnDate || rental.endDate || new Date().toISOString().slice(0, 10));
+    return `/documents?${params.toString()}`;
+  };
   const createDeliveryUrl = (type: Delivery['type']) => {
     const params = new URLSearchParams({ action: 'create', type });
     if (canonicalRentalId) params.set('rentalId', canonicalRentalId);
@@ -320,12 +362,35 @@ export function RentalDrawer({
     doc.rentalId,
     doc.rental,
   ].some(value => rentalPaymentIds.has(String(value || '').trim())));
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const documentControlRental = {
+    ...rental,
+    id: canonicalRentalId || rental.id,
+    plannedReturnDate: rental.endDate,
+    equipment: rental.equipmentInv ? [rental.equipmentInv] : [],
+  };
+  const documentControl = buildDocumentControl({
+    rentals: [documentControlRental],
+    documents,
+    clients,
+    equipment: currentEquipment ? [currentEquipment] : [],
+    today: todayKey,
+  });
+  const rentalDocumentSummary = documentControl.getRentalSummary(documentControlRental.id);
+  const documentsById = new Map(documents.map(doc => [doc.id, doc]));
+  const chainDocument = (slot?: { documents?: Array<{ id?: string }> }) => {
+    const id = slot?.documents?.[0]?.id || '';
+    return id ? documentsById.get(id) : undefined;
+  };
+  const chainContract = chainDocument(rentalDocumentSummary?.contract);
+  const chainSpecification = chainDocument(rentalDocumentSummary?.specification);
+  const chainTransferAct = chainDocument(rentalDocumentSummary?.transferAct);
+  const chainReturnAct = chainDocument(rentalDocumentSummary?.returnAct);
   const totalPaid = rentalPayments.reduce((sum, p) => sum + getEffectivePaidAmount(p), 0);
   const rentalBilling = calculateRentalBilling(rental);
   const rentalBillingAmount = rentalBilling.finalRentalAmount;
   const remaining = Math.max(0, rentalBillingAmount - totalPaid);
   const canRegisterPayment = canCreatePayments && remaining > 0;
-  const todayKey = new Date().toISOString().slice(0, 10);
   const isReturnOverdue = rental.status === 'active' && rental.endDate < todayKey;
   const overdueDays = isReturnOverdue
     ? Math.max(1, Math.ceil((new Date(todayKey).getTime() - new Date(rental.endDate).getTime()) / 86400000))
@@ -348,6 +413,42 @@ export function RentalDrawer({
     || (rental as GanttRentalData & { actualReturnDate?: string; returnDate?: string }).returnDate
     || '';
   const isRentalFinished = rental.status === 'closed' || rental.status === 'returned';
+  const rentalDocumentChainRows = [
+    {
+      id: 'contract',
+      label: 'Договор аренды',
+      doc: chainContract,
+      createType: 'rental_contract' as const,
+      missingHint: chainContract ? '' : 'Договор ещё не создан.',
+    },
+    {
+      id: 'specification',
+      label: 'Спецификация',
+      doc: chainSpecification,
+      createType: 'rental_specification' as const,
+      missingHint: chainContract
+        ? 'Спецификация ещё не создана.'
+        : 'Для спецификации желательно сначала создать договор аренды.',
+    },
+    {
+      id: 'transfer',
+      label: 'Акт передачи',
+      doc: chainTransferAct,
+      createType: 'transfer_act_to_client' as const,
+      missingHint: chainSpecification
+        ? 'Акт передачи ещё не создан.'
+        : 'Спецификация не найдена. Рекомендуется сначала создать спецификацию.',
+    },
+    {
+      id: 'return',
+      label: 'Акт возврата',
+      doc: chainReturnAct,
+      createType: 'return_act_from_client' as const,
+      missingHint: isRentalFinished
+        ? 'Акт возврата ещё не создан.'
+        : 'Аренда ещё не закрыта. Проверьте дату возврата.',
+    },
+  ];
   const canManageDowntimes = canEditRentals && !isRentalFinished;
   const canExtendRentalTerm = canEditRentalDates && Boolean(rentalDetailId) && (rental.status === 'active' || rental.status === 'created') && !isRentalFinished;
   const canShowExtendShortcut = canEditRentalDates && rental.status === 'active' && !isRentalFinished;
@@ -1468,6 +1569,97 @@ export function RentalDrawer({
                   </Link>
                 </Button>
               )}
+            </div>
+
+            <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Документы аренды</h3>
+                  <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    Контроль договора, спецификации и актов по этой аренде.
+                  </p>
+                </div>
+                <Button size="sm" variant="ghost" className="rounded-xl" asChild>
+                  <Link to={`/documents?rentalId=${encodeURIComponent(canonicalRentalId || rental.id)}`}>
+                    Открыть все документы клиента/аренды
+                  </Link>
+                </Button>
+              </div>
+              <div className="mt-3 space-y-2">
+                {rentalDocumentChainRows.map(row => {
+                  const docNumber = row.doc?.documentNumber || row.doc?.number || '';
+                  const docDate = row.doc?.documentDate || row.doc?.date || row.doc?.createdAt || '';
+                  const docStatus = row.doc ? documentStatusLabels[row.doc.status] || 'Черновик' : 'Не создан';
+                  const isReady = Boolean(row.doc);
+                  return (
+                    <div
+                      key={row.id}
+                      className={`rounded-md border px-3 py-2 ${
+                        isReady
+                          ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/60 dark:bg-emerald-950/20'
+                          : 'border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            {isReady ? (
+                              <CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                            ) : (
+                              <CircleAlert className="h-4 w-4 text-amber-500" />
+                            )}
+                            <span className="text-sm font-medium text-gray-900 dark:text-white">{row.label}</span>
+                            <Badge variant={isReady ? 'success' : 'warning'}>
+                              {isReady ? 'Есть' : 'Нет'}
+                            </Badge>
+                          </div>
+                          <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                            {isReady
+                              ? `${docNumber || 'Без номера'} · ${docDate ? formatDate(docDate) : 'Без даты'} · ${docStatus}`
+                              : row.missingHint}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                          {row.doc ? (
+                            <>
+                              <Button size="sm" variant="secondary" className="h-7 rounded-lg px-2" asChild>
+                                <a href={`/api/documents/${encodeURIComponent(row.doc.id)}/print`} target="_blank" rel="noreferrer">
+                                  <Eye className="h-3.5 w-3.5" />
+                                  Открыть
+                                </a>
+                              </Button>
+                              <Button size="sm" variant="secondary" className="h-7 rounded-lg px-2" asChild>
+                                <a href={`/api/documents/${encodeURIComponent(row.doc.id)}/print`} target="_blank" rel="noreferrer">
+                                  <Printer className="h-3.5 w-3.5" />
+                                  Печать
+                                </a>
+                              </Button>
+                            </>
+                          ) : canCreateDocuments ? (
+                            <>
+                              {row.createType === 'rental_specification' && !chainContract ? (
+                                <Button size="sm" variant="secondary" className="h-7 rounded-lg px-2" asChild>
+                                  <Link to={createRentalDocumentUrl('rental_contract')}>Создать договор</Link>
+                                </Button>
+                              ) : null}
+                              {['transfer_act_to_client', 'return_act_from_client'].includes(row.createType) && !chainSpecification ? (
+                                <Button size="sm" variant="secondary" className="h-7 rounded-lg px-2" asChild>
+                                  <Link to={createRentalDocumentUrl('rental_specification')}>Создать спецификацию</Link>
+                                </Button>
+                              ) : null}
+                              <Button size="sm" className="h-7 rounded-lg px-2" asChild>
+                                <Link to={createRentalDocumentUrl(row.createType)}>Создать</Link>
+                              </Button>
+                            </>
+                          ) : (
+                            <span className="text-xs text-gray-500 dark:text-gray-400">Нет прав на создание</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">

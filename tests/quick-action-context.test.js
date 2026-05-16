@@ -25,6 +25,18 @@ test('buildQuickActionContext reads safe query values', () => {
     rentalId: 'rent-1',
     equipmentId: 'eq-1',
     equipmentInv: 'INV-1',
+    type: '',
+    parentDocumentId: '',
+    specificationId: '',
+    rentalStartDate: '',
+    rentalEndDate: '',
+    dailyRate: '',
+    quantityDays: '',
+    amount: '',
+    transferDate: '',
+    returnDate: '',
+    objectId: '',
+    contractId: '',
   });
 });
 

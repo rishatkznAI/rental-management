@@ -23,6 +23,18 @@ export function buildQuickActionContext(source) {
     rentalId: readParam(source, 'rentalId'),
     equipmentId: readParam(source, 'equipmentId'),
     equipmentInv: readParam(source, 'equipmentInv'),
+    type: readParam(source, 'type') || readParam(source, 'documentType'),
+    parentDocumentId: readParam(source, 'parentDocumentId'),
+    specificationId: readParam(source, 'specificationId'),
+    rentalStartDate: readParam(source, 'rentalStartDate'),
+    rentalEndDate: readParam(source, 'rentalEndDate'),
+    dailyRate: readParam(source, 'dailyRate'),
+    quantityDays: readParam(source, 'quantityDays'),
+    amount: readParam(source, 'amount'),
+    transferDate: readParam(source, 'transferDate'),
+    returnDate: readParam(source, 'returnDate'),
+    objectId: readParam(source, 'objectId'),
+    contractId: readParam(source, 'contractId'),
   };
 }
 

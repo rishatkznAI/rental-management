@@ -961,12 +961,38 @@ export default function Documents() {
     if (appliedQuickActionRef.current === actionKey) return;
     appliedQuickActionRef.current = actionKey;
 
-    const requestedType = String(searchParams.get('type') || searchParams.get('documentType') || '').toLowerCase();
+    const requestedType = String(quickActionContext.type || '').toLowerCase();
+    const wizardDocumentTypes: DocumentType[] = [
+      'rental_contract',
+      'rental_specification',
+      'transfer_act_to_client',
+      'return_act_from_client',
+    ];
     if (['commercial_offer', 'quote', 'kp', 'кп'].includes(requestedType)) {
       openCommercialOfferCreate({
         clientId: quickActionClient?.id || quickActionRental?.clientId || quickActionContext.clientId,
         client: quickActionClient?.company || quickActionRental?.client || quickActionContext.clientName,
         equipmentId: quickActionEquipment?.id || quickActionContext.equipmentId,
+      });
+    } else if (wizardDocumentTypes.includes(requestedType as DocumentType)) {
+      const rentalEndDate = quickActionContext.rentalEndDate
+        || quickActionRental?.plannedReturnDate
+        || (quickActionRental as unknown as Record<string, string | undefined> | undefined)?.endDate
+        || '';
+      openDocumentWizard({
+        type: requestedType as DocumentType,
+        clientId: quickActionClient?.id || quickActionRental?.clientId || quickActionContext.clientId,
+        rentalId: quickActionRental?.id || quickActionContext.rentalId,
+        equipmentId: quickActionEquipment?.id || quickActionContext.equipmentId,
+        parentDocumentId: quickActionContext.parentDocumentId,
+        specificationId: quickActionContext.specificationId,
+        rentalStartDate: quickActionContext.rentalStartDate || quickActionRental?.startDate || '',
+        rentalEndDate,
+        dailyRate: quickActionContext.dailyRate || rentalDailyRate(quickActionRental),
+        quantityDays: quickActionContext.quantityDays || countRentalDays(quickActionRental?.startDate, rentalEndDate),
+        amount: quickActionContext.amount || String((quickActionRental as unknown as Record<string, unknown> | undefined)?.amount || quickActionRental?.price || ''),
+        transferDate: quickActionContext.transferDate || quickActionRental?.startDate || new Date().toISOString().slice(0, 10),
+        returnDate: quickActionContext.returnDate || quickActionRental?.actualReturnDate || quickActionRental?.plannedReturnDate || new Date().toISOString().slice(0, 10),
       });
     } else {
       openContractCreate('rental', {
@@ -1275,11 +1301,13 @@ export default function Documents() {
   }
 
   function openDocumentWizard(initial: Partial<DocumentWizardState> = {}) {
-    setWizardForm({
+    const nextForm = {
       ...EMPTY_WIZARD,
       ...initial,
       type: initial.type || EMPTY_WIZARD.type,
-    });
+    };
+    const initialClient = nextForm.clientId ? clientsById.get(nextForm.clientId) : null;
+    setWizardForm(initialClient ? fillWizardClientFields(nextForm, initialClient) : nextForm);
     setWizardStep(1);
     setDocumentWizardOpen(true);
   }

@@ -173,6 +173,19 @@ function isRentalClosed(rental) {
   return RENTAL_CLOSED_STATUSES.has(status) || Boolean(rental?.actualReturnDate);
 }
 
+function documentChainItem(doc) {
+  return {
+    id: safeId(doc?.id),
+    number: safeDisplay(doc?.documentNumber, doc?.number, doc?.id),
+    type: documentTypeLabel(documentType(doc)),
+    status: documentStatusLabel(documentStatus(doc)),
+    rawStatus: documentStatus(doc),
+    date: dateKey(doc?.documentDate || doc?.date || doc?.createdAt),
+    parentDocumentId: getDocumentParentId(doc),
+    specificationId: getDocumentSpecificationId(doc),
+  };
+}
+
 function isRentalRelevant(rental) {
   const status = normalizeStatus(rental?.status);
   return !['cancelled', 'canceled'].includes(status) && (RENTAL_OPEN_STATUSES.has(status) || isRentalClosed(rental) || !status);
@@ -379,21 +392,25 @@ function buildRentalSummary(rental, rentalDocuments, maps, todayKey, overdueDays
       signed: hasSignedContract,
       count: contracts.length,
       label: hasSignedContract ? 'Есть, подписан' : hasContract ? 'Есть, без подписи' : 'Нет договора',
+      documents: contracts.map(documentChainItem),
     },
     specification: {
       exists: hasSpecification,
       count: specifications.length,
       label: hasSpecification ? 'Есть' : 'Нет спецификации',
+      documents: specifications.map(documentChainItem),
     },
     transferAct: {
       exists: hasTransferAct,
       count: transferActs.length,
       label: hasTransferAct ? 'Есть' : 'Нет акта передачи',
+      documents: transferActs.map(documentChainItem),
     },
     returnAct: {
       exists: hasReturnAct,
       count: returnActs.length,
       label: hasReturnAct ? 'Есть' : 'Нет акта возврата',
+      documents: returnActs.map(documentChainItem),
     },
     closing: {
       exists: hasClosingDoc,

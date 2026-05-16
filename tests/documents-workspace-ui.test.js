@@ -90,3 +90,14 @@ test('document chain wizard renders type-specific fields and quick actions', () 
   assert.match(source, /openDocumentChainAction\(doc, 'transfer_act_to_client'\)/);
   assert.match(source, /openDocumentChainAction\(doc, 'return_act_from_client'\)/);
 });
+
+test('documents quick action can open rental document wizard with chain context', () => {
+  assert.match(source, /const requestedType = String\(quickActionContext\.type \|\| ''\)\.toLowerCase\(\)/);
+  assert.match(source, /const wizardDocumentTypes: DocumentType\[\]/);
+  assert.match(source, /wizardDocumentTypes\.includes\(requestedType as DocumentType\)/);
+  assert.match(source, /parentDocumentId: quickActionContext\.parentDocumentId/);
+  assert.match(source, /specificationId: quickActionContext\.specificationId/);
+  assert.match(source, /transferDate: quickActionContext\.transferDate \|\| quickActionRental\?\.startDate/);
+  assert.match(source, /returnDate: quickActionContext\.returnDate \|\| quickActionRental\?\.actualReturnDate/);
+  assert.match(source, /setWizardForm\(initialClient \? fillWizardClientFields\(nextForm, initialClient\) : nextForm\)/);
+});

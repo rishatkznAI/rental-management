@@ -152,6 +152,10 @@ test('rental document chain resolves framework contract through specification pa
   assert.equal(summary.specification.exists, true);
   assert.equal(summary.transferAct.exists, true);
   assert.equal(summary.returnAct.exists, true);
+  assert.equal(summary.contract.documents[0].id, 'D-contract');
+  assert.equal(summary.specification.documents[0].id, 'D-spec');
+  assert.equal(summary.transferAct.documents[0].id, 'D-transfer');
+  assert.equal(summary.returnAct.documents[0].id, 'D-return');
   assert.notEqual(summary.status, DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT);
 });
 

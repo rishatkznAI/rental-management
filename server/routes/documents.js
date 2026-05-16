@@ -60,6 +60,52 @@ function registerDocumentRoutes(router, deps) {
     return isAdmin(user);
   }
 
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function fallbackPrintableDocumentHtml(document) {
+    const number = documentNumber(document) || document.id || 'Без номера';
+    const rows = [
+      ['Тип', document.type || document.documentType || 'Документ'],
+      ['Номер', number],
+      ['Дата', document.date || document.documentDate || document.createdAt || ''],
+      ['Клиент', document.client || document.clientName || document.clientId || ''],
+      ['Аренда', document.rentalId || document.rental || ''],
+      ['Техника', document.equipmentInv || document.equipmentId || ''],
+      ['Статус', document.status || ''],
+      ['Комментарий', document.comment || document.description || ''],
+    ].filter(([, value]) => String(value || '').trim());
+    return `<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(number)}</title>
+  <style>
+    body { margin: 32px; font-family: Arial, sans-serif; color: #111827; }
+    h1 { margin: 0 0 16px; font-size: 24px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { border: 1px solid #d1d5db; padding: 8px 10px; vertical-align: top; }
+    td:first-child { width: 180px; font-weight: 700; background: #f9fafb; }
+    @media print { body { margin: 16mm; } }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(number)}</h1>
+  <table>
+    <tbody>
+      ${rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value)}</td></tr>`).join('')}
+    </tbody>
+  </table>
+</body>
+</html>`;
+  }
+
   function relatedRentalsById() {
     const map = new Map();
     const rentals = readData('rentals') || [];
@@ -619,8 +665,7 @@ function registerDocumentRoutes(router, deps) {
       const document = (readData('documents') || []).find(item => item.id === req.params.id);
       if (!document) return res.status(404).send('Not found');
       if (!accessControl.canAccessEntity('documents', document, req.user)) return res.status(403).send('Forbidden');
-      const html = document.printHtml || document.generatedContent || document.contentHtml;
-      if (!html) return res.status(404).send('Printable content not found');
+      const html = document.printHtml || document.generatedContent || document.contentHtml || fallbackPrintableDocumentHtml(document);
       res.setHeader('content-type', 'text/html; charset=utf-8');
       return res.send(html);
     } catch (error) {

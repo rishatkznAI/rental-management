@@ -370,6 +370,31 @@ test('documents API assigns number to legacy document and reports registry summa
   });
 });
 
+test('documents print endpoint renders legacy manual records without stored html', async () => {
+  const { app, state } = createApp();
+  state.documents = [{
+    id: 'D-legacy-print',
+    type: 'contract',
+    number: 'LEGACY-1',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    rentalId: 'R-1',
+    date: '2026-05-09',
+    status: 'draft',
+  }];
+
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/documents/D-legacy-print/print`, {
+      headers: { authorization: 'Bearer office' },
+    });
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type') || '', /text\/html/);
+    assert.match(html, /LEGACY-1/);
+    assert.match(html, /ООО Клиент/);
+  });
+});
+
 test('documents API records status history and blocks forbidden roles', async () => {
   const { app } = createApp();
   await withServer(app, async (baseUrl) => {

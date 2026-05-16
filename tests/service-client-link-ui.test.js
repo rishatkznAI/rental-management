@@ -27,6 +27,20 @@ test('service create form supports rental prefill and explicit active rental lin
   assert.match(formSource, /applyRentalLink/);
 });
 
+test('service create form filters rentals by selected client and resets stale relation fields', () => {
+  assert.match(formSource, /filteredRentalOptions/);
+  assert.match(formSource, /rentalBelongsToSelectedClient/);
+  assert.match(formSource, /rental\.clientId/);
+  assert.match(formSource, /rental\.clientName/);
+  assert.match(formSource, /rental\.companyName/);
+  assert.match(formSource, /Аренда не принадлежит выбранному клиенту/);
+  assert.match(formSource, /Аренда сброшена, потому что она относится к другому клиенту/);
+  assert.match(formSource, /Сначала выберите клиента, затем аренду/);
+  assert.match(formSource, /У выбранного клиента нет аренд\. Можно создать заявку без аренды/);
+  assert.match(formSource, /objectId: ''/);
+  assert.match(formSource, /contractId: ''/);
+});
+
 test('service DTO keeps client link fields from API responses', () => {
   assert.match(dtoSource, /clientId: stringValue\(item\.clientId \?\? item\.client_id\) \|\| undefined/);
   assert.match(dtoSource, /clientName: stringValue\(item\.clientName \?\? item\.client\) \|\| undefined/);

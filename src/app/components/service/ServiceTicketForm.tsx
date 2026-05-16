@@ -44,8 +44,12 @@ type ServiceRentalOption = {
   label: string;
   clientId?: string;
   client?: string;
+  clientName?: string;
+  companyName?: string;
   objectId?: string;
   contractId?: string;
+  location?: string;
+  periodLabel?: string;
   equipmentRefs: string[];
   active: boolean;
 };
@@ -54,28 +58,68 @@ function compact(values: Array<unknown>): string[] {
   return values.flat().map(value => String(value || '').trim()).filter(Boolean);
 }
 
+function normalizeText(value: unknown): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function rentalPeriodLabel(startDate?: string, endDate?: string): string {
+  return [startDate, endDate].filter(Boolean).join('–');
+}
+
 function rentalOptionFromClassic(rental: Rental): ServiceRentalOption {
-  const rawRental = rental as Rental & { equipmentId?: string; equipmentInv?: string; serialNumber?: string };
+  const rawRental = rental as Rental & {
+    clientName?: string;
+    companyName?: string;
+    equipmentId?: string;
+    equipmentInv?: string;
+    serialNumber?: string;
+    location?: string;
+  };
+  const periodLabel = rentalPeriodLabel(rental.startDate, rental.plannedReturnDate || rental.actualReturnDate);
+  const equipmentLabel = compact([rawRental.equipmentInv, rawRental.serialNumber, rental.equipment]).join(', ');
+  const objectLabel = rawRental.location || rental.deliveryAddress;
   return {
     id: rental.id,
-    label: `${rental.id} · ${rental.client || 'Клиент не указан'}`,
+    label: compact([
+      rental.id,
+      rental.client || rawRental.clientName || rawRental.companyName || 'Клиент не указан',
+      equipmentLabel,
+      objectLabel,
+      periodLabel,
+    ]).join(' · '),
     clientId: rental.clientId,
     client: rental.client,
+    clientName: rawRental.clientName,
+    companyName: rawRental.companyName,
     objectId: rental.objectId,
     contractId: rental.contractId,
+    location: objectLabel,
+    periodLabel,
     equipmentRefs: compact([rawRental.equipmentId, rawRental.equipmentInv, rawRental.serialNumber, rental.equipment]),
     active: !['closed'].includes(String(rental.status || '').toLowerCase()),
   };
 }
 
 function rentalOptionFromGantt(rental: GanttRentalData): ServiceRentalOption {
+  const rawRental = rental as GanttRentalData & { clientName?: string; companyName?: string; location?: string; objectName?: string };
+  const periodLabel = rentalPeriodLabel(rental.startDate, rental.endDate);
   return {
     id: rental.id,
-    label: `${rental.rentalId || rental.id} · ${rental.client || 'Клиент не указан'}`,
+    label: compact([
+      rental.rentalId || rental.id,
+      rental.client || rawRental.clientName || rawRental.companyName || 'Клиент не указан',
+      rental.equipmentInv || rental.serialNumber,
+      rawRental.objectName || rawRental.location,
+      periodLabel,
+    ]).join(' · '),
     clientId: rental.clientId,
     client: rental.client,
+    clientName: rawRental.clientName,
+    companyName: rawRental.companyName,
     objectId: rental.objectId,
     contractId: rental.contractId,
+    location: rawRental.location || rawRental.objectName,
+    periodLabel,
     equipmentRefs: compact([rental.equipmentId, rental.equipmentInv, rental.serialNumber]),
     active: !['closed', 'returned'].includes(String(rental.status || '').toLowerCase()),
   };
@@ -109,6 +153,7 @@ export function ServiceTicketForm({
   const { data: ganttRentals = [] } = useGanttData({ enabled: canViewRentals });
   const { data: equipmentList = [] } = useEquipmentList();
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [relationNotice, setRelationNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -124,6 +169,7 @@ export function ServiceTicketForm({
     rentalId: initialRentalId ?? '',
     objectId: '',
     contractId: '',
+    rentalLocationSnapshot: '',
     reason: initialReason,
     description: initialDescription,
     notes: '',
@@ -146,6 +192,22 @@ export function ServiceTicketForm({
     ],
     [ganttRentals, rentals],
   );
+  const rentalBelongsToSelectedClient = (rental: ServiceRentalOption, clientId = formData.clientId, clientName = formData.client) => {
+    const selectedId = String(clientId || '').trim();
+    const rentalClientId = String(rental.clientId || '').trim();
+    if (selectedId && rentalClientId) return rentalClientId === selectedId;
+    if (rentalClientId) return false;
+
+    const selectedName = normalizeText(
+      clientName || clients.find(item => item.id === selectedId)?.company,
+    );
+    if (!selectedName) return false;
+    return compact([rental.client, rental.clientName, rental.companyName]).some(name => normalizeText(name) === selectedName);
+  };
+  const filteredRentalOptions = useMemo(
+    () => formData.clientId ? rentalOptions.filter(rental => rentalBelongsToSelectedClient(rental)) : [],
+    [clients, formData.client, formData.clientId, rentalOptions],
+  );
   const selectedRental = rentalOptions.find(item => item.id === formData.rentalId);
   const activeRentalForEquipment = useMemo(() => {
     if (!selectedEquipment) return undefined;
@@ -155,8 +217,21 @@ export function ServiceTicketForm({
     );
   }, [rentalOptions, selectedEquipment]);
 
+  const resetRentalDerivedFields = (next: typeof formData, clearRental = true) => ({
+    ...next,
+    rentalId: clearRental ? '' : next.rentalId,
+    objectId: '',
+    contractId: '',
+    location: next.rentalLocationSnapshot && next.location === next.rentalLocationSnapshot ? '' : next.location,
+    rentalLocationSnapshot: '',
+  });
+
   const applyRentalLink = (rental: ServiceRentalOption | undefined) => {
     if (!rental) return;
+    if (formData.clientId && !rentalBelongsToSelectedClient(rental)) {
+      setSubmitError('Аренда не принадлежит выбранному клиенту');
+      return;
+    }
     const nextClient = rental.clientId ? clients.find(item => item.id === rental.clientId) : undefined;
     setFormData(prev => ({
       ...prev,
@@ -165,7 +240,11 @@ export function ServiceTicketForm({
       client: nextClient?.company || rental.client || prev.client,
       objectId: rental.objectId || '',
       contractId: rental.contractId || '',
+      location: rental.location || prev.location,
+      rentalLocationSnapshot: rental.location || '',
     }));
+    setRelationNotice(null);
+    setSubmitError(null);
   };
 
   useEffect(() => {
@@ -280,6 +359,31 @@ export function ServiceTicketForm({
   const removePhoto = (idx: number) => {
     setPhotos(prev => prev.filter((_, i) => i !== idx));
   };
+
+  const handleClientReset = (clientId: string, clientName: string) => {
+    setFormData(prev => {
+      const currentRental = rentalOptions.find(item => item.id === prev.rentalId);
+      const shouldResetRental = Boolean(currentRental && !rentalBelongsToSelectedClient(currentRental, clientId, clientName));
+      if (shouldResetRental) {
+        setRelationNotice('Аренда сброшена, потому что она относится к другому клиенту');
+      } else {
+        setRelationNotice(null);
+      }
+      return resetRentalDerivedFields({
+        ...prev,
+        clientId,
+        client: clientName,
+        rentalId: shouldResetRental ? '' : prev.rentalId,
+      }, shouldResetRental);
+    });
+  };
+
+  useEffect(() => {
+    if (!formData.clientId || !formData.rentalId || !selectedRental) return;
+    if (rentalBelongsToSelectedClient(selectedRental)) return;
+    setFormData(prev => resetRentalDerivedFields(prev));
+    setRelationNotice('Аренда сброшена, потому что она относится к другому клиенту');
+  }, [formData.clientId, formData.rentalId, selectedRental]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -487,22 +591,10 @@ export function ServiceTicketForm({
               valueId={formData.clientId}
               placeholder={canViewClients ? 'Введите название, ИНН, контакт или телефон…' : 'Клиент не выбран'}
               onChange={(value) => {
-                setFormData(prev => ({
-                  ...prev,
-                  client: value,
-                  clientId: value ? prev.clientId : '',
-                  objectId: '',
-                  contractId: '',
-                }));
+                handleClientReset(value ? formData.clientId : '', value);
               }}
               onClientSelect={(client) => {
-                setFormData(prev => ({
-                  ...prev,
-                  clientId: client?.id || '',
-                  client: client?.company || '',
-                  objectId: '',
-                  contractId: '',
-                }));
+                handleClientReset(client?.id || '', client?.company || '');
               }}
             />
             {!formData.clientId && (
@@ -515,25 +607,36 @@ export function ServiceTicketForm({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Аренда</label>
             <Select
               value={formData.rentalId || 'none'}
-              disabled={rentalOptions.length === 0}
+              disabled={!formData.clientId}
               onValueChange={(value) => {
                 if (value === 'none') {
-                  setFormData(prev => ({ ...prev, rentalId: '' }));
+                  setFormData(prev => resetRentalDerivedFields(prev));
+                  setRelationNotice(null);
                   return;
                 }
                 applyRentalLink(rentalOptions.find(item => item.id === value));
               }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Без аренды" />
+                <SelectValue placeholder={formData.clientId ? 'Без аренды' : 'Сначала выберите клиента'} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Без аренды</SelectItem>
-                {rentalOptions.map(rental => (
+                {filteredRentalOptions.map(rental => (
                   <SelectItem key={rental.id} value={rental.id}>{rental.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {!formData.clientId
+                ? 'Сначала выберите клиента, затем аренду'
+                : filteredRentalOptions.length === 0
+                  ? 'У выбранного клиента нет аренд. Можно создать заявку без аренды'
+                  : 'В списке показаны только аренды выбранного клиента'}
+            </p>
+            {relationNotice && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">{relationNotice}</p>
+            )}
           </div>
           {activeRentalForEquipment && activeRentalForEquipment.id !== selectedRental?.id && (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100 md:col-span-2">

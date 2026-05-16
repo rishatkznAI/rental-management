@@ -204,6 +204,7 @@ function registerCrudRoutes(deps) {
     }
     if (collection === 'payments' || collection === 'payment_allocations' || collection === 'documents' || collection === 'service') {
       const enriched = enrichRecordFromRentalLinks(item, readData);
+      if (collection === 'service') validateServiceRelationLinks(enriched);
       const normalized = normalizeClientRelationLinks(enriched, enriched.clientId, {
         readData,
         requireActiveObject: !existing,
@@ -228,6 +229,58 @@ function registerCrudRoutes(deps) {
 
   function normalizeClientName(value) {
     return String(value || '').trim().toLowerCase();
+  }
+
+  function text(value) {
+    return String(value ?? '').trim();
+  }
+
+  function findRentalForServiceLink(rentalId) {
+    const id = text(rentalId);
+    if (!id) return null;
+    return [
+      ...(readData('rentals') || []),
+      ...(readData('gantt_rentals') || []),
+    ].find(item => [
+      item?.id,
+      item?.rentalId,
+      item?.sourceRentalId,
+      item?.originalRentalId,
+    ].some(candidate => text(candidate) === id)) || null;
+  }
+
+  function serviceRentalBelongsToClient(rental, record) {
+    const clientId = text(record?.clientId);
+    const rentalClientId = text(rental?.clientId);
+    if (clientId && rentalClientId) return clientId === rentalClientId;
+    if (rentalClientId) return false;
+    if (!clientId) return true;
+
+    const client = (readData('clients') || []).find(item => text(item?.id) === clientId);
+    const selectedNames = [
+      record?.client,
+      record?.clientName,
+      client?.company,
+      client?.name,
+    ].map(normalizeClientName).filter(Boolean);
+    const rentalNames = [
+      rental?.client,
+      rental?.clientName,
+      rental?.companyName,
+    ].map(normalizeClientName).filter(Boolean);
+    if (selectedNames.length === 0 || rentalNames.length === 0) return true;
+    return selectedNames.some(name => rentalNames.includes(name));
+  }
+
+  function validateServiceRelationLinks(record) {
+    if (!record || !record.rentalId) return;
+    const rental = findRentalForServiceLink(record.rentalId);
+    if (!rental) return;
+    if (!serviceRentalBelongsToClient(rental, record)) {
+      const error = new Error('Аренда не принадлежит выбранному клиенту');
+      error.status = 400;
+      throw error;
+    }
   }
 
   function rentalBelongsToClient(rental, client) {

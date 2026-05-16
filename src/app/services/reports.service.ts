@@ -220,6 +220,19 @@ export interface ServiceReportSummary {
     totalClosedNormHours: number;
     productivityKpi?: Record<string, number>;
   };
+  options?: Record<string, string[]>;
+}
+
+export interface ManagerReportSummary {
+  period: { dateFrom: string; dateTo: string; maxDays: number; defaulted?: boolean };
+  summary: any[];
+  totals: Record<string, number>;
+  options: {
+    managers: string[];
+    clients: string[];
+    equipmentTypes: string[];
+    equipment: Array<{ value: string; label: string }>;
+  };
 }
 
 export interface RepairFactsMigrationResult {
@@ -251,6 +264,18 @@ export const reportsService = {
     api.get<ServiceReportSummary>(`/api/reports/service/summary${buildPaginatedQuery(params)}`),
 
   getServiceDetails: (type: 'work-details' | 'field-trips' | 'productivity-details', params?: PaginatedQueryParams): Promise<PaginatedResponse<Record<string, any>, ServiceReportSummary['summary']>> =>
+    api.get<PaginatedResponse<Record<string, any>, ServiceReportSummary['summary']>>(`/api/reports/service/details/${type}${buildPaginatedQuery(params)}`),
+
+  getManagerSummary: (params?: PaginatedQueryParams): Promise<ManagerReportSummary> =>
+    api.get<ManagerReportSummary>(`/api/reports/managers/summary${buildPaginatedQuery(params)}`),
+
+  getManagerDetails: (type: 'rentals' | 'payments' | 'debts' | 'accruals', params?: PaginatedQueryParams): Promise<PaginatedResponse<Record<string, any>, Record<string, number>>> =>
+    api.get<PaginatedResponse<Record<string, any>, Record<string, number>>>(`/api/reports/managers/details/${type}${buildPaginatedQuery(params)}`),
+
+  getManagerExport: (params?: PaginatedQueryParams): Promise<{ period: ManagerReportSummary['period']; rows: any[]; summary: any[]; totals: Record<string, number> }> =>
+    api.get(`/api/reports/managers/export${buildPaginatedQuery(params)}`),
+
+  getServiceSecondaryDetails: (type: 'repeated-failures' | 'equipment-summary' | 'problematic-models', params?: PaginatedQueryParams): Promise<PaginatedResponse<Record<string, any>, ServiceReportSummary['summary']>> =>
     api.get<PaginatedResponse<Record<string, any>, ServiceReportSummary['summary']>>(`/api/reports/service/details/${type}${buildPaginatedQuery(params)}`),
 
   getServiceExport: (params?: PaginatedQueryParams): Promise<{

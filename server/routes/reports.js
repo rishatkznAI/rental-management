@@ -8,6 +8,11 @@ const {
   getRentalDebtOverdueDays,
 } = require('../lib/finance-core');
 const { buildMechanicWorkloadReport } = require('../lib/mechanic-workload');
+const {
+  buildManagerReportRows,
+  buildManagerReportSummary,
+  filterManagerReportRows,
+} = require('../lib/manager-report');
 const { isRegularServiceTicket } = require('../lib/service-ticket-kind');
 const {
   buildPaginatedResponse,
@@ -257,6 +262,116 @@ function registerReportRoutes(deps) {
       },
     };
   }
+
+  function buildManagers(user, period, query = {}) {
+    assertFinanceReportAccess(user);
+    const rentals = scoped('gantt_rentals', user);
+    const equipment = scoped('equipment', user);
+    const payments = scoped('payments', user);
+    const scopedRentalIds = new Set(rentals.map(item => String(item.id || '')).filter(Boolean));
+    const scopedPaymentIds = new Set(payments.map(item => String(item.id || '')).filter(Boolean));
+    const paymentAllocations = (readData('payment_allocations') || []).filter(allocation => {
+      const rentalId = String(allocation?.rentalId || '').trim();
+      const paymentId = String(allocation?.paymentId || '').trim();
+      return (rentalId && scopedRentalIds.has(rentalId)) || (paymentId && scopedPaymentIds.has(paymentId));
+    });
+    const rows = buildManagerReportRows(rentals, equipment, payments, period, paymentAllocations);
+    const filteredRows = filterManagerReportRows(rows, query).filter(row => itemMatchesSearch(row, query.search, ['manager', 'client', 'equipmentInv', 'equipmentName', 'rentalId']));
+    const summary = buildManagerReportSummary(filteredRows);
+    const totals = {
+      managersCount: summary.length,
+      rentalsCount: new Set(filteredRows.map(row => row.rentalId)).size,
+      accrualsCount: filteredRows.length,
+      totalAmount: summary.reduce((sum, row) => sum + row.totalAmount, 0),
+      paidAmount: summary.reduce((sum, row) => sum + row.paidAmount, 0),
+      debt: summary.reduce((sum, row) => sum + row.debt, 0),
+      activeRentals: summary.reduce((sum, row) => sum + row.activeRentals, 0),
+      closedRentals: summary.reduce((sum, row) => sum + row.closedRentals, 0),
+      overdueRentals: summary.reduce((sum, row) => sum + row.overdueRentals, 0),
+      updSignedCount: summary.reduce((sum, row) => sum + row.updSignedCount, 0),
+      updNotSignedCount: summary.reduce((sum, row) => sum + row.updNotSignedCount, 0),
+    };
+    const optionsSource = filterManagerReportRows(rows, {
+      ...query,
+      manager: 'all',
+      client: 'all',
+      equipmentInv: 'all',
+      equipmentType: 'all',
+    });
+    const uniqueOptions = field => Array.from(new Set(optionsSource.map(row => row[field]).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), 'ru'));
+    return {
+      period,
+      rows: filteredRows,
+      summary,
+      totals,
+      options: {
+        managers: uniqueOptions('manager'),
+        clients: uniqueOptions('client'),
+        equipmentTypes: uniqueOptions('equipmentType'),
+        equipment: Array.from(new Map(optionsSource.map(row => [row.equipmentFilterKey, {
+          value: row.equipmentFilterKey,
+          label: `${row.equipmentInv}${row.equipmentName && row.equipmentName !== row.equipmentInv ? ` · ${row.equipmentName}` : ''}`,
+        }])).values()).sort((a, b) => a.label.localeCompare(b.label, 'ru')),
+      },
+    };
+  }
+
+  const managerReportSortFields = {
+    monthKey: item => item.monthKey,
+    manager: item => item.manager,
+    client: item => item.client,
+    equipmentInv: item => item.equipmentInv,
+    equipmentLabel: item => item.equipmentLabel,
+    amount: item => item.amount,
+    paidAmount: item => item.paidAmount,
+    debt: item => item.debt,
+    paymentStatus: item => item.paymentStatus,
+    updSigned: item => item.updSigned ? 1 : 0,
+    rentalStatus: item => item.rentalStatus,
+  };
+
+  router.get('/reports/managers/summary', requireAuth, requireRead('reports'), (req, res) => {
+    try {
+      const period = normalizeReportPeriod(req.query, 30);
+      const report = buildManagers(req.user, period, req.query);
+      res.json({ period, summary: report.summary, totals: report.totals, options: report.options });
+    } catch (error) {
+      res.status(error.status || 500).json({ ok: false, error: error.message });
+    }
+  });
+
+  router.get('/reports/managers/details/:type', requireAuth, requireRead('reports'), (req, res) => {
+    try {
+      const period = normalizeReportPeriod(req.query, 30);
+      const report = buildManagers(req.user, period, req.query);
+      const type = req.params.type;
+      let rows = report.rows;
+      if (type === 'debts') rows = rows.filter(row => row.debt > 0);
+      else if (type === 'payments') rows = rows.filter(row => row.paidAmount > 0);
+      else if (type === 'accruals' || type === 'rentals') rows = rows;
+      else return res.status(404).json({ ok: false, error: 'Unknown manager detail type' });
+      res.json(buildPaginatedResponse(rows, req.query, {
+        sortFields: managerReportSortFields,
+        defaultSort: { sortBy: 'monthKey', sortDir: 'desc' },
+        summary: report.totals,
+      }));
+    } catch (error) {
+      res.status(error.status || 500).json({ ok: false, error: error.message });
+    }
+  });
+
+  router.get('/reports/managers/export', requireAuth, requireRead('reports'), (req, res) => {
+    try {
+      const period = normalizeReportPeriod(req.query, 30);
+      const report = buildManagers(req.user, period, req.query);
+      if (report.rows.length > EXPORT_LIMIT) {
+        return res.status(413).json({ ok: false, error: `Экспорт ограничен ${EXPORT_LIMIT} строками. Сузьте фильтр периода.` });
+      }
+      res.json({ period, rows: report.rows, summary: report.summary, totals: report.totals });
+    } catch (error) {
+      res.status(error.status || 500).json({ ok: false, error: error.message });
+    }
+  });
 
   const financeSortFields = {
     client: item => item.client,
@@ -648,13 +763,144 @@ function registerReportRoutes(deps) {
     };
   }
 
+  function buildServiceEquipmentSummary(rows) {
+    const map = new Map();
+    for (const row of rows) {
+      const key = row.equipmentId || `${row.inventoryNumber}-${row.serialNumber}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          equipmentId: row.equipmentId,
+          equipmentLabel: row.equipmentLabel,
+          equipmentTypeLabel: row.equipmentTypeLabel || row.equipmentType,
+          inventoryNumber: row.inventoryNumber,
+          serialNumber: row.serialNumber,
+          repairs: new Set(),
+          mechanics: new Set(),
+          worksCount: 0,
+          totalNormHours: 0,
+          partsCost: 0,
+        });
+      }
+      const item = map.get(key);
+      item.repairs.add(row.repairId);
+      item.mechanics.add(row.mechanicName);
+      item.worksCount += row.quantity;
+      item.totalNormHours += row.totalNormHours;
+      item.partsCost += row.partsCost;
+    }
+    return [...map.values()].map(item => ({
+      equipmentId: item.equipmentId,
+      equipmentLabel: item.equipmentLabel,
+      equipmentTypeLabel: item.equipmentTypeLabel,
+      inventoryNumber: item.inventoryNumber,
+      serialNumber: item.serialNumber,
+      repairsCount: item.repairs.size,
+      mechanicsCount: item.mechanics.size,
+      worksCount: item.worksCount,
+      totalNormHours: Number(item.totalNormHours.toFixed(2)),
+      partsCost: Number(item.partsCost.toFixed(2)),
+    })).sort((a, b) => b.totalNormHours - a.totalNormHours);
+  }
+
+  function buildServiceRepeatFailures(rows) {
+    const map = new Map();
+    for (const row of rows) {
+      const reason = row.workName || row.workCategory || 'Сервис';
+      const key = `${row.equipmentId || row.inventoryNumber}-${reason}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          equipmentId: row.equipmentId,
+          equipmentLabel: row.equipmentLabel,
+          equipmentType: row.equipmentType,
+          equipmentTypeLabel: row.equipmentTypeLabel,
+          inventoryNumber: row.inventoryNumber,
+          serialNumber: row.serialNumber,
+          reason,
+          serviceKind: row.serviceKind,
+          repairIds: new Set(),
+          repairStatuses: new Set(),
+          mechanicNames: new Set(),
+          partNames: new Set(),
+          workCategories: new Set(),
+          createdDates: [],
+          totalNormHours: 0,
+          totalPartsCost: 0,
+        });
+      }
+      const item = map.get(key);
+      item.repairIds.add(row.repairId);
+      item.repairStatuses.add(row.repairStatus);
+      item.mechanicNames.add(row.mechanicName);
+      (row.partNames || []).forEach(part => item.partNames.add(part));
+      if (row.workCategory) item.workCategories.add(row.workCategory);
+      if (row.createdAt) item.createdDates.push(row.createdAt);
+      item.totalNormHours += row.totalNormHours;
+      item.totalPartsCost += row.partsCost;
+    }
+    return [...map.values()]
+      .filter(item => item.repairIds.size >= 2)
+      .map(item => ({
+        ...item,
+        repairsCount: item.repairIds.size,
+        totalNormHours: Number(item.totalNormHours.toFixed(2)),
+        totalPartsCost: Number(item.totalPartsCost.toFixed(2)),
+        firstCreatedAt: item.createdDates.sort()[0] || '',
+        lastCreatedAt: item.createdDates.sort().at(-1) || '',
+        repairIds: [...item.repairIds],
+        repairStatuses: [...item.repairStatuses].filter(Boolean),
+        mechanicNames: [...item.mechanicNames].filter(Boolean),
+        partNames: [...item.partNames].filter(Boolean),
+        workCategories: [...item.workCategories].filter(Boolean),
+      }))
+      .sort((a, b) => b.repairsCount - a.repairsCount || b.totalNormHours - a.totalNormHours);
+  }
+
+  function buildServiceProblematicModels(rows) {
+    const map = new Map();
+    for (const row of rows) {
+      const key = `${row.equipmentTypeLabel || row.equipmentType}__${row.equipmentLabel}`;
+      if (!map.has(key)) {
+        map.set(key, { model: row.equipmentLabel, equipmentTypeLabel: row.equipmentTypeLabel || row.equipmentType, units: new Set(), repairs: new Set(), totalNormHours: 0, partsCost: 0 });
+      }
+      const item = map.get(key);
+      item.units.add(row.equipmentId || `${row.inventoryNumber}-${row.serialNumber}`);
+      item.repairs.add(row.repairId);
+      item.totalNormHours += row.totalNormHours;
+      item.partsCost += row.partsCost;
+    }
+    return [...map.values()].map(item => ({
+      model: item.model,
+      equipmentTypeLabel: item.equipmentTypeLabel,
+      unitsCount: item.units.size,
+      repairsCount: item.repairs.size,
+      totalNormHours: Number(item.totalNormHours.toFixed(2)),
+      partsCost: Number(item.partsCost.toFixed(2)),
+    })).sort((a, b) => b.repairsCount - a.repairsCount || b.totalNormHours - a.totalNormHours);
+  }
+
+  function serviceFilterOptions(report) {
+    const rows = report.rows || [];
+    const productivityDetails = report.productivity?.details || [];
+    const unique = values => Array.from(new Set(values.filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), 'ru'));
+    return {
+      mechanics: unique([...rows.map(item => item.mechanicName), ...report.fieldTrips.map(item => item.mechanicName), ...productivityDetails.map(item => item.mechanicName)]),
+      statuses: unique(rows.map(item => item.repairStatus)),
+      scenarios: unique(rows.map(item => item.serviceKind)),
+      equipmentTypes: unique([...rows.map(item => item.equipmentTypeLabel || item.equipmentType), ...productivityDetails.map(item => item.equipmentType)]),
+      workCategories: unique([...rows.map(item => item.workCategory), ...productivityDetails.map(item => item.category)]),
+      parts: unique(rows.flatMap(item => item.partNames || [])),
+      workStatuses: unique(productivityDetails.map(item => item.status)),
+      workSources: unique(productivityDetails.map(item => item.source)),
+    };
+  }
+
   router.get('/reports/service/summary', requireAuth, requireRead('reports'), (req, res) => {
     try {
       const period = normalizeReportPeriod(req.query, 30);
       const report = buildService(req.user, period, req.query);
       const rows = filterServiceRows(report.rows, req.query, 'work-details');
       const trips = filterServiceRows(report.fieldTrips, req.query, 'field-trips');
-      res.json({ period, summary: buildServiceSummary(rows, trips, report.productivity) });
+      res.json({ period, summary: buildServiceSummary(rows, trips, report.productivity), options: serviceFilterOptions(report) });
     } catch (error) {
       res.status(error.status || 500).json({ ok: false, error: error.message });
     }
@@ -669,6 +915,9 @@ function registerReportRoutes(deps) {
       if (type === 'work-details') rows = filterServiceRows(report.rows, req.query, type);
       else if (type === 'field-trips') rows = filterServiceRows(report.fieldTrips, req.query, type);
       else if (type === 'productivity-details') rows = (report.productivity?.details || []).filter(row => dateInRange(row.date, period) && itemMatchesSearch(row, req.query.search, ['mechanicName', 'serviceTicketId', 'equipmentLabel', 'workNameSnapshot', 'category']));
+      else if (type === 'equipment-summary') rows = buildServiceEquipmentSummary(filterServiceRows(report.rows, req.query, 'work-details'));
+      else if (type === 'repeated-failures') rows = buildServiceRepeatFailures(filterServiceRows(report.rows, req.query, 'work-details'));
+      else if (type === 'problematic-models') rows = buildServiceProblematicModels(filterServiceRows(report.rows, req.query, 'work-details'));
       else return res.status(404).json({ ok: false, error: 'Unknown service detail type' });
       res.json(buildPaginatedResponse(rows, req.query, {
         sortFields: {
@@ -677,6 +926,8 @@ function registerReportRoutes(deps) {
           equipment: item => item.equipmentLabel,
           normHours: item => item.totalNormHours ?? item.closedNormHours ?? item.normHours,
           amount: item => item.amount,
+          repairs: item => item.repairsCount,
+          partsCost: item => item.partsCost ?? item.totalPartsCost,
         },
         defaultSort: { sortBy: 'date', sortDir: 'desc' },
         summary: buildServiceSummary(filterServiceRows(report.rows, req.query, 'work-details'), filterServiceRows(report.fieldTrips, req.query, 'field-trips'), report.productivity),

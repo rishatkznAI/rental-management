@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -11,20 +11,11 @@ import {
   Users, BarChart2, CreditCard, FileCheck, FileX,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, X,
 } from 'lucide-react';
-import { type GanttRentalData } from '../mock-data';
-import type { Equipment, Payment, PaymentAllocation } from '../types';
 import { formatCurrency } from '../lib/utils';
-import { rentalsService } from '../services/rentals.service';
-import { equipmentService } from '../services/equipment.service';
-import { paymentsService } from '../services/payments.service';
-import { RENTAL_KEYS } from '../hooks/useRentals';
-import { EQUIPMENT_KEYS } from '../hooks/useEquipment';
-import { PAYMENT_KEYS } from '../hooks/usePayments';
+import { reportsService } from '../services/reports.service';
+import { PaginationControls } from '../components/common/PaginationControls';
 import {
-  buildManagerReportRows,
-  buildManagerReportSummary,
   buildManagerReportXLS,
-  filterManagerReportRows,
   formatManagerReportDate,
 } from '../lib/managerReport.js';
 
@@ -85,6 +76,7 @@ interface Filters {
 
 type SortKey = keyof ReportRow;
 type SortDir = 'asc' | 'desc';
+const DEFAULT_PAGE_SIZE = 25;
 
 const EMPTY_FILTERS: Filters = {
   dateFrom: '', dateTo: '', manager: 'all', client: 'all',
@@ -118,19 +110,6 @@ function rentalBadge(status: string): BV {
   if (status === 'returned') return 'default';
   if (status === 'closed')   return 'default';
   return 'default';
-}
-
-// ── Sort helper ───────────────────────────────────────────────────────────────
-
-function sortRows(rows: ReportRow[], key: SortKey, dir: SortDir): ReportRow[] {
-  return [...rows].sort((a, b) => {
-    const va = a[key] as string | number | boolean;
-    const vb = b[key] as string | number | boolean;
-    let cmp = 0;
-    if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
-    else cmp = String(va ?? '').localeCompare(String(vb ?? ''), 'ru');
-    return dir === 'asc' ? cmp : -cmp;
-  });
 }
 
 // ── Summary Table ─────────────────────────────────────────────────────────────
@@ -257,23 +236,29 @@ function SummaryTable({
 
 // ── Detail Table ──────────────────────────────────────────────────────────────
 
-function DetailTable({ rows }: { rows: ReportRow[] }) {
-  const [sortKey, setSortKey]   = useState<SortKey>('monthKey');
-  const [sortDir, setSortDir]   = useState<SortDir>('desc');
+function DetailTable({
+  rows,
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  rows: ReportRow[];
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+}) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-
-  const sorted = useMemo(() => sortRows(rows, sortKey, sortDir), [rows, sortKey, sortDir]);
 
   // Group by manager
   const grouped = useMemo(() => {
     const map = new Map<string, ReportRow[]>();
-    for (const r of sorted) {
+    for (const r of rows) {
       const list = map.get(r.manager) ?? [];
       list.push(r);
       map.set(r.manager, list);
     }
     return [...map.entries()];
-  }, [sorted]);
+  }, [rows]);
 
   const toggleManager = (m: string) => {
     setExpanded(prev => {
@@ -286,11 +271,6 @@ function DetailTable({ rows }: { rows: ReportRow[] }) {
   const collapseAll = () => setExpanded(new Set());
   const allExpanded = grouped.length > 0 && grouped.every(([m]) => expanded.has(m));
 
-  const handleSort = (key: SortKey) => {
-    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir('asc'); }
-  };
-
   const SortIcon = ({ k }: { k: SortKey }) => {
     if (sortKey !== k) return <ArrowUpDown className="h-3 w-3 opacity-40" />;
     return sortDir === 'asc'
@@ -301,7 +281,7 @@ function DetailTable({ rows }: { rows: ReportRow[] }) {
   const th = (label: string, key?: SortKey, extra = '') => (
     <th
       className={`px-3 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide whitespace-nowrap ${key ? 'cursor-pointer hover:text-gray-800 dark:hover:text-gray-200 select-none' : ''} ${extra}`}
-      onClick={key ? () => handleSort(key) : undefined}
+      onClick={key ? () => onSort(key) : undefined}
     >
       <span className="flex items-center gap-1">
         {label}
@@ -505,121 +485,92 @@ export default function ManagerReport() {
   // ── Data state ─────────────────────────────────────────────────────────────
   const [isRefreshing, setRefreshing] = useState(false);
   const [loadedAt, setLoadedAt] = useState(Date.now);
-  const { data: rentals = [] } = useQuery<GanttRentalData[]>({
-    queryKey: RENTAL_KEYS.gantt,
-    queryFn: rentalsService.getGanttData,
-  });
-  const { data: equipment = [] } = useQuery<Equipment[]>({
-    queryKey: EQUIPMENT_KEYS.all,
-    queryFn: equipmentService.getAll,
-  });
-  const { data: payments = [] } = useQuery<Payment[]>({
-    queryKey: PAYMENT_KEYS.all,
-    queryFn: paymentsService.getAll,
-  });
-  const { data: paymentAllocations = [] } = useQuery<PaymentAllocation[]>({
-    queryKey: PAYMENT_KEYS.allocations,
-    queryFn: paymentsService.getAllocations,
-  });
-
-  const refresh = useCallback(() => {
-    setRefreshing(true);
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
-      queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
-      queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
-      queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.allocations }),
-    ]).finally(() => {
-      setLoadedAt(Date.now());
-      setRefreshing(false);
-    });
-  }, [queryClient]);
 
   // ── Filters ────────────────────────────────────────────────────────────────
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [view, setView] = useState<'summary' | 'detail'>('summary');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [sortKey, setSortKey] = useState<SortKey>('monthKey');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  const managerParams = useMemo(() => ({
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    pageSize,
+    sortBy: sortKey,
+    sortDir,
+    filters: {
+      manager: filters.manager,
+      client: filters.client,
+      paymentStatus: filters.paymentStatus,
+      updStatus: filters.updStatus,
+      rentalStatus: filters.rentalStatus,
+      equipmentType: filters.equipmentType,
+      equipmentInv: filters.equipmentInv,
+    },
+  }), [filters, pageSize, sortDir, sortKey]);
+
+  const { data: managerSummary, isFetching: summaryFetching } = useQuery({
+    queryKey: ['reports', 'managers', 'summary', managerParams],
+    queryFn: () => reportsService.getManagerSummary(managerParams),
+    placeholderData: previous => previous,
+  });
+
+  const { data: managerDetails, isFetching: detailFetching } = useQuery({
+    queryKey: ['reports', 'managers', 'details', managerParams, page],
+    queryFn: () => reportsService.getManagerDetails('accruals', { ...managerParams, page }),
+    placeholderData: previous => previous,
+  });
+
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    queryClient.invalidateQueries({ queryKey: ['reports', 'managers'] }).finally(() => {
+      setLoadedAt(Date.now());
+      setRefreshing(false);
+    });
+  }, [queryClient]);
 
   const setF = <K extends keyof Filters>(k: K, v: Filters[K]) =>
     setFilters(f => ({ ...f, [k]: v }));
 
   const resetFilters = () => setFilters(EMPTY_FILTERS);
 
+  useEffect(() => {
+    setPage(1);
+  }, [filters, pageSize]);
+
   const hasActiveFilters = Object.entries(filters).some(([k, v]) => {
     if (k === 'dateFrom' || k === 'dateTo') return v !== '';
     return v !== 'all';
   });
 
-  // ── Build all rows from real data ──────────────────────────────────────────
-  const allRows = useMemo(
-    () => buildManagerReportRows(rentals, equipment, payments, {}, paymentAllocations) as ReportRow[],
-    [rentals, equipment, payments, paymentAllocations],
-  );
-
   // ── Derived option lists ───────────────────────────────────────────────────
   const managerOptions = useMemo(() => {
-    const set = new Set(allRows.map(r => r.manager));
     return [
       { value: 'all', label: 'Все менеджеры' },
-      ...[...set].sort().map(m => ({ value: m, label: m })),
+      ...(managerSummary?.options?.managers ?? []).map(m => ({ value: m, label: m })),
     ];
-  }, [allRows]);
+  }, [managerSummary]);
 
   const clientOptions = useMemo(() => {
-    const set = new Set(allRows.map(r => r.client));
     return [
       { value: 'all', label: 'Все клиенты' },
-      ...[...set].sort().map(c => ({ value: c, label: c.length > 30 ? c.slice(0, 28) + '…' : c })),
+      ...(managerSummary?.options?.clients ?? []).map(c => ({ value: c, label: c.length > 30 ? c.slice(0, 28) + '…' : c })),
     ];
-  }, [allRows]);
+  }, [managerSummary]);
 
   const invOptions = useMemo(() => {
     return [
       { value: 'all', label: 'Вся техника (INV)' },
-      ...[...allRows]
-        .sort((a, b) => {
-          const byInv = a.equipmentInv.localeCompare(b.equipmentInv, 'ru');
-          if (byInv !== 0) return byInv;
-          return a.equipmentName.localeCompare(b.equipmentName, 'ru');
-        })
-        .reduce<Array<{ value: string; label: string }>>((acc, row) => {
-          if (acc.some(item => item.value === row.equipmentFilterKey)) return acc;
-          const suffix = row.equipmentName && row.equipmentName !== row.equipmentInv
-            ? ` · ${row.equipmentName}`
-            : '';
-          acc.push({
-            value: row.equipmentFilterKey,
-            label: `${row.equipmentInv}${suffix}`,
-          });
-          return acc;
-        }, []),
+      ...(managerSummary?.options?.equipment ?? []),
     ];
-  }, [allRows]);
+  }, [managerSummary]);
 
-  // ── Month options from real data ───────────────────────────────────────────
-  const monthOptions = useMemo(() => {
-    const set = new Map<string, string>();
-    for (const r of allRows) if (r.monthKey !== '9999-99') set.set(r.monthKey, r.monthLabel);
-    const sorted = [...set.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-    return [{ value: 'all', label: 'Все периоды' }, ...sorted.map(([v, l]) => ({ value: v, label: l }))];
-  }, [allRows]);
-
-  // ── Apply filters ──────────────────────────────────────────────────────────
-  const filteredRows = useMemo(() => {
-    const periodRows = buildManagerReportRows(rentals, equipment, payments, {
-      dateFrom: filters.dateFrom,
-      dateTo: filters.dateTo,
-    }, paymentAllocations) as ReportRow[];
-    return filterManagerReportRows(periodRows, filters) as ReportRow[];
-  }, [rentals, equipment, payments, paymentAllocations, filters]);
-
-  const summary = useMemo(
-    () => buildManagerReportSummary(filteredRows) as ManagerSummaryRow[],
-    [filteredRows],
-  );
-  const filteredRentalsCount = useMemo(
-    () => new Set(filteredRows.map(row => row.rentalId)).size,
-    [filteredRows],
-  );
+  const summary = (managerSummary?.summary ?? []) as ManagerSummaryRow[];
+  const filteredRows = (managerDetails?.items ?? []) as ReportRow[];
+  const totals = managerSummary?.totals ?? managerDetails?.summary ?? {};
+  const filteredRentalsCount = Number(totals.rentalsCount ?? 0);
 
   // ── Period label for XLS ───────────────────────────────────────────────────
   const periodLabel = useMemo(() => {
@@ -627,14 +578,19 @@ export default function ManagerReport() {
       return `${formatManagerReportDate(filters.dateFrom)} — ${formatManagerReportDate(filters.dateTo)}`;
     if (filters.dateFrom) return `с ${formatManagerReportDate(filters.dateFrom)}`;
     if (filters.dateTo)   return `по ${formatManagerReportDate(filters.dateTo)}`;
-    if (monthOptions.find(m => m.value === 'all')) return 'за всё время';
-    return '';
-  }, [filters, monthOptions]);
+    return 'за выбранный период';
+  }, [filters]);
 
   // ── Drill-down: click "Детализация →" in summary ───────────────────────────
   const drillToManager = (manager: string) => {
     setF('manager', manager);
     setView('detail');
+  };
+
+  const handleSort = (key: SortKey) => {
+    setPage(1);
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
   };
 
   // ── Timestamp display ──────────────────────────────────────────────────────
@@ -645,8 +601,9 @@ export default function ManagerReport() {
   };
 
   // ── Export ─────────────────────────────────────────────────────────────────
-  const handleExport = () => {
-    const content  = buildManagerReportXLS(summary, filteredRows, periodLabel);
+  const handleExport = async () => {
+    const exportData = await reportsService.getManagerExport(managerParams);
+    const content  = buildManagerReportXLS(exportData.summary as ManagerSummaryRow[], exportData.rows as ReportRow[], periodLabel);
     const dateTag  = new Date().toISOString().slice(0, 10);
     downloadXLS(content, `report-managers-${dateTag}.xls`);
   };
@@ -659,7 +616,7 @@ export default function ManagerReport() {
           <h2 className="text-xl font-bold text-gray-900 dark:text-white">Отчёт по менеджерам</h2>
           <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
             Обновлено: {fmtTs(loadedAt)} ·{' '}
-            {filteredRentalsCount} аренд · {filteredRows.length} начислений · {summary.length} менеджеров ·{' '}
+            {filteredRentalsCount} аренд · {Number(totals.accrualsCount ?? 0)} начислений · {summary.length} менеджеров ·{' '}
             <span className="text-green-600 dark:text-green-400">реальные данные</span>
           </p>
         </div>
@@ -671,7 +628,7 @@ export default function ManagerReport() {
           <Button
             size="sm"
             onClick={handleExport}
-            disabled={filteredRows.length === 0}
+            disabled={summaryFetching || detailFetching || Number(totals.accrualsCount ?? 0) === 0}
             className="flex items-center gap-2"
           >
             <Download className="h-4 w-4" />
@@ -784,14 +741,24 @@ export default function ManagerReport() {
       </div>
 
       {/* ── Content ─────────────────────────────────────────────────────────── */}
-      {rentals.length === 0 ? (
+      {summaryFetching && !managerSummary ? (
+        <EmptyState message="Загружаем отчёт по менеджерам." />
+      ) : Number(totals.accrualsCount ?? 0) === 0 && !hasActiveFilters ? (
         <EmptyState message="Аренды не найдены. Создайте первые аренды через планировщик или «Новая аренда»." />
-      ) : filteredRows.length === 0 ? (
+      ) : Number(totals.accrualsCount ?? 0) === 0 ? (
         <EmptyState message="Нет данных по выбранным фильтрам. Попробуйте изменить период или снять часть фильтров." />
       ) : view === 'summary' ? (
         <SummaryTable summary={summary} onSelectManager={drillToManager} />
       ) : (
-        <DetailTable rows={filteredRows} />
+        <>
+          <DetailTable rows={filteredRows} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <PaginationControls
+            pagination={managerDetails?.pagination}
+            loading={detailFetching}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        </>
       )}
     </div>
   );

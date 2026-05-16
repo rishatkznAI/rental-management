@@ -236,6 +236,9 @@ export default function Reports() {
   const [serviceWorkPage, setServiceWorkPage] = useState(1);
   const [serviceTripPage, setServiceTripPage] = useState(1);
   const [serviceProductivityPage, setServiceProductivityPage] = useState(1);
+  const [serviceRepeatedPage, setServiceRepeatedPage] = useState(1);
+  const [serviceEquipmentPage, setServiceEquipmentPage] = useState(1);
+  const [serviceModelsPage, setServiceModelsPage] = useState(1);
   const [servicePageSize, setServicePageSize] = useState(DEFAULT_REPORT_PAGE_SIZE);
   const [serviceSearch, setServiceSearch] = useState('');
   const [salesStockPage, setSalesStockPage] = useState(1);
@@ -345,6 +348,24 @@ export default function Reports() {
     enabled: activeTab === 'service',
     placeholderData: previous => previous,
   });
+  const { data: serviceRepeatedPageData } = useQuery({
+    queryKey: ['reports', 'service', 'repeated-failures', serviceParams, serviceRepeatedPage],
+    queryFn: () => reportsService.getServiceSecondaryDetails('repeated-failures', { ...serviceParams, page: serviceRepeatedPage }),
+    enabled: activeTab === 'service',
+    placeholderData: previous => previous,
+  });
+  const { data: serviceEquipmentPageData } = useQuery({
+    queryKey: ['reports', 'service', 'equipment-summary', serviceParams, serviceEquipmentPage],
+    queryFn: () => reportsService.getServiceSecondaryDetails('equipment-summary', { ...serviceParams, page: serviceEquipmentPage }),
+    enabled: activeTab === 'service',
+    placeholderData: previous => previous,
+  });
+  const { data: serviceModelsPageData } = useQuery({
+    queryKey: ['reports', 'service', 'problematic-models', serviceParams, serviceModelsPage],
+    queryFn: () => reportsService.getServiceSecondaryDetails('problematic-models', { ...serviceParams, page: serviceModelsPage }),
+    enabled: activeTab === 'service',
+    placeholderData: previous => previous,
+  });
   const equipment: Equipment[] = [];
   const ganttRentals: GanttRentalData[] = [];
   const clients: any[] = [];
@@ -373,6 +394,9 @@ export default function Reports() {
     setServiceWorkPage(1);
     setServiceTripPage(1);
     setServiceProductivityPage(1);
+    setServiceRepeatedPage(1);
+    setServiceEquipmentPage(1);
+    setServiceModelsPage(1);
   }, [serviceDateFrom, serviceDateTo, serviceEquipmentType, serviceMechanic, servicePageSize, servicePartName, serviceScenario, serviceSearch, serviceStatus, serviceWorkCategory, serviceWorkSource, serviceWorkStatus]);
 
   useEffect(() => {
@@ -385,56 +409,43 @@ export default function Reports() {
   }, []);
 
   const serviceMechanicOptions = useMemo(() => {
-    const names = Array.from(new Set([
-      ...(mechanicWorkload?.summary ?? []).map(item => item.mechanicName),
-      ...(mechanicWorkload?.productivity?.mechanics ?? []).map(item => item.mechanicName),
-      ...(serviceWorkPageData?.items ?? []).map(item => item.mechanicName),
-      ...(serviceTripPageData?.items ?? []).map(item => item.mechanicName),
-      ...(serviceProductivityPageData?.items ?? []).map(item => item.mechanicName),
-    ])).filter((value): value is string => Boolean(value)).sort((a, b) => a.localeCompare(b, 'ru'));
-    return names;
-  }, [mechanicWorkload, serviceProductivityPageData, serviceTripPageData, serviceWorkPageData]);
+    return (serviceSummary?.options?.mechanics ?? []).sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [serviceSummary]);
 
   const serviceStatusOptions = useMemo(() => {
-    const statuses = Array.from(new Set([...(mechanicWorkload?.rows ?? []), ...(serviceWorkPageData?.items ?? [])].map(item => item.repairStatus).filter(Boolean)));
+    const statuses = serviceSummary?.options?.statuses ?? [];
     return statuses.sort((a, b) => formatServiceStatus(a).localeCompare(formatServiceStatus(b), 'ru'));
-  }, [mechanicWorkload, serviceWorkPageData]);
+  }, [serviceSummary]);
 
   const serviceScenarioOptions = useMemo(() => {
-    const scenarios = Array.from(new Set([...(mechanicWorkload?.rows ?? []), ...(serviceWorkPageData?.items ?? [])].map(item => item.serviceKind).filter(Boolean)));
+    const scenarios = serviceSummary?.options?.scenarios ?? [];
     return scenarios.sort((a, b) => getServiceScenarioLabel(a).localeCompare(getServiceScenarioLabel(b), 'ru'));
-  }, [mechanicWorkload, serviceWorkPageData]);
+  }, [serviceSummary]);
 
   const serviceEquipmentTypeOptions = useMemo(() => {
-    const types = Array.from(new Set([
-      ...(mechanicWorkload?.rows ?? []).map(item => item.equipmentTypeLabel || item.equipmentType),
-      ...(mechanicWorkload?.productivity?.details ?? []).map(item => item.equipmentType),
-    ].filter((value): value is string => Boolean(value))));
+    const types = serviceSummary?.options?.equipmentTypes ?? [];
     return types.sort((a, b) => a.localeCompare(b, 'ru'));
-  }, [mechanicWorkload]);
+  }, [serviceSummary]);
 
   const serviceWorkCategoryOptions = useMemo(() => {
-    const categories = Array.from(new Set([
-      ...(mechanicWorkload?.rows ?? []).map(item => item.workCategory),
-      ...(mechanicWorkload?.productivity?.details ?? []).map(item => item.category),
-    ].filter((value): value is string => Boolean(value))));
+    const categories = serviceSummary?.options?.workCategories ?? [];
     return categories.sort((a, b) => a.localeCompare(b, 'ru'));
-  }, [mechanicWorkload]);
+  }, [serviceSummary]);
 
   const servicePartOptions = useMemo(() => {
-    const names = Array.from(new Set((mechanicWorkload?.rows ?? []).flatMap(item => item.partNames).filter(Boolean)));
+    const names = serviceSummary?.options?.parts ?? [];
     return names.sort((a, b) => a.localeCompare(b, 'ru'));
-  }, [mechanicWorkload]);
+  }, [serviceSummary]);
 
   const serviceWorkStatusOptions = useMemo(() => {
-    const statuses = Array.from(new Set((mechanicWorkload?.productivity?.details ?? []).map(item => item.status).filter(Boolean)));
+    const statuses = serviceSummary?.options?.workStatuses ?? [];
     return statuses.sort((a, b) => a.localeCompare(b, 'ru'));
-  }, [mechanicWorkload]);
+  }, [serviceSummary]);
 
   const serviceWorkSourceOptions = useMemo(() => {
-    const sources = Array.from(new Set((mechanicWorkload?.productivity?.details ?? []).map(item => item.source).filter(Boolean)));
+    const sources = serviceSummary?.options?.workSources ?? [];
     return sources.sort((a, b) => a.localeCompare(b, 'ru'));
-  }, [mechanicWorkload]);
+  }, [serviceSummary]);
 
   const financeDebtRows = useMemo(() => financeDebtPageData?.items ?? [], [financeDebtPageData]);
   const financeManagerSnapshots = useMemo(() => financeManagerPageData?.items ?? [], [financeManagerPageData]);
@@ -612,58 +623,8 @@ export default function Reports() {
   }, [filteredProductivityDetails, filteredProductivitySummary, mechanicWorkload, serviceSummary]);
 
   const equipmentServiceSummary = useMemo(() => {
-    const map = new Map<string, {
-      equipmentId: string;
-      equipmentLabel: string;
-      equipmentTypeLabel: string;
-      inventoryNumber: string;
-      serialNumber: string;
-      repairs: Set<string>;
-      mechanics: Set<string>;
-      worksCount: number;
-      totalNormHours: number;
-      partsCost: number;
-    }>();
-
-    for (const row of filteredMechanicRows) {
-      const key = row.equipmentId || `${row.inventoryNumber}-${row.serialNumber}`;
-      if (!map.has(key)) {
-        map.set(key, {
-          equipmentId: row.equipmentId,
-          equipmentLabel: row.equipmentLabel,
-          equipmentTypeLabel: row.equipmentTypeLabel || row.equipmentType,
-          inventoryNumber: row.inventoryNumber,
-          serialNumber: row.serialNumber,
-          repairs: new Set(),
-          mechanics: new Set(),
-          worksCount: 0,
-          totalNormHours: 0,
-          partsCost: 0,
-        });
-      }
-      const item = map.get(key)!;
-      item.repairs.add(row.repairId);
-      item.mechanics.add(row.mechanicName);
-      item.worksCount += row.quantity;
-      item.totalNormHours += row.totalNormHours;
-      item.partsCost += row.partsCost;
-    }
-
-    return [...map.values()]
-      .map(item => ({
-        equipmentId: item.equipmentId,
-        equipmentLabel: item.equipmentLabel,
-        equipmentTypeLabel: item.equipmentTypeLabel,
-        inventoryNumber: item.inventoryNumber,
-        serialNumber: item.serialNumber,
-        repairsCount: item.repairs.size,
-        mechanicsCount: item.mechanics.size,
-        worksCount: item.worksCount,
-        totalNormHours: Number(item.totalNormHours.toFixed(2)),
-        partsCost: Number(item.partsCost.toFixed(2)),
-      }))
-      .sort((a, b) => b.totalNormHours - a.totalNormHours);
-  }, [filteredMechanicRows]);
+    return (serviceEquipmentPageData?.items ?? []) as any[];
+  }, [serviceEquipmentPageData]);
 
   const topServiceWorks = useMemo(() => {
     const map = new Map<string, { name: string; category: string; count: number; totalNormHours: number }>();
@@ -817,31 +778,8 @@ export default function Reports() {
   ]);
 
   const filteredRepeatFailures = useMemo(() => {
-    const items = mechanicWorkload?.repeatFailures ?? [];
-    return items.filter(item => {
-      const createdDates = item.createdDates.map(date => date.slice(0, 10));
-      if (serviceMechanic !== 'all' && !item.mechanicNames.includes(serviceMechanic)) return false;
-      if (serviceScenario !== 'all' && item.serviceKind !== serviceScenario) return false;
-      if (serviceStatus !== 'all' && !item.repairStatuses.includes(serviceStatus)) return false;
-      if (serviceEquipmentType !== 'all' && (item.equipmentTypeLabel || item.equipmentType) !== serviceEquipmentType) return false;
-      if (serviceWorkCategory !== 'all' && !item.workCategories.includes(serviceWorkCategory)) return false;
-      if (servicePartName !== 'all' && !item.partNames.includes(servicePartName)) return false;
-      if (serviceDateFrom && serviceDateTo && !createdDates.some(date => date >= serviceDateFrom && date <= serviceDateTo)) return false;
-      if (serviceDateFrom && !serviceDateTo && !createdDates.some(date => date >= serviceDateFrom)) return false;
-      if (serviceDateTo && !serviceDateFrom && !createdDates.some(date => date <= serviceDateTo)) return false;
-      return true;
-    });
-  }, [
-    mechanicWorkload,
-    serviceDateFrom,
-    serviceDateTo,
-    serviceEquipmentType,
-    serviceMechanic,
-    serviceScenario,
-    servicePartName,
-    serviceStatus,
-    serviceWorkCategory,
-  ]);
+    return (serviceRepeatedPageData?.items ?? []) as any[];
+  }, [serviceRepeatedPageData]);
 
   const serviceScenarioSummary = useMemo(() => {
     const map = new Map<string, { scenario: string; repairIds: Set<string>; totalNormHours: number; totalPartsCost: number }>();
@@ -877,51 +815,11 @@ export default function Reports() {
   }, [equipmentServiceSummary]);
 
   const problematicModels = useMemo(() => {
-    const map = new Map<string, {
-      model: string;
-      equipmentTypeLabel: string;
-      units: Set<string>;
-      repairs: Set<string>;
-      totalNormHours: number;
-      partsCost: number;
-    }>();
-
-    for (const row of filteredMechanicRows) {
-      const modelKey = `${row.equipmentTypeLabel || row.equipmentType}__${row.equipmentLabel}`;
-      if (!map.has(modelKey)) {
-        map.set(modelKey, {
-          model: row.equipmentLabel,
-          equipmentTypeLabel: row.equipmentTypeLabel || row.equipmentType,
-          units: new Set(),
-          repairs: new Set(),
-          totalNormHours: 0,
-          partsCost: 0,
-        });
-      }
-      const item = map.get(modelKey)!;
-      item.units.add(row.equipmentId || `${row.inventoryNumber}-${row.serialNumber}`);
-      item.repairs.add(row.repairId);
-      item.totalNormHours += row.totalNormHours;
-      item.partsCost += row.partsCost;
-    }
-
-    return [...map.values()]
-      .map(item => ({
-        model: item.model,
-        equipmentTypeLabel: item.equipmentTypeLabel,
-        unitsCount: item.units.size,
-        repairsCount: item.repairs.size,
-        totalNormHours: Number(item.totalNormHours.toFixed(2)),
-        partsCost: Number(item.partsCost.toFixed(2)),
-        risk: assessServiceRisk({
-          repairsCount: item.repairs.size,
-          totalNormHours: Number(item.totalNormHours.toFixed(2)),
-          partsCost: Number(item.partsCost.toFixed(2)),
-        }),
-      }))
-      .sort((a, b) => b.repairsCount - a.repairsCount || b.totalNormHours - a.totalNormHours)
-      .slice(0, 10);
-  }, [filteredMechanicRows]);
+    return ((serviceModelsPageData?.items ?? []) as any[]).map(item => ({
+      ...item,
+      risk: assessServiceRisk(item),
+    }));
+  }, [serviceModelsPageData]);
 
   const serviceMonthlyDynamics = useMemo(() => {
     const months = lastNMonths(6);
@@ -2887,6 +2785,12 @@ export default function Reports() {
                       </div>
                     </div>
                   ))}
+                  <ReportPagination
+                    pagination={serviceRepeatedPageData?.pagination}
+                    pageSize={servicePageSize}
+                    onPageSizeChange={setServicePageSize}
+                    onPageChange={setServiceRepeatedPage}
+                  />
                 </div>
               ) : (
                 <EmptyChart message="По текущим фильтрам повторных поломок не найдено." />
@@ -3057,6 +2961,12 @@ export default function Reports() {
                         </div>
                       </div>
                     ))}
+                    <ReportPagination
+                      pagination={serviceEquipmentPageData?.pagination}
+                      pageSize={servicePageSize}
+                      onPageSizeChange={setServicePageSize}
+                      onPageChange={setServiceEquipmentPage}
+                    />
                   </div>
                 ) : (
                   <EmptyChart message="Нет данных по технике в выбранном срезе." />
@@ -3159,6 +3069,12 @@ export default function Reports() {
                         </div>
                       </div>
                     ))}
+                    <ReportPagination
+                      pagination={serviceModelsPageData?.pagination}
+                      pageSize={servicePageSize}
+                      onPageSizeChange={setServicePageSize}
+                      onPageChange={setServiceModelsPage}
+                    />
                   </div>
                 ) : (
                   <EmptyChart message="Нет моделей для рейтинга в текущем срезе." />

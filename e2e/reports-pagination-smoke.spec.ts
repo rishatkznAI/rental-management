@@ -69,10 +69,25 @@ test('Reports summary detail pagination smoke has no full-load endpoints', async
   await expect(page.getByText('Фильтры сервиса')).toBeVisible();
   await page.getByPlaceholder('Поиск по механику, заявке, технике или работе').fill('test');
   await expect(page.getByText('Детализация работ')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Повторные поломки' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Сводка по технике' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Проблемные модели' })).toBeVisible();
   const servicePageSize = page.locator('select').filter({ hasText: '50 строк' }).first();
   if (await servicePageSize.count()) {
     await servicePageSize.selectOption('50');
   }
+
+  const managerSummaryResponse = page.waitForResponse(response => response.url().includes('/api/reports/managers/summary') && response.status() < 500);
+  await selectTab(page, 'По менеджерам');
+  await managerSummaryResponse;
+  await expect(page.getByRole('heading', { name: 'Отчёт по менеджерам' })).toBeVisible();
+  await expect(page.getByText('Сводно по менеджерам')).toBeVisible();
+  const managerDetailsResponse = page.waitForResponse(response => response.url().includes('/api/reports/managers/details/') && response.status() < 500);
+  await page.getByRole('button', { name: 'Детализация по арендам' }).click();
+  await managerDetailsResponse;
+  await expect(page.getByText(/Детализация|Нет данных|Аренды не найдены/).first()).toBeVisible();
+  const managerDates = page.locator('input[type="date"]');
+  await managerDates.first().fill('2026-05-01');
 
   const fullLoadPatterns = [
     /\/api\/equipment(?:\?|$)/,
@@ -85,5 +100,10 @@ test('Reports summary detail pagination smoke has no full-load endpoints', async
   ];
   const fullLoads = apiUrls.filter(url => fullLoadPatterns.some(pattern => pattern.test(url)));
   expect(fullLoads).toEqual([]);
+  expect(apiUrls.some(url => url.includes('/api/reports/managers/summary'))).toBeTruthy();
+  expect(apiUrls.some(url => url.includes('/api/reports/managers/details/'))).toBeTruthy();
+  expect(apiUrls.some(url => url.includes('/api/reports/service/details/repeated-failures'))).toBeTruthy();
+  expect(apiUrls.some(url => url.includes('/api/reports/service/details/equipment-summary'))).toBeTruthy();
+  expect(apiUrls.some(url => url.includes('/api/reports/service/details/problematic-models'))).toBeTruthy();
   expect(issues).toEqual([]);
 });

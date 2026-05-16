@@ -93,6 +93,13 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 const REPAIR_ITEMS_ADMIN_NOTICE = 'Работы и запчасти может изменять только администратор';
+const serviceDetailTabTriggerClass = [
+  'service-detail-tab-trigger flex-none rounded-md border border-transparent px-4 py-2 font-medium text-gray-600',
+  'hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white',
+  'focus-visible:ring-2 focus-visible:ring-blue-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-emerald-400/70 dark:focus-visible:ring-offset-gray-950',
+  'data-[state=active]:border-blue-300 data-[state=active]:bg-blue-50 data-[state=active]:font-semibold data-[state=active]:text-blue-900 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-blue-100',
+  'dark:data-[state=active]:border-emerald-400/60 dark:data-[state=active]:bg-emerald-400/10 dark:data-[state=active]:text-emerald-100 dark:data-[state=active]:shadow-none dark:data-[state=active]:ring-1 dark:data-[state=active]:ring-emerald-400/20',
+].join(' ');
 
 type BadgeVariant = 'success' | 'warning' | 'error' | 'info' | 'default';
 
@@ -1490,12 +1497,15 @@ export default function ServiceDetail({
       )}
 
       <Tabs defaultValue="overview" className="space-y-5">
-        <TabsList className="h-auto w-full justify-start gap-2 overflow-x-auto rounded-lg border border-gray-200 bg-white p-1 dark:border-white/10 dark:bg-white/[0.03]">
-          <TabsTrigger value="overview" className="rounded-md px-4 py-2">Обзор</TabsTrigger>
-          <TabsTrigger value="works" className="rounded-md px-4 py-2">Работы</TabsTrigger>
-          <TabsTrigger value="parts" className="rounded-md px-4 py-2">Запчасти</TabsTrigger>
-          <TabsTrigger value="photos" className="rounded-md px-4 py-2">Фото</TabsTrigger>
-          <TabsTrigger value="history" className="rounded-md px-4 py-2">История</TabsTrigger>
+        <TabsList
+          aria-label="Разделы сервисной заявки"
+          className="h-auto w-full justify-start gap-2 overflow-x-auto rounded-lg border border-gray-200 bg-white p-1 dark:border-white/10 dark:bg-white/[0.03]"
+        >
+          <TabsTrigger value="overview" className={serviceDetailTabTriggerClass}>Обзор</TabsTrigger>
+          <TabsTrigger value="works" className={serviceDetailTabTriggerClass}>Работы</TabsTrigger>
+          <TabsTrigger value="parts" className={serviceDetailTabTriggerClass}>Запчасти</TabsTrigger>
+          <TabsTrigger value="photos" className={serviceDetailTabTriggerClass}>Фото</TabsTrigger>
+          <TabsTrigger value="history" className={serviceDetailTabTriggerClass}>История</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">

@@ -86,6 +86,10 @@ async function seedServiceTicket(suffix: string) {
 test('service list opens the full ticket card as a modal and keeps filters after closing', async ({ page }) => {
   const suffix = `${Date.now()}`;
   const seed = await seedServiceTicket(suffix);
+  const consoleErrors: string[] = [];
+  page.on('console', msg => {
+    if (msg.type() === 'error') consoleErrors.push(msg.text());
+  });
 
   await loginAsAdmin(page);
   await navigateInApp(page, '/service');
@@ -112,6 +116,38 @@ test('service list opens the full ticket card as a modal and keeps filters after
   await expect(dialog.getByText(seed.comment).first()).toBeVisible();
   await expect(dialog.getByText('Фото не добавлены')).toBeVisible();
   await expect(dialog.getByText(/mock/i)).toHaveCount(0);
+
+  const overviewTab = dialog.getByRole('tab', { name: 'Обзор' });
+  const worksTab = dialog.getByRole('tab', { name: 'Работы' });
+  const partsTab = dialog.getByRole('tab', { name: 'Запчасти' });
+  const photosTab = dialog.getByRole('tab', { name: 'Фото' });
+  const historyTab = dialog.getByRole('tab', { name: 'История' });
+
+  await expect(dialog.getByRole('tablist', { name: 'Разделы сервисной заявки' })).toBeVisible();
+  await expect(overviewTab).toHaveAttribute('aria-selected', 'true');
+  await expect(overviewTab).toHaveAttribute('data-state', 'active');
+  await expect(overviewTab).toHaveClass(/service-detail-tab-trigger/);
+
+  await worksTab.click();
+  await expect(worksTab).toHaveAttribute('aria-selected', 'true');
+  await expect(worksTab).toHaveAttribute('data-state', 'active');
+  await expect(dialog.getByRole('heading', { name: 'Работы' })).toBeVisible();
+
+  await partsTab.click();
+  await expect(partsTab).toHaveAttribute('aria-selected', 'true');
+  await expect(partsTab).toHaveAttribute('data-state', 'active');
+  await expect(dialog.getByRole('heading', { name: 'Запчасти' })).toBeVisible();
+
+  await photosTab.click();
+  await expect(photosTab).toHaveAttribute('aria-selected', 'true');
+  await expect(photosTab).toHaveAttribute('data-state', 'active');
+  await expect(dialog.getByRole('heading', { name: 'Фото' })).toBeVisible();
+
+  await historyTab.click();
+  await expect(historyTab).toHaveAttribute('aria-selected', 'true');
+  await expect(historyTab).toHaveAttribute('data-state', 'active');
+  await expect(dialog.getByText('История и ревизии')).toBeVisible();
+  expect(consoleErrors).toEqual([]);
 
   await dialog.getByRole('button', { name: 'Закрыть карточку заявки' }).click();
   await expect(dialog).toHaveCount(0);

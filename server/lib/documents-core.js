@@ -214,18 +214,19 @@ function prepareDocumentCreate(input, {
   if (!doc.responsibleId) doc.responsibleId = user.userId || '';
   if (doc.generatedContent && !doc.printHtml) doc.printHtml = doc.generatedContent;
   if (doc.printHtml && !doc.contentHtml) doc.contentHtml = doc.printHtml;
-  assertDocumentNumberUnique(documents, doc, { fallbackIso: now });
-  let withHistory = appendDocumentHistory(doc, {
+  const printableDoc = withGeneratedPrintHtml(doc);
+  assertDocumentNumberUnique(documents, printableDoc, { fallbackIso: now });
+  let withHistory = appendDocumentHistory(printableDoc, {
     action: 'created',
-    createdBy: doc.createdBy,
-    createdByUserId: doc.createdByUserId,
+    createdBy: printableDoc.createdBy,
+    createdByUserId: printableDoc.createdByUserId,
     createdAt: now,
   });
   if (numberingEvent) {
     withHistory = appendDocumentHistory(withHistory, {
       ...numberingEvent,
-      createdBy: doc.createdBy,
-      createdByUserId: doc.createdByUserId,
+      createdBy: printableDoc.createdBy,
+      createdByUserId: printableDoc.createdByUserId,
       createdAt: now,
     });
   }
@@ -376,6 +377,12 @@ function htmlEscape(value) {
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
+}
+
+function compactRows(rows) {
+  return rows
+    .map(([label, value]) => [label, text(value)])
+    .filter(([, value]) => Boolean(value));
 }
 
 function buildSnapshot(input, collections = {}, nowIso = () => new Date().toISOString()) {
@@ -572,6 +579,7 @@ function linesForDocument(type, snapshot, input) {
 }
 
 function buildDocumentPrintHtml(doc, snapshot, lines) {
+  if (doc.type === 'rental_contract') return buildRentalContractPrintHtml(doc, snapshot, lines);
   const meta = getDocumentTypeMeta(doc.type);
   const rows = lines.map(([label, value]) => `<tr><th>${htmlEscape(label)}</th><td>${htmlEscape(value)}</td></tr>`).join('');
   return `<!doctype html>
@@ -601,6 +609,106 @@ function buildDocumentPrintHtml(doc, snapshot, lines) {
   </div>
 </body>
 </html>`;
+}
+
+function buildRentalContractPrintHtml(doc, snapshot, lines) {
+  const rows = new Map(lines.map(([label, value]) => [label, text(value)]));
+  const payload = doc.payload || {};
+  const signer = payload.signer || {};
+  const requisites = payload.requisites || {};
+  const bank = payload.bank || {};
+  const clientName = text(requisites.legalName || snapshot.client?.legalName || rows.get('Юридическое название') || snapshot.client?.company || doc.client);
+  const signerPosition = text(signer.position);
+  const signerLabel = text(signer.name || rows.get('Подписант'));
+  const signerName = signerPosition && signerLabel.startsWith(`${signerPosition} `)
+    ? signerLabel.slice(signerPosition.length).trim()
+    : signerLabel;
+  const signerBasis = [signer.basis, signer.basis === 'Доверенность'
+    ? [signer.basisNumber, signer.basisDate].map(text).filter(Boolean).join(' от ')
+    : ''].map(text).filter(Boolean).join(' · ');
+  const requisiteRows = compactRows([
+    ['Юридическое название', clientName],
+    ['ИНН', requisites.inn || snapshot.client?.inn],
+    ['КПП', requisites.kpp || snapshot.client?.kpp],
+    ['ОГРН', requisites.ogrn || snapshot.client?.ogrn],
+    ['Юридический адрес', requisites.legalAddress || snapshot.client?.legalAddress || snapshot.client?.address],
+    ['Почтовый адрес', requisites.postalAddress || snapshot.client?.postalAddress],
+  ]);
+  const bankRows = compactRows([
+    ['Банк', bank.bankName || snapshot.client?.bankName],
+    ['БИК', bank.bik || snapshot.client?.bankBik],
+    ['Расчётный счёт', bank.account || snapshot.client?.bankAccount],
+    ['Корреспондентский счёт', bank.corrAccount || snapshot.client?.corrAccount],
+  ]);
+  const signerRows = compactRows([
+    ['ФИО подписанта', signerName],
+    ['Должность подписанта', signerPosition],
+    ['Основание подписания', signerBasis],
+  ]);
+  const rowHtml = rowsList => rowsList.map(([label, value]) => `<tr><th>${htmlEscape(label)}</th><td>${htmlEscape(value)}</td></tr>`).join('');
+  const notes = text(payload.notes || doc.notes || doc.comment);
+  return `<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Договор аренды ${htmlEscape(documentNumber(doc))}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #111827; line-height: 1.45; }
+    h1 { font-size: 24px; margin: 0 0 8px; text-align: center; }
+    h2 { font-size: 16px; margin: 28px 0 10px; }
+    .meta { color: #374151; margin-bottom: 24px; text-align: center; }
+    p { margin: 0 0 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #d1d5db; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { width: 32%; background: #f9fafb; }
+    .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 52px; }
+    .party { min-height: 120px; }
+    .line { border-top: 1px solid #111827; margin-top: 44px; padding-top: 8px; }
+    @media print { body { margin: 16mm; } }
+  </style>
+</head>
+<body>
+  <h1>Договор аренды</h1>
+  <div class="meta">№ ${htmlEscape(documentNumber(doc))} от ${htmlEscape(doc.date)}</div>
+
+  <p>Настоящий договор является рамочным договором аренды между Skytech и ${htmlEscape(clientName || 'Клиентом')}.</p>
+  <p>Конкретная техника, сроки аренды, стоимость, порядок передачи и иные условия по каждой аренде указываются в спецификациях.</p>
+  <p>Каждая подписанная сторонами спецификация является приложением к настоящему договору и его неотъемлемой частью.</p>
+
+  <h2>Реквизиты клиента</h2>
+  <table>${rowHtml(requisiteRows)}</table>
+
+  <h2>Подписант клиента</h2>
+  <table>${rowHtml(signerRows)}</table>
+
+  ${bankRows.length ? `<h2>Банковские реквизиты</h2><table>${rowHtml(bankRows)}</table>` : ''}
+  ${notes ? `<h2>Примечание</h2><p>${htmlEscape(notes)}</p>` : ''}
+
+  <h2>Подписи сторон</h2>
+  <div class="signatures">
+    <div class="party">
+      <strong>Арендодатель</strong><br />Skytech
+      <div class="line">Подпись / ФИО</div>
+    </div>
+    <div class="party">
+      <strong>Арендатор</strong><br />${htmlEscape(clientName || 'Клиент')}<br />
+      ${htmlEscape([signerPosition, signerName].filter(Boolean).join(' '))}
+      <div class="line">Подпись / ФИО</div>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+function withGeneratedPrintHtml(doc) {
+  if (!doc?.snapshot || !Array.isArray(doc?.payload?.lines)) return doc;
+  const printHtml = buildDocumentPrintHtml(doc, doc.snapshot, doc.payload.lines);
+  return {
+    ...doc,
+    generatedContent: printHtml,
+    printHtml,
+    contentHtml: printHtml,
+  };
 }
 
 function prepareGeneratedDocument(input, collections = {}, options = {}) {

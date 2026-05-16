@@ -24,6 +24,7 @@ function createApp() {
       kpp: '770101001',
       ogrn: '1027700000000',
       legalAddress: 'Москва, ул. Тестовая, 1',
+      postalAddress: '101000, Москва, а/я 5',
       bankName: 'АО Тест Банк',
       bankBik: '044525000',
       bankAccount: '40702810000000000001',
@@ -448,8 +449,100 @@ test('documents generate API creates every workspace document type with snapshot
         assert.equal(generated.json.payload.signer.name, 'Иванов Иван');
         assert.equal(generated.json.payload.requisites.inn, '7701000000');
         assert.equal(generated.json.payload.bank.bankName, 'АО Тест Банк');
+        assert.match(generated.json.printHtml, /№ DA-2026-0001 от 2026-05-09/);
+        assert.match(generated.json.printHtml, /рамочным договором аренды/);
+        assert.match(generated.json.printHtml, /спецификация является приложением/);
+        assert.match(generated.json.printHtml, /Юридическое название/);
+        assert.match(generated.json.printHtml, /ИНН/);
+        assert.match(generated.json.printHtml, /7701000000/);
+        assert.match(generated.json.printHtml, /КПП/);
+        assert.match(generated.json.printHtml, /770101001/);
+        assert.match(generated.json.printHtml, /ОГРН/);
+        assert.match(generated.json.printHtml, /1027700000000/);
+        assert.match(generated.json.printHtml, /Юридический адрес/);
+        assert.match(generated.json.printHtml, /Москва, ул\. Тестовая, 1/);
+        assert.match(generated.json.printHtml, /Почтовый адрес/);
+        assert.match(generated.json.printHtml, /101000, Москва, а\/я 5/);
+        assert.match(generated.json.printHtml, /ФИО подписанта/);
+        assert.match(generated.json.printHtml, /Должность подписанта/);
+        assert.match(generated.json.printHtml, /Основание подписания/);
+        assert.match(generated.json.printHtml, /Банковские реквизиты/);
+        assert.match(generated.json.printHtml, /АО Тест Банк/);
+        assert.match(generated.json.printHtml, /044525000/);
+        assert.match(generated.json.printHtml, /40702810000000000001/);
+        assert.match(generated.json.printHtml, /Подписи сторон/);
+        assert.match(generated.json.printHtml, /Арендодатель/);
+        assert.match(generated.json.printHtml, /Арендатор/);
+        assert.doesNotMatch(generated.json.printHtml, /A-1/);
+        assert.doesNotMatch(generated.json.printHtml, /R-1/);
+        assert.doesNotMatch(generated.json.printHtml, /Сервисная заявка/);
+        assert.doesNotMatch(generated.json.printHtml, /Механик/);
+        assert.doesNotMatch(generated.json.printHtml, /Служебный автомобиль|служебная машина/i);
+        assert.doesNotMatch(generated.json.printHtml, /Пробег|Запчасти|Выполненные работы/);
       }
     }
+  });
+});
+
+test('rental contract print uses stored snapshot, preserves date, and tolerates partial client requisites', async () => {
+  const { app, state } = createApp();
+  state.clients.push({
+    id: 'C-partial',
+    company: 'ИП Частичный',
+    inn: '771122334455',
+    legalAddress: 'Москва, пер. Короткий, 2',
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const created = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'rental_contract',
+      clientId: 'C-1',
+      signerName: 'Иванов Иван Иванович',
+      signerPosition: 'Генеральный директор',
+      signerBasis: 'Устав',
+      date: '2026-05-09',
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.json.date, '2026-05-09');
+    assert.equal(created.json.documentDate, '2026-05-09');
+    assert.equal(created.json.snapshot.client.inn, '7701000000');
+
+    state.clients[0] = {
+      ...state.clients[0],
+      company: 'ООО Клиент После Изменения',
+      inn: '9999999999',
+      legalAddress: 'Новый адрес',
+      bankName: 'Новый Банк',
+    };
+
+    const print = await fetch(`${baseUrl}/api/documents/${created.json.id}/print`, {
+      headers: { authorization: 'Bearer office' },
+    });
+    const html = await print.text();
+    assert.equal(print.status, 200);
+    assert.match(html, /№ DA-2026-0001 от 2026-05-09/);
+    assert.match(html, /7701000000/);
+    assert.match(html, /Москва, ул\. Тестовая, 1/);
+    assert.match(html, /АО Тест Банк/);
+    assert.doesNotMatch(html, /9999999999/);
+    assert.doesNotMatch(html, /Новый адрес/);
+    assert.doesNotMatch(html, /Новый Банк/);
+
+    const partial = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'rental_contract',
+      clientId: 'C-partial',
+      signerName: 'Петров Пётр Петрович',
+      signerPosition: 'Индивидуальный предприниматель',
+      signerBasis: 'ОГРНИП',
+      date: '2026-05-09',
+    });
+    assert.equal(partial.response.status, 201);
+    assert.match(partial.json.printHtml, /ИП Частичный/);
+    assert.match(partial.json.printHtml, /771122334455/);
+    assert.match(partial.json.printHtml, /Москва, пер\. Короткий, 2/);
+    assert.doesNotMatch(partial.json.printHtml, /<th>КПП<\/th>/);
+    assert.doesNotMatch(partial.json.printHtml, /<th>ОГРН<\/th>/);
+    assert.doesNotMatch(partial.json.printHtml, /Банковские реквизиты/);
   });
 });
 

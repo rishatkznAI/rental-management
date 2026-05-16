@@ -344,6 +344,12 @@ test('non-admin service create allows only explicit PDI markers and strips unsaf
     saleMode: true,
     pdiData: { status: 'in_progress' },
     equipmentId: 'EQ-1',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    clientName: 'ООО Клиент',
+    rentalId: 'R-1',
+    objectId: 'CO-1',
+    contractId: 'CC-1',
     reason: 'PDI / предпродажная подготовка',
     assignedTo: 'Другой механик',
     assignedMechanicId: 'M-2',
@@ -357,10 +363,16 @@ test('non-admin service create allows only explicit PDI markers and strips unsaf
   assert.equal(safe.source, 'sales');
   assert.equal(safe.saleMode, true);
   assert.deepEqual(safe.pdiData, { status: 'in_progress' });
+  assert.equal(safe.clientId, 'C-1');
+  assert.equal(safe.client, 'ООО Клиент');
+  assert.equal(safe.clientName, 'ООО Клиент');
+  assert.equal(safe.rentalId, 'R-1');
+  assert.equal(safe.objectId, 'CO-1');
+  assert.equal(safe.contractId, 'CC-1');
   assert.equal(safe.assignedTo, undefined);
   assert.equal(safe.assignedMechanicId, undefined);
   assert.equal(safe.resultData, undefined);
-  assert.equal(safe.location, undefined);
+  assert.equal(safe.location, 'Склад');
   assert.equal(safe.closedAt, undefined);
 });
 

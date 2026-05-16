@@ -10,6 +10,7 @@ export default function ServiceNew() {
   const [searchParams] = useSearchParams();
   const { can } = usePermissions();
   const initialEquipmentId = searchParams.get('equipmentId') || undefined;
+  const initialRentalId = searchParams.get('rentalId') || searchParams.get('ganttRentalId') || undefined;
   const mode = searchParams.get('mode') || '';
   const isSalesPdi = mode === 'sales_pdi';
 
@@ -31,6 +32,7 @@ export default function ServiceNew() {
       </div>
       <ServiceTicketForm
         initialEquipmentId={initialEquipmentId}
+        initialRentalId={initialRentalId}
         lockEquipment={Boolean(initialEquipmentId)}
         initialReason={isSalesPdi ? 'PDI перед продажей' : undefined}
         initialDescription={isSalesPdi ? 'Предпродажная проверка и подготовка техники к продаже.' : undefined}

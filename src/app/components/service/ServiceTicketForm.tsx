@@ -1,18 +1,21 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Camera, ImagePlus, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { usePermissions } from '../../lib/permissions';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { EquipmentCombobox } from '../ui/EquipmentCombobox';
+import { ClientCombobox } from '../ui/ClientCombobox';
 import { useClientsList } from '../../hooks/useClients';
 import { useClientContractsList, useClientObjectsList } from '../../hooks/useClientRelations';
 import { SERVICE_TICKET_KEYS, useCreateServiceTicket } from '../../hooks/useServiceTickets';
 import { EQUIPMENT_KEYS, useEquipmentList } from '../../hooks/useEquipment';
-import { RENTAL_KEYS } from '../../hooks/useRentals';
-import type { ServiceTicket } from '../../types';
+import { RENTAL_KEYS, useGanttData, useRentalsList } from '../../hooks/useRentals';
+import type { Rental, ServiceTicket } from '../../types';
+import type { GanttRentalData } from '../../mock-data';
 import { getEquipmentTypeLabel } from '../../lib/equipmentClassification';
 import { isMechanicRole } from '../../lib/userStorage';
 import {
@@ -33,7 +36,50 @@ type ServiceTicketFormProps = {
   scenarioDescription?: string;
   hideScenarioSelect?: boolean;
   stickyActions?: boolean;
+  initialRentalId?: string;
 };
+
+type ServiceRentalOption = {
+  id: string;
+  label: string;
+  clientId?: string;
+  client?: string;
+  objectId?: string;
+  contractId?: string;
+  equipmentRefs: string[];
+  active: boolean;
+};
+
+function compact(values: Array<unknown>): string[] {
+  return values.flat().map(value => String(value || '').trim()).filter(Boolean);
+}
+
+function rentalOptionFromClassic(rental: Rental): ServiceRentalOption {
+  const rawRental = rental as Rental & { equipmentId?: string; equipmentInv?: string; serialNumber?: string };
+  return {
+    id: rental.id,
+    label: `${rental.id} · ${rental.client || 'Клиент не указан'}`,
+    clientId: rental.clientId,
+    client: rental.client,
+    objectId: rental.objectId,
+    contractId: rental.contractId,
+    equipmentRefs: compact([rawRental.equipmentId, rawRental.equipmentInv, rawRental.serialNumber, rental.equipment]),
+    active: !['closed'].includes(String(rental.status || '').toLowerCase()),
+  };
+}
+
+function rentalOptionFromGantt(rental: GanttRentalData): ServiceRentalOption {
+  return {
+    id: rental.id,
+    label: `${rental.rentalId || rental.id} · ${rental.client || 'Клиент не указан'}`,
+    clientId: rental.clientId,
+    client: rental.client,
+    objectId: rental.objectId,
+    contractId: rental.contractId,
+    equipmentRefs: compact([rental.equipmentId, rental.equipmentInv, rental.serialNumber]),
+    active: !['closed', 'returned'].includes(String(rental.status || '').toLowerCase()),
+  };
+}
 
 export function ServiceTicketForm({
   initialEquipmentId,
@@ -47,13 +93,20 @@ export function ServiceTicketForm({
   scenarioDescription,
   hideScenarioSelect = false,
   stickyActions = false,
+  initialRentalId,
 }: ServiceTicketFormProps) {
   const { user } = useAuth();
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
   const createTicket = useCreateServiceTicket();
-  const { data: clients = [] } = useClientsList();
-  const { data: clientObjects = [] } = useClientObjectsList();
-  const { data: clientContracts = [] } = useClientContractsList();
+  const currentUserIsMechanic = isMechanicRole(user?.role);
+  const canViewClients = can('view', 'clients');
+  const canViewRentals = can('view', 'rentals');
+  const { data: clients = [] } = useClientsList({ enabled: canViewClients });
+  const { data: clientObjects = [] } = useClientObjectsList({ enabled: canViewClients });
+  const { data: clientContracts = [] } = useClientContractsList({ enabled: canViewClients });
+  const { data: rentals = [] } = useRentalsList({ enabled: canViewRentals });
+  const { data: ganttRentals = [] } = useGanttData({ enabled: canViewRentals });
   const { data: equipmentList = [] } = useEquipmentList();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -68,6 +121,7 @@ export function ServiceTicketForm({
     reporterContact: '',
     clientId: '',
     client: '',
+    rentalId: initialRentalId ?? '',
     objectId: '',
     contractId: '',
     reason: initialReason,
@@ -85,7 +139,34 @@ export function ServiceTicketForm({
   );
   const isRepairScenario = formData.serviceKind === 'repair';
   const scenarioLabel = getServiceScenarioLabel(formData.serviceKind);
-  const currentUserIsMechanic = isMechanicRole(user?.role);
+  const rentalOptions = useMemo(
+    () => [
+      ...rentals.map(rentalOptionFromClassic),
+      ...ganttRentals.map(rentalOptionFromGantt),
+    ],
+    [ganttRentals, rentals],
+  );
+  const selectedRental = rentalOptions.find(item => item.id === formData.rentalId);
+  const activeRentalForEquipment = useMemo(() => {
+    if (!selectedEquipment) return undefined;
+    const refs = compact([selectedEquipment.id, selectedEquipment.inventoryNumber, selectedEquipment.serialNumber]);
+    return rentalOptions.find(rental =>
+      rental.active && rental.equipmentRefs.some(ref => refs.includes(ref))
+    );
+  }, [rentalOptions, selectedEquipment]);
+
+  const applyRentalLink = (rental: ServiceRentalOption | undefined) => {
+    if (!rental) return;
+    const nextClient = rental.clientId ? clients.find(item => item.id === rental.clientId) : undefined;
+    setFormData(prev => ({
+      ...prev,
+      rentalId: rental.id,
+      clientId: rental.clientId || prev.clientId,
+      client: nextClient?.company || rental.client || prev.client,
+      objectId: rental.objectId || '',
+      contractId: rental.contractId || '',
+    }));
+  };
 
   useEffect(() => {
     if (!initialEquipmentId) return;
@@ -98,6 +179,11 @@ export function ServiceTicketForm({
       location: eq?.location ?? prev.location,
     }));
   }, [equipmentList, initialEquipmentId]);
+
+  useEffect(() => {
+    if (!initialRentalId) return;
+    applyRentalLink(rentalOptions.find(item => item.id === initialRentalId));
+  }, [clients, initialRentalId, rentalOptions]);
 
   useEffect(() => {
     setFormData(prev => ({
@@ -242,6 +328,8 @@ export function ServiceTicketForm({
       reporterContact: formData.reporterContact || undefined,
       clientId: formData.clientId || undefined,
       client: selectedClient?.company || formData.client || undefined,
+      clientName: selectedClient?.company || formData.client || undefined,
+      rentalId: formData.rentalId || undefined,
       objectId: formData.objectId || undefined,
       contractId: formData.contractId || undefined,
       source: 'manual',
@@ -393,30 +481,70 @@ export function ServiceTicketForm({
         <CardContent className="grid gap-4 md:grid-cols-2">
           <div className="space-y-1.5">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Клиент</label>
-            <Select
-              value={formData.clientId || 'none'}
-              onValueChange={(value) => {
-                const nextClient = clients.find(item => item.id === value);
+            <ClientCombobox
+              clients={clients}
+              value={formData.client}
+              valueId={formData.clientId}
+              placeholder={canViewClients ? 'Введите название, ИНН, контакт или телефон…' : 'Клиент не выбран'}
+              onChange={(value) => {
                 setFormData(prev => ({
                   ...prev,
-                  clientId: value === 'none' ? '' : value,
-                  client: nextClient?.company || '',
+                  client: value,
+                  clientId: value ? prev.clientId : '',
                   objectId: '',
                   contractId: '',
                 }));
               }}
+              onClientSelect={(client) => {
+                setFormData(prev => ({
+                  ...prev,
+                  clientId: client?.id || '',
+                  client: client?.company || '',
+                  objectId: '',
+                  contractId: '',
+                }));
+              }}
+            />
+            {!formData.clientId && (
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Можно оставить пустым только для внутренней заявки по собственной технике.
+              </p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Аренда</label>
+            <Select
+              value={formData.rentalId || 'none'}
+              disabled={rentalOptions.length === 0}
+              onValueChange={(value) => {
+                if (value === 'none') {
+                  setFormData(prev => ({ ...prev, rentalId: '' }));
+                  return;
+                }
+                applyRentalLink(rentalOptions.find(item => item.id === value));
+              }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Без клиента" />
+                <SelectValue placeholder="Без аренды" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">Без клиента</SelectItem>
-                {clients.map(client => (
-                  <SelectItem key={client.id} value={client.id}>{client.company}</SelectItem>
+                <SelectItem value="none">Без аренды</SelectItem>
+                {rentalOptions.map(rental => (
+                  <SelectItem key={rental.id} value={rental.id}>{rental.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+          {activeRentalForEquipment && activeRentalForEquipment.id !== selectedRental?.id && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100 md:col-span-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <span>По выбранной технике найдена активная аренда: {activeRentalForEquipment.label}</span>
+                <Button type="button" size="sm" variant="outline" onClick={() => applyRentalLink(activeRentalForEquipment)}>
+                  Связать с арендой
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="space-y-1.5">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Объект</label>
             <Select

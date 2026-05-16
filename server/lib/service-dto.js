@@ -129,6 +129,7 @@ function normalizeServiceTicketRecord(item, index = 0) {
     assignedTo: stringValue(item.assignedTo || item.responsibleName),
     clientId: stringValue(item.clientId || item.client_id),
     client: stringValue(item.client || item.clientName),
+    clientName: stringValue(item.clientName || item.client),
     rentalId: stringValue(item.rentalId || item.rental_id),
     objectId: stringValue(item.objectId || item.clientObjectId || item.siteId),
     contractId: stringValue(item.contractId || item.clientContractId),

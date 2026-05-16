@@ -734,6 +734,7 @@ export interface ServiceTicket {
   createdBy?: string;
   clientId?: string;
   client?: string;
+  clientName?: string;
   rentalId?: string;
   objectId?: string;
   contractId?: string;

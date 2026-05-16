@@ -305,6 +305,36 @@ test('rentals, deliveries, service, payments and documents can carry object and 
   assert.equal(row.contractId, 'CC-1');
 });
 
+test('POST and GET /api/service keep client id and display snapshot', async () => {
+  const { app } = makeCrudApp({
+    clients: [{ id: 'C-1', company: 'ООО Клиент', inn: '7707083893', innNormalized: '7707083893' }],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const created = await request(baseUrl, 'POST', '/api/service', {
+      clientId: 'C-1',
+      client: 'ООО Клиент',
+      clientName: 'ООО Клиент',
+      equipmentId: 'EQ-1',
+      equipment: 'Подъемник',
+      reason: 'Осмотр',
+      description: 'Осмотр',
+      priority: 'medium',
+      sla: '24 ч',
+      status: 'new',
+    });
+
+    assert.equal(created.status, 201);
+    assert.equal(created.body.clientId, 'C-1');
+    assert.equal(created.body.clientName, 'ООО Клиент');
+
+    const list = await request(baseUrl, 'GET', '/api/service');
+    assert.equal(list.status, 200);
+    assert.equal(list.body[0].clientId, 'C-1');
+    assert.equal(list.body[0].clientName, 'ООО Клиент');
+  });
+});
+
 test('client receivables stay client-based while object breakdown groups legacy rows as Без объекта', () => {
   const rows = [
     { rentalId: 'GR-1', clientId: 'C-1', client: 'Клиент', objectId: 'CO-1', outstanding: 100000 },

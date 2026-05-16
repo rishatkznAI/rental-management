@@ -223,6 +223,7 @@ function enrichRecordFromRentalLinks(record, readData) {
     ...record,
     clientId: record.clientId || rental.clientId || undefined,
     client: record.client || rental.client || undefined,
+    clientName: record.clientName || record.client || rental.client || undefined,
     objectId: record.objectId || rental.objectId || undefined,
     contractId: record.contractId || rental.contractId || undefined,
   };

@@ -1712,6 +1712,38 @@ test('admin service create may leave mechanic unassigned through API', async () 
   });
 });
 
+test('service create preserves client links for web service roles without exposing clients to forbidden roles', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients.push({ id: 'C-service', company: 'ООО Сервис клиент', inn: '7707083893' });
+
+  await withServer(app, async baseUrl => {
+    for (const [token, roleName] of [
+      ['admin-token', 'Администратор'],
+      ['office-token', 'Офис-менеджер'],
+      ['manager-token', 'Менеджер по аренде'],
+    ]) {
+      const response = await request(baseUrl, 'POST', '/api/service', token, {
+        ...servicePayload,
+        clientId: 'C-service',
+        client: 'ООО Сервис клиент',
+        clientName: 'ООО Сервис клиент',
+        rentalId: 'R-own',
+      });
+
+      assert.equal(response.status, 201, roleName);
+      assert.equal(response.body.clientId, 'C-service', roleName);
+      assert.equal(response.body.clientName, 'ООО Сервис клиент', roleName);
+      assert.equal(response.body.rentalId, 'R-own', roleName);
+    }
+
+    const list = await request(baseUrl, 'GET', '/api/service', 'office-token');
+    assert.equal(list.status, 200);
+    assert.equal(list.body.some(item => item.clientId === 'C-service' && item.clientName === 'ООО Сервис клиент'), true);
+
+    assert.equal((await request(baseUrl, 'GET', '/api/clients', 'investor-token')).status, 403);
+  });
+});
+
 test('MAX webhook accepts header secret and rejects missing, wrong, or query secrets', async () => {
   const { app, auditEntries } = createSecurityApp();
 

@@ -1570,7 +1570,7 @@ export default function ServiceDetail({
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="grid gap-2">
-                  <DetailTile label="Клиент" value={ticket.client || relatedClient?.company || relatedGanttRental?.client} />
+                  <DetailTile label="Клиент" value={ticket.clientName || ticket.client || relatedClient?.company || relatedGanttRental?.client} />
                   <DetailTile label="Объект" value={ticket.objectName || relatedRental?.deliveryAddress || relatedGanttRental?.deliveryAddress} />
                   <DetailTile label="Аренда" value={ticket.rentalId || relatedRental?.id || relatedGanttRental?.rentalId || relatedGanttRental?.id} mono />
                   <DetailTile label="Менеджер" value={relatedRental?.manager || relatedGanttRental?.manager} />
@@ -1662,7 +1662,7 @@ export default function ServiceDetail({
                 {ticket.closedAt && <Field label="Фактическое закрытие" value={formatServiceDate(ticket.closedAt)} />}
                 <Field label="Источник" value={ticket.source ? SOURCE_LABELS[ticket.source] : undefined} />
                 <Field label="Кто создал" value={ticket.createdByUserName ?? ticket.createdBy} />
-                <Field label="Клиент" value={ticket.client} />
+                <Field label="Клиент" value={ticket.clientName || ticket.client || relatedClient?.company} />
                 <Field label="Объект" value={ticket.objectName || ticket.objectId} />
                 <Field label="Адрес объекта" value={ticket.objectAddress} />
                 <Field label="Контакт объекта" value={[ticket.objectContactName, ticket.objectContactPhone].filter(Boolean).join(' · ')} />

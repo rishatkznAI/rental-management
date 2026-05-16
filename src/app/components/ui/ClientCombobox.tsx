@@ -3,19 +3,37 @@ import { ChevronDown, Search, X } from 'lucide-react';
 import type { Client } from '../../types';
 import { cn } from './utils';
 
-function clientLabel(client: Client): string {
-  return client.company;
+type ClientOption = Client & {
+  name?: string;
+  companyName?: string;
+  title?: string;
+  clientName?: string;
+};
+
+export function clientLabel(client: ClientOption): string {
+  return String(
+    client.company ||
+    client.companyName ||
+    client.name ||
+    client.title ||
+    client.clientName ||
+    '',
+  ).trim() || 'Клиент без названия';
 }
 
-function clientSubtitle(client: Client): string {
+function clientSubtitle(client: ClientOption): string {
   return [client.contact, client.contactPerson, client.phone, client.inn].filter(Boolean).join(' · ');
 }
 
-function matchesSearch(client: Client, query: string): boolean {
+function matchesSearch(client: ClientOption, query: string): boolean {
   if (!query.trim()) return true;
   const lower = query.trim().toLowerCase();
   return [
     client.company,
+    client.companyName,
+    client.name,
+    client.title,
+    client.clientName,
     client.contact,
     client.contactPerson,
     client.phone,
@@ -54,17 +72,17 @@ export function ClientCombobox({
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const selectedClient = useMemo(
-    () => clients.find(client => client.id === valueId) ?? clients.find(client => client.company === value) ?? null,
+    () => clients.find(client => client.id === valueId) ?? clients.find(client => clientLabel(client) === value) ?? null,
     [clients, value, valueId],
   );
 
   const filteredClients = useMemo(() => {
     const base = query.trim() ? clients.filter(client => matchesSearch(client, query)) : clients.slice(0, initialLimit);
-    return [...base].sort((left, right) => left.company.localeCompare(right.company, 'ru'));
+    return [...base].sort((left, right) => clientLabel(left).localeCompare(clientLabel(right), 'ru'));
   }, [clients, query, initialLimit]);
 
   const handleSelect = useCallback((client: Client) => {
-    onChange(client.company);
+    onChange(clientLabel(client));
     onClientSelect?.(client);
     setOpen(false);
     setQuery('');

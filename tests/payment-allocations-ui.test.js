@@ -41,6 +41,10 @@ test('Client and rental details show allocation-aware finance state', () => {
 test('Client combobox tolerates legacy clients without optional contact fields', () => {
   const source = readSource('src/app/components/ui/ClientCombobox.tsx');
 
+  assert.match(source, /export function clientLabel/);
+  assert.match(source, /client\.companyName/);
+  assert.match(source, /client\.name/);
+  assert.match(source, /client\.title/);
   assert.match(source, /String\(value \|\| ''\)\.toLowerCase\(\)\.includes\(lower\)/);
   assert.match(source, /client\.contactPerson/);
   assert.doesNotMatch(source, /client\\.contact\\.toLowerCase\\(\\)/);

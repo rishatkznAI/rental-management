@@ -34,3 +34,12 @@ test('documents workspace has KPI cards and unified generation wizard', () => {
   assert.match(source, /Предпросмотр/);
   assert.match(source, /Проверка обязательных полей/);
 });
+
+test('document generation wizard uses searchable client selection and sends clientId', () => {
+  assert.match(source, /ClientCombobox/);
+  assert.match(source, /valueId=\{wizardResolvedClientId\}/);
+  assert.match(source, /clientId: wizardResolvedClientId \|\| undefined/);
+  assert.match(source, /Клиенты не найдены/);
+  assert.match(source, /field === 'clientId'[\s\S]*!\s*wizardResolvedClientId/);
+  assert.match(source, /clientId: rental\?\.clientId \|\| current\.clientId \|\| ''/);
+});

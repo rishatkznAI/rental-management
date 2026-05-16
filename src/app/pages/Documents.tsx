@@ -22,7 +22,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Textarea } from '../components/ui/textarea';
 import { getDocumentStatusBadge } from '../components/ui/badge';
-import { ClientCombobox } from '../components/ui/ClientCombobox';
+import { ClientCombobox, clientLabel } from '../components/ui/ClientCombobox';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -995,8 +995,9 @@ export default function Documents() {
     [createContractKind, contractForm.date, documents],
   );
   const wizardTypeMeta = getDocumentRegistryItem(wizardForm.type) || DOCUMENT_WORKSPACE_TYPES[0];
-  const wizardClient = wizardForm.clientId ? clientsById.get(wizardForm.clientId) : undefined;
   const wizardRental = wizardForm.rentalId ? rentalsById.get(wizardForm.rentalId) : undefined;
+  const wizardResolvedClientId = wizardForm.clientId || wizardRental?.clientId || '';
+  const wizardClient = wizardResolvedClientId ? clientsById.get(wizardResolvedClientId) : undefined;
   const wizardEquipment = wizardForm.equipmentId ? equipmentById.get(wizardForm.equipmentId) : undefined;
   const wizardServiceTicket = wizardForm.serviceTicketId ? serviceTicketsById.get(wizardForm.serviceTicketId) : undefined;
   const wizardDelivery = wizardForm.deliveryId ? deliveriesById.get(wizardForm.deliveryId) : undefined;
@@ -1014,13 +1015,15 @@ export default function Documents() {
       parentDocumentId: 'Родительский документ',
     };
     return (wizardTypeMeta.requiredFields || [])
-      .filter(field => !wizardForm[field as keyof DocumentWizardState])
+      .filter(field => field === 'clientId'
+        ? !wizardResolvedClientId
+        : !wizardForm[field as keyof DocumentWizardState])
       .map(field => labels[field] || field);
-  }, [wizardForm, wizardTypeMeta]);
+  }, [wizardForm, wizardResolvedClientId, wizardTypeMeta]);
   const wizardPreviewRows = React.useMemo(() => ([
     ['Тип', wizardTypeMeta.label],
     ['Дата', new Date().toISOString().slice(0, 10)],
-    ['Клиент', wizardClient?.company || wizardRental?.client || '—'],
+    ['Клиент', wizardClient ? clientLabel(wizardClient) : wizardRental?.client || '—'],
     ['Техника', wizardEquipment ? getEquipmentLabel(wizardEquipment) : '—'],
     ['Аренда', wizardRental?.id || '—'],
     ['Сервис', wizardServiceTicket?.id || '—'],
@@ -1135,8 +1138,8 @@ export default function Documents() {
         documentType: wizardForm.type,
         date: new Date().toISOString().slice(0, 10),
         status: 'draft',
-        clientId: wizardForm.clientId || wizardRental?.clientId || undefined,
-        client: wizardClient?.company || wizardRental?.client || '',
+        clientId: wizardResolvedClientId || undefined,
+        client: wizardClient ? clientLabel(wizardClient) : wizardRental?.client || '',
         rentalId: wizardForm.rentalId || undefined,
         equipmentId: wizardForm.equipmentId || undefined,
         deliveryId: wizardForm.deliveryId || undefined,
@@ -1983,19 +1986,29 @@ export default function Documents() {
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <div className="text-sm font-medium text-foreground">Клиент</div>
-                      <Select value={wizardForm.clientId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, clientId: value === 'none' ? '' : value }))}>
-                        <SelectTrigger><SelectValue placeholder="Выберите клиента" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Не выбран</SelectItem>
-                          {(clients as Client[]).map(client => <SelectItem key={client.id} value={client.id}>{client.company}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                      <ClientCombobox
+                        clients={clients as Client[]}
+                        value={wizardClient ? clientLabel(wizardClient) : ''}
+                        valueId={wizardResolvedClientId}
+                        onChange={(value) => {
+                          if (!value) setWizardForm(current => ({ ...current, clientId: '' }));
+                        }}
+                        onClientSelect={(client) => setWizardForm(current => ({
+                          ...current,
+                          clientId: client?.id ?? '',
+                        }))}
+                        placeholder={(clients as Client[]).length > 0 ? 'Выберите клиента из базы' : 'Клиенты не найдены'}
+                        initialLimit={20}
+                      />
+                      {(clients as Client[]).length === 0 ? (
+                        <p className="text-xs text-muted-foreground">Клиенты не найдены</p>
+                      ) : null}
                     </div>
                     <div className="space-y-2">
                       <div className="text-sm font-medium text-foreground">Аренда</div>
                       <Select value={wizardForm.rentalId || 'none'} onValueChange={(value) => {
                         const rental = value === 'none' ? undefined : rentalsById.get(value);
-                        setWizardForm(current => ({ ...current, rentalId: value === 'none' ? '' : value, clientId: current.clientId || rental?.clientId || '' }));
+                        setWizardForm(current => ({ ...current, rentalId: value === 'none' ? '' : value, clientId: rental?.clientId || current.clientId || '' }));
                       }}>
                         <SelectTrigger><SelectValue placeholder="Выберите аренду" /></SelectTrigger>
                         <SelectContent>

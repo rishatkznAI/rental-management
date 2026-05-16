@@ -439,6 +439,14 @@ test('documents generate API creates every workspace document type with snapshot
 test('documents generate API rejects missing required data and supports status endpoints, duplicate, print and delete', async () => {
   const { app } = createApp();
   await withServer(app, async (baseUrl) => {
+    const missingClient = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'rental_contract',
+      rentalId: 'R-1',
+      date: '2026-05-09',
+    });
+    assert.equal(missingClient.response.status, 400);
+    assert.equal(missingClient.json.code, 'DOCUMENT_REQUIRED_FIELDS');
+
     const missing = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
       type: 'rental_contract',
       clientId: 'C-1',
@@ -454,6 +462,9 @@ test('documents generate API rejects missing required data and supports status e
       date: '2026-05-09',
     });
     assert.equal(created.response.status, 201);
+    assert.equal(created.json.clientId, 'C-1');
+    assert.equal(created.json.date, '2026-05-09');
+    assert.equal(created.json.documentDate, '2026-05-09');
 
     const sent = await request(baseUrl, 'POST', `/api/documents/${created.json.id}/mark-sent`, 'office', { status: 'pending_signature' });
     assert.equal(sent.response.status, 200);

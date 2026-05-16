@@ -350,7 +350,7 @@ test('investor sees only own owner equipment and rentals without forbidden UI/AP
 
     action = 'rentals page';
     await goToRoute(page, '/rentals');
-    await expect(page.getByRole('heading', { name: 'Планировщик аренды' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Аренды', level: 1 })).toBeVisible();
     await expectVisibleText(page, seed.ownEquipment.inventoryNumber);
     await expect(page.getByText(seed.otherEquipment.inventoryNumber)).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Новая аренда/ })).toHaveCount(0);

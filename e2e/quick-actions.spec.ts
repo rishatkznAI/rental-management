@@ -142,10 +142,10 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
   await navigateInApp(page, `/equipment/${seed.equipment.id}`);
   await expect(page.getByRole('heading', { name: new RegExp(seed.equipment.model) })).toBeVisible();
   await expect(page.getByText('Быстрые действия').first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Создать сервисную заявку' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'История аренд' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Создать сервисную заявку' }).first()).toBeVisible();
+  await expect(page.locator('main').getByRole('button', { name: 'Аренды' }).first()).toBeVisible();
 
-  await page.getByRole('button', { name: 'Очередь сервиса' }).click();
+  await page.locator('main').getByRole('button', { name: 'Сервис' }).first().click();
   await expect(page).toHaveURL(/#\/service$/);
 
   await navigateInApp(page, `/rentals/${seed.rental.id}`);
@@ -170,6 +170,6 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
   const ticket = await withAdminApi((api) => findServiceTicketByReason(api, serviceReason));
   await expect(page.getByRole('heading', { name: ticket.id })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Быстрые действия' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Открыть технику' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Очередь сервиса' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Открыть технику' }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Очередь сервиса' }).first()).toBeVisible();
 });

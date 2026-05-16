@@ -26,12 +26,20 @@ import { ClientCombobox } from '../components/ui/ClientCombobox';
 import {
   AlertTriangle,
   CheckCircle2,
+  ClipboardList,
   Download,
   Eye,
   FileSignature,
+  MoreHorizontal,
   Plus,
+  Printer,
+  Route,
   Search,
+  Send,
+  Settings2,
+  Trash2,
   Upload,
+  Wrench,
   UserRound,
 } from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
@@ -39,13 +47,20 @@ import { useClientsList } from '../hooks/useClients';
 import {
   useAssignDocumentNumber,
   useCreateDocument,
+  useDeleteDocument,
+  useDuplicateDocument,
   useDocumentRegistrySummary,
   useDocumentsList,
+  useGenerateDocument,
+  useMarkDocumentSent,
+  useMarkDocumentSigned,
   useUpdateDocument,
 } from '../hooks/useDocuments';
 import { useEquipmentList } from '../hooks/useEquipment';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
+import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { buildDocumentControl, getDocumentControlStatusLabel } from '../lib/documentControl.js';
+import { DOCUMENT_WORKSPACE_TYPES, getDocumentRegistryItem } from '../lib/documentRegistry';
 import {
   buildQuickActionContext,
   contextFilterLabel,
@@ -66,6 +81,8 @@ import { formatDate, formatCurrency, formatDateTime } from '../lib/utils';
 import { mechanicsService } from '../services/mechanics.service';
 import { mechanicDocumentsService } from '../services/mechanic-documents.service';
 import { appSettingsService } from '../services/app-settings.service';
+import { deliveriesService } from '../services/deliveries.service';
+import { serviceVehiclesService } from '../services/service-vehicles.service';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { normalizeUserRole } from '../lib/userStorage';
@@ -75,16 +92,23 @@ import type {
   DocumentContractKind,
   DocumentStatus,
   DocumentType,
+  Delivery,
   Equipment,
   Mechanic,
   MechanicDocument,
   Rental,
+  ServiceTicket,
+  ServiceVehicle,
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
 type DocumentsView = 'general' | 'control' | 'mechanics';
 
 const VALID_DOCUMENT_TYPES = new Set<DocumentType>([
+  'rental_contract',
+  'rental_specification',
+  'transfer_act_to_client',
+  'return_act_from_client',
   'contract',
   'commercial_offer',
   'act',
@@ -97,9 +121,58 @@ const VALID_DOCUMENT_TYPES = new Set<DocumentType>([
   'court_document',
   'court_decision',
   'enforcement_writ',
+  'trip_ticket',
   'other',
 ]);
-const VALID_DOCUMENT_STATUSES = new Set<DocumentStatus>(['draft', 'signed', 'sent']);
+const VALID_DOCUMENT_STATUSES = new Set<DocumentStatus>(['draft', 'signed', 'sent', 'pending_signature', 'expired', 'cancelled']);
+
+const DOCUMENT_ICON_MAP = {
+  FileSignature,
+  ClipboardList,
+  Send,
+  Route,
+  Wrench,
+} as const;
+
+type DocumentQuickFilter =
+  | 'all'
+  | 'rental_contract'
+  | 'rental_specification'
+  | 'transfer_act_to_client'
+  | 'return_act_from_client'
+  | 'work_order'
+  | 'trip_ticket'
+  | 'unsigned'
+  | 'overdue'
+  | 'draft';
+
+type DocumentWizardState = {
+  type: DocumentType;
+  clientId: string;
+  rentalId: string;
+  equipmentId: string;
+  serviceTicketId: string;
+  deliveryId: string;
+  mechanicId: string;
+  serviceCarId: string;
+  parentDocumentId: string;
+  dueDate: string;
+  notes: string;
+};
+
+const EMPTY_WIZARD: DocumentWizardState = {
+  type: 'rental_contract',
+  clientId: '',
+  rentalId: '',
+  equipmentId: '',
+  serviceTicketId: '',
+  deliveryId: '',
+  mechanicId: '',
+  serviceCarId: '',
+  parentDocumentId: '',
+  dueDate: '',
+  notes: '',
+};
 
 type ContractFormState = {
   clientId: string;
@@ -184,7 +257,14 @@ function searchText(value: unknown) {
 }
 
 export function getDocumentTypeLabel(doc: Partial<Doc> | null | undefined): string {
+  const registryItem = getDocumentRegistryItem(doc?.type);
+  if (registryItem) return registryItem.label;
   const labels: Record<DocumentType, string> = {
+    rental_contract: 'Договор аренды',
+    rental_specification: 'Спецификация к договору',
+    transfer_act_to_client: 'Акт передачи клиенту',
+    return_act_from_client: 'Акт возврата от клиента',
+    trip_ticket: 'Путевой лист',
     contract: getContractKindLabel(doc?.contractKind),
     commercial_offer: 'Коммерческое предложение',
     act: 'Акт',
@@ -205,6 +285,16 @@ export function getDocumentTypeLabel(doc: Partial<Doc> | null | undefined): stri
 
 export function getSafeDocumentStatus(status: unknown): DocumentStatus {
   return VALID_DOCUMENT_STATUSES.has(status as DocumentStatus) ? status as DocumentStatus : 'draft';
+}
+
+function getDocumentStatusLabel(status: unknown) {
+  const safe = getSafeDocumentStatus(status);
+  if (safe === 'signed') return 'Подписан';
+  if (safe === 'sent') return 'Отправлен';
+  if (safe === 'pending_signature') return 'На подписи';
+  if (safe === 'expired') return 'Просрочен';
+  if (safe === 'cancelled') return 'Отменён';
+  return 'Черновик';
 }
 
 function getDocumentRentalId(doc: Partial<Doc> | null | undefined) {
@@ -497,9 +587,24 @@ export default function Documents() {
   const { data: rentals = [] } = useRentalsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: equipment = [] } = useEquipmentList();
+  const { data: serviceTickets = [] } = useServiceTicketsList();
+  const { data: deliveries = [] } = useQuery<Delivery[]>({
+    queryKey: ['deliveries', 'documents'],
+    queryFn: deliveriesService.getAll,
+  });
+  const { data: serviceVehicles = [] } = useQuery<ServiceVehicle[]>({
+    queryKey: ['service-vehicles', 'documents'],
+    queryFn: serviceVehiclesService.getAll,
+    enabled: canReadMechanics,
+  });
   const createDocument = useCreateDocument();
+  const generateDocument = useGenerateDocument();
   const updateDocument = useUpdateDocument();
   const assignDocumentNumber = useAssignDocumentNumber();
+  const markDocumentSent = useMarkDocumentSent();
+  const markDocumentSigned = useMarkDocumentSigned();
+  const duplicateDocument = useDuplicateDocument();
+  const deleteDocument = useDeleteDocument();
   const { data: mechanics = EMPTY_MECHANICS } = useQuery<Mechanic[]>({
     queryKey: ['mechanics'],
     queryFn: mechanicsService.getAll,
@@ -523,6 +628,7 @@ export default function Documents() {
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
   const [statusFilter, setStatusFilter] = React.useState<string>('all');
   const [managerFilter, setManagerFilter] = React.useState<string>('all');
+  const [quickTypeFilter, setQuickTypeFilter] = React.useState<DocumentQuickFilter>('all');
   const [controlRiskFilter, setControlRiskFilter] = React.useState<string>('all');
   const [controlStatusFilter, setControlStatusFilter] = React.useState<string>('all');
   const [controlTypeFilter, setControlTypeFilter] = React.useState<string>('all');
@@ -538,6 +644,9 @@ export default function Documents() {
   const [mechanicDocuments, setMechanicDocuments] = React.useState<MechanicDocument[]>([]);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [commercialOfferDialogOpen, setCommercialOfferDialogOpen] = React.useState(false);
+  const [documentWizardOpen, setDocumentWizardOpen] = React.useState(false);
+  const [wizardStep, setWizardStep] = React.useState(1);
+  const [wizardForm, setWizardForm] = React.useState<DocumentWizardState>(EMPTY_WIZARD);
   const [selectedDocument, setSelectedDocument] = React.useState<Doc | null>(null);
   const [sortKey, setSortKey] = React.useState<'date' | 'number' | 'client' | 'status' | 'createdAt'>('date');
   const [createContractKind, setCreateContractKind] = React.useState<DocumentContractKind>('rental');
@@ -613,6 +722,22 @@ export default function Documents() {
       .filter(item => item.inventoryNumber)
       .map(item => [item.inventoryNumber, item])),
     [equipment],
+  );
+  const serviceTicketsById = React.useMemo(
+    () => new Map((serviceTickets as ServiceTicket[]).map(item => [item.id, item])),
+    [serviceTickets],
+  );
+  const deliveriesById = React.useMemo(
+    () => new Map((deliveries as Delivery[]).map(item => [item.id, item])),
+    [deliveries],
+  );
+  const mechanicsById = React.useMemo(
+    () => new Map(mechanicList.map(item => [item.id, item])),
+    [mechanicList],
+  );
+  const serviceVehiclesById = React.useMemo(
+    () => new Map((serviceVehicles as ServiceVehicle[]).map(item => [item.id, item])),
+    [serviceVehicles],
   );
   const quickActionClient = React.useMemo(() => {
     if (quickActionContext.clientId) {
@@ -751,6 +876,8 @@ export default function Documents() {
       || searchText(rentalId).includes(q)
       || searchText(equipmentInv).includes(q)
       || searchText(getEquipmentLabel(equipmentItem)).includes(q)
+      || searchText(getDocumentServiceTicket(doc)).includes(q)
+      || searchText(doc.deliveryId).includes(q)
       || getDocumentTypeLabel(doc).toLowerCase().includes(q)
       || searchText(doc.signatoryName).includes(q)
       || searchText(doc.signatoryBasis).includes(q);
@@ -770,8 +897,15 @@ export default function Documents() {
     }, quickActionContext);
     const matchesRental = rentalFilter === 'all' || rentalId === rentalFilter;
     const matchesManager = managerFilter === 'all' || normalizedManager === managerFilter;
+    const isUnsigned = safeStatus !== 'signed' && safeStatus !== 'cancelled';
+    const isOverdue = safeStatus === 'expired' || Boolean(doc.dueDate && doc.dueDate < new Date().toISOString().slice(0, 10) && isUnsigned);
+    const matchesQuickType = quickTypeFilter === 'all'
+      || (quickTypeFilter === 'unsigned' && isUnsigned)
+      || (quickTypeFilter === 'overdue' && isOverdue)
+      || (quickTypeFilter === 'draft' && safeStatus === 'draft')
+      || doc.type === quickTypeFilter;
 
-    return matchesSearch && matchesType && matchesStatus && matchesUnsigned && matchesWithoutNumber && matchesDuplicates && matchesClient && matchesQuickClient && matchesRental && matchesManager;
+    return matchesSearch && matchesType && matchesStatus && matchesUnsigned && matchesWithoutNumber && matchesDuplicates && matchesClient && matchesQuickClient && matchesRental && matchesManager && matchesQuickType;
   }).sort((left, right) => {
     const leftClient = left.client || clientsById.get(left.clientId || '')?.company || '';
     const rightClient = right.client || clientsById.get(right.clientId || '')?.company || '';
@@ -821,6 +955,7 @@ export default function Documents() {
     typeFilter !== 'all',
     statusFilter !== 'all',
     managerFilter !== 'all',
+    quickTypeFilter !== 'all',
   ].filter(Boolean).length;
   const controlActiveFilterCount = [
     controlRiskFilter !== 'all',
@@ -859,6 +994,42 @@ export default function Documents() {
     () => nextContractNumber(documents, createContractKind, contractForm.date),
     [createContractKind, contractForm.date, documents],
   );
+  const wizardTypeMeta = getDocumentRegistryItem(wizardForm.type) || DOCUMENT_WORKSPACE_TYPES[0];
+  const wizardClient = wizardForm.clientId ? clientsById.get(wizardForm.clientId) : undefined;
+  const wizardRental = wizardForm.rentalId ? rentalsById.get(wizardForm.rentalId) : undefined;
+  const wizardEquipment = wizardForm.equipmentId ? equipmentById.get(wizardForm.equipmentId) : undefined;
+  const wizardServiceTicket = wizardForm.serviceTicketId ? serviceTicketsById.get(wizardForm.serviceTicketId) : undefined;
+  const wizardDelivery = wizardForm.deliveryId ? deliveriesById.get(wizardForm.deliveryId) : undefined;
+  const wizardMechanic = wizardForm.mechanicId ? mechanicsById.get(wizardForm.mechanicId) : undefined;
+  const wizardServiceVehicle = wizardForm.serviceCarId ? serviceVehiclesById.get(wizardForm.serviceCarId) : undefined;
+  const wizardMissingFields = React.useMemo(() => {
+    const labels: Record<string, string> = {
+      clientId: 'Клиент',
+      rentalId: 'Аренда',
+      equipmentId: 'Техника',
+      serviceTicketId: 'Сервисная заявка',
+      deliveryId: 'Доставка',
+      mechanicId: 'Механик',
+      serviceCarId: 'Служебный автомобиль',
+      parentDocumentId: 'Родительский документ',
+    };
+    return (wizardTypeMeta.requiredFields || [])
+      .filter(field => !wizardForm[field as keyof DocumentWizardState])
+      .map(field => labels[field] || field);
+  }, [wizardForm, wizardTypeMeta]);
+  const wizardPreviewRows = React.useMemo(() => ([
+    ['Тип', wizardTypeMeta.label],
+    ['Дата', new Date().toISOString().slice(0, 10)],
+    ['Клиент', wizardClient?.company || wizardRental?.client || '—'],
+    ['Техника', wizardEquipment ? getEquipmentLabel(wizardEquipment) : '—'],
+    ['Аренда', wizardRental?.id || '—'],
+    ['Сервис', wizardServiceTicket?.id || '—'],
+    ['Доставка', wizardDelivery?.id || '—'],
+    ['Механик', wizardMechanic?.name || '—'],
+    ['Служебная машина', wizardServiceVehicle ? [wizardServiceVehicle.make, wizardServiceVehicle.model, wizardServiceVehicle.plateNumber].filter(Boolean).join(' ') : '—'],
+    ['Статус', 'Черновик'],
+    ['Сумма', wizardRental?.amount || wizardRental?.price ? formatCurrency(Number(wizardRental?.amount || wizardRental?.price)) : '—'],
+  ]), [wizardClient, wizardDelivery, wizardEquipment, wizardMechanic, wizardRental, wizardServiceTicket, wizardServiceVehicle, wizardTypeMeta]);
 
   const persistMechanicDocuments = React.useCallback(async (next: MechanicDocument[]) => {
     setMechanicDocuments(next);
@@ -935,6 +1106,58 @@ export default function Documents() {
       ...initial,
     });
     setCommercialOfferDialogOpen(true);
+  }
+
+  function openDocumentWizard(initial: Partial<DocumentWizardState> = {}) {
+    setWizardForm({
+      ...EMPTY_WIZARD,
+      ...initial,
+      type: initial.type || EMPTY_WIZARD.type,
+    });
+    setWizardStep(1);
+    setDocumentWizardOpen(true);
+  }
+
+  function applyWizardType(type: DocumentType) {
+    setWizardForm(current => ({ ...current, type }));
+    setWizardStep(2);
+  }
+
+  async function handleGenerateDocument() {
+    if (wizardMissingFields.length > 0) {
+      toast.error(`Не хватает данных: ${wizardMissingFields.join(', ')}`);
+      setWizardStep(4);
+      return;
+    }
+    try {
+      const created = await generateDocument.mutateAsync({
+        type: wizardForm.type,
+        documentType: wizardForm.type,
+        date: new Date().toISOString().slice(0, 10),
+        status: 'draft',
+        clientId: wizardForm.clientId || wizardRental?.clientId || undefined,
+        client: wizardClient?.company || wizardRental?.client || '',
+        rentalId: wizardForm.rentalId || undefined,
+        equipmentId: wizardForm.equipmentId || undefined,
+        deliveryId: wizardForm.deliveryId || undefined,
+        serviceTicketId: wizardForm.serviceTicketId || undefined,
+        mechanicId: wizardForm.mechanicId || undefined,
+        serviceCarId: wizardForm.serviceCarId || undefined,
+        parentDocumentId: wizardForm.parentDocumentId || undefined,
+        objectId: wizardRental?.objectId,
+        contractId: wizardRental?.contractId,
+        dueDate: wizardForm.dueDate || undefined,
+        notes: wizardForm.notes.trim() || undefined,
+        comment: wizardForm.notes.trim() || undefined,
+        responsibleId: user?.id,
+        responsibleName: user?.name || 'Система',
+      });
+      setDocumentWizardOpen(false);
+      setSelectedDocument(created);
+      toast.success(`${getDocumentTypeLabel(created)} создан: ${getDocumentNumber(created)}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось создать документ.');
+    }
   }
 
   async function handleCreateContract() {
@@ -1088,8 +1311,9 @@ export default function Documents() {
   }
 
   function openDocument(doc: Doc) {
-    if (doc.contentHtml) {
-      openPrintableHtml(doc.contentHtml);
+    const html = doc.printHtml || doc.generatedContent || doc.contentHtml;
+    if (html) {
+      openPrintableHtml(html);
       return;
     }
     if (doc.signedScanDataUrl) {
@@ -1098,8 +1322,9 @@ export default function Documents() {
   }
 
   function downloadDocument(doc: Doc) {
-    if (doc.contentHtml) {
-      downloadPrintableHtml(doc.contentHtml, `${displayText(doc.number, 'document')}.html`);
+    const html = doc.printHtml || doc.generatedContent || doc.contentHtml;
+    if (html) {
+      downloadPrintableHtml(html, `${displayText(doc.number, 'document')}.html`);
       return;
     }
     if (doc.signedScanDataUrl) {
@@ -1110,6 +1335,46 @@ export default function Documents() {
   function startMarkAsSigned(doc: Doc) {
     setSignedScanTargetDoc(doc);
     signedScanInputRef.current?.click();
+  }
+
+  async function handleMarkSent(doc: Doc, status: 'sent' | 'pending_signature' = 'sent') {
+    try {
+      const updated = await markDocumentSent.mutateAsync({ id: doc.id, status });
+      setSelectedDocument(current => current?.id === updated.id ? updated : current);
+      toast.success(status === 'pending_signature' ? 'Документ отмечен как на подписи.' : 'Документ отмечен как отправленный.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось обновить статус.');
+    }
+  }
+
+  async function handleMarkSigned(doc: Doc) {
+    try {
+      const updated = await markDocumentSigned.mutateAsync(doc.id);
+      setSelectedDocument(current => current?.id === updated.id ? updated : current);
+      toast.success('Документ отмечен как подписанный.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось отметить документ подписанным.');
+    }
+  }
+
+  async function handleDuplicateDocument(doc: Doc) {
+    try {
+      const duplicated = await duplicateDocument.mutateAsync(doc.id);
+      toast.success(`Создан дубль: ${getDocumentNumber(duplicated)}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось дублировать документ.');
+    }
+  }
+
+  async function handleDeleteDocument(doc: Doc) {
+    if (!window.confirm(`Удалить документ ${getDocumentNumber(doc) || doc.id}?`)) return;
+    try {
+      await deleteDocument.mutateAsync(doc.id);
+      setSelectedDocument(current => current?.id === doc.id ? null : current);
+      toast.success('Документ удалён.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось удалить документ.');
+    }
   }
 
   async function handleSignedScanUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1145,10 +1410,20 @@ export default function Documents() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Документы</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Реестр договоров, актов, счетов, заказ-нарядов и данных по механикам.
+            Генерация и контроль договоров, актов, заказ-нарядов и путевых листов
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {canManageDocuments ? (
+            <Button onClick={() => openDocumentWizard()}>
+              <Plus className="h-4 w-4" />
+              Создать документ
+            </Button>
+          ) : null}
+          <Button variant="secondary" onClick={() => setView('general')}>
+            <ClipboardList className="h-4 w-4" />
+            Шаблоны
+          </Button>
           <Button
             variant={view === 'general' ? 'default' : 'secondary'}
             onClick={() => setView('general')}
@@ -1162,6 +1437,12 @@ export default function Documents() {
             <AlertTriangle className="h-4 w-4" />
             Контроль
           </Button>
+          {isAdmin ? (
+            <Button variant="secondary">
+              <Settings2 className="h-4 w-4" />
+              Настройки полей
+            </Button>
+          ) : null}
           <Button
             variant={view === 'mechanics' ? 'default' : 'secondary'}
             onClick={() => setView('mechanics')}
@@ -1176,21 +1457,46 @@ export default function Documents() {
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {[
-              ['Всего', registrySummary?.total ?? documents.length],
-              ['Без номера', registrySummary?.withoutNumber ?? documents.filter(doc => !getDocumentNumber(doc)).length],
-              ['Дубли', registrySummary?.duplicateNumbers ?? duplicateDocumentIds.size],
-              ['Неподписанные', registrySummary?.unsigned ?? documents.filter(doc => getSafeDocumentStatus(doc.status) !== 'signed').length],
-              ['Подписанные', registrySummary?.signed ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'signed').length],
+              ['Всего документов', registrySummary?.total ?? documents.length],
+              ['Черновики', registrySummary?.draft ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'draft').length],
+              ['На подписи', registrySummary?.pendingSignature ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'pending_signature').length],
+              ['Подписано', registrySummary?.signed ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'signed').length],
+              ['Просрочено', registrySummary?.expired ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'expired').length],
               ['За месяц', registrySummary?.currentMonth ?? documents.filter(doc => getDocumentDate(doc).slice(0, 7) === new Date().toISOString().slice(0, 7)).length],
             ].map(([label, value]) => (
               <div key={String(label)} className={`rounded-lg border p-4 ${
-                Number(value) > 0 && ['Без номера', 'Дубли'].includes(String(label))
+                Number(value) > 0 && ['Просрочено'].includes(String(label))
                   ? 'border-amber-300 bg-amber-50/70 dark:border-amber-900/70 dark:bg-amber-950/20'
                   : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
               }`}>
                 <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
                 <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
               </div>
+            ))}
+          </div>
+
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {[
+              ['all', 'Все'],
+              ['rental_contract', 'Договоры'],
+              ['rental_specification', 'Спецификации'],
+              ['transfer_act_to_client', 'Акты передачи'],
+              ['return_act_from_client', 'Акты возврата'],
+              ['work_order', 'Заказ-наряды'],
+              ['trip_ticket', 'Путевые листы'],
+              ['unsigned', 'Без подписи'],
+              ['overdue', 'Просроченные'],
+              ['draft', 'Черновики'],
+            ].map(([key, label]) => (
+              <Button
+                key={key}
+                type="button"
+                variant={quickTypeFilter === key ? 'default' : 'secondary'}
+                onClick={() => setQuickTypeFilter(key as DocumentQuickFilter)}
+                className="shrink-0"
+              >
+                {label}
+              </Button>
             ))}
           </div>
 
@@ -1225,6 +1531,7 @@ export default function Documents() {
               setTypeFilter('all');
               setStatusFilter('all');
               setManagerFilter('all');
+              setQuickTypeFilter('all');
               setSortKey('date');
             }}
           >
@@ -1233,7 +1540,7 @@ export default function Documents() {
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
-                    placeholder="Поиск по номеру, клиенту, подписанту..."
+                    placeholder="Поиск по номеру, клиенту, технике, аренде, сервисной заявке..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     className="app-filter-input pl-10"
@@ -1304,6 +1611,9 @@ export default function Documents() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Все типы</SelectItem>
+                    {DOCUMENT_WORKSPACE_TYPES.map(item => (
+                      <SelectItem key={item.type} value={item.type}>{item.label}</SelectItem>
+                    ))}
                     <SelectItem value="contract">Договоры</SelectItem>
                     <SelectItem value="commercial_offer">КП</SelectItem>
                     <SelectItem value="act">Акты</SelectItem>
@@ -1324,7 +1634,10 @@ export default function Documents() {
                     <SelectItem value="all">Все статусы</SelectItem>
                     <SelectItem value="draft">Черновик</SelectItem>
                     <SelectItem value="sent">Отправлен</SelectItem>
+                    <SelectItem value="pending_signature">На подписи</SelectItem>
                     <SelectItem value="signed">Подписан</SelectItem>
+                    <SelectItem value="expired">Просрочен</SelectItem>
+                    <SelectItem value="cancelled">Отменён</SelectItem>
                   </SelectContent>
                 </Select>
               </FilterField>
@@ -1370,19 +1683,21 @@ export default function Documents() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <input type="checkbox" aria-label="Выбрать все документы" disabled />
+                  </TableHead>
                   <TableHead>Тип</TableHead>
                   <TableHead>Номер</TableHead>
                   <TableHead>Дата документа</TableHead>
                   <TableHead>Клиент</TableHead>
-                  <TableHead>Аренда</TableHead>
-                  <TableHead>Техника</TableHead>
-                  <TableHead>Сервис</TableHead>
+                  <TableHead>Техника / объект</TableHead>
+                  <TableHead>Связанная сущность</TableHead>
                   <TableHead>Сумма</TableHead>
                   <TableHead>Ответственный</TableHead>
                   <TableHead>Статус</TableHead>
                   <TableHead>Создан</TableHead>
                   <TableHead>Отправлен/подписан</TableHead>
-                  <TableHead className="w-[160px]">Действия</TableHead>
+                  <TableHead className="w-[190px]">Действия</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1399,8 +1714,17 @@ export default function Documents() {
                   const managerName = doc.manager || rental?.manager || gantt?.manager;
                   const docNumber = getDocumentNumber(doc);
                   const serviceTicket = getDocumentServiceTicket(doc);
+                  const linkedEntity = [
+                    rentalId ? `Аренда ${rentalId}` : '',
+                    serviceTicket ? `Сервис ${serviceTicket}` : '',
+                    doc.deliveryId ? `Доставка ${doc.deliveryId}` : '',
+                    doc.parentDocumentId ? `Осн. ${doc.parentDocumentId}` : '',
+                  ].filter(Boolean).join(' · ') || '—';
                   return (
                   <TableRow key={doc.id || doc.number || index} className="cursor-pointer" onClick={() => setSelectedDocument(doc)}>
+                    <TableCell>
+                      <input type="checkbox" aria-label={`Выбрать ${docNumber || doc.id}`} onClick={(event) => event.stopPropagation()} />
+                    </TableCell>
                     <TableCell>
                       <div>
                         <p className="text-sm font-medium">{getDocumentTypeLabel(doc)}</p>
@@ -1427,18 +1751,20 @@ export default function Documents() {
                       <p className="text-sm">{displayText(clientName)}</p>
                     </TableCell>
                     <TableCell>
-                      <p className="text-sm">{displayText(rentalId)}</p>
-                      {rental?.startDate ? (
-                        <p className="text-xs text-gray-500 dark:text-gray-400">{formatDate(rental.startDate)}</p>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
                       <p className="text-sm">{displayText(equipmentInv || equipmentItem?.inventoryNumber)}</p>
                       {equipmentItem ? (
                         <p className="text-xs text-gray-500 dark:text-gray-400">{displayText(`${equipmentItem.manufacturer || ''} ${equipmentItem.model || ''}`.trim())}</p>
                       ) : null}
+                      {doc.objectId ? (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Объект {doc.objectId}</p>
+                      ) : null}
                     </TableCell>
-                    <TableCell>{displayText(serviceTicket)}</TableCell>
+                    <TableCell>
+                      <p className="text-sm">{linkedEntity}</p>
+                      {rental?.startDate ? (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{formatDate(rental.startDate)}</p>
+                      ) : null}
+                    </TableCell>
                     <TableCell>{doc.amount ? formatCurrency(doc.amount) : '—'}</TableCell>
                     <TableCell>
                       <div>
@@ -1478,11 +1804,11 @@ export default function Documents() {
                         ) : null}
                         <button
                           onClick={() => openDocument(doc)}
-                          disabled={!doc.contentHtml && !doc.signedScanDataUrl}
+                          disabled={!doc.contentHtml && !doc.printHtml && !doc.generatedContent && !doc.signedScanDataUrl}
                           className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          title={doc.contentHtml || doc.signedScanDataUrl ? 'Просмотр' : 'Просмотр недоступен'}
+                          title={doc.contentHtml || doc.printHtml || doc.generatedContent || doc.signedScanDataUrl ? 'Открыть' : 'Просмотр недоступен'}
                         >
-                          <Eye className={`h-4 w-4 ${doc.contentHtml || doc.signedScanDataUrl ? 'text-gray-500 dark:text-gray-400' : 'text-gray-300 dark:text-gray-600'}`} />
+                          <Eye className={`h-4 w-4 ${doc.contentHtml || doc.printHtml || doc.generatedContent || doc.signedScanDataUrl ? 'text-gray-500 dark:text-gray-400' : 'text-gray-300 dark:text-gray-600'}`} />
                         </button>
                         <button
                           onClick={() => downloadDocument(doc)}
@@ -1505,6 +1831,40 @@ export default function Documents() {
                             )}
                           </button>
                         ) : null}
+                        {canManageDocuments ? (
+                          <>
+                            <button
+                              onClick={() => void handleMarkSent(doc, 'pending_signature')}
+                              className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                              title="Отметить на подписи"
+                            >
+                              <Send className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                            </button>
+                            <button
+                              onClick={() => void handleMarkSigned(doc)}
+                              className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                              title="Отметить подписанным"
+                            >
+                              <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+                            </button>
+                            <button
+                              onClick={() => void handleDuplicateDocument(doc)}
+                              className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                              title="Дублировать"
+                            >
+                              <MoreHorizontal className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                            </button>
+                            {isAdmin ? (
+                              <button
+                                onClick={() => void handleDeleteDocument(doc)}
+                                className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                                title="Удалить"
+                              >
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </button>
+                            ) : null}
+                          </>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -1526,6 +1886,33 @@ export default function Documents() {
                     ? `Для ${contextFilterLabel(quickActionContext)} нет документов по выбранным фильтрам`
                     : 'Попробуйте изменить параметры поиска или фильтры'}
                 </p>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  {canManageDocuments ? (
+                    <Button onClick={() => openDocumentWizard()}>
+                      <Plus className="h-4 w-4" />
+                      Создать документ
+                    </Button>
+                  ) : null}
+                  {activeFilterCount > 0 ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setSearch('');
+                        setUnsignedOnly(false);
+                        setWithoutNumberOnly(false);
+                        setDuplicatesOnly(false);
+                        setClientFilter('all');
+                        setRentalFilter('all');
+                        setTypeFilter('all');
+                        setStatusFilter('all');
+                        setManagerFilter('all');
+                        setQuickTypeFilter('all');
+                      }}
+                    >
+                      Сбросить фильтры
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             )}
           </div>
@@ -1535,6 +1922,201 @@ export default function Documents() {
               <p>Показано {filteredDocuments.length} из {documents.length} документов</p>
             </div>
           )}
+
+          <Dialog open={documentWizardOpen} onOpenChange={setDocumentWizardOpen}>
+            <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-4xl">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <FileSignature className="h-5 w-5" />
+                  Создать документ
+                </DialogTitle>
+                <DialogDescription>
+                  Единый мастер создаёт черновик с номером, snapshot и печатной формой.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="max-h-[64vh] space-y-5 overflow-y-auto pr-1">
+                <div className="flex flex-wrap gap-2">
+                  {[1, 2, 3, 4, 5, 6].map(step => (
+                    <Button
+                      key={step}
+                      type="button"
+                      variant={wizardStep === step ? 'default' : 'secondary'}
+                      onClick={() => setWizardStep(step)}
+                      className="h-8 px-3 text-xs"
+                    >
+                      Шаг {step}
+                    </Button>
+                  ))}
+                </div>
+
+                {wizardStep === 1 ? (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {DOCUMENT_WORKSPACE_TYPES.map(item => {
+                      const Icon = DOCUMENT_ICON_MAP[item.icon as keyof typeof DOCUMENT_ICON_MAP] || FileSignature;
+                      return (
+                        <button
+                          key={item.type}
+                          type="button"
+                          onClick={() => applyWizardType(item.type)}
+                          className={`rounded-lg border p-4 text-left transition hover:border-slate-400 dark:hover:border-gray-500 ${
+                            wizardForm.type === item.type
+                              ? 'border-lime-300 bg-lime-50 dark:border-lime-800 dark:bg-lime-950/20'
+                              : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <Icon className="mt-0.5 h-5 w-5 text-slate-600 dark:text-gray-300" />
+                            <div>
+                              <p className="font-medium text-gray-900 dark:text-white">{item.label}</p>
+                              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{item.purpose}</p>
+                              <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">Префикс {item.numberPrefix}</p>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {wizardStep === 2 ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Клиент</div>
+                      <Select value={wizardForm.clientId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, clientId: value === 'none' ? '' : value }))}>
+                        <SelectTrigger><SelectValue placeholder="Выберите клиента" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Не выбран</SelectItem>
+                          {(clients as Client[]).map(client => <SelectItem key={client.id} value={client.id}>{client.company}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Аренда</div>
+                      <Select value={wizardForm.rentalId || 'none'} onValueChange={(value) => {
+                        const rental = value === 'none' ? undefined : rentalsById.get(value);
+                        setWizardForm(current => ({ ...current, rentalId: value === 'none' ? '' : value, clientId: current.clientId || rental?.clientId || '' }));
+                      }}>
+                        <SelectTrigger><SelectValue placeholder="Выберите аренду" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Не выбрана</SelectItem>
+                          {(rentals as Rental[]).map(rental => <SelectItem key={rental.id} value={rental.id}>{getRentalLabel(rental)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Техника</div>
+                      <Select value={wizardForm.equipmentId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, equipmentId: value === 'none' ? '' : value }))}>
+                        <SelectTrigger><SelectValue placeholder="Выберите технику" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Не выбрана</SelectItem>
+                          {(equipment as Equipment[]).map(item => <SelectItem key={item.id} value={item.id}>{getEquipmentLabel(item)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Сервисная заявка</div>
+                      <Select value={wizardForm.serviceTicketId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, serviceTicketId: value === 'none' ? '' : value }))}>
+                        <SelectTrigger><SelectValue placeholder="Выберите заявку" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Не выбрана</SelectItem>
+                          {(serviceTickets as ServiceTicket[]).map(ticket => <SelectItem key={ticket.id} value={ticket.id}>{ticket.id} · {ticket.reason || ticket.description || 'Сервис'}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Доставка</div>
+                      <Select value={wizardForm.deliveryId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, deliveryId: value === 'none' ? '' : value }))}>
+                        <SelectTrigger><SelectValue placeholder="Выберите доставку" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Не выбрана</SelectItem>
+                          {(deliveries as Delivery[]).map(delivery => <SelectItem key={delivery.id} value={delivery.id}>{delivery.id} · {delivery.status}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Механик</div>
+                      <Select value={wizardForm.mechanicId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, mechanicId: value === 'none' ? '' : value }))}>
+                        <SelectTrigger><SelectValue placeholder="Выберите механика" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Не выбран</SelectItem>
+                          {mechanicList.map(mechanic => <SelectItem key={mechanic.id} value={mechanic.id}>{mechanic.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Служебная машина</div>
+                      <Select value={wizardForm.serviceCarId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, serviceCarId: value === 'none' ? '' : value }))}>
+                        <SelectTrigger><SelectValue placeholder="Выберите машину" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Не выбрана</SelectItem>
+                          {(serviceVehicles as ServiceVehicle[]).map(vehicle => <SelectItem key={vehicle.id} value={vehicle.id}>{[vehicle.make, vehicle.model, vehicle.plateNumber].filter(Boolean).join(' ')}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-foreground">Срок подписи</div>
+                      <Input type="date" value={wizardForm.dueDate} onChange={(event) => setWizardForm(current => ({ ...current, dueDate: event.target.value }))} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {wizardStep === 3 ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {wizardPreviewRows.slice(2).map(([label, value]) => (
+                      <div key={label} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
+                        <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{value}</p>
+                      </div>
+                    ))}
+                    <div className="space-y-2 sm:col-span-2">
+                      <div className="text-sm font-medium text-foreground">Комментарий / примечания</div>
+                      <Textarea rows={3} value={wizardForm.notes} onChange={(event) => setWizardForm(current => ({ ...current, notes: event.target.value }))} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {wizardStep === 4 ? (
+                  <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                    <p className="font-medium text-gray-900 dark:text-white">Проверка обязательных полей</p>
+                    {wizardMissingFields.length > 0 ? (
+                      <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-amber-700 dark:text-amber-300">
+                        {wizardMissingFields.map(item => <li key={item}>{item}</li>)}
+                      </ul>
+                    ) : (
+                      <p className="mt-3 text-sm text-green-700 dark:text-green-300">Все обязательные данные заполнены.</p>
+                    )}
+                  </div>
+                ) : null}
+
+                {wizardStep >= 5 ? (
+                  <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+                    <p className="font-medium text-gray-900 dark:text-white">Предпросмотр</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      {wizardPreviewRows.map(([label, value]) => (
+                        <div key={label} className="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40">
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
+                          <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <DialogFooter className="sticky bottom-0 bg-white pt-3 dark:bg-gray-900">
+                <Button variant="secondary" onClick={() => setDocumentWizardOpen(false)}>Отмена</Button>
+                {wizardStep > 1 ? <Button variant="secondary" onClick={() => setWizardStep(step => Math.max(1, step - 1))}>Назад</Button> : null}
+                {wizardStep < 5 ? (
+                  <Button onClick={() => setWizardStep(step => Math.min(5, step + 1))}>Далее</Button>
+                ) : (
+                  <Button onClick={() => void handleGenerateDocument()} disabled={generateDocument.isPending || wizardMissingFields.length > 0}>
+                    Создать черновик
+                  </Button>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
             <DialogContent className="sm:max-w-2xl">
@@ -1811,7 +2393,7 @@ export default function Documents() {
                   <div className="max-h-[58vh] space-y-4 overflow-y-auto pr-1">
                     <div className="grid gap-3 sm:grid-cols-2">
                       {[
-                        ['Статус', getSafeDocumentStatus(selectedDocument.status) === 'signed' ? 'Подписан' : getSafeDocumentStatus(selectedDocument.status) === 'sent' ? 'Отправлен' : 'Черновик'],
+                        ['Статус', getDocumentStatusLabel(selectedDocument.status)],
                         ['Клиент', displayText(selectedDocument.client || clientsById.get(selectedDocument.clientId || '')?.company)],
                         ['Аренда', displayText(getDocumentRentalId(selectedDocument))],
                         ['Техника', displayText(getDocumentEquipmentInv(selectedDocument) || selectedDocument.equipmentId)],

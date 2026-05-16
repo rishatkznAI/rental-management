@@ -941,6 +941,11 @@ export interface ClientContract {
 }
 
 export type DocumentType =
+  | 'rental_contract'
+  | 'rental_specification'
+  | 'transfer_act_to_client'
+  | 'return_act_from_client'
+  | 'trip_ticket'
   | 'contract'
   | 'commercial_offer'
   | 'act'
@@ -954,7 +959,7 @@ export type DocumentType =
   | 'court_decision'
   | 'enforcement_writ'
   | 'other';
-export type DocumentStatus = 'draft' | 'signed' | 'sent';
+export type DocumentStatus = 'draft' | 'signed' | 'sent' | 'pending_signature' | 'expired' | 'cancelled';
 export type DocumentContractKind = 'rental' | 'supply';
 
 export interface DocumentHistoryEntry {
@@ -1040,6 +1045,14 @@ export interface Document {
   equipment?: string;
   serviceTicketId?: string;
   serviceTicket?: string;
+  deliveryId?: string;
+  mechanicId?: string;
+  serviceCarId?: string;
+  parentDocumentId?: string;
+  templateId?: string;
+  dueDate?: string;
+  responsibleId?: string;
+  responsibleName?: string;
   manager?: string;
   createdAt?: string;
   createdBy?: string;
@@ -1048,6 +1061,10 @@ export interface Document {
   updatedBy?: string;
   updatedByUserId?: string;
   contentHtml?: string;
+  generatedContent?: string;
+  printHtml?: string;
+  snapshot?: Record<string, unknown>;
+  payload?: Record<string, unknown>;
   fileName?: string;
   fileUrl?: string;
   signedScanDataUrl?: string;
@@ -1058,6 +1075,7 @@ export interface Document {
   signedAt?: string;
   signedBy?: string;
   comment?: string;
+  notes?: string;
   attachments?: unknown[];
   history?: DocumentHistoryEntry[];
 }

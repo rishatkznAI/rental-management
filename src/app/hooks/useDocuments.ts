@@ -55,6 +55,17 @@ export function useCreateDocument() {
   });
 }
 
+export function useGenerateDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Partial<Document>) => documentsService.generate(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.summary });
+    },
+  });
+}
+
 export function useUpdateDocument() {
   const qc = useQueryClient();
   return useMutation({
@@ -75,6 +86,53 @@ export function useAssignDocumentNumber() {
       qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
       qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.summary });
       qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.detail(id) });
+    },
+  });
+}
+
+export function useMarkDocumentSent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status = 'sent' }: { id: string; status?: 'sent' | 'pending_signature' }) =>
+      documentsService.markSent(id, status),
+    onSuccess: (_res, { id }) => {
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.summary });
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.detail(id) });
+    },
+  });
+}
+
+export function useMarkDocumentSigned() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => documentsService.markSigned(id),
+    onSuccess: (_res, id) => {
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.summary });
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.detail(id) });
+    },
+  });
+}
+
+export function useDuplicateDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => documentsService.duplicate(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.summary });
+    },
+  });
+}
+
+export function useDeleteDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => documentsService.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
+      qc.invalidateQueries({ queryKey: DOCUMENT_KEYS.summary });
     },
   });
 }

@@ -116,6 +116,9 @@ export function getDocumentStatusBadge(status: DocumentStatus | string | null | 
     draft: { label: 'Черновик', variant: 'default' },
     signed: { label: 'Подписан', variant: 'success' },
     sent: { label: 'Отправлен', variant: 'info' },
+    pending_signature: { label: 'На подписи', variant: 'warning' },
+    expired: { label: 'Просрочен', variant: 'error' },
+    cancelled: { label: 'Отменён', variant: 'default' },
   };
   const { label, variant } = getBadgeMeta(map, status);
   return <Badge variant={variant}>{label}</Badge>;

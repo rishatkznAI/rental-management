@@ -391,3 +391,93 @@ test('documents API records status history and blocks forbidden roles', async ()
     assert.equal(sent.json.history.some(entry => entry.field === 'status'), true);
   });
 });
+
+test('documents generate API creates every workspace document type with snapshots and print html', async () => {
+  const { app, state } = createApp();
+  state.service = [{
+    id: 'S-1',
+    clientId: 'C-1',
+    rentalId: 'R-1',
+    equipmentId: 'EQ-1',
+    reason: 'Проверка после возврата',
+    assignedMechanicId: 'M-1',
+    assignedMechanicName: 'Петров',
+  }];
+  state.deliveries = [{ id: 'DEL-1', rentalId: 'R-1', clientId: 'C-1', equipmentId: 'EQ-1', status: 'planned', routeTo: 'Объект клиента' }];
+  state.mechanics = [{ id: 'M-1', name: 'Петров' }];
+  state.service_vehicles = [{ id: 'CAR-1', make: 'УАЗ', model: 'Профи', plateNumber: 'А001АА' }];
+
+  const cases = [
+    ['rental_contract', { clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1' }, 'DA-2026-0001'],
+    ['rental_specification', { clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1' }, 'SP-2026-0001'],
+    ['transfer_act_to_client', { clientId: 'C-1', rentalId: 'R-1', deliveryId: 'DEL-1', equipmentId: 'EQ-1' }, 'AP-2026-0001'],
+    ['return_act_from_client', { clientId: 'C-1', rentalId: 'R-1', deliveryId: 'DEL-1', equipmentId: 'EQ-1', serviceTicketId: 'S-1' }, 'AR-2026-0001'],
+    ['work_order', { serviceTicketId: 'S-1', equipmentId: 'EQ-1', mechanicId: 'M-1', clientId: 'C-1', rentalId: 'R-1' }, 'ZN-2026-0001'],
+    ['trip_ticket', { mechanicId: 'M-1', serviceCarId: 'CAR-1', serviceTicketId: 'S-1' }, 'PL-2026-0001'],
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    for (const [type, payload, expectedNumber] of cases) {
+      const generated = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+        type,
+        date: '2026-05-09',
+        ...payload,
+      });
+      assert.equal(generated.response.status, 201, `${type}: ${JSON.stringify(generated.json)}`);
+      assert.equal(generated.json.type, type);
+      assert.equal(generated.json.number, expectedNumber);
+      assert.equal(generated.json.date, '2026-05-09');
+      assert.equal(generated.json.documentDate, '2026-05-09');
+      assert.equal(generated.json.status, 'draft');
+      assert.ok(generated.json.snapshot.generatedAt);
+      assert.match(generated.json.printHtml, /<!doctype html>/i);
+      assert.ok(Array.isArray(generated.json.payload.lines));
+    }
+  });
+});
+
+test('documents generate API rejects missing required data and supports status endpoints, duplicate, print and delete', async () => {
+  const { app } = createApp();
+  await withServer(app, async (baseUrl) => {
+    const missing = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'rental_contract',
+      clientId: 'C-1',
+      date: '2026-05-09',
+    });
+    assert.equal(missing.response.status, 400);
+    assert.equal(missing.json.code, 'DOCUMENT_REQUIRED_FIELDS');
+
+    const created = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'rental_contract',
+      clientId: 'C-1',
+      rentalId: 'R-1',
+      date: '2026-05-09',
+    });
+    assert.equal(created.response.status, 201);
+
+    const sent = await request(baseUrl, 'POST', `/api/documents/${created.json.id}/mark-sent`, 'office', { status: 'pending_signature' });
+    assert.equal(sent.response.status, 200);
+    assert.equal(sent.json.status, 'pending_signature');
+    assert.equal(sent.json.sentAt, '2026-05-09T10:00:00.000Z');
+
+    const signed = await request(baseUrl, 'POST', `/api/documents/${created.json.id}/mark-signed`, 'office');
+    assert.equal(signed.response.status, 200);
+    assert.equal(signed.json.status, 'signed');
+    assert.equal(signed.json.signedAt, '2026-05-09T10:00:00.000Z');
+
+    const duplicate = await request(baseUrl, 'POST', `/api/documents/${created.json.id}/duplicate`, 'office');
+    assert.equal(duplicate.response.status, 201);
+    assert.equal(duplicate.json.status, 'draft');
+    assert.notEqual(duplicate.json.number, created.json.number);
+
+    const print = await fetch(`${baseUrl}/api/documents/${created.json.id}/print`, {
+      headers: { authorization: 'Bearer office' },
+    });
+    assert.equal(print.status, 200);
+    assert.match(await print.text(), /Договор аренды/);
+
+    const deleted = await request(baseUrl, 'DELETE', `/api/documents/${duplicate.json.id}`, 'admin');
+    assert.equal(deleted.response.status, 200);
+    assert.equal(deleted.json.ok, true);
+  });
+});

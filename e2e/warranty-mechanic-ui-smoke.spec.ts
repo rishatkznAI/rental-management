@@ -474,7 +474,7 @@ test('smoke-service can use warranty mechanic UI and warranty workflows without 
   action = 'equipment detail redaction';
   await goToRoute(page, `/equipment/${seed.equipment.id}`);
   await expect(page.getByText(seed.equipment.inventoryNumber).first()).toBeVisible();
-  await expect(page.getByText('Финансовые показатели скрыты правами доступа.')).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Экономика' })).toHaveCount(0);
   await expectHealthyScreen(page, action);
 
   action = 'rbac api checks';

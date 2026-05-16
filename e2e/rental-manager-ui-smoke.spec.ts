@@ -55,7 +55,6 @@ const RENTAL_MANAGER_SECTIONS: Array<{ name: RegExp; label: string; route: strin
   { name: /^Клиенты/, label: 'Клиенты', route: '/clients' },
   { name: /^Документы/, label: 'Документы', route: '/documents' },
   { name: /^Платежи/, label: 'Платежи', route: '/payments' },
-  { name: /^Личные настройки/, label: 'Личные настройки', route: '/settings' },
 ];
 
 const FORBIDDEN_NAV_ITEMS = [
@@ -462,7 +461,8 @@ test('smoke-rental can use rental manager UI without admin access or runtime err
   expect(meJson.user.permissions.writableCollections).not.toContain('payments');
 
   action = 'logout and re-login';
-  await page.getByRole('button', { name: 'Выйти' }).click();
+  await page.getByRole('button', { name: /SMOKE-RENTAL-User/ }).click();
+  await page.getByRole('menu').getByRole('menuitem', { name: 'Выйти' }).click();
   await expect(page).toHaveURL(/#\/login$/);
   await login(page, RENTAL_CREDENTIALS);
   await expect(page.locator('aside').getByRole('button', { name: /^Дашборд/ })).toBeVisible();
@@ -501,7 +501,7 @@ test('smoke-rental can use rental manager UI without admin access or runtime err
   action = 'rental creation remains forbidden';
   await navigateInApp(page, `/rentals/new?clientId=${seed.client.id}`);
   await expect(page).toHaveURL(/#\/rentals$/);
-  await expect(page.getByRole('heading', { name: 'Планировщик аренды' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Аренды', level: 1 })).toBeVisible();
   await expectHealthyScreen(page, action);
 
   action = 'service ticket creation';
@@ -529,8 +529,9 @@ test('smoke-rental can use rental manager UI without admin access or runtime err
   await expect(page).toHaveURL(/#\/documents$/);
   await expectHealthyScreen(page, action);
   await expect(page.getByText(seed.document.number)).toBeVisible();
-  await page.getByRole('button', { name: /Договор аренды/ }).click();
-  await expect(page.getByRole('dialog', { name: /Договор аренды/ })).toBeVisible();
+  await page.getByRole('button', { name: /^Создать документ$/ }).first().click();
+  await expect(page.getByRole('dialog', { name: /Создать документ/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Договор аренды/ })).toBeVisible();
   await closeDialogIfOpen(page);
 
   action = 'payments read-only';
@@ -541,7 +542,7 @@ test('smoke-rental can use rental manager UI without admin access or runtime err
   await expect(page.getByRole('button', { name: /Добавить платёж/ })).toBeHidden();
 
   for (const detail of [
-    { label: 'equipment detail', path: `/equipment/${seed.equipment.id}`, text: /Техника 360°/ },
+    { label: 'equipment detail', path: `/equipment/${seed.equipment.id}`, text: seed.equipment.model },
     { label: 'client detail', path: `/clients/${seed.client.id}`, text: seed.client.company },
     { label: 'rental detail', path: `/rentals/${seed.rental.id}`, text: seed.rental.id },
     { label: 'service detail', path: `/service/${seed.serviceTicket.id}`, text: seed.serviceTicket.reason },

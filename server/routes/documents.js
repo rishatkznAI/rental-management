@@ -4,6 +4,7 @@ const { calculateRentalBilling } = require('../lib/rental-billing');
 const {
   buildDocumentRegistrySummary,
   documentNumber,
+  prepareGeneratedDocument,
   nextDocumentNumber,
   prepareDocumentCreate,
   prepareDocumentPatch,
@@ -162,6 +163,48 @@ function registerDocumentRoutes(router, deps) {
     });
   }
 
+  function documentCollections() {
+    return {
+      clients: readData('clients') || [],
+      rentals: readData('rentals') || [],
+      gantt_rentals: readData('gantt_rentals') || [],
+      equipment: readData('equipment') || [],
+      service: readData('service') || [],
+      deliveries: readData('deliveries') || [],
+      mechanics: readData('mechanics') || [],
+      service_vehicles: readData('service_vehicles') || [],
+      documents: readData('documents') || [],
+    };
+  }
+
+  function persistDocumentStatus(req, res, status) {
+    try {
+      const documents = readData('documents') || [];
+      const idx = documents.findIndex(item => item.id === req.params.id);
+      if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+      accessControl.assertCanUpdateEntity('documents', documents[idx], req.user);
+      const updated = prepareDocumentPatch(documents[idx], { status }, {
+        documents,
+        nowIso,
+        user: req.user,
+        canManualNumber: canManualNumber(req.user),
+      });
+      const next = [...documents];
+      next[idx] = updated;
+      writeData('documents', next);
+      auditLog?.(req, {
+        action: `documents.mark_${status}`,
+        entityType: 'documents',
+        entityId: updated.id,
+        before: documents[idx],
+        after: updated,
+      });
+      return res.json(updated);
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error.message, code: error.code });
+    }
+  }
+
   function readSettings() {
     return readNumberingSettings(readData('app_settings') || []);
   }
@@ -283,6 +326,39 @@ function registerDocumentRoutes(router, deps) {
     }
   });
 
+  documentsRouter.post('/documents/generate', requireAuth, requireWrite('documents'), (req, res) => {
+    try {
+      const raw = req.body?.data && typeof req.body.data === 'object' ? req.body.data : req.body;
+      const generatedInput = prepareGeneratedDocument(raw, documentCollections(), { nowIso });
+      accessControl.assertCanCreateCollection('documents', req.user, generatedInput);
+      const input = accessControl.sanitizeCreateInput('documents', generatedInput, req.user);
+      if ((input.number || input.documentNumber) && !canManualNumber(req.user)) {
+        return res.status(403).json({ ok: false, error: 'Ручной номер документа может задать только администратор или офис-менеджер' });
+      }
+      const documents = readData('documents') || [];
+      const normalized = withRentalBillingSnapshot(normalizeDocumentDomainRecord({ ...input, id: input.id || generateId(idPrefixes.documents || 'D') }));
+      const prepared = prepareDocumentCreate(normalized, {
+        documents,
+        settings: readSettings(),
+        nowIso,
+        generateId,
+        idPrefix: idPrefixes.documents || 'D',
+        user: req.user,
+      });
+      writeData('documents', [...documents, prepared.document]);
+      saveSettings(prepared.settings);
+      auditLog?.(req, {
+        action: 'documents.generate',
+        entityType: 'documents',
+        entityId: prepared.document.id,
+        after: prepared.document,
+      });
+      return res.status(201).json(prepared.document);
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error.message, code: error.code });
+    }
+  });
+
   documentsRouter.patch('/documents/:id', requireAuth, requireWrite('documents'), (req, res) => {
     try {
       const documents = readData('documents') || [];
@@ -316,6 +392,99 @@ function registerDocumentRoutes(router, deps) {
       return res.json(updated);
     } catch (error) {
       return res.status(error?.status || 400).json({ ok: false, error: error.message, code: error.code });
+    }
+  });
+
+  documentsRouter.delete('/documents/:id', requireAuth, requireWrite('documents'), (req, res) => {
+    try {
+      const documents = readData('documents') || [];
+      const idx = documents.findIndex(item => item.id === req.params.id);
+      if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+      accessControl.assertCanDeleteEntity('documents', documents[idx], req.user);
+      const next = documents.filter(item => item.id !== req.params.id);
+      writeData('documents', next);
+      auditLog?.(req, {
+        action: 'documents.delete',
+        entityType: 'documents',
+        entityId: documents[idx].id,
+        before: documents[idx],
+      });
+      return res.json({ ok: true });
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error.message, code: error.code });
+    }
+  });
+
+  documentsRouter.post('/documents/:id/mark-sent', requireAuth, requireWrite('documents'), (req, res) => (
+    persistDocumentStatus(req, res, req.body?.status === 'pending_signature' ? 'pending_signature' : 'sent')
+  ));
+
+  documentsRouter.post('/documents/:id/mark-signed', requireAuth, requireWrite('documents'), (req, res) => (
+    persistDocumentStatus(req, res, 'signed')
+  ));
+
+  documentsRouter.post('/documents/:id/duplicate', requireAuth, requireWrite('documents'), (req, res) => {
+    try {
+      const documents = readData('documents') || [];
+      const source = documents.find(item => item.id === req.params.id);
+      if (!source) return res.status(404).json({ ok: false, error: 'Not found' });
+      if (!accessControl.canAccessEntity('documents', source, req.user)) {
+        return res.status(403).json({ ok: false, error: 'Forbidden' });
+      }
+      const copyInput = {
+        ...source,
+        id: undefined,
+        number: '',
+        documentNumber: '',
+        status: 'draft',
+        sentAt: undefined,
+        sentBy: undefined,
+        signedAt: undefined,
+        signedBy: undefined,
+        signedScanDataUrl: undefined,
+        signedScanFileName: undefined,
+        signedScanMimeType: undefined,
+        history: undefined,
+        createdAt: undefined,
+        updatedAt: undefined,
+        notes: source.notes || source.comment,
+      };
+      accessControl.assertCanCreateCollection('documents', req.user, copyInput);
+      const input = accessControl.sanitizeCreateInput('documents', copyInput, req.user);
+      const prepared = prepareDocumentCreate(input, {
+        documents,
+        settings: readSettings(),
+        nowIso,
+        generateId,
+        idPrefix: idPrefixes.documents || 'D',
+        user: req.user,
+      });
+      writeData('documents', [...documents, prepared.document]);
+      saveSettings(prepared.settings);
+      auditLog?.(req, {
+        action: 'documents.duplicate',
+        entityType: 'documents',
+        entityId: prepared.document.id,
+        after: prepared.document,
+      });
+      return res.status(201).json(prepared.document);
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error.message, code: error.code });
+    }
+  });
+
+  documentsRouter.get('/documents/:id/print', requireAuth, requireRead('documents'), (req, res) => {
+    try {
+      accessControl.assertCanReadCollection('documents', req.user);
+      const document = (readData('documents') || []).find(item => item.id === req.params.id);
+      if (!document) return res.status(404).send('Not found');
+      if (!accessControl.canAccessEntity('documents', document, req.user)) return res.status(403).send('Forbidden');
+      const html = document.printHtml || document.generatedContent || document.contentHtml;
+      if (!html) return res.status(404).send('Printable content not found');
+      res.setHeader('content-type', 'text/html; charset=utf-8');
+      return res.send(html);
+    } catch (error) {
+      return res.status(error?.status || 400).send(error.message);
     }
   });
 

@@ -409,7 +409,7 @@ test('sale quote actions create commercial offer documents instead of contracts'
   const salesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Sales.tsx'), 'utf8');
   const documentsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Documents.tsx'), 'utf8');
   const typesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/types.ts'), 'utf8');
-  const documentsCoreSource = fs.readFileSync(path.join(process.cwd(), 'server/lib/documents-core.js'), 'utf8');
+  const documentRegistrySource = fs.readFileSync(path.join(process.cwd(), 'server/lib/document-registry.js'), 'utf8');
   const systemRoutesSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/system.js'), 'utf8');
 
   assert.match(detailSource, /action=create&type=commercial_offer/);
@@ -417,8 +417,9 @@ test('sale quote actions create commercial offer documents instead of contracts'
   assert.match(salesSource, /type=commercial_offer&action=create/);
   assert.doesNotMatch(salesSource, /type=kp/);
   assert.match(typesSource, /\| 'commercial_offer'/);
-  assert.match(documentsCoreSource, /commercial_offer: \{ label: 'Коммерческое предложение', prefix: 'KP' \}/);
-  assert.match(documentsCoreSource, /key === 'quote' \|\| key === 'kp'[\s\S]*return 'commercial_offer'/);
+  assert.match(documentRegistrySource, /commercial_offer: \{ label: 'Коммерческое предложение', prefix: 'KP' \}/);
+  assert.match(documentRegistrySource, /quote: 'commercial_offer'/);
+  assert.match(documentRegistrySource, /kp: 'commercial_offer'/);
   assert.match(documentsSource, /type: 'commercial_offer'/);
   assert.match(documentsSource, /documentType: 'commercial_offer'/);
   assert.match(documentsSource, /Коммерческое предложение/);

@@ -22,6 +22,21 @@ export const documentsService = {
   assignNumber: (id: string): Promise<Document> =>
     api.post<Document>(`/api/documents/${id}/assign-number`, {}),
 
+  generate: (data: Partial<Document>): Promise<Document> =>
+    api.post<Document>('/api/documents/generate', data),
+
+  markSent: (id: string, status: 'sent' | 'pending_signature' = 'sent'): Promise<Document> =>
+    api.post<Document>(`/api/documents/${id}/mark-sent`, { status }),
+
+  markSigned: (id: string): Promise<Document> =>
+    api.post<Document>(`/api/documents/${id}/mark-signed`, {}),
+
+  duplicate: (id: string): Promise<Document> =>
+    api.post<Document>(`/api/documents/${id}/duplicate`, {}),
+
+  delete: (id: string): Promise<{ ok: boolean }> =>
+    api.del<{ ok: boolean }>(`/api/documents/${id}`),
+
   getNumberingSettings: (): Promise<DocumentNumberingSetting[]> =>
     api.get<DocumentNumberingSetting[]>('/api/documents/numbering-settings'),
 

@@ -1,20 +1,11 @@
-const DOCUMENT_TYPE_CONFIG = {
-  contract: { label: 'Договор', prefix: 'CONTRACT' },
-  commercial_offer: { label: 'Коммерческое предложение', prefix: 'KP' },
-  act: { label: 'Акт', prefix: 'ACT' },
-  upd: { label: 'УПД', prefix: 'UPD' },
-  invoice: { label: 'Счёт', prefix: 'INVOICE' },
-  service_act: { label: 'Сервисный акт', prefix: 'SERVICE' },
-  work_order: { label: 'Заказ-наряд', prefix: 'WO' },
-  debt_notification: { label: 'Уведомление о задолженности', prefix: 'DEBTNOTICE' },
-  pretrial_claim: { label: 'Досудебная претензия', prefix: 'CLAIM' },
-  court_document: { label: 'Судебный документ', prefix: 'COURT' },
-  court_decision: { label: 'Решение суда', prefix: 'DECISION' },
-  enforcement_writ: { label: 'Исполнительный лист', prefix: 'WRIT' },
-  other: { label: 'Прочее', prefix: 'DOC' },
-};
+const {
+  DOCUMENT_TYPE_CONFIG,
+  DOCUMENT_TYPE_REGISTRY,
+  getDocumentTypeMeta,
+  normalizeDocumentType,
+} = require('./document-registry');
 
-const DOCUMENT_STATUSES = new Set(['draft', 'sent', 'signed']);
+const DOCUMENT_STATUSES = new Set(['draft', 'sent', 'pending_signature', 'signed', 'expired', 'cancelled']);
 const NUMBERING_SETTINGS_KEY = 'document_numbering_settings';
 
 function documentError(message, status = 400, code = 'DOCUMENT_ERROR') {
@@ -28,15 +19,6 @@ function text(value) {
   return String(value ?? '').trim();
 }
 
-function normalizeDocumentType(value) {
-  const key = text(value).toLowerCase();
-  if (key === 'quote' || key === 'kp' || key === 'кп' || key === 'commercial_offer') return 'commercial_offer';
-  if (key === 'service' || key === 'service_act') return 'service_act';
-  if (key === 'upd' || key === 'упд') return 'upd';
-  if (DOCUMENT_TYPE_CONFIG[key]) return key;
-  return 'other';
-}
-
 function normalizeDocumentStatus(value) {
   const status = text(value).toLowerCase();
   return DOCUMENT_STATUSES.has(status) ? status : 'draft';
@@ -45,9 +27,10 @@ function normalizeDocumentStatus(value) {
 function normalizeDocumentDate(value, fallbackIso = new Date().toISOString()) {
   const raw = text(value);
   const candidate = raw || fallbackIso;
-  const parsed = new Date(`${candidate.slice(0, 10)}T00:00:00`);
+  const datePart = candidate.slice(0, 10);
+  const parsed = new Date(`${datePart}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime())) throw documentError('Укажите корректную дату документа');
-  return parsed.toISOString().slice(0, 10);
+  return datePart;
 }
 
 function getDocumentYear(doc, fallbackIso = new Date().toISOString()) {
@@ -227,6 +210,10 @@ function prepareDocumentCreate(input, {
     updatedBy: user.userName || 'Система',
     updatedByUserId: user.userId || '',
   };
+  if (!doc.responsibleName) doc.responsibleName = doc.manager || user.userName || 'Система';
+  if (!doc.responsibleId) doc.responsibleId = user.userId || '';
+  if (doc.generatedContent && !doc.printHtml) doc.printHtml = doc.generatedContent;
+  if (doc.printHtml && !doc.contentHtml) doc.contentHtml = doc.printHtml;
   assertDocumentNumberUnique(documents, doc, { fallbackIso: now });
   let withHistory = appendDocumentHistory(doc, {
     action: 'created',
@@ -265,6 +252,10 @@ function prepareDocumentPatch(previous, patch, {
   next.date = normalizeDocumentDate(patch.documentDate || patch.date || previous.documentDate || previous.date, now);
   next.documentDate = next.date;
   if (next.status === 'sent' && text(previous.status) !== 'sent' && !next.sentAt) {
+    next.sentAt = now;
+    next.sentBy = user.userName || 'Система';
+  }
+  if (next.status === 'pending_signature' && text(previous.status) !== 'pending_signature' && !next.sentAt) {
     next.sentAt = now;
     next.sentBy = user.userName || 'Система';
   }
@@ -318,10 +309,14 @@ function buildDocumentRegistrySummary(documents = [], todayIso = new Date().toIS
   const duplicateDocuments = documents.filter(doc => duplicateKeys.has(duplicateKey(doc, todayIso)));
   return {
     total: documents.length,
+    draft: documents.filter(doc => normalizeDocumentStatus(doc.status) === 'draft').length,
+    sent: documents.filter(doc => normalizeDocumentStatus(doc.status) === 'sent').length,
+    pendingSignature: documents.filter(doc => normalizeDocumentStatus(doc.status) === 'pending_signature').length,
     withoutNumber: documents.filter(doc => !documentNumber(doc)).length,
     duplicateNumbers: duplicateDocuments.length,
     unsigned: documents.filter(doc => normalizeDocumentStatus(doc.status) !== 'signed').length,
     signed: documents.filter(doc => normalizeDocumentStatus(doc.status) === 'signed').length,
+    expired: documents.filter(doc => isDocumentExpired(doc, todayIso)).length,
     currentMonth: documents.filter(doc => text(doc.documentDate || doc.date || doc.createdAt).slice(0, 7) === currentMonth).length,
     duplicates: duplicateDocuments.map(doc => ({ id: doc.id, number: documentNumber(doc), type: normalizeDocumentType(doc.type), year: getDocumentYear(doc, todayIso) })),
     invalidNumbers: documents.filter(doc => documentNumber(doc) && !/^[A-ZА-Я0-9_-]+-\d{4}-\d+$/i.test(documentNumber(doc)))
@@ -329,10 +324,273 @@ function buildDocumentRegistrySummary(documents = [], todayIso = new Date().toIS
   };
 }
 
+function fieldLabel(field) {
+  const labels = {
+    clientId: 'клиент',
+    rentalId: 'аренда',
+    equipmentId: 'техника',
+    serviceTicketId: 'сервисная заявка',
+    deliveryId: 'доставка',
+    mechanicId: 'механик',
+    serviceCarId: 'служебный автомобиль',
+    parentDocumentId: 'родительский документ',
+  };
+  return labels[field] || field;
+}
+
+function isDocumentExpired(doc, todayIso = new Date().toISOString()) {
+  const status = normalizeDocumentStatus(doc?.status);
+  if (status === 'signed' || status === 'cancelled') return false;
+  const dueDate = text(doc?.dueDate);
+  return Boolean(dueDate && dueDate.slice(0, 10) < todayIso.slice(0, 10));
+}
+
+function validateDocumentRequiredFields(input) {
+  const type = normalizeDocumentType(input?.documentType || input?.type);
+  const meta = getDocumentTypeMeta(type);
+  const missing = (meta.requiredFields || []).filter(field => !text(input?.[field]));
+  return {
+    ok: missing.length === 0,
+    type,
+    missing,
+    messages: missing.map(field => `Укажите ${fieldLabel(field)}`),
+  };
+}
+
+function resolveById(list, id) {
+  const wanted = text(id);
+  if (!wanted) return null;
+  return (Array.isArray(list) ? list : []).find(item => text(item?.id) === wanted) || null;
+}
+
+function equipmentLabel(item) {
+  return [item?.inventoryNumber, item?.manufacturer, item?.model].map(text).filter(Boolean).join(' · ');
+}
+
+function htmlEscape(value) {
+  return text(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function buildSnapshot(input, collections = {}, nowIso = () => new Date().toISOString()) {
+  const client = resolveById(collections.clients, input.clientId);
+  const rental = resolveById(collections.rentals, input.rentalId) || resolveById(collections.gantt_rentals, input.rentalId);
+  const equipment = resolveById(collections.equipment, input.equipmentId);
+  const serviceTicket = resolveById(collections.service, input.serviceTicketId);
+  const delivery = resolveById(collections.deliveries, input.deliveryId);
+  const mechanic = resolveById(collections.mechanics, input.mechanicId);
+  const serviceCar = resolveById(collections.service_vehicles, input.serviceCarId);
+  const parentDocument = resolveById(collections.documents, input.parentDocumentId);
+
+  return {
+    generatedAt: nowIso(),
+    client: client ? {
+      id: client.id,
+      company: client.company || client.name || input.client,
+      inn: client.inn,
+      address: client.address,
+      phone: client.phone,
+      email: client.email,
+    } : (input.client ? { id: input.clientId, company: input.client } : null),
+    rental: rental ? {
+      id: rental.id,
+      clientId: rental.clientId,
+      client: rental.client,
+      startDate: rental.startDate,
+      endDate: rental.endDate || rental.plannedReturnDate,
+      actualReturnDate: rental.actualReturnDate,
+      amount: rental.amount ?? rental.price,
+      manager: rental.manager,
+      objectId: rental.objectId,
+      contractId: rental.contractId,
+    } : null,
+    equipment: equipment ? {
+      id: equipment.id,
+      inventoryNumber: equipment.inventoryNumber,
+      manufacturer: equipment.manufacturer,
+      model: equipment.model,
+      serialNumber: equipment.serialNumber,
+      type: equipment.type,
+    } : null,
+    serviceTicket: serviceTicket ? {
+      id: serviceTicket.id,
+      reason: serviceTicket.reason || serviceTicket.description,
+      status: serviceTicket.status,
+      mechanicId: serviceTicket.mechanicId || serviceTicket.assignedMechanicId,
+      mechanicName: serviceTicket.mechanicName || serviceTicket.assignedMechanicName || serviceTicket.assignedTo,
+      works: serviceTicket.works || serviceTicket.workLog,
+      parts: serviceTicket.parts,
+      result: serviceTicket.result || serviceTicket.summary,
+    } : null,
+    delivery: delivery ? {
+      id: delivery.id,
+      status: delivery.status,
+      date: delivery.date || delivery.plannedDate,
+      address: delivery.address || delivery.routeTo,
+      route: delivery.route || [delivery.routeFrom, delivery.routeTo].filter(Boolean).join(' → '),
+    } : null,
+    mechanic: mechanic ? { id: mechanic.id, name: mechanic.name, phone: mechanic.phone } : null,
+    serviceCar: serviceCar ? { id: serviceCar.id, label: [serviceCar.make, serviceCar.model, serviceCar.plateNumber].filter(Boolean).join(' '), mileage: serviceCar.currentMileage } : null,
+    parentDocument: parentDocument ? { id: parentDocument.id, number: documentNumber(parentDocument), type: parentDocument.type } : null,
+  };
+}
+
+function linesForDocument(type, snapshot, input) {
+  const client = snapshot.client?.company || input.client || '—';
+  const equipment = equipmentLabel(snapshot.equipment) || input.equipmentInv || input.equipment || '—';
+  const rental = snapshot.rental;
+  const service = snapshot.serviceTicket;
+  const delivery = snapshot.delivery;
+  const mechanic = snapshot.mechanic?.name || input.mechanicName || input.responsibleName || '—';
+  const route = input.route || snapshot.serviceCar?.route || delivery?.route || [input.routeFrom, input.routeTo].filter(Boolean).join(' → ') || '—';
+  const amount = input.amount ?? rental?.amount;
+  const date = input.documentDate || input.date || new Date().toISOString().slice(0, 10);
+  const common = {
+    rental_contract: [
+      ['Клиент', client],
+      ['Техника', equipment],
+      ['Срок аренды', [rental?.startDate, rental?.endDate].filter(Boolean).join(' — ') || '—'],
+      ['Ставка / сумма', amount ? String(amount) : '—'],
+      ['Объект', input.objectId || rental?.objectId || '—'],
+      ['Условия возврата', input.returnTerms || 'Возврат в согласованном состоянии и комплектации.'],
+      ['Ответственность сторон', input.liabilityTerms || 'Стороны несут ответственность по условиям договора.'],
+      ['Реквизиты', snapshot.client?.inn ? `ИНН ${snapshot.client.inn}` : '—'],
+      ['Подписи сторон', 'Skytech / Клиент'],
+    ],
+    rental_specification: [
+      ['Договор', snapshot.parentDocument?.number || input.parentDocumentId || input.contractId || '—'],
+      ['Техника', equipment],
+      ['Модель', [snapshot.equipment?.manufacturer, snapshot.equipment?.model].filter(Boolean).join(' ') || '—'],
+      ['INV/SN', [snapshot.equipment?.inventoryNumber, snapshot.equipment?.serialNumber].filter(Boolean).join(' / ') || '—'],
+      ['Период', [rental?.startDate, rental?.endDate].filter(Boolean).join(' — ') || '—'],
+      ['Ставка', input.rate || '—'],
+      ['Количество дней', input.days || '—'],
+      ['Сумма', amount ? String(amount) : '—'],
+      ['Примечания', input.notes || input.comment || '—'],
+    ],
+    transfer_act_to_client: [
+      ['Дата передачи', input.transferDate || date],
+      ['Клиент', client],
+      ['Техника', equipment],
+      ['Состояние при передаче', input.condition || 'Исправна, рабочее состояние.'],
+      ['Комплектность', input.completeness || 'Согласно карточке техники и договору.'],
+      ['Фото/замечания', input.notes || input.comment || '—'],
+      ['Представитель компании', input.responsibleName || 'Skytech'],
+      ['Представитель клиента', input.clientRepresentative || '—'],
+      ['Подписи', 'Стороны'],
+    ],
+    return_act_from_client: [
+      ['Дата возврата', input.returnDate || date],
+      ['Клиент', client],
+      ['Техника', equipment],
+      ['Состояние при возврате', input.condition || 'Требует проверки после возврата.'],
+      ['Повреждения', input.damageNotes || 'Не указаны'],
+      ['Недостача', input.missingItems || 'Не указана'],
+      ['Необходимость сервиса', input.serviceRequired || (input.serviceTicketId ? 'Да' : 'Нет')],
+      ['Сервисная заявка', service?.id || input.serviceTicketId || '—'],
+      ['Подписи', 'Стороны'],
+    ],
+    work_order: [
+      ['Сервисная заявка', service?.id || input.serviceTicketId || '—'],
+      ['Техника', equipment],
+      ['Механик', mechanic],
+      ['Причина обращения', service?.reason || input.reason || '—'],
+      ['Выполненные работы', input.works || service?.works || '—'],
+      ['Запчасти', input.parts || service?.parts || '—'],
+      ['Трудозатраты', input.laborHours || '—'],
+      ['Итог ремонта', input.result || service?.result || '—'],
+      ['Сумма', amount ? String(amount) : '—'],
+      ['Подпись ответственного', input.responsibleName || '—'],
+    ],
+    trip_ticket: [
+      ['Дата', date],
+      ['Служебный автомобиль', snapshot.serviceCar?.label || input.serviceCarId || '—'],
+      ['Водитель/механик', mechanic],
+      ['Маршрут', route],
+      ['Цель поездки', input.purpose || service?.reason || delivery?.id || '—'],
+      ['Связанная заявка/доставка', service?.id || delivery?.id || '—'],
+      ['Начальный пробег', input.startMileage || input.odometerStart || '—'],
+      ['Конечный пробег', input.endMileage || input.odometerEnd || '—'],
+      ['Топливо', input.fuel || [input.fuelStart, input.fuelAdded, input.fuelEnd].filter(Boolean).join(' / ') || '—'],
+      ['Комментарии', input.notes || input.comment || '—'],
+    ],
+  };
+  return common[type] || [['Документ', getDocumentTypeMeta(type).label], ['Клиент', client], ['Техника', equipment]];
+}
+
+function buildDocumentPrintHtml(doc, snapshot, lines) {
+  const meta = getDocumentTypeMeta(doc.type);
+  const rows = lines.map(([label, value]) => `<tr><th>${htmlEscape(label)}</th><td>${htmlEscape(value)}</td></tr>`).join('');
+  return `<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>${htmlEscape(meta.label)} ${htmlEscape(documentNumber(doc))}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; color: #111827; }
+    h1 { font-size: 24px; margin: 0 0 8px; }
+    .meta { color: #6b7280; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #d1d5db; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { width: 30%; background: #f9fafb; }
+    .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 48px; }
+    .line { border-top: 1px solid #111827; padding-top: 8px; }
+    @media print { body { margin: 16mm; } }
+  </style>
+</head>
+<body>
+  <h1>${htmlEscape(meta.label)}</h1>
+  <div class="meta">№ ${htmlEscape(documentNumber(doc))} от ${htmlEscape(doc.date)} · статус: ${htmlEscape(doc.status)}</div>
+  <table>${rows}</table>
+  <div class="signatures">
+    <div class="line">Skytech</div>
+    <div class="line">${htmlEscape(snapshot.client?.company || doc.client || 'Клиент')}</div>
+  </div>
+</body>
+</html>`;
+}
+
+function prepareGeneratedDocument(input, collections = {}, options = {}) {
+  const nowIso = options.nowIso || (() => new Date().toISOString());
+  const validation = validateDocumentRequiredFields(input);
+  if (!validation.ok) {
+    throw documentError(`Не хватает данных: ${validation.messages.join(', ')}`, 400, 'DOCUMENT_REQUIRED_FIELDS');
+  }
+  const type = validation.type;
+  const snapshot = input.snapshot || buildSnapshot({ ...input, type }, collections, nowIso);
+  const payload = {
+    ...(input.payload && typeof input.payload === 'object' ? input.payload : {}),
+    lines: linesForDocument(type, snapshot, input),
+  };
+  const generatedContent = input.generatedContent || input.printHtml || buildDocumentPrintHtml({ ...input, type }, snapshot, payload.lines);
+  return {
+    ...input,
+    type,
+    documentType: type,
+    status: input.status || getDocumentTypeMeta(type).defaultStatus || 'draft',
+    client: input.client || snapshot.client?.company || snapshot.rental?.client || '',
+    equipmentInv: input.equipmentInv || snapshot.equipment?.inventoryNumber || '',
+    equipment: input.equipment || equipmentLabel(snapshot.equipment),
+    amount: input.amount ?? snapshot.rental?.amount,
+    manager: input.manager || snapshot.rental?.manager || input.responsibleName,
+    responsibleName: input.responsibleName || input.manager || snapshot.rental?.manager,
+    snapshot,
+    payload,
+    generatedContent,
+    printHtml: generatedContent,
+    contentHtml: input.contentHtml || generatedContent,
+  };
+}
+
 module.exports = {
   DOCUMENT_TYPE_CONFIG,
+  DOCUMENT_TYPE_REGISTRY,
   DOCUMENT_STATUSES,
   NUMBERING_SETTINGS_KEY,
+  getDocumentTypeMeta,
   normalizeDocumentType,
   normalizeDocumentStatus,
   normalizeDocumentDate,
@@ -347,4 +605,8 @@ module.exports = {
   appendDocumentHistory,
   assertDocumentNumberUnique,
   buildDocumentRegistrySummary,
+  isDocumentExpired,
+  validateDocumentRequiredFields,
+  buildSnapshot,
+  prepareGeneratedDocument,
 };

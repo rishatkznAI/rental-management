@@ -499,8 +499,9 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   await goToRoute(page, '/documents');
   await expect(page.getByRole('heading', { name: 'Документы', exact: true })).toBeVisible();
   await expectHealthyScreen(page, action);
-  await page.getByRole('button', { name: /Договор аренды/ }).click();
-  await expect(page.getByRole('dialog', { name: /Договор аренды/ })).toBeVisible();
+  await page.getByRole('button', { name: /^Создать документ$/ }).first().click();
+  await expect(page.getByRole('dialog', { name: /Создать документ/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Договор аренды/ })).toBeVisible();
   await closeDialogIfOpen(page);
 
   action = 'payments create modal';

@@ -32,7 +32,7 @@ Production endpoints:
 | Build | CI + local | `npm run build` запускается в Basic CI и формирует Pages artifact только после успешных checks. Локально доступен тот же script. |
 | Deploy | Gated frontend deploy | Frontend деплоится через GitHub Pages workflow только после успешных `basic-ci` и `playwright-smoke`. Backend Railway деплой описан в `docs/production-operations.md`, но отдельного backend deploy gate в репозитории нет. |
 | Production smoke | Partial/manual | В `docs/production-operations.md` есть post-deploy smoke checklist. В `e2e/*` есть production-style smoke tests по ролям, но они настроены на локальный backend/frontend. Отдельного GitHub Actions workflow для production smoke нет. |
-| Staging smoke | Missing | Staging URL, staging workflow и staging smoke pipeline в репозитории не обнаружены. |
+| Staging smoke | Stage 2 partial | Добавлены `docs/staging-environment.md`, `.github/workflows/staging-smoke.yml`, `playwright.staging.config.ts` и read-only `e2e/staging-smoke.spec.ts`. Для реального запуска нужны staging Railway/frontend URL и GitHub secrets. |
 | Backup | Partial | Есть admin-only full backup endpoint `GET /api/admin/backup/full`, история backup downloads и документация в `docs/production-operations.md`. Restore UI/API не реализован; restore playbook до этого этапа отсутствовал. |
 | Rollback | Missing | До этого этапа отдельного rollback playbook не было. GitHub Pages и Railway rollback steps не были формализованы в отдельном документе. |
 | Monitoring/logging | Partial | Есть `/health`, `/api/version`, admin production diagnostics, audit/security logging и backup audit history. Нет внешнего monitoring/alerting workflow или documented alert policy. |
@@ -95,9 +95,27 @@ Node 24 drift removed from root package metadata, server package metadata, Railw
 
 ## Staging Smoke Workflow
 
-Staging smoke workflow не обнаружен. Также в документации не найден зафиксированный staging frontend/backend URL.
+Stage 2 добавил отдельный manual workflow: `.github/workflows/staging-smoke.yml`.
 
-Рекомендуемый следующий шаг: сначала завести staging окружение с отдельной Railway service/database и GitHub Pages preview или другим static host, затем запускать smoke до production deploy.
+Workflow:
+
+- запускается через `workflow_dispatch`;
+- использует Node 20;
+- выполняет `npm ci`, `npm ci --prefix server`, `npm run build`;
+- устанавливает Playwright browsers;
+- запускает `npx playwright test e2e/staging-smoke.spec.ts --config=playwright.staging.config.ts`;
+- загружает `playwright-report/` и `test-results/` artifacts.
+
+Нужны GitHub secrets:
+
+- `STAGING_API_URL`;
+- `STAGING_FRONTEND_URL`;
+- `STAGING_ADMIN_EMAIL`;
+- `STAGING_ADMIN_PASSWORD`.
+
+Staging URL в документации или коде не найден. До добавления secrets и отдельной Railway staging service workflow готов структурно, но реальный smoke будет заблокирован validate-secrets шагом.
+
+Read-only staging smoke проверяет frontend boot, backend `/health`, backend `/api/version`, admin login, dashboard, основные разделы, отсутствие critical console errors, API 500 и неожиданных 401/403 для admin-visible pages. Он не создает аренды, платежи, документы, пользователей или сервисные заявки.
 
 ## Backup/Restore
 
@@ -199,11 +217,13 @@ Gap:
 
 ### Stage 2: Staging Smoke
 
-- Create staging Railway service with separate SQLite volume/database.
-- Create staging frontend build with staging `VITE_API_URL`.
-- Add `workflow_dispatch` staging smoke.
-- Run health, version, frontend boot and role smoke before production.
-- Seed or maintain dedicated staging smoke users.
+- Completed in repo: documented staging environment requirements in `docs/staging-environment.md`.
+- Completed in repo: added manual `workflow_dispatch` staging smoke workflow.
+- Completed in repo: added remote Playwright config and read-only staging smoke spec.
+- Still required outside repo: create staging Railway service with separate SQLite volume/database.
+- Still required outside repo: deploy staging frontend build with staging `VITE_API_URL`.
+- Still required outside repo: add `STAGING_*` GitHub secrets and dedicated staging smoke user.
+- Future: add seeded role users and write smoke only for staging.
 
 ### Stage 3: Production Smoke + Rollback
 

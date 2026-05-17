@@ -7,18 +7,63 @@ Use this checklist before and after production releases. Do not change productio
 1. Confirm the target commit and release scope.
 2. Confirm no unrelated risky changes are included.
 3. Use Node 20 for release checks.
-4. Run local checks when possible:
+4. Run staging smoke before production if staging is configured:
+   - Open GitHub Actions.
+   - Run `Staging Smoke`.
+   - Confirm the workflow passed for the target commit.
+   - Download `staging-playwright-report` and `staging-playwright-test-results` if it failed.
+5. Run local checks when possible:
    - `git status`
    - `git diff --check`
    - `npm test`
    - `npm run build`
    - `npx playwright test e2e/smoke.spec.ts` when Playwright browsers are installed
-5. For data-sensitive releases, download a fresh admin backup from production before deploy.
-6. Confirm Railway backend production URL:
+6. For data-sensitive releases, download a fresh admin backup from production before deploy.
+7. Confirm Railway backend production URL:
    - `https://rental-management-production-35bc.up.railway.app`
-7. Confirm frontend production URL:
+8. Confirm frontend production URL:
    - `https://rishatkznai.github.io/rental-management/`
-8. Confirm the frontend build uses the production Railway backend URL as `VITE_API_URL`.
+9. Confirm the frontend build uses the production Railway backend URL as `VITE_API_URL`.
+
+## Staging Smoke Gate
+
+Required setup:
+
+- separate Railway staging service/environment;
+- separate staging SQLite volume/database;
+- staging frontend built with `VITE_API_URL=$STAGING_API_URL`;
+- GitHub secrets `STAGING_API_URL`, `STAGING_FRONTEND_URL`, `STAGING_ADMIN_EMAIL`, `STAGING_ADMIN_PASSWORD`.
+
+Run:
+
+```bash
+npx playwright test e2e/staging-smoke.spec.ts --config=playwright.staging.config.ts
+```
+
+or use GitHub Actions `Staging Smoke`.
+
+PASS means:
+
+- staging backend `/health` returns OK;
+- staging backend `/api/version` returns build info with commit;
+- staging frontend opens;
+- staging admin login works;
+- dashboard and read-only sections open;
+- no critical console errors, page errors, API 500, or unexpected admin 401/403;
+- frontend/backend commits match unless an approved metadata-only drift is documented.
+
+BLOCKER means:
+
+- staging points to production backend or production DB;
+- any staging secret is missing;
+- smoke writes to production;
+- login fails;
+- frontend is blank;
+- `/health` or `/api/version` fails;
+- critical sections throw runtime errors or API 500;
+- permissions break for allowed admin sections.
+
+On failed staging smoke, stop the production release, inspect GitHub Actions artifacts, identify whether the issue is frontend, backend, env, database seed, or commit mismatch, then fix-forward in staging and rerun smoke.
 
 ## Backend Deploy
 
@@ -58,13 +103,13 @@ Use this checklist before and after production releases. Do not change productio
    - backend commit
    - `VITE_API_URL`
 
-## Stage 2 Remaining Work
+## Stage 2 Status
 
-1. Add staging Railway service and a separate staging database/volume.
-2. Add a manual `workflow_dispatch` staging smoke workflow.
-3. Add protected production smoke with explicit approval and read-only checks by default.
-4. Add frontend/backend commit consistency checks after deploy.
-5. Add dedicated role smoke for `head` / `Руководитель`.
+1. Staging environment design is documented in `docs/staging-environment.md`.
+2. Manual `workflow_dispatch` staging smoke workflow exists at `.github/workflows/staging-smoke.yml`.
+3. Read-only staging spec exists at `e2e/staging-smoke.spec.ts`.
+4. Remaining outside-repo setup: staging Railway service, separate SQLite volume/database, staging frontend URL and GitHub `STAGING_*` secrets.
+5. Stage 3 remaining work: protected production smoke with explicit approval, richer role smoke and formal commit-drift policy.
 
 ## Post-Deploy Smoke
 
@@ -90,5 +135,6 @@ Stop the deploy or start rollback if any of these happen:
 - admin diagnostics exposes secrets;
 - documents, rentals, service, GSM, finance or MAX bot critical flows show production-breaking errors;
 - frontend and backend commits are unexpectedly mismatched after both deploys complete.
+- staging smoke failed or was skipped without an explicit release owner decision.
 
 Use `docs/rollback-playbook.md` for rollback steps.

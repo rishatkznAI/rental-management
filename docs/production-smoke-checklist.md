@@ -2,6 +2,8 @@
 
 Run this after every production deploy and after every rollback. Use dedicated smoke users, not personal owner accounts.
 
+Before production deploy, run the separate `Staging Smoke` GitHub Actions workflow against the staging Railway service and staging frontend. If staging smoke fails, do not use production as the first realistic integration test.
+
 Backend:
 
 - `https://rental-management-production-35bc.up.railway.app/health`
@@ -118,6 +120,7 @@ Open these screens with appropriate roles:
 
 Pass only if:
 
+- staging smoke passed before this production deploy, or the release owner explicitly accepted skipping it;
 - backend health and version are OK;
 - frontend loads from GitHub Pages;
 - expected build identity is confirmed;
@@ -127,9 +130,21 @@ Pass only if:
 
 Fail and start `docs/rollback-playbook.md` if:
 
+- production smoke performs or requires writes to validate a basic release;
 - login fails for smoke users;
 - protected data is visible to the wrong role;
 - write actions are available to read-only roles;
 - `/health` or `/api/version` fails;
 - frontend cannot reach backend;
 - critical rentals, service, documents, GSM, finance or MAX bot workflows are broken.
+
+## Production Write Ban
+
+Production smoke must not:
+
+- create, edit or delete rentals, payments, documents, clients, equipment, users, service tickets or deliveries;
+- run imports, sync, cleanup, backfill, demo reset or database repair endpoints;
+- trigger real MAX/GSM write flows, carrier dispatches or document side effects;
+- change Railway production env, secrets, volume mounts or `DB_PATH`.
+
+Use staging for write smoke and seeded data. Production write checks require explicit human approval and a fresh backup.

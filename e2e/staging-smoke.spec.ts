@@ -51,8 +51,8 @@ function appUrl(route = '/') {
   return `${frontendUrl}/?debugVersion=1&_smoke=${Date.now()}#${normalizedRoute}`;
 }
 
-function sanitize(text: string) {
-  return text.replace(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[token]').slice(0, 800);
+function sanitize(text: string, limit = 1000) {
+  return text.replace(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[token]').slice(0, limit);
 }
 
 function installReadOnlyGuards(page: Page, issues: UiIssue[], getAction: () => string) {
@@ -99,6 +99,59 @@ async function expectHealthyMain(page: Page, label: string) {
   await expect(page.getByText(/Cannot read properties|Maximum update depth exceeded|Unexpected Application Error|Application error|Something went wrong|ошибка приложения/i)).toHaveCount(0);
 }
 
+async function visibleBodyText(page: Page) {
+  const text = await page.locator('body').innerText().catch(() => '');
+  return sanitize(text.trim(), 1000);
+}
+
+async function failWithPageDiagnostics(page: Page, message: string): Promise<never> {
+  throw new Error(`${message}
+URL: ${page.url()}
+Visible body text (first 1000 chars):
+${await visibleBodyText(page)}`);
+}
+
+async function expectAdminLoginSucceeded(page: Page) {
+  const authError = page.locator('[role="alert"], #auth-error').filter({
+    hasText: /Неверный логин или пароль|invalid login|invalid password|unauthorized|forbidden/i,
+  }).first();
+  const dashboardHeading = page.getByRole('heading', { name: 'Дашборд', exact: true });
+  const nav = page.getByRole('navigation').first();
+
+  const deadline = Date.now() + 20_000;
+  let loginState = 'pending';
+  while (Date.now() < deadline) {
+    if (await authError.isVisible().catch(() => false)) {
+      loginState = 'auth-error';
+      break;
+    }
+    if (await dashboardHeading.isVisible().catch(() => false)) {
+      loginState = 'dashboard';
+      break;
+    }
+    if (await nav.isVisible().catch(() => false)) {
+      loginState = 'nav';
+      break;
+    }
+    await page.waitForTimeout(250);
+  }
+
+  if (loginState === 'auth-error') {
+    await failWithPageDiagnostics(page, 'Staging login failed');
+  }
+
+  if (loginState === 'pending') {
+    await failWithPageDiagnostics(page, 'Staging login did not reach an authenticated app shell.');
+  }
+
+  if (page.url().includes('#/login')) {
+    await failWithPageDiagnostics(page, 'Staging login did not leave the login route.');
+  }
+
+  await expect(dashboardHeading, 'dashboard heading should be visible after staging login').toBeVisible();
+  await expect(nav, 'main navigation should be visible after staging login').toBeVisible();
+}
+
 test('staging read-only smoke', async ({ page }) => {
   test.setTimeout(180_000);
   const issues: UiIssue[] = [];
@@ -130,8 +183,7 @@ test('staging read-only smoke', async ({ page }) => {
   await page.getByLabel('Логин').fill(adminEmail);
   await page.getByRole('textbox', { name: 'Пароль' }).fill(adminPassword);
   await page.getByRole('button', { name: 'Войти' }).click();
-  await expect(page.locator('aside')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Дашборд' })).toBeVisible();
+  await expectAdminLoginSucceeded(page);
   await expectHealthyMain(page, 'dashboard');
 
   const token = await page.evaluate(() => window.localStorage.getItem('app_auth_token'));
@@ -147,7 +199,7 @@ test('staging read-only smoke', async ({ page }) => {
 
   for (const section of READ_ONLY_SECTIONS) {
     action = `section ${section.label}`;
-    const navButton = page.locator('aside').getByRole('button', { name: section.nav });
+    const navButton = page.getByRole('navigation').getByRole('button', { name: section.nav });
     await expect(navButton, `${section.label} nav should be visible for staging admin`).toBeVisible();
     await page.goto(appUrl(section.route), { waitUntil: 'domcontentloaded' });
     await expectHealthyMain(page, section.label);

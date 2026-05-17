@@ -213,7 +213,12 @@ function needsPasswordRehash(stored) {
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({
+  limit: '20mb',
+  verify: (req, _res, buffer) => {
+    req.rawBodyBytes = buffer.length;
+  },
+}));
 
 function buildSecurityHeadersMiddleware() {
   const csp = [
@@ -417,7 +422,7 @@ const gprsGateway = createGprsGateway({
   readData,
   writeData,
   logger: console,
-  enabled: !DEMO_MODE,
+  enabled: !DEMO_MODE && String(process.env.GPRS_ENABLED || '').toLowerCase() === 'true',
 });
 const wialonIpsGateway = createWialonIpsGateway({
   readData,

@@ -14,6 +14,9 @@ function registerGsmRoutes(router, deps) {
     writeData,
     generateId = prefix => `${prefix}-${Date.now()}`,
     nowIso = () => new Date().toISOString(),
+    gsmIngestToken = process.env.GSM_INGEST_TOKEN || process.env.GSM_GATEWAY_SECRET || '',
+    gsmMaxPacketAgeSeconds = Number(process.env.GSM_MAX_PACKET_AGE_SECONDS || process.env.GSM_MAX_PACKET_AGE || 7 * 24 * 60 * 60),
+    gsmMaxHttpPayloadBytes = Number(process.env.GSM_HTTP_MAX_PAYLOAD_BYTES || process.env.GPRS_MAX_PACKET_BYTES || 16 * 1024),
   } = deps;
 
   const GSM_VIEW_ROLES = new Set([
@@ -71,9 +74,108 @@ function registerGsmRoutes(router, deps) {
     return Math.min(Math.max(Number(value) || fallback, 1), max);
   }
 
+  function safeEqual(left, right) {
+    const crypto = require('crypto');
+    const safeLeft = toText(left);
+    const safeRight = toText(right);
+    if (!safeLeft || !safeRight) return false;
+    const leftDigest = crypto.createHash('sha256').update(safeLeft).digest();
+    const rightDigest = crypto.createHash('sha256').update(safeRight).digest();
+    return crypto.timingSafeEqual(leftDigest, rightDigest);
+  }
+
+  function getIngestToken(req) {
+    const authorization = toText(req.headers.authorization).replace(/^Bearer\s+/i, '');
+    return toText(req.headers['x-gsm-ingest-token']) || authorization;
+  }
+
+  function requireGsmIngestToken(req, res, next) {
+    if (!toText(gsmIngestToken)) {
+      return res.status(503).json({ ok: false, error: 'GSM ingest is not configured' });
+    }
+    if (!safeEqual(getIngestToken(req), gsmIngestToken)) {
+      return res.status(401).json({ ok: false, error: 'GSM ingest token required' });
+    }
+    return next();
+  }
+
   function parseDateMs(value) {
     const ms = Date.parse(String(value || ''));
     return Number.isFinite(ms) ? ms : null;
+  }
+
+  function getHttpIngestFields(body = {}) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new Error('JSON payload object required');
+    }
+    return {
+      imei: toText(body.imei || body.IMEI) || undefined,
+      deviceId: toText(body.deviceId || body.device_id || body.trackerId || body.tracker) || undefined,
+      timestamp: toText(body.timestamp || body.deviceTime || body.time || body.at) || undefined,
+      lat: body.lat ?? body.latitude,
+      lng: body.lng ?? body.lon ?? body.longitude,
+      speed: body.speed ?? body.speedKph,
+      course: body.course ?? body.heading,
+      satellites: body.satellites ?? body.sats,
+      gsmSignal: body.gsmSignal ?? body.signal ?? body.rssi,
+      voltage: body.voltage ?? body.batteryVoltage ?? body.battery,
+      ignition: body.ignition,
+      rawPayload: body.rawPayload,
+    };
+  }
+
+  function normalizeHttpIngestPayload(body = {}) {
+    const normalized = getHttpIngestFields(body);
+    if (!normalized.imei && !normalized.deviceId) throw new Error('deviceId or imei required');
+    if (!normalized.timestamp) throw new Error('timestamp required');
+    if (normalized.lat === undefined || normalized.lat === null || normalized.lat === '') throw new Error('latitude required');
+    if (normalized.lng === undefined || normalized.lng === null || normalized.lng === '') throw new Error('longitude required');
+    return JSON.stringify(normalized);
+  }
+
+  function validateHttpIngestBody(body = {}, req = null) {
+    const requestBytes = Number(req?.rawBodyBytes || req?.headers?.['content-length'] || 0);
+    if (requestBytes > gsmMaxHttpPayloadBytes) {
+      const error = new Error(`payload_too_large: ${requestBytes} bytes > ${gsmMaxHttpPayloadBytes}`);
+      error.statusCode = 413;
+      throw error;
+    }
+
+    const payloadText = normalizeHttpIngestPayload(body);
+    const byteLength = Buffer.byteLength(payloadText);
+    if (byteLength > gsmMaxHttpPayloadBytes) {
+      const error = new Error(`payload_too_large: ${byteLength} bytes > ${gsmMaxHttpPayloadBytes}`);
+      error.statusCode = 413;
+      throw error;
+    }
+
+    const fields = getHttpIngestFields(body);
+    const lat = Number(fields.lat);
+    const lng = Number(fields.lng);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+      const error = new Error('Invalid latitude');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+      const error = new Error('Invalid longitude');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const packetMs = parseDateMs(fields.timestamp);
+    if (packetMs === null) {
+      const error = new Error('Invalid timestamp');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (Math.abs(Date.now() - packetMs) > gsmMaxPacketAgeSeconds * 1000) {
+      const error = new Error('Packet timestamp is outside allowed age window');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return payloadText;
   }
 
   function routeWindow(req, res) {
@@ -386,8 +488,50 @@ function registerGsmRoutes(router, deps) {
     res.json(gprsGateway.getStatus());
   });
 
+  router.post('/gsm/ingest', requireGsmIngestToken, (req, res) => {
+    let payloadText;
+    try {
+      payloadText = validateHttpIngestBody(req.body, req);
+    } catch (error) {
+      return res.status(error.statusCode || 400).json({ ok: false, error: error.message });
+    }
+
+    try {
+      const packet = gprsGateway.processRawPacket(Buffer.from(payloadText, 'utf8'), {
+        sourceIp: req.ip,
+        remoteAddress: req.ip,
+        remotePort: req.socket?.remotePort || null,
+      });
+      const status = packet.parseStatus === 'parsed' ? (packet.duplicate ? 200 : 202) : 400;
+      return res.status(status).json({
+        ok: packet.parseStatus === 'parsed',
+        packetId: packet.id,
+        duplicate: Boolean(packet.duplicate),
+        duplicateOf: packet.duplicateOf || null,
+        parseStatus: packet.parseStatus,
+        parseError: packet.parseError || null,
+        imei: packet.imei || null,
+        deviceId: packet.deviceId || null,
+        equipmentId: packet.equipmentId || null,
+        receivedAt: packet.receivedAt || packet.createdAt || null,
+      });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error.message || 'GSM packet rejected' });
+    }
+  });
+
   router.get('/gsm/dashboard', requireAuth, requireGsmView, (req, res) => {
     res.json(buildGsmDashboard(req));
+  });
+
+  router.get('/gsm/diagnostics', requireAuth, requireGsmView, (req, res) => {
+    if (req.user?.userRole !== 'Администратор') {
+      return res.status(403).json({ ok: false, error: 'GSM diagnostics доступен только администратору' });
+    }
+    if (typeof gprsGateway.getDiagnostics !== 'function') {
+      return res.status(501).json({ ok: false, error: 'GSM diagnostics недоступен' });
+    }
+    return res.json(gprsGateway.getDiagnostics());
   });
 
   router.get('/gsm/bindings', requireAuth, requireGsmView, (req, res) => {

@@ -71,7 +71,7 @@ async function request(baseUrl, method, path, token = 'admin-token', body) {
   };
 }
 
-function createGsmApiApp(stateOverrides = {}) {
+function createGsmApiApp(stateOverrides = {}, routeOptions = {}) {
   const { gateway, state } = createMemoryGateway({
     users: [
       { id: 'U-1', name: 'Admin', role: 'Администратор' },
@@ -81,7 +81,11 @@ function createGsmApiApp(stateOverrides = {}) {
     ...stateOverrides,
   });
   const app = express();
-  app.use(express.json());
+  app.use(express.json({
+    verify: (req, _res, buffer) => {
+      req.rawBodyBytes = buffer.length;
+    },
+  }));
   const apiRouter = express.Router();
 
   function requireAuth(req, res, next) {
@@ -115,6 +119,9 @@ function createGsmApiApp(stateOverrides = {}) {
     },
     generateId: prefix => `${prefix}-test`,
     nowIso: () => '2026-05-16T10:00:00.000Z',
+    gsmIngestToken: 'gsm-test-secret',
+    gsmMaxPacketAgeSeconds: 10 * 365 * 24 * 60 * 60,
+    ...routeOptions,
   });
   app.use('/api', apiRouter);
   return { app, gateway, state };
@@ -284,6 +291,233 @@ test('GET /api/gsm/status returns gateway state', async () => {
   });
 });
 
+test('POST /api/gsm/ingest requires token and accepts valid JSON packet', async () => {
+  const { app, state } = createGsmApiApp({
+    equipment: [
+      { id: 'EQ-1', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '044', gsmImei: '866123456789012' },
+    ],
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const noToken = await fetch(`${baseUrl}/api/gsm/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ imei: '866123456789012', timestamp: '2026-05-16T10:00:00.000Z', lat: 55.796, lng: 49.108 }),
+    });
+    assert.equal(noToken.status, 401);
+
+    const accepted = await fetch(`${baseUrl}/api/gsm/ingest`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gsm-ingest-token': 'gsm-test-secret',
+      },
+      body: JSON.stringify({ imei: '866123456789012', timestamp: '2026-05-16T10:00:00.000Z', lat: 55.796, lng: 49.108, speed: 4 }),
+    });
+    const body = await accepted.json();
+
+    assert.equal(accepted.status, 202);
+    assert.equal(body.ok, true);
+    assert.equal(body.equipmentId, 'EQ-1');
+    assert.equal(state.gsm_packets.length, 1);
+    assert.equal(state.equipment[0].gsmLastLat, 55.796);
+  });
+});
+
+test('POST /api/gsm/ingest rejects invalid packet without crashing', async () => {
+  const { app, state } = createGsmApiApp();
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/gsm/ingest`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer gsm-test-secret',
+      },
+      body: JSON.stringify({ imei: '866123456789012', timestamp: '2026-05-16T10:00:00.000Z', lat: 120, lng: 49.108 }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.equal(body.ok, false);
+    assert.match(body.error, /latitude/i);
+    assert.equal(state.gsm_packets.length, 0);
+  });
+});
+
+test('POST /api/gsm/ingest rejects invalid token, stale timestamps, and oversize JSON', async () => {
+  const { app, state } = createGsmApiApp({}, { gsmMaxPacketAgeSeconds: 60, gsmMaxHttpPayloadBytes: 180 });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const invalidToken = await fetch(`${baseUrl}/api/gsm/ingest`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gsm-ingest-token': 'wrong-secret',
+      },
+      body: JSON.stringify({ imei: '866123456789012', timestamp: new Date().toISOString(), lat: 55.796, lng: 49.108 }),
+    });
+    assert.equal(invalidToken.status, 401);
+
+    const tooOld = await fetch(`${baseUrl}/api/gsm/ingest`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer gsm-test-secret',
+      },
+      body: JSON.stringify({ imei: '866123456789012', timestamp: '2020-01-01T00:00:00.000Z', lat: 55.796, lng: 49.108 }),
+    });
+    assert.equal(tooOld.status, 400);
+
+    const tooLarge = await fetch(`${baseUrl}/api/gsm/ingest`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gsm-ingest-token': 'gsm-test-secret',
+      },
+      body: JSON.stringify({
+        imei: '866123456789012',
+        timestamp: new Date().toISOString(),
+        lat: 55.796,
+        lng: 49.108,
+        rawPayload: 'x'.repeat(240),
+      }),
+    });
+    assert.equal(tooLarge.status, 413);
+    assert.equal(state.gsm_packets.length, 0);
+  });
+});
+
+test('POST /api/gsm/ingest keeps production closed when token is not configured', async () => {
+  const { app } = createGsmApiApp({}, { gsmIngestToken: '' });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/gsm/ingest`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gsm-ingest-token': 'gsm-test-secret',
+      },
+      body: JSON.stringify({ imei: '866123456789012', timestamp: new Date().toISOString(), lat: 55.796, lng: 49.108 }),
+    });
+    assert.equal(response.status, 503);
+  });
+});
+
+test('POST /api/gsm/ingest stores unknown device as unlinked device row', async () => {
+  const { app, state } = createGsmApiApp();
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/gsm/ingest`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gsm-ingest-token': 'gsm-test-secret',
+      },
+      body: JSON.stringify({ deviceId: 'UNKNOWN-HTTP-1', timestamp: '2026-05-16T10:00:00.000Z', lat: 55.796, lng: 49.108 }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 202);
+    assert.equal(body.ok, true);
+    assert.equal(body.equipmentId, null);
+    assert.equal(state.gsm_packets.length, 1);
+    assert.equal(state.gsm_devices.length, 1);
+    assert.equal(state.gsm_devices[0].deviceId, 'UNKNOWN-HTTP-1');
+    assert.equal(state.gsm_devices[0].equipmentId, undefined);
+  });
+});
+
+test('POST /api/gsm/ingest uses gsm_devices link to update equipment', async () => {
+  const { app, state } = createGsmApiApp({
+    equipment: [
+      { id: 'EQ-linked', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '044' },
+    ],
+    gsm_devices: [
+      { id: 'GSM-866123456789012', imei: '866123456789012', equipmentId: 'EQ-linked', status: 'unknown' },
+    ],
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/gsm/ingest`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gsm-ingest-token': 'gsm-test-secret',
+      },
+      body: JSON.stringify({ imei: '866123456789012', timestamp: '2026-05-16T10:00:00.000Z', lat: 55.796, lng: 49.108 }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 202);
+    assert.equal(body.equipmentId, 'EQ-linked');
+    assert.equal(state.gsm_packets[0].equipmentId, 'EQ-linked');
+    assert.equal(state.gsm_devices[0].equipmentId, 'EQ-linked');
+    assert.equal(state.equipment[0].gsmLastLat, 55.796);
+  });
+});
+
+test('duplicate HTTP ingest packet reuses stored packet instead of appending noise', async () => {
+  const { app, state } = createGsmApiApp();
+  const packet = {
+    imei: '866123456789012',
+    timestamp: '2026-05-16T10:00:00.000Z',
+    lat: 55.796,
+    lng: 49.108,
+  };
+
+  await withExpressApp(app, async (baseUrl) => {
+    for (let index = 0; index < 2; index += 1) {
+      const response = await fetch(`${baseUrl}/api/gsm/ingest`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-gsm-ingest-token': 'gsm-test-secret',
+        },
+        body: JSON.stringify(packet),
+      });
+      assert.equal([200, 202].includes(response.status), true);
+    }
+
+    assert.equal(state.gsm_packets.length, 1);
+  });
+});
+
+test('GET /api/gsm/diagnostics summarizes unknown devices and parse errors for admins', async () => {
+  const { app, gateway } = createGsmApiApp();
+  gateway.processRawPacket(Buffer.from('deviceId:UNKNOWN-DEVICE LAT:120 LNG:49.108'), { sourceIp: '127.0.0.1' });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const viewer = await request(baseUrl, 'GET', '/api/gsm/diagnostics', 'viewer-token');
+    assert.equal(viewer.status, 403);
+
+    const admin = await request(baseUrl, 'GET', '/api/gsm/diagnostics', 'admin-token');
+    assert.equal(admin.status, 200);
+    assert.equal(admin.body.totals.packets, 1);
+    assert.equal(admin.body.totals.packetsWithoutLinkedEquipment, 1);
+    assert.equal(admin.body.totals.parseErrors, 1);
+    assert.deepEqual(admin.body.unknownDeviceIds, ['UNKNOWN-DEVICE']);
+    assert.equal(admin.body.latestRawPackets.length, 1);
+  });
+});
+
+test('GET /api/gsm/diagnostics redacts secret-like raw text', async () => {
+  const { app, gateway } = createGsmApiApp();
+  gateway.processRawPacket(
+    Buffer.from('deviceId:UNKNOWN-SECRET LAT:55.1 LNG:49.1 token=gsm-test-secret password=hidden'),
+    { sourceIp: '127.0.0.1' },
+  );
+
+  await withExpressApp(app, async (baseUrl) => {
+    const admin = await request(baseUrl, 'GET', '/api/gsm/diagnostics', 'admin-token');
+    assert.equal(admin.status, 200);
+    const serialized = JSON.stringify(admin.body);
+    assert.doesNotMatch(serialized, /gsm-test-secret/);
+    assert.doesNotMatch(serialized, /password=hidden/);
+    assert.match(serialized, /redacted/);
+  });
+});
+
 test('GSM API enforces authentication and command write permissions', async () => {
   const { app } = createGsmApiApp({
     equipment: [
@@ -323,12 +557,15 @@ test('GET /api/gsm/route returns coordinate packets for equipment', async () => 
       { id: 'EQ-1', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '044', gsmImei: '866123456789012' },
     ],
   });
-  gateway.processRawPacket(Buffer.from('IMEI:866123456789012 LAT:55.796 LNG:49.108 SPEED:0 COURSE:120'), {
+  const packet = gateway.processRawPacket(Buffer.from('IMEI:866123456789012 LAT:55.796 LNG:49.108 SPEED:0 COURSE:120'), {
     sourceIp: '127.0.0.1',
   });
+  const packetAt = new Date(packet.receivedAt);
+  const from = new Date(packetAt.getTime() - 60_000).toISOString();
+  const to = new Date(packetAt.getTime() + 60_000).toISOString();
 
   await withExpressApp(app, async (baseUrl) => {
-    const response = await request(baseUrl, 'GET', '/api/gsm/route?equipmentId=EQ-1&dateFrom=2026-05-16T00:00:00.000Z&dateTo=2026-05-16T23:59:59.000Z', 'viewer-token');
+    const response = await request(baseUrl, 'GET', `/api/gsm/route?equipmentId=EQ-1&dateFrom=${encodeURIComponent(from)}&dateTo=${encodeURIComponent(to)}`, 'viewer-token');
     assert.equal(response.status, 200);
     assert.equal(response.body.length, 1);
     assert.equal(response.body[0].lat, 55.796);

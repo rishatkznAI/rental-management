@@ -735,7 +735,7 @@ export default function Gsm() {
 
   React.useEffect(() => {
     if (routeEquipmentId || gsmDevices.length === 0) return;
-    setRouteEquipmentId(gsmDevices[0].equipmentId);
+    setRouteEquipmentId(gsmDevices.find(device => device.equipmentId)?.equipmentId || '');
   }, [gsmDevices, routeEquipmentId]);
 
   const selectedSnapshot = React.useMemo(
@@ -1297,11 +1297,18 @@ export default function Gsm() {
                       </thead>
                       <tbody>
                         {gsmDevices.map(device => (
-                          <tr key={device.equipmentId} className="border-t border-white/10 align-top">
+                          <tr key={device.equipmentId || device.id || device.imei || device.deviceId} className="border-t border-white/10 align-top">
                             <td className="px-3 py-2">
-                              <Link to={`/equipment/${device.equipmentId}`} className="font-medium text-cyan-300 hover:text-cyan-200">
-                                {device.inventoryNumber || device.equipmentName || device.equipmentId}
-                              </Link>
+                              {device.equipmentId ? (
+                                <Link to={`/equipment/${device.equipmentId}`} className="font-medium text-cyan-300 hover:text-cyan-200">
+                                  {device.inventoryNumber || device.equipmentName || device.equipmentId}
+                                </Link>
+                              ) : (
+                                <div>
+                                  <div className="font-medium text-slate-100">Не привязано</div>
+                                  <div className="mt-1 text-xs text-slate-500">{device.imei || device.deviceId || device.id || 'unknown device'}</div>
+                                </div>
+                              )}
                             </td>
                             <td className="px-3 py-2 text-slate-300">{[device.manufacturer, device.model].filter(Boolean).join(' ') || '—'}</td>
                             <td className="px-3 py-2 font-mono text-xs text-slate-300">{device.serialNumber || '—'}</td>

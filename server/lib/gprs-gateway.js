@@ -131,21 +131,26 @@ function protocolBreakdown(packets) {
 
 function equipmentLabel(equipment) {
   if (!equipment) return null;
+  const clean = value => String(value || '').trim();
   return [
-    [equipment.manufacturer, equipment.model].filter(Boolean).join(' '),
-    equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
-    equipment.serialNumber ? `SN ${equipment.serialNumber}` : '',
+    [clean(equipment.manufacturer), clean(equipment.model)].filter(Boolean).join(' '),
+    clean(equipment.inventoryNumber) ? `INV ${clean(equipment.inventoryNumber)}` : '',
+    clean(equipment.serialNumber) ? `SN ${clean(equipment.serialNumber)}` : '',
   ].filter(Boolean).join(' · ') || equipment.id || null;
 }
 
 function equipmentGsmFields(equipment) {
   if (!equipment) return {};
+  const clean = value => {
+    const text = String(value || '').trim();
+    return text || null;
+  };
   return {
     equipmentLabel: equipmentLabel(equipment),
-    equipmentModel: equipment.model || null,
-    equipmentManufacturer: equipment.manufacturer || null,
-    equipmentInventoryNumber: equipment.inventoryNumber || null,
-    equipmentSerialNumber: equipment.serialNumber || null,
+    equipmentModel: clean(equipment.model),
+    equipmentManufacturer: clean(equipment.manufacturer),
+    equipmentInventoryNumber: clean(equipment.inventoryNumber),
+    equipmentSerialNumber: clean(equipment.serialNumber),
   };
 }
 

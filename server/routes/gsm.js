@@ -201,10 +201,11 @@ function registerGsmRoutes(router, deps) {
 
   function equipmentLabel(equipment) {
     if (!equipment) return null;
+    const clean = value => String(value || '').trim();
     return [
-      [equipment.manufacturer, equipment.model].filter(Boolean).join(' '),
-      equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
-      equipment.serialNumber ? `SN ${equipment.serialNumber}` : '',
+      [clean(equipment.manufacturer), clean(equipment.model)].filter(Boolean).join(' '),
+      clean(equipment.inventoryNumber) ? `INV ${clean(equipment.inventoryNumber)}` : '',
+      clean(equipment.serialNumber) ? `SN ${clean(equipment.serialNumber)}` : '',
     ].filter(Boolean).join(' · ') || equipment.id || null;
   }
 

@@ -259,8 +259,8 @@ test('packet from Mantall tracker links by gsmDeviceId before IMEI', () => {
     equipment: [
       {
         id: 'EQ-MANTALL-001',
-        manufacturer: 'Mantall',
-        model: 'XE160WCT',
+        manufacturer: 'Mantall ',
+        model: 'XE160WCT ',
         serialNumber: '03311273',
         inventoryNumber: '001',
         status: 'available',
@@ -477,8 +477,8 @@ test('POST /api/gsm/ingest links JSON packet by gsmDeviceId', async () => {
     equipment: [
       {
         id: 'EQ-MANTALL-001',
-        manufacturer: 'Mantall',
-        model: 'XE160WCT',
+        manufacturer: 'Mantall ',
+        model: 'XE160WCT ',
         serialNumber: '03311273',
         inventoryNumber: '001',
         gsmImei: '866854051837469',
@@ -621,8 +621,8 @@ test('GET /api/gsm/packets enriches legacy unlinked deviceId packet without cras
     equipment: [
       {
         id: 'EQ-MANTALL-001',
-        manufacturer: 'Mantall',
-        model: 'XE160WCT',
+        manufacturer: 'Mantall ',
+        model: 'XE160WCT ',
         serialNumber: '03311273',
         inventoryNumber: '001',
         gsmDeviceId: '990999260517062',
@@ -897,6 +897,7 @@ test('GET /api/gsm/dashboard maps legacy deviceId packet to equipment snapshot p
 
     assert.equal(response.status, 200);
     assert.equal(response.body.recentPackets[0].equipmentId, 'EQ-MANTALL-001');
+    assert.equal(response.body.recentPackets[0].equipmentLabel, 'Mantall XE160WCT · INV 001 · SN 03311273');
     assert.equal(snapshot.point.lat, 0.223456);
     assert.equal(snapshot.point.lng, 0.754321);
     assert.equal(snapshot.telemetry.batteryVoltage, 11.9);

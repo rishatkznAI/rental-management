@@ -5,12 +5,33 @@ import { loginAsAdmin, navigateInApp } from './helpers/auth';
 import { createEquipment, withAdminApi } from './helpers/api';
 
 function sendTcpPacket(payload: string, port = 5023) {
+  const deadline = Date.now() + 8_000;
+
   return new Promise<void>((resolve, reject) => {
-    const socket = net.createConnection({ host: '127.0.0.1', port }, () => {
-      socket.end(payload);
-    });
-    socket.once('error', reject);
-    socket.once('close', () => resolve());
+    let settled = false;
+    const attempt = () => {
+      const socket = net.createConnection({ host: '127.0.0.1', port }, () => {
+        socket.end(payload);
+      });
+      socket.once('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ECONNREFUSED' && Date.now() < deadline) {
+          socket.removeAllListeners('close');
+          socket.destroy();
+          setTimeout(attempt, 250);
+          return;
+        }
+        socket.destroy();
+        settled = true;
+        reject(error);
+      });
+      socket.once('close', () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      });
+    };
+
+    attempt();
   });
 }
 
@@ -105,6 +126,76 @@ test('GSM page shows gateway status, latest packets and packet details', async (
   ));
   expect(fullReferenceLoads, `Unexpected full GSM refs: ${fullReferenceLoads.map(item => item.path).join(', ')}`).toEqual([]);
   expect(apiErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+});
+
+test('GSM page keeps light theme readable across packets, warning and map', async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on('console', message => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+
+  const trackerId = '990999260517062';
+  await withAdminApi(async (api) => {
+    const equipmentRes = await api.get('/api/equipment');
+    expect(equipmentRes.ok()).toBeTruthy();
+    const equipment = (await equipmentRes.json()) as Array<{ id: string; inventoryNumber?: string; serialNumber?: string }>;
+    const existing = equipment.find(item => item.inventoryNumber === '001' && item.serialNumber === '03311273');
+    const target = existing || await createEquipment(api, `gsm-light-${Date.now()}`);
+    const patch = await api.patch(`/api/equipment/${target.id}`, {
+      data: {
+        manufacturer: 'Mantall',
+        model: 'XE160WCT',
+        inventoryNumber: '001',
+        serialNumber: '03311273',
+        gsmImei: trackerId,
+        gsmDeviceId: trackerId,
+        gsmProtocol: 'fallback-text',
+      },
+    });
+    expect(patch.ok()).toBeTruthy();
+    return target;
+  });
+
+  await page.addInitScript(() => window.localStorage.setItem('theme', 'light'));
+  await loginAsAdmin(page);
+  await sendTcpPacket(`IMEI:${trackerId} LAT:0.223456 LNG:0.754321 SPEED:0`);
+
+  await navigateInApp(page, '/gsm');
+  await expect(page.locator('html')).not.toHaveClass(/dark/);
+  await expect(page.getByRole('heading', { name: /Геозоны, уведомления и маршруты техники/ })).toBeVisible();
+
+  const shell = page.locator('main, body').first();
+  await expect.poll(async () => shell.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe('rgb(5, 8, 22)');
+
+  const badLightThemeContainers = await page.locator([
+    '[class*="bg-black"]',
+    '[class*="bg-zinc-950"]',
+    '[class*="bg-slate-950"]:not([class*="dark:bg-slate-950"])',
+    '[class*="border-white/10"]:not([class*="dark:border-white/10"])',
+  ].join(',')).count();
+  expect(badLightThemeContainers).toBe(0);
+
+  await page.getByRole('tab', { name: 'Последние пакеты' }).click();
+  await expect(page.getByText(trackerId).first()).toBeVisible();
+  await expect(page.getByText('Mantall XE160WCT · INV 001 · SN 03311273').first()).toBeVisible();
+  await expect(page.getByText('Координаты выглядят тестовыми или некорректными').first()).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Карта и геозоны' }).click();
+  await expect(page.getByRole('heading', { name: 'Карта расположения техники' })).toBeVisible();
+  await expect(page.getByText('Mantall XE160WCT').first()).toBeVisible();
+  await expect(page.getByText('Координаты выглядят тестовыми или некорректными').first()).toBeVisible();
+  await expectRenderedGsmMap(page);
+
+  await page.evaluate(() => {
+    window.localStorage.setItem('theme', 'dark');
+    document.documentElement.classList.add('dark');
+  });
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  await expect(page.getByRole('heading', { name: 'Карта расположения техники' })).toBeVisible();
+  await expect(page.getByText('Координаты выглядят тестовыми или некорректными').first()).toBeVisible();
+  await expectRenderedGsmMap(page);
+
   expect(consoleErrors).toEqual([]);
 });
 

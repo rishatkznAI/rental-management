@@ -43,6 +43,7 @@ export default defineConfig({
       env: {
         ADMIN_RESET_EMAIL: process.env.E2E_ADMIN_EMAIL || 'smoke-admin@yandex.ru',
         ADMIN_RESET_PASSWORD: process.env.E2E_ADMIN_PASSWORD || '123123',
+        GPRS_ENABLED: 'true',
       },
     },
   ],

@@ -596,7 +596,7 @@ function GsmLeafletMap({
 
   if (loadError) {
     return (
-      <div className="flex min-h-[520px] items-center justify-center rounded-3xl border border-dashed border-white/10 bg-slate-950/40 px-6 text-center text-sm text-slate-300">
+      <div className="flex min-h-[520px] items-center justify-center rounded-3xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/40 px-6 text-center text-sm text-slate-700 dark:text-slate-300">
         {loadError} Список техники, уведомления и история ниже продолжают работать.
       </div>
     );
@@ -605,7 +605,7 @@ function GsmLeafletMap({
   return (
     <div
       ref={containerRef}
-      className="min-h-[520px] rounded-3xl border border-white/10 bg-slate-950/40"
+      className="min-h-[520px] rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/40"
     />
   );
 }
@@ -1016,52 +1016,52 @@ export default function Gsm() {
   ]);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.08),transparent_28%),radial-gradient(circle_at_top_right,rgba(163,230,53,0.08),transparent_24%),linear-gradient(180deg,#050816_0%,#09101f_100%)] px-4 py-8 text-white sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-50 dark:bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.08),transparent_28%),radial-gradient(circle_at_top_right,rgba(163,230,53,0.08),transparent_24%),linear-gradient(180deg,#050816_0%,#09101f_100%)] px-4 py-8 text-slate-900 dark:text-white sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
-        <section className="overflow-hidden rounded-[32px] border border-white/10 bg-slate-950/70 shadow-[0_32px_80px_-44px_rgba(15,23,42,0.9)] backdrop-blur-xl">
+        <section className="overflow-hidden rounded-[32px] border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 shadow-[0_32px_80px_-44px_rgba(15,23,42,0.9)] backdrop-blur-xl">
           <div className="grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
             <div>
-                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200">
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-200 dark:border-cyan-400/20 bg-cyan-50 dark:bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700 dark:text-cyan-200">
                 <MapIcon className="h-3.5 w-3.5" />
                 GSM
               </div>
-              <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">Геозоны, уведомления и маршруты техники</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">
+              <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white sm:text-4xl">Геозоны, уведомления и маршруты техники</h1>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-700 dark:text-slate-300 sm:text-base">
                 Раздел показывает текущее положение техники, выезд со склада, прибытие на объект, пропажу сигнала, маршрут за день или неделю,
                 а также телеметрию по моточасам, зажиганию и АКБ. Привязка идёт к активной аренде и адресу объекта клиента.
               </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Точек на карте</div>
+              <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-600 dark:text-slate-400">Точек на карте</div>
                 <div className="mt-2 text-3xl font-black">{metrics.mapped}</div>
-                <div className="mt-1 text-sm text-slate-300">из {metrics.total} единиц техники</div>
+                <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">из {metrics.total} единиц техники</div>
               </div>
-              <div className="rounded-3xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-emerald-200">Реальный GPS</div>
-                <div className="mt-2 text-3xl font-black text-white">{metrics.realGps}</div>
-                <div className="mt-1 text-sm text-emerald-100/80">точка пришла от трекера</div>
+              <div className="rounded-3xl border border-emerald-200 dark:border-emerald-400/20 bg-emerald-50 dark:bg-emerald-400/10 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-200">Реальный GPS</div>
+                <div className="mt-2 text-3xl font-black text-slate-900 dark:text-white">{metrics.realGps}</div>
+                <div className="mt-1 text-sm text-emerald-700 dark:text-emerald-100/80">точка пришла от трекера</div>
               </div>
-              <div className="rounded-3xl border border-amber-400/20 bg-amber-400/10 p-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-amber-100">Расчётно по локации</div>
-                <div className="mt-2 text-3xl font-black text-white">{metrics.locationDerived}</div>
-                <div className="mt-1 text-sm text-amber-100/80">точка достроена по адресу и истории</div>
+              <div className="rounded-3xl border border-amber-200 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-400/10 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-amber-800 dark:text-amber-100">Расчётно по локации</div>
+                <div className="mt-2 text-3xl font-black text-slate-900 dark:text-white">{metrics.locationDerived}</div>
+                <div className="mt-1 text-sm text-amber-700 dark:text-amber-100/80">точка достроена по адресу и истории</div>
               </div>
-              <div className="rounded-3xl border border-rose-400/20 bg-rose-400/10 p-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-rose-100">Уведомления</div>
-                <div className="mt-2 text-3xl font-black text-white">{metrics.alerts}</div>
-                <div className="mt-1 text-sm text-rose-100/80">только для техники с реальным трекером</div>
+              <div className="rounded-3xl border border-rose-200 dark:border-rose-400/20 bg-rose-50 dark:bg-rose-400/10 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-rose-800 dark:text-rose-100">Уведомления</div>
+                <div className="mt-2 text-3xl font-black text-slate-900 dark:text-white">{metrics.alerts}</div>
+                <div className="mt-1 text-sm text-rose-700 dark:text-rose-100/80">только для техники с реальным трекером</div>
               </div>
             </div>
           </div>
         </section>
 
-        <Card className="border-white/10 bg-slate-950/70 text-white">
+        <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
           <CardHeader className="gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <CardTitle className="text-xl font-bold text-white">Фильтры и режим просмотра</CardTitle>
-              <CardDescription className="text-slate-400">
+              <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Фильтры и режим просмотра</CardTitle>
+              <CardDescription className="text-slate-600 dark:text-slate-400">
                 Фильтруйте по сигналу, рабочему статусу техники и поиску по модели, INV, SN, клиенту или адресу объекта.
               </CardDescription>
             </div>
@@ -1072,7 +1072,7 @@ export default function Gsm() {
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Поиск по технике, клиенту, адресу объекта или локации"
-                  className="h-11 rounded-2xl border-white/10 bg-white/5 pl-10 text-white placeholder:text-slate-500"
+                  className="h-11 rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 pl-10 text-slate-900 dark:text-white placeholder:text-slate-500"
                 />
               </div>
             </div>
@@ -1094,7 +1094,7 @@ export default function Gsm() {
                     'rounded-full',
                     signalFilter === option.value
                       ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
-                      : 'border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10',
+                      : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10',
                   )}
                 >
                   {option.label}
@@ -1113,7 +1113,7 @@ export default function Gsm() {
                     'rounded-full',
                     statusFilter === option.value
                       ? 'bg-cyan-300 text-slate-950 hover:bg-cyan-200'
-                      : 'border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10',
+                      : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10',
                   )}
                 >
                   {option.label}
@@ -1124,26 +1124,26 @@ export default function Gsm() {
         </Card>
 
         <Tabs value={tab} onValueChange={(value) => setTab(value as GsmTab)} className="space-y-4">
-          <TabsList className="h-auto rounded-2xl border border-white/10 bg-slate-950/70 p-1">
-            <TabsTrigger value="overview" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+          <TabsList className="h-auto rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 p-1">
+            <TabsTrigger value="overview" className="rounded-xl px-4 py-2 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-50 dark:data-[state=active]:bg-white dark:data-[state=active]:text-slate-950">
               Обзор
             </TabsTrigger>
-            <TabsTrigger value="devices" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+            <TabsTrigger value="devices" className="rounded-xl px-4 py-2 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-50 dark:data-[state=active]:bg-white dark:data-[state=active]:text-slate-950">
               Устройства
             </TabsTrigger>
-            <TabsTrigger value="packets" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+            <TabsTrigger value="packets" className="rounded-xl px-4 py-2 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-50 dark:data-[state=active]:bg-white dark:data-[state=active]:text-slate-950">
               Последние пакеты
             </TabsTrigger>
-            <TabsTrigger value="route" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+            <TabsTrigger value="route" className="rounded-xl px-4 py-2 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-50 dark:data-[state=active]:bg-white dark:data-[state=active]:text-slate-950">
               Маршрут
             </TabsTrigger>
-            <TabsTrigger value="live" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+            <TabsTrigger value="live" className="rounded-xl px-4 py-2 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-50 dark:data-[state=active]:bg-white dark:data-[state=active]:text-slate-950">
               Карта и геозоны
             </TabsTrigger>
-            <TabsTrigger value="history" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+            <TabsTrigger value="history" className="rounded-xl px-4 py-2 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-50 dark:data-[state=active]:bg-white dark:data-[state=active]:text-slate-950">
               История и маршрут
             </TabsTrigger>
-            <TabsTrigger value="gateway" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:text-slate-950">
+            <TabsTrigger value="gateway" className="rounded-xl px-4 py-2 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-50 dark:data-[state=active]:bg-white dark:data-[state=active]:text-slate-950">
               GPRS канал
             </TabsTrigger>
           </TabsList>
@@ -1151,83 +1151,83 @@ export default function Gsm() {
           <TabsContent value="overview">
             <div className="space-y-6">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardContent className="p-5">
-                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-cyan-300">
+                    <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 text-cyan-700 dark:text-cyan-300">
                       <Server className="h-5 w-5" />
                     </div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">GPRS-шлюз</div>
-                    <div className="mt-2 text-2xl font-black text-white">
+                    <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
                       {formatGatewayState(gatewayStatus)}
                     </div>
-                    <div className="mt-1 text-sm text-slate-400">TCP :{gatewayStatus.tcpPort}</div>
+                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">TCP :{gatewayStatus.tcpPort}</div>
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardContent className="p-5">
-                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-emerald-300">
+                    <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 text-emerald-700 dark:text-emerald-300">
                       <Cable className="h-5 w-5" />
                     </div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Подключения</div>
-                    <div className="mt-2 text-2xl font-black text-white">{gatewayStatus.connectionsActive}</div>
-                    <div className="mt-1 text-sm text-slate-400">активных сейчас</div>
+                    <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{gatewayStatus.connectionsActive}</div>
+                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">активных сейчас</div>
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardContent className="p-5">
-                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-cyan-300">
+                    <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 text-cyan-700 dark:text-cyan-300">
                       <ArrowDownToLine className="h-5 w-5" />
                     </div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Пакетов всего</div>
-                    <div className="mt-2 text-2xl font-black text-white">{gatewayStatus.packetsReceivedTotal}</div>
-                    <div className="mt-1 text-sm text-slate-400">в журнале {gatewayStatus.packetsStored}</div>
+                    <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{gatewayStatus.packetsReceivedTotal}</div>
+                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">в журнале {gatewayStatus.packetsStored}</div>
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardContent className="p-5">
-                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-amber-300">
+                    <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 text-amber-700 dark:text-amber-300">
                       <Clock3 className="h-5 w-5" />
                     </div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Последний пакет</div>
-                    <div className="mt-2 text-sm font-semibold text-white">{formatDateTime(gatewayStatus.lastPacketAt)}</div>
-                    <div className="mt-1 text-sm text-slate-400">uptime {gatewayStatus.uptimeSeconds} c</div>
+                    <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">{formatDateTime(gatewayStatus.lastPacketAt)}</div>
+                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">uptime {gatewayStatus.uptimeSeconds} c</div>
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardContent className="p-5">
-                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-lime-300">
+                    <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 text-lime-700 dark:text-lime-300">
                       <Cpu className="h-5 w-5" />
                     </div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Устройства</div>
-                    <div className="mt-2 text-2xl font-black text-white">
+                    <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
                       {gsmDevices.filter(item => item.status === 'online').length}/{gsmDevices.length}
                     </div>
-                    <div className="mt-1 text-sm text-slate-400">онлайн / всего</div>
+                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">онлайн / всего</div>
                   </CardContent>
                 </Card>
               </div>
 
               {gatewayStatus.startError && (
-                <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
+                <div className="rounded-2xl border border-rose-200 dark:border-rose-400/20 bg-rose-50 dark:bg-rose-400/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-200">
                   {gatewayStatus.startError}
                 </div>
               )}
 
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardHeader>
-                    <CardTitle className="text-xl font-bold text-white">Последние входящие пакеты</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Последние входящие пакеты</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       Сырые пакеты сохраняются до добавления конкретных парсеров протоколов.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     {recentGatewayPackets.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                      <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                         Пакетов пока нет.
                       </div>
                     ) : (
@@ -1249,12 +1249,12 @@ export default function Gsm() {
                               const packetEquipment = resolveGsmPacketEquipment(packet, gsmEquipmentLookup);
                               const coordinateStatus = getGsmCoordinateStatus(packet.lat, packet.lng);
                               return (
-                                <tr key={packet.id} className="border-t border-white/10">
-                                  <td className="px-3 py-2 text-slate-300">{formatDateTime(packetReceivedAt(packet))}</td>
-                                  <td className="px-3 py-2 text-slate-300">{packetSourceIp(packet)}</td>
-                                  <td className="px-3 py-2 font-mono text-xs text-slate-300">{packet.imei || packet.deviceId || packet.trackerId || '—'}</td>
+                                <tr key={packet.id} className="border-t border-slate-200 dark:border-white/10">
+                                  <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{formatDateTime(packetReceivedAt(packet))}</td>
+                                  <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{packetSourceIp(packet)}</td>
+                                  <td className="px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-300">{packet.imei || packet.deviceId || packet.trackerId || '—'}</td>
                                   <td className="px-3 py-2">
-                                    <div className="max-w-[260px] truncate text-slate-200">{packetEquipment.label}</div>
+                                    <div className="max-w-[260px] truncate text-slate-700 dark:text-slate-200">{packetEquipment.label}</div>
                                     <div className="mt-1">
                                       <Badge variant={packetEquipment.linked ? 'success' : 'warning'}>{packetEquipment.badge}</Badge>
                                     </div>
@@ -1262,10 +1262,10 @@ export default function Gsm() {
                                   <td className="px-3 py-2">
                                     <Badge variant={getParseStatusBadge(packet.parseStatus)}>{packet.parseStatus || 'pending'}</Badge>
                                   </td>
-                                  <td className="px-3 py-2 text-slate-300">
+                                  <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
                                     <div>{formatCoordinates(packet.lat, packet.lng)}</div>
                                     {coordinateStatus.warning ? (
-                                      <div className="mt-1 text-xs text-amber-200">{coordinateStatus.warning}</div>
+                                      <div className="mt-1 text-xs text-amber-800 dark:text-amber-200">{coordinateStatus.warning}</div>
                                     ) : null}
                                   </td>
                                   <td className="px-3 py-2 text-right">
@@ -1274,7 +1274,7 @@ export default function Gsm() {
                                       variant="secondary"
                                       size="sm"
                                       onClick={() => setSelectedPacket(packet)}
-                                      className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                                      className="border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10"
                                     >
                                       Открыть
                                     </Button>
@@ -1289,17 +1289,17 @@ export default function Gsm() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardHeader>
-                    <CardTitle className="text-xl font-bold text-white">Состояние парка</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Состояние парка</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       Учитываются единицы техники с IMEI или Device ID.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     {(['online', 'offline', 'unknown'] as const).map(status => (
-                      <div key={status} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                        <span className="text-sm text-slate-300">{formatGsmStatus(status)}</span>
+                      <div key={status} className="flex items-center justify-between rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-3">
+                        <span className="text-sm text-slate-700 dark:text-slate-300">{formatGsmStatus(status)}</span>
                         <Badge variant={status === 'online' ? 'success' : status === 'offline' ? 'warning' : 'default'}>
                           {gsmDevices.filter(item => item.status === status).length}
                         </Badge>
@@ -1312,11 +1312,11 @@ export default function Gsm() {
           </TabsContent>
 
           <TabsContent value="devices">
-            <Card className="border-white/10 bg-slate-950/70 text-white">
+            <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
               <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle className="text-xl font-bold text-white">GSM-устройства техники</CardTitle>
-                  <CardDescription className="text-slate-400">
+                  <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">GSM-устройства техники</CardTitle>
+                  <CardDescription className="text-slate-600 dark:text-slate-400">
                     Привязка выполняется по IMEI или Device ID. Добавить трекер можно прямо здесь.
                   </CardDescription>
                 </div>
@@ -1333,7 +1333,7 @@ export default function Gsm() {
               </CardHeader>
               <CardContent>
                 {gsmDevices.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                  <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                     <div>Пока нет техники с заполненным GSM IMEI или Device ID.</div>
                     {canBindGsmEquipment ? (
                       <Button
@@ -1371,43 +1371,43 @@ export default function Gsm() {
                       </thead>
                       <tbody>
                         {gsmDevices.map(device => (
-                          <tr key={device.equipmentId || device.id || device.imei || device.deviceId} className="border-t border-white/10 align-top">
+                          <tr key={device.equipmentId || device.id || device.imei || device.deviceId} className="border-t border-slate-200 dark:border-white/10 align-top">
                             <td className="px-3 py-2">
                               {device.equipmentId ? (
-                                <Link to={`/equipment/${device.equipmentId}`} className="font-medium text-cyan-300 hover:text-cyan-200">
+                                <Link to={`/equipment/${device.equipmentId}`} className="font-medium text-cyan-700 dark:text-cyan-300 hover:text-cyan-700 dark:text-cyan-200">
                                   {device.inventoryNumber || device.equipmentName || device.equipmentId}
                                 </Link>
                               ) : (
                                 <div>
-                                  <div className="font-medium text-slate-100">Не привязано</div>
+                                  <div className="font-medium text-slate-900 dark:text-slate-100">Не привязано</div>
                                   <div className="mt-1 text-xs text-slate-500">{device.imei || device.deviceId || device.id || 'unknown device'}</div>
                                 </div>
                               )}
                             </td>
-                            <td className="px-3 py-2 text-slate-300">{[device.manufacturer, device.model].filter(Boolean).join(' ') || '—'}</td>
-                            <td className="px-3 py-2 font-mono text-xs text-slate-300">{device.serialNumber || '—'}</td>
-                            <td className="px-3 py-2 font-mono text-xs text-slate-300">{device.imei || '—'}</td>
-                            <td className="px-3 py-2 text-slate-300">{device.deviceType || device.deviceId || '—'}</td>
-                            <td className="px-3 py-2 text-slate-300">{device.sim1 || device.simNumber || '—'}</td>
-                            <td className="px-3 py-2 text-slate-300">{device.protocol || '—'}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{[device.manufacturer, device.model].filter(Boolean).join(' ') || '—'}</td>
+                            <td className="px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-300">{device.serialNumber || '—'}</td>
+                            <td className="px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-300">{device.imei || '—'}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{device.deviceType || device.deviceId || '—'}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{device.sim1 || device.simNumber || '—'}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{device.protocol || '—'}</td>
                             <td className="px-3 py-2">
                               <Badge variant={device.status === 'online' ? 'success' : device.status === 'offline' ? 'warning' : 'default'}>
                                 {formatGsmStatus(device.status)}
                               </Badge>
                             </td>
-                            <td className="px-3 py-2 text-slate-300">{formatDateTime(device.lastSeenAt)}</td>
-                            <td className="px-3 py-2 text-slate-300">{formatCoordinates(device.lastLat ?? device.lastLatitude, device.lastLng ?? device.lastLongitude)}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{formatDateTime(device.lastSeenAt)}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{formatCoordinates(device.lastLat ?? device.lastLatitude, device.lastLng ?? device.lastLongitude)}</td>
                             <td className="px-3 py-2">
                               {hasGpsWarning(device) ? (
                                 <Badge variant="warning">GPS 0/0 или 0 спутников</Badge>
                               ) : (
-                                <span className="text-slate-300">{device.lastSatellites ?? '—'} спутн.</span>
+                                <span className="text-slate-700 dark:text-slate-300">{device.lastSatellites ?? '—'} спутн.</span>
                               )}
                             </td>
-                            <td className="px-3 py-2 text-slate-300">{formatSpeed(device.lastSpeed ?? null)}</td>
-                            <td className="px-3 py-2 text-slate-300">{formatVoltage(device.lastVoltage ?? null)}</td>
-                            <td className="px-3 py-2 text-slate-300">{formatIgnition(device.lastIgnition)}</td>
-                            <td className="max-w-[240px] px-3 py-2 font-mono text-xs text-slate-300">
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{formatSpeed(device.lastSpeed ?? null)}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{formatVoltage(device.lastVoltage ?? null)}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{formatIgnition(device.lastIgnition)}</td>
+                            <td className="max-w-[240px] px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-300">
                               <span className="block truncate">{device.lastRawPacket || '—'}</span>
                             </td>
                             {canBindGsmEquipment ? (
@@ -1417,7 +1417,7 @@ export default function Gsm() {
                                   variant="secondary"
                                   size="sm"
                                   onClick={() => openGsmBinding(device.equipmentId)}
-                                  className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                                  className="border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10"
                                 >
                                   Изменить
                                 </Button>
@@ -1434,16 +1434,16 @@ export default function Gsm() {
           </TabsContent>
 
           <TabsContent value="packets">
-            <Card className="border-white/10 bg-slate-950/70 text-white">
+            <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
               <CardHeader>
-                <CardTitle className="text-xl font-bold text-white">Последние пакеты GSM/GPRS</CardTitle>
-                <CardDescription className="text-slate-400">
+                <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Последние пакеты GSM/GPRS</CardTitle>
+                <CardDescription className="text-slate-600 dark:text-slate-400">
                   Компактный журнал rawHex/rawText и результата безопасного fallback-парсинга.
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 {recentGatewayPackets.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                  <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                     Журнал пакетов пуст.
                   </div>
                 ) : (
@@ -1468,12 +1468,12 @@ export default function Gsm() {
                           const packetEquipment = resolveGsmPacketEquipment(packet, gsmEquipmentLookup);
                           const coordinateStatus = getGsmCoordinateStatus(packet.lat, packet.lng);
                           return (
-                            <tr key={packet.id} className="border-t border-white/10 align-top">
-                              <td className="px-3 py-2 text-slate-300">{formatDateTime(packetReceivedAt(packet))}</td>
-                              <td className="px-3 py-2 text-slate-300">{packetSourceIp(packet)}</td>
-                              <td className="px-3 py-2 font-mono text-xs text-slate-300">{packet.imei || packet.deviceId || packet.trackerId || '—'}</td>
+                            <tr key={packet.id} className="border-t border-slate-200 dark:border-white/10 align-top">
+                              <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{formatDateTime(packetReceivedAt(packet))}</td>
+                              <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{packetSourceIp(packet)}</td>
+                              <td className="px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-300">{packet.imei || packet.deviceId || packet.trackerId || '—'}</td>
                               <td className="px-3 py-2">
-                                <div className="max-w-[280px] truncate text-slate-200">{packetEquipment.label}</div>
+                                <div className="max-w-[280px] truncate text-slate-700 dark:text-slate-200">{packetEquipment.label}</div>
                                 <div className="mt-1 flex flex-wrap gap-1">
                                   <Badge variant={packetEquipment.linked ? 'success' : 'warning'}>{packetEquipment.badge}</Badge>
                                   {packetEquipment.equipmentId ? (
@@ -1484,19 +1484,19 @@ export default function Gsm() {
                               <td className="px-3 py-2">
                                 <Badge variant={getParseStatusBadge(packet.parseStatus)}>{packet.parseStatus || 'pending'}</Badge>
                               </td>
-                              <td className="px-3 py-2 text-slate-300">
+                              <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
                                 <div>{formatCoordinates(packet.lat, packet.lng)}</div>
                                 {coordinateStatus.warning ? (
-                                  <div className="mt-1 text-xs text-amber-200">{coordinateStatus.warning}</div>
+                                  <div className="mt-1 text-xs text-amber-800 dark:text-amber-200">{coordinateStatus.warning}</div>
                                 ) : null}
                               </td>
-                              <td className="max-w-[220px] px-3 py-2 font-mono text-xs text-cyan-200">
+                              <td className="max-w-[220px] px-3 py-2 font-mono text-xs text-cyan-700 dark:text-cyan-200">
                                 <span className="block truncate">{packetRawHex(packet)}</span>
                               </td>
-                              <td className="max-w-[220px] px-3 py-2 text-slate-300">
+                              <td className="max-w-[220px] px-3 py-2 text-slate-700 dark:text-slate-300">
                                 <span className="block truncate">{packetRawText(packet) || '—'}</span>
                               </td>
-                              <td className="max-w-[220px] px-3 py-2 text-rose-300">
+                              <td className="max-w-[220px] px-3 py-2 text-rose-700 dark:text-rose-300">
                                 <span className="block truncate">{packet.parseError || '—'}</span>
                               </td>
                               <td className="px-3 py-2 text-right">
@@ -1505,7 +1505,7 @@ export default function Gsm() {
                                   variant="secondary"
                                   size="sm"
                                   onClick={() => setSelectedPacket(packet)}
-                                  className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                                  className="border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10"
                                 >
                                   Детали
                                 </Button>
@@ -1523,10 +1523,10 @@ export default function Gsm() {
 
           <TabsContent value="route">
             <div className="space-y-6">
-              <Card className="border-white/10 bg-slate-950/70 text-white">
+              <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                 <CardHeader>
-                  <CardTitle className="text-xl font-bold text-white">Маршрут по GSM-пакетам</CardTitle>
-                  <CardDescription className="text-slate-400">
+                  <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Маршрут по GSM-пакетам</CardTitle>
+                  <CardDescription className="text-slate-600 dark:text-slate-400">
                     На первом этапе выводится таблица точек; карту можно подключить отдельной задачей.
                   </CardDescription>
                 </CardHeader>
@@ -1535,7 +1535,7 @@ export default function Gsm() {
                     <select
                       value={routeEquipmentId}
                       onChange={event => setRouteEquipmentId(event.target.value)}
-                      className="h-11 rounded-2xl border border-white/10 bg-slate-950/80 px-3 text-sm text-white"
+                      className="h-11 rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/80 px-3 text-sm text-slate-900 dark:text-white"
                     >
                       <option value="">Выберите технику</option>
                       {gsmDevices.map(device => (
@@ -1548,24 +1548,24 @@ export default function Gsm() {
                       type="datetime-local"
                       value={routeFrom}
                       onChange={event => setRouteFrom(event.target.value)}
-                      className="h-11 rounded-2xl border-white/10 bg-white/5 text-white"
+                      className="h-11 rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white"
                     />
                     <Input
                       type="datetime-local"
                       value={routeTo}
                       onChange={event => setRouteTo(event.target.value)}
-                      className="h-11 rounded-2xl border-white/10 bg-white/5 text-white"
+                      className="h-11 rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white"
                     />
                   </div>
 
-                  <div className="min-h-[220px] rounded-3xl border border-dashed border-white/10 bg-white/5 p-6">
-                    <div className="flex h-full min-h-[170px] items-center justify-center text-center text-sm text-slate-400">
+                  <div className="min-h-[220px] rounded-3xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-6">
+                    <div className="flex h-full min-h-[170px] items-center justify-center text-center text-sm text-slate-600 dark:text-slate-400">
                       Карта маршрута появится после выбора картографической библиотеки. Сейчас источник маршрута — сохранённые точки из `gsm_packets`.
                     </div>
                   </div>
 
                   {apiRoutePoints.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                    <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                       Для выбранного периода точек нет.
                     </div>
                   ) : (
@@ -1582,12 +1582,12 @@ export default function Gsm() {
                         </thead>
                         <tbody>
                           {apiRoutePoints.map((point, index) => (
-                            <tr key={`${point.receivedAt}:${index}`} className="border-t border-white/10">
-                              <td className="px-3 py-2 text-slate-300">{formatDateTime(point.receivedAt)}</td>
-                              <td className="px-3 py-2 text-slate-300">{formatDateTime(point.deviceTime)}</td>
-                              <td className="px-3 py-2 text-slate-300">{formatCoordinates(point.lat, point.lng)}</td>
-                              <td className="px-3 py-2 text-slate-300">{formatSpeed(point.speed ?? null)}</td>
-                              <td className="px-3 py-2 text-slate-300">{point.course ?? '—'}</td>
+                            <tr key={`${point.receivedAt}:${index}`} className="border-t border-slate-200 dark:border-white/10">
+                              <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{formatDateTime(point.receivedAt)}</td>
+                              <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{formatDateTime(point.deviceTime)}</td>
+                              <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{formatCoordinates(point.lat, point.lng)}</td>
+                              <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{formatSpeed(point.speed ?? null)}</td>
+                              <td className="px-3 py-2 text-slate-700 dark:text-slate-300">{point.course ?? '—'}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1601,11 +1601,11 @@ export default function Gsm() {
 
           <TabsContent value="live">
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_380px]">
-              <Card className="border-white/10 bg-slate-950/70 text-white">
+              <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                 <CardHeader className="gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div>
-                    <CardTitle className="text-xl font-bold text-white">Карта расположения техники</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Карта расположения техники</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       Геозона склада и геозона объекта клиента рисуются прямо на карте. Для выбранной техники сверху показывается маршрут за период.
                     </CardDescription>
                   </div>
@@ -1622,8 +1622,8 @@ export default function Gsm() {
                         className={cn(
                           'rounded-full',
                           routePeriod === option.value
-                            ? 'bg-white text-slate-950 hover:bg-slate-100'
-                            : 'border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10',
+                            ? 'bg-slate-900 text-slate-50 hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100'
+                            : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10',
                         )}
                       >
                         {option.label}
@@ -1633,7 +1633,7 @@ export default function Gsm() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {suspiciousMapMarkers.length > 0 ? (
-                    <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+                    <div className="rounded-2xl border border-amber-200 dark:border-amber-400/30 bg-amber-50 dark:bg-amber-400/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-100">
                       Координаты выглядят тестовыми или некорректными: {suspiciousMapMarkers.map(marker => marker.title).join(', ')}. Маркеры показаны и карта центрируется по фактическим точкам.
                     </div>
                   ) : null}
@@ -1648,25 +1648,25 @@ export default function Gsm() {
               </Card>
 
               <div className="space-y-6">
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardHeader>
-                    <CardTitle className="text-lg font-bold text-white">Выбранная техника</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-lg font-bold text-slate-900 dark:text-white">Выбранная техника</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       Сводка по сигналу, телеметрии, аренде и геозонам для текущей единицы.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     {!selectedSnapshot ? (
-                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                      <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                         По текущим фильтрам техника не найдена.
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+                        <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                           <div className="flex flex-wrap items-start gap-2">
                             <div className="min-w-0 flex-1">
-                              <div className="text-lg font-bold text-white">{buildEquipmentLabel(selectedSnapshot)}</div>
-                              <div className="mt-1 text-sm text-slate-400">
+                              <div className="text-lg font-bold text-slate-900 dark:text-white">{buildEquipmentLabel(selectedSnapshot)}</div>
+                              <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                                 {selectedSnapshot.equipment.serialNumber || 'Серийный номер не указан'}
                               </div>
                             </div>
@@ -1677,22 +1677,22 @@ export default function Gsm() {
                           </div>
 
                           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                               <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Локация</div>
-                              <div className="mt-1 text-sm font-medium text-white">
+                              <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">
                                 {selectedSnapshot.point?.address || selectedSnapshot.equipment.location || 'Не указана'}
                               </div>
                             </div>
-                            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                               <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Последний сигнал</div>
-                              <div className="mt-1 text-sm font-medium text-white">
+                              <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">
                                 {formatRelativeSignal(selectedSnapshot.lastSeenAt)}
                               </div>
                               <div className="mt-1 text-xs text-slate-500">{formatDateTime(selectedSnapshot.lastSeenAt)}</div>
                             </div>
-                            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                               <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Источник точки</div>
-                              <div className="mt-1 text-sm font-medium text-white">
+                              <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">
                                 {selectedSnapshot.point?.source === 'gps'
                                   ? 'GPS / трекер'
                                   : selectedSnapshot.point?.source === 'parsed'
@@ -1706,15 +1706,15 @@ export default function Gsm() {
                               <div className={cn(
                                 'mt-1 text-xs',
                                 selectedCoordinateStatus.status === 'suspicious' || selectedCoordinateStatus.status === 'invalid'
-                                  ? 'text-amber-200'
+                                  ? 'text-amber-800 dark:text-amber-200'
                                   : 'text-slate-500',
                               )}>
                                 {selectedCoordinateStatus.warning || selectedCoordinateStatus.label}
                               </div>
                             </div>
-                            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                               <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Текущий статус</div>
-                              <div className="mt-1 text-sm font-medium text-white">
+                              <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">
                                 {STATUS_LABELS[selectedSnapshot.equipment.status]}
                               </div>
                               <div className="mt-1 text-xs text-slate-500">
@@ -1733,7 +1733,7 @@ export default function Gsm() {
                               <Button
                                 asChild
                                 variant="secondary"
-                                className="rounded-full border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                                className="rounded-full border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10"
                               >
                                 <a href={buildMapLink(selectedSnapshot.point) || '#'} target="_blank" rel="noreferrer">
                                   Внешняя карта
@@ -1745,33 +1745,33 @@ export default function Gsm() {
                         </div>
 
                         <div className="grid gap-3 sm:grid-cols-2">
-                          <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                            <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-cyan-300">
+                          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+                            <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3 text-cyan-700 dark:text-cyan-300">
                               <Gauge className="h-5 w-5" />
                             </div>
                             <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Моточасы</div>
-                            <div className="mt-2 text-xl font-bold text-white">{formatEngineHours(selectedSnapshot.telemetry.engineHours)}</div>
+                            <div className="mt-2 text-xl font-bold text-slate-900 dark:text-white">{formatEngineHours(selectedSnapshot.telemetry.engineHours)}</div>
                           </div>
-                          <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                            <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-amber-300">
+                          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+                            <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3 text-amber-700 dark:text-amber-300">
                               <Zap className="h-5 w-5" />
                             </div>
                             <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Зажигание</div>
-                            <div className="mt-2 text-xl font-bold text-white">{getIgnitionLabel(selectedSnapshot.telemetry.ignitionOn)}</div>
+                            <div className="mt-2 text-xl font-bold text-slate-900 dark:text-white">{getIgnitionLabel(selectedSnapshot.telemetry.ignitionOn)}</div>
                           </div>
-                          <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                            <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-lime-300">
+                          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+                            <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3 text-lime-700 dark:text-lime-300">
                               <BatteryCharging className="h-5 w-5" />
                             </div>
                             <div className="text-xs uppercase tracking-[0.18em] text-slate-500">АКБ</div>
-                            <div className="mt-2 text-xl font-bold text-white">{formatVoltage(selectedSnapshot.telemetry.batteryVoltage)}</div>
+                            <div className="mt-2 text-xl font-bold text-slate-900 dark:text-white">{formatVoltage(selectedSnapshot.telemetry.batteryVoltage)}</div>
                           </div>
-                          <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                            <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-sky-300">
+                          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+                            <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3 text-sky-700 dark:text-sky-300">
                               <Activity className="h-5 w-5" />
                             </div>
                             <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Скорость</div>
-                            <div className="mt-2 text-xl font-bold text-white">{formatSpeed(selectedSnapshot.telemetry.speedKph)}</div>
+                            <div className="mt-2 text-xl font-bold text-slate-900 dark:text-white">{formatSpeed(selectedSnapshot.telemetry.speedKph)}</div>
                           </div>
                         </div>
                       </div>
@@ -1779,46 +1779,46 @@ export default function Gsm() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardHeader>
-                    <CardTitle className="text-lg font-bold text-white">Привязка к аренде и объекту</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-lg font-bold text-slate-900 dark:text-white">Привязка к аренде и объекту</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       Показываем, на каком объекте техника должна находиться, и сверяем это с текущей точкой.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     {!selectedSnapshot?.binding ? (
-                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-6 text-sm text-slate-400">
+                      <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-6 text-sm text-slate-600 dark:text-slate-400">
                         Активная привязка к аренде не найдена.
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                          <div className="text-sm font-semibold text-white">{selectedSnapshot.binding.clientName}</div>
-                          <div className="mt-1 text-sm text-slate-400">
+                        <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+                          <div className="text-sm font-semibold text-slate-900 dark:text-white">{selectedSnapshot.binding.clientName}</div>
+                          <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                             {selectedSnapshot.binding.objectAddress || 'Адрес объекта не указан'}
                           </div>
                           <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                               <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Аренда</div>
-                              <div className="mt-1 text-sm font-medium text-white">{selectedSnapshot.binding.rentalId}</div>
+                              <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">{selectedSnapshot.binding.rentalId}</div>
                               <div className="mt-1 text-xs text-slate-500">
                                 {selectedSnapshot.binding.startDate || '—'} → {selectedSnapshot.binding.endDate || '—'}
                               </div>
                             </div>
-                            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                               <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Менеджер</div>
-                              <div className="mt-1 text-sm font-medium text-white">{selectedSnapshot.binding.manager || 'Не указан'}</div>
+                              <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">{selectedSnapshot.binding.manager || 'Не указан'}</div>
                             </div>
                           </div>
                         </div>
 
                         <div className="space-y-2">
                           {warehouseZone ? (
-                            <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3">
                               <div className="flex items-center justify-between gap-3">
                                 <div>
-                                  <div className="text-sm font-medium text-white">Геозона склада</div>
+                                  <div className="text-sm font-medium text-slate-900 dark:text-white">Геозона склада</div>
                                   <div className="text-xs text-slate-500">{warehouseZone.label}</div>
                                 </div>
                                 <Badge variant={isPointInsideZone(selectedSnapshot.point, warehouseZone) ? 'success' : 'default'}>
@@ -1828,10 +1828,10 @@ export default function Gsm() {
                             </div>
                           ) : null}
                           {jobsiteZone ? (
-                            <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                            <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3">
                               <div className="flex items-center justify-between gap-3">
                                 <div>
-                                  <div className="text-sm font-medium text-white">Геозона объекта</div>
+                                  <div className="text-sm font-medium text-slate-900 dark:text-white">Геозона объекта</div>
                                   <div className="text-xs text-slate-500">{jobsiteZone.label}</div>
                                 </div>
                                 <Badge variant={isPointInsideZone(selectedSnapshot.point, jobsiteZone) ? 'warning' : 'default'}>
@@ -1846,20 +1846,20 @@ export default function Gsm() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardHeader>
-                    <CardTitle className="text-lg font-bold text-white">Уведомления GSM</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-lg font-bold text-slate-900 dark:text-white">Уведомления GSM</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       Выезд со склада, прибытие на объект и пропажа сигнала формируются только для техники с настоящим трекером.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     {selectedSnapshot && !selectedSnapshot.hasRealTracker ? (
-                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-6 text-sm text-slate-400">
+                      <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-6 text-sm text-slate-600 dark:text-slate-400">
                         У этой техники нет реального GSM-трекера, поэтому уведомления скрыты.
                       </div>
                     ) : notificationFeed.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-6 text-sm text-slate-400">
+                      <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-6 text-sm text-slate-600 dark:text-slate-400">
                         Активных GSM-уведомлений нет.
                       </div>
                     ) : (
@@ -1867,17 +1867,17 @@ export default function Gsm() {
                         {notificationFeed.map((item) => {
                           const Icon = NOTIFICATION_META[item.type].icon;
                           return (
-                            <div key={item.id} className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                            <div key={item.id} className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3">
                               <div className="flex gap-3">
-                                <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-cyan-300">
+                                <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-2 text-cyan-700 dark:text-cyan-300">
                                   <Icon className="h-4 w-4" />
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <div className="text-sm font-semibold text-white">{item.title}</div>
+                                    <div className="text-sm font-semibold text-slate-900 dark:text-white">{item.title}</div>
                                     <Badge variant={NOTIFICATION_META[item.type].badge}>{formatDateTime(item.occurredAt)}</Badge>
                                   </div>
-                                  <div className="mt-1 text-sm text-slate-300">{item.description}</div>
+                                  <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">{item.description}</div>
                                 </div>
                               </div>
                             </div>
@@ -1888,10 +1888,10 @@ export default function Gsm() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardHeader>
-                    <CardTitle className="text-lg font-bold text-white">Техника в текущей выборке</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-lg font-bold text-slate-900 dark:text-white">Техника в текущей выборке</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       {filteredSnapshots.length} единиц. Можно быстро переключаться между точками без выхода из экрана.
                     </CardDescription>
                   </CardHeader>
@@ -1905,8 +1905,8 @@ export default function Gsm() {
                           className={cn(
                             'w-full rounded-2xl border px-4 py-3 text-left transition-colors',
                             selectedSnapshot?.equipment.id === snapshot.equipment.id
-                              ? 'border-cyan-300/50 bg-cyan-400/10'
-                              : 'border-white/10 bg-white/5 hover:bg-white/10',
+                              ? 'border-cyan-300/50 bg-cyan-50 dark:bg-cyan-400/10'
+                              : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10',
                           )}
                         >
                           <div className="flex items-start gap-3">
@@ -1915,14 +1915,14 @@ export default function Gsm() {
                               style={{ backgroundColor: SIGNAL_META[snapshot.signalState].markerColor }}
                             />
                             <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-semibold text-white">{buildEquipmentLabel(snapshot)}</div>
-                              <div className="mt-1 truncate text-xs text-slate-400">
+                              <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{buildEquipmentLabel(snapshot)}</div>
+                              <div className="mt-1 truncate text-xs text-slate-600 dark:text-slate-400">
                                 {snapshot.binding?.clientName ? `${snapshot.binding.clientName} · ` : ''}
                                 {snapshot.point?.address || snapshot.equipment.location || 'Локация не указана'}
                               </div>
                             </div>
                             <div className="shrink-0 text-right">
-                              <div className="text-xs font-medium text-slate-200">{SIGNAL_META[snapshot.signalState].label}</div>
+                              <div className="text-xs font-medium text-slate-700 dark:text-slate-200">{SIGNAL_META[snapshot.signalState].label}</div>
                               <div className="mt-1 text-[11px] text-slate-500">{formatRelativeSignal(snapshot.lastSeenAt)}</div>
                             </div>
                           </div>
@@ -1937,11 +1937,11 @@ export default function Gsm() {
 
           <TabsContent value="history">
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_420px]">
-              <Card className="border-white/10 bg-slate-950/70 text-white">
+              <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                 <CardHeader className="gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div>
-                    <CardTitle className="text-xl font-bold text-white">Маршрут за период</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Маршрут за период</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       {selectedSnapshot
                         ? `Точки маршрута по ${buildEquipmentLabel(selectedSnapshot)}.`
                         : 'Сначала выберите технику в живой карте.'}
@@ -1961,7 +1961,7 @@ export default function Gsm() {
                           'rounded-full',
                           routePeriod === option.value
                             ? 'bg-cyan-300 text-slate-950 hover:bg-cyan-200'
-                            : 'border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10',
+                            : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10',
                         )}
                       >
                         {option.label}
@@ -1971,27 +1971,27 @@ export default function Gsm() {
                 </CardHeader>
                 <CardContent>
                   {!selectedSnapshot ? (
-                    <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                    <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                       Выберите технику на вкладке «Карта и геозоны», чтобы увидеть маршрут.
                     </div>
                   ) : selectedRoutePoints.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                    <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                       За выбранный период точек маршрута нет.
                     </div>
                   ) : (
                     <div className="space-y-3">
                       {selectedRoutePoints.map((point, index) => (
-                        <div key={`${point.at}:${index}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div key={`${point.at}:${index}`} className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                           <div className="flex gap-3">
-                            <div className="rounded-xl border border-white/10 bg-slate-950/60 p-2 text-cyan-300">
+                            <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-2 text-cyan-700 dark:text-cyan-300">
                               <Route className="h-4 w-4" />
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-2">
-                                <div className="text-sm font-semibold text-white">{point.label}</div>
+                                <div className="text-sm font-semibold text-slate-900 dark:text-white">{point.label}</div>
                                 <span className="text-xs text-slate-500">{formatDateTime(point.at)}</span>
                               </div>
-                              <div className="mt-1 text-sm text-slate-300">{point.address}</div>
+                              <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">{point.address}</div>
                               <div className="mt-1 text-xs text-slate-500">
                                 {point.lat.toFixed(5)}, {point.lng.toFixed(5)}
                               </div>
@@ -2004,10 +2004,10 @@ export default function Gsm() {
                 </CardContent>
               </Card>
 
-              <Card className="border-white/10 bg-slate-950/70 text-white">
+              <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                 <CardHeader>
-                  <CardTitle className="text-xl font-bold text-white">История передвижений техники</CardTitle>
-                  <CardDescription className="text-slate-400">
+                  <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">История передвижений техники</CardTitle>
+                  <CardDescription className="text-slate-600 dark:text-slate-400">
                     {selectedSnapshot
                       ? `Показываются события только по ${buildEquipmentLabel(selectedSnapshot)}.`
                       : 'Показываются последние события по текущей фильтрации GSM.'}
@@ -2015,7 +2015,7 @@ export default function Gsm() {
                 </CardHeader>
                 <CardContent>
                   {movementFeed.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                    <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                       История перемещений пока пустая.
                     </div>
                   ) : (
@@ -2024,14 +2024,14 @@ export default function Gsm() {
                         const Icon = getMovementIcon(entry.kind);
                         const equipmentSnapshot = snapshots.find(item => item.equipment.id === entry.equipmentId);
                         return (
-                          <div key={entry.id} className="rounded-3xl border border-white/10 bg-white/5 p-4">
+                          <div key={entry.id} className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                             <div className="flex gap-4">
-                              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-cyan-300">
+                              <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3 text-cyan-700 dark:text-cyan-300">
                                 <Icon className="h-5 w-5" />
                               </div>
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
-                                  <div className="font-semibold text-white">{entry.title}</div>
+                                  <div className="font-semibold text-slate-900 dark:text-white">{entry.title}</div>
                                   <span className="text-xs text-slate-500">{formatDateTime(entry.occurredAt)}</span>
                                   {equipmentSnapshot ? (
                                     <Badge variant={SIGNAL_META[equipmentSnapshot.signalState].badge}>
@@ -2039,13 +2039,13 @@ export default function Gsm() {
                                     </Badge>
                                   ) : null}
                                 </div>
-                                <div className="mt-2 text-sm text-slate-300">{entry.description || 'Без комментария'}</div>
+                                <div className="mt-2 text-sm text-slate-700 dark:text-slate-300">{entry.description || 'Без комментария'}</div>
                                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
                                   <span>{entry.location}</span>
                                   {equipmentSnapshot ? (
                                     <Link
                                       to={`/equipment/${entry.equipmentId}`}
-                                      className="inline-flex items-center gap-1 text-cyan-300 transition-colors hover:text-cyan-200"
+                                      className="inline-flex items-center gap-1 text-cyan-700 dark:text-cyan-300 transition-colors hover:text-cyan-700 dark:text-cyan-200"
                                     >
                                       {buildEquipmentLabel(equipmentSnapshot)}
                                       <ArrowUpRight className="h-3.5 w-3.5" />
@@ -2067,67 +2067,67 @@ export default function Gsm() {
           <TabsContent value="gateway">
             <div className="space-y-6">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardContent className="p-5">
-                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-cyan-300">
+                    <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 text-cyan-700 dark:text-cyan-300">
                       <Server className="h-5 w-5" />
                     </div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Шлюз GPRS</div>
-                    <div className="mt-2 text-2xl font-black text-white">
+                    <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
                       {formatGatewayState(gatewayStatus)}
                     </div>
-                    <div className="mt-1 text-sm text-slate-400">
+                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                       {gatewayStatus.host}:{gatewayStatus.port}
                     </div>
                     {gatewayStatus.startError ? (
-                      <div className="mt-2 text-xs text-rose-300">{gatewayStatus.startError}</div>
+                      <div className="mt-2 text-xs text-rose-700 dark:text-rose-300">{gatewayStatus.startError}</div>
                     ) : (
                       <div className="mt-2 text-xs text-slate-500">Запущен: {formatDateTime(gatewayStatus.startedAt)}</div>
                     )}
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardContent className="p-5">
-                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-emerald-300">
+                    <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 text-emerald-700 dark:text-emerald-300">
                       <Cable className="h-5 w-5" />
                     </div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Онлайн соединения</div>
-                    <div className="mt-2 text-2xl font-black text-white">{gatewayStatus.onlineConnections}</div>
-                    <div className="mt-1 text-sm text-slate-400">{gatewayStatus.onlineDevices} устройств на линии</div>
+                    <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{gatewayStatus.onlineConnections}</div>
+                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{gatewayStatus.onlineDevices} устройств на линии</div>
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardContent className="p-5">
-                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-cyan-300">
+                    <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 text-cyan-700 dark:text-cyan-300">
                       <ArrowDownToLine className="h-5 w-5" />
                     </div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Пакеты за сегодня</div>
-                    <div className="mt-2 text-2xl font-black text-white">{gatewayStatus.packetsToday}</div>
-                    <div className="mt-1 text-sm text-slate-400">в журнале всего {gatewayStatus.packetsStored}</div>
+                    <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{gatewayStatus.packetsToday}</div>
+                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">в журнале всего {gatewayStatus.packetsStored}</div>
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardContent className="p-5">
-                    <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/5 p-3 text-amber-300">
+                    <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 text-amber-700 dark:text-amber-300">
                       <ArrowUpToLine className="h-5 w-5" />
                     </div>
                     <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Команды</div>
-                    <div className="mt-2 text-2xl font-black text-white">{gatewayStatus.sentToday}</div>
-                    <div className="mt-1 text-sm text-slate-400">
+                    <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{gatewayStatus.sentToday}</div>
+                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                       очередь {gatewayStatus.queuedCommands} · ошибок {gatewayStatus.failedCommands}
                     </div>
                   </CardContent>
                 </Card>
               </div>
 
-              <Card className="border-white/10 bg-slate-950/70 text-white">
+              <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                 <CardHeader className="gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <CardTitle className="text-xl font-bold text-white">Данные GSM</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Данные GSM</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       Сводка по привязке трекеров, свежести сигналов, неопознанным пакетам, протоколам и доставке команд.
                     </CardDescription>
                   </div>
@@ -2137,48 +2137,48 @@ export default function Gsm() {
                 </CardHeader>
                 <CardContent className="space-y-5">
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-cyan-300">
+                    <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+                      <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3 text-cyan-700 dark:text-cyan-300">
                         <Cpu className="h-5 w-5" />
                       </div>
                       <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Привязано трекеров</div>
-                      <div className="mt-2 text-2xl font-black text-white">{gatewayAnalytics.configuredTrackers}</div>
-                      <div className="mt-1 text-sm text-slate-400">
+                      <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{gatewayAnalytics.configuredTrackers}</div>
+                      <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                         {formatPercent(gatewayAnalytics.configuredTrackers, gatewayAnalytics.trackedEquipment)} от парка
                       </div>
                     </div>
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-emerald-300">
+                    <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+                      <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3 text-emerald-700 dark:text-emerald-300">
                         <Cable className="h-5 w-5" />
                       </div>
                       <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Онлайн сейчас</div>
-                      <div className="mt-2 text-2xl font-black text-white">{gatewayAnalytics.onlineTrackedEquipment}</div>
-                      <div className="mt-1 text-sm text-slate-400">из {gatewayAnalytics.configuredTrackers} привязанных</div>
+                      <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{gatewayAnalytics.onlineTrackedEquipment}</div>
+                      <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">из {gatewayAnalytics.configuredTrackers} привязанных</div>
                     </div>
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-amber-300">
+                    <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+                      <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3 text-amber-700 dark:text-amber-300">
                         <Clock3 className="h-5 w-5" />
                       </div>
                       <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Без свежего сигнала</div>
-                      <div className="mt-2 text-2xl font-black text-white">{gatewayAnalytics.staleTrackers}</div>
-                      <div className="mt-1 text-sm text-slate-400">нет пакета за 24 часа</div>
+                      <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{gatewayAnalytics.staleTrackers}</div>
+                      <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">нет пакета за 24 часа</div>
                     </div>
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-rose-300">
+                    <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+                      <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3 text-rose-700 dark:text-rose-300">
                         <AlertTriangle className="h-5 w-5" />
                       </div>
                       <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Неопознано за 24ч</div>
-                      <div className="mt-2 text-2xl font-black text-white">{gatewayAnalytics.unknownPackets24h}</div>
-                      <div className="mt-1 text-sm text-slate-400">пакеты без техники</div>
+                      <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{gatewayAnalytics.unknownPackets24h}</div>
+                      <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">пакеты без техники</div>
                     </div>
                   </div>
 
                   <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Выбранная техника</div>
-                          <div className="mt-1 text-lg font-bold text-white">
+                          <div className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
                             {selectedSnapshot ? buildEquipmentLabel(selectedSnapshot) : 'Не выбрана'}
                           </div>
                         </div>
@@ -2188,50 +2188,50 @@ export default function Gsm() {
                       </div>
 
                       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                        <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                           <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Вход / выход</div>
-                          <div className="mt-1 text-sm font-medium text-white">
+                          <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">
                             {gatewayAnalytics.selected.inbound24h} / {gatewayAnalytics.selected.outbound24h}
                           </div>
                         </div>
-                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                        <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                           <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Последний протокол</div>
-                          <div className="mt-1 text-sm font-medium text-white">{gatewayAnalytics.selected.lastProtocol || '—'}</div>
+                          <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">{gatewayAnalytics.selected.lastProtocol || '—'}</div>
                         </div>
-                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                        <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                           <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Последний пакет</div>
-                          <div className="mt-1 text-sm font-medium text-white">{formatDateTime(gatewayAnalytics.selected.lastPacketAt)}</div>
+                          <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">{formatDateTime(gatewayAnalytics.selected.lastPacketAt)}</div>
                         </div>
-                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                        <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                           <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Последняя команда</div>
-                          <div className="mt-1 text-sm font-medium text-white">
+                          <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">
                             {formatCommandStatus(gatewayAnalytics.selected.lastCommandStatus)}
                           </div>
                         </div>
                       </div>
 
                       {gatewayAnalytics.selected.lastSummary ? (
-                        <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-sm text-slate-300">
+                        <div className="mt-3 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3 text-sm text-slate-700 dark:text-slate-300">
                           {gatewayAnalytics.selected.lastSummary}
                         </div>
                       ) : null}
                     </div>
 
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                       <div className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
-                        <History className="h-4 w-4 text-cyan-300" />
+                        <History className="h-4 w-4 text-cyan-700 dark:text-cyan-300" />
                         Протоколы за 24ч
                       </div>
                       {gatewayAnalytics.protocols.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/60 px-4 py-6 text-center text-sm text-slate-400">
+                        <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 px-4 py-6 text-center text-sm text-slate-600 dark:text-slate-400">
                           Пакетов за последние 24 часа нет.
                         </div>
                       ) : (
                         <div className="space-y-2">
                           {gatewayAnalytics.protocols.map(item => (
-                            <div key={item.protocol} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-3 py-2">
+                            <div key={item.protocol} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 px-3 py-2">
                               <div className="min-w-0">
-                                <div className="truncate text-sm font-medium text-white">{item.protocol}</div>
+                                <div className="truncate text-sm font-medium text-slate-900 dark:text-white">{item.protocol}</div>
                                 <div className="text-xs text-slate-500">{formatDateTime(item.lastPacketAt)}</div>
                               </div>
                               <Badge variant="info">{item.count}</Badge>
@@ -2245,25 +2245,25 @@ export default function Gsm() {
               </Card>
 
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_420px]">
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardHeader>
-                    <CardTitle className="text-xl font-bold text-white">Отправка пакета на устройство</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Отправка пакета на устройство</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       Для выбранной техники можно отправить текстовую команду или HEX-пакет. Если устройство не в сети, команда встанет в очередь.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {!selectedSnapshot ? (
-                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                      <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                         Сначала выберите технику по текущим фильтрам, чтобы привязать команду к конкретному трекеру.
                       </div>
                     ) : (
                       <>
-                        <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+                        <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                              <div className="text-lg font-semibold text-white">{buildEquipmentLabel(selectedSnapshot)}</div>
-                              <div className="mt-1 text-sm text-slate-400">
+                              <div className="text-lg font-semibold text-slate-900 dark:text-white">{buildEquipmentLabel(selectedSnapshot)}</div>
+                              <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                                 Трекер: {selectedTrackerId || 'не привязан в карточке техники'}
                               </div>
                               <div className="mt-1 text-xs text-slate-500">
@@ -2285,7 +2285,7 @@ export default function Gsm() {
                               value={commandDeviceId}
                               onChange={(event) => setCommandDeviceId(event.target.value)}
                               placeholder="IMEI или deviceId трекера"
-                              className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                              className="h-11 rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-500"
                             />
                           </div>
                           <div className="space-y-2">
@@ -2306,7 +2306,7 @@ export default function Gsm() {
                                     'rounded-full',
                                     commandEncoding === option.value
                                       ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
-                                      : 'border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10',
+                                      : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10',
                                   )}
                                 >
                                   {option.label}
@@ -2326,14 +2326,14 @@ export default function Gsm() {
                             placeholder={commandEncoding === 'hex'
                               ? 'Например: 78780D0101234567890123450D0A'
                               : 'Например: engine=off;relay=1'}
-                            className="min-h-[140px] rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                            className="min-h-[140px] rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-500"
                           />
-                          <label className="inline-flex items-center gap-2 text-sm text-slate-300">
+                          <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                             <input
                               type="checkbox"
                               checked={appendNewline}
                               onChange={(event) => setAppendNewline(event.target.checked)}
-                              className="h-4 w-4 rounded border-white/20 bg-slate-950/70"
+                              className="h-4 w-4 rounded border-slate-300 dark:border-white/20 bg-white dark:bg-slate-950/70"
                             />
                             Добавлять перевод строки в текстовую команду
                           </label>
@@ -2360,25 +2360,25 @@ export default function Gsm() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardHeader>
-                    <CardTitle className="text-xl font-bold text-white">Онлайн-соединения трекеров</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Онлайн-соединения трекеров</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       Активные GPRS/TCP соединения с сервером. Если техника выбрана, список сужается под неё.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     {selectedGatewayConnections.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                      <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                         Активных соединений по текущей технике нет.
                       </div>
                     ) : (
                       <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
                         {selectedGatewayConnections.map((connection) => (
-                          <div key={connection.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div key={connection.id} className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <div className="text-sm font-semibold text-white">
+                                <div className="text-sm font-semibold text-slate-900 dark:text-white">
                                   {connection.equipmentLabel || connection.deviceId || connection.imei || 'Неопознанное устройство'}
                                 </div>
                                 <div className="mt-1 text-xs text-slate-500">
@@ -2390,13 +2390,13 @@ export default function Gsm() {
                               </Badge>
                             </div>
                             <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                              <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                                 <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Последний пакет</div>
-                                <div className="mt-1 text-white">{formatDateTime(connection.lastSeenAt)}</div>
+                                <div className="mt-1 text-slate-900 dark:text-white">{formatDateTime(connection.lastSeenAt)}</div>
                               </div>
-                              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                              <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                                 <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Трафик</div>
-                                <div className="mt-1 text-white">
+                                <div className="mt-1 text-slate-900 dark:text-white">
                                   {connection.packetsReceived} пак. · {formatBytes(connection.bytesReceived)}
                                 </div>
                               </div>
@@ -2410,16 +2410,16 @@ export default function Gsm() {
               </div>
 
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_420px]">
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardHeader>
-                    <CardTitle className="text-xl font-bold text-white">Последние пакеты GPRS</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Последние пакеты GPRS</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       Входящие и исходящие сообщения по текущей технике. Для бинарных пакетов сохраняется HEX.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     {gatewayPackets.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                      <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                         Пакетов по текущей выборке пока нет.
                       </div>
                     ) : (
@@ -2427,7 +2427,7 @@ export default function Gsm() {
                         {gatewayPackets.map((packet) => {
                           const packetEquipment = resolveGsmPacketEquipment(packet, gsmEquipmentLookup);
                           return (
-                            <div key={packet.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div key={packet.id} className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-2">
@@ -2437,7 +2437,7 @@ export default function Gsm() {
                                     <Badge variant={packetEquipment.linked ? 'success' : 'warning'}>{packetEquipment.badge}</Badge>
                                     <span className="text-xs text-slate-500">{formatDateTime(packet.createdAt)}</span>
                                   </div>
-                                  <div className="mt-2 text-sm font-semibold text-white">
+                                  <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
                                     {packetEquipment.label}
                                   </div>
                                   <div className="mt-1 text-xs text-slate-500">
@@ -2450,16 +2450,16 @@ export default function Gsm() {
                                 </div>
                               </div>
 
-                              <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                              <div className="mt-3 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                                 <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Текст пакета</div>
-                                <div className="mt-2 whitespace-pre-wrap break-all text-sm text-slate-200">
+                                <div className="mt-2 whitespace-pre-wrap break-all text-sm text-slate-700 dark:text-slate-200">
                                   {compactPayloadText(packet)}
                                 </div>
                               </div>
 
-                              <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                              <div className="mt-3 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3">
                                 <div className="text-xs uppercase tracking-[0.18em] text-slate-500">HEX</div>
-                                <div className="mt-2 break-all font-mono text-xs text-cyan-200">
+                                <div className="mt-2 break-all font-mono text-xs text-cyan-700 dark:text-cyan-200">
                                   {packet.payloadHex || '—'}
                                 </div>
                               </div>
@@ -2471,25 +2471,25 @@ export default function Gsm() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-white/10 bg-slate-950/70 text-white">
+                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardHeader>
-                    <CardTitle className="text-xl font-bold text-white">Очередь и история команд</CardTitle>
-                    <CardDescription className="text-slate-400">
+                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Очередь и история команд</CardTitle>
+                    <CardDescription className="text-slate-600 dark:text-slate-400">
                       Здесь видно, ушла ли команда сразу, встала в очередь или вернулась с ошибкой.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     {gatewayCommands.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                      <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                         По текущей технике команды ещё не отправлялись.
                       </div>
                     ) : (
                       <div className="max-h-[760px] space-y-3 overflow-y-auto pr-1">
                         {gatewayCommands.map((command) => (
-                          <div key={command.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div key={command.id} className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <div className="text-sm font-semibold text-white">
+                                <div className="text-sm font-semibold text-slate-900 dark:text-white">
                                   {command.equipmentLabel || command.deviceId || command.imei || 'Команда'}
                                 </div>
                                 <div className="mt-1 text-xs text-slate-500">
@@ -2511,14 +2511,14 @@ export default function Gsm() {
                               </Badge>
                             </div>
 
-                            <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-sm text-slate-200">
+                            <div className="mt-3 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-950/60 p-3 text-sm text-slate-700 dark:text-slate-200">
                               {compactPayloadText(command)}
                             </div>
 
                             <div className="mt-3 space-y-1 text-xs text-slate-500">
                               <div>Формат: {command.encoding === 'hex' ? 'HEX' : 'Текст'}{command.appendNewline ? ' · с переводом строки' : ''}</div>
                               {command.sentAt && <div>Отправлено: {formatDateTime(command.sentAt)}</div>}
-                              {command.error && <div className="text-rose-300">Ошибка: {command.error}</div>}
+                              {command.error && <div className="text-rose-700 dark:text-rose-300">Ошибка: {command.error}</div>}
                             </div>
                           </div>
                         ))}
@@ -2532,34 +2532,34 @@ export default function Gsm() {
         </Tabs>
 
         <Sheet open={gsmBindingOpen} onOpenChange={setGsmBindingOpen}>
-          <SheetContent side="right" className="w-full overflow-y-auto border-white/10 bg-slate-950 text-white sm:max-w-xl">
-            <SheetHeader className="border-b border-white/10 px-6 py-5 pr-12">
-              <SheetTitle className="flex items-center gap-2 text-xl text-white">
-                <Cable className="h-5 w-5 text-cyan-300" />
+          <SheetContent side="right" className="w-full overflow-y-auto border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 text-slate-900 dark:text-white sm:max-w-xl">
+            <SheetHeader className="border-b border-slate-200 dark:border-white/10 px-6 py-5 pr-12">
+              <SheetTitle className="flex items-center gap-2 text-xl text-slate-900 dark:text-white">
+                <Cable className="h-5 w-5 text-cyan-700 dark:text-cyan-300" />
                 Привязать GSM-устройство
               </SheetTitle>
-              <SheetDescription className="text-slate-400">
+              <SheetDescription className="text-slate-600 dark:text-slate-400">
                 Выберите технику и заполните IMEI или Device ID трекера. После сохранения техника появится в списке GSM-устройств.
               </SheetDescription>
             </SheetHeader>
 
             <div className="space-y-5 px-6 py-5">
               <label className="block space-y-2">
-                <span className="text-sm font-medium text-slate-200">Поиск техники</span>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Поиск техники</span>
                 <Input
                   value={bindingSearch}
                   onChange={event => setBindingSearch(event.target.value)}
                   placeholder="Инвентарный номер, модель, IMEI"
-                  className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                  className="h-11 rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-500"
                 />
               </label>
 
               <label className="block space-y-2">
-                <span className="text-sm font-medium text-slate-200">Техника</span>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Техника</span>
                 <select
                   value={gsmBindingForm.equipmentId}
                   onChange={event => handleGsmBindingEquipmentChange(event.target.value)}
-                  className="h-11 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-3 text-sm text-white outline-none focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/20"
+                  className="h-11 w-full rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/80 px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/20"
                 >
                   <option value="">Выберите технику</option>
                   {bindingEquipmentOptions.map(item => (
@@ -2572,58 +2572,58 @@ export default function Gsm() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-200">GSM IMEI</span>
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">GSM IMEI</span>
                   <Input
                     value={gsmBindingForm.gsmImei}
                     onChange={event => updateGsmBindingForm('gsmImei', event.target.value)}
                     placeholder="866123456789012"
-                    className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                    className="h-11 rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-500"
                   />
                 </label>
 
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-200">Device ID</span>
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Device ID</span>
                   <Input
                     value={gsmBindingForm.gsmDeviceId}
                     onChange={event => updateGsmBindingForm('gsmDeviceId', event.target.value)}
                     placeholder="TRACKER-001"
-                    className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                    className="h-11 rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-500"
                   />
                 </label>
 
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-200">SIM-карта</span>
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">SIM-карта</span>
                   <Input
                     value={gsmBindingForm.gsmSimNumber}
                     onChange={event => updateGsmBindingForm('gsmSimNumber', event.target.value)}
                     placeholder="+7 999 000-00-00"
-                    className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                    className="h-11 rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-500"
                   />
                 </label>
 
                 <label className="block space-y-2">
-                  <span className="text-sm font-medium text-slate-200">Протокол</span>
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Протокол</span>
                   <Input
                     value={gsmBindingForm.gsmProtocol}
                     onChange={event => updateGsmBindingForm('gsmProtocol', event.target.value)}
                     placeholder="GT06 / Teltonika / Wialon IPS"
-                    className="h-11 rounded-2xl border-white/10 bg-white/5 text-white placeholder:text-slate-500"
+                    className="h-11 rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-500"
                   />
                 </label>
               </div>
 
-              <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4 text-sm leading-6 text-cyan-50">
+              <div className="rounded-2xl border border-cyan-200 dark:border-cyan-300/20 bg-cyan-50 dark:bg-cyan-300/10 p-4 text-sm leading-6 text-cyan-900 dark:text-cyan-50">
                 Для автоматической привязки входящих пакетов достаточно, чтобы IMEI или Device ID в карточке техники совпадал с тем,
                 что передаёт трекер в GPRS-пакете.
               </div>
             </div>
 
-            <SheetFooter className="border-t border-white/10 px-6 py-4 sm:flex-row sm:items-center sm:justify-end">
+            <SheetFooter className="border-t border-slate-200 dark:border-white/10 px-6 py-4 sm:flex-row sm:items-center sm:justify-end">
               <Button
                 type="button"
                 variant="secondary"
                 onClick={() => setGsmBindingOpen(false)}
-                className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                className="border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10"
               >
                 Отмена
               </Button>
@@ -2646,30 +2646,30 @@ export default function Gsm() {
               data-side="right"
               data-state={packetDrawerPresence.dataState}
               onAnimationEnd={packetDrawerPresence.onExitAnimationEnd}
-              className="app-animate-drawer fixed inset-y-0 right-0 h-full w-full max-w-2xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 text-white shadow-2xl"
+              className="app-animate-drawer fixed inset-y-0 right-0 h-full w-full max-w-2xl overflow-y-auto border-l border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 p-6 text-slate-900 dark:text-white shadow-2xl"
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">GSM packet</div>
                   <h2 className="mt-1 text-xl font-bold">Детали пакета</h2>
-                  <p className="mt-1 text-sm text-slate-400">{formatDateTime(packetReceivedAt(retainedPacket))}</p>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{formatDateTime(packetReceivedAt(retainedPacket))}</p>
                 </div>
                 <Button
                   type="button"
                   variant="secondary"
                   onClick={() => setSelectedPacket(null)}
-                  className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                  className="border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10"
                 >
                   Закрыть
                 </Button>
               </div>
 
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:col-span-2">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4 sm:col-span-2">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Связанная техника</div>
-                      <div className="mt-1 break-words text-sm font-semibold text-white">
+                      <div className="mt-1 break-words text-sm font-semibold text-slate-900 dark:text-white">
                         {retainedPacketEquipment?.label || 'Техника не привязана'}
                       </div>
                       <div className="mt-1 font-mono text-xs text-slate-500">
@@ -2684,47 +2684,47 @@ export default function Gsm() {
                     </div>
                   </div>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">IP</div>
-                  <div className="mt-1 text-sm text-white">{packetSourceIp(retainedPacket)}</div>
+                  <div className="mt-1 text-sm text-slate-900 dark:text-white">{packetSourceIp(retainedPacket)}</div>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Порт</div>
-                  <div className="mt-1 text-sm text-white">{retainedPacket.remotePort || '—'}</div>
+                  <div className="mt-1 text-sm text-slate-900 dark:text-white">{retainedPacket.remotePort || '—'}</div>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">IMEI / Device ID</div>
-                  <div className="mt-1 break-all font-mono text-xs text-white">
+                  <div className="mt-1 break-all font-mono text-xs text-slate-900 dark:text-white">
                     {retainedPacket.imei || retainedPacket.deviceId || retainedPacket.trackerId || '—'}
                   </div>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Статус парсинга</div>
                   <div className="mt-1">
                     <Badge variant={getParseStatusBadge(retainedPacket.parseStatus)}>{retainedPacket.parseStatus || 'pending'}</Badge>
                   </div>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Координаты</div>
-                  <div className="mt-1 text-sm text-white">{formatCoordinates(retainedPacket.lat, retainedPacket.lng)}</div>
+                  <div className="mt-1 text-sm text-slate-900 dark:text-white">{formatCoordinates(retainedPacket.lat, retainedPacket.lng)}</div>
                   <div className={cn(
                     'mt-1 text-xs',
-                    retainedPacketCoordinateStatus.warning ? 'text-amber-200' : 'text-slate-500',
+                    retainedPacketCoordinateStatus.warning ? 'text-amber-800 dark:text-amber-200' : 'text-slate-500',
                   )}>
                     {retainedPacketCoordinateStatus.warning || retainedPacketCoordinateStatus.label}
                   </div>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Время устройства</div>
-                  <div className="mt-1 text-sm text-white">{formatDateTime(retainedPacket.deviceTime)}</div>
+                  <div className="mt-1 text-sm text-slate-900 dark:text-white">{formatDateTime(retainedPacket.deviceTime)}</div>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Source / transport</div>
-                  <div className="mt-1 text-sm text-white">
+                  <div className="mt-1 text-sm text-slate-900 dark:text-white">
                     {[retainedPacket.source, retainedPacket.transport, retainedPacket.protocol, retainedPacket.direction].filter(Boolean).join(' · ') || '—'}
                   </div>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Duplicate / orphan</div>
                   <div className="mt-1 flex flex-wrap gap-2">
                     {retainedPacket.duplicate ? <Badge variant="warning">Дубликат</Badge> : <Badge variant="success">Не дубликат</Badge>}
@@ -2739,27 +2739,27 @@ export default function Gsm() {
               </div>
 
               <div className="mt-4 space-y-4">
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">rawHex</div>
-                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950/70 p-3 font-mono text-xs text-cyan-200">
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-white dark:bg-slate-950/70 p-3 font-mono text-xs text-cyan-700 dark:text-cyan-200">
                     {packetRawHex(retainedPacket) || '—'}
                   </pre>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">rawText</div>
-                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950/70 p-3 text-sm text-slate-200">
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-white dark:bg-slate-950/70 p-3 text-sm text-slate-700 dark:text-slate-200">
                     {packetRawText(retainedPacket) || '—'}
                   </pre>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">parsed</div>
-                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-slate-950/70 p-3 font-mono text-xs text-lime-200">
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-white dark:bg-slate-950/70 p-3 font-mono text-xs text-lime-700 dark:text-lime-200">
                     {JSON.stringify(retainedPacket.parsed || retainedPacket.parsedPayload || null, null, 2)}
                   </pre>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                   <div className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">parseError</div>
-                  <div className="text-sm text-rose-300">{retainedPacket.parseError || '—'}</div>
+                  <div className="text-sm text-rose-700 dark:text-rose-300">{retainedPacket.parseError || '—'}</div>
                 </div>
               </div>
             </div>

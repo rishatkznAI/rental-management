@@ -1,6 +1,6 @@
 # Staging Environment
 
-Stage 2 staging is the release rehearsal environment for Skytech Rental Management. It must prove that the GitHub Pages frontend build and Railway backend can work together before production is touched.
+Stage 2 staging is the release rehearsal environment for Skytech Rental Management. It must prove that an isolated staging frontend build and the staging Railway backend can work together before production is touched.
 
 Staging is not production, demo mode, or a personal test database. It is allowed to contain seeded/test data, but it must never mount the production SQLite volume and must never use production bot, GSM, webhook, or user credentials.
 
@@ -27,9 +27,28 @@ Staging is not production, demo mode, or a personal test database. It is allowed
 Add these repository or environment secrets before running `.github/workflows/staging-smoke.yml`:
 
 - `STAGING_API_URL`: staging Railway backend URL, for example `https://<staging-service>.up.railway.app`.
-- `STAGING_FRONTEND_URL`: staging frontend URL built with `VITE_API_URL=$STAGING_API_URL`.
+- `STAGING_FRONTEND_URL`: separate staging frontend URL built with `VITE_API_URL=$STAGING_API_URL`.
 - `STAGING_ADMIN_EMAIL`: dedicated staging admin/smoke user email.
 - `STAGING_ADMIN_PASSWORD`: password for the staging admin/smoke user.
+
+Do not set `STAGING_FRONTEND_URL` to the production GitHub Pages URL. Staging must use its own published frontend build, not production Pages and not a local Vite preview.
+
+## Frontend Deployment
+
+Use a separate static frontend deployment for staging. Railway static hosting, Vercel, or another static host is acceptable when it is isolated from production and publishes the current release commit.
+
+Recommended Railway staging frontend settings:
+
+- Repository: `rishatkznAI/rental-management`
+- Branch: `main`
+- Build command: `npm ci && npm run build`
+- Static output directory: `dist`
+- Environment:
+  - `VITE_API_URL=$STAGING_API_URL`
+  - `VITE_BASE_PATH=/`
+  - `VITE_GIT_COMMIT_SHA=<release commit>` when the platform does not expose `RAILWAY_GIT_COMMIT_SHA`
+
+The staging frontend bundle must contain the staging backend URL and must not contain the production backend URL.
 
 Optional future smoke users:
 
@@ -97,7 +116,7 @@ npm run test:e2e:staging-smoke
 Before production release:
 
 1. Deploy backend release candidate to the staging Railway service.
-2. Deploy/build staging frontend with `VITE_API_URL=$STAGING_API_URL`.
+2. Deploy the separate staging frontend with `VITE_API_URL=$STAGING_API_URL`.
 3. Run GitHub Actions `Staging Smoke`.
 4. Confirm PASS:
    - `/health` is OK;

@@ -42,7 +42,17 @@ curl -fsS "$PRODUCTION_API_URL/api/version"
 
 Expected: JSON has `ok: true` and `build.commit` or `build.commitFull` matching the release commit.
 
-Frontend:
+Staging frontend:
+
+```bash
+STAGING_FRONTEND_URL="https://<staging-frontend-host>" \
+STAGING_API_URL="https://<staging-backend>.up.railway.app" \
+node scripts/release-preflight.mjs --env staging --expected-commit <commit>
+```
+
+Expected: the separate staging frontend HTML/assets are reachable, contain the expected commit marker, contain `STAGING_API_URL`, and do not contain a production-like Railway backend URL. Do not use `https://rishatkznai.github.io/rental-management/` as `STAGING_FRONTEND_URL`.
+
+Production frontend:
 
 ```bash
 PRODUCTION_FRONTEND_URL="https://rishatkznai.github.io/rental-management/" \
@@ -52,19 +62,46 @@ node scripts/release-preflight.mjs --env production --expected-commit <commit>
 
 Expected: frontend HTML/assets are reachable, contain the expected commit marker, and contain the expected API URL.
 
+## Staging Frontend
+
+Staging frontend is a separate deployment from production frontend. It must be built from the target commit and configured only for the staging backend:
+
+- `VITE_API_URL=$STAGING_API_URL`
+- `VITE_BASE_PATH=/` for root-domain static hosts such as Railway or Vercel
+- `VITE_GIT_COMMIT_SHA=<release commit>` only if the platform does not expose the commit automatically
+
+If no staging frontend service exists yet, create one manually in Railway or another static host:
+
+1. Create a new frontend service for repository `rishatkznAI/rental-management`.
+2. Use branch `main`.
+3. Set build command to `npm ci && npm run build`.
+4. Set static output directory to `dist`.
+5. Set environment `VITE_API_URL=<staging backend URL>` and `VITE_BASE_PATH=/`.
+6. Deploy the target commit.
+7. Copy its public URL into GitHub secret `STAGING_FRONTEND_URL`.
+
+Production GitHub Pages is not a staging frontend. A local `vite preview` is also not a staging frontend for release smoke.
+
 ## Before Production Deploy
 
 1. Confirm the target release commit.
 2. Confirm production backup exists and was checked.
-3. Deploy or verify staging backend and staging frontend for that same commit.
-4. Run GitHub Actions `Staging Smoke`.
-5. Confirm staging passed:
+3. Deploy or verify the staging backend for that commit.
+4. Deploy or verify the separate staging frontend for that commit.
+5. Run staging preflight:
+   - backend `/health`;
+   - backend `/api/version`;
+   - frontend marker;
+   - frontend API URL;
+   - no production backend URL in the staging bundle.
+6. Run GitHub Actions `Staging Smoke`.
+7. Confirm staging passed:
    - frontend commit marker matches target commit;
    - backend `/health` returns `200`;
    - backend `/api/version` matches target commit;
    - staging admin login works;
    - main read-only sections open without console/API errors.
-6. Do not start production deploy while staging smoke is red unless the release owner explicitly accepts the risk and records why.
+8. Do not start production deploy while staging smoke is red unless the release owner explicitly accepts the risk and records why.
 
 ## Production Gate
 
@@ -84,6 +121,13 @@ The GitHub Pages deploy workflow now requires:
 - production read-only Playwright smoke login and section checks.
 
 If the post-deploy gate fails, the workflow is failed and the release is not considered successful.
+
+Production release order:
+
+1. Deploy production backend through the Railway/external backend flow.
+2. Deploy production frontend through GitHub Pages.
+3. Run production preflight.
+4. Run production smoke.
 
 ## 401 On `/api/auth/login`
 

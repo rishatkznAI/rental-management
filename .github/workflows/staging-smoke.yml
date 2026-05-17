@@ -19,8 +19,6 @@ jobs:
       STAGING_FRONTEND_URL: ${{ secrets.STAGING_FRONTEND_URL }}
       STAGING_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
       STAGING_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
-      VITE_API_URL: ${{ secrets.STAGING_API_URL }}
-      VITE_GIT_COMMIT_SHA: ${{ github.sha }}
       EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
@@ -46,9 +44,6 @@ jobs:
 
       - name: Install backend dependencies
         run: npm ci --prefix server
-
-      - name: Build frontend with staging API URL
-        run: npm run build
 
       - name: Run staging release preflight
         run: npm run release:preflight -- --env staging --expected-commit "$EXPECTED_RELEASE_COMMIT"

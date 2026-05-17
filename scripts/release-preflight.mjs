@@ -84,6 +84,14 @@ function assertOk(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function normalizeUrl(value = '') {
+  return String(value || '').trim().replace(/\/$/, '');
+}
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
 function resolveAssetUrl(frontendUrl, assetPath) {
   return new URL(assetPath, `${frontendUrl.replace(/\/$/, '')}/`).toString();
 }
@@ -122,6 +130,28 @@ async function readFrontendBundle(frontendUrl) {
     assets,
     combinedText: [html, ...assets.map(asset => asset.text)].join('\n'),
   };
+}
+
+function extractHttpUrls(text) {
+  return unique(
+    [...String(text || '').matchAll(/https?:\/\/[^\s"'`\\)<>{}]+/g)]
+      .map(match => normalizeUrl(match[0].replace(/\\\//g, '/'))),
+  );
+}
+
+function detectApiUrlCandidates(text) {
+  return extractHttpUrls(text).filter(url =>
+    /railway\.app|vercel\.app|github\.io|localhost|127\.0\.0\.1|\/api($|[/?#])/i.test(url),
+  );
+}
+
+function detectProductionLikeBackendUrls(urls, expectedApiUrl) {
+  const productionApiUrl = normalizeUrl(process.env.PRODUCTION_API_URL || process.env.RELEASE_PREFLIGHT_PRODUCTION_API_URL || '');
+  return urls.filter(url => {
+    if (normalizeUrl(url) === normalizeUrl(expectedApiUrl)) return false;
+    if (productionApiUrl && normalizeUrl(url) === productionApiUrl) return true;
+    return /rental-management-production|production-[a-z0-9-]*\.up\.railway\.app/i.test(url);
+  });
 }
 
 async function main() {
@@ -163,14 +193,31 @@ async function main() {
 
   const frontend = await readFrontendBundle(frontendUrl);
   const expectedShort = shortCommit(expectedCommit);
+  const detectedApiUrls = detectApiUrlCandidates(frontend.combinedText);
+  const productionLikeBackendUrls = detectProductionLikeBackendUrls(detectedApiUrls, apiUrl);
+  const markerFound = frontend.combinedText.includes(expectedShort) || frontend.combinedText.includes(expectedCommit);
+  const expectedApiFound = frontend.combinedText.includes(apiUrl);
+
+  console.log(`[release-preflight] frontend marker expected=${expectedShort} found=${markerFound ? 'yes' : 'no'}`);
+  console.log(`[release-preflight] frontend detected API-like URLs=${detectedApiUrls.length ? detectedApiUrls.join(', ') : 'none'}`);
+  if (args.env === 'staging' && productionLikeBackendUrls.length > 0) {
+    console.warn(`[release-preflight] WARNING: staging frontend bundle contains production-like backend URL(s): ${productionLikeBackendUrls.join(', ')}`);
+  }
+
   assertOk(
-    frontend.combinedText.includes(expectedShort) || frontend.combinedText.includes(expectedCommit),
-    `frontend build marker does not contain expected commit ${expectedShort}`,
+    markerFound,
+    `frontend build marker does not contain expected commit ${expectedShort}. detectedApiUrls=${detectedApiUrls.join(', ') || 'none'}`,
   );
   assertOk(
-    frontend.combinedText.includes(apiUrl),
-    `frontend bundle does not contain expected API URL ${apiUrl}`,
+    expectedApiFound,
+    `frontend bundle does not contain expected API URL ${apiUrl}. detectedApiUrls=${detectedApiUrls.join(', ') || 'none'}`,
   );
+  if (args.env === 'staging') {
+    assertOk(
+      productionLikeBackendUrls.length === 0,
+      `staging frontend bundle contains production-like backend URL(s): ${productionLikeBackendUrls.join(', ')}`,
+    );
+  }
   if (args.oldCommit) {
     const oldShort = shortCommit(args.oldCommit);
     assertOk(

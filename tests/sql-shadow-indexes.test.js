@@ -206,6 +206,59 @@ test('SQL read helpers support document filters/search and gantt date overlap', 
   }
 });
 
+test('gantt SQL read helper supports stable reference filters used by JSON reference path', () => {
+  const { db, dir } = makeDb();
+  try {
+    setCollection(db, 'documents', []);
+    setCollection(db, 'gantt_rentals', [
+      {
+        id: 'GR-stable',
+        rentalId: '',
+        sourceRentalId: 'R-source',
+        originalRentalId: 'R-original',
+        equipmentId: 'EQ-1',
+        clientId: 'C-1',
+        objectId: 'CO-1',
+        contractId: 'CC-1',
+        managerId: 'U-manager',
+        ownerId: 'OWN-1',
+        status: 'active',
+        startDate: '2026-05-01',
+        endDate: '2026-05-10',
+      },
+      {
+        id: 'GR-other',
+        rentalId: 'R-other',
+        sourceRentalId: 'R-other',
+        equipmentId: 'EQ-2',
+        clientId: 'C-2',
+        objectId: 'CO-2',
+        contractId: 'CC-2',
+        managerId: 'U-other',
+        ownerId: 'OWN-2',
+        status: 'closed',
+        startDate: '2026-06-01',
+        endDate: '2026-06-10',
+      },
+    ]);
+    backfillSqlShadowIndexes(db);
+    for (const query of [
+      { rentalId: 'R-source' },
+      { rentalId: 'R-original' },
+      { rentalId: 'GR-stable' },
+      { objectId: 'CO-1' },
+      { managerId: 'U-manager' },
+      { ownerId: 'OWN-1' },
+      { clientId: 'C-1', equipmentId: 'EQ-1', contractId: 'CC-1', status: 'active' },
+    ]) {
+      assert.deepEqual(queryGanttIndex(db, query).map(item => item.id), ['GR-stable'], JSON.stringify(query));
+    }
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('documents SQL date range uses JSON business date fallback order', () => {
   const { db, dir } = makeDb();
   try {

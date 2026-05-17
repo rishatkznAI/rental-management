@@ -156,6 +156,17 @@ function registerDocumentRoutes(router, deps) {
     return String(record?.rentalId || record?.sourceRentalId || record?.originalRentalId || record?.id || '').trim();
   }
 
+  function ganttReferenceMatchesRentalId(record, rentalId) {
+    const wanted = String(rentalId || '').trim();
+    if (!wanted) return true;
+    return [
+      record?.rentalId,
+      record?.sourceRentalId,
+      record?.originalRentalId,
+      record?.id,
+    ].some(value => String(value || '').trim() === wanted);
+  }
+
   function findDocumentRental(rentalId) {
     const wanted = String(rentalId || '').trim();
     if (!wanted) return null;
@@ -433,9 +444,11 @@ function registerDocumentRoutes(router, deps) {
     let hasNarrowingFilter = false;
     const filters = {
       clientId: item => item.clientId,
-      rentalId: item => canonicalRentalId(item),
       equipmentId: item => item.equipmentId,
+      objectId: item => item.objectId,
       contractId: item => item.contractId,
+      managerId: item => item.managerId,
+      ownerId: item => item.ownerId,
       status: item => item.status,
     };
     Object.entries(filters).forEach(([name, getter]) => {
@@ -445,6 +458,11 @@ function registerDocumentRoutes(router, deps) {
         list = list.filter(item => String(getter(item) || '') === value);
       }
     });
+    const rentalId = String(query.rentalId || '').trim();
+    if (rentalId && rentalId !== 'all') {
+      hasNarrowingFilter = true;
+      list = list.filter(item => ganttReferenceMatchesRentalId(item, rentalId));
+    }
 
     const search = String(query.search || '').trim();
     if (search) hasNarrowingFilter = true;

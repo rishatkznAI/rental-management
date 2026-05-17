@@ -478,7 +478,10 @@ function queryGanttIndex(db, query = {}) {
   for (const [field, column] of Object.entries({
     clientId: 'clientId',
     equipmentId: 'equipmentId',
+    objectId: 'objectId',
     contractId: 'contractId',
+    managerId: 'managerId',
+    ownerId: 'ownerId',
     status: 'status',
   })) {
     const value = text(query[field]);

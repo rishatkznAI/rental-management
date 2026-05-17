@@ -186,9 +186,9 @@ test('documents gantt references are bounded, scoped and compact', async () => {
 test('documents gantt references support search and stable-id filters', async () => {
   const { app, state } = createApp();
   state.gantt_rentals = [
-    { id: 'GR-own', rentalId: 'R-own', clientId: 'C-1', client: 'ООО Альфа', equipmentId: 'EQ-1', equipmentInv: 'A-1', contractId: 'CON-1', manager: 'Руслан', managerId: 'U-manager', startDate: '2026-05-10', endDate: '2026-05-12', status: 'active', amount: 30000 },
-    { id: 'GR-other', rentalId: 'R-other', clientId: 'C-2', client: 'ООО Бета', equipmentId: 'EQ-2', equipmentInv: 'B-2', contractId: 'CON-2', manager: 'Анна', managerId: 'U-other', startDate: '2026-06-10', endDate: '2026-06-12', status: 'closed', amount: 50000 },
-    { id: 'GR-old', rentalId: 'R-old', clientId: 'C-1', client: 'ООО Старый', equipmentId: 'EQ-1', equipmentInv: 'A-1', contractId: 'CON-1', manager: 'Руслан', managerId: 'U-manager', startDate: '2024-01-10', endDate: '2024-01-12', status: 'closed', amount: 20000 },
+    { id: 'GR-own', rentalId: 'R-own', clientId: 'C-1', client: 'ООО Альфа', equipmentId: 'EQ-1', equipmentInv: 'A-1', objectId: 'CO-1', contractId: 'CON-1', manager: 'Руслан', managerId: 'U-manager', ownerId: 'OWN-1', startDate: '2026-05-10', endDate: '2026-05-12', status: 'active', amount: 30000 },
+    { id: 'GR-other', rentalId: 'R-other', sourceRentalId: 'R-source-other', originalRentalId: 'R-original-other', clientId: 'C-2', client: 'ООО Бета', equipmentId: 'EQ-2', equipmentInv: 'B-2', objectId: 'CO-2', contractId: 'CON-2', manager: 'Анна', managerId: 'U-other', ownerId: 'OWN-2', startDate: '2026-06-10', endDate: '2026-06-12', status: 'closed', amount: 50000 },
+    { id: 'GR-old', rentalId: 'R-old', clientId: 'C-1', client: 'ООО Старый', equipmentId: 'EQ-1', equipmentInv: 'A-1', objectId: 'CO-1', contractId: 'CON-1', manager: 'Руслан', managerId: 'U-manager', ownerId: 'OWN-1', startDate: '2024-01-10', endDate: '2024-01-12', status: 'closed', amount: 20000 },
   ];
 
   await withServer(app, async (baseUrl) => {
@@ -208,9 +208,33 @@ test('documents gantt references support search and stable-id filters', async ()
     assert.equal(equipment.response.status, 200);
     assert.deepEqual(new Set(equipment.json.items.map(item => item.id)), new Set(['GR-own', 'GR-old']));
 
+    const object = await request(baseUrl, 'GET', '/api/documents/gantt-references?objectId=CO-2', 'office');
+    assert.equal(object.response.status, 200);
+    assert.deepEqual(object.json.items.map(item => item.id), ['GR-other']);
+
+    const manager = await request(baseUrl, 'GET', '/api/documents/gantt-references?managerId=U-other', 'office');
+    assert.equal(manager.response.status, 200);
+    assert.deepEqual(manager.json.items.map(item => item.id), ['GR-other']);
+
+    const owner = await request(baseUrl, 'GET', '/api/documents/gantt-references?ownerId=OWN-2', 'office');
+    assert.equal(owner.response.status, 200);
+    assert.deepEqual(owner.json.items.map(item => item.id), ['GR-other']);
+
     const status = await request(baseUrl, 'GET', '/api/documents/gantt-references?status=active', 'office');
     assert.equal(status.response.status, 200);
     assert.deepEqual(status.json.items.map(item => item.id), ['GR-own']);
+
+    const sourceRental = await request(baseUrl, 'GET', '/api/documents/gantt-references?rentalId=R-source-other', 'office');
+    assert.equal(sourceRental.response.status, 200);
+    assert.deepEqual(sourceRental.json.items.map(item => item.id), ['GR-other']);
+
+    const originalRental = await request(baseUrl, 'GET', '/api/documents/gantt-references?rentalId=R-original-other', 'office');
+    assert.equal(originalRental.response.status, 200);
+    assert.deepEqual(originalRental.json.items.map(item => item.id), ['GR-other']);
+
+    const ganttId = await request(baseUrl, 'GET', '/api/documents/gantt-references?rentalId=GR-other', 'office');
+    assert.equal(ganttId.response.status, 200);
+    assert.deepEqual(ganttId.json.items.map(item => item.id), ['GR-other']);
   });
 });
 

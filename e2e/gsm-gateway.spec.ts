@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import net from 'node:net';
 import { loginAsAdmin, navigateInApp } from './helpers/auth';
 import { createEquipment, withAdminApi } from './helpers/api';
@@ -11,6 +12,21 @@ function sendTcpPacket(payload: string, port = 5023) {
     socket.once('error', reject);
     socket.once('close', () => resolve());
   });
+}
+
+async function expectRenderedGsmMap(page: Page) {
+  await expect(page.locator('.leaflet-container')).toBeVisible();
+  await expect.poll(async () => page.locator('.leaflet-pane').count()).toBeGreaterThan(0);
+  await expect.poll(async () => page.locator('.leaflet-marker-pane').count()).toBeGreaterThan(0);
+  await expect.poll(async () => page.evaluate(() => {
+    const selectors = [
+      '.leaflet-marker-icon',
+      '.leaflet-interactive',
+      '.leaflet-pane canvas',
+      '.leaflet-pane svg',
+    ];
+    return selectors.some(selector => document.querySelectorAll(selector).length > 0);
+  })).toBeTruthy();
 }
 
 test('GSM page shows gateway status, latest packets and packet details', async ({ page }) => {
@@ -32,7 +48,7 @@ test('GSM page shows gateway status, latest packets and packet details', async (
   });
 
   const suffix = `gsm-open-${Date.now()}`;
-  await withAdminApi(async (api) => {
+  const equipment = await withAdminApi(async (api) => {
     const equipment = await createEquipment(api, suffix);
     const patch = await api.patch(`/api/equipment/${equipment.id}`, {
       data: {
@@ -42,6 +58,7 @@ test('GSM page shows gateway status, latest packets and packet details', async (
       },
     });
     expect(patch.ok()).toBeTruthy();
+    return equipment;
   });
 
   await loginAsAdmin(page);
@@ -57,6 +74,13 @@ test('GSM page shows gateway status, latest packets and packet details', async (
 
   await page.getByRole('tab', { name: 'Последние пакеты' }).click();
   await expect(page.getByText('866123456789012').first()).toBeVisible();
+  await expect(page.getByText('55.79600, 49.10800').first()).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Карта и геозоны' }).click();
+  await expect(page.getByRole('heading', { name: 'Карта расположения техники' })).toBeVisible();
+  await expect(page.getByText(equipment.inventoryNumber).first()).toBeVisible();
+  await expect(page.getByText('Источник точки')).toBeVisible();
+  await expectRenderedGsmMap(page);
 
   await page.getByRole('tab', { name: 'Маршрут', exact: true }).click();
   await expect.poll(() => requests.some(item => (

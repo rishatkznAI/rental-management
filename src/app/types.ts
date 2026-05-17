@@ -282,6 +282,8 @@ export interface GsmGatewayPacket {
   protocol?: string | null;
   parseStatus?: GsmPacketParseStatus;
   parseError?: string | null;
+  duplicate?: boolean;
+  duplicateOf?: string | null;
   deviceId?: string | null;
   trackerId?: string | null;
   imei?: string | null;
@@ -308,6 +310,8 @@ export interface GsmGatewayPacket {
   alarmType?: string | null;
   parsed?: Record<string, unknown> | null;
   direction: GsmPacketDirection;
+  source?: string | null;
+  transport?: string | null;
   equipmentLabel?: string | null;
   connectionId?: string | null;
   remoteAddress?: string | null;

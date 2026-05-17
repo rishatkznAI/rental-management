@@ -39,6 +39,11 @@ import { animationDurations, useAnimatedPresence } from '../lib/animations';
 import { useAuth } from '../contexts/AuthContext';
 import { gsmGatewayService, type GsmDashboardResponse } from '../services/gsm-gateway.service';
 import {
+  buildGsmEquipmentLabel,
+  buildGsmEquipmentLookup,
+  resolveGsmPacketEquipment,
+} from '../lib/gsmEquipmentLabel.js';
+import {
   isPointInsideZone,
   type GsmEquipmentSnapshot,
   type GsmMovementEntry,
@@ -342,11 +347,11 @@ function getParseStatusBadge(status?: string | null): 'success' | 'warning' | 'd
 }
 
 function buildEquipmentLabel(snapshot: GsmEquipmentSnapshot) {
-  return [
-    snapshot.equipment.manufacturer,
-    snapshot.equipment.model,
-    snapshot.equipment.inventoryNumber ? `INV ${snapshot.equipment.inventoryNumber}` : '',
-  ].filter(Boolean).join(' · ');
+  const manufacturer = String(snapshot.equipment.manufacturer || '').trim();
+  const label = buildGsmEquipmentLabel(snapshot.equipment, snapshot.equipment.id);
+  return manufacturer && !label.includes(manufacturer) && label !== 'Техника не привязана'
+    ? `${manufacturer} · ${label}`
+    : label;
 }
 
 function buildEquipmentOptionLabel(equipment: Equipment) {
@@ -655,6 +660,10 @@ export default function Gsm() {
   const gsmDevices = gsmDashboard.devices || [];
   const recentGatewayPackets = gsmDashboard.recentPackets || [];
   const snapshots = gsmDashboard.snapshots || [];
+  const gsmEquipmentLookup = React.useMemo(
+    () => buildGsmEquipmentLookup(snapshots, gsmDevices),
+    [gsmDevices, snapshots],
+  );
   const { data: gatewayConnections = [] } = useQuery<GsmGatewayConnection[]>({
     queryKey: ['gsmGateway', 'connections'],
     queryFn: () => gsmGatewayService.getConnections().catch(() => []),
@@ -845,6 +854,10 @@ export default function Gsm() {
       || [item.deviceId, item.trackerId, item.imei].includes(selectedTrackerId)
     ));
   }, [gatewayConnections, selectedSnapshot, selectedTrackerId]);
+  const retainedPacketEquipment = React.useMemo(
+    () => retainedPacket ? resolveGsmPacketEquipment(retainedPacket, gsmEquipmentLookup) : null,
+    [gsmEquipmentLookup, retainedPacket],
+  );
 
   const { data: gatewayPackets = [] } = useQuery<GsmGatewayPacket[]>({
     queryKey: ['gsmGateway', 'packets', selectedSnapshot?.equipment.id || 'all', selectedTrackerId || 'none'],
@@ -1174,40 +1187,50 @@ export default function Gsm() {
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="w-full min-w-[780px] text-left text-sm">
+                        <table className="w-full min-w-[980px] text-left text-sm">
                           <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
                             <tr>
                               <th className="px-3 py-2">Время</th>
                               <th className="px-3 py-2">IP</th>
                               <th className="px-3 py-2">IMEI / ID</th>
+                              <th className="px-3 py-2">Техника</th>
                               <th className="px-3 py-2">Статус</th>
                               <th className="px-3 py-2">Координаты</th>
                               <th className="px-3 py-2"></th>
                             </tr>
                           </thead>
                           <tbody>
-                            {recentGatewayPackets.slice(0, 8).map(packet => (
-                              <tr key={packet.id} className="border-t border-white/10">
-                                <td className="px-3 py-2 text-slate-300">{formatDateTime(packetReceivedAt(packet))}</td>
-                                <td className="px-3 py-2 text-slate-300">{packetSourceIp(packet)}</td>
-                                <td className="px-3 py-2 text-slate-300">{packet.imei || packet.deviceId || '—'}</td>
-                                <td className="px-3 py-2">
-                                  <Badge variant={getParseStatusBadge(packet.parseStatus)}>{packet.parseStatus || 'pending'}</Badge>
-                                </td>
-                                <td className="px-3 py-2 text-slate-300">{formatCoordinates(packet.lat, packet.lng)}</td>
-                                <td className="px-3 py-2 text-right">
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={() => setSelectedPacket(packet)}
-                                    className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
-                                  >
-                                    Открыть
-                                  </Button>
-                                </td>
-                              </tr>
-                            ))}
+                            {recentGatewayPackets.slice(0, 8).map((packet) => {
+                              const packetEquipment = resolveGsmPacketEquipment(packet, gsmEquipmentLookup);
+                              return (
+                                <tr key={packet.id} className="border-t border-white/10">
+                                  <td className="px-3 py-2 text-slate-300">{formatDateTime(packetReceivedAt(packet))}</td>
+                                  <td className="px-3 py-2 text-slate-300">{packetSourceIp(packet)}</td>
+                                  <td className="px-3 py-2 font-mono text-xs text-slate-300">{packet.imei || packet.deviceId || packet.trackerId || '—'}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="max-w-[260px] truncate text-slate-200">{packetEquipment.label}</div>
+                                    <div className="mt-1">
+                                      <Badge variant={packetEquipment.linked ? 'success' : 'warning'}>{packetEquipment.badge}</Badge>
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <Badge variant={getParseStatusBadge(packet.parseStatus)}>{packet.parseStatus || 'pending'}</Badge>
+                                  </td>
+                                  <td className="px-3 py-2 text-slate-300">{formatCoordinates(packet.lat, packet.lng)}</td>
+                                  <td className="px-3 py-2 text-right">
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="sm"
+                                      onClick={() => setSelectedPacket(packet)}
+                                      className="border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                                    >
+                                      Открыть
+                                    </Button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -1391,13 +1414,21 @@ export default function Gsm() {
                       </thead>
                       <tbody>
                         {recentGatewayPackets.map(packet => {
-                          const device = packet.equipmentId ? gsmDevices.find(item => item.equipmentId === packet.equipmentId) : null;
+                          const packetEquipment = resolveGsmPacketEquipment(packet, gsmEquipmentLookup);
                           return (
                             <tr key={packet.id} className="border-t border-white/10 align-top">
                               <td className="px-3 py-2 text-slate-300">{formatDateTime(packetReceivedAt(packet))}</td>
                               <td className="px-3 py-2 text-slate-300">{packetSourceIp(packet)}</td>
-                              <td className="px-3 py-2 font-mono text-xs text-slate-300">{packet.imei || packet.deviceId || '—'}</td>
-                              <td className="px-3 py-2 text-slate-300">{device?.equipmentName || packet.equipmentLabel || packet.equipmentId || '—'}</td>
+                              <td className="px-3 py-2 font-mono text-xs text-slate-300">{packet.imei || packet.deviceId || packet.trackerId || '—'}</td>
+                              <td className="px-3 py-2">
+                                <div className="max-w-[280px] truncate text-slate-200">{packetEquipment.label}</div>
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  <Badge variant={packetEquipment.linked ? 'success' : 'warning'}>{packetEquipment.badge}</Badge>
+                                  {packetEquipment.equipmentId ? (
+                                    <span className="font-mono text-[11px] text-slate-500">{packetEquipment.equipmentId}</span>
+                                  ) : null}
+                                </div>
+                              </td>
                               <td className="px-3 py-2">
                                 <Badge variant={getParseStatusBadge(packet.parseStatus)}>{packet.parseStatus || 'pending'}</Badge>
                               </td>
@@ -2323,44 +2354,48 @@ export default function Gsm() {
                       </div>
                     ) : (
                       <div className="max-h-[760px] space-y-3 overflow-y-auto pr-1">
-                        {gatewayPackets.map((packet) => (
-                          <div key={packet.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Badge variant={packet.direction === 'inbound' ? 'info' : 'warning'}>
-                                    {packet.direction === 'inbound' ? 'Входящий' : 'Исходящий'}
-                                  </Badge>
-                                  <span className="text-xs text-slate-500">{formatDateTime(packet.createdAt)}</span>
+                        {gatewayPackets.map((packet) => {
+                          const packetEquipment = resolveGsmPacketEquipment(packet, gsmEquipmentLookup);
+                          return (
+                            <div key={packet.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Badge variant={packet.direction === 'inbound' ? 'info' : 'warning'}>
+                                      {packet.direction === 'inbound' ? 'Входящий' : 'Исходящий'}
+                                    </Badge>
+                                    <Badge variant={packetEquipment.linked ? 'success' : 'warning'}>{packetEquipment.badge}</Badge>
+                                    <span className="text-xs text-slate-500">{formatDateTime(packet.createdAt)}</span>
+                                  </div>
+                                  <div className="mt-2 text-sm font-semibold text-white">
+                                    {packetEquipment.label}
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    {packet.deviceId || packet.imei || 'Устройство не опознано'} · {packet.protocol || 'raw'}
+                                  </div>
                                 </div>
-                                <div className="mt-2 text-sm font-semibold text-white">
-                                  {packet.summary || packet.equipmentLabel || packet.deviceId || 'Пакет'}
-                                </div>
-                                <div className="mt-1 text-xs text-slate-500">
-                                  {packet.deviceId || packet.imei || 'Устройство не опознано'} · {packet.protocol || 'raw'}
+                                <div className="text-right text-xs text-slate-500">
+                                  <div>{packet.remoteAddress || '—'}</div>
+                                  <div>{packet.remotePort || '—'}</div>
                                 </div>
                               </div>
-                              <div className="text-right text-xs text-slate-500">
-                                <div>{packet.remoteAddress || '—'}</div>
-                                <div>{packet.remotePort || '—'}</div>
-                              </div>
-                            </div>
 
-                            <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3">
-                              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Текст пакета</div>
-                              <div className="mt-2 whitespace-pre-wrap break-all text-sm text-slate-200">
-                                {compactPayloadText(packet)}
+                              <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Текст пакета</div>
+                                <div className="mt-2 whitespace-pre-wrap break-all text-sm text-slate-200">
+                                  {compactPayloadText(packet)}
+                                </div>
                               </div>
-                            </div>
 
-                            <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3">
-                              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">HEX</div>
-                              <div className="mt-2 break-all font-mono text-xs text-cyan-200">
-                                {packet.payloadHex || '—'}
+                              <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">HEX</div>
+                                <div className="mt-2 break-all font-mono text-xs text-cyan-200">
+                                  {packet.payloadHex || '—'}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </CardContent>
@@ -2560,6 +2595,25 @@ export default function Gsm() {
               </div>
 
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:col-span-2">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Связанная техника</div>
+                      <div className="mt-1 break-words text-sm font-semibold text-white">
+                        {retainedPacketEquipment?.label || 'Техника не привязана'}
+                      </div>
+                      <div className="mt-1 font-mono text-xs text-slate-500">
+                        {retainedPacketEquipment?.equipmentId || 'equipmentId отсутствует'}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant={retainedPacketEquipment?.linked ? 'success' : 'warning'}>
+                        {retainedPacketEquipment?.badge || 'Без привязки'}
+                      </Badge>
+                      {retainedPacket.duplicate ? <Badge variant="warning">Дубликат</Badge> : null}
+                    </div>
+                  </div>
+                </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">IP</div>
                   <div className="mt-1 text-sm text-white">{packetSourceIp(retainedPacket)}</div>
@@ -2570,13 +2624,41 @@ export default function Gsm() {
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">IMEI / Device ID</div>
-                  <div className="mt-1 text-sm text-white">{retainedPacket.imei || retainedPacket.deviceId || '—'}</div>
+                  <div className="mt-1 break-all font-mono text-xs text-white">
+                    {retainedPacket.imei || retainedPacket.deviceId || retainedPacket.trackerId || '—'}
+                  </div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Статус парсинга</div>
                   <div className="mt-1">
                     <Badge variant={getParseStatusBadge(retainedPacket.parseStatus)}>{retainedPacket.parseStatus || 'pending'}</Badge>
                   </div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Координаты</div>
+                  <div className="mt-1 text-sm text-white">{formatCoordinates(retainedPacket.lat, retainedPacket.lng)}</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Время устройства</div>
+                  <div className="mt-1 text-sm text-white">{formatDateTime(retainedPacket.deviceTime)}</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Source / transport</div>
+                  <div className="mt-1 text-sm text-white">
+                    {[retainedPacket.source, retainedPacket.transport, retainedPacket.protocol, retainedPacket.direction].filter(Boolean).join(' · ') || '—'}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Duplicate / orphan</div>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {retainedPacket.duplicate ? <Badge variant="warning">Дубликат</Badge> : <Badge variant="success">Не дубликат</Badge>}
+                    <Badge variant={retainedPacketEquipment?.linked ? 'success' : 'warning'}>
+                      {retainedPacketEquipment?.linked ? 'Привязан' : 'Orphan'}
+                    </Badge>
+                  </div>
+                  {retainedPacket.duplicateOf ? (
+                    <div className="mt-2 font-mono text-xs text-slate-500">{retainedPacket.duplicateOf}</div>
+                  ) : null}
                 </div>
               </div>
 

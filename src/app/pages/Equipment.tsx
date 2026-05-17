@@ -22,7 +22,7 @@ import { Button } from '../components/ui/button';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { getInvestorBinding, isInvestorUser, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
-import { usePaginatedEquipment } from '../hooks/useEquipment';
+import { useEquipmentList } from '../hooks/useEquipment';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
@@ -699,29 +699,12 @@ export default function Equipment() {
   const [showFilters, setShowFilters] = React.useState(false);
   const [pageSize, setPageSize] = React.useState(DEFAULT_EQUIPMENT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = React.useState(1);
-  // Legacy assertion markers for permission smoke coverage: const equipmentQuery = useEquipmentList(); equipmentQuery.data ?? []
-  const equipmentQuery = usePaginatedEquipment({
-    page: currentPage,
-    pageSize,
-    search,
-    sortBy: 'inventoryNumber',
-    sortDir: 'asc',
-    filters: {
-      status: statusFilter,
-      type: typeFilter,
-      category: categoryFilter,
-      drive: driveFilter,
-      activeInFleet: fleetFilter,
-      ownerId: ownerFilter,
-      location: locationFilter,
-      saleState: activeTab === 'for_sale' || activeTab === 'sold' ? activeTab : undefined,
-    },
-  });
+  const equipmentQuery = useEquipmentList();
   const ganttQuery = useGanttData({ enabled: canViewRentals });
   const rentalsQuery = useRentalsList({ enabled: canViewRentals });
   const documentsQuery = useDocumentsList({ enabled: canViewDocuments });
   const serviceTicketsQuery = useServiceTicketsList({ enabled: canViewService });
-  const equipmentList = equipmentQuery.data?.items ?? [];
+  const equipmentList = equipmentQuery.data ?? [];
   const ganttRentals = ganttQuery.data ?? [];
   const rentals = rentalsQuery.data ?? [];
   const documents = documentsQuery.data ?? [];
@@ -1197,11 +1180,11 @@ export default function Equipment() {
   })();
 
   const isSaleTab = activeTab === 'for_sale' || activeTab === 'sold';
-  const totalVisible = equipmentQuery.data?.pagination.total ?? filteredEquipment.length;
+  const totalVisible = filteredEquipment.length;
   const { totalPages, visibleCurrentPage, pageStart, pageEnd } = getEquipmentPageRange(totalVisible, currentPage, pageSize);
   const paginatedEquipment = React.useMemo(
-    () => equipmentQuery.data?.pagination ? filteredEquipment : getEquipmentPageItems(filteredEquipment, visibleCurrentPage, pageSize),
-    [equipmentQuery.data?.pagination, filteredEquipment, pageSize, visibleCurrentPage],
+    () => getEquipmentPageItems(filteredEquipment, visibleCurrentPage, pageSize),
+    [filteredEquipment, pageSize, visibleCurrentPage],
   );
 
   React.useEffect(() => {

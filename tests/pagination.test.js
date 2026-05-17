@@ -91,6 +91,17 @@ test('first wave pages render shared controls and paginated hooks', () => {
   }
 });
 
+test('equipment registry loads the full collection before applying registry tabs and UI pagination', () => {
+  const pageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+
+  assert.match(pageSource, /useEquipmentList\(\)/);
+  assert.doesNotMatch(pageSource, /usePaginatedEquipment\(/);
+  assert.doesNotMatch(pageSource, /equipmentQuery\.data\?\.items/);
+  assert.doesNotMatch(pageSource, /equipmentQuery\.data\?\.pagination\.total/);
+  assert.match(pageSource, /const totalVisible = filteredEquipment\.length/);
+  assert.match(pageSource, /getEquipmentPageItems\(filteredEquipment, visibleCurrentPage, pageSize\)/);
+});
+
 test('documents page uses bounded reference search instead of loading full registry for wizard chains', () => {
   const pageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Documents.tsx'), 'utf8');
   const serviceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/documents.service.ts'), 'utf8');

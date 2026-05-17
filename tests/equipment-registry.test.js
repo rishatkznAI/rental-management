@@ -128,6 +128,22 @@ test('equipment registry tab matching keeps rental availability scoped and hidde
   assert.equal(matchesTabType({ id: 'EQ-hidden', inventoryNumber: 'INV-hidden', status: 'available', hidden: true }, 'all', activeRentalIndex, options), false);
 });
 
+test('equipment registry all tab keeps ordinary lifts across status category owner and nullable legacy fields', () => {
+  const activeRentalIndex = buildActiveRentalIndex([], []);
+  const options = { canEquipmentParticipateInRentals: canRentOwnOrPartner };
+  const ordinaryEquipment = [
+    { id: 'EQ-own', inventoryNumber: 'INV-own', status: 'available', category: 'own', owner: 'own' },
+    { id: 'EQ-null-status', inventoryNumber: 'INV-null-status', status: null, category: 'own', owner: 'own' },
+    { id: 'EQ-object-owner', inventoryNumber: 'INV-object-owner', status: 'available', category: 'partner', owner: { name: 'Partner' } },
+    { id: 'EQ-client', inventoryNumber: 'INV-client', status: 'available', category: 'client', owner: null },
+    { id: 'EQ-partner', inventoryNumber: 'INV-partner', status: 'available', category: 'partner', ownerId: 'partner-1' },
+  ];
+
+  for (const equipment of ordinaryEquipment) {
+    assert.equal(matchesTabType(equipment, 'all', activeRentalIndex, options), true, equipment.id);
+  }
+});
+
 test('equipment registry status filters reuse tab behavior for sales and active rentals', () => {
   const activeRentalIndex = buildActiveRentalIndex(
     [{ id: 'EQ-rented', inventoryNumber: 'INV-rented' }],
@@ -317,6 +333,26 @@ test('equipment registry tab counts preserve sale and fleet classification', () 
   assert.equal(counts.for_sale, 1);
   assert.equal(counts.sold, 1);
   assert.equal(matchesTabType(equipment.find(item => item.id === 'EQ-sold'), 'available', activeRentalIndex, { canEquipmentParticipateInRentals: canRentOwnOrPartner }), false);
+});
+
+test('equipment registry all tab includes sold written-off sale client and partner records in counters', () => {
+  const equipment = [
+    { id: 'EQ-own', inventoryNumber: 'INV-own', status: 'available', category: 'own' },
+    { id: 'EQ-client', inventoryNumber: 'INV-client', status: 'available', category: 'client' },
+    { id: 'EQ-partner', inventoryNumber: 'INV-partner', status: 'available', category: 'partner' },
+    { id: 'EQ-written-off', inventoryNumber: 'INV-written-off', status: 'inactive', category: 'own' },
+    { id: 'EQ-sale', inventoryNumber: 'INV-sale', status: 'inactive', category: 'own', saleMode: true, saleStatus: 'На продаже' },
+    { id: 'EQ-sold', inventoryNumber: 'INV-sold', status: 'inactive', category: 'sold', saleStatus: 'Продана' },
+    { id: 'EQ-archived', inventoryNumber: 'INV-archived', status: 'available', category: 'own', archived: true },
+  ];
+  const activeRentalIndex = buildActiveRentalIndex(equipment, []);
+  const counts = buildEquipmentTabCounts(equipment, [{ key: 'all' }, { key: 'available' }, { key: 'written_off' }, { key: 'for_sale' }, { key: 'sold' }], activeRentalIndex, { canEquipmentParticipateInRentals: canRentOwnOrPartner });
+
+  assert.equal(counts.all, 6);
+  assert.equal(counts.available, 2);
+  assert.equal(counts.written_off, 1);
+  assert.equal(counts.for_sale, 1);
+  assert.equal(counts.sold, 1);
 });
 
 test('equipment registry tab counts do not include active sale equipment in written-off totals', () => {

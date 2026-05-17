@@ -30,6 +30,20 @@ function toText(value) {
   return String(value || '').trim();
 }
 
+function normalizeIdentifier(value) {
+  return toText(value).replace(/\s+/g, '');
+}
+
+function identityKey(value) {
+  return normalizeIdentifier(value).toLowerCase();
+}
+
+function identifiersEqual(left, right) {
+  const leftKey = identityKey(left);
+  const rightKey = identityKey(right);
+  return Boolean(leftKey && rightKey && leftKey === rightKey);
+}
+
 function toNumberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
@@ -53,8 +67,8 @@ function normalizeParseResult(result = {}) {
     protocol: result.protocol || null,
     parseStatus: status,
     parseError: result.parseError || null,
-    deviceId: toText(result.deviceId) || null,
-    imei: toText(result.imei) || null,
+    deviceId: normalizeIdentifier(result.deviceId) || null,
+    imei: normalizeIdentifier(result.imei) || null,
     deviceTime: result.deviceTime || null,
     lat: toNumberOrNull(result.lat),
     lng: toNumberOrNull(result.lng),
@@ -231,30 +245,28 @@ function createGprsGateway({
   }
 
   function resolveEquipmentByIdentity(identity = {}) {
-    const imei = toText(identity.imei);
-    const deviceId = toText(identity.deviceId);
+    const imei = normalizeIdentifier(identity.imei);
+    const deviceId = normalizeIdentifier(identity.deviceId);
     if (!imei && !deviceId) return null;
 
     return asArray(readData('equipment')).find((item) => {
-      const itemImei = toText(item.gsmImei);
-      const itemDeviceId = toText(item.gsmDeviceId);
-      const legacyTrackerId = toText(item.gsmTrackerId);
       return Boolean(
-        (imei && itemImei && imei === itemImei)
-        || (deviceId && itemDeviceId && deviceId === itemDeviceId)
-        || (deviceId && legacyTrackerId && deviceId === legacyTrackerId),
+        (imei && identifiersEqual(imei, item.gsmImei))
+        || (deviceId && identifiersEqual(deviceId, item.gsmDeviceId))
+        || (deviceId && identifiersEqual(deviceId, item.gsmTrackerId)),
       );
     }) || null;
   }
 
   function findDeviceByIdentity(identity = {}) {
-    const imei = toText(identity.imei);
-    const deviceId = toText(identity.deviceId);
+    const imei = normalizeIdentifier(identity.imei);
+    const deviceId = normalizeIdentifier(identity.deviceId);
     if (!imei && !deviceId) return null;
     return asArray(readData('gsm_devices')).find(item => Boolean(
-      (imei && toText(item.imei) === imei)
-      || (deviceId && toText(item.imei) === deviceId)
-      || (deviceId && toText(item.id) === deviceId),
+      (imei && identifiersEqual(item.imei, imei))
+      || (deviceId && identifiersEqual(item.imei, deviceId))
+      || (deviceId && identifiersEqual(item.id, deviceId))
+      || (deviceId && identifiersEqual(item.deviceId, deviceId)),
     )) || null;
   }
 
@@ -264,14 +276,14 @@ function createGprsGateway({
   }
 
   function updateGsmDeviceFromPacket(device, parsed, rawText, receivedAt) {
-    const imei = toText(parsed.imei || device?.imei);
-    const deviceId = toText(parsed.deviceId || device?.deviceId || device?.id);
+    const imei = normalizeIdentifier(parsed.imei || device?.imei);
+    const deviceId = normalizeIdentifier(parsed.deviceId || device?.deviceId || device?.id);
     if (!imei && !deviceId) return;
     const devices = asArray(readData('gsm_devices'));
     const index = devices.findIndex(item => Boolean(
-      (imei && toText(item.imei) === imei)
-      || (deviceId && toText(item.id) === deviceId)
-      || (deviceId && toText(item.deviceId) === deviceId),
+      (imei && identifiersEqual(item.imei, imei))
+      || (deviceId && identifiersEqual(item.id, deviceId))
+      || (deviceId && identifiersEqual(item.deviceId, deviceId)),
     ));
     const current = index >= 0 ? devices[index] : {
       id: `GSM-${imei || deviceId}`,
@@ -500,11 +512,13 @@ function createGprsGateway({
     const device = findDeviceByIdentity(parsed);
     const equipment = resolveEquipmentByDevice(device) || resolveEquipmentByIdentity(parsed);
     bindConnection(connection, parsed, equipment);
-    updateEquipmentFromPacket(equipment?.id || null, parsed, receivedAt);
-    updateGsmDeviceFromPacket(device, parsed, bufferToReadableText(buffer), receivedAt);
 
     const packet = buildPacket({ connection, buffer, parsed, receivedAt, equipment, parseError, tooLarge });
     const storedPacket = persistPacket(packet);
+    if (!storedPacket.duplicate && parsed.parseStatus === 'parsed') {
+      updateEquipmentFromPacket(equipment?.id || null, parsed, receivedAt);
+      updateGsmDeviceFromPacket(device, parsed, bufferToReadableText(buffer), receivedAt);
+    }
 
     if (parsed.ack && connection?.socket && !connection.socket.destroyed) {
       connection.socket.write(parsed.ack, (error) => {

@@ -236,6 +236,105 @@ test('packet with IMEI links to equipment by gsmImei and updates GSM state', () 
   assert.equal(state.equipment[0].gsmStatus, 'online');
 });
 
+test('packet with deviceId links to equipment by stable gsmDeviceId and updates GSM state', () => {
+  const { gateway, state } = createMemoryGateway({
+    equipment: [
+      { id: 'EQ-DEVICE', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '045', gsmDeviceId: 'TRACKER-E2E' },
+    ],
+  });
+
+  const packet = gateway.processRawPacket(Buffer.from('deviceId:tracker-e2e LAT:55.797 LNG:49.109 SPEED:2'), {
+    sourceIp: '10.0.0.12',
+  });
+
+  assert.equal(packet.equipmentId, 'EQ-DEVICE');
+  assert.equal(packet.deviceId, 'tracker-e2e');
+  assert.equal(state.equipment[0].gsmLastLat, 55.797);
+  assert.equal(state.equipment[0].gsmLastLng, 49.109);
+  assert.equal(state.equipment[0].gsmStatus, 'online');
+});
+
+test('GSM identity matching ignores case and whitespace without stripping leading zeros', () => {
+  const { gateway, state } = createMemoryGateway({
+    equipment: [
+      { id: 'EQ-IMEI', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '046', gsmImei: '00 866 123 456 789 012' },
+      { id: 'EQ-DEVICE', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '047', gsmDeviceId: ' Tracker AbC 007 ' },
+    ],
+  });
+
+  const imeiPacket = gateway.processRawPacket(Buffer.from('IMEI:00866123456789012 LAT:55.796 LNG:49.108'), {
+    sourceIp: '10.0.0.12',
+  });
+  const devicePacket = gateway.processRawPacket(Buffer.from('deviceId:trackerabc007 LAT:55.797 LNG:49.109'), {
+    sourceIp: '10.0.0.13',
+  });
+
+  assert.equal(imeiPacket.equipmentId, 'EQ-IMEI');
+  assert.equal(imeiPacket.imei, '00866123456789012');
+  assert.equal(devicePacket.equipmentId, 'EQ-DEVICE');
+  assert.equal(state.equipment[0].gsmImei, '00 866 123 456 789 012');
+  assert.equal(state.equipment[0].gsmLastLat, 55.796);
+  assert.equal(state.equipment[1].gsmLastLat, 55.797);
+});
+
+test('unknown IMEI saves packet but does not update equipment', () => {
+  const { gateway, state } = createMemoryGateway({
+    equipment: [
+      { id: 'EQ-1', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '044', gsmImei: '866123456789012' },
+    ],
+  });
+
+  const packet = gateway.processRawPacket(Buffer.from('IMEI:866000000000000 LAT:55.796 LNG:49.108'), {
+    sourceIp: '10.0.0.13',
+  });
+
+  assert.equal(packet.parseStatus, 'parsed');
+  assert.equal(packet.equipmentId, null);
+  assert.equal(state.gsm_packets.length, 1);
+  assert.equal(state.equipment[0].gsmLastSeenAt, undefined);
+  assert.equal(state.equipment[0].gsmLastLat, undefined);
+});
+
+test('duplicate packet inside GSM_DEDUPE_WINDOW_MS does not update equipment state again', () => {
+  const { gateway, state } = createMemoryGateway({
+    equipment: [
+      { id: 'EQ-1', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '044', gsmImei: '866123456789012' },
+    ],
+  }, { dedupeWindowMs: 60_000 });
+  const raw = Buffer.from('IMEI:866123456789012 TIME:2026-05-16T10:00:00.000Z LAT:55.796 LNG:49.108 SPEED:0');
+
+  const first = gateway.processRawPacket(raw, { sourceIp: '10.0.0.14' });
+  state.equipment[0].gsmLastSeenAt = 'sentinel-last-seen';
+  state.equipment[0].gsmStatus = 'sentinel-status';
+  const duplicate = gateway.processRawPacket(raw, { sourceIp: '10.0.0.14' });
+
+  assert.equal(first.duplicate, undefined);
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.duplicateOf, first.id);
+  assert.equal(state.gsm_packets.length, 1);
+  assert.equal(state.equipment[0].gsmLastSeenAt, 'sentinel-last-seen');
+  assert.equal(state.equipment[0].gsmStatus, 'sentinel-status');
+});
+
+test('invalid coordinates on linked raw packet are stored as failed packet and do not update equipment', () => {
+  const { gateway, state } = createMemoryGateway({
+    equipment: [
+      { id: 'EQ-1', manufacturer: 'Mantall', model: 'XE80', inventoryNumber: '044', gsmImei: '866123456789012' },
+    ],
+  });
+
+  const packet = gateway.processRawPacket(Buffer.from('IMEI:866123456789012 LAT:120 LNG:49.108'), {
+    sourceIp: '10.0.0.15',
+  });
+
+  assert.equal(packet.parseStatus, 'failed');
+  assert.equal(packet.equipmentId, 'EQ-1');
+  assert.match(packet.parseError, /latitude_out_of_range/);
+  assert.equal(state.gsm_packets.length, 1);
+  assert.equal(state.equipment[0].gsmLastSeenAt, undefined);
+  assert.equal(state.equipment[0].gsmLastLat, undefined);
+});
+
 test('GET /api/gsm/packets returns stored packets', async () => {
   const { app, gateway } = createGsmApiApp();
   gateway.processRawPacket(Buffer.from('IMEI:866123456789012 LAT:55.796 LNG:49.108'), {

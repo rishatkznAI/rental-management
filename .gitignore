@@ -48,8 +48,11 @@ server/data/*.sqlite
 server/data/*.sqlite-shm
 server/data/*.sqlite-wal
 server/data/*.sqlite-*
+server/data/backups/
 server/data/backups/*.sqlite
 server/data/backups/*.sqlite-shm
 server/data/backups/*.sqlite-wal
 server/data/backups/*.zip
+server/data/smoke/
+production-smoke-artifacts/
 !server/data/.gitkeep

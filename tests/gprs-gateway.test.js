@@ -254,6 +254,39 @@ test('packet with deviceId links to equipment by stable gsmDeviceId and updates 
   assert.equal(state.equipment[0].gsmStatus, 'online');
 });
 
+test('packet from Mantall tracker links by gsmDeviceId before IMEI', () => {
+  const { gateway, state } = createMemoryGateway({
+    equipment: [
+      {
+        id: 'EQ-MANTALL-001',
+        manufacturer: 'Mantall',
+        model: 'XE160WCT',
+        serialNumber: '03311273',
+        inventoryNumber: '001',
+        status: 'available',
+        gsmImei: '866854051837469',
+        gsmDeviceId: '990999260517062',
+      },
+    ],
+  });
+
+  const packet = gateway.processRawPacket(Buffer.from('deviceId:990999260517062 LAT:0.223456 LNG:0.754321 SPEED:0 VOLTAGE:11.9'), {
+    sourceIp: '10.0.0.12',
+  });
+
+  assert.equal(packet.equipmentId, 'EQ-MANTALL-001');
+  assert.equal(packet.equipmentLabel, 'Mantall XE160WCT · INV 001 · SN 03311273');
+  assert.equal(packet.equipmentModel, 'XE160WCT');
+  assert.equal(packet.equipmentInventoryNumber, '001');
+  assert.equal(packet.equipmentSerialNumber, '03311273');
+  assert.equal(state.gsm_packets[0].equipmentId, 'EQ-MANTALL-001');
+  assert.equal(state.gsm_devices[0].equipmentId, 'EQ-MANTALL-001');
+  assert.equal(state.equipment[0].gsmLastVoltage, 11.9);
+  assert.equal(state.equipment[0].gsmLastSpeed, 0);
+  assert.equal(state.equipment[0].gsmLastLat, 0.223456);
+  assert.equal(state.equipment[0].gsmLastLng, 0.754321);
+});
+
 test('GSM identity matching ignores case and whitespace without stripping leading zeros', () => {
   const { gateway, state } = createMemoryGateway({
     equipment: [
@@ -275,6 +308,22 @@ test('GSM identity matching ignores case and whitespace without stripping leadin
   assert.equal(state.equipment[0].gsmImei, '00 866 123 456 789 012');
   assert.equal(state.equipment[0].gsmLastLat, 55.796);
   assert.equal(state.equipment[1].gsmLastLat, 55.797);
+});
+
+test('ambiguous GSM deviceId match stores diagnostic warning without linking equipment', () => {
+  const { gateway } = createMemoryGateway({
+    equipment: [
+      { id: 'EQ-1', model: 'Mantall XE80', gsmDeviceId: 'DUPLICATE-TRACKER' },
+      { id: 'EQ-2', model: 'Mantall XE100', gsmDeviceId: 'DUPLICATE-TRACKER' },
+    ],
+  });
+
+  const packet = gateway.processRawPacket(Buffer.from('deviceId:DUPLICATE-TRACKER LAT:55.796 LNG:49.108'), {
+    sourceIp: '10.0.0.12',
+  });
+
+  assert.equal(packet.equipmentId, null);
+  assert.match(packet.equipmentMatchWarning, /multiple_equipment_matches:gsmDeviceId/i);
 });
 
 test('unknown IMEI saves packet but does not update equipment', () => {
@@ -423,6 +472,46 @@ test('POST /api/gsm/ingest requires token and accepts valid JSON packet', async 
   });
 });
 
+test('POST /api/gsm/ingest links JSON packet by gsmDeviceId', async () => {
+  const { app, state } = createGsmApiApp({
+    equipment: [
+      {
+        id: 'EQ-MANTALL-001',
+        manufacturer: 'Mantall',
+        model: 'XE160WCT',
+        serialNumber: '03311273',
+        inventoryNumber: '001',
+        gsmImei: '866854051837469',
+        gsmDeviceId: '990999260517062',
+      },
+    ],
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/gsm/ingest`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gsm-ingest-token': 'gsm-test-secret',
+      },
+      body: JSON.stringify({
+        deviceId: '990999260517062',
+        timestamp: '2026-05-16T10:00:00.000Z',
+        lat: 0.223456,
+        lng: 0.754321,
+        speed: 0,
+        voltage: 11.9,
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 202);
+    assert.equal(body.equipmentId, 'EQ-MANTALL-001');
+    assert.equal(state.gsm_packets[0].equipmentId, 'EQ-MANTALL-001');
+    assert.equal(state.equipment[0].gsmLastVoltage, 11.9);
+  });
+});
+
 test('POST /api/gsm/ingest rejects invalid packet without crashing', async () => {
   const { app, state } = createGsmApiApp();
 
@@ -523,7 +612,46 @@ test('POST /api/gsm/ingest stores unknown device as unlinked device row', async 
     assert.equal(state.gsm_packets.length, 1);
     assert.equal(state.gsm_devices.length, 1);
     assert.equal(state.gsm_devices[0].deviceId, 'UNKNOWN-HTTP-1');
-    assert.equal(state.gsm_devices[0].equipmentId, undefined);
+    assert.equal(state.gsm_devices[0].equipmentId, null);
+  });
+});
+
+test('GET /api/gsm/packets enriches legacy unlinked deviceId packet without crashing', async () => {
+  const { app } = createGsmApiApp({
+    equipment: [
+      {
+        id: 'EQ-MANTALL-001',
+        manufacturer: 'Mantall',
+        model: 'XE160WCT',
+        serialNumber: '03311273',
+        inventoryNumber: '001',
+        gsmDeviceId: '990999260517062',
+      },
+    ],
+    gsm_packets: [
+      {
+        id: 'P-legacy',
+        deviceId: '990999260517062',
+        parseStatus: 'parsed',
+        lat: 0.223456,
+        lng: 0.754321,
+        speed: 0,
+        voltage: 11.9,
+        receivedAt: '2026-05-16T10:00:00.000Z',
+        createdAt: '2026-05-16T10:00:00.000Z',
+        direction: 'inbound',
+        payloadHex: '',
+        encoding: 'text',
+      },
+    ],
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'GET', '/api/gsm/packets?deviceId=990999260517062&limit=10', 'viewer-token');
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body[0].equipmentId, 'EQ-MANTALL-001');
+    assert.equal(response.body[0].equipmentLabel, 'Mantall XE160WCT · INV 001 · SN 03311273');
   });
 });
 
@@ -729,6 +857,50 @@ test('GET /api/gsm/dashboard returns bounded snapshot without full references', 
     assert.equal(response.body.clients, undefined);
     assert.equal(response.body.snapshots[0].binding.total, undefined);
     assert.equal(response.body.snapshots[0].binding.balance, undefined);
+  });
+});
+
+test('GET /api/gsm/dashboard maps legacy deviceId packet to equipment snapshot point', async () => {
+  const { app } = createGsmApiApp({
+    equipment: [
+      {
+        id: 'EQ-MANTALL-001',
+        manufacturer: 'Mantall',
+        model: 'XE160WCT',
+        serialNumber: '03311273',
+        inventoryNumber: '001',
+        status: 'available',
+        gsmDeviceId: '990999260517062',
+      },
+    ],
+    gsm_packets: [
+      {
+        id: 'P-device',
+        deviceId: '990999260517062',
+        parseStatus: 'parsed',
+        lat: 0.223456,
+        lng: 0.754321,
+        speed: 0,
+        voltage: 11.9,
+        receivedAt: '2026-05-16T10:00:00.000Z',
+        createdAt: '2026-05-16T10:00:00.000Z',
+        direction: 'inbound',
+        payloadHex: '',
+        encoding: 'text',
+      },
+    ],
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'GET', '/api/gsm/dashboard?limit=10&recentLimit=10', 'viewer-token');
+    const snapshot = response.body.snapshots.find(item => item.equipment.id === 'EQ-MANTALL-001');
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.recentPackets[0].equipmentId, 'EQ-MANTALL-001');
+    assert.equal(snapshot.point.lat, 0.223456);
+    assert.equal(snapshot.point.lng, 0.754321);
+    assert.equal(snapshot.telemetry.batteryVoltage, 11.9);
+    assert.equal(snapshot.telemetry.speedKph, 0);
   });
 });
 

@@ -41,7 +41,9 @@ import { gsmGatewayService, type GsmDashboardResponse } from '../services/gsm-ga
 import {
   buildGsmEquipmentLabel,
   buildGsmEquipmentLookup,
+  getGsmCoordinateStatus,
   resolveGsmPacketEquipment,
+  toGsmCoordinateNumber,
 } from '../lib/gsmEquipmentLabel.js';
 import {
   isPointInsideZone,
@@ -310,15 +312,16 @@ function packetSourceIp(packet: GsmGatewayPacket) {
   return packet.sourceIp || packet.remoteAddress || '—';
 }
 
-function formatCoordinates(lat?: number | null, lng?: number | null) {
-  if (typeof lat !== 'number' || typeof lng !== 'number') return '—';
-  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+function formatCoordinates(lat?: unknown, lng?: unknown) {
+  const safeLat = toGsmCoordinateNumber(lat);
+  const safeLng = toGsmCoordinateNumber(lng);
+  if (safeLat === null || safeLng === null) return '—';
+  return `${safeLat.toFixed(5)}, ${safeLng.toFixed(5)}`;
 }
 
 function hasGpsWarning(device: GsmGatewayDevice) {
-  const lat = device.lastLat ?? device.lastLatitude ?? null;
-  const lng = device.lastLng ?? device.lastLongitude ?? null;
-  return (lat === 0 && lng === 0) || device.lastSatellites === 0;
+  const coordinates = getGsmCoordinateStatus(device.lastLat ?? device.lastLatitude, device.lastLng ?? device.lastLongitude);
+  return coordinates.status === 'suspicious' || coordinates.status === 'invalid' || device.lastSatellites === 0;
 }
 
 function formatIgnition(value?: boolean | null) {
@@ -438,6 +441,8 @@ type MapMarker = {
   title: string;
   subtitle: string;
   signalState: EquipmentGsmSignalState;
+  coordinateStatus: 'real' | 'suspicious' | 'invalid' | 'missing';
+  coordinateWarning: string;
 };
 
 function GsmLeafletMap({
@@ -791,18 +796,55 @@ export default function Gsm() {
     [apiRoutePoints, routeEquipmentId, routePeriod, selectedSnapshot],
   );
 
-  const mapMarkers = React.useMemo(() => (
-    filteredSnapshots
+  const mapMarkers = React.useMemo(() => {
+    const equipmentMarkers = filteredSnapshots
       .filter(item => item.point)
-      .map(item => ({
-        id: item.equipment.id,
-        lat: item.point!.lat,
-        lng: item.point!.lng,
-        title: buildEquipmentLabel(item),
-        subtitle: [item.point!.address, SIGNAL_META[item.signalState].label].filter(Boolean).join(' · '),
-        signalState: item.signalState,
-      }))
-  ), [filteredSnapshots]);
+      .map((item) => {
+        const coordinates = getGsmCoordinateStatus(item.point!.lat, item.point!.lng);
+        return {
+          id: item.equipment.id,
+          lat: coordinates.lat ?? item.point!.lat,
+          lng: coordinates.lng ?? item.point!.lng,
+          title: buildEquipmentLabel(item),
+          subtitle: [item.point!.address, SIGNAL_META[item.signalState].label, coordinates.warning].filter(Boolean).join(' · '),
+          signalState: item.signalState,
+          coordinateStatus: coordinates.status,
+          coordinateWarning: coordinates.warning,
+        };
+      })
+      .filter(marker => getGsmCoordinateStatus(marker.lat, marker.lng).valid);
+    const equipmentMarkerIds = new Set(equipmentMarkers.map(marker => marker.id));
+    const packetMarkers = recentGatewayPackets
+      .map((packet) => {
+        const packetEquipment = resolveGsmPacketEquipment(packet, gsmEquipmentLookup);
+        if (packetEquipment.equipmentId && equipmentMarkerIds.has(packetEquipment.equipmentId)) return null;
+        const coordinates = getGsmCoordinateStatus(packet.lat, packet.lng);
+        if (!coordinates.valid || coordinates.lat === null || coordinates.lng === null) return null;
+        const tracker = packet.deviceId || packet.trackerId || packet.imei || 'unknown';
+        return {
+          id: `packet:${packet.id}`,
+          lat: coordinates.lat,
+          lng: coordinates.lng,
+          title: packetEquipment.linked
+            ? packetEquipment.label
+            : `Не привязано · deviceId ${tracker}`,
+          subtitle: [formatDateTime(packetReceivedAt(packet)), coordinates.warning].filter(Boolean).join(' · '),
+          signalState: 'online' as EquipmentGsmSignalState,
+          coordinateStatus: coordinates.status,
+          coordinateWarning: coordinates.warning,
+        };
+      })
+      .filter((marker): marker is MapMarker => Boolean(marker));
+    return [...equipmentMarkers, ...packetMarkers];
+  }, [filteredSnapshots, gsmEquipmentLookup, recentGatewayPackets]);
+
+  const suspiciousMapMarkers = React.useMemo(
+    () => mapMarkers.filter(marker => marker.coordinateStatus === 'suspicious'),
+    [mapMarkers],
+  );
+  const selectedCoordinateStatus = selectedSnapshot?.point
+    ? getGsmCoordinateStatus(selectedSnapshot.point.lat, selectedSnapshot.point.lng)
+    : getGsmCoordinateStatus(null, null);
 
   const movementFeed = React.useMemo(() => {
     const feed = selectedSnapshot
@@ -858,6 +900,9 @@ export default function Gsm() {
     () => retainedPacket ? resolveGsmPacketEquipment(retainedPacket, gsmEquipmentLookup) : null,
     [gsmEquipmentLookup, retainedPacket],
   );
+  const retainedPacketCoordinateStatus = retainedPacket
+    ? getGsmCoordinateStatus(retainedPacket.lat, retainedPacket.lng)
+    : getGsmCoordinateStatus(null, null);
 
   const { data: gatewayPackets = [] } = useQuery<GsmGatewayPacket[]>({
     queryKey: ['gsmGateway', 'packets', selectedSnapshot?.equipment.id || 'all', selectedTrackerId || 'none'],
@@ -1202,6 +1247,7 @@ export default function Gsm() {
                           <tbody>
                             {recentGatewayPackets.slice(0, 8).map((packet) => {
                               const packetEquipment = resolveGsmPacketEquipment(packet, gsmEquipmentLookup);
+                              const coordinateStatus = getGsmCoordinateStatus(packet.lat, packet.lng);
                               return (
                                 <tr key={packet.id} className="border-t border-white/10">
                                   <td className="px-3 py-2 text-slate-300">{formatDateTime(packetReceivedAt(packet))}</td>
@@ -1216,7 +1262,12 @@ export default function Gsm() {
                                   <td className="px-3 py-2">
                                     <Badge variant={getParseStatusBadge(packet.parseStatus)}>{packet.parseStatus || 'pending'}</Badge>
                                   </td>
-                                  <td className="px-3 py-2 text-slate-300">{formatCoordinates(packet.lat, packet.lng)}</td>
+                                  <td className="px-3 py-2 text-slate-300">
+                                    <div>{formatCoordinates(packet.lat, packet.lng)}</div>
+                                    {coordinateStatus.warning ? (
+                                      <div className="mt-1 text-xs text-amber-200">{coordinateStatus.warning}</div>
+                                    ) : null}
+                                  </td>
                                   <td className="px-3 py-2 text-right">
                                     <Button
                                       type="button"
@@ -1415,6 +1466,7 @@ export default function Gsm() {
                       <tbody>
                         {recentGatewayPackets.map(packet => {
                           const packetEquipment = resolveGsmPacketEquipment(packet, gsmEquipmentLookup);
+                          const coordinateStatus = getGsmCoordinateStatus(packet.lat, packet.lng);
                           return (
                             <tr key={packet.id} className="border-t border-white/10 align-top">
                               <td className="px-3 py-2 text-slate-300">{formatDateTime(packetReceivedAt(packet))}</td>
@@ -1432,7 +1484,12 @@ export default function Gsm() {
                               <td className="px-3 py-2">
                                 <Badge variant={getParseStatusBadge(packet.parseStatus)}>{packet.parseStatus || 'pending'}</Badge>
                               </td>
-                              <td className="px-3 py-2 text-slate-300">{formatCoordinates(packet.lat, packet.lng)}</td>
+                              <td className="px-3 py-2 text-slate-300">
+                                <div>{formatCoordinates(packet.lat, packet.lng)}</div>
+                                {coordinateStatus.warning ? (
+                                  <div className="mt-1 text-xs text-amber-200">{coordinateStatus.warning}</div>
+                                ) : null}
+                              </td>
                               <td className="max-w-[220px] px-3 py-2 font-mono text-xs text-cyan-200">
                                 <span className="block truncate">{packetRawHex(packet)}</span>
                               </td>
@@ -1574,7 +1631,12 @@ export default function Gsm() {
                     ))}
                   </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-3">
+                  {suspiciousMapMarkers.length > 0 ? (
+                    <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+                      Координаты выглядят тестовыми или некорректными: {suspiciousMapMarkers.map(marker => marker.title).join(', ')}. Маркеры показаны и карта центрируется по фактическим точкам.
+                    </div>
+                  ) : null}
                   <GsmLeafletMap
                     markers={mapMarkers}
                     selectedId={selectedSnapshot?.equipment.id || null}
@@ -1640,6 +1702,14 @@ export default function Gsm() {
                                       : selectedSnapshot.point?.source === 'approximate'
                                         ? 'Приблизительно по локации'
                                         : 'Нет координат'}
+                              </div>
+                              <div className={cn(
+                                'mt-1 text-xs',
+                                selectedCoordinateStatus.status === 'suspicious' || selectedCoordinateStatus.status === 'invalid'
+                                  ? 'text-amber-200'
+                                  : 'text-slate-500',
+                              )}>
+                                {selectedCoordinateStatus.warning || selectedCoordinateStatus.label}
                               </div>
                             </div>
                             <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
@@ -2637,6 +2707,12 @@ export default function Gsm() {
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Координаты</div>
                   <div className="mt-1 text-sm text-white">{formatCoordinates(retainedPacket.lat, retainedPacket.lng)}</div>
+                  <div className={cn(
+                    'mt-1 text-xs',
+                    retainedPacketCoordinateStatus.warning ? 'text-amber-200' : 'text-slate-500',
+                  )}>
+                    {retainedPacketCoordinateStatus.warning || retainedPacketCoordinateStatus.label}
+                  </div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Время устройства</div>

@@ -64,6 +64,7 @@ import {
 } from '../lib/equipmentSaleMode.js';
 import { getEffectivePaidAmount } from '../lib/finance';
 import { deriveSignalState } from '../lib/gsm';
+import { getGsmCoordinateStatus } from '../lib/gsmEquipmentLabel.js';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -2091,13 +2092,20 @@ export default function EquipmentDetail() {
   const assetGalleryPreview = saleGalleryPhotos.slice(0, 4);
   const assetCurrentRental = equipment360.occupancy.currentRental;
   const assetDocuments = equipment360.documents.latest;
-  const assetGsmState = deriveSignalState(equipment, equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || null);
   const assetGsmDevice = gsmTelemetry.devices[0] || null;
   const assetGsmPacket = gsmTelemetry.packets[0] || null;
-  const assetGsmLat = assetGsmDevice?.lastLat ?? assetGsmDevice?.lastLatitude ?? equipment.gsmLastLat ?? equipment.gsmLatitude ?? null;
-  const assetGsmLng = assetGsmDevice?.lastLng ?? assetGsmDevice?.lastLongitude ?? equipment.gsmLastLng ?? equipment.gsmLongitude ?? null;
+  const assetGsmLastPacketAt = assetGsmPacket?.receivedAt || assetGsmPacket?.createdAt || assetGsmDevice?.lastPacketAt || equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || '';
+  const assetGsmPacketAgeMs = assetGsmLastPacketAt ? Date.now() - new Date(assetGsmLastPacketAt).getTime() : Number.POSITIVE_INFINITY;
+  const assetGsmState = Number.isFinite(assetGsmPacketAgeMs) && assetGsmPacketAgeMs <= 24 * 60 * 60 * 1000
+    ? 'online'
+    : deriveSignalState(equipment, assetGsmLastPacketAt || null);
+  const assetGsmLat = assetGsmPacket?.lat ?? assetGsmDevice?.lastLat ?? assetGsmDevice?.lastLatitude ?? equipment.gsmLastLat ?? equipment.gsmLatitude ?? null;
+  const assetGsmLng = assetGsmPacket?.lng ?? assetGsmDevice?.lastLng ?? assetGsmDevice?.lastLongitude ?? equipment.gsmLastLng ?? equipment.gsmLongitude ?? null;
   const assetGsmSatellites = assetGsmDevice?.lastSatellites ?? assetGsmPacket?.satellites ?? null;
-  const assetGsmGpsWarning = (assetGsmLat === 0 && assetGsmLng === 0) || assetGsmSatellites === 0 || assetGsmPacket?.hasValidLocation === false;
+  const assetGsmCoordinateStatus = getGsmCoordinateStatus(assetGsmLat, assetGsmLng);
+  const assetGsmGpsWarning = assetGsmCoordinateStatus.status === 'suspicious' || assetGsmCoordinateStatus.status === 'invalid' || assetGsmSatellites === 0 || assetGsmPacket?.hasValidLocation === false;
+  const assetGsmVoltage = assetGsmPacket?.voltage ?? assetGsmDevice?.lastVoltage ?? equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage;
+  const assetGsmSpeed = assetGsmPacket?.speed ?? assetGsmDevice?.lastSpeed ?? equipment.gsmLastSpeed ?? equipment.gsmSpeedKph;
   const assetHasServiceAttention = criticalTickets.length > 0 || equipment.status === 'in_service';
   const assetMaintenanceOverdue = daysUntilMaintenance <= 0;
   const assetMaintenanceSoon = daysUntilMaintenance > 0 && daysUntilMaintenance <= 30;
@@ -2886,10 +2894,12 @@ export default function EquipmentDetail() {
                   <SaleField label="SIM" value={assetGsmDevice?.sim1 || equipment.gsmSimNumber || '—'} />
                   <SaleField label="Протокол" value={assetGsmDevice?.protocol || equipment.gsmProtocol || '—'} />
                   <SaleStatusRow label="Связь" value={assetGsmState === 'online' ? 'Онлайн' : assetGsmState === 'offline' ? 'Офлайн' : 'Неизвестно'} tone={assetGsmState === 'online' ? 'success' : 'warning'} />
-                  <SaleField label="Последний пакет" value={assetGsmDevice?.lastPacketAt || equipment.gsmLastSeenAt || equipment.gsmLastSignalAt ? formatDateTime(assetGsmDevice?.lastPacketAt || equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || '') : '—'} />
-                  <SaleField label="Напряжение" value={typeof (assetGsmDevice?.lastVoltage ?? equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage) === 'number' ? `${(assetGsmDevice?.lastVoltage ?? equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage)!.toFixed(1)} В` : '—'} />
+                  <SaleField label="Последний пакет" value={assetGsmLastPacketAt ? formatDateTime(assetGsmLastPacketAt) : '—'} />
+                  <SaleField label="Напряжение" value={typeof assetGsmVoltage === 'number' ? `${assetGsmVoltage.toFixed(1)} В` : '—'} />
+                  <SaleField label="Скорость" value={typeof assetGsmSpeed === 'number' ? `${assetGsmSpeed.toLocaleString('ru-RU')} км/ч` : '—'} />
+                  <SaleField label="Координаты" value={assetGsmCoordinateStatus.valid ? `${assetGsmCoordinateStatus.lat!.toFixed(5)}, ${assetGsmCoordinateStatus.lng!.toFixed(5)}` : '—'} />
                   <SaleField label="Зажигание" value={(assetGsmDevice?.lastIgnition ?? equipment.gsmIgnitionOn) === true ? 'Вкл.' : (assetGsmDevice?.lastIgnition ?? equipment.gsmIgnitionOn) === false ? 'Выкл.' : '—'} />
-                  <SaleStatusRow label="GPS" value={assetGsmGpsWarning ? 'Проверьте координаты / спутники' : 'Данные валидны'} tone={assetGsmGpsWarning ? 'warning' : 'success'} />
+                  <SaleStatusRow label="GPS" value={assetGsmGpsWarning ? (assetGsmCoordinateStatus.warning || 'Проверьте координаты / спутники') : assetGsmCoordinateStatus.label} tone={assetGsmGpsWarning ? 'warning' : 'success'} />
                   <Link to={`/gsm?equipmentId=${encodeURIComponent(equipment.id)}`} className="inline-flex text-sm font-medium text-blue-300 hover:underline">История пакетов →</Link>
                 </SalePanel>
 
@@ -3552,20 +3562,20 @@ export default function EquipmentDetail() {
                 <InfoField label="Протокол" value={assetGsmDevice?.protocol || equipment.gsmProtocol || '—'} />
                 <InfoField
                   label="Последняя связь"
-                  value={equipment.gsmLastSeenAt || equipment.gsmLastSignalAt ? formatDateTime(equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || '') : '—'}
+                  value={assetGsmLastPacketAt ? formatDateTime(assetGsmLastPacketAt) : '—'}
                 />
                 <InfoField
                   label="Координаты"
                   value={
-                    typeof (equipment.gsmLastLat ?? equipment.gsmLatitude) === 'number'
-                    && typeof (equipment.gsmLastLng ?? equipment.gsmLongitude) === 'number'
-                      ? `${(equipment.gsmLastLat ?? equipment.gsmLatitude)!.toFixed(5)}, ${(equipment.gsmLastLng ?? equipment.gsmLongitude)!.toFixed(5)}`
+                    assetGsmCoordinateStatus.valid
+                      ? `${assetGsmCoordinateStatus.lat!.toFixed(5)}, ${assetGsmCoordinateStatus.lng!.toFixed(5)}`
                       : '—'
                   }
                 />
-                <InfoField label="Напряжение" value={typeof (equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage) === 'number' ? `${(equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage)!.toFixed(1)} В` : '—'} />
+                <InfoField label="Напряжение" value={typeof assetGsmVoltage === 'number' ? `${assetGsmVoltage.toFixed(1)} В` : '—'} />
+                <InfoField label="Скорость" value={typeof assetGsmSpeed === 'number' ? `${assetGsmSpeed.toLocaleString('ru-RU')} км/ч` : '—'} />
                 <InfoField label="Зажигание" value={(assetGsmDevice?.lastIgnition ?? equipment.gsmIgnitionOn) === true ? 'Вкл.' : (assetGsmDevice?.lastIgnition ?? equipment.gsmIgnitionOn) === false ? 'Выкл.' : '—'} />
-                <InfoField label="GPS статус" value={assetGsmGpsWarning ? 'GPS 0/0 или 0 спутников' : 'Валидный'} />
+                <InfoField label="GPS статус" value={assetGsmGpsWarning ? (assetGsmCoordinateStatus.warning || 'GPS 0/0 или 0 спутников') : assetGsmCoordinateStatus.label} />
                 <InfoField label="Raw пакет" value={assetGsmDevice?.lastRawPacket || assetGsmPacket?.rawText || '—'} mono />
               </div>
             </div>}

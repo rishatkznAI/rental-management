@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildGsmEquipmentLabel,
   buildGsmEquipmentLookup,
+  getGsmCoordinateStatus,
   resolveGsmPacketEquipment,
 } from '../src/app/lib/gsmEquipmentLabel.js';
 
@@ -70,4 +71,62 @@ test('GSM UI equipment label is defensive for empty equipment objects', () => {
   assert.equal(buildGsmEquipmentLabel({}), 'Техника не привязана');
   assert.equal(buildGsmEquipmentLabel(null, ''), 'Техника не привязана');
   assert.equal(buildGsmEquipmentLabel({ model: undefined, inventoryNumber: null, serialNumber: {} }), 'Техника не привязана');
+});
+
+test('GSM packet with Mantall equipmentId shows full equipment label', () => {
+  const lookup = buildGsmEquipmentLookup([
+    {
+      equipment: {
+        id: 'EQ-MANTALL-001',
+        manufacturer: 'Mantall',
+        model: 'XE160WCT',
+        inventoryNumber: '001',
+        serialNumber: '03311273',
+        gsmDeviceId: '990999260517062',
+      },
+    },
+  ]);
+
+  const resolved = resolveGsmPacketEquipment({ equipmentId: 'EQ-MANTALL-001', deviceId: '990999260517062' }, lookup);
+
+  assert.equal(resolved.linked, true);
+  assert.equal(resolved.label, 'Mantall XE160WCT · INV 001 · SN 03311273');
+});
+
+test('GSM packet label can resolve by deviceId but remains backend-compatible', () => {
+  const lookup = buildGsmEquipmentLookup([
+    {
+      equipment: {
+        id: 'EQ-MANTALL-001',
+        manufacturer: 'Mantall',
+        model: 'XE160WCT',
+        inventoryNumber: '001',
+        serialNumber: '03311273',
+        gsmDeviceId: '990999260517062',
+      },
+    },
+  ]);
+
+  const resolved = resolveGsmPacketEquipment({ deviceId: '990999260517062' }, lookup);
+
+  assert.equal(resolved.equipmentId, 'EQ-MANTALL-001');
+  assert.equal(resolved.label, 'Mantall XE160WCT · INV 001 · SN 03311273');
+});
+
+test('near-zero GSM coordinates are valid but suspicious for the map UI', () => {
+  const status = getGsmCoordinateStatus(0.223456, 0.754321);
+
+  assert.equal(status.valid, true);
+  assert.equal(status.status, 'suspicious');
+  assert.equal(status.warning, 'Координаты выглядят тестовыми или некорректными');
+});
+
+test('GSM coordinate helper rejects broken coordinate shapes without unsafe text', () => {
+  const invalid = getGsmCoordinateStatus({ lat: 55 }, 'not-a-number');
+  const missing = getGsmCoordinateStatus(null, undefined);
+
+  assert.equal(invalid.status, 'missing');
+  assert.equal(missing.status, 'missing');
+  assert.equal(JSON.stringify([invalid, missing]).includes('undefined'), false);
+  assert.equal(JSON.stringify([invalid, missing]).includes('[object Object]'), false);
 });

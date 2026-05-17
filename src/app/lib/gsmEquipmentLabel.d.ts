@@ -26,3 +26,14 @@ export function resolveGsmPacketEquipment(
   badge: string;
   trackerId: string;
 };
+
+export function toGsmCoordinateNumber(value: unknown): number | null;
+
+export function getGsmCoordinateStatus(lat?: unknown, lng?: unknown): {
+  status: 'real' | 'suspicious' | 'invalid' | 'missing';
+  label: string;
+  warning: string;
+  lat: number | null;
+  lng: number | null;
+  valid: boolean;
+};

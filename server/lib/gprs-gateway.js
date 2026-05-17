@@ -132,10 +132,21 @@ function protocolBreakdown(packets) {
 function equipmentLabel(equipment) {
   if (!equipment) return null;
   return [
-    equipment.manufacturer,
-    equipment.model,
+    [equipment.manufacturer, equipment.model].filter(Boolean).join(' '),
     equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
+    equipment.serialNumber ? `SN ${equipment.serialNumber}` : '',
   ].filter(Boolean).join(' · ') || equipment.id || null;
+}
+
+function equipmentGsmFields(equipment) {
+  if (!equipment) return {};
+  return {
+    equipmentLabel: equipmentLabel(equipment),
+    equipmentModel: equipment.model || null,
+    equipmentManufacturer: equipment.manufacturer || null,
+    equipmentInventoryNumber: equipment.inventoryNumber || null,
+    equipmentSerialNumber: equipment.serialNumber || null,
+  };
 }
 
 function compactHex(value, maxChars = 600) {
@@ -244,18 +255,75 @@ function createGprsGateway({
     writeData('gsm_commands', list.slice(0, MAX_COMMAND_LOG));
   }
 
-  function resolveEquipmentByIdentity(identity = {}) {
-    const imei = normalizeIdentifier(identity.imei);
-    const deviceId = normalizeIdentifier(identity.deviceId);
-    if (!imei && !deviceId) return null;
+  function findUniqueEquipmentMatch(value, fields) {
+    const key = normalizeIdentifier(value);
+    if (!key) return { equipment: null, warning: null, strategy: null };
+    const matches = asArray(readData('equipment')).filter(item => fields.some(field => identifiersEqual(key, item[field])));
+    if (matches.length === 1) return { equipment: matches[0], warning: null, strategy: fields.join('|') };
+    if (matches.length > 1) {
+      return {
+        equipment: null,
+        warning: `multiple_equipment_matches:${fields.join('|')}:${key}`,
+        strategy: fields.join('|'),
+      };
+    }
+    return { equipment: null, warning: null, strategy: fields.join('|') };
+  }
 
-    return asArray(readData('equipment')).find((item) => {
-      return Boolean(
-        (imei && identifiersEqual(imei, item.gsmImei))
-        || (deviceId && identifiersEqual(deviceId, item.gsmDeviceId))
-        || (deviceId && identifiersEqual(deviceId, item.gsmTrackerId)),
-      );
-    }) || null;
+  function resolveEquipmentMatchByIdentity(identity = {}) {
+    const deviceId = normalizeIdentifier(identity.deviceId);
+    const imei = normalizeIdentifier(identity.imei);
+    if (!imei && !deviceId) return { equipment: null, warning: null, strategy: null };
+
+    const matchSteps = [
+      { value: deviceId, fields: ['gsmDeviceId'] },
+      { value: imei, fields: ['gsmImei'] },
+      { value: deviceId, fields: ['gsmTrackerId', 'trackerId'] },
+      { value: imei, fields: ['imei'] },
+    ];
+
+    for (const step of matchSteps) {
+      const result = findUniqueEquipmentMatch(step.value, step.fields);
+      if (result.equipment || result.warning) return result;
+    }
+
+    return { equipment: null, warning: null, strategy: null };
+  }
+
+  function resolveEquipmentByIdentity(identity = {}) {
+    return resolveEquipmentMatchByIdentity(identity).equipment;
+  }
+
+  function enrichPacketEquipment(packet = {}) {
+    if (packet.equipmentId) return packet;
+    const match = resolveEquipmentMatchByIdentity(packet);
+    if (!match.equipment && !match.warning) return packet;
+    return {
+      ...packet,
+      equipmentId: match.equipment?.id || null,
+      ...equipmentGsmFields(match.equipment),
+      equipmentLabel: equipmentLabel(match.equipment) || packet.equipmentLabel || null,
+      equipmentMatchStrategy: match.strategy || packet.equipmentMatchStrategy || null,
+      equipmentMatchWarning: match.warning || packet.equipmentMatchWarning || null,
+    };
+  }
+
+  function packetMatchesEquipmentFilter(packet = {}, equipmentId = '') {
+    if (!equipmentId) return true;
+    return enrichPacketEquipment(packet).equipmentId === equipmentId;
+  }
+
+  function resolveEquipmentForPacket(parsed = {}, device = null) {
+    const directMatch = resolveEquipmentMatchByIdentity(parsed);
+    if (directMatch.equipment || directMatch.warning) {
+      return directMatch;
+    }
+    const equipment = resolveEquipmentByDevice(device);
+    return {
+      equipment,
+      warning: null,
+      strategy: equipment ? 'gsm_devices.equipmentId' : null,
+    };
   }
 
   function findDeviceByIdentity(identity = {}) {
@@ -275,7 +343,7 @@ function createGprsGateway({
     return asArray(readData('equipment')).find(item => item.id === device.equipmentId) || null;
   }
 
-  function updateGsmDeviceFromPacket(device, parsed, rawText, receivedAt) {
+  function updateGsmDeviceFromPacket(device, parsed, rawText, receivedAt, equipment = null, matchWarning = null) {
     const imei = normalizeIdentifier(parsed.imei || device?.imei);
     const deviceId = normalizeIdentifier(parsed.deviceId || device?.deviceId || device?.id);
     if (!imei && !deviceId) return;
@@ -295,6 +363,8 @@ function createGprsGateway({
     };
     const next = {
       ...current,
+      equipmentId: equipment?.id || current.equipmentId || null,
+      equipmentLabel: equipmentLabel(equipment) || current.equipmentLabel || null,
       imei: imei || current.imei || null,
       deviceId: deviceId || current.deviceId || null,
       protocol: current.protocol || parsed.protocol || 'GPRS',
@@ -308,7 +378,8 @@ function createGprsGateway({
       lastSatellites: toNumberOrNull(parsed.satellites) ?? current.lastSatellites ?? null,
       lastVoltage: toNumberOrNull(parsed.voltage) ?? current.lastVoltage ?? null,
       lastRawPacket: rawText || current.lastRawPacket || null,
-      unlinked: !current.equipmentId,
+      equipmentMatchWarning: matchWarning || current.equipmentMatchWarning || null,
+      unlinked: !(equipment?.id || current.equipmentId),
       updatedAt: receivedAt,
     };
     if (index >= 0) devices[index] = next;
@@ -439,6 +510,7 @@ function createGprsGateway({
       encoding: rawText ? 'text' : 'hex',
       summary: getPacketSummary(packet),
       parsedPayload: packet.parsed,
+      ...equipmentGsmFields(equipment),
       createdAt: receivedAt,
       createdBy: 'Трекер',
     };
@@ -510,14 +582,17 @@ function createGprsGateway({
     }
 
     const device = findDeviceByIdentity(parsed);
-    const equipment = resolveEquipmentByDevice(device) || resolveEquipmentByIdentity(parsed);
+    const equipmentMatch = resolveEquipmentForPacket(parsed, device);
+    const equipment = equipmentMatch.equipment;
     bindConnection(connection, parsed, equipment);
 
     const packet = buildPacket({ connection, buffer, parsed, receivedAt, equipment, parseError, tooLarge });
+    if (equipmentMatch.warning) packet.equipmentMatchWarning = equipmentMatch.warning;
+    if (equipmentMatch.strategy) packet.equipmentMatchStrategy = equipmentMatch.strategy;
     const storedPacket = persistPacket(packet);
     if (!storedPacket.duplicate && parsed.parseStatus === 'parsed') {
       updateEquipmentFromPacket(equipment?.id || null, parsed, receivedAt);
-      updateGsmDeviceFromPacket(device, parsed, bufferToReadableText(buffer), receivedAt);
+      updateGsmDeviceFromPacket(device, parsed, bufferToReadableText(buffer), receivedAt, equipment, equipmentMatch.warning);
     }
 
     if (parsed.ack && connection?.socket && !connection.socket.destroyed) {
@@ -752,7 +827,7 @@ function createGprsGateway({
   }
 
   function matchesPacketFilters(packet, filters = {}) {
-    if (filters.equipmentId && packet.equipmentId !== filters.equipmentId) return false;
+    if (filters.equipmentId && !packetMatchesEquipmentFilter(packet, filters.equipmentId)) return false;
     if (filters.imei && packet.imei !== filters.imei) return false;
     if (filters.deviceId && ![packet.deviceId, packet.trackerId, packet.imei].filter(Boolean).includes(filters.deviceId)) return false;
     if (filters.parseStatus && packet.parseStatus !== filters.parseStatus) return false;
@@ -776,7 +851,8 @@ function createGprsGateway({
         to: toText(filters.to),
       }))
       .sort((left, right) => Date.parse(getPacketTime(right) || '') - Date.parse(getPacketTime(left) || ''))
-      .slice(safeOffset, safeOffset + safeLimit);
+      .slice(safeOffset, safeOffset + safeLimit)
+      .map(enrichPacketEquipment);
   }
 
   function listCommands({ limit = 50, offset = 0, equipmentId = '', deviceId = '' } = {}) {
@@ -833,15 +909,20 @@ function createGprsGateway({
 
     const byEquipmentOrImei = new Map(legacyDevices.map(item => [item.equipmentId || item.imei || item.id, item]));
     for (const device of asArray(readData('gsm_devices'))) {
-      const item = equipment.find(eq => eq.id === device.equipmentId) || null;
+      const equipmentMatch = device.equipmentId
+        ? { equipment: null, warning: null, strategy: 'gsm_devices.equipmentId' }
+        : resolveEquipmentMatchByIdentity(device);
+      const linkedEquipmentId = device.equipmentId || equipmentMatch.equipment?.id || null;
+      const item = equipment.find(eq => eq.id === linkedEquipmentId) || null;
       const statusAt = device.lastOnlineAt || device.lastPacketAt || null;
       const status = Date.now() - Date.parse(statusAt || '') <= ONLINE_WINDOW_MS ? 'online' : (device.status || 'unknown');
-      const key = device.equipmentId || device.imei || device.id;
+      const key = linkedEquipmentId || device.imei || device.deviceId || device.id;
       byEquipmentOrImei.set(key, {
         ...(byEquipmentOrImei.get(key) || {}),
         id: device.id || key,
-        equipmentId: device.equipmentId || item?.id || null,
+        equipmentId: linkedEquipmentId,
         equipmentName: equipmentLabel(item) || device.equipmentLabel || null,
+        equipmentMatchWarning: equipmentMatch.warning || device.equipmentMatchWarning || null,
         manufacturer: item?.manufacturer || null,
         model: item?.model || null,
         serialNumber: item?.serialNumber || null,

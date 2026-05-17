@@ -21,7 +21,8 @@ function prefixedSerial(value) {
 
 export function buildGsmEquipmentLabel(equipment, fallbackEquipmentId = '') {
   const item = equipment && typeof equipment === 'object' ? equipment : {};
-  const model = cleanText(item.model);
+  const manufacturer = cleanText(item.manufacturer);
+  const model = [manufacturer, cleanText(item.model)].filter(Boolean).join(' ');
   const name = cleanText(item.name || item.equipmentName || item.label);
   const inventoryNumber = cleanText(item.inventoryNumber);
   const serialNumber = cleanText(item.serialNumber);
@@ -79,7 +80,14 @@ export function resolveGsmPacketEquipment(packet = {}, lookup = {}) {
   const packetLabel = cleanText(packet.equipmentLabel);
   const linked = Boolean(equipmentId);
   const label = linked
-    ? buildGsmEquipmentLabel(equipment || { equipmentName: packetLabel, equipmentId }, equipmentId)
+    ? buildGsmEquipmentLabel(equipment || {
+      equipmentName: packetLabel,
+      equipmentId,
+      manufacturer: packet.equipmentManufacturer,
+      model: packet.equipmentModel,
+      inventoryNumber: packet.equipmentInventoryNumber,
+      serialNumber: packet.equipmentSerialNumber,
+    }, equipmentId)
     : UNLINKED_EQUIPMENT_LABEL;
 
   return {
@@ -88,6 +96,55 @@ export function resolveGsmPacketEquipment(packet = {}, lookup = {}) {
     label,
     badge: linked ? 'Привязано' : trackerKey ? 'Неизвестный трекер' : 'Без привязки',
     trackerId: trackerKey,
+  };
+}
+
+export function toGsmCoordinateNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function getGsmCoordinateStatus(latValue, lngValue) {
+  const lat = toGsmCoordinateNumber(latValue);
+  const lng = toGsmCoordinateNumber(lngValue);
+  if (lat === null || lng === null) {
+    return {
+      status: 'missing',
+      label: 'Координаты отсутствуют',
+      warning: '',
+      lat,
+      lng,
+      valid: false,
+    };
+  }
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return {
+      status: 'invalid',
+      label: 'Координаты некорректны',
+      warning: 'Координаты вне допустимого диапазона',
+      lat,
+      lng,
+      valid: false,
+    };
+  }
+  if ((lat === 0 && lng === 0) || (Math.abs(lat) < 1 && Math.abs(lng) < 1)) {
+    return {
+      status: 'suspicious',
+      label: 'Координаты подозрительные',
+      warning: 'Координаты выглядят тестовыми или некорректными',
+      lat,
+      lng,
+      valid: true,
+    };
+  }
+  return {
+    status: 'real',
+    label: 'Координаты реальные',
+    warning: '',
+    lat,
+    lng,
+    valid: true,
   };
 }
 

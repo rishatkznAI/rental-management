@@ -263,6 +263,12 @@ export interface GsmGatewayConnection {
   imei?: string | null;
   equipmentId?: string | null;
   equipmentLabel?: string | null;
+  equipmentModel?: string | null;
+  equipmentManufacturer?: string | null;
+  equipmentInventoryNumber?: string | null;
+  equipmentSerialNumber?: string | null;
+  equipmentMatchStrategy?: string | null;
+  equipmentMatchWarning?: string | null;
   remoteAddress?: string | null;
   remotePort?: number | null;
   connectedAt: string;

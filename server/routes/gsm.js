@@ -202,9 +202,9 @@ function registerGsmRoutes(router, deps) {
   function equipmentLabel(equipment) {
     if (!equipment) return null;
     return [
-      equipment.manufacturer,
-      equipment.model,
+      [equipment.manufacturer, equipment.model].filter(Boolean).join(' '),
       equipment.inventoryNumber ? `INV ${equipment.inventoryNumber}` : '',
+      equipment.serialNumber ? `SN ${equipment.serialNumber}` : '',
     ].filter(Boolean).join(' · ') || equipment.id || null;
   }
 
@@ -284,7 +284,7 @@ function registerGsmRoutes(router, deps) {
   function resolveGsmPoint(equipment, packet, binding) {
     const lat = toNumberOrNull(packet?.lat ?? equipment.gsmLastLat ?? equipment.gsmLatitude);
     const lng = toNumberOrNull(packet?.lng ?? equipment.gsmLastLng ?? equipment.gsmLongitude);
-    if (lat !== null && lng !== null && !(lat === 0 && lng === 0)) {
+    if (lat !== null && lng !== null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
       return {
         lat,
         lng,
@@ -354,8 +354,8 @@ function registerGsmRoutes(router, deps) {
       telemetry: {
         engineHours: toNumberOrNull(equipment.gsmLastMotoHours ?? equipment.gsmHourmeter),
         ignitionOn: typeof equipment.gsmIgnitionOn === 'boolean' ? equipment.gsmIgnitionOn : null,
-        batteryVoltage: toNumberOrNull(equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage),
-        speedKph: toNumberOrNull(equipment.gsmLastSpeed ?? equipment.gsmSpeedKph),
+        batteryVoltage: toNumberOrNull(packet?.voltage ?? equipment.gsmLastVoltage ?? equipment.gsmBatteryVoltage),
+        speedKph: toNumberOrNull(packet?.speed ?? equipment.gsmLastSpeed ?? equipment.gsmSpeedKph),
       },
       zones: [],
       notifications,

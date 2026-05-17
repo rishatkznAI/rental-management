@@ -3268,6 +3268,17 @@ export default function EquipmentDetail() {
               <SaleField label="Локация" value={equipment.location || '—'} />
             </div>
           </SalePanel>
+          <SalePanel title="GSM / Трекер">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <SaleField label="Устройство" value={assetGsmDevice?.deviceType || equipment.gsmDeviceId || equipment.gsmTrackerId || equipment.gsmImei || '—'} mono />
+              <SaleField label="Последний пакет" value={assetGsmLastPacketAt ? formatDateTime(assetGsmLastPacketAt) : '—'} />
+              <SaleField label="Напряжение" value={typeof assetGsmVoltage === 'number' ? `${assetGsmVoltage.toFixed(1)} В` : '—'} />
+              <SaleField label="Скорость" value={typeof assetGsmSpeed === 'number' ? `${assetGsmSpeed.toLocaleString('ru-RU')} км/ч` : '—'} />
+              <SaleField label="Координаты" value={assetGsmCoordinateStatus.valid ? `${assetGsmCoordinateStatus.lat!.toFixed(5)}, ${assetGsmCoordinateStatus.lng!.toFixed(5)}` : '—'} />
+              <SaleStatusRow label="GPS" value={assetGsmGpsWarning ? (assetGsmCoordinateStatus.warning || 'Проверьте координаты / спутники') : assetGsmCoordinateStatus.label} tone={assetGsmGpsWarning ? 'warning' : 'success'} />
+            </div>
+            <Link to={`/gsm?equipmentId=${encodeURIComponent(equipment.id)}`} className="inline-flex text-sm font-medium text-blue-300 hover:underline">История пакетов →</Link>
+          </SalePanel>
           <SalePanel title="Быстрые действия">
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {saleQuickActions.map(action => {

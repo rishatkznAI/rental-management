@@ -238,6 +238,7 @@ test.describe('production smoke', () => {
 
   test('admin can see linked documents in registry, rental card and dashboard', async ({ page }) => {
     const suffix = `docs-${Date.now()}`;
+    const documentDate = new Date().toISOString().slice(0, 10);
     const manager = `Docs Manager ${suffix}`;
     const seed = await withAdminApi(async (api) => {
       const client = await createClient(api, suffix);
@@ -259,7 +260,7 @@ test.describe('production smoke', () => {
         equipmentId: equipment.id,
         equipmentInv: equipment.inventoryNumber,
         status: 'sent',
-        date: '2026-05-02',
+        date: documentDate,
         manager,
       });
       const signed = await createDocument(api, {
@@ -272,7 +273,7 @@ test.describe('production smoke', () => {
         equipmentId: equipment.id,
         equipmentInv: equipment.inventoryNumber,
         status: 'signed',
-        date: '2026-05-02',
+        date: documentDate,
         manager,
       });
       return { client, equipment, rental, unsigned, signed };
@@ -289,7 +290,7 @@ test.describe('production smoke', () => {
     await page.getByRole('button', { name: /Контроль/ }).click();
     await expect(page.getByText('Контроль документов').first()).toBeVisible();
     await expect(page.getByText('Без подписи').first()).toBeVisible();
-    await expect(page.getByText('Отправлено без подписи').first()).toBeVisible();
+    await expect(page.getByText('Отправлено, ждём подпись').first()).toBeVisible();
     await expect(page.getByText(seed.client.company).first()).toBeVisible();
     await expect(page.getByText(/NaN|undefined|null/)).toHaveCount(0);
 

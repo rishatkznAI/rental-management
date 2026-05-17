@@ -99,10 +99,13 @@ Run these checks after every production deploy:
 1. Backend health: `GET /health` returns `200`.
 2. Backend version: `GET /api/version` returns the expected commit/build.
 3. Frontend opens at the GitHub Pages URL.
-4. Login succeeds with a dedicated production smoke/admin account.
-5. Admin diagnostics opens and does not show secrets, tokens, passwords, cookies, or raw env values.
-6. Documents page opens.
-7. Finance page opens.
-8. Logout succeeds and returns to the login page.
+4. Release preflight passes:
+   `npm run release:preflight -- --env production --expected-commit <commit>`.
+5. Login succeeds with a dedicated production smoke/admin account:
+   `npm run test:e2e:production-smoke`.
+6. Admin diagnostics opens and does not show secrets, tokens, passwords, cookies, or raw env values.
+7. Documents page opens.
+8. Finance page opens.
+9. Logout succeeds and returns to the login page.
 
 Do not use a personal owner account for smoke testing. Prefer a dedicated smoke user that can be disabled or rotated after verification.

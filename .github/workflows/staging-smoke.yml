@@ -21,6 +21,7 @@ jobs:
       STAGING_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
       VITE_API_URL: ${{ secrets.STAGING_API_URL }}
       VITE_GIT_COMMIT_SHA: ${{ github.sha }}
+      EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
 
@@ -49,11 +50,14 @@ jobs:
       - name: Build frontend with staging API URL
         run: npm run build
 
+      - name: Run staging release preflight
+        run: npm run release:preflight -- --env staging --expected-commit "$EXPECTED_RELEASE_COMMIT"
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 
       - name: Run staging smoke
-        run: npx playwright test e2e/staging-smoke.spec.ts --config=playwright.staging.config.ts
+        run: npm run test:e2e:staging-smoke
 
       - name: Upload Playwright report
         if: always()

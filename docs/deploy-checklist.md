@@ -12,6 +12,7 @@ Use this checklist before and after production releases. Do not change productio
    - Run `Staging Smoke`.
    - Confirm the workflow passed for the target commit.
    - Download `staging-playwright-report` and `staging-playwright-test-results` if it failed.
+   - Use `docs/release-runbook.md` for the current staging/prod gate details.
 5. Run local checks when possible:
    - `git status`
    - `git diff --check`
@@ -33,11 +34,13 @@ Required setup:
 - separate staging SQLite volume/database;
 - staging frontend built with `VITE_API_URL=$STAGING_API_URL`;
 - GitHub secrets `STAGING_API_URL`, `STAGING_FRONTEND_URL`, `STAGING_ADMIN_EMAIL`, `STAGING_ADMIN_PASSWORD`.
+- `EXPECTED_RELEASE_COMMIT` is supplied by GitHub Actions from `github.sha`.
 
 Run:
 
 ```bash
-npx playwright test e2e/staging-smoke.spec.ts --config=playwright.staging.config.ts
+npm run release:preflight -- --env staging --expected-commit <commit>
+npm run test:e2e:staging-smoke
 ```
 
 or use GitHub Actions `Staging Smoke`.
@@ -88,15 +91,20 @@ On failed staging smoke, stop the production release, inspect GitHub Actions art
    - `npm test`;
    - `npm run build`;
    - `playwright-smoke` with `e2e/smoke.spec.ts`.
-3. If `playwright-smoke` failed, open the failed GitHub Actions run and download artifacts:
+3. Confirm required post-deploy production gate passed:
+   - `npm run release:preflight -- --env production --expected-commit <commit>`;
+   - `npm run test:e2e:production-smoke`.
+4. If `playwright-smoke` or production smoke failed, open the failed GitHub Actions run and download artifacts:
    - `playwright-report`;
    - `playwright-test-results`.
-4. Do not re-run deploy until failed tests/build/smoke are understood and fixed.
-5. Note: there are no `lint`, `typecheck`, standalone `smoke` or standalone `playwright` npm scripts yet, so they are not part of the required gate.
-6. Open:
+   - `production-playwright-report`;
+   - `production-playwright-test-results`.
+5. Do not re-run deploy until failed tests/build/smoke are understood and fixed.
+6. Note: there are no `lint` or `typecheck` npm scripts yet, so they are not part of the required gate.
+7. Open:
    - `https://rishatkznai.github.io/rental-management/`
-7. Confirm the app loads without a blank screen.
-8. In admin diagnostics, confirm:
+8. Confirm the app loads without a blank screen.
+9. In admin diagnostics, confirm:
    - frontend commit
    - frontend build time
    - backend health
@@ -108,8 +116,10 @@ On failed staging smoke, stop the production release, inspect GitHub Actions art
 1. Staging environment design is documented in `docs/staging-environment.md`.
 2. Manual `workflow_dispatch` staging smoke workflow exists at `.github/workflows/staging-smoke.yml`.
 3. Read-only staging spec exists at `e2e/staging-smoke.spec.ts`.
-4. Remaining outside-repo setup: staging Railway service, separate SQLite volume/database, staging frontend URL and GitHub `STAGING_*` secrets.
-5. Stage 3 remaining work: protected production smoke with explicit approval, richer role smoke and formal commit-drift policy.
+4. Production read-only smoke exists at `e2e/production-smoke.spec.ts`.
+5. Release preflight exists at `scripts/release-preflight.mjs`.
+6. Remaining outside-repo setup: staging Railway service, separate SQLite volume/database, staging frontend URL and GitHub `STAGING_*`/`PRODUCTION_*` secrets.
+7. Remaining future work: richer role smoke and formal commit-drift policy for intentionally mixed frontend/backend releases.
 
 ## Post-Deploy Smoke
 

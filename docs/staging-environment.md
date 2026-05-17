@@ -77,12 +77,20 @@ Production smoke must stay read-only unless a human explicitly approves a scoped
 - Check backend `/health`.
 - Check backend `/api/version`.
 - Login with dedicated staging admin.
+- Directly probe `/api/auth/login` and report HTTP status without printing passwords or tokens.
 - Open dashboard.
 - Open read-only main sections: equipment, rentals, deliveries, service, documents, payments, finance and GSM when enabled.
 - Fail on critical console errors, page errors, API 500, or unexpected 401/403 for admin-visible sections.
 - Check frontend/backend commit match when both build identities are available.
 
 Do not use the existing broad `e2e/smoke.spec.ts` against staging or production: it creates clients, equipment, rentals, service tickets, documents and users.
+
+Local command shape:
+
+```bash
+npm run release:preflight -- --env staging --expected-commit <commit>
+npm run test:e2e:staging-smoke
+```
 
 ## Release Check
 
@@ -95,6 +103,7 @@ Before production release:
    - `/health` is OK;
    - `/api/version` exposes commit;
    - frontend opens;
+   - frontend marker exposes the expected commit and `STAGING_API_URL`;
    - admin login works;
    - dashboard and read-only sections open;
    - no critical console errors;
@@ -103,4 +112,4 @@ Before production release:
    - frontend/backend commits match, unless Stage 3 documents an allowed metadata-only backend drift.
 5. Treat failure as a release blocker until understood.
 
-Stage 3 should add richer role smoke, production smoke with approval, and a formal allowed commit-drift policy.
+Production has a separate read-only smoke in `e2e/production-smoke.spec.ts`. Future work should add richer role smoke and a formal allowed commit-drift policy.

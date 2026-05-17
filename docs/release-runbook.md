@@ -1,0 +1,130 @@
+# Release Runbook
+
+Use this for staging and production releases. Do not paste secrets into logs, issues, docs, or chat.
+
+## Smoke And Preflight Files
+
+- Staging smoke: `e2e/staging-smoke.spec.ts`
+- Production read-only smoke: `e2e/production-smoke.spec.ts`
+- Shared smoke diagnostics: `e2e/helpers/releaseSmoke.ts`
+- Staging Playwright config: `playwright.staging.config.ts`
+- Production Playwright config: `playwright.production.config.ts`
+- URL/commit/API preflight: `scripts/release-preflight.mjs`
+- GitHub Actions:
+  - Staging smoke: `.github/workflows/staging-smoke.yml`
+  - GitHub Pages production deploy and production gate: `.github/workflows/deploy.yml`
+
+## Required GitHub Secrets
+
+Staging:
+
+- `STAGING_API_URL`
+- `STAGING_FRONTEND_URL`
+- `STAGING_ADMIN_EMAIL`
+- `STAGING_ADMIN_PASSWORD`
+
+Production:
+
+- `PRODUCTION_API_URL`
+- `PRODUCTION_FRONTEND_URL`
+- `PRODUCTION_ADMIN_EMAIL`
+- `PRODUCTION_ADMIN_PASSWORD`
+
+The workflows validate that these values exist, but never print secret values. Smoke logs may print URLs and HTTP status codes, not passwords or tokens.
+
+## Commit Checks
+
+Backend:
+
+```bash
+curl -fsS "$PRODUCTION_API_URL/api/version"
+```
+
+Expected: JSON has `ok: true` and `build.commit` or `build.commitFull` matching the release commit.
+
+Frontend:
+
+```bash
+PRODUCTION_FRONTEND_URL="https://rishatkznai.github.io/rental-management/" \
+PRODUCTION_API_URL="https://rental-management-production-35bc.up.railway.app" \
+node scripts/release-preflight.mjs --env production --expected-commit <commit>
+```
+
+Expected: frontend HTML/assets are reachable, contain the expected commit marker, and contain the expected API URL.
+
+## Before Production Deploy
+
+1. Confirm the target release commit.
+2. Confirm production backup exists and was checked.
+3. Deploy or verify staging backend and staging frontend for that same commit.
+4. Run GitHub Actions `Staging Smoke`.
+5. Confirm staging passed:
+   - frontend commit marker matches target commit;
+   - backend `/health` returns `200`;
+   - backend `/api/version` matches target commit;
+   - staging admin login works;
+   - main read-only sections open without console/API errors.
+6. Do not start production deploy while staging smoke is red unless the release owner explicitly accepts the risk and records why.
+
+## Production Gate
+
+The GitHub Pages deploy workflow now requires:
+
+- successful install/test/build;
+- `git diff --check`;
+- production frontend build with `VITE_API_URL=$PRODUCTION_API_URL`;
+- local Playwright smoke before deploy;
+- successful GitHub Pages deploy;
+- production preflight after deploy:
+  - frontend URL reachable;
+  - backend `/health`;
+  - backend `/api/version`;
+  - frontend commit marker;
+  - frontend API URL;
+- production read-only Playwright smoke login and section checks.
+
+If the post-deploy gate fails, the workflow is failed and the release is not considered successful.
+
+## 401 On `/api/auth/login`
+
+Treat `401` as an auth/environment/data problem first, not a selector problem.
+
+Check:
+
+- the smoke user exists in the target environment database;
+- the smoke user is active (`Активен`);
+- the workflow uses the correct environment secrets;
+- `STAGING_API_URL`/`PRODUCTION_API_URL` points to the intended backend;
+- the frontend build marker `apiBaseUrl` points to that same backend;
+- `/api/version` backend commit is the intended release commit;
+- the smoke password was rotated in both the DB/user record and GitHub secret.
+
+Do not print the password or token while diagnosing. The smoke failure includes current URL, visible body text, frontend commit marker, API URL, frontend URL, and captured `/api/auth/login` HTTP status.
+
+## Old Frontend Build
+
+If the frontend still serves an old commit after deploy:
+
+1. Check the production preflight output for the actual frontend marker.
+2. Confirm GitHub Pages deploy completed for the target commit.
+3. Hard-refresh the browser and retry with `?debugVersion=1`.
+4. Re-run:
+
+```bash
+node scripts/release-preflight.mjs --env production --expected-commit <commit> --old-commit <previous-commit>
+```
+
+5. If the old build is still served, stop release verification and redeploy GitHub Pages after confirming the workflow built with the correct `VITE_GIT_COMMIT_SHA` and `VITE_API_URL`.
+
+## After Production Deploy
+
+Required checks:
+
+- production workflow is green;
+- `/health` returns `200`;
+- `/api/version` returns expected commit;
+- frontend marker returns expected commit and API URL;
+- production smoke login passes;
+- console errors are `0`;
+- API errors are `0`;
+- no secrets, passwords, tokens, bot secrets, or session data appear in logs.

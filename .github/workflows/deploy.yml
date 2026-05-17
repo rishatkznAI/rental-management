@@ -42,11 +42,26 @@ jobs:
       - name: Check whitespace
         run: git diff --check
 
+      - name: Validate production release secrets
+        run: |
+          test -n "$PRODUCTION_API_URL"
+          test -n "$PRODUCTION_FRONTEND_URL"
+          test -n "$PRODUCTION_ADMIN_EMAIL"
+          test -n "$PRODUCTION_ADMIN_PASSWORD"
+        env:
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+          PRODUCTION_ADMIN_EMAIL: ${{ secrets.PRODUCTION_ADMIN_EMAIL }}
+          PRODUCTION_ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
+
       - name: Test
         run: npm test
 
       - name: Build
         run: npm run build
+        env:
+          VITE_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          VITE_GIT_COMMIT_SHA: ${{ github.sha }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
@@ -98,6 +113,7 @@ jobs:
           if-no-files-found: ignore
 
   deploy:
+    name: Deploy and production gate
     needs:
       - basic-ci
       - playwright-smoke
@@ -109,3 +125,55 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Wait for GitHub Pages propagation
+        run: sleep 30
+
+      - name: Run production release preflight
+        run: npm run release:preflight -- --env production --expected-commit "$EXPECTED_RELEASE_COMMIT"
+        env:
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+          EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+
+      - name: Run production smoke login
+        run: npm run test:e2e:production-smoke
+        env:
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+          PRODUCTION_ADMIN_EMAIL: ${{ secrets.PRODUCTION_ADMIN_EMAIL }}
+          PRODUCTION_ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
+          EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+
+      - name: Upload production Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+
+      - name: Upload production Playwright test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-playwright-test-results
+          path: test-results/
+          if-no-files-found: ignore

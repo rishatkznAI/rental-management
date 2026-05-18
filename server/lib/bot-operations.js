@@ -515,16 +515,31 @@ function createBotOperations(deps) {
     });
   }
 
-  function createServiceTicketFromBot(equipment, authUser, reason, description = '') {
+  function createServiceTicketFromBot(equipment, authUser, reason, description = '', context = null) {
     const now = nowIso();
     const mechanicRef = getMechanicReferenceByUser(authUser);
     const assignedName = mechanicRef?.name || authUser.userName;
     const assignedMechanicId = mechanicRef?.id || undefined;
+    const ticketContext = context && context.key
+      ? {
+          key: context.key,
+          label: context.label || context.key,
+          selectedAt: context.selectedAt || now,
+          selectedByUserId: context.selectedByUserId || authUser.userId,
+          selectedByUserName: context.selectedByUserName || authUser.userName,
+          source: context.source || 'bot',
+        }
+      : null;
     const newTicket = {
       id: generateId(idPrefixes.service),
       equipmentId: equipment.id,
       equipment: `${equipment.manufacturer} ${equipment.model} (INV: ${equipment.inventoryNumber})`,
       serviceKind: 'repair',
+      ...(ticketContext ? {
+        serviceContext: ticketContext.key,
+        repairContext: ticketContext.key,
+        ticketContext,
+      } : {}),
       inventoryNumber: equipment.inventoryNumber,
       serialNumber: equipment.serialNumber,
       equipmentType: equipment.type,
@@ -576,18 +591,33 @@ function createBotOperations(deps) {
     return newTicket;
   }
 
-  function createMaintenanceTicketFromBot(equipment, authUser, maintenanceKind, summary = '') {
+  function createMaintenanceTicketFromBot(equipment, authUser, maintenanceKind, summary = '', context = null) {
     const now = nowIso();
     const today = now.slice(0, 10);
     const maintenanceLabel = MAINTENANCE_REASON_LABELS[maintenanceKind] || 'ТО';
     const mechanicRef = getMechanicReferenceByUser(authUser);
     const assignedName = mechanicRef?.name || authUser.userName;
     const assignedMechanicId = mechanicRef?.id || undefined;
+    const ticketContext = context && context.key
+      ? {
+          key: context.key,
+          label: context.label || context.key,
+          selectedAt: context.selectedAt || now,
+          selectedByUserId: context.selectedByUserId || authUser.userId,
+          selectedByUserName: context.selectedByUserName || authUser.userName,
+          source: context.source || 'bot',
+        }
+      : null;
     const ticket = {
       id: generateId(idPrefixes.service),
       equipmentId: equipment.id,
       equipment: `${equipment.manufacturer} ${equipment.model} (INV: ${equipment.inventoryNumber})`,
       serviceKind: maintenanceKind,
+      ...(ticketContext ? {
+        serviceContext: ticketContext.key,
+        repairContext: ticketContext.key,
+        ticketContext,
+      } : {}),
       inventoryNumber: equipment.inventoryNumber,
       serialNumber: equipment.serialNumber,
       equipmentType: equipment.type,

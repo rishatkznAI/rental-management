@@ -128,6 +128,17 @@ function createBotUi() {
     REPAIR_REASON_TEMPLATES.map(item => [item.key, item.text]),
   );
 
+  const SERVICE_TICKET_CONTEXTS = [
+    { key: 'rental', label: 'Аренда' },
+    { key: 'sales', label: 'Продажи' },
+    { key: 'commercial_repair', label: 'Коммерческий ремонт' },
+    { key: 'after_sales', label: 'Послепродажа' },
+  ];
+
+  const SERVICE_TICKET_CONTEXT_BY_KEY = Object.fromEntries(
+    SERVICE_TICKET_CONTEXTS.map(item => [item.key, item]),
+  );
+
   const MAINTENANCE_REASON_LABELS = {
     to: 'ТО',
     chto: 'ЧТО',
@@ -222,6 +233,16 @@ function createBotUi() {
     ]);
   }
 
+  function serviceTicketContextKeyboard() {
+    const buttons = SERVICE_TICKET_CONTEXTS.map(item =>
+      button(item.label, `ticketcontext:${item.key}`),
+    );
+    return keyboard([
+      ...chunkButtons(buttons, 2),
+      [button('Назад', 'menu:main')],
+    ]);
+  }
+
   function quantityKeyboard(kind) {
     return keyboard([
       [
@@ -300,11 +321,14 @@ function createBotUi() {
     operationsKeyboard,
     repairActionsKeyboard,
     repairReasonKeyboard,
+    serviceTicketContextKeyboard,
     quantityKeyboard,
     operationKeyboard,
     defaultKeyboardForRole,
     REPAIR_REASON_TEMPLATES,
     REPAIR_REASON_BY_KEY,
+    SERVICE_TICKET_CONTEXTS,
+    SERVICE_TICKET_CONTEXT_BY_KEY,
     MAINTENANCE_REASON_LABELS,
     HANDOFF_CHECKLIST_LABELS,
     CHECKLIST_STEP_TO_KEY,

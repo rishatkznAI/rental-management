@@ -1175,15 +1175,61 @@ test('mechanic new ticket search opens equipment action menu before repair reaso
   }];
 
   await handlers.handleCommand({ user_id: 100 }, '100', '/новаязаявка');
+  assert.equal(state.bot_sessions['100'].pendingAction, 'ticket_context');
+  const contextMenu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
+  assert.deepEqual(
+    contextMenu.payload.buttons.flat().map((item) => [item.text, item.payload]).slice(0, 4),
+    [
+      ['Аренда', 'ticketcontext:rental'],
+      ['Продажи', 'ticketcontext:sales'],
+      ['Коммерческий ремонт', 'ticketcontext:commercial_repair'],
+      ['Послепродажа', 'ticketcontext:after_sales'],
+    ],
+  );
+  await handlers.handleCallback({ user_id: 100 }, '100', 'ticketcontext:rental', { callbackId: 'cb-context' });
+  assert.equal(state.bot_sessions['100'].pendingPayload.ticketContext.key, 'rental');
   await handlers.handleCommand({ user_id: 100 }, '100', '083');
   await handlers.handleCallback({ user_id: 100 }, '100', 'equipment:choose:EQ-1', { callbackId: 'cb-1' });
 
   assert.equal(state.bot_sessions['100'].pendingAction, 'equipment_action_menu');
+  assert.equal(state.bot_sessions['100'].pendingPayload.ticketContext.key, 'rental');
   assert.doesNotMatch(messages.at(-1).text, /Напишите причину/);
   assert.match(messages.at(-1).text, /Выберите действие/);
   const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
   const buttonTexts = menu.payload.buttons.flat().map((item) => item.text);
   assert.deepEqual(buttonTexts.slice(1, 5), ['Ремонт', 'ТО', 'ЧТО', 'ПТО']);
+});
+
+test('mechanic selected ticket context is saved into bot-created service ticket', async () => {
+  const { state, handlers } = createMemoryBot(false);
+  state.bot_users['100'] = {
+    userId: 'U-mechanic',
+    userName: 'Дмитрий',
+    userRole: 'Механик',
+    email: 'mechanic@example.test',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+  state.equipment = [{
+    id: 'EQ-1',
+    inventoryNumber: '083',
+    serialNumber: 'SN-083',
+    manufacturer: 'Mantall',
+    model: 'HZ160JRT',
+    type: 'scissor',
+    status: 'available',
+  }];
+
+  await handlers.handleCommand({ user_id: 100 }, '100', '/найтитехнику 083');
+  assert.equal(state.bot_sessions['100'].pendingAction, 'ticket_context');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'ticketcontext:after_sales', { callbackId: 'cb-context' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'equipment:choose:EQ-1', { callbackId: 'cb-equipment' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'equipmentmenu:repair:EQ-1', { callbackId: 'cb-repair' });
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Течь гидравлики');
+
+  assert.equal(state.service.length, 1);
+  assert.equal(state.service[0].serviceContext, 'after_sales');
+  assert.equal(state.service[0].repairContext, 'after_sales');
+  assert.equal(state.service[0].ticketContext.label, 'Послепродажа');
 });
 
 test('mechanic work add asks for meter hours before saving', async () => {

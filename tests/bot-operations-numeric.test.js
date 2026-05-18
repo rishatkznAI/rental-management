@@ -125,6 +125,40 @@ test('MAX service ticket created by mechanic is assigned to that bot user', () =
   assert.equal(state.service[0].assignedMechanicId, 'U-mechanic');
 });
 
+test('MAX service ticket keeps selected service context', () => {
+  const { operations, state } = createOperations();
+  const equipment = {
+    id: 'EQ-1',
+    manufacturer: 'Mantall',
+    model: 'HZ160',
+    inventoryNumber: '083',
+    serialNumber: 'SN-083',
+    type: 'boom',
+    location: 'Склад',
+  };
+  const mechanic = { userId: 'U-mechanic', userName: 'Петров', userRole: 'Механик' };
+
+  const ticket = operations.createServiceTicketFromBot(
+    equipment,
+    mechanic,
+    'Течь гидравлики',
+    '',
+    {
+      key: 'commercial_repair',
+      label: 'Коммерческий ремонт',
+      selectedAt: '2026-04-30T09:00:00.000Z',
+      selectedByUserId: 'U-mechanic',
+      selectedByUserName: 'Петров',
+      source: 'bot',
+    },
+  );
+
+  assert.equal(ticket.serviceContext, 'commercial_repair');
+  assert.equal(ticket.repairContext, 'commercial_repair');
+  assert.equal(ticket.ticketContext.label, 'Коммерческий ремонт');
+  assert.equal(state.service[0].ticketContext.key, 'commercial_repair');
+});
+
 test('admin MAX helper writes bot-sourced service audit entries', () => {
   const { operations, state } = createOperations();
 

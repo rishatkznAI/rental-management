@@ -724,8 +724,8 @@ export default function Settings() {
             {/* Роль */}
             <Field label="Роль">
               <Select value={form.role} onValueChange={val => setForm(f => ({ ...f, role: val as UserRole }))}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
+                <SelectTrigger className={adminUserSelectClass}><SelectValue placeholder="Выберите роль">{form.role}</SelectValue></SelectTrigger>
+                <SelectContent className="border-gray-200 bg-white text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
                   {ROLES.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -740,8 +740,12 @@ export default function Settings() {
                     setForm(f => ({ ...f, ownerId: val, ownerName: selectedOwner?.name || '' }));
                   }}
                 >
-                  <SelectTrigger className="w-full"><SelectValue placeholder="Выберите собственника" /></SelectTrigger>
-                  <SelectContent>
+                  <SelectTrigger className={adminUserSelectClass}>
+                    <SelectValue placeholder="Выберите собственника">
+                      {ownersData.find(owner => owner.id === form.ownerId)?.name || form.ownerName}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="border-gray-200 bg-white text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
                     {ownersData.map(owner => <SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -757,8 +761,8 @@ export default function Settings() {
             {/* Статус */}
             <Field label="Статус">
               <Select value={form.status} onValueChange={val => setForm(f => ({ ...f, status: val as UserStatus }))}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
+                <SelectTrigger className={adminUserSelectClass}><SelectValue placeholder="Выберите статус">{form.status}</SelectValue></SelectTrigger>
+                <SelectContent className="border-gray-200 bg-white text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
                   <SelectItem value="Активен">Активен</SelectItem>
                   <SelectItem value="Неактивен">Неактивен (вход запрещён)</SelectItem>
                 </SelectContent>
@@ -864,6 +868,9 @@ export default function Settings() {
 
 const fieldClass =
   'w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[--color-primary]';
+
+const adminUserSelectClass =
+  'w-full border-gray-300 bg-white text-gray-900 shadow-sm placeholder:text-gray-500 focus-visible:border-[--color-primary] focus-visible:ring-[--color-primary]/30 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-400';
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

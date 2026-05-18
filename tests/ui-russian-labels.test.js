@@ -29,3 +29,20 @@ test('admin backup controls avoid English visible action labels', () => {
   assert.doesNotMatch(settings, /Dry-run import/);
   assert.doesNotMatch(settings, /Failed to fetch/);
 });
+
+test('admin user modal select fields keep readable light and dark theme styles', () => {
+  const settings = fs.readFileSync(new URL('../src/app/pages/Settings.tsx', import.meta.url), 'utf8');
+
+  assert.match(settings, /const adminUserSelectClass =/);
+  assert.match(settings, /bg-white/);
+  assert.match(settings, /text-gray-900/);
+  assert.match(settings, /border-gray-300/);
+  assert.match(settings, /placeholder:text-gray-500/);
+  assert.match(settings, /focus-visible:border-\[--color-primary\]/);
+  assert.match(settings, /dark:bg-gray-800/);
+  assert.match(settings, /dark:text-white/);
+  assert.match(settings, /dark:border-gray-600/);
+  assert.match(settings, /<SelectTrigger className=\{adminUserSelectClass\}><SelectValue placeholder="Выберите роль">\{form\.role\}<\/SelectValue><\/SelectTrigger>/);
+  assert.match(settings, /<SelectTrigger className=\{adminUserSelectClass\}><SelectValue placeholder="Выберите статус">\{form\.status\}<\/SelectValue><\/SelectTrigger>/);
+  assert.match(settings, /<SelectContent className="border-gray-200 bg-white text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white">/);
+});

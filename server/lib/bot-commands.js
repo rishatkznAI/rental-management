@@ -6,6 +6,10 @@ const { getRentalBillingAmount } = require('./rental-billing');
 const { SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE } = require('./service-audit-log');
 const { linkedRentalIds } = require('./gantt-rental-link-guard');
 const {
+  filterEquipmentByTicketContext,
+  findBestRentalLinkForEquipment,
+} = require('./bot-ticket-context-equipment');
+const {
   DELIVERY_STATUS_LABELS,
   canCarrierAccessDelivery,
   deliveryTypeLabel: carrierDeliveryTypeLabel,
@@ -1757,16 +1761,44 @@ function createBotHandlers(deps) {
     return {
       flow: 'service_ticket',
       ...(current.ticketContext ? { ticketContext: current.ticketContext } : {}),
+      ...(current.globalEquipmentSearch ? { globalEquipmentSearch: true } : {}),
+      ...(current.lastEquipmentQuery ? { lastEquipmentQuery: current.lastEquipmentQuery } : {}),
       ...extra,
     };
   }
 
+  function readTicketContextEquipmentData() {
+    return {
+      equipment: readData('equipment') || [],
+      rentals: readData('rentals') || [],
+      gantt_rentals: readData('gantt_rentals') || [],
+      service: readData('service') || [],
+      warranty_claims: readData('warranty_claims') || [],
+    };
+  }
+
+  function ticketContextFallbackKeyboard() {
+    return keyboard([
+      [button('Выбрать другое направление', 'ticketcontext:change')],
+      [button('Общий поиск', 'ticketcontext:global_search')],
+      [button('Главное меню', 'menu:main')],
+    ]);
+  }
+
+  function enrichTicketContextForEquipment(ticketContext, equipment) {
+    if (!ticketContext?.key) return null;
+    if (ticketContext.key !== 'rental') return ticketContext;
+    const rentalLink = findBestRentalLinkForEquipment(equipment, readTicketContextEquipmentData());
+    return rentalLink ? { ...ticketContext, rentalLink } : ticketContext;
+  }
+
   async function handleEquipmentSearchRequest(senderId, phone, query, uiContext = {}) {
-    const matches = searchEquipmentForBot(query);
     const session = getBotSession(phone);
     const flow = session.pendingPayload?.flow;
     const photoEventType = session.pendingPayload?.photoEventType;
     const ticketContext = session.pendingPayload?.ticketContext || null;
+    const globalEquipmentSearch = Boolean(session.pendingPayload?.globalEquipmentSearch);
+    const matches = searchEquipmentForBot(query);
     const botUser = getAuthorizedUserForCurrentBot(String(phone), senderId) || getAuthorizedUser(String(phone));
     const stage = flow === 'photo_event'
       ? 'handoff'
@@ -1779,7 +1811,7 @@ function createBotHandlers(deps) {
         pendingPayload: flow === 'photo_event'
           ? { flow, photoEventType }
           : flow === 'service_ticket'
-            ? { flow: 'service_ticket', ...(ticketContext ? { ticketContext } : {}) }
+            ? { flow: 'service_ticket', ...(ticketContext ? { ticketContext } : {}), lastEquipmentQuery: query, ...(globalEquipmentSearch ? { globalEquipmentSearch: true } : {}) }
             : null,
       });
       return reply(
@@ -1798,8 +1830,37 @@ function createBotHandlers(deps) {
         },
       );
     }
+    let visibleMatches = matches;
+    let filterResult = null;
+    if (flow === 'service_ticket' && ticketContext && !globalEquipmentSearch) {
+      filterResult = filterEquipmentByTicketContext(matches, ticketContext, readTicketContextEquipmentData());
+      visibleMatches = filterResult.items;
+      if (!visibleMatches.length) {
+        updateBotSession(phone, {
+          pendingAction: 'equipment_search',
+          pendingPayload: {
+            flow: 'service_ticket',
+            ticketContext,
+            lastEquipmentQuery: query,
+          },
+          lastEquipmentSearch: [],
+        });
+        return reply(
+          senderId,
+          `По направлению "${ticketContext.label || ticketContext.key}" техника не найдена. Можно выбрать другое направление или выполнить общий поиск.`,
+          {
+            attachments: ticketContextFallbackKeyboard(),
+            mechanicStage: stage,
+            phone,
+            callbackContext: uiContext.callbackContext,
+            replaceMessage: Boolean(uiContext.callbackContext),
+            cleanupPrevious: !uiContext.callbackContext,
+          },
+        );
+      }
+    }
     updateBotSession(phone, {
-      lastEquipmentSearch: matches.map(item => ({
+      lastEquipmentSearch: visibleMatches.map(item => ({
         id: item.id,
         inventoryNumber: item.inventoryNumber,
         serialNumber: item.serialNumber,
@@ -1809,7 +1870,12 @@ function createBotHandlers(deps) {
       pendingPayload: flow === 'photo_event'
         ? { flow, photoEventType }
         : flow === 'service_ticket'
-          ? { flow: 'service_ticket', ...(ticketContext ? { ticketContext } : {}) }
+          ? {
+              flow: 'service_ticket',
+              ...(ticketContext ? { ticketContext } : {}),
+              lastEquipmentQuery: query,
+              ...(globalEquipmentSearch ? { globalEquipmentSearch: true } : {}),
+            }
           : null,
     });
     const isPhotoFlow = flow === 'photo_event';
@@ -1817,7 +1883,8 @@ function createBotHandlers(deps) {
     const serviceTicketUsesActionMenu = isServiceTicketFlow && shouldOpenEquipmentActionMenuForServiceTicket(botUser);
     return reply(senderId, withBotMenu([
       '🚜 Найденная техника:',
-      ...matches.map((item, index) => `${index + 1}. ${formatEquipmentForBot(item)}`),
+      ...(filterResult?.isFallback ? [`${filterResult.reason}`] : []),
+      ...visibleMatches.map((item, index) => `${index + 1}. ${formatEquipmentForBot(item)}`),
       '',
       'Можно нажать кнопку с техникой ниже.',
       isPhotoFlow
@@ -1828,7 +1895,7 @@ function createBotHandlers(deps) {
             : 'После выбора бот попросит написать причину сервисной заявки.')
           : 'После выбора откроется меню действий по технике.',
     ].join('\n'), ['новый поиск: найти технику', 'отмена: /сброс']), {
-      attachments: equipmentSearchKeyboard(matches),
+      attachments: equipmentSearchKeyboard(visibleMatches),
       mechanicStage: stage,
       phone,
       callbackContext: uiContext.callbackContext,
@@ -1911,7 +1978,8 @@ function createBotHandlers(deps) {
         cleanupPrevious: !uiContext.callbackContext,
       });
     }
-    const ticket = createServiceTicketFromBot(equipment, authUser, reason, '', ticketContext);
+    const enrichedTicketContext = enrichTicketContextForEquipment(ticketContext, equipment);
+    const ticket = createServiceTicketFromBot(equipment, authUser, reason, '', enrichedTicketContext);
     setCurrentRepair(phone, ticket.id);
     const mechanicCreatedOwnTicket = isMechanicRole(authUser?.userRole);
     return reply(senderId, withBotMenu([
@@ -3991,6 +4059,57 @@ function createBotHandlers(deps) {
       );
     }
 
+    if (normalized === 'ticketcontext:change') {
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', { attachments: authKeyboard() });
+      }
+      updateBotSession(phone, {
+        pendingAction: 'ticket_context',
+        pendingPayload: pendingServiceTicketPayload(getBotSession(phone), {
+          ticketContext: undefined,
+          globalEquipmentSearch: undefined,
+        }),
+        lastEquipmentSearch: [],
+      });
+      return reply(senderId, 'Выберите направление сервисной заявки:', {
+        attachments: serviceTicketContextKeyboard(),
+        mechanicStage: serviceTicketStageForRole(authUser.userRole),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
+    if (normalized === 'ticketcontext:global_search') {
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', { attachments: authKeyboard() });
+      }
+      const session = getBotSession(phone);
+      const ticketContext = session.pendingPayload?.ticketContext || null;
+      const lastEquipmentQuery = session.pendingPayload?.lastEquipmentQuery || '';
+      updateBotSession(phone, {
+        pendingAction: 'equipment_search',
+        pendingPayload: {
+          flow: 'service_ticket',
+          ...(ticketContext ? { ticketContext } : {}),
+          globalEquipmentSearch: true,
+          lastEquipmentQuery,
+        },
+      });
+      if (lastEquipmentQuery) {
+        return handleEquipmentSearchRequest(senderId, phone, lastEquipmentQuery, { callbackContext, replaceMessage: true });
+      }
+      return reply(senderId, '🚜 Напишите INV, серийный номер, модель или производителя техники для общего поиска.', {
+        attachments: defaultKeyboardForRole(authUser.userRole),
+        mechanicStage: serviceTicketStageForRole(authUser.userRole),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
     if (normalized.startsWith('ticketcontext:')) {
       const contextKey = normalized.slice('ticketcontext:'.length);
       const authUser = getAuthorizedUser(String(phone));
@@ -4012,7 +4131,10 @@ function createBotHandlers(deps) {
       const pendingCreateTicketText = pendingPayload.pendingCreateTicketText;
       updateBotSession(phone, {
         pendingAction: 'equipment_search',
-        pendingPayload: pendingServiceTicketPayload(getBotSession(phone), { ticketContext }),
+        pendingPayload: pendingServiceTicketPayload(getBotSession(phone), {
+          ticketContext,
+          globalEquipmentSearch: undefined,
+        }),
         lastEquipmentSearch: [],
       });
       if (pendingCreateTicketText) {
@@ -4021,7 +4143,7 @@ function createBotHandlers(deps) {
       if (initialEquipmentQuery) {
         return handleEquipmentSearchRequest(senderId, phone, initialEquipmentQuery, { callbackContext, replaceMessage: true });
       }
-      return reply(senderId, `Направление: ${ticketContext.label}\n\n🚜 Напишите следующим сообщением INV, серийный номер, модель или производителя техники.`, {
+      return reply(senderId, `Направление: ${ticketContext.label}. Теперь найдите технику по INV, серийному номеру, модели или производителю.`, {
         attachments: defaultKeyboardForRole(authUser.userRole),
         mechanicStage: serviceTicketStageForRole(authUser.userRole),
         phone,
@@ -4417,7 +4539,8 @@ function createBotHandlers(deps) {
             replaceMessage: Boolean(uiContext.callbackContext),
           });
         }
-        const ticket = createMaintenanceTicketFromBot(equipment, authUser, maintenanceKind, trimmed, session.pendingPayload?.ticketContext || null);
+        const ticketContext = enrichTicketContextForEquipment(session.pendingPayload?.ticketContext || null, equipment);
+        const ticket = createMaintenanceTicketFromBot(equipment, authUser, maintenanceKind, trimmed, ticketContext);
         resetBotFlow(phone);
         return reply(senderId, withBotMenu([
           `✅ ${MAINTENANCE_REASON_LABELS[maintenanceKind]} зафиксировано`,

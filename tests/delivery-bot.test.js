@@ -1232,6 +1232,166 @@ test('mechanic selected ticket context is saved into bot-created service ticket'
   assert.equal(state.service[0].ticketContext.label, 'Послепродажа');
 });
 
+function setMechanicUser(state) {
+  state.bot_users['100'] = {
+    userId: 'U-mechanic',
+    userName: 'Дмитрий',
+    userRole: 'Механик',
+    email: 'mechanic@example.test',
+    replyTarget: { user_id: 100, chat_id: null },
+  };
+}
+
+function equipmentFixture(id, inventoryNumber, extra = {}) {
+  return {
+    id,
+    inventoryNumber,
+    serialNumber: `SN-${inventoryNumber}`,
+    manufacturer: extra.manufacturer || 'Mantall',
+    model: extra.model || 'HZ160JRT',
+    type: 'scissor',
+    status: 'available',
+    ...extra,
+  };
+}
+
+async function chooseTicketContextForSearch(handlers, contextKey, query = 'mantall') {
+  await handlers.handleCommand({ user_id: 100 }, '100', `/найтитехнику ${query}`);
+  await handlers.handleCallback({ user_id: 100 }, '100', `ticketcontext:${contextKey}`, { callbackId: `cb-${contextKey}` });
+}
+
+test('mechanic rental context search shows rented equipment and saves confident rental links', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  setMechanicUser(state);
+  state.equipment = [
+    equipmentFixture('EQ-rent', 'INV-RENT'),
+    equipmentFixture('EQ-free', 'INV-FREE'),
+  ];
+  state.rentals = [{
+    id: 'R-1',
+    equipmentId: 'EQ-rent',
+    equipmentInv: 'INV-RENT',
+    clientId: 'C-1',
+    client: 'ООО Аренда',
+    objectId: 'OBJ-1',
+    contractId: 'CON-1',
+    status: 'active',
+    startDate: '2026-04-01',
+    plannedReturnDate: '2026-05-30',
+  }];
+  state.gantt_rentals = [{
+    id: 'GR-1',
+    rentalId: 'R-1',
+    equipmentId: 'EQ-rent',
+    equipmentInv: 'INV-RENT',
+    clientId: 'C-1',
+    client: 'ООО Аренда',
+    objectId: 'OBJ-1',
+    contractId: 'CON-1',
+    status: 'active',
+    startDate: '2026-04-01',
+    endDate: '2026-05-30',
+  }];
+
+  await chooseTicketContextForSearch(handlers, 'rental');
+
+  assert.match(messages.at(-1).text, /INV-RENT/);
+  assert.doesNotMatch(messages.at(-1).text, /INV-FREE/);
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'equipment:choose:EQ-rent', { callbackId: 'cb-equipment' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'equipmentmenu:repair:EQ-rent', { callbackId: 'cb-repair' });
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Течь гидравлики');
+
+  assert.equal(state.service[0].serviceContext, 'rental');
+  assert.equal(state.service[0].rentalId, 'R-1');
+  assert.equal(state.service[0].clientId, 'C-1');
+  assert.equal(state.service[0].objectId, 'OBJ-1');
+  assert.equal(state.service[0].contractId, 'CON-1');
+  assert.equal(state.service[0].client, 'ООО Аренда');
+});
+
+test('mechanic sales context search shows active sale equipment and excludes sold units', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  setMechanicUser(state);
+  state.equipment = [
+    equipmentFixture('EQ-sale', 'INV-SALE', { saleMode: true, isForSale: true, saleStatus: 'На продаже' }),
+    equipmentFixture('EQ-sold', 'INV-SOLD', { category: 'sold', status: 'inactive', saleStatus: 'Продана', saleMode: true }),
+  ];
+
+  await chooseTicketContextForSearch(handlers, 'sales');
+
+  assert.match(messages.at(-1).text, /INV-SALE/);
+  assert.doesNotMatch(messages.at(-1).text, /INV-SOLD/);
+});
+
+test('mechanic commercial repair context uses client-owned equipment and falls back when ownership is unmarked', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  setMechanicUser(state);
+  state.equipment = [
+    equipmentFixture('EQ-client', 'INV-CLIENT', { category: 'client' }),
+    equipmentFixture('EQ-own', 'INV-OWN', { category: 'own' }),
+  ];
+
+  await chooseTicketContextForSearch(handlers, 'commercial_repair');
+  assert.match(messages.at(-1).text, /INV-CLIENT/);
+  assert.doesNotMatch(messages.at(-1).text, /INV-OWN/);
+
+  const fallbackBot = createMemoryBot(false);
+  setMechanicUser(fallbackBot.state);
+  fallbackBot.state.equipment = [equipmentFixture('EQ-unmarked', 'INV-UNMARKED')];
+
+  await chooseTicketContextForSearch(fallbackBot.handlers, 'commercial_repair', 'unmarked');
+  assert.match(fallbackBot.messages.at(-1).text, /Клиентская техника не размечена/);
+  assert.match(fallbackBot.messages.at(-1).text, /INV-UNMARKED/);
+});
+
+test('mechanic after-sales context search shows sold equipment and saves after-sales context', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  setMechanicUser(state);
+  state.equipment = [
+    equipmentFixture('EQ-sold', 'INV-SOLD', { category: 'sold', status: 'inactive', saleStatus: 'Продана' }),
+    equipmentFixture('EQ-sale', 'INV-SALE', { saleMode: true, isForSale: true, saleStatus: 'На продаже' }),
+  ];
+
+  await chooseTicketContextForSearch(handlers, 'after_sales');
+  assert.match(messages.at(-1).text, /INV-SOLD/);
+  assert.doesNotMatch(messages.at(-1).text, /INV-SALE/);
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'equipment:choose:EQ-sold', { callbackId: 'cb-equipment' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'equipmentmenu:repair:EQ-sold', { callbackId: 'cb-repair' });
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Гарантийная диагностика');
+
+  assert.equal(state.service[0].serviceContext, 'after_sales');
+});
+
+test('mechanic ticket context search offers global search fallback and preserves service context', async () => {
+  const { state, messages, handlers } = createMemoryBot(false);
+  setMechanicUser(state);
+  state.equipment = [equipmentFixture('EQ-free', 'INV-FREE')];
+
+  await chooseTicketContextForSearch(handlers, 'rental', 'free');
+
+  assert.match(messages.at(-1).text, /По направлению "Аренда" техника не найдена/);
+  const fallbackMenu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
+  assert.deepEqual(
+    fallbackMenu.payload.buttons.flat().map((item) => [item.text, item.payload]),
+    [
+      ['Выбрать другое направление', 'ticketcontext:change'],
+      ['Общий поиск', 'ticketcontext:global_search'],
+      ['Главное меню', 'menu:main'],
+    ],
+  );
+
+  await handlers.handleCallback({ user_id: 100 }, '100', 'ticketcontext:global_search', { callbackId: 'cb-global' });
+  assert.match(messages.at(-1).text, /INV-FREE/);
+  await handlers.handleCallback({ user_id: 100 }, '100', 'equipment:choose:EQ-free', { callbackId: 'cb-equipment' });
+  await handlers.handleCallback({ user_id: 100 }, '100', 'equipmentmenu:repair:EQ-free', { callbackId: 'cb-repair' });
+  await handlers.handleCommand({ user_id: 100 }, '100', 'Диагностика');
+
+  assert.equal(state.service[0].serviceContext, 'rental');
+  assert.equal(state.service[0].rentalId, undefined);
+});
+
 test('mechanic work add asks for meter hours before saving', async () => {
   const { state, messages, handlers } = setupMechanicRepairWithWorks([
     makeWork(1, { name: 'Диагностика гидравлики' }),

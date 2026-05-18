@@ -530,6 +530,16 @@ function createBotOperations(deps) {
           source: context.source || 'bot',
         }
       : null;
+    const rentalLink = ticketContext?.key === 'rental' && context?.rentalLink
+      ? {
+          rentalId: context.rentalLink.rentalId || undefined,
+          clientId: context.rentalLink.clientId || undefined,
+          objectId: context.rentalLink.objectId || undefined,
+          contractId: context.rentalLink.contractId || undefined,
+          client: context.rentalLink.client || context.rentalLink.clientName || undefined,
+          clientName: context.rentalLink.clientName || context.rentalLink.client || undefined,
+        }
+      : null;
     const newTicket = {
       id: generateId(idPrefixes.service),
       equipmentId: equipment.id,
@@ -540,6 +550,7 @@ function createBotOperations(deps) {
         repairContext: ticketContext.key,
         ticketContext,
       } : {}),
+      ...(rentalLink ? Object.fromEntries(Object.entries(rentalLink).filter(([, value]) => value)) : {}),
       inventoryNumber: equipment.inventoryNumber,
       serialNumber: equipment.serialNumber,
       equipmentType: equipment.type,
@@ -608,6 +619,16 @@ function createBotOperations(deps) {
           source: context.source || 'bot',
         }
       : null;
+    const rentalLink = ticketContext?.key === 'rental' && context?.rentalLink
+      ? {
+          rentalId: context.rentalLink.rentalId || undefined,
+          clientId: context.rentalLink.clientId || undefined,
+          objectId: context.rentalLink.objectId || undefined,
+          contractId: context.rentalLink.contractId || undefined,
+          client: context.rentalLink.client || context.rentalLink.clientName || undefined,
+          clientName: context.rentalLink.clientName || context.rentalLink.client || undefined,
+        }
+      : null;
     const ticket = {
       id: generateId(idPrefixes.service),
       equipmentId: equipment.id,
@@ -618,6 +639,7 @@ function createBotOperations(deps) {
         repairContext: ticketContext.key,
         ticketContext,
       } : {}),
+      ...(rentalLink ? Object.fromEntries(Object.entries(rentalLink).filter(([, value]) => value)) : {}),
       inventoryNumber: equipment.inventoryNumber,
       serialNumber: equipment.serialNumber,
       equipmentType: equipment.type,

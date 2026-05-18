@@ -203,10 +203,15 @@ test('rentals workspace does not open broken gantt rows as full rentals', () => 
 test('rental movement view never routes legacy objects as URLs', () => {
   assert.match(rentalsSource, /import \{ normalizePhotoReference, type NormalizedPhoto \} from '\.\.\/lib\/media'/);
   assert.match(rentalsSource, /import \{ AuthenticatedImage \} from '\.\.\/components\/ui\/AuthenticatedImage'/);
+  assert.match(rentalsSource, /resolveMovementEquipment/);
+  assert.match(rentalsSource, /resolveMovementClientObject/);
   assert.match(rentalsSource, /photoItems\?: NormalizedPhoto\[\]/);
   assert.match(rentalsSource, /equipmentNavigationId\?: string/);
-  assert.match(rentalsSource, /typeof event\.equipmentId === 'string' \? event\.equipmentId\.trim\(\) : ''/);
+  assert.match(rentalsSource, /movementDiagnosticReason\?: string/);
   assert.match(rentalsSource, /normalizePhotoReference\(photo, \{ idPrefix: `\$\{event\.id \|\| 'movement'\}-\$\{index\}` \}\)/);
+  assert.match(rentalsSource, /equipmentLabel: getEquipmentMovementLabel\(equipment, resolution\.diagnosticReason\)/);
+  assert.match(rentalsSource, /clientLabel: clientObject\.clientLabel/);
+  assert.match(rentalsSource, /objectLabel: clientObject\.objectLabel/);
   assert.match(rentalsSource, /const movementPhotos = \(entry\.photoItems \|\| \[\]\)[\s\S]*\.filter\(photo => Boolean\(photo\.fullUrl\)\)/);
   assert.match(rentalsSource, /<AuthenticatedImage[\s\S]*photo=\{photo\}[\s\S]*imgClassName="h-full w-full object-cover"/);
   assert.match(rentalsSource, /to=\{`\/equipment\/\$\{encodeURIComponent\(entry\.equipmentNavigationId\)\}`\}/);

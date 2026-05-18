@@ -129,7 +129,7 @@ test('delivery tab keeps an honest empty-state when no delivery is linked', () =
 test('rentals page passes delivery records into rental drawer', () => {
   assert.match(rentalsSource, /import \{ deliveriesService \} from '\.\.\/services\/deliveries\.service'/);
   assert.match(rentalsSource, /const \{ data: deliveriesData = EMPTY_DELIVERIES \} = useQuery<Delivery\[\]>/);
-  assert.match(rentalsSource, /deliveriesService\.getPaginated/);
+  assert.match(rentalsSource, /deliveriesService\.getAll/);
   assert.match(rentalsSource, /rentalsService\.getContext\(selectedRentalContextId\)/);
   assert.match(rentalsSource, /deliveries=\{drawerDeliveries\}/);
   assert.match(rentalsSource, /documents=\{drawerDocuments\}/);

@@ -35,7 +35,7 @@ import { filterRentalManagerUsers, getInvestorBinding, isInvestorUser, normalize
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData, DowntimePeriod, ServicePeriod } from '../mock-data';
-import type { Client, Delivery, Document, Equipment, EquipmentType, EquipmentStatus, Payment, Rental, RentalChangeRequest, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
+import type { Client, ClientObject, Delivery, Document, Equipment, EquipmentType, EquipmentStatus, Payment, Rental, RentalChangeRequest, ServiceTicket, ServiceStatus, ShippingPhoto } from '../types';
 import { equipmentService } from '../services/equipment.service';
 import { rentalsService, type RentalExtensionResponse } from '../services/rentals.service';
 import { paymentsService } from '../services/payments.service';
@@ -50,6 +50,7 @@ import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { useRentalChangeRequestsList } from '../hooks/useRentalChangeRequests';
 import { useDocumentsList } from '../hooks/useDocuments';
+import { useClientObjectsList } from '../hooks/useClientRelations';
 import { canEquipmentParticipateInRentals, compareEquipmentByPriority } from '../lib/equipmentClassification';
 import { resolveRentalEquipment } from '../lib/rentalEquipment';
 import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
@@ -86,6 +87,12 @@ import { ru } from 'date-fns/locale';
 import { cn, formatCurrency, getRentalDays } from '../lib/utils';
 import { animationClasses } from '../lib/animations';
 import { normalizePhotoReference, type NormalizedPhoto } from '../lib/media';
+import {
+  buildRentalMovementResolverContext,
+  getMovementEquipmentLabel,
+  resolveMovementClientObject,
+  resolveMovementEquipment,
+} from '../lib/rentalMovementResolver.js';
 
 // ========== Constants & Types ==========
 type Scale = 'week' | 'month' | 'quarter' | 'year' | 'custom';
@@ -120,6 +127,7 @@ type DrawerRentalData = GanttRentalData & {
 };
 type FleetMovementEntry = ShippingPhoto & {
   rental?: GanttRentalData;
+  delivery?: Delivery | null;
   equipment?: Equipment;
   photoItems?: NormalizedPhoto[];
   equipmentNavigationId?: string;
@@ -128,6 +136,8 @@ type FleetMovementEntry = ShippingPhoto & {
   inventoryNumber?: string;
   clientLabel?: string;
   objectLabel?: string;
+  movementDiagnosticReason?: string;
+  movementDiagnostic?: Record<string, unknown>;
   operationStatusLabel?: string;
   typeLabel?: string;
   typeBadgeClassName?: string;
@@ -800,13 +810,8 @@ function safeMovementDateLabel(value?: string) {
   return format(date, hasTime ? 'dd.MM.yyyy HH:mm' : 'dd.MM.yyyy', { locale: ru });
 }
 
-function getEquipmentMovementLabel(equipment?: Pick<Equipment, 'manufacturer' | 'model' | 'inventoryNumber'> | null) {
-  if (!equipment) return 'Техника не найдена';
-  const manufacturerModel = [equipment.manufacturer, equipment.model].filter(Boolean).join(' ').trim();
-  if (manufacturerModel && equipment.inventoryNumber) return `${manufacturerModel} · INV ${equipment.inventoryNumber}`;
-  if (manufacturerModel) return manufacturerModel;
-  if (equipment.inventoryNumber) return `INV ${equipment.inventoryNumber}`;
-  return 'Без названия';
+function getEquipmentMovementLabel(equipment?: Pick<Equipment, 'manufacturer' | 'model' | 'inventoryNumber' | 'serialNumber'> | null, fallbackReason = '') {
+  return getMovementEquipmentLabel(equipment, fallbackReason);
 }
 
 function getHeadMovementStatusLabel(entry: Pick<FleetMovementEntry, 'type' | 'rental'>): string {
@@ -1253,6 +1258,7 @@ const EMPTY_SERVICE_PERIODS: ServicePeriod[] = [];
 const EMPTY_DOWNTIMES: DowntimePeriod[] = [];
 const EMPTY_STAFF_OPTIONS: StaffOption[] = [];
 const EMPTY_CLIENTS: Client[] = [];
+const EMPTY_CLIENT_OBJECTS: ClientObject[] = [];
 const EMPTY_RENTAL_CHANGE_REQUESTS: RentalChangeRequest[] = [];
 
 function mergeGanttRentalLists(...lists: GanttRentalData[][]): GanttRentalData[] {
@@ -1357,9 +1363,8 @@ export default function Rentals() {
     enabled: false,
   });
   const { data: equipmentData = EMPTY_EQUIPMENT } = useQuery({
-    queryKey: EQUIPMENT_KEYS.paginated({ page: 1, pageSize: 100 }),
-    queryFn: () => equipmentService.getPaginated({ page: 1, pageSize: 100 }),
-    select: response => response.items,
+    queryKey: ['equipment', 'rentals-page', 'all'],
+    queryFn: equipmentService.getAll,
     enabled: shouldLoadTimelineData,
   });
   const { data: downtimeData = EMPTY_DOWNTIMES } = useQuery({
@@ -1374,8 +1379,8 @@ export default function Rentals() {
   });
   const { data: documentsData = EMPTY_DOCUMENTS } = useDocumentsList({ enabled: false });
   const { data: deliveriesData = EMPTY_DELIVERIES } = useQuery<Delivery[]>({
-    queryKey: ['deliveries', 'rentals-page'],
-    queryFn: () => deliveriesService.getPaginated({ page: 1, pageSize: 100 }).then(response => response.items),
+    queryKey: ['deliveries', 'rentals-page', 'all'],
+    queryFn: deliveriesService.getAll,
     enabled: shouldLoadTimelineData && canViewDeliveries && canReadCollection('deliveries'),
   });
   const { data: shippingPhotos = EMPTY_SHIPPING_PHOTOS } = useQuery<ShippingPhoto[]>({
@@ -1394,9 +1399,12 @@ export default function Rentals() {
     enabled: canViewStaffOptions,
   });
   const { data: clientsData = EMPTY_CLIENTS } = useQuery({
-    queryKey: ['clients', 'rentals-page'],
-    queryFn: () => clientsService.getPaginated({ page: 1, pageSize: 100 }).then(response => response.items),
+    queryKey: ['clients', 'rentals-page', 'all'],
+    queryFn: clientsService.getAll,
     enabled: canViewClients,
+  });
+  const { data: clientObjects = EMPTY_CLIENT_OBJECTS } = useClientObjectsList({
+    enabled: shouldLoadTimelineData && canViewClients && canReadCollection('client_objects'),
   });
 
   const investorBinding = useMemo(() => getInvestorBinding(user), [user]);
@@ -2480,8 +2488,13 @@ export default function Rentals() {
   }, [rentalRows, today]);
 
   const movementEntries = useMemo(() => {
-    const rentalsById = new Map(rentalRows.map(rental => [rental.id, rental]));
-    const equipmentById = new Map(equipmentList.map(item => [item.id, item]));
+    const resolverContext = buildRentalMovementResolverContext({
+      equipmentList,
+      rentals: rentalRows,
+      deliveries: deliveriesData,
+      clients: clientsData,
+      clientObjects,
+    });
 
     return [...shippingPhotos]
       .filter(event => event.type === 'shipping' || event.type === 'receiving')
@@ -2494,25 +2507,40 @@ export default function Rentals() {
         return bTime - aTime;
       })
       .map(event => {
-        const rentalId = typeof event.rentalId === 'string' ? event.rentalId.trim() : '';
-        const eventEquipmentId = typeof event.equipmentId === 'string' ? event.equipmentId.trim() : '';
-        const rental = rentalId ? rentalsById.get(rentalId) : undefined;
-        const equipment = eventEquipmentId ? equipmentById.get(eventEquipmentId) : undefined;
+        const resolution = resolveMovementEquipment(
+          { ...event, sourceCollection: 'shipping_photos' },
+          resolverContext,
+        );
+        const rental = resolution.rental || undefined;
+        const delivery = resolution.delivery || null;
+        const equipment = resolution.equipment || undefined;
+        const clientObject = resolveMovementClientObject(event, resolution, resolverContext);
+        const sourceSerialNumber = (event as ShippingPhoto & { equipmentSerialNumber?: string; vin?: string; sn?: string }).serialNumber
+          || (event as ShippingPhoto & { equipmentSerialNumber?: string; vin?: string; sn?: string }).equipmentSerialNumber
+          || (event as ShippingPhoto & { equipmentSerialNumber?: string; vin?: string; sn?: string }).vin
+          || (event as ShippingPhoto & { equipmentSerialNumber?: string; vin?: string; sn?: string }).sn
+          || '';
+        const sourceInventoryNumber = (event as ShippingPhoto & { equipmentInventoryNumber?: string; inventoryNumber?: string; invNumber?: string; equipmentInv?: string }).equipmentInventoryNumber
+          || (event as ShippingPhoto & { equipmentInventoryNumber?: string; inventoryNumber?: string; invNumber?: string; equipmentInv?: string }).inventoryNumber
+          || (event as ShippingPhoto & { equipmentInventoryNumber?: string; inventoryNumber?: string; invNumber?: string; equipmentInv?: string }).invNumber
+          || (event as ShippingPhoto & { equipmentInventoryNumber?: string; inventoryNumber?: string; invNumber?: string; equipmentInv?: string }).equipmentInv
+          || '';
         return {
           ...event,
           rental,
+          delivery,
           equipment,
-          equipmentNavigationId: equipment?.id || eventEquipmentId,
+          equipmentNavigationId: resolution.equipmentNavigationId,
           photoItems: (Array.isArray(event.photos) ? event.photos : []).map((photo, index) =>
             normalizePhotoReference(photo, { idPrefix: `${event.id || 'movement'}-${index}` }),
           ),
-          equipmentLabel: getEquipmentMovementLabel(equipment),
-          serialNumber: event.serialNumber || equipment?.serialNumber || '',
-          inventoryNumber: (event as ShippingPhoto & { inventoryNumber?: string }).inventoryNumber || equipment?.inventoryNumber || '',
-          clientLabel: rental?.client || equipment?.currentClient || 'Без клиента',
-          objectLabel: (rental as GanttRentalData & { objectName?: string; objectAddress?: string })?.objectName
-            || (rental as GanttRentalData & { objectName?: string; objectAddress?: string })?.objectAddress
-            || 'Объект не указан',
+          equipmentLabel: getEquipmentMovementLabel(equipment, resolution.diagnosticReason),
+          serialNumber: equipment?.serialNumber || sourceSerialNumber || '',
+          inventoryNumber: equipment?.inventoryNumber || sourceInventoryNumber || '',
+          clientLabel: clientObject.clientLabel,
+          objectLabel: clientObject.objectLabel,
+          movementDiagnosticReason: resolution.diagnosticReason,
+          movementDiagnostic: resolution.diagnostic,
           operationStatusLabel: getHeadMovementStatusLabel({ ...event, rental }),
           typeLabel: event.type === 'shipping' ? 'Отгрузка' : 'Приёмка',
           typeBadgeClassName: event.type === 'shipping'
@@ -2520,7 +2548,7 @@ export default function Rentals() {
             : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300',
         };
       });
-  }, [equipmentList, rentalRows, shippingPhotos]);
+  }, [clientObjects, clientsData, deliveriesData, equipmentList, rentalRows, shippingPhotos]);
 
   const getMovementsForEquipment = useCallback((equipment: Equipment) => {
     return movementEntries.filter(entry =>
@@ -2540,6 +2568,8 @@ export default function Rentals() {
 
   const headMovementEntries = useMemo(() => {
     const equipmentByIdForHead = new Map(equipmentList.map(item => [item.id, item]));
+    const clientsByIdForHead = new Map(clientsData.map(client => [client.id, client]));
+    const objectsByIdForHead = new Map(clientObjects.map(object => [object.id, object]));
     const existingByRentalAndType = new Set(
       movementEntries.map(entry => `${entry.rentalId || entry.rental?.id || ''}:${entry.type}`),
     );
@@ -2567,10 +2597,14 @@ export default function Rentals() {
           equipmentLabel: getEquipmentMovementLabel(equipment),
           serialNumber: rental.serialNumber || equipment?.serialNumber || '',
           inventoryNumber: rental.equipmentInv || equipment?.inventoryNumber || '',
-          clientLabel: rental.client || equipment?.currentClient || 'Без клиента',
-          objectLabel: (rental as GanttRentalData & { objectName?: string; objectAddress?: string }).objectName
+          clientLabel: clientsByIdForHead.get(String(rental.clientId || ''))?.company
+            || rental.client
+            || equipment?.currentClient
+            || (rental.clientId ? 'Клиент не найден: clientId указывает на отсутствующую карточку' : 'Без клиента: нет clientId в источнике'),
+          objectLabel: objectsByIdForHead.get(String((rental as GanttRentalData & { objectId?: string }).objectId || ''))?.name
+            || (rental as GanttRentalData & { objectName?: string; objectAddress?: string }).objectName
             || (rental as GanttRentalData & { objectName?: string; objectAddress?: string }).objectAddress
-            || 'Объект не указан',
+            || ((rental as GanttRentalData & { objectId?: string }).objectId ? 'Объект не найден: objectId указывает на отсутствующую карточку' : 'Объект не указан: нет objectId в источнике'),
           operationStatusLabel: getHeadMovementStatusLabel({ type, rental }),
           typeLabel: type === 'shipping' ? 'Отгрузка' : 'Приёмка',
           typeBadgeClassName: type === 'shipping'
@@ -2581,7 +2615,7 @@ export default function Rentals() {
       .filter(Boolean) as FleetMovementEntry[];
     return [...movementEntries, ...derived]
       .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-  }, [equipmentList, movementEntries, rentalRows]);
+  }, [clientObjects, clientsData, equipmentList, movementEntries, rentalRows]);
 
   const displayedMovementEntries = isHeadRole
     ? headMovementEntries.filter(entry => movementFilter === 'all' || entry.type === movementFilter)
@@ -4927,7 +4961,16 @@ export default function Rentals() {
                               </td>
                               <td className="px-4 py-3 font-medium text-foreground">{safeMovementDateLabel(entry.date)}</td>
                               <td className="px-4 py-3">
-                                <div className="font-semibold text-foreground">{entry.equipmentLabel}</div>
+                                {entry.equipmentNavigationId ? (
+                                  <Link
+                                    to={`/equipment/${encodeURIComponent(entry.equipmentNavigationId)}`}
+                                    className="font-semibold text-[--color-primary] hover:underline"
+                                  >
+                                    {entry.equipmentLabel}
+                                  </Link>
+                                ) : (
+                                  <div className="font-semibold text-foreground">{entry.equipmentLabel}</div>
+                                )}
                                 <div className="text-xs text-muted-foreground">SN {entry.serialNumber || 'не указан'} · INV {entry.inventoryNumber || 'не указан'}</div>
                               </td>
                               <td className="px-4 py-3">
@@ -6470,7 +6513,13 @@ export default function Rentals() {
                             Серийный номер: <span className="font-medium text-gray-900 dark:text-white">{entry.serialNumber || 'не указан'}</span>
                           </div>
                           <div className="text-sm text-gray-600 dark:text-gray-300">
+                            Инвентарный номер: <span className="font-medium text-gray-900 dark:text-white">{entry.inventoryNumber || 'не указан'}</span>
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-300">
                             Клиент: <span className="font-medium text-gray-900 dark:text-white">{entry.clientLabel}</span>
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-300">
+                            Объект: <span className="font-medium text-gray-900 dark:text-white">{entry.objectLabel}</span>
                           </div>
                           <div className="text-sm text-gray-600 dark:text-gray-300">
                             Оформил: <span className="font-medium text-gray-900 dark:text-white">{entry.uploadedBy || 'Не указано'}</span>

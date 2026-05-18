@@ -8,7 +8,12 @@ const {
 } = require('../lib/pagination');
 const { buildClientFinancialSnapshots } = require('../lib/finance-core');
 const { assignCurrentUserAsMechanicIfNeeded } = require('../lib/service-assignment');
-const { normalizeServiceTicketList, normalizeServiceTicketRecord } = require('../lib/service-dto');
+const {
+  normalizeServiceTicketForWrite,
+  normalizeServiceTicketList,
+  normalizeServiceTicketRecord,
+  serviceCreatedAtValue,
+} = require('../lib/service-dto');
 const {
   SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE,
   assertRepairItemsAdmin,
@@ -145,7 +150,7 @@ function registerCrudRoutes(deps) {
       && !['closed', 'ready'].includes(String(ticket?.status || '').toLowerCase())
     );
     if (alreadyExists) return;
-    const ticket = {
+    const ticket = normalizeServiceTicketForWrite({
       id: generateId(idPrefixes.service || 'S'),
       type: 'pdi',
       scenario: 'pdi',
@@ -166,7 +171,11 @@ function registerCrudRoutes(deps) {
       createdAt: nowIso(),
       createdBy: authorName || 'Система',
       createdByUserId: '',
-    };
+    }, {
+      actor: { userName: authorName || 'Система' },
+      isCreate: true,
+      nowIso,
+    });
     writeData('service', [...service, ticket]);
     applyServiceTicketCreationEffects?.(ticket, authorName || 'Система');
   }
@@ -918,8 +927,8 @@ function registerCrudRoutes(deps) {
     service: {
       searchFields: ['id', 'equipment', 'inventoryNumber', 'serialNumber', 'reason', 'description', 'client', 'clientName', 'assignedMechanicName', 'assignedTo', 'createdByUserName', 'contractNumber'],
       sortFields: {
-        createdAt: item => item.createdAt,
-        updatedAt: item => item.updatedAt || item.createdAt,
+        createdAt: item => serviceCreatedAtValue(item),
+        updatedAt: item => item.updatedAt || serviceCreatedAtValue(item),
         priority: item => item.priority,
         status: item => item.status,
         plannedDate: item => item.plannedDate || item.scheduledDate || item.dueDate,
@@ -1061,7 +1070,9 @@ function registerCrudRoutes(deps) {
     const dateTo = String(query.dateTo || '').trim();
     if (dateFrom || dateTo) {
       rows = rows.filter(item => {
-        const date = String(item.date || item.documentDate || item.paymentDate || item.createdAt || item.updatedAt || '').slice(0, 10);
+        const date = String(collection === 'service'
+          ? serviceCreatedAtValue(item)
+          : item.date || item.documentDate || item.paymentDate || item.createdAt || item.updatedAt || '').slice(0, 10);
         if (!date) return false;
         if (dateFrom && date < dateFrom) return false;
         if (dateTo && date > dateTo) return false;
@@ -1303,6 +1314,11 @@ function registerCrudRoutes(deps) {
             mechanics: readData('mechanics') || [],
             users: readData('users') || [],
           });
+          newItem = normalizeServiceTicketForWrite(newItem, {
+            actor: req.user,
+            isCreate: true,
+            nowIso,
+          });
         }
         if (collection === 'equipment_downtimes') {
           newItem = normalizeEquipmentDowntimeRecord(newItem, null, { user: req.user, nowIso });
@@ -1521,6 +1537,14 @@ function registerCrudRoutes(deps) {
         } else {
           let nextItem = withClientLink(collection, { ...data[idx], ...safePatch, id: data[idx].id });
           nextItem = normalizeClientDomainRecord(collection, nextItem, data[idx]);
+          if (collection === 'service') {
+            nextItem = normalizeServiceTicketForWrite(nextItem, {
+              previous: data[idx],
+              actor: req.user,
+              isCreate: false,
+              nowIso,
+            });
+          }
           if (collection === 'clients') {
             assertClientInnUnique(data, nextItem, data[idx].id);
           }

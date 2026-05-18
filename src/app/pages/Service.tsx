@@ -223,7 +223,7 @@ function serviceQueueGroupTone(group: string) {
 
 function formatTicketDate(value: ServiceTicket['createdAt']) {
   const timestamp = Date.parse(String(value || ''));
-  return Number.isFinite(timestamp) ? formatDate(new Date(timestamp).toISOString()) : '—';
+  return Number.isFinite(timestamp) ? formatDate(new Date(timestamp).toISOString()) : 'не указана';
 }
 
 function formatShortDate(value?: string) {

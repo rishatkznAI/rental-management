@@ -140,7 +140,11 @@ const { registerServiceRoutes } = require('./routes/service');
 const { registerStaffRoutes } = require('./routes/staff');
 const { registerSystemRoutes } = require('./routes/system');
 const { registerTasksCenterRoutes } = require('./routes/tasks-center');
-const { normalizeServiceTicketList } = require('./lib/service-dto');
+const {
+  backfillServiceTicketCreatedAt,
+  normalizeServiceTicketForWrite,
+  normalizeServiceTicketList,
+} = require('./lib/service-dto');
 const { normalizeEquipmentStorageRecord } = require('./lib/equipment-classification');
 const {
   DB_PATH,
@@ -1269,6 +1273,7 @@ apiRouter.use(registerRentalRoutes({
   accessControl,
   auditLog,
   normalizeRecordClientLink,
+  normalizeServiceTicketForWrite,
   botNotifications,
 }));
 
@@ -1438,6 +1443,7 @@ apiRouter.use(registerCrudRoutes({
   serviceAuditLog,
   normalizeRecordClientLink,
   normalizeClientLinks,
+  normalizeServiceTicketForWrite,
 }));
 
 registerLeasingRoutes(apiRouter, {
@@ -2500,6 +2506,7 @@ startServer({
     migrateReferenceCollections,
     migrateLegacyRepairFacts,
     backfillPaymentAllocations,
+    backfillServiceTicketCreatedAt,
     applyAdminResetFromEnv,
     registerWebhook: async () => {
       if (!SHOULD_REGISTER_MAX_WEBHOOKS) {
@@ -2524,6 +2531,7 @@ startServer({
     logGanttRentalLinkDiagnostics,
     normalizeServiceWorkRecord,
     normalizeSparePartRecord,
+    createDatabaseBackup: createSqliteBackup,
     seedsDir: path.join(__dirname, 'seeds'),
   },
   logger: console,

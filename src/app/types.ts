@@ -811,6 +811,8 @@ export interface ServiceTicket {
   workLog: ServiceWorkLogEntry[];
   parts: ServicePartUsage[];
   createdAt: string;
+  fallbackCreatedAt?: string;
+  updatedAt?: string;
   photos?: PhotoReference[];
   serviceVehicleId?: string | null;   // Служебная машина, используемая в выезде
 }

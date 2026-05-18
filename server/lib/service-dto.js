@@ -42,6 +42,25 @@ function dateValue(value) {
   return Number.isFinite(Date.parse(text)) ? text : '';
 }
 
+function serviceCreatedAtValue(item) {
+  return dateValue(
+    item?.createdAt
+      || item?.created_at
+      || item?.createdDate
+      || item?.created
+      || item?.date
+      || item?.requestedAt
+      || item?.openedAt
+      || item?.updatedAt
+      || item?.updated_at
+      || item?.modifiedAt,
+  );
+}
+
+function serviceUpdatedAtValue(item) {
+  return dateValue(item?.updatedAt || item?.updated_at || item?.modifiedAt) || serviceCreatedAtValue(item);
+}
+
 function enumKey(value) {
   return stringValue(value)
     .toLowerCase()
@@ -97,8 +116,8 @@ function normalizeServiceTicketRecord(item, index = 0) {
   const serviceKind = normalizeServiceKind(item);
   const scenario = stringValue(item.scenario || item.type || serviceKind);
   const type = stringValue(item.type || item.scenario || serviceKind);
-  const createdAt = dateValue(item.createdAt || item.created_at || item.date || item.openedAt);
-  const updatedAt = dateValue(item.updatedAt || item.updated_at || item.modifiedAt) || createdAt;
+  const createdAt = serviceCreatedAtValue(item);
+  const updatedAt = serviceUpdatedAtValue(item) || createdAt;
   const inventoryNumber = stringValue(item.inventoryNumber || item.inventory || item.equipmentInv);
   const equipmentId = stringValue(item.equipmentId || item.equipment_id);
   const equipment = stringValue(item.equipment || item.equipmentName || item.equipmentTitle)
@@ -152,7 +171,83 @@ function normalizeServiceTicketList(list) {
     .filter(Boolean);
 }
 
+function normalizeServiceTicketForWrite(item, options = {}) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  const now = typeof options.nowIso === 'function' ? options.nowIso() : new Date().toISOString();
+  const previous = options.previous && typeof options.previous === 'object' ? options.previous : null;
+  const isCreate = options.isCreate !== false && !previous;
+  const actor = options.actor || {};
+  const actorId = stringValue(actor.userId || actor.id);
+  const actorName = stringValue(actor.userName || actor.name);
+  const createdAt = previous
+    ? serviceCreatedAtValue(previous) || serviceCreatedAtValue(item) || now
+    : serviceCreatedAtValue(item) || now;
+  const createdBy = previous
+    ? (previous.createdBy || item.createdBy || actorName || undefined)
+    : (item.createdBy || actorName || undefined);
+  const createdByName = previous
+    ? (previous.createdByName || previous.createdByUserName || item.createdByName || item.createdByUserName || actorName || undefined)
+    : (item.createdByName || item.createdByUserName || actorName || undefined);
+  const createdByUserId = previous
+    ? (previous.createdByUserId || item.createdByUserId || actorId || undefined)
+    : (item.createdByUserId || actorId || undefined);
+
+  return {
+    ...item,
+    createdAt,
+    updatedAt: now,
+    ...(createdBy ? { createdBy } : {}),
+    ...(createdByName ? { createdByName, createdByUserName: item.createdByUserName || createdByName } : {}),
+    ...(createdByUserId ? { createdByUserId } : {}),
+    ...(isCreate && !item.source ? { source: 'manual' } : {}),
+  };
+}
+
+function backfillServiceTicketCreatedAt(list, options = {}) {
+  const source = Array.isArray(list) ? list : [];
+  const now = typeof options.nowIso === 'function' ? options.nowIso() : new Date().toISOString();
+  const stats = {
+    total: source.length,
+    missingCreatedAt: 0,
+    fromCreatedDate: 0,
+    fromDate: 0,
+    fromRequestedAt: 0,
+    fromUpdatedAt: 0,
+    fromNow: 0,
+    changed: 0,
+  };
+  const items = source.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    if (dateValue(item.createdAt)) return item;
+    stats.missingCreatedAt += 1;
+    const fallbackCandidates = [
+      ['createdDate', item.createdDate],
+      ['date', item.date],
+      ['requestedAt', item.requestedAt],
+      ['updatedAt', item.updatedAt || item.updated_at || item.modifiedAt],
+    ];
+    const found = fallbackCandidates.find(([, value]) => dateValue(value));
+    const createdAt = found ? dateValue(found[1]) : now;
+    if (found?.[0] === 'createdDate') stats.fromCreatedDate += 1;
+    else if (found?.[0] === 'date') stats.fromDate += 1;
+    else if (found?.[0] === 'requestedAt') stats.fromRequestedAt += 1;
+    else if (found?.[0] === 'updatedAt') stats.fromUpdatedAt += 1;
+    else stats.fromNow += 1;
+    stats.changed += 1;
+    return {
+      ...item,
+      createdAt,
+      updatedAt: dateValue(item.updatedAt || item.updated_at || item.modifiedAt) || createdAt,
+      ...(found ? {} : { createdAtRestoredApproximate: true, createdAtRestoredAt: now }),
+    };
+  });
+  return { items, stats };
+}
+
 module.exports = {
+  backfillServiceTicketCreatedAt,
+  normalizeServiceTicketForWrite,
   normalizeServiceTicketList,
   normalizeServiceTicketRecord,
+  serviceCreatedAtValue,
 };

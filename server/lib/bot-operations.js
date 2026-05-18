@@ -1,6 +1,7 @@
 const { assertRepairItemsAdmin } = require('./service-audit-log');
 const { calculateWorkAmount, normalizePayType } = require('./mechanic-workload');
 const { linkedRentalIds } = require('./gantt-rental-link-guard');
+const { normalizeServiceTicketForWrite } = require('./service-dto');
 
 function createBotOperations(deps) {
   const {
@@ -540,7 +541,7 @@ function createBotOperations(deps) {
           clientName: context.rentalLink.clientName || context.rentalLink.client || undefined,
         }
       : null;
-    const newTicket = {
+    const newTicket = normalizeServiceTicketForWrite({
       id: generateId(idPrefixes.service),
       equipmentId: equipment.id,
       equipment: `${equipment.manufacturer} ${equipment.model} (INV: ${equipment.inventoryNumber})`,
@@ -595,7 +596,7 @@ function createBotOperations(deps) {
       ],
       parts: [],
       createdAt: now,
-    };
+    }, { actor: authUser, isCreate: true, nowIso: () => now });
 
     writeServiceTickets([...readServiceTickets(), newTicket]);
     syncEquipmentStatusForService(newTicket, 'in_progress');
@@ -629,7 +630,7 @@ function createBotOperations(deps) {
           clientName: context.rentalLink.clientName || context.rentalLink.client || undefined,
         }
       : null;
-    const ticket = {
+    const ticket = normalizeServiceTicketForWrite({
       id: generateId(idPrefixes.service),
       equipmentId: equipment.id,
       equipment: `${equipment.manufacturer} ${equipment.model} (INV: ${equipment.inventoryNumber})`,
@@ -685,7 +686,7 @@ function createBotOperations(deps) {
       parts: [],
       createdAt: now,
       closedAt: now,
-    };
+    }, { actor: authUser, isCreate: true, nowIso: () => now });
 
     writeServiceTickets([...readServiceTickets(), ticket]);
 
@@ -717,7 +718,7 @@ function createBotOperations(deps) {
     const assignedName = mechanicRef?.name || '';
     const assignedMechanicId = mechanicRef?.id || undefined;
 
-    const newTicket = {
+    const newTicket = normalizeServiceTicketForWrite({
       id: generateId(idPrefixes.service),
       equipmentId: equipment.id,
       equipment: `${equipment.manufacturer} ${equipment.model} (INV: ${equipment.inventoryNumber})`,
@@ -762,7 +763,7 @@ function createBotOperations(deps) {
       parts: [],
       createdAt: now,
       photos: photoUrls,
-    };
+    }, { actor: authUser, isCreate: true, nowIso: () => now });
 
     writeServiceTickets([...readServiceTickets(), newTicket]);
     syncEquipmentStatusForService(newTicket, 'new');

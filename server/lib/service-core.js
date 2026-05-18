@@ -2,6 +2,7 @@ const { createAuditEntry } = require('./audit-history');
 const { isUniqueInventoryNumber } = require('./equipment-matching');
 const { resolveCurrentUserAsMechanic } = require('./service-assignment');
 const { isPdiServiceTicket } = require('./service-ticket-kind');
+const { normalizeServiceTicketForWrite, serviceCreatedAtValue } = require('./service-dto');
 
 function createServiceCore(deps) {
   const {
@@ -40,7 +41,17 @@ function createServiceCore(deps) {
   }
 
   function writeServiceTickets(tickets) {
-    writeData('service', tickets);
+    const previousById = new Map(readServiceTickets().map(ticket => [String(ticket?.id || ''), ticket]));
+    const normalized = (Array.isArray(tickets) ? tickets : []).map(ticket => {
+      const previous = previousById.get(String(ticket?.id || '')) || null;
+      if (previous && ticket === previous && serviceCreatedAtValue(previous)) return previous;
+      return normalizeServiceTicketForWrite(ticket, {
+        previous,
+        isCreate: !previous,
+        nowIso,
+      });
+    }).filter(Boolean);
+    writeData('service', normalized);
   }
 
   function findServiceTicketById(ticketId) {
@@ -50,7 +61,13 @@ function createServiceCore(deps) {
 
   function saveServiceTicket(updatedTicket) {
     const tickets = readServiceTickets();
-    const nextTickets = tickets.map(ticket => ticket.id === updatedTicket.id ? updatedTicket : ticket);
+    const previous = tickets.find(ticket => ticket.id === updatedTicket.id) || null;
+    const normalized = normalizeServiceTicketForWrite(updatedTicket, {
+      previous,
+      isCreate: !previous,
+      nowIso,
+    });
+    const nextTickets = tickets.map(ticket => ticket.id === updatedTicket.id ? normalized : ticket);
     writeServiceTickets(nextTickets);
   }
 

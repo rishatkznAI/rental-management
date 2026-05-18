@@ -121,8 +121,11 @@ test('MAX service ticket created by mechanic is assigned to that bot user', () =
   assert.equal(ticket.mechanicId, 'U-mechanic');
   assert.equal(ticket.assignedMechanicName, 'Петров');
   assert.equal(ticket.assignedTo, 'Петров');
+  assert.equal(ticket.createdAt, '2026-04-30T10:00:00.000Z');
+  assert.equal(ticket.updatedAt, '2026-04-30T10:00:00.000Z');
   assert.equal(state.service[0].id, ticket.id);
   assert.equal(state.service[0].assignedMechanicId, 'U-mechanic');
+  assert.equal(state.service[0].createdAt, '2026-04-30T10:00:00.000Z');
 });
 
 test('MAX service ticket keeps selected service context', () => {

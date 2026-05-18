@@ -307,6 +307,7 @@ function registerRentalRoutes(deps) {
     normalizeGanttRentalList,
     normalizeGanttRentalStatus,
     normalizeRecordClientLink,
+    normalizeServiceTicketForWrite,
     generateId,
     idPrefixes,
     accessControl,
@@ -768,7 +769,7 @@ function registerRentalRoutes(deps) {
 
     function buildReturnServiceTicket(rental, equipment, returnDate, damageDescription, author) {
       const now = new Date().toISOString();
-      return {
+      const ticket = {
         id: generateId(idPrefixes.service || 'S'),
         equipmentId: equipment.id,
         equipment: `${equipment.manufacturer || ''} ${equipment.model || ''} (INV: ${equipment.inventoryNumber || ''})`.trim(),
@@ -805,6 +806,13 @@ function registerRentalRoutes(deps) {
         objectId: rental?.objectId,
         contractId: rental?.contractId,
       };
+      return typeof normalizeServiceTicketForWrite === 'function'
+        ? normalizeServiceTicketForWrite(ticket, {
+            actor: { userName: author },
+            isCreate: true,
+            nowIso: () => now,
+          })
+        : ticket;
     }
 
     function buildClassicRentalFromGantt(ganttRental, rawMeta, author, existingRentals) {

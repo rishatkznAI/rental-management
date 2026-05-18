@@ -237,7 +237,7 @@ function normalizeWorkPerformed(work: Partial<ServiceWorkPerformed> | undefined)
 
 function formatServiceDate(value: string | null | undefined) {
   const timestamp = Date.parse(String(value || ''));
-  return Number.isFinite(timestamp) ? formatDate(new Date(timestamp).toISOString()) : '—';
+  return Number.isFinite(timestamp) ? formatDate(new Date(timestamp).toISOString()) : 'не указана';
 }
 
 function repairMutationErrorMessage(error: unknown) {

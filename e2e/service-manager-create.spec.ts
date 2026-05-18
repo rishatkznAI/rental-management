@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test';
-import { loginAsRentalManager, navigateInApp } from './helpers/auth';
+import { loginAsRentalManager } from './helpers/auth';
 import { findServiceTicketByReason, getAnyRentableEquipment, withAdminApi } from './helpers/api';
+
+async function navigateWithoutReload(page: import('@playwright/test').Page, route: string) {
+  const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
+  await page.evaluate((nextRoute) => {
+    window.location.hash = nextRoute;
+  }, normalizedRoute);
+}
 
 async function selectEquipment(page: import('@playwright/test').Page, query: string) {
   await page.getByText('Введите модель, INV или серийный номер…').click();
@@ -18,7 +25,7 @@ test('rental manager can create a service ticket from the service form', async (
   const description = `E2E manager description ${suffix}`;
 
   await loginAsRentalManager(page);
-  await navigateInApp(page, '/service/new');
+  await navigateWithoutReload(page, '/service/new');
 
   await expect(page.getByRole('heading', { name: 'Новая заявка в сервис' })).toBeVisible();
   await selectEquipment(page, equipment.serialNumber || equipment.inventoryNumber);
@@ -28,8 +35,16 @@ test('rental manager can create a service ticket from the service form', async (
   await page.getByRole('button', { name: 'Создать заявку' }).click();
 
   await expect(page).toHaveURL(/#\/service\/.+/);
-  await expect(page.getByText(reason)).toBeVisible();
+  await expect(page.getByText(reason).first()).toBeVisible();
+  await expect(page.getByText(/Создана:\s*(?!не указана)/).first()).toBeVisible();
 
   const createdTicket = await withAdminApi((api) => findServiceTicketByReason(api, reason));
   expect(createdTicket.id).toBeTruthy();
+  expect(createdTicket.createdAt).toBeTruthy();
+
+  await navigateWithoutReload(page, '/service');
+  await page.getByPlaceholder('№ заявки, техника, клиент, проблема...').fill(reason);
+  const ticketRow = page.getByRole('button', { name: new RegExp(`Открыть заявку ${createdTicket.id}`) });
+  await expect(ticketRow).toBeVisible();
+  await expect(ticketRow.getByText('не указана')).toHaveCount(0);
 });

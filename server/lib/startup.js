@@ -124,6 +124,7 @@ async function startServer({ app, port, deps, logger = console }) {
     migrateReferenceCollections,
     migrateLegacyRepairFacts,
     backfillPaymentAllocations,
+    backfillServiceTicketCreatedAt,
     normalizeClientLinks,
     backfillGanttRentalLinks,
     logGanttRentalLinkDiagnostics,
@@ -144,6 +145,28 @@ async function startServer({ app, port, deps, logger = console }) {
     ensureLegacyDefaultUsers();
     migrateReferenceCollections();
     migrateLegacyRepairFacts();
+    if (typeof backfillServiceTicketCreatedAt === 'function') {
+      try {
+        const currentService = deps.readData('service') || [];
+        const result = backfillServiceTicketCreatedAt(currentService, {
+          nowIso: () => new Date().toISOString(),
+        });
+        if (result?.stats?.missingCreatedAt > 0) {
+          logger.warn(`[service] createdAt backfill dry-run: missing=${result.stats.missingCreatedAt}, createdDate=${result.stats.fromCreatedDate}, date=${result.stats.fromDate}, requestedAt=${result.stats.fromRequestedAt}, updatedAt=${result.stats.fromUpdatedAt}, approximate=${result.stats.fromNow}`);
+        }
+        if (process.env.SERVICE_CREATED_AT_BACKFILL === 'apply' && result?.stats?.changed > 0) {
+          if (typeof deps.createDatabaseBackup === 'function') {
+            const backupPath = path.join(path.dirname(deps.dbPath), 'backups', `pre-service-created-at-backfill-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
+            await deps.createDatabaseBackup(backupPath);
+            logger.log(`[service] createdAt backfill backup created: ${backupPath}`);
+          }
+          deps.writeData('service', result.items);
+          logger.log(`[service] createdAt backfill applied: changed=${result.stats.changed}`);
+        }
+      } catch (error) {
+        logger.warn(`[service] createdAt backfill skipped: ${error?.message || String(error)}`);
+      }
+    }
     if (typeof backfillPaymentAllocations === 'function') {
       try {
         const result = backfillPaymentAllocations({

@@ -61,6 +61,21 @@ function dateValue(value: unknown): string {
   return Number.isFinite(Date.parse(text)) ? text : '';
 }
 
+export function getServiceCreatedAtFallback(item: Record<string, unknown> | null | undefined): string {
+  return dateValue(
+    item?.createdAt
+      ?? item?.created_at
+      ?? item?.createdDate
+      ?? item?.created
+      ?? item?.date
+      ?? item?.requestedAt
+      ?? item?.openedAt
+      ?? item?.updatedAt
+      ?? item?.updated_at
+      ?? item?.modifiedAt,
+  );
+}
+
 function enumKey(value: unknown): string {
   return stringValue(value)
     .toLowerCase()
@@ -105,7 +120,7 @@ export function normalizeServiceTicketDto(value: unknown, index = 0): ServiceTic
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
   const id = stringValue(item.id) || `legacy-service-${index + 1}`;
-  const createdAt = dateValue(item.createdAt ?? item.created_at ?? item.date ?? item.openedAt);
+  const createdAt = getServiceCreatedAtFallback(item);
   const updatedAt = dateValue(item.updatedAt ?? item.updated_at ?? item.modifiedAt) || createdAt;
   const inventoryNumber = stringValue(item.inventoryNumber ?? item.inventory ?? item.equipmentInv);
   const equipmentId = stringValue(item.equipmentId ?? item.equipment_id);
@@ -179,6 +194,7 @@ export function normalizeServiceTicketDto(value: unknown, index = 0): ServiceTic
     workLog: arrayValue(item.workLog) as ServiceTicket['workLog'],
     parts: arrayValue(item.parts) as ServiceTicket['parts'],
     createdAt,
+    fallbackCreatedAt: createdAt,
     updatedAt,
     photos: arrayValue<PhotoReference>(item.photos),
     serviceVehicleId: stringValue(item.serviceVehicleId) || null,

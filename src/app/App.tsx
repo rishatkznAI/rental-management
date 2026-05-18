@@ -3,9 +3,10 @@ import { RouterProvider } from 'react-router-dom';
 import { router } from './routes';
 import { Toaster } from 'sonner';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { AppLoadingState } from './components/ui/AppLoadingState';
+import { AppDisabledScreen } from './components/ui/AppDisabledScreen';
 import { BuildDebugBadge } from './components/ui/BuildDebugBadge';
 import { DemoModeBadge } from './components/ui/DemoModeBadge';
 import { animationClasses } from './lib/animations';
@@ -22,33 +23,45 @@ const queryClient = new QueryClient({
   },
 });
 
+function AppGate() {
+  const { appDisabled } = useAuth();
+  if (appDisabled) {
+    return <AppDisabledScreen message={appDisabled.message} />;
+  }
+  return (
+    <>
+      <RouterProvider
+        router={router}
+        fallbackElement={
+          <AppLoadingState
+            title="Открываем раздел"
+            description="Загружаем интерфейс и данные."
+          />
+        }
+      />
+      <DemoModeBadge />
+      <BuildDebugBadge />
+      <Toaster
+        position="top-right"
+        richColors
+        closeButton
+        toastOptions={{
+          classNames: {
+            toast: animationClasses.toast,
+          },
+        }}
+      />
+    </>
+  );
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <ThemeProvider>
-            <RouterProvider
-              router={router}
-              fallbackElement={
-                <AppLoadingState
-                  title="Открываем раздел"
-                  description="Загружаем интерфейс и данные."
-                />
-              }
-            />
-            <DemoModeBadge />
-            <BuildDebugBadge />
-            <Toaster
-              position="top-right"
-              richColors
-              closeButton
-              toastOptions={{
-                classNames: {
-                  toast: animationClasses.toast,
-                },
-              }}
-            />
+            <AppGate />
           </ThemeProvider>
         </AuthProvider>
       </QueryClientProvider>

@@ -14,6 +14,8 @@ function registerAuthRoutes(app, deps) {
     deleteSessionsForUserIds,
     auditLog,
     getRoleAccessSummary,
+    getAppDisabledConfig,
+    sendAppDisabled,
     nowIso = () => new Date().toISOString(),
   } = deps;
 
@@ -92,6 +94,12 @@ function registerAuthRoutes(app, deps) {
 
   app.post('/api/auth/login', async (req, res) => {
     try {
+      const appDisabled = typeof getAppDisabledConfig === 'function' ? getAppDisabledConfig() : { disabled: false };
+      if (appDisabled.disabled) {
+        if (typeof sendAppDisabled === 'function') return sendAppDisabled(res, appDisabled);
+        return res.status(503).json({ ok: false, code: 'APP_DISABLED', error: appDisabled.message || 'Система временно отключена.' });
+      }
+
       const { email, login, password } = req.body || {};
       const loginValue = login ?? email;
       if (!loginValue || !password) {

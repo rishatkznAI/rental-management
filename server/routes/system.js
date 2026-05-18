@@ -415,6 +415,7 @@ function registerSystemRoutes(app, deps) {
     analyzeGanttRentalLinks,
     backfillGanttRentalLinks,
     getBuildInfo,
+    getAppDisabledConfig,
     getRoleAccessSummary,
     jsonCollections = [],
     createDatabaseBackup,
@@ -616,12 +617,21 @@ function registerSystemRoutes(app, deps) {
     res.json({ ok: true, uptime: Math.round(process.uptime()), build: buildInfo() });
   });
 
+  app.get('/health/ready', (req, res) => {
+    res.json({ ok: true, uptime: Math.round(process.uptime()), build: buildInfo() });
+  });
+
   app.get('/', (req, res) => {
     res.json({ ok: true, service: 'rental-management-api', uptime: Math.round(process.uptime()), build: buildInfo() });
   });
 
   app.get('/api/version', (_req, res) => {
-    res.json({ ok: true, build: buildInfo() });
+    const appDisabled = typeof getAppDisabledConfig === 'function' ? getAppDisabledConfig() : { disabled: false };
+    res.json({
+      ok: true,
+      build: buildInfo(),
+      app: appDisabled.disabled ? { disabled: true, message: appDisabled.message } : { disabled: false },
+    });
   });
 
   app.get('/api/public-settings', (_req, res) => {

@@ -99,6 +99,12 @@ const { getBuildInfo } = require('./lib/build-info');
 const { createGprsGateway } = require('./lib/gprs-gateway');
 const { createWialonIpsGateway } = require('./lib/gsm/wialon-ips-gateway');
 const { createMaxApiClient } = require('./lib/max-api');
+const {
+  createAppDisabledMiddleware,
+  getAppDisabledConfig,
+  getBotDisabledConfig,
+  sendAppDisabled,
+} = require('./lib/feature-flags');
 const { getDemoPublicInfo, isDemoMode } = require('./lib/demo-mode');
 const { seedDemoData } = require('./scripts/seed-demo-data');
 const { createServiceCore } = require('./lib/service-core');
@@ -317,6 +323,8 @@ const MAX_WEBHOOK_SECRET = DEMO_MODE ? '' : String(process.env.MAX_WEBHOOK_SECRE
 const MAIN_BOT_WEBHOOK_PATH = '/bot/webhook';
 const MANAGER_BOT_WEBHOOK_PATH = '/bot/webhook/manager';
 const DELIVERY_BOT_WEBHOOK_PATH = '/bot/webhook/delivery';
+const appDisabledConfig = getAppDisabledConfig();
+const botDisabledConfig = getBotDisabledConfig();
 
 function normalizeBotToken(value) {
   return String(value || '').trim();
@@ -389,7 +397,7 @@ function getSnapshot()    { return readData('snapshot') || {}; }
 function saveSnapshot(s)  { writeData('snapshot', s); }
 
 const {
-  sendMessage,
+  sendMessage: maxSendMessage,
   deleteMessage,
   answerCallback,
   registerWebhook: registerMainWebhook,
@@ -403,6 +411,14 @@ const {
   webhookSecret: MAX_WEBHOOK_SECRET,
   logger: console,
 });
+
+async function sendMessage(target, text, options = {}) {
+  if (botDisabledConfig.disabled) {
+    console.log('[BOT] sendMessage skipped: BOT_DISABLED=true');
+    return { ok: true, disabled: true };
+  }
+  return maxSendMessage(target, text, options);
+}
 
 const botNotifications = createBotNotificationService({
   readData,
@@ -588,6 +604,9 @@ const READ_PERMISSIONS = {
 // ── Middleware ─────────────────────────────────────────────────────────────────
 
 function requireAuth(req, res, next) {
+  if (appDisabledConfig.disabled) {
+    return sendAppDisabled(res, appDisabledConfig);
+  }
   const auth = req.headers['authorization'];
   if (!auth || !auth.startsWith('Bearer ')) {
     return res.status(401).json({ ok: false, error: 'Unauthorized' });
@@ -1248,8 +1267,14 @@ registerAuthRoutes(app, {
   deleteSessionsForUserIds,
   auditLog,
   getRoleAccessSummary: roleAccessSummary,
+  getAppDisabledConfig: () => appDisabledConfig,
+  sendAppDisabled,
   nowIso,
 });
+
+apiRouter.use(createAppDisabledMiddleware({
+  getConfig: () => appDisabledConfig,
+}));
 
 apiRouter.get('/access-diagnostics', requireAuth, (req, res) => {
   return res.json(buildAccessDiagnostics(req));
@@ -1638,6 +1663,7 @@ function getMoscowDateParts(date = new Date()) {
 }
 
 async function sendRentalManagerMorningDigests() {
+  if (botDisabledConfig.disabled) return;
   const { dateKey, hour, minute } = getMoscowDateParts();
   if (hour !== 8 || minute >= 15) return;
 
@@ -1678,6 +1704,9 @@ if (isBotNotificationSchedulerEnabled(process.env)) {
 }
 
 async function runBotNotificationSchedulerTick(reason = 'interval') {
+  if (botDisabledConfig.disabled) {
+    return { ok: true, disabled: true, events: 0 };
+  }
   const result = await botNotifications.runScheduledNotifications();
   if (result?.events) {
     console.log(`[BOT] notification scheduler ${reason}: events=${result.events}`);
@@ -1690,6 +1719,23 @@ startBotNotificationScheduler({
 });
 
 const BOT_ACTIVITY_LIMIT = 2000;
+
+function recordBotDisabledActivity({ webhookPath = '', updateTypes = [], updatesCount = 0 } = {}) {
+  const activity = getBotActivity();
+  activity.unshift({
+    id: generateId('botact'),
+    botId: 'max',
+    eventType: 'bot_disabled_received',
+    action: 'webhook_acknowledged_disabled',
+    details: {
+      webhookPath,
+      updatesCount,
+      updateTypes: Array.isArray(updateTypes) ? updateTypes.slice(0, 20) : [],
+    },
+    createdAt: nowIso(),
+  });
+  saveBotActivity(activity.slice(0, BOT_ACTIVITY_LIMIT));
+}
 
 function trimBotAuditText(value, maxLength = 160) {
   const normalized = String(value || '').replace(/\s+/g, ' ').trim();
@@ -1946,6 +1992,7 @@ async function requestMaxUpdates(endpoint) {
 }
 
 async function pollMaxBotUpdatesOnce() {
+  if (botDisabledConfig.disabled) return;
   if (!MAIN_BOT_TOKEN || maxPollingInFlight) return;
   maxPollingInFlight = true;
   try {
@@ -1998,6 +2045,10 @@ async function pollMaxBotUpdatesOnce() {
 }
 
 function startMaxBotPolling() {
+  if (botDisabledConfig.disabled) {
+    console.log('[BOT] /bot/polling пропущен: BOT_DISABLED=true');
+    return null;
+  }
   if (!MAX_POLLING_ENABLED) {
     console.log(WEBHOOK_URL
       ? '[BOT] /bot/polling выключен: используется webhook MAX'
@@ -2447,6 +2498,8 @@ registerBotRoutes(app, {
   logger: console,
   webhookPath: MAIN_BOT_WEBHOOK_PATH,
   webhookSecret: MAX_WEBHOOK_SECRET,
+  getBotDisabledConfig: () => botDisabledConfig,
+  recordBotDisabledActivity,
 });
 
 registerBotRoutes(app, {
@@ -2457,6 +2510,8 @@ registerBotRoutes(app, {
   logger: console,
   webhookPath: MANAGER_BOT_WEBHOOK_PATH,
   webhookSecret: MAX_WEBHOOK_SECRET,
+  getBotDisabledConfig: () => botDisabledConfig,
+  recordBotDisabledActivity,
 });
 
 registerBotRoutes(app, {
@@ -2467,6 +2522,8 @@ registerBotRoutes(app, {
   logger: console,
   webhookPath: DELIVERY_BOT_WEBHOOK_PATH,
   webhookSecret: MAX_WEBHOOK_SECRET,
+  getBotDisabledConfig: () => botDisabledConfig,
+  recordBotDisabledActivity,
 });
 
 registerSystemRoutes(app, {
@@ -2487,6 +2544,7 @@ registerSystemRoutes(app, {
   analyzeGanttRentalLinks,
   backfillGanttRentalLinks,
   getBuildInfo,
+  getAppDisabledConfig: () => appDisabledConfig,
   getRoleAccessSummary: roleAccessSummary,
   jsonCollections: JSON_COLLECTIONS,
   createDatabaseBackup: createSqliteBackup,

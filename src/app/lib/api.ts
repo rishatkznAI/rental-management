@@ -81,6 +81,11 @@ export class ApiError extends Error {
   }
 }
 
+export type AppDisabledDetail = {
+  disabled: true;
+  message: string;
+};
+
 export type PaginationMeta = {
   page: number;
   pageSize: number;
@@ -142,6 +147,22 @@ async function parseErrorResponse(res: Response) {
     // ignore parse error
   }
   return { message, details, body };
+}
+
+function maybeDispatchAppDisabled(status: number, body: unknown, fallbackMessage: string): void {
+  if (status !== 503 && status !== 423) return;
+  const json = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+  if (json.code !== 'APP_DISABLED') return;
+  const message = typeof json.message === 'string'
+    ? json.message
+    : typeof json.error === 'string'
+      ? json.error
+      : fallbackMessage;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<AppDisabledDetail>('app:disabled', {
+      detail: { disabled: true, message },
+    }));
+  }
 }
 
 function dispatchUnauthorizedForToken(tokenUsed: string | null): void {
@@ -274,6 +295,7 @@ async function request<T>(
 
   if (!res.ok) {
     const { message, details, body } = await parseErrorResponse(res);
+    maybeDispatchAppDisabled(res.status, body, message);
     throw new ApiError(message, res.status, details, body);
   }
 

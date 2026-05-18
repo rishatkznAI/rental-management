@@ -24,6 +24,7 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
+  appDisabled: { disabled: true; message: string } | null;
   login: (login: string, password: string) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
@@ -116,6 +117,7 @@ function sessionUserToAuthUser(session: {
 // ── Провайдер ─────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [appDisabled, setAppDisabled] = useState<{ disabled: true; message: string } | null>(null);
   const [state, setState] = useState<AuthState>(() => {
     const storedToken = getToken();
     const storedUser = storedToken ? readStoredUser() : null;
@@ -155,6 +157,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     writeStoredUser(user);
     setState({ user, isAuthenticated: true, isLoading: false });
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+
+    api.get<{ ok: boolean; app?: { disabled?: boolean; message?: string } }>('/api/version')
+      .then((result) => {
+        if (disposed) return;
+        if (result.app?.disabled) {
+          setAppDisabled({
+            disabled: true,
+            message: result.app.message || 'Система временно отключена. Обратитесь к администратору.',
+          });
+        }
+      })
+      .catch(() => {
+        // Version is diagnostic only; login/session flows still surface real errors.
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleAppDisabled(event: Event) {
+      const detail = (event as CustomEvent<{ disabled?: boolean; message?: string }>).detail;
+      setAppDisabled({
+        disabled: true,
+        message: detail?.message || 'Система временно отключена. Обратитесь к администратору.',
+      });
+      setState(current => ({ ...current, isLoading: false }));
+    }
+    window.addEventListener('app:disabled', handleAppDisabled);
+    return () => window.removeEventListener('app:disabled', handleAppDisabled);
   }, []);
 
   useEffect(() => {
@@ -250,7 +287,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!state.isAuthenticated) return undefined;
+    if (!state.isAuthenticated || appDisabled) return undefined;
 
     let disposed = false;
 
@@ -269,7 +306,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('focus', verifySession);
       document.removeEventListener('visibilitychange', verifySession);
     };
-  }, [refreshUser, state.isAuthenticated]);
+  }, [appDisabled, refreshUser, state.isAuthenticated]);
 
   const login = useCallback(async (loginValue: string, password: string) => {
     traceAuth('login submit', {
@@ -326,7 +363,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ ...state, login, logout, refreshUser }}>
+    <AuthContext.Provider value={{ ...state, appDisabled, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

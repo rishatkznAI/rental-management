@@ -176,6 +176,7 @@ function deliveryStatusLabel(status) {
 
 function isBotNotificationSchedulerEnabled(env = process.env) {
   return env?.NODE_ENV !== 'test' &&
+    String(env?.BOT_DISABLED || '').trim().toLowerCase() !== 'true' &&
     !SCHEDULER_DISABLED_VALUES.has(String(env?.BOT_NOTIFICATION_SCHEDULER || '1').toLowerCase());
 }
 

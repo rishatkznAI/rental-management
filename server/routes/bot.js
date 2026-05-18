@@ -751,6 +751,8 @@ function registerBotRoutes(app, deps) {
     logger = console,
     webhookPath = '/bot/webhook',
     webhookSecret = '',
+    getBotDisabledConfig,
+    recordBotDisabledActivity,
   } = deps;
   const normalizedWebhookPath = normalizeWebhookPath(webhookPath);
   const processBotUpdate = createBotUpdateProcessor({
@@ -770,6 +772,24 @@ function registerBotRoutes(app, deps) {
     if (!verification.ok) {
       logger.warn(`[BOT] ${normalizedWebhookPath} rejected webhook: ${verification.error}`);
       return res.status(verification.status || 401).json({ ok: false, error: verification.error });
+    }
+
+    const botDisabled = typeof getBotDisabledConfig === 'function' ? getBotDisabledConfig() : { disabled: false };
+    if (botDisabled.disabled) {
+      try {
+        const updates = Array.isArray(req.body?.updates) ? req.body.updates : [req.body];
+        if (typeof recordBotDisabledActivity === 'function') {
+          recordBotDisabledActivity({
+            webhookPath: normalizedWebhookPath,
+            updateTypes: updates.map(update => getUpdateType(update) || 'unknown'),
+            updatesCount: updates.length,
+          });
+        }
+      } catch (error) {
+        logger.warn(`[BOT] ${normalizedWebhookPath} disabled activity log skipped: ${error?.message || String(error)}`);
+      }
+      logger.log(`[BOT] ${normalizedWebhookPath} disabled: update acknowledged without processing`);
+      return res.status(200).json({ ok: true, disabled: true, message: botDisabled.message });
     }
 
     try {

@@ -31,6 +31,7 @@ Thumbs.db
 *.tmp
 *.temp
 *.zip
+exports/
 backups/*.zip
 diagnostics/*.json
 

@@ -1,6 +1,6 @@
 import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import { normalizeEquipment, normalizeEquipmentList, normalizeEquipmentPatch } from '../lib/equipmentClassification';
-import type { Equipment, RepairRecord, ShippingPhoto } from '../types';
+import type { Equipment, FleetReadinessResponse, RepairRecord, ShippingPhoto } from '../types';
 
 export const equipmentService = {
   getAll: (): Promise<Equipment[]> =>
@@ -12,6 +12,9 @@ export const equipmentService = {
 
   getById: (id: string): Promise<Equipment | undefined> =>
     api.get<Equipment>(`/api/equipment/${id}`).then(normalizeEquipment).catch(() => undefined),
+
+  getReadiness: (): Promise<FleetReadinessResponse> =>
+    api.get<FleetReadinessResponse>('/api/equipment/readiness'),
 
   // RepairRecords не реализованы в текущей архитектуре
   getRepairRecords: async (_equipmentId: string): Promise<RepairRecord[]> => [],

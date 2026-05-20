@@ -188,6 +188,76 @@ export interface Equipment {
   history?: AuditEntry[];
 }
 
+export type FleetReadinessStatus =
+  | 'ready'
+  | 'needs_check'
+  | 'in_service'
+  | 'rented'
+  | 'delivery_blocked'
+  | 'document_blocked'
+  | 'gsm_attention'
+  | 'unknown';
+
+export type FleetReadinessSeverity = 'good' | 'warning' | 'danger' | 'neutral';
+export type FleetReadinessDailyRateSource = 'latest_rental' | 'average_rental' | 'equipment_price' | 'category_average' | 'unavailable';
+export type FleetReadinessLossSeverity = 'none' | 'low' | 'medium' | 'high' | 'critical';
+export type FleetReadinessResponsibleArea = 'service' | 'rental_manager' | 'logistics' | 'office' | 'admin' | 'unknown';
+
+export interface FleetReadinessLossSummary {
+  totalEstimatedDailyLoss: number;
+  totalEstimatedLoss: number;
+  blockedItemsWithRate: number;
+  blockedItemsWithoutRate: number;
+  topLossStatus: FleetReadinessStatus | null;
+  topResponsibleArea: FleetReadinessResponsibleArea | null;
+}
+
+export interface FleetReadinessSummary {
+  total: number;
+  ready: number;
+  needsCheck: number;
+  inService: number;
+  rented: number;
+  deliveryBlocked: number;
+  documentBlocked: number;
+  gsmAttention: number;
+  unknown: number;
+  loss: FleetReadinessLossSummary;
+}
+
+export interface FleetReadinessItem {
+  equipmentId: string;
+  model: string;
+  inventoryNumber: string;
+  serialNumber: string;
+  status: string;
+  readinessStatus: FleetReadinessStatus;
+  readinessLabel: string;
+  readinessSeverity: FleetReadinessSeverity;
+  blockers: string[];
+  recommendedAction: string;
+  estimatedDailyRate: number | null;
+  estimatedDailyRateSource: FleetReadinessDailyRateSource;
+  blockedSince: string | null;
+  blockedDays: number | null;
+  estimatedLoss: number | null;
+  lossSeverity: FleetReadinessLossSeverity;
+  responsibleArea: FleetReadinessResponsibleArea;
+  financialRecommendation: string;
+  links: {
+    equipment?: string;
+    serviceTicket?: string;
+    rental?: string;
+    delivery?: string;
+  };
+}
+
+export interface FleetReadinessResponse {
+  ok: true;
+  summary: FleetReadinessSummary;
+  items: FleetReadinessItem[];
+}
+
 export type GsmPacketDirection = 'inbound' | 'outbound';
 export type GsmPacketParseStatus = 'pending' | 'parsed' | 'failed';
 export type GsmCommandStatus = 'queued' | 'sent' | 'acknowledged' | 'failed';

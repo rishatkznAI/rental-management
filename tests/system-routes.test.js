@@ -330,6 +330,43 @@ test('system control center interprets conservation flags and unknown DB isolati
   assert.ok(status.checks.some(item => item.id === 'production_conserved' && item.status === 'ok'));
 });
 
+test('system control center classifies /data DB path as Railway staging volume when mounted', () => {
+  const status = buildSystemControlCenterStatus({
+    dbPath: '/data/app.sqlite',
+    buildInfo: { commit: 'abc123', buildTime: '2026-05-19T00:00:00.000Z' },
+    getAppDisabledConfig: () => ({ disabled: false }),
+    env: {
+      NODE_ENV: 'production',
+      RAILWAY_ENVIRONMENT_NAME: 'staging',
+      RAILWAY_SERVICE_NAME: 'rental-management',
+      RAILWAY_VOLUME_MOUNT_PATH: '/data',
+      BOT_DISABLED: 'true',
+      GSM_DISABLED: 'true',
+      DB_PATH: '/data/app.sqlite',
+    },
+    inspectStorage: () => ({
+      mountPath: '/data',
+      available: true,
+      signalPresent: true,
+      device: '/dev/zd1232',
+      statDevice: 1232,
+      totalKb: 899836,
+      usedKb: 447072,
+      freeKb: 452764,
+      capacity: '50%',
+      error: '',
+    }),
+  });
+
+  assert.equal(status.environment.isStagingLike, true);
+  assert.equal(status.database.dbPathSafeLabel, 'data/app.sqlite');
+  assert.equal(status.database.dbPathKind, 'staging-volume');
+  assert.equal(status.storage.mountPath, '/data');
+  assert.equal(status.storage.risk, 'ok');
+  assert.ok(status.storage.volumeSignals.includes('RAILWAY_VOLUME_SIGNAL_SET'));
+  assert.ok(status.checks.some(item => item.id === 'db_isolation' && item.status === 'ok'));
+});
+
 test('system control center treats GSM_DISABLED=true as write blocking', () => {
   const status = buildSystemControlCenterStatus({
     dbPath: ':memory:',

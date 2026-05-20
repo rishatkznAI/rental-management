@@ -178,8 +178,10 @@ function runtimeEnvironment(env = process.env) {
     nodeEnv,
   );
   const haystack = `${nodeEnv} ${appEnvironment} ${env.RAILWAY_SERVICE_NAME || ''}`.toLowerCase();
-  const isProductionLike = /\bprod(uction)?\b/.test(haystack) || nodeEnv === 'production';
-  const isStagingLike = /\bstag(e|ing)?\b/.test(haystack) || /\btest\b/.test(haystack);
+  const appEnvironmentLower = appEnvironment.toLowerCase();
+  const explicitStagingEnvironment = /\bstag(e|ing)?\b/.test(appEnvironmentLower) || /\btest\b/.test(appEnvironmentLower);
+  const isProductionLike = !explicitStagingEnvironment && (/\bprod(uction)?\b/.test(haystack) || nodeEnv === 'production');
+  const isStagingLike = explicitStagingEnvironment || /\bstag(e|ing)?\b/.test(haystack) || /\btest\b/.test(haystack);
   return {
     nodeEnv: nodeEnv || 'unknown',
     appEnvironment: appEnvironment || 'unknown',
@@ -201,10 +203,10 @@ function safeDbPathLabel(dbPath) {
 function classifyDbPath(dbPath, envInfo, env = process.env) {
   const text = String(dbPath || '').trim();
   const lower = text.toLowerCase();
-  const volumeMount = nonEmptyString(env.RAILWAY_VOLUME_MOUNT_PATH, env.RAILWAY_VOLUME_PATH);
+  const volumeMount = nonEmptyString(env.RAILWAY_VOLUME_MOUNT_PATH, env.RAILWAY_VOLUME_PATH, '/data');
   const volumeLower = volumeMount.toLowerCase();
 
-  if (!text || text === ':memory:' || lower.includes('/server/data/') || lower.includes('/data/app.sqlite')) {
+  if (!text || text === ':memory:' || lower.includes('/server/data/')) {
     return 'local';
   }
   if (volumeLower && lower.startsWith(volumeLower) && envInfo.isProductionLike) {

@@ -9,7 +9,10 @@ const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const express = serverRequire('express');
 
-const { registerSystemRoutes } = require('../server/routes/system.js');
+const {
+  buildSystemControlCenterStatus,
+  registerSystemRoutes,
+} = require('../server/routes/system.js');
 
 function createSystemApp(overrides = {}) {
   const app = express();
@@ -44,7 +47,8 @@ function createSystemApp(overrides = {}) {
     fetchImpl: overrides.fetchImpl || fetch,
     assertPublicHttpUrlImpl: overrides.assertPublicHttpUrlImpl || (async (url) => new URL(url)),
     auditLog: overrides.auditLog || ((_req, entry) => auditEntries.push(entry)),
-    getBuildInfo: () => ({ version: 'test' }),
+    getBuildInfo: overrides.getBuildInfo || (() => ({ version: 'test' })),
+    getAppDisabledConfig: overrides.getAppDisabledConfig,
     getRoleAccessSummary: () => ({
       readableCollections: ['equipment', 'rentals'],
       writableCollections: ['equipment'],
@@ -119,6 +123,20 @@ async function requestRaw(baseUrl, path, method) {
   const response = await fetch(`${baseUrl}${path}`, { method });
   const text = await response.text();
   return { status: response.status, text };
+}
+
+function collectObjectKeys(value, keys = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectObjectKeys(item, keys);
+    return keys;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      keys.push(key);
+      collectObjectKeys(child, keys);
+    }
+  }
+  return keys;
 }
 
 test('/api/bot-test requires explicit chatId or env chat id', async () => {
@@ -206,6 +224,154 @@ test('/api/admin/production-diagnostics is admin-only', async () => {
     const response = await getJson(baseUrl, '/api/admin/production-diagnostics');
     assert.equal(response.status, 403);
   });
+});
+
+test('/api/admin/system-control-center is admin-only', async () => {
+  const { app } = createSystemApp({
+    requireAdmin: (_req, res) => res.status(403).json({ ok: false, error: 'Forbidden' }),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/system-control-center');
+    assert.equal(response.status, 403);
+  });
+});
+
+test('/api/admin/system-control-center requires authentication', async () => {
+  const { app } = createSystemApp({
+    requireAuth: (_req, res) => res.status(401).json({ ok: false, error: 'Unauthorized' }),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/system-control-center');
+    assert.equal(response.status, 401);
+  });
+});
+
+test('/api/admin/system-control-center returns safe admin status without env secrets', async () => {
+  const previousSecret = process.env.RAILWAY_SECRET_TOKEN;
+  const previousPassword = process.env.DATABASE_PASSWORD;
+  process.env.RAILWAY_SECRET_TOKEN = 'super-secret-token';
+  process.env.DATABASE_PASSWORD = 'do-not-return';
+  const { app } = createSystemApp({
+    dbPath: '/var/lib/railway/volume/app.sqlite',
+    getBuildInfo: () => ({ commit: 'abc123def456', buildTime: '2026-05-19T00:00:00.000Z' }),
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await getJson(baseUrl, '/api/admin/system-control-center');
+      assert.equal(response.status, 200);
+      assert.equal(response.body.ok, true);
+      assert.equal(response.body.conservation.appDisabled, false);
+      assert.equal(response.body.version.backendCommit, 'abc123def456');
+      assert.equal(response.body.database.usesSqlite, true);
+      assert.equal(response.body.database.dbPathSafeLabel, 'volume/app.sqlite');
+
+      const serialized = JSON.stringify(response.body);
+      assert.doesNotMatch(serialized, /super-secret-token|do-not-return/i);
+      assert.doesNotMatch(serialized, /RAILWAY_SECRET_TOKEN|DATABASE_PASSWORD/i);
+      const keys = collectObjectKeys(response.body);
+      assert.deepEqual(
+        keys.filter(key => /^(TOKEN|PASSWORD|SECRET|KEY|DATABASE_URL)$/i.test(key)),
+        [],
+      );
+    });
+  } finally {
+    if (previousSecret === undefined) delete process.env.RAILWAY_SECRET_TOKEN;
+    else process.env.RAILWAY_SECRET_TOKEN = previousSecret;
+    if (previousPassword === undefined) delete process.env.DATABASE_PASSWORD;
+    else process.env.DATABASE_PASSWORD = previousPassword;
+  }
+});
+
+test('system control center interprets conservation flags and unknown DB isolation honestly', () => {
+  const status = buildSystemControlCenterStatus({
+    dbPath: '/app/storage/app.sqlite',
+    buildInfo: { commit: 'abc123', buildTime: '2026-05-19T00:00:00.000Z' },
+    getAppDisabledConfig: () => ({ disabled: true, message: 'paused' }),
+    env: {
+      NODE_ENV: 'production',
+      RAILWAY_ENVIRONMENT_NAME: 'production',
+      APP_DISABLED: 'true',
+      BOT_DISABLED: 'true',
+      GSM_ENABLED: 'false',
+      DB_PATH: '/app/storage/app.sqlite',
+    },
+    inspectStorage: () => ({
+      mountPath: '/data',
+      available: true,
+      signalPresent: true,
+      device: '/dev/zd1232',
+      statDevice: 1232,
+      totalKb: 899836,
+      usedKb: 447072,
+      freeKb: 452764,
+      capacity: '50%',
+      error: '',
+    }),
+  });
+
+  assert.equal(status.environment.isProductionLike, true);
+  assert.equal(status.conservation.appDisabled, true);
+  assert.equal(status.conservation.webAccessBlocked, true);
+  assert.equal(status.conservation.botDisabled, true);
+  assert.equal(status.conservation.botWritesBlocked, true);
+  assert.equal(status.conservation.gsmDisabled, true);
+  assert.equal(status.conservation.gsmEnabled, false);
+  assert.equal(status.conservation.gsmWritesBlocked, true);
+  assert.equal(status.database.dbPathKind, 'unknown');
+  assert.equal(status.storage.risk, 'unknown');
+  assert.equal(status.storage.signalPresent, true);
+  assert.equal(status.storage.device, '/dev/zd1232');
+  assert.equal(status.storage.totalKb, 899836);
+  assert.ok(status.recommendations.some(item => item.includes('Railway volume and DB_PATH manually')));
+  assert.ok(status.checks.some(item => item.id === 'db_isolation' && item.status === 'unknown'));
+  assert.ok(status.checks.some(item => item.id === 'production_conserved' && item.status === 'ok'));
+});
+
+test('system control center treats GSM_DISABLED=true as write blocking', () => {
+  const status = buildSystemControlCenterStatus({
+    dbPath: ':memory:',
+    buildInfo: {},
+    getAppDisabledConfig: () => ({ disabled: false }),
+    env: {
+      NODE_ENV: 'development',
+      GSM_DISABLED: 'true',
+      GSM_ENABLED: 'true',
+    },
+  });
+
+  assert.equal(status.conservation.gsmDisabled, true);
+  assert.equal(status.conservation.gsmWritesBlocked, true);
+  assert.equal(status.conservation.gsmEnabled, true);
+});
+
+test('system control center reports unavailable storage signal without failing', () => {
+  const status = buildSystemControlCenterStatus({
+    dbPath: ':memory:',
+    buildInfo: {},
+    getAppDisabledConfig: () => ({ disabled: false }),
+    env: { NODE_ENV: 'test', RAILWAY_ENVIRONMENT_NAME: 'staging', BOT_DISABLED: 'true', GSM_DISABLED: 'true' },
+    inspectStorage: () => ({
+      mountPath: '/data',
+      available: false,
+      signalPresent: false,
+      device: '',
+      statDevice: null,
+      totalKb: null,
+      usedKb: null,
+      freeKb: null,
+      capacity: '',
+      error: 'mount-not-found',
+    }),
+  });
+
+  assert.equal(status.environment.isStagingLike, true);
+  assert.equal(status.storage.signalPresent, false);
+  assert.equal(status.storage.risk, 'unknown');
+  assert.ok(status.checks.some(item => item.id === 'storage_signal' && item.status === 'unknown'));
+  assert.ok(status.checks.some(item => item.id === 'staging_external_writes' && item.status === 'ok'));
 });
 
 test('/api/admin/rental-equipment-diagnostics returns structured admin diagnostics', async () => {

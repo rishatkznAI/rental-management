@@ -35,6 +35,34 @@ Generate `MAX_WEBHOOK_SECRET` as a long random value in Railway. Do not paste it
 
 Railway billing warning: keep the Trial/Hobby plan active for the production service. If the plan is inactive or exhausted, the backend can stop responding even when the code and database are correct.
 
+## Conservation Mode
+
+Production deployment is allowed during conservation. Frontend and backend may continue to update from `main`; production usage is blocked at runtime instead.
+
+Required Railway production variables during conservation:
+
+- `APP_DISABLED=true` blocks login, existing authenticated API access and mutating business API work while keeping `/health`, `/health/ready` and `/api/version` available.
+- `BOT_DISABLED=true` acknowledges MAX webhook traffic without running bot scenarios or creating service tickets, deliveries, rentals, photos, works, parts or bot sessions.
+- `GSM_ENABLED=false` or `GSM_DISABLED=true` blocks HTTP GSM ingest and prevents GSM/GPRS TCP gateways from listening after restart.
+
+`GET /api/version` must show `app.disabled=true` while `APP_DISABLED=true`.
+
+Do not run production write smoke during conservation. Use staging for active testing.
+
+## System Control Center
+
+Admins can open `Панель администратора` -> `Центр контроля системы` for a read-only status view. It shows environment classification, backend/frontend build markers, conservation flag interpretation, safe SQLite path labels, storage signals, safe probe status and manual recommendations.
+
+The control center cannot prove Railway staging/production volume isolation by itself. If runtime signals cannot prove `DB_PATH` and the mounted volume belong to the intended environment, it reports `unknown` and asks an admin to check Railway volume and `DB_PATH` manually.
+
+The app must not mutate its own production env flags. Change `APP_DISABLED`, `BOT_DISABLED`, `GSM_ENABLED` and `GSM_DISABLED` only through Railway UI/CLI or another approved external deployment workflow.
+
+Safe production probes remain:
+
+- `GET /health`
+- `GET /health/ready`
+- `GET /api/version`
+
 ## Frontend
 
 The frontend is deployed as a static Vite app on GitHub Pages:

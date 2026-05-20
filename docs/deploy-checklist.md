@@ -2,6 +2,8 @@
 
 Use this checklist before and after production releases. Do not change production data, env vars or Railway settings during deploy unless the release explicitly requires it and a backup exists.
 
+Production deployment is allowed while the product is conserved. Conservation is enforced by runtime flags (`APP_DISABLED`, `BOT_DISABLED`, and GSM disable flags), not by stopping frontend or backend deploys.
+
 ## Pre-Deploy
 
 1. Confirm the target commit and release scope.
@@ -25,6 +27,23 @@ Use this checklist before and after production releases. Do not change productio
 8. Confirm frontend production URL:
    - `https://rishatkznai.github.io/rental-management/`
 9. Confirm the frontend build uses the production Railway backend URL as `VITE_API_URL`.
+10. If production is conserved, confirm Railway production variables:
+   - `APP_DISABLED=true`;
+   - `BOT_DISABLED=true`;
+   - `GSM_ENABLED=false` or `GSM_DISABLED=true`;
+   - `/api/version` returns `app.disabled=true`.
+
+## System Control Center
+
+After admin login, `Панель администратора` -> `Центр контроля системы` provides a read-only safety snapshot: environment type, conservation flags, build markers, SQLite/storage labels, safe probe availability and recommendations. It must never be used to change Railway variables and does not expose secrets or raw env dumps.
+
+The page cannot automatically prove that staging and production use isolated Railway volumes. If it shows volume isolation as `unknown`, manually verify Railway service/environment, volume mount and `DB_PATH` before smoke or release approval.
+
+Safe probes that remain valid during conservation:
+
+- `GET /health`
+- `GET /health/ready`
+- `GET /api/version`
 
 ## Staging Smoke Gate
 
@@ -79,6 +98,7 @@ On failed staging smoke, stop the production release, inspect GitHub Actions art
    - `GET https://rental-management-production-35bc.up.railway.app/health`
    - `GET https://rental-management-production-35bc.up.railway.app/api/version`
 7. Record backend commit, build time and deployment id when available.
+8. During conservation, do not disable deploys only to preserve the pause. Production deployment is allowed; production usage must remain blocked by `APP_DISABLED`, `BOT_DISABLED`, and GSM disable flags.
 
 ## Frontend Deploy
 
@@ -133,6 +153,7 @@ Minimum checks:
 4. Login works for a dedicated smoke/admin account.
 5. Role smoke passes for admin, office manager, rental manager, mechanic, investor and head.
 6. Admin diagnostics does not expose secrets, tokens, passwords, cookies or raw env values.
+7. Admin System Control Center opens in normal admin mode and does not expose secrets, tokens, passwords, cookies, raw Railway secrets or full env dumps.
 
 ## Stop Conditions
 

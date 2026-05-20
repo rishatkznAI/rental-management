@@ -1,8 +1,13 @@
 const DEFAULT_APP_DISABLED_MESSAGE = 'Система временно отключена. Обратитесь к администратору.';
 const DEFAULT_BOT_DISABLED_MESSAGE = 'Бот временно отключён. Обратитесь к администратору.';
+const DEFAULT_GSM_DISABLED_MESSAGE = 'GSM/GPRS ingest временно отключён.';
 
 function envFlagEnabled(value) {
   return ['1', 'true', 'yes', 'on', 'enabled'].includes(String(value || '').trim().toLowerCase());
+}
+
+function envFlagDisabled(value) {
+  return ['0', 'false', 'no', 'off', 'disabled'].includes(String(value || '').trim().toLowerCase());
 }
 
 function getAppDisabledConfig(env = process.env) {
@@ -16,6 +21,13 @@ function getBotDisabledConfig(env = process.env) {
   return {
     disabled: envFlagEnabled(env.BOT_DISABLED),
     message: String(env.BOT_DISABLED_MESSAGE || DEFAULT_BOT_DISABLED_MESSAGE).trim() || DEFAULT_BOT_DISABLED_MESSAGE,
+  };
+}
+
+function getGsmDisabledConfig(env = process.env) {
+  return {
+    disabled: envFlagEnabled(env.GSM_DISABLED) || envFlagDisabled(env.GSM_ENABLED),
+    message: String(env.GSM_DISABLED_MESSAGE || DEFAULT_GSM_DISABLED_MESSAGE).trim() || DEFAULT_GSM_DISABLED_MESSAGE,
   };
 }
 
@@ -47,10 +59,13 @@ function createAppDisabledMiddleware({ getConfig = getAppDisabledConfig } = {}) 
 module.exports = {
   DEFAULT_APP_DISABLED_MESSAGE,
   DEFAULT_BOT_DISABLED_MESSAGE,
+  DEFAULT_GSM_DISABLED_MESSAGE,
   buildDisabledResponse,
   createAppDisabledMiddleware,
+  envFlagDisabled,
   envFlagEnabled,
   getAppDisabledConfig,
   getBotDisabledConfig,
+  getGsmDisabledConfig,
   sendAppDisabled,
 };

@@ -17,6 +17,7 @@ function registerGsmRoutes(router, deps) {
     gsmIngestToken = process.env.GSM_INGEST_TOKEN || process.env.GSM_GATEWAY_SECRET || '',
     gsmMaxPacketAgeSeconds = Number(process.env.GSM_MAX_PACKET_AGE_SECONDS || process.env.GSM_MAX_PACKET_AGE || 7 * 24 * 60 * 60),
     gsmMaxHttpPayloadBytes = Number(process.env.GSM_HTTP_MAX_PAYLOAD_BYTES || process.env.GPRS_MAX_PACKET_BYTES || 16 * 1024),
+    getGsmDisabledConfig = () => ({ disabled: false }),
   } = deps;
 
   const GSM_VIEW_ROLES = new Set([
@@ -90,6 +91,15 @@ function registerGsmRoutes(router, deps) {
   }
 
   function requireGsmIngestToken(req, res, next) {
+    const gsmDisabled = typeof getGsmDisabledConfig === 'function' ? getGsmDisabledConfig() : { disabled: false };
+    if (gsmDisabled.disabled) {
+      return res.status(503).json({
+        ok: false,
+        code: 'GSM_DISABLED',
+        error: gsmDisabled.message || 'GSM/GPRS ingest временно отключён.',
+        message: gsmDisabled.message || 'GSM/GPRS ingest временно отключён.',
+      });
+    }
     if (!toText(gsmIngestToken)) {
       return res.status(503).json({ ok: false, error: 'GSM ingest is not configured' });
     }

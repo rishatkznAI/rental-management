@@ -5,12 +5,13 @@ GPRS-шлюз запускается вместе с backend и слушает T
 
 ## Переменные окружения
 
-- `GSM_ENABLED=0` — общий алиас для отключения legacy TCP-шлюза, если `GPRS_ENABLED` не задан.
+- `GSM_ENABLED=false` — глобально отключить GSM/GPRS ingest на время conservation: HTTP `/api/gsm/ingest` не пишет пакеты, TCP-шлюзы не слушают после рестарта.
+- `GSM_DISABLED=true` — явный глобальный флаг отключения GSM/GPRS ingest, эквивалентный conservation-блокировке.
+- `GPRS_ENABLED=0` — отключить legacy TCP-шлюз без отключения Express API.
 - `GSM_INGEST_TOKEN` или `GSM_GATEWAY_SECRET` — обязательный секрет для HTTP ingest `/api/gsm/ingest`.
 - `GSM_HTTP_MAX_PAYLOAD_BYTES=16384` — максимальный размер нормализованного HTTP ingest payload.
 - `GSM_MAX_PACKET_AGE_SECONDS=604800` — допустимое отклонение timestamp входящего HTTP пакета, по умолчанию 7 дней.
 - `GSM_DEDUPE_WINDOW_MS=300000` — окно дедупликации одинаковых пакетов.
-- `GPRS_ENABLED=0` — отключить TCP-шлюз без отключения Express API.
 - `GPRS_PORT=5023` — TCP-порт шлюза, по умолчанию `5023`.
 - `GPRS_HOST=0.0.0.0` — адрес прослушивания, по умолчанию `0.0.0.0`.
 - `GPRS_MAX_PACKET_BYTES=16384` — максимальный размер одного пакета.

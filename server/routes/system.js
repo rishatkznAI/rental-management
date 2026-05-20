@@ -18,12 +18,19 @@ const {
   buildBrokenGanttRentalsRepairPlan,
 } = require('../lib/gantt-rental-repair-diagnostics');
 const { buildRentalLinkDiagnostics } = require('../lib/rental-link-diagnostics');
+const {
+  envFlagDisabled,
+  envFlagEnabled,
+  getBotDisabledConfig,
+  getGsmDisabledConfig,
+} = require('../lib/feature-flags');
 const dns = require('dns');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const net = require('net');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const MAX_MEDIA_PROXY_BYTES = 10 * 1024 * 1024;
 const MEDIA_PROXY_TIMEOUT_MS = 10_000;
@@ -156,6 +163,276 @@ const SYSTEM_DATA_COLLECTIONS = [
   'delivery_carriers',
   'app_settings',
 ];
+
+function nonEmptyString(...values) {
+  return values.map(value => String(value || '').trim()).find(Boolean) || '';
+}
+
+function runtimeEnvironment(env = process.env) {
+  const nodeEnv = nonEmptyString(env.NODE_ENV);
+  const appEnvironment = nonEmptyString(
+    env.APP_ENVIRONMENT,
+    env.APP_ENV,
+    env.RAILWAY_ENVIRONMENT_NAME,
+    env.RAILWAY_ENVIRONMENT,
+    nodeEnv,
+  );
+  const haystack = `${nodeEnv} ${appEnvironment} ${env.RAILWAY_SERVICE_NAME || ''}`.toLowerCase();
+  const isProductionLike = /\bprod(uction)?\b/.test(haystack) || nodeEnv === 'production';
+  const isStagingLike = /\bstag(e|ing)?\b/.test(haystack) || /\btest\b/.test(haystack);
+  return {
+    nodeEnv: nodeEnv || 'unknown',
+    appEnvironment: appEnvironment || 'unknown',
+    isProductionLike,
+    isStagingLike,
+  };
+}
+
+function safeDbPathLabel(dbPath) {
+  const text = String(dbPath || '').trim();
+  if (!text) return 'not configured';
+  if (text === ':memory:') return ':memory:';
+  const normalized = text.replace(/\\/g, '/');
+  const parts = normalized.split('/').filter(Boolean);
+  const tail = parts.slice(-2).join('/');
+  return tail || path.basename(text) || 'configured';
+}
+
+function classifyDbPath(dbPath, envInfo, env = process.env) {
+  const text = String(dbPath || '').trim();
+  const lower = text.toLowerCase();
+  const volumeMount = nonEmptyString(env.RAILWAY_VOLUME_MOUNT_PATH, env.RAILWAY_VOLUME_PATH);
+  const volumeLower = volumeMount.toLowerCase();
+
+  if (!text || text === ':memory:' || lower.includes('/server/data/') || lower.includes('/data/app.sqlite')) {
+    return 'local';
+  }
+  if (volumeLower && lower.startsWith(volumeLower) && envInfo.isProductionLike) {
+    return 'production-volume';
+  }
+  if (volumeLower && lower.startsWith(volumeLower) && envInfo.isStagingLike) {
+    return 'staging-volume';
+  }
+  if (lower.includes('/volume') || lower.includes('/mnt/')) {
+    return envInfo.isProductionLike ? 'production-volume' : envInfo.isStagingLike ? 'staging-volume' : 'unknown';
+  }
+  return envInfo.isProductionLike || envInfo.isStagingLike ? 'unknown' : 'local';
+}
+
+function parseDfOutput(output) {
+  const lines = String(output || '').trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return null;
+  const parts = lines[lines.length - 1].trim().split(/\s+/);
+  if (parts.length < 6) return null;
+  return {
+    device: parts[0] || '',
+    totalKb: Number(parts[1]) || 0,
+    usedKb: Number(parts[2]) || 0,
+    freeKb: Number(parts[3]) || 0,
+    capacity: parts[4] || '',
+    mountPath: parts.slice(5).join(' ') || '',
+  };
+}
+
+function inspectStorageSignal({ mountPath = '/data', execFile = execFileSync } = {}) {
+  const safeMountPath = String(mountPath || '/data').trim() || '/data';
+  const result = {
+    mountPath: safeMountPath,
+    available: false,
+    signalPresent: false,
+    device: '',
+    statDevice: null,
+    totalKb: null,
+    usedKb: null,
+    freeKb: null,
+    capacity: '',
+    error: '',
+  };
+
+  try {
+    const stat = fs.statSync(safeMountPath);
+    result.available = true;
+    result.statDevice = Number.isFinite(Number(stat.dev)) ? Number(stat.dev) : null;
+  } catch (error) {
+    result.error = error?.code === 'ENOENT' ? 'mount-not-found' : 'mount-stat-unavailable';
+    return result;
+  }
+
+  try {
+    const output = execFile('df', ['-kP', safeMountPath], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 1500,
+    });
+    const parsed = parseDfOutput(output);
+    if (parsed) {
+      result.signalPresent = true;
+      result.device = parsed.device;
+      result.totalKb = parsed.totalKb;
+      result.usedKb = parsed.usedKb;
+      result.freeKb = parsed.freeKb;
+      result.capacity = parsed.capacity;
+      result.mountPath = parsed.mountPath || safeMountPath;
+    }
+  } catch (_error) {
+    result.error = result.error || 'df-unavailable';
+  }
+
+  return result;
+}
+
+function buildSystemControlCenterStatus({
+  dbPath,
+  buildInfo,
+  getAppDisabledConfig,
+  env = process.env,
+  inspectStorage = inspectStorageSignal,
+} = {}) {
+  const environment = runtimeEnvironment(env);
+  const appDisabled = typeof getAppDisabledConfig === 'function'
+    ? getAppDisabledConfig()
+    : { disabled: envFlagEnabled(env.APP_DISABLED) };
+  const botDisabled = getBotDisabledConfig(env);
+  const gsmDisabled = getGsmDisabledConfig(env);
+  const gsmEnabledValue = String(env.GSM_ENABLED ?? '').trim();
+  const gsmExplicitlyEnabled = gsmEnabledValue
+    ? !envFlagDisabled(gsmEnabledValue)
+    : !gsmDisabled.disabled;
+  const gsmWritesBlocked = Boolean(gsmDisabled.disabled);
+  const dbPathKind = classifyDbPath(dbPath, environment, env);
+  const storageSignal = typeof inspectStorage === 'function'
+    ? inspectStorage({ mountPath: nonEmptyString(env.RAILWAY_VOLUME_MOUNT_PATH, env.RAILWAY_VOLUME_PATH, '/data') })
+    : inspectStorageSignal({ mountPath: '/data' });
+  const volumeSignals = [
+    env.DB_PATH ? 'DB_PATH_SET' : 'DB_PATH_NOT_SET',
+    env.RAILWAY_VOLUME_MOUNT_PATH || env.RAILWAY_VOLUME_PATH ? 'RAILWAY_VOLUME_SIGNAL_SET' : 'RAILWAY_VOLUME_SIGNAL_NOT_SET',
+    env.RAILWAY_ENVIRONMENT_NAME || env.RAILWAY_ENVIRONMENT ? 'RAILWAY_ENVIRONMENT_SET' : 'RAILWAY_ENVIRONMENT_NOT_SET',
+    storageSignal.signalPresent ? 'RUNTIME_STORAGE_SIGNAL_SET' : 'RUNTIME_STORAGE_SIGNAL_NOT_SET',
+  ];
+  const isolationUnknown = (environment.isProductionLike || environment.isStagingLike) && dbPathKind === 'unknown';
+  const checks = [];
+  const recommendations = [];
+
+  const addCheck = (id, label, status, message) => checks.push({ id, label, status, message });
+
+  addCheck(
+    'app_disabled',
+    'APP_DISABLED',
+    environment.isProductionLike && !appDisabled.disabled ? 'warning' : 'ok',
+    appDisabled.disabled ? 'Web access is conserved.' : 'Authenticated app access is open.',
+  );
+  addCheck(
+    'bot_disabled',
+    'BOT_DISABLED',
+    environment.isProductionLike && !botDisabled.disabled ? 'warning' : 'ok',
+    botDisabled.disabled ? 'MAX bot writes are blocked.' : 'MAX bot scenarios may write data.',
+  );
+  addCheck(
+    'gsm_disabled',
+    'GSM_ENABLED / GSM_DISABLED',
+    environment.isProductionLike && !gsmWritesBlocked ? 'warning' : 'ok',
+    gsmWritesBlocked ? 'GSM/GPRS writes are blocked.' : 'GSM/GPRS writes appear enabled.',
+  );
+  addCheck(
+    'db_isolation',
+    'DB_PATH / Railway volume',
+    isolationUnknown || !storageSignal.signalPresent ? 'unknown' : 'ok',
+    isolationUnknown
+      ? 'Runtime signals cannot prove staging/production database isolation.'
+      : storageSignal.signalPresent
+        ? `Database path classified as ${dbPathKind}; storage device signal is present.`
+        : `Database path classified as ${dbPathKind}; storage device signal is unavailable.`,
+  );
+  addCheck(
+    'production_conserved',
+    'Production conserved',
+    environment.isProductionLike ? (appDisabled.disabled && botDisabled.disabled && gsmWritesBlocked ? 'ok' : 'warning') : 'unknown',
+    environment.isProductionLike
+      ? (appDisabled.disabled && botDisabled.disabled && gsmWritesBlocked
+        ? 'Production conservation flags are active.'
+        : 'One or more production conservation flags appear open.')
+      : 'Not running in a production-labelled environment.',
+  );
+  addCheck(
+    'staging_external_writes',
+    'Staging external writes',
+    environment.isStagingLike ? (botDisabled.disabled && gsmWritesBlocked ? 'ok' : 'warning') : 'unknown',
+    environment.isStagingLike
+      ? (botDisabled.disabled && gsmWritesBlocked
+        ? 'Staging bot and GSM external writes are disabled.'
+        : 'Staging bot or GSM external writes appear enabled.')
+      : 'Not running in a staging-labelled environment.',
+  );
+  addCheck(
+    'storage_signal',
+    'Storage signal',
+    storageSignal.signalPresent ? 'ok' : 'unknown',
+    storageSignal.signalPresent
+      ? `Runtime storage device: ${storageSignal.device || 'unknown device'}.`
+      : 'Runtime storage df/stat signal is unavailable.',
+  );
+
+  if (environment.isProductionLike && !appDisabled.disabled) {
+    recommendations.push('Verify Railway production APP_DISABLED=true before keeping production conserved.');
+  }
+  if (environment.isProductionLike && !botDisabled.disabled) {
+    recommendations.push('Verify Railway production BOT_DISABLED=true or use only test bot credentials.');
+  }
+  if (environment.isProductionLike && !gsmWritesBlocked) {
+    recommendations.push('Verify Railway production GSM_ENABLED=false or GSM_DISABLED=true before allowing telemetry traffic.');
+  }
+  if (isolationUnknown) {
+    recommendations.push('Verify Railway volume and DB_PATH manually; this app cannot prove staging/production volume isolation from runtime signals.');
+  }
+  if (!storageSignal.signalPresent) {
+    recommendations.push('Verify the /data mount with Railway runtime shell because df/stat storage signal is unavailable.');
+  }
+  recommendations.push('Use only safe probes for conserved production: GET /health, GET /health/ready, GET /api/version.');
+  recommendations.push('Do not mutate Railway variables from inside the app; change conservation flags in Railway UI or CLI with an external approval workflow.');
+
+  const build = buildInfo && typeof buildInfo === 'object' ? buildInfo : {};
+  return {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    environment,
+    conservation: {
+      appDisabled: Boolean(appDisabled.disabled),
+      botDisabled: Boolean(botDisabled.disabled),
+      gsmDisabled: Boolean(gsmDisabled.disabled),
+      gsmEnabled: Boolean(gsmExplicitlyEnabled),
+      webAccessBlocked: Boolean(appDisabled.disabled),
+      botWritesBlocked: Boolean(botDisabled.disabled),
+      gsmWritesBlocked,
+    },
+    version: {
+      backendCommit: build.commit || build.commitFull || '',
+      buildTime: build.buildTime || build.startedAt || '',
+      frontendCommit: null,
+    },
+    database: {
+      dbPathPresent: Boolean(dbPath),
+      dbPathKind,
+      dbPathSafeLabel: safeDbPathLabel(dbPath),
+      usesSqlite: true,
+    },
+    storage: {
+      volumeSignals,
+      mountPath: storageSignal.mountPath,
+      available: Boolean(storageSignal.available),
+      signalPresent: Boolean(storageSignal.signalPresent),
+      device: storageSignal.device || '',
+      statDevice: storageSignal.statDevice,
+      totalKb: storageSignal.totalKb,
+      usedKb: storageSignal.usedKb,
+      freeKb: storageSignal.freeKb,
+      capacity: storageSignal.capacity || '',
+      error: storageSignal.error || '',
+      risk: isolationUnknown || !storageSignal.signalPresent ? 'unknown' : checks.some(check => check.status === 'warning' || check.status === 'danger') ? 'warning' : 'ok',
+    },
+    checks,
+    recommendations,
+  };
+}
 
 const SYSTEM_DATA_COLLECTION_SET = new Set(SYSTEM_DATA_COLLECTIONS);
 const SENSITIVE_KEY_PATTERN = /(password|passhash|token|secret|apikey|api_key|authorization|cookie|session|webhook)/i;
@@ -774,6 +1051,14 @@ function registerSystemRoutes(app, deps) {
     });
   });
 
+  app.get('/api/admin/system-control-center', requireAuth, requireAdmin, (_req, res) => {
+    return res.json(buildSystemControlCenterStatus({
+      dbPath,
+      buildInfo: buildInfo(),
+      getAppDisabledConfig,
+    }));
+  });
+
   app.get('/api/admin/system-data/export', requireAuth, requireAdmin, (req, res) => {
     const payload = buildSystemDataExport(readData);
     auditLog?.(req, {
@@ -1237,5 +1522,6 @@ function registerSystemRoutes(app, deps) {
 }
 
 module.exports = {
+  buildSystemControlCenterStatus,
   registerSystemRoutes,
 };

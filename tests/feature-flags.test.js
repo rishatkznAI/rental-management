@@ -13,6 +13,7 @@ const {
   createAppDisabledMiddleware,
   getAppDisabledConfig,
   getBotDisabledConfig,
+  getGsmDisabledConfig,
   sendAppDisabled,
 } = require('../server/lib/feature-flags.js');
 
@@ -221,4 +222,14 @@ test('BOT_DISABLED acknowledges webhook without running scenarios or deleting bo
     if (previousMessage === undefined) delete process.env.BOT_DISABLED_MESSAGE;
     else process.env.BOT_DISABLED_MESSAGE = previousMessage;
   }
+});
+
+test('GSM conservation config treats GSM_ENABLED=false as a global ingest disable', () => {
+  const config = getGsmDisabledConfig({
+    GSM_ENABLED: 'false',
+    GSM_DISABLED_MESSAGE: 'Telemetry paused',
+  });
+
+  assert.equal(config.disabled, true);
+  assert.equal(config.message, 'Telemetry paused');
 });

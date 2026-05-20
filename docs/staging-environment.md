@@ -48,7 +48,7 @@ Recommended Railway staging frontend settings:
   - `VITE_BASE_PATH=/`
   - `VITE_GIT_COMMIT_SHA=<release commit>` when the platform does not expose `RAILWAY_GIT_COMMIT_SHA`
 
-The staging frontend bundle must contain the staging backend URL and must not contain the production backend URL.
+The staging frontend bundle must contain the staging backend URL and must not contain the production backend URL. During conservation, staging remains the active testing environment; confirm staging never points to the production Railway backend.
 
 Optional future smoke users:
 
@@ -64,9 +64,24 @@ Do not reuse production credentials in staging.
 
 - Use a separate SQLite database, normally `app.sqlite` on a separate Railway staging volume.
 - Do not mount the production volume.
+- Confirm staging `DB_PATH` points to the staging volume path, not the production volume or production `DB_PATH`.
 - Do not copy production DB into staging unless the copy is explicitly approved, sanitized if needed, and treated as sensitive.
 - Seeded/test data is preferred for smoke users, equipment, rentals, service, documents, payments, delivery and GSM examples.
 - Seed/backfill scripts must be idempotent where possible.
+
+## Integration Safety
+
+- Staging must use test MAX bot token, webhook URL and webhook secret, or set `BOT_DISABLED=true`.
+- Staging must use test GSM/GPRS secrets and test devices only, or set `GSM_ENABLED=false` / `GSM_DISABLED=true`.
+- Staging must not use production bot tokens, production webhook secrets, production GSM ingest tokens, or production tracker traffic.
+
+## System Control Center
+
+Admins can use `Панель администратора` -> `Центр контроля системы` in staging for a read-only safety check. It shows the detected environment, conservation flag interpretation, backend/frontend build markers, safe SQLite path labels, storage signals, `/health` and `/api/version` probe status, and manual recommendations.
+
+This page cannot prove Railway volume isolation from inside the app when runtime signals are incomplete. If volume isolation is `unknown`, verify the staging Railway service/environment, mounted staging volume and `DB_PATH` manually before running smoke.
+
+The app must not mutate its own production or staging Railway env flags. Change `APP_DISABLED`, `BOT_DISABLED`, `GSM_ENABLED` and `GSM_DISABLED` only through Railway UI/CLI or an approved external deployment workflow.
 
 ## Allowed Staging Writes
 
@@ -95,6 +110,7 @@ Production smoke must stay read-only unless a human explicitly approves a scoped
 - Open frontend.
 - Check backend `/health`.
 - Check backend `/api/version`.
+- Open admin `Центр контроля системы` and confirm no secrets are shown.
 - Login with dedicated staging admin.
 - Directly probe `/api/auth/login` and report HTTP status without printing passwords or tokens.
 - Open dashboard.

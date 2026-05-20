@@ -592,6 +592,30 @@ test('POST /api/gsm/ingest keeps production closed when token is not configured'
   });
 });
 
+test('POST /api/gsm/ingest is blocked when GSM conservation flag is disabled', async () => {
+  const { app, state } = createGsmApiApp({}, {
+    getGsmDisabledConfig: () => ({ disabled: true, message: 'GSM paused' }),
+  });
+
+  await withExpressApp(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/gsm/ingest`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gsm-ingest-token': 'gsm-test-secret',
+      },
+      body: JSON.stringify({ imei: '866123456789012', timestamp: new Date().toISOString(), lat: 55.796, lng: 49.108 }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.equal(body.code, 'GSM_DISABLED');
+    assert.equal(body.message, 'GSM paused');
+    assert.equal(state.gsm_packets.length, 0);
+    assert.equal(state.gsm_devices.length, 0);
+  });
+});
+
 test('POST /api/gsm/ingest stores unknown device as unlinked device row', async () => {
   const { app, state } = createGsmApiApp();
 

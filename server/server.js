@@ -103,6 +103,7 @@ const {
   createAppDisabledMiddleware,
   getAppDisabledConfig,
   getBotDisabledConfig,
+  getGsmDisabledConfig,
   sendAppDisabled,
 } = require('./lib/feature-flags');
 const { getDemoPublicInfo, isDemoMode } = require('./lib/demo-mode');
@@ -325,6 +326,7 @@ const MANAGER_BOT_WEBHOOK_PATH = '/bot/webhook/manager';
 const DELIVERY_BOT_WEBHOOK_PATH = '/bot/webhook/delivery';
 const appDisabledConfig = getAppDisabledConfig();
 const botDisabledConfig = getBotDisabledConfig();
+const gsmDisabledConfig = getGsmDisabledConfig();
 
 function normalizeBotToken(value) {
   return String(value || '').trim();
@@ -442,13 +444,13 @@ const gprsGateway = createGprsGateway({
   readData,
   writeData,
   logger: console,
-  enabled: !DEMO_MODE && String(process.env.GPRS_ENABLED || '').toLowerCase() === 'true',
+  enabled: !DEMO_MODE && !gsmDisabledConfig.disabled && String(process.env.GPRS_ENABLED || '').toLowerCase() === 'true',
 });
 const wialonIpsGateway = createWialonIpsGateway({
   readData,
   writeData,
   logger: console,
-  enabled: !DEMO_MODE && String(process.env.ENABLE_GSM_TCP_GATEWAY || '').toLowerCase() === 'true',
+  enabled: !DEMO_MODE && !gsmDisabledConfig.disabled && String(process.env.ENABLE_GSM_TCP_GATEWAY || '').toLowerCase() === 'true',
   port: Number(process.env.GSM_TCP_PORT || 5050),
   host: '0.0.0.0',
 });
@@ -1367,6 +1369,7 @@ registerGsmRoutes(apiRouter, {
   writeData,
   generateId,
   nowIso,
+  getGsmDisabledConfig: () => gsmDisabledConfig,
 });
 
 registerDeliveryRoutes(apiRouter, {

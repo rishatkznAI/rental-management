@@ -9,6 +9,7 @@ import {
   CalendarPlus,
   CheckCircle2,
   ClipboardList,
+  ExternalLink,
   FileText,
   History,
   PenLine,
@@ -25,7 +26,7 @@ import { Badge } from '../components/ui/badge';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { getInvestorBinding, isInvestorUser, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
-import { useEquipmentList, useEquipmentReadiness } from '../hooks/useEquipment';
+import { useEquipmentList, useEquipmentReadiness, useManagementActionQueue } from '../hooks/useEquipment';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
@@ -111,6 +112,9 @@ import type {
   FleetReadinessResponsibleArea,
   FleetReadinessSeverity,
   FleetReadinessStatus,
+  ManagementActionPriority,
+  ManagementActionQueueItem,
+  ManagementActionQueueSummary,
   EquipmentSalePdiStatus,
   PhotoReference,
   Rental,
@@ -124,6 +128,7 @@ type PermissionCan = ReturnType<typeof usePermissions>['can'];
 const EQUIPMENT_REGISTRY_MATCH_OPTIONS = { canEquipmentParticipateInRentals };
 
 type FleetReadinessFilter = FleetReadinessStatus | 'all' | 'with_loss' | 'without_rate' | 'high_loss';
+type ManagementActionQueueFilter = 'all' | ManagementActionPriority | FleetReadinessResponsibleArea;
 
 const READINESS_FILTERS: Array<{ value: FleetReadinessFilter; label: string }> = [
   { value: 'all', label: 'Все' },
@@ -135,6 +140,16 @@ const READINESS_FILTERS: Array<{ value: FleetReadinessFilter; label: string }> =
   { value: 'with_loss', label: 'С потерями' },
   { value: 'without_rate', label: 'Нет ставки' },
   { value: 'high_loss', label: 'Высокие потери' },
+];
+
+const ACTION_QUEUE_FILTERS: Array<{ value: ManagementActionQueueFilter; label: string }> = [
+  { value: 'all', label: 'Все' },
+  { value: 'critical', label: 'Критичные' },
+  { value: 'high', label: 'Высокие' },
+  { value: 'service', label: 'Сервис' },
+  { value: 'logistics', label: 'Логистика' },
+  { value: 'office', label: 'Офис' },
+  { value: 'admin', label: 'Админ' },
 ];
 
 function readinessBadgeVariant(severity: FleetReadinessSeverity) {
@@ -161,6 +176,23 @@ function readinessLossText(value: number | null, suffix = '') {
   return `${formatCurrency(value)}${suffix}`;
 }
 
+function queuePriorityLabel(priority: ManagementActionPriority) {
+  const labels: Record<ManagementActionPriority, string> = {
+    critical: 'Критично',
+    high: 'Высокий',
+    medium: 'Средний',
+    low: 'Низкий',
+  };
+  return labels[priority] || labels.low;
+}
+
+function queuePriorityVariant(priority: ManagementActionPriority) {
+  if (priority === 'critical') return 'danger';
+  if (priority === 'high') return 'warning';
+  if (priority === 'medium') return 'info';
+  return 'default';
+}
+
 function responsibleAreaLabel(area: FleetReadinessResponsibleArea) {
   const labels: Record<FleetReadinessResponsibleArea, string> = {
     service: 'Сервис',
@@ -185,6 +217,133 @@ function readinessTopBlockerLabel(status?: FleetReadinessStatus | null) {
     unknown: 'Не ясно',
   };
   return status ? labels[status] || '—' : '—';
+}
+
+function ManagementActionQueueSection({
+  items,
+  summary,
+  isLoading,
+  error,
+}: {
+  items: ManagementActionQueueItem[];
+  summary?: ManagementActionQueueSummary;
+  isLoading: boolean;
+  error: unknown;
+}) {
+  const [filter, setFilter] = React.useState<ManagementActionQueueFilter>('all');
+  const filteredItems = React.useMemo(() => {
+    const list = filter === 'all'
+      ? items
+      : filter === 'critical' || filter === 'high'
+        ? items.filter(item => item.priority === filter)
+        : items.filter(item => item.responsibleArea === filter);
+    return list.slice(0, 10);
+  }, [filter, items]);
+
+  const kpis = [
+    { label: 'Всего действий', value: summary?.total ?? 0, icon: ClipboardList, className: 'text-blue-400' },
+    { label: 'Критичные', value: summary?.critical ?? 0, icon: AlertTriangle, className: 'text-red-400' },
+    { label: 'Потери сейчас', value: readinessLossText(summary?.totalEstimatedLoss ?? 0, ' оценочно'), icon: BadgeDollarSign, className: 'text-orange-400' },
+    { label: 'Потеря в день', value: readinessLossText(summary?.totalDailyLoss ?? 0, ' оценочно'), icon: BadgeDollarSign, className: 'text-red-400' },
+  ];
+
+  return (
+    <section className="app-panel overflow-hidden" data-testid="management-action-queue-section">
+      <div className="border-b border-border/80 px-5 py-5 sm:px-6">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="app-shell-title text-xl font-extrabold text-foreground">Очередь управленческих действий</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Приоритетные действия, чтобы вернуть технику в доходное состояние</p>
+          </div>
+          <div className="flex flex-wrap gap-2" aria-label="Фильтр очереди управленческих действий">
+            {ACTION_QUEUE_FILTERS.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setFilter(option.value)}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                  filter === option.value
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-secondary text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {kpis.map(({ label, value, icon: Icon, className }) => (
+            <div key={label} className="rounded-lg border border-border bg-secondary/50 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-muted-foreground">{label}</span>
+                <Icon className={`h-4 w-4 ${className}`} />
+              </div>
+              <div className="mt-2 text-xl font-extrabold text-foreground">{isLoading ? '…' : value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {error ? (
+        <div className="p-5 text-sm text-red-200">
+          Не удалось загрузить очередь действий. {apiErrorMessage(error, 'Проверьте доступ к /api/management/action-queue.')}
+        </div>
+      ) : filteredItems.length === 0 ? (
+        <div className="p-5 text-sm text-muted-foreground">
+          {isLoading ? 'Загружаем очередь действий…' : 'Критичных действий нет'}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1120px] text-left text-sm">
+            <thead className="border-b border-border bg-secondary/60 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+              <tr>
+                <th className="px-5 py-3 font-medium">Приоритет</th>
+                <th className="px-3 py-3 font-medium">Действие</th>
+                <th className="px-3 py-3 font-medium">Техника</th>
+                <th className="px-3 py-3 font-medium">Ответственный блок</th>
+                <th className="px-3 py-3 font-medium">Уже потеряно</th>
+                <th className="px-3 py-3 font-medium">Потеря/день</th>
+                <th className="px-3 py-3 font-medium">Сколько дней</th>
+                <th className="px-5 py-3 font-medium">Ссылка</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/80">
+              {filteredItems.map(item => (
+                <tr key={item.actionId} className="align-top">
+                  <td className="px-5 py-3">
+                    <Badge variant={queuePriorityVariant(item.priority)}>{queuePriorityLabel(item.priority)}</Badge>
+                    <div className="mt-1 text-xs text-muted-foreground">{item.dueHint || 'Плановая проверка'}</div>
+                  </td>
+                  <td className="max-w-[360px] px-3 py-3">
+                    <div className="font-semibold text-foreground">{item.title || 'Уточнить действие'}</div>
+                    <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.description || item.recommendedAction || 'Проверьте блокер техники.'}</div>
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground">{item.equipmentId || 'Не указана'}</td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground">{responsibleAreaLabel(item.responsibleArea)}</td>
+                  <td className="px-3 py-3 text-xs font-semibold text-foreground">{readinessLossText(item.estimatedLoss, item.estimatedLoss && item.estimatedLoss > 0 ? ' оценочно' : '')}</td>
+                  <td className="px-3 py-3 text-xs font-semibold text-foreground">{readinessLossText(item.estimatedDailyLoss)}</td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground">{item.blockedDays ? `${item.blockedDays} дн.` : 'не ясно'}</td>
+                  <td className="px-5 py-3 text-xs">
+                    <div className="flex flex-wrap gap-2">
+                      <Link className="inline-flex items-center gap-1 text-primary hover:underline" to={item.links.equipment || `/equipment/${item.equipmentId}`}>
+                        Техника <ExternalLink className="h-3 w-3" />
+                      </Link>
+                      {item.links.serviceTicket ? <Link className="text-primary hover:underline" to={item.links.serviceTicket}>Сервис</Link> : null}
+                      {item.links.rental ? <Link className="text-primary hover:underline" to={item.links.rental}>Аренда</Link> : null}
+                      {item.links.delivery ? <Link className="text-primary hover:underline" to={item.links.delivery}>Доставка</Link> : null}
+                      {item.links.document ? <Link className="text-primary hover:underline" to={item.links.document}>Документ</Link> : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function FleetReadinessSection({
@@ -955,6 +1114,7 @@ export default function Equipment() {
   const [currentPage, setCurrentPage] = React.useState(1);
   const equipmentQuery = useEquipmentList();
   const readinessQuery = useEquipmentReadiness();
+  const actionQueueQuery = useManagementActionQueue();
   const ganttQuery = useGanttData({ enabled: canViewRentals });
   const rentalsQuery = useRentalsList({ enabled: canViewRentals });
   const documentsQuery = useDocumentsList({ enabled: canViewDocuments });
@@ -1539,6 +1699,13 @@ export default function Equipment() {
         summary={readinessQuery.data?.summary}
         isLoading={readinessQuery.isLoading}
         error={readinessQuery.error}
+      />
+
+      <ManagementActionQueueSection
+        items={actionQueueQuery.data?.items ?? []}
+        summary={actionQueueQuery.data?.summary}
+        isLoading={actionQueueQuery.isLoading}
+        error={actionQueueQuery.error}
       />
 
       <div className="space-y-3 sm:hidden">

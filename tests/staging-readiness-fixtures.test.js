@@ -9,6 +9,8 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const Database = serverRequire('better-sqlite3');
+const { buildManagementActionQueue } = require('../server/lib/equipment-readiness.js');
+const { buildFixtures } = require('../server/scripts/seed-staging-readiness-fixtures.cjs');
 
 const rootDir = path.resolve(new URL('..', import.meta.url).pathname);
 const scriptPath = path.join(rootDir, 'scripts', 'seed-staging-readiness-fixtures.cjs');
@@ -92,4 +94,27 @@ test('staging readiness fixture seed refuses production-like environment', () =>
 
   assert.equal(result.status, 2);
   assert.match(result.stderr, /not clearly staging|production-like/);
+});
+
+test('staging readiness fixtures produce expected management action queue', () => {
+  const now = new Date('2026-05-20T12:00:00Z');
+  const fixtures = buildFixtures(now);
+  const queue = buildManagementActionQueue({
+    now,
+    equipment: fixtures.equipment,
+    rentals: fixtures.rentals,
+    serviceTickets: fixtures.service,
+    deliveries: fixtures.deliveries,
+    documents: fixtures.documents,
+    gsmPackets: fixtures.gsmPackets,
+  });
+  const ids = queue.items.map(item => item.equipmentId);
+  assert.equal(ids.includes('STG-READINESS-EQ-READY'), false);
+  assert.equal(ids.includes('STG-READINESS-EQ-RENTED'), false);
+  assert.equal(queue.items.find(item => item.equipmentId === 'STG-READINESS-EQ-SERVICE')?.responsibleArea, 'service');
+  assert.equal(queue.items.find(item => item.equipmentId === 'STG-READINESS-EQ-DELIVERY')?.responsibleArea, 'logistics');
+  assert.equal(queue.items.find(item => item.equipmentId === 'STG-READINESS-EQ-DOC')?.responsibleArea, 'office');
+  assert.equal(queue.items.find(item => item.equipmentId === 'STG-READINESS-EQ-GSM')?.responsibleArea, 'admin');
+  assert.ok(queue.items.some(item => item.equipmentId === 'STG-READINESS-EQ-CHECK' && ['service', 'office'].includes(item.responsibleArea)));
+  assert.ok(queue.items.some(item => item.equipmentId === 'STG-READINESS-EQ-UNKNOWN' && ['low', 'medium'].includes(item.priority)));
 });

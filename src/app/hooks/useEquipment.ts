@@ -6,6 +6,7 @@ import type { Equipment } from '../types';
 export const EQUIPMENT_KEYS = {
   all: ['equipment'] as const,
   readiness: ['equipment', 'readiness'] as const,
+  managementActionQueue: ['equipment', 'management-action-queue'] as const,
   paginated: (params: PaginatedQueryParams) => ['equipment', 'paginated', params] as const,
   detail: (id: string) => ['equipment', id] as const,
   repairs: (id: string) => ['equipment', id, 'repairs'] as const,
@@ -25,6 +26,15 @@ export function useEquipmentReadiness(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: EQUIPMENT_KEYS.readiness,
     queryFn: equipmentService.getReadiness,
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60,
+  });
+}
+
+export function useManagementActionQueue(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: EQUIPMENT_KEYS.managementActionQueue,
+    queryFn: equipmentService.getManagementActionQueue,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60,
   });

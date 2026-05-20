@@ -8,6 +8,7 @@ const express = serverRequire('express');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
 const {
+  buildManagementActionQueue,
   buildFleetReadinessReport,
   calculateEquipmentReadiness,
 } = require('../server/lib/equipment-readiness.js');
@@ -172,7 +173,93 @@ test('fleet readiness summary includes financial loss totals', () => {
   assert.equal(report.summary.loss.topResponsibleArea, 'logistics');
 });
 
-function createApp() {
+test('management action queue excludes ready and rented equipment', () => {
+  const equipment = [
+    baseEquipment({ id: 'EQ-ready', inventoryNumber: 'INV-ready' }),
+    baseEquipment({ id: 'EQ-rented', inventoryNumber: 'INV-rented' }),
+    baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 5000 }),
+  ];
+  const queue = buildManagementActionQueue({
+    now: new Date('2026-05-20T12:00:00Z'),
+    equipment,
+    rentals: [{ id: 'R-1', equipmentId: 'EQ-rented', status: 'active', startDate: '2026-05-20', dailyRate: 7000 }],
+    serviceTickets: [{ id: 'S-1', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-20' }],
+  });
+
+  assert.deepEqual(queue.items.map(item => item.equipmentId), ['EQ-service']);
+  assert.equal(JSON.stringify(queue).includes('EQ-ready'), false);
+  assert.equal(JSON.stringify(queue).includes('EQ-rented'), false);
+});
+
+test('management action queue maps readiness blockers to responsible areas', () => {
+  const equipment = [
+    baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 5000 }),
+    baseEquipment({ id: 'EQ-delivery', inventoryNumber: 'INV-delivery', dailyRate: 6000 }),
+    baseEquipment({ id: 'EQ-doc', inventoryNumber: 'INV-doc', dailyRate: 7000 }),
+  ];
+  const queue = buildManagementActionQueue({
+    now: new Date('2026-05-20T12:00:00Z'),
+    equipment,
+    serviceTickets: [{ id: 'S-1', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-19' }],
+    deliveries: [{ id: 'D-1', equipmentId: 'EQ-delivery', status: 'sent', scheduledDate: '2026-05-19' }],
+    documents: [{ id: 'DOC-1', equipmentId: 'EQ-doc', status: 'missing', createdAt: '2026-05-19' }],
+  });
+
+  const byEquipment = Object.fromEntries(queue.items.map(item => [item.equipmentId, item]));
+  assert.equal(byEquipment['EQ-service'].responsibleArea, 'service');
+  assert.equal(byEquipment['EQ-service'].links.serviceTicket, '/service/S-1');
+  assert.equal(byEquipment['EQ-delivery'].responsibleArea, 'logistics');
+  assert.equal(byEquipment['EQ-delivery'].links.delivery, '/deliveries?deliveryId=D-1');
+  assert.equal(byEquipment['EQ-doc'].responsibleArea, 'office');
+  assert.equal(byEquipment['EQ-doc'].links.document, '/documents?documentId=DOC-1');
+});
+
+test('management action queue priority sorting uses loss, blocked days, and daily loss', () => {
+  const equipment = [
+    baseEquipment({ id: 'EQ-low', inventoryNumber: 'INV-low', status: 'legacy_hold', dailyRate: 1000 }),
+    baseEquipment({ id: 'EQ-critical', inventoryNumber: 'INV-critical', status: 'in_service', dailyRate: 30000 }),
+    baseEquipment({ id: 'EQ-high', inventoryNumber: 'INV-high', status: 'in_service', dailyRate: 5000 }),
+  ];
+  const queue = buildManagementActionQueue({
+    now: new Date('2026-05-20T12:00:00Z'),
+    equipment,
+    serviceTickets: [
+      { id: 'S-critical', equipmentId: 'EQ-critical', status: 'new', createdAt: '2026-05-18' },
+      { id: 'S-high', equipmentId: 'EQ-high', status: 'new', createdAt: '2026-05-20' },
+    ],
+  });
+
+  assert.equal(queue.items[0].equipmentId, 'EQ-critical');
+  assert.equal(queue.items[0].priority, 'critical');
+  assert.equal(queue.items[1].equipmentId, 'EQ-high');
+  assert.equal(queue.items[1].priority, 'high');
+});
+
+test('management action queue summary totals are correct', () => {
+  const equipment = [
+    baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 5000 }),
+    baseEquipment({ id: 'EQ-delivery', inventoryNumber: 'INV-delivery', dailyRate: 8000 }),
+    baseEquipment({ id: 'EQ-doc', inventoryNumber: 'INV-doc' }),
+  ];
+  const queue = buildManagementActionQueue({
+    now: new Date('2026-05-20T12:00:00Z'),
+    equipment,
+    serviceTickets: [{ id: 'S-1', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-19' }],
+    deliveries: [{ id: 'D-1', equipmentId: 'EQ-delivery', status: 'sent', scheduledDate: '2026-05-19' }],
+    documents: [{ id: 'DOC-1', equipmentId: 'EQ-doc', status: 'missing', createdAt: '2026-05-19' }],
+  });
+
+  assert.equal(queue.summary.total, 3);
+  assert.equal(queue.summary.high, 2);
+  assert.equal(queue.summary.medium, 1);
+  assert.equal(queue.summary.totalEstimatedLoss, 26000);
+  assert.equal(queue.summary.totalDailyLoss, 13000);
+  assert.equal(queue.summary.byResponsibleArea.service, 1);
+  assert.equal(queue.summary.byResponsibleArea.logistics, 1);
+  assert.equal(queue.summary.byResponsibleArea.office, 1);
+});
+
+function createApp(stateOverride = {}) {
   const state = {
     users: [{ id: 'U-admin', name: 'Админ', role: 'Администратор', status: 'Активен' }],
     equipment: [baseEquipment({ password: 'hidden', token: 'hidden-token' })],
@@ -183,6 +270,7 @@ function createApp() {
     documents: [],
     gsm_packets: [],
     shipping_photos: [],
+    ...stateOverride,
   };
   const app = express();
   app.use(express.json());
@@ -256,6 +344,39 @@ test('GET /api/equipment/readiness returns summary and does not expose secrets',
     assert.equal(response.body.items[0].equipmentId, 'EQ-1');
     const payload = JSON.stringify(response.body);
     assert.equal(payload.includes('hidden-token'), false);
+    assert.equal(payload.includes('password'), false);
+    assert.equal(payload.includes('token'), false);
+  });
+});
+
+test('GET /api/management/action-queue requires auth', async () => {
+  await withServer(createApp(), async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/management/action-queue');
+    assert.equal(response.status, 401);
+  });
+});
+
+test('GET /api/management/action-queue returns prioritized items and does not expose secrets', async () => {
+  await withServer(createApp({
+    equipment: [
+      baseEquipment({ id: 'EQ-ready', inventoryNumber: 'INV-ready', password: 'hidden-password' }),
+      baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 30000, token: 'hidden-token' }),
+      baseEquipment({ id: 'EQ-delivery', inventoryNumber: 'INV-delivery', dailyRate: 8000 }),
+    ],
+    service: [{ id: 'S-critical', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-18' }],
+    deliveries: [{ id: 'D-high', equipmentId: 'EQ-delivery', status: 'sent', scheduledDate: '2026-05-20' }],
+  }), async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/management/action-queue', 'admin-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.summary.total, 2);
+    assert.equal(response.body.items[0].equipmentId, 'EQ-service');
+    assert.equal(response.body.items[0].priority, 'critical');
+    assert.equal(response.body.items[1].responsibleArea, 'logistics');
+    const payload = JSON.stringify(response.body);
+    assert.equal(payload.includes('EQ-ready'), false);
+    assert.equal(payload.includes('hidden-token'), false);
+    assert.equal(payload.includes('hidden-password'), false);
     assert.equal(payload.includes('password'), false);
     assert.equal(payload.includes('token'), false);
   });

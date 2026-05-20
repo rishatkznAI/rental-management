@@ -59,6 +59,17 @@ const SUMMARY_KEYS = {
   unknown: 'unknown',
 };
 
+const ACTION_QUEUE_PRIORITIES = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+};
+
+const ACTION_QUEUE_AREAS = ['service', 'logistics', 'office', 'rental_manager', 'admin', 'unknown'];
+const ACTION_QUEUE_HIGH_LOSS_THRESHOLD = 50000;
+const ACTION_QUEUE_CRITICAL_BLOCKED_DAYS = 7;
+
 const ACTIVE_RENTAL_STATUSES = new Set(['active', 'delivery', 'return_planned', 'confirmed']);
 const FUTURE_RENTAL_STATUSES = new Set(['new', 'created', 'confirmed']);
 const OPEN_SERVICE_STATUSES = new Set(['new', 'assigned', 'in_progress', 'waiting_parts', 'needs_revision']);
@@ -373,7 +384,7 @@ function calculateEquipmentReadiness(equipment, context = {}) {
   const blockingDocument = asArray(context.documents)
     .find(document => documentMatchesEquipment(document, equipment) && DOCUMENT_BLOCKER_STATUSES.has(lower(document.status || document.documentStatus)));
   if (blockingDocument) {
-    addCandidate(candidates, 'document_blocked', `Проблемный документ ${blockingDocument.documentNumber || blockingDocument.number || blockingDocument.id || ''}`.trim(), {}, { blockedSince: dateKey(blockingDocument.createdAt || blockingDocument.date || blockingDocument.documentDate) });
+    addCandidate(candidates, 'document_blocked', `Проблемный документ ${blockingDocument.documentNumber || blockingDocument.number || blockingDocument.id || ''}`.trim(), { document: blockingDocument.id }, { blockedSince: dateKey(blockingDocument.createdAt || blockingDocument.date || blockingDocument.documentDate) });
   }
 
   const hasGsmLink = Boolean(equipment?.gsmImei || equipment?.gsmDeviceId || equipment?.gsmTrackerId);
@@ -418,6 +429,7 @@ function calculateEquipmentReadiness(equipment, context = {}) {
     if (candidate.link?.rental && !links.rental) links.rental = `/rentals/${encodeURIComponent(candidate.link.rental)}`;
     if (candidate.link?.serviceTicket && !links.serviceTicket) links.serviceTicket = `/service/${encodeURIComponent(candidate.link.serviceTicket)}`;
     if (candidate.link?.delivery && !links.delivery) links.delivery = `/deliveries?deliveryId=${encodeURIComponent(candidate.link.delivery)}`;
+    if (candidate.link?.document && !links.document) links.document = `/documents?documentId=${encodeURIComponent(candidate.link.document)}`;
   }
 
   const rate = estimateDailyRate({ equipment, relatedRentals, context });
@@ -505,6 +517,120 @@ function buildFleetReadinessReport(context = {}) {
   return { summary, items };
 }
 
+function actionPriority(item) {
+  const estimatedLoss = Number(item?.estimatedLoss || 0);
+  const blockedDays = Number(item?.blockedDays || 0);
+  if (
+    item?.lossSeverity === 'high' ||
+    item?.lossSeverity === 'critical' ||
+    estimatedLoss >= ACTION_QUEUE_HIGH_LOSS_THRESHOLD ||
+    blockedDays >= ACTION_QUEUE_CRITICAL_BLOCKED_DAYS
+  ) {
+    return 'critical';
+  }
+  if (estimatedLoss > 0 && ['service', 'logistics', 'office'].includes(item?.responsibleArea)) {
+    return 'high';
+  }
+  if (item?.estimatedDailyRate === null || item?.readinessStatus === 'needs_check') {
+    return 'medium';
+  }
+  return 'low';
+}
+
+function actionDueHint(item) {
+  if (item?.blockedDays >= ACTION_QUEUE_CRITICAL_BLOCKED_DAYS || item?.lossSeverity === 'critical') return 'Сегодня';
+  if (item?.priority === 'critical') return 'Сегодня';
+  if (item?.priority === 'high') return 'В течение 24 часов';
+  if (item?.priority === 'medium') return 'На ближайшую смену';
+  return 'Плановая проверка';
+}
+
+function actionTitle(item) {
+  const model = [item?.model, item?.inventoryNumber].filter(Boolean).join(' / ') || item?.equipmentId || 'Техника';
+  if (item?.readinessStatus === 'in_service') return `Вернуть из сервиса: ${model}`;
+  if (item?.readinessStatus === 'delivery_blocked') return `Закрыть доставку: ${model}`;
+  if (item?.readinessStatus === 'document_blocked') return `Закрыть документальный блокер: ${model}`;
+  if (item?.readinessStatus === 'gsm_attention') return `Проверить GSM: ${model}`;
+  if (item?.readinessStatus === 'needs_check') return `Проверить готовность: ${model}`;
+  return `Уточнить статус: ${model}`;
+}
+
+function actionDescription(item) {
+  const blockerText = Array.isArray(item?.blockers) && item.blockers.length > 0
+    ? item.blockers.join('; ')
+    : 'Блокер требует ручной проверки.';
+  return [blockerText, item?.financialRecommendation || item?.recommendedAction]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function buildManagementActionQueueFromReadiness(items = []) {
+  const actionItems = asArray(items)
+    .filter(item => item?.readinessStatus !== 'ready' && item?.readinessStatus !== 'rented')
+    .filter(item => Array.isArray(item?.blockers) && item.blockers.length > 0)
+    .map(item => {
+      const priority = actionPriority(item);
+      const action = {
+        actionId: `equipment_readiness:${item.equipmentId || 'unknown'}:${item.readinessStatus}`,
+        sourceType: 'equipment_readiness',
+        equipmentId: item.equipmentId || '',
+        title: actionTitle(item),
+        description: actionDescription(item),
+        priority,
+        responsibleArea: ACTION_QUEUE_AREAS.includes(item.responsibleArea) ? item.responsibleArea : 'unknown',
+        readinessStatus: item.readinessStatus || 'unknown',
+        estimatedLoss: item.estimatedLoss,
+        estimatedDailyLoss: item.estimatedDailyRate,
+        blockedDays: item.blockedDays,
+        dueHint: '',
+        recommendedAction: item.recommendedAction || '',
+        links: {
+          equipment: item.links?.equipment,
+          serviceTicket: item.links?.serviceTicket,
+          rental: item.links?.rental,
+          delivery: item.links?.delivery,
+          document: item.links?.document,
+        },
+      };
+      action.dueHint = actionDueHint(action);
+      return action;
+    })
+    .sort((left, right) => {
+      const priorityDiff = (ACTION_QUEUE_PRIORITIES[right.priority] || 0) - (ACTION_QUEUE_PRIORITIES[left.priority] || 0);
+      if (priorityDiff !== 0) return priorityDiff;
+      const lossDiff = Number(right.estimatedLoss || 0) - Number(left.estimatedLoss || 0);
+      if (lossDiff !== 0) return lossDiff;
+      const daysDiff = Number(right.blockedDays || 0) - Number(left.blockedDays || 0);
+      if (daysDiff !== 0) return daysDiff;
+      return Number(right.estimatedDailyLoss || 0) - Number(left.estimatedDailyLoss || 0);
+    });
+
+  const summary = {
+    total: actionItems.length,
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    totalEstimatedLoss: 0,
+    totalDailyLoss: 0,
+    byResponsibleArea: Object.fromEntries(ACTION_QUEUE_AREAS.map(area => [area, 0])),
+  };
+
+  for (const item of actionItems) {
+    summary[item.priority] = (summary[item.priority] || 0) + 1;
+    summary.totalEstimatedLoss = roundMoney(summary.totalEstimatedLoss + Number(item.estimatedLoss || 0));
+    summary.totalDailyLoss = roundMoney(summary.totalDailyLoss + Number(item.estimatedDailyLoss || 0));
+    summary.byResponsibleArea[item.responsibleArea] = (summary.byResponsibleArea[item.responsibleArea] || 0) + 1;
+  }
+
+  return { summary, items: actionItems };
+}
+
+function buildManagementActionQueue(context = {}) {
+  const report = buildFleetReadinessReport(context);
+  return buildManagementActionQueueFromReadiness(report.items);
+}
+
 module.exports = {
   READINESS_LABELS,
   READINESS_SEVERITY,
@@ -512,4 +638,6 @@ module.exports = {
   PRIORITY,
   calculateEquipmentReadiness,
   buildFleetReadinessReport,
+  buildManagementActionQueue,
+  buildManagementActionQueueFromReadiness,
 };

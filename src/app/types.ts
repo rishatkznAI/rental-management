@@ -249,6 +249,7 @@ export interface FleetReadinessItem {
     serviceTicket?: string;
     rental?: string;
     delivery?: string;
+    document?: string;
   };
 }
 
@@ -256,6 +257,49 @@ export interface FleetReadinessResponse {
   ok: true;
   summary: FleetReadinessSummary;
   items: FleetReadinessItem[];
+}
+
+export type ManagementActionPriority = 'critical' | 'high' | 'medium' | 'low';
+export type ManagementActionSourceType = 'equipment_readiness';
+
+export interface ManagementActionQueueItem {
+  actionId: string;
+  sourceType: ManagementActionSourceType;
+  equipmentId: string;
+  title: string;
+  description: string;
+  priority: ManagementActionPriority;
+  responsibleArea: FleetReadinessResponsibleArea;
+  readinessStatus: FleetReadinessStatus;
+  estimatedLoss: number | null;
+  estimatedDailyLoss: number | null;
+  blockedDays: number | null;
+  dueHint: string;
+  recommendedAction: string;
+  links: {
+    equipment?: string;
+    serviceTicket?: string;
+    rental?: string;
+    delivery?: string;
+    document?: string;
+  };
+}
+
+export interface ManagementActionQueueSummary {
+  total: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  totalEstimatedLoss: number;
+  totalDailyLoss: number;
+  byResponsibleArea: Record<FleetReadinessResponsibleArea, number>;
+}
+
+export interface ManagementActionQueueResponse {
+  ok: true;
+  summary: ManagementActionQueueSummary;
+  items: ManagementActionQueueItem[];
 }
 
 export type GsmPacketDirection = 'inbound' | 'outbound';

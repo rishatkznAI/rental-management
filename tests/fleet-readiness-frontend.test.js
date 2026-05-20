@@ -69,3 +69,55 @@ test('readiness error state is safe and endpoint is centralized in service hook'
   assert.match(equipmentHookSource, /useEquipmentReadiness/);
   assert.match(equipmentHookSource, /EQUIPMENT_KEYS\.readiness/);
 });
+
+test('management action queue section renders on the equipment page', () => {
+  assert.match(equipmentPageSource, /function ManagementActionQueueSection/);
+  assert.match(equipmentPageSource, /data-testid="management-action-queue-section"/);
+  assert.match(equipmentPageSource, /Очередь управленческих действий/);
+  assert.match(equipmentPageSource, /useManagementActionQueue\(\)/);
+});
+
+test('management action queue KPI cards render', () => {
+  assert.match(equipmentPageSource, /Всего действий/);
+  assert.match(equipmentPageSource, /Критичные/);
+  assert.match(equipmentPageSource, /Потери сейчас/);
+  assert.match(equipmentPageSource, /Потеря в день/);
+});
+
+test('management action queue filters include priorities and responsible areas', () => {
+  assert.match(equipmentPageSource, /ACTION_QUEUE_FILTERS/);
+  assert.match(equipmentPageSource, /value: 'all'/);
+  assert.match(equipmentPageSource, /value: 'critical'/);
+  assert.match(equipmentPageSource, /value: 'high'/);
+  assert.match(equipmentPageSource, /value: 'service'/);
+  assert.match(equipmentPageSource, /value: 'logistics'/);
+  assert.match(equipmentPageSource, /value: 'office'/);
+  assert.match(equipmentPageSource, /value: 'admin'/);
+  assert.match(equipmentPageSource, /item\.priority === filter/);
+  assert.match(equipmentPageSource, /item\.responsibleArea === filter/);
+});
+
+test('management action queue table renders sorted API items without raw undefined states', () => {
+  assert.match(equipmentPageSource, /Приоритет/);
+  assert.match(equipmentPageSource, /Действие/);
+  assert.match(equipmentPageSource, /Техника/);
+  assert.match(equipmentPageSource, /Ответственный блок/);
+  assert.match(equipmentPageSource, /Уже потеряно/);
+  assert.match(equipmentPageSource, /Потеря\/день/);
+  assert.match(equipmentPageSource, /Сколько дней/);
+  assert.match(equipmentPageSource, /Ссылка/);
+  assert.match(equipmentPageSource, /filteredItems\.map/);
+  assert.match(equipmentPageSource, /readinessLossText\(item\.estimatedLoss/);
+  assert.doesNotMatch(equipmentPageSource, /\[object Object\]/);
+  assert.doesNotMatch(equipmentPageSource, />undefined</);
+  assert.doesNotMatch(equipmentPageSource, />null</);
+});
+
+test('management action queue empty and error states are safe', () => {
+  assert.match(equipmentPageSource, /Критичных действий нет/);
+  assert.match(equipmentPageSource, /Не удалось загрузить очередь действий/);
+  assert.match(equipmentPageSource, /apiErrorMessage\(error, 'Проверьте доступ к \/api\/management\/action-queue\.'\)/);
+  assert.match(equipmentServiceSource, /getManagementActionQueue: \(\): Promise<ManagementActionQueueResponse> =>\s*api\.get<ManagementActionQueueResponse>\('\/api\/management\/action-queue'\)/);
+  assert.match(equipmentHookSource, /useManagementActionQueue/);
+  assert.match(equipmentHookSource, /EQUIPMENT_KEYS\.managementActionQueue/);
+});

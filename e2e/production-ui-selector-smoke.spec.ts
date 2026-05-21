@@ -3,6 +3,8 @@ import { requiredEnv, runReleaseSmoke } from './helpers/releaseSmoke';
 
 const EXPECTED_EXECUTION_LABELS = new Set(['Открыто', 'В работе', 'Отложено', 'Решено', 'Игнорировано']);
 
+test.use({ trace: 'off', screenshot: 'off', video: 'off' });
+
 function sanitizeUrl(url: string) {
   return url.replace(/[?&](token|password|secret|auth|access_token)=[^&]+/gi, '$1=[secret]');
 }

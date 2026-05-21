@@ -52,7 +52,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run focused read-only production UI selector smoke
-        run: npx playwright test e2e/production-ui-selector-smoke.spec.ts --config=playwright.production.config.ts --trace=off --screenshot=off --video=off
+        run: npx playwright test e2e/production-ui-selector-smoke.spec.ts --config=playwright.production.config.ts --trace=off
 
       - name: Upload Playwright report
         if: failure()

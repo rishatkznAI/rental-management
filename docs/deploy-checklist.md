@@ -4,6 +4,227 @@ Use this checklist before and after production releases. Do not change productio
 
 Production deployment is allowed while the product is conserved. Conservation is enforced by runtime flags (`APP_DISABLED`, `BOT_DISABLED`, and GSM disable flags), not by stopping frontend or backend deploys.
 
+# Release checklist: staging → production
+
+Короткий рабочий checklist для релизов Skytech Rental Management. Особенно обязателен, если релиз затрагивает `Техника`, `Готовность парка`, очередь управленческих действий, Action Queue, Fleet Readiness, синхронизацию production frontend/backend, Railway или GitHub Actions smoke workflows.
+
+Важные правила:
+
+- Не принимать `RISK` как `SAFE` без явного решения владельца релиза.
+- Если staging не `SAFE` - production не деплоить.
+- Production smoke не должен писать данные.
+- Bot/GSM включаются только отдельной задачей.
+
+## 1. Before coding
+
+- [ ] Production auto-deploy отключён или явно принят как риск.
+- [ ] Working tree clean: `git status --short`.
+- [ ] `exports/` ignored and not committed.
+- [ ] `service-history` stash не трогался.
+- [ ] Bot/GSM не включать без отдельной задачи.
+
+## 2. Local checks
+
+- [ ] `npm test`.
+- [ ] `npm run build`.
+- [ ] `git diff --check`.
+- [ ] Focused tests по изменённому модулю.
+
+Для docs-only изменения можно не запускать `npm test` и `npm run build`, если не менялись ссылки, scripts или workflow. Решение фиксируется в финальном отчёте.
+
+## 3. Commit and push
+
+- [ ] Commit message понятный, например `docs(release): add staging to production checklist`.
+- [ ] Push только если production auto-deploy безопасен.
+- [ ] После push проверить, что production не задеплоился случайно.
+
+## 4. Staging deploy
+
+- [ ] Backend deploy success.
+- [ ] Frontend deploy success.
+- [ ] Frontend/backend commit match.
+- [ ] Frontend API target = staging backend.
+- [ ] `GET /health`.
+- [ ] `GET /health/ready`.
+- [ ] `GET /api/version`.
+
+## 5. Staging safety
+
+- [ ] SCC returns `200`.
+- [ ] `app disabled=false`.
+- [ ] `bot disabled=true`.
+- [ ] `GSM disabled=true`.
+- [ ] `storage classification=staging-volume`.
+- [ ] Secrets not exposed.
+
+## 6. Fixture safety, если используются fixtures
+
+- [ ] Selected environment = staging.
+- [ ] `DB_PATH=/data/app.sqlite`.
+- [ ] `storage classification=staging-volume`.
+- [ ] Seed требует `ALLOW_STAGING_FIXTURE_SEED=true`.
+- [ ] Seed refuses production-like env.
+- [ ] Changed only `STG-READINESS-` / `STG-ACTION-` records.
+- [ ] Idempotent run.
+
+## 7. Staging API smoke
+
+- [ ] Readiness endpoint.
+- [ ] Action Queue endpoint.
+- [ ] Assignees endpoint, если затрагивался.
+- [ ] Status `200`.
+- [ ] Duration ms recorded.
+- [ ] Item count recorded.
+- [ ] No `5xx`.
+- [ ] No timeout.
+- [ ] No secrets.
+- [ ] No visible `undefined`, `null`, `[object Object]`.
+
+## 8. Staging UI smoke
+
+- [ ] Login.
+- [ ] Equipment page.
+- [ ] Fleet Readiness.
+- [ ] Action Queue.
+- [ ] KPI cards.
+- [ ] Filters.
+- [ ] Badges.
+- [ ] Edit dialog, если затрагивался.
+- [ ] No console errors.
+- [ ] No API errors.
+- [ ] No refetch-loop.
+- [ ] No visible `undefined`, `null`, `[object Object]`.
+
+## 9. Staging workflow
+
+- [ ] Manually run `.github/workflows/staging-smoke.yml`.
+- [ ] Workflow passed.
+- [ ] Preflight passed.
+- [ ] Frontend/backend match.
+- [ ] Bot/GSM disabled.
+- [ ] Webhook registration skipped.
+
+## 10. Production deploy decision
+
+- [ ] Решение только после staging `SAFE`.
+- [ ] Production backup нужен, если есть DB migration/write logic.
+- [ ] Если только frontend/backend read-only logic - backup может быть не нужен, но решение фиксируется.
+- [ ] Production variables не менять без необходимости.
+- [ ] Bot/GSM не включать.
+
+## 11. Production backend/frontend deploy
+
+- [ ] Backend deploy success.
+- [ ] Frontend deploy success.
+- [ ] Frontend/backend match.
+- [ ] Frontend API target = production backend.
+- [ ] `GET /health`.
+- [ ] `GET /health/ready`.
+- [ ] `GET /api/version`.
+- [ ] `APP_DISABLED` expected state.
+
+## 12. Production read-only API smoke
+
+- [ ] SCC.
+- [ ] Readiness.
+- [ ] Action Queue.
+- [ ] Assignees, если затрагивался.
+- [ ] Status `200`.
+- [ ] Duration ms recorded.
+- [ ] Item count recorded.
+- [ ] No timeout.
+- [ ] No `5xx`.
+- [ ] No secrets.
+
+## 13. Production UI smoke
+
+- [ ] Login.
+- [ ] Dashboard.
+- [ ] Equipment page.
+- [ ] Affected UI block.
+- [ ] Edit dialog open but do not save.
+- [ ] No quick actions.
+- [ ] No `PATCH` on real production data.
+- [ ] No console errors.
+- [ ] No API errors.
+- [ ] No visible `undefined`, `null`, `[object Object]`.
+
+## 14. Production selector workflow
+
+Если релиз затрагивает `/equipment`, Fleet Readiness или Action Queue:
+
+- [ ] Manually run `.github/workflows/production-ui-selector-smoke.yml`.
+- [ ] Deploy performed = no.
+- [ ] Artifacts with production UI payload = no.
+- [ ] Secrets printed = no.
+- [ ] `PATCH` performed = no.
+- [ ] Business writes = no.
+
+## 15. Railway logs after production
+
+- [ ] `5xx` count.
+- [ ] `499` count.
+- [ ] Target endpoint errors/timeouts.
+- [ ] Auth error spike.
+- [ ] CORS errors.
+- [ ] Frontend/backend mismatch.
+- [ ] Bot/GSM unexpected activity.
+- [ ] Webhook registration skipped when `BOT_DISABLED=true`.
+
+## 16. Rollback criteria
+
+Rollback нужен, если:
+
+- [ ] `5xx`.
+- [ ] Users cannot work.
+- [ ] Equipment page broken.
+- [ ] Target endpoints timeout.
+- [ ] Frontend/backend mismatch.
+- [ ] Bot/GSM unexpectedly active.
+- [ ] Visible `undefined`, `null`, `[object Object]` in critical UI.
+
+Rollback action:
+
+- [ ] `APP_DISABLED=true`.
+- [ ] Redeploy/restart backend if required.
+- [ ] Verify `/api/version` has `app.disabled=true`.
+- [ ] Do not restore SQLite backup without separate decision.
+
+## 17. Final report format
+
+```text
+STATUS: SAFE / RISK / BLOCKED
+
+Git:
+- commit:
+- pushed:
+- dirty files:
+
+Staging:
+- backend:
+- frontend:
+- smoke:
+- risks:
+
+Production:
+- backend:
+- frontend:
+- smoke:
+- logs:
+- app disabled:
+- bot disabled:
+- GSM disabled:
+
+Safety:
+- business writes:
+- PATCH production:
+- secrets:
+- rollback:
+
+Next recommended action:
+- one clear next step
+```
+
 ## Pre-Deploy
 
 1. Confirm the target commit and release scope.

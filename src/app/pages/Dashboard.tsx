@@ -41,7 +41,7 @@ import { formatCurrency, formatDate, getRentalDays } from '../lib/utils';
 import { assessServiceRisk } from '../lib/serviceRisk';
 import { useQueryClient } from '@tanstack/react-query';
 import { useQuery } from '@tanstack/react-query';
-import { useEquipmentList } from '../hooks/useEquipment';
+import { useEquipmentList, useManagementActionAttention } from '../hooks/useEquipment';
 import { useRentalsList, useGanttData } from '../hooks/useRentals';
 import { rentalsService } from '../services/rentals.service';
 import { equipmentService } from '../services/equipment.service';
@@ -74,6 +74,7 @@ import type {
   EquipmentStatus,
   ManagerBreakdownResponse,
   Delivery,
+  ManagementActionAttentionItem,
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
@@ -192,6 +193,43 @@ function formatCompactCurrency(value: number) {
   if (abs >= 1_000_000) return `${(value / 1_000_000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} млн`;
   if (abs >= 1_000) return `${Math.round(value / 1_000).toLocaleString('ru-RU')} тыс`;
   return value.toLocaleString('ru-RU');
+}
+
+function apiErrorMessage(error: unknown, fallback: string) {
+  if (!error) return fallback;
+  const status = typeof error === 'object' && error && 'status' in error ? `HTTP ${(error as { status?: number }).status}` : '';
+  const message = error instanceof Error ? error.message : fallback;
+  return [status, message].filter(Boolean).join(': ');
+}
+
+const ATTENTION_PRIORITY_LABELS: Record<string, string> = {
+  critical: 'Критично',
+  high: 'Высокий',
+  medium: 'Средний',
+  low: 'Низкий',
+};
+
+const ATTENTION_AREA_LABELS: Record<string, string> = {
+  service: 'Сервис',
+  logistics: 'Доставка',
+  office: 'Офис',
+  admin: 'Админ',
+  rental_manager: 'Аренда',
+  unknown: 'Не определено',
+};
+
+function attentionAssigneeLabel(item: ManagementActionAttentionItem) {
+  return item.assignedToName || (item.isUnassigned ? 'Без ответственного' : 'Назначен');
+}
+
+function attentionDueLabel(item: ManagementActionAttentionItem) {
+  if (item.isOverdue) return item.dueDate ? `Просрочено с ${formatDate(item.dueDate)}` : 'Просрочено';
+  if (item.isDueToday) return 'Сегодня';
+  return item.dueDate ? formatDate(item.dueDate) : item.accountabilityLabel || 'Срок не задан';
+}
+
+function attentionLossLabel(value: number) {
+  return value > 0 ? formatCurrency(value) : 'без оценки';
 }
 
 type DashboardTone = 'default' | 'success' | 'warning' | 'danger' | 'info' | 'violet';
@@ -424,6 +462,16 @@ export default function Dashboard() {
     enabled: canViewTasksCenter,
     staleTime: 60_000,
   });
+  const canViewAttentionBlock = Boolean(
+    user?.role === 'Администратор'
+    || user?.role === 'Руководитель'
+    || user?.role === 'Коммерческий директор'
+    || user?.role === 'Офис-менеджер'
+    || user?.role === 'Менеджер по аренде'
+  );
+  const actionAttentionQuery = useManagementActionAttention({
+    enabled: canViewAttentionBlock && canViewEquipment,
+  });
   const { data: ganttRentals = [] } = useGanttData({ enabled: canViewRentals || canViewPlanner });
   const { data: deliveries = [] } = useQuery<Delivery[]>({
     queryKey: ['deliveries', 'dashboard'],
@@ -555,6 +603,29 @@ export default function Dashboard() {
     }),
     [clientDebtAgingRows, documents, equipmentList, rentalDebtRows, tickets, today, viewPlannerRentals],
   );
+  const actionAttention = actionAttentionQuery.data;
+  const topAttentionActions = useMemo(() => {
+    const byId = new Map<string, ManagementActionAttentionItem>();
+    [
+      ...(actionAttention?.groups?.critical ?? []),
+      ...(actionAttention?.groups?.topLoss ?? []),
+      ...(actionAttention?.groups?.unassigned ?? []),
+      ...(actionAttention?.groups?.today ?? []),
+    ].forEach(item => {
+      if (item?.actionId && !byId.has(item.actionId)) byId.set(item.actionId, item);
+    });
+    const priorityRank: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+    return Array.from(byId.values())
+      .sort((left, right) =>
+        Number(right.isOverdue) - Number(left.isOverdue)
+        || Number((priorityRank[right.priority] || 0) >= 3) - Number((priorityRank[left.priority] || 0) >= 3)
+        || Number(right.estimatedLoss || 0) - Number(left.estimatedLoss || 0)
+        || Number(right.isUnassigned) - Number(left.isUnassigned)
+        || Number(right.isDueToday) - Number(left.isDueToday)
+        || (priorityRank[right.priority] || 0) - (priorityRank[left.priority] || 0)
+      )
+      .slice(0, 7);
+  }, [actionAttention]);
   const documentControl = useMemo(
     () => buildDocumentControl({
       rentals: viewRentals,
@@ -2474,6 +2545,97 @@ export default function Dashboard() {
               </span>
             </div>
           </div>
+
+          {canViewAttentionBlock && canViewEquipment && (
+            <Card className={dashboardCardClass} data-testid="dashboard-attention-block">
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Управленческий контроль</p>
+                    <CardTitle className="app-shell-title mt-1 text-xl font-extrabold">Что требует внимания сегодня</CardTitle>
+                    <CardDescription>Короткая сводка по Action Queue, простоям и блокерам возврата техники в аренду.</CardDescription>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button asChild variant="secondary" size="sm"><Link to="/equipment">Открыть очередь</Link></Button>
+                    <Button asChild variant="outline" size="sm"><Link to="/equipment?actionQueueFilter=unassigned">Показать без ответственного</Link></Button>
+                    <Button asChild variant="outline" size="sm"><Link to="/equipment?actionQueueFilter=overdue">Показать просроченные</Link></Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {actionAttentionQuery.isError ? (
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200">
+                    Не удалось загрузить блок внимания. {apiErrorMessage(actionAttentionQuery.error, 'Проверьте доступ к /api/management/action-queue?view=attention.')}
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                      {[
+                        { label: 'Критично', value: actionAttention?.summary?.critical ?? 0, tone: (actionAttention?.summary?.critical ?? 0) > 0 ? 'danger' : 'success' },
+                        { label: 'Просрочено', value: actionAttention?.summary?.overdue ?? 0, tone: (actionAttention?.summary?.overdue ?? 0) > 0 ? 'danger' : 'success' },
+                        { label: 'Сегодня', value: actionAttention?.summary?.dueToday ?? 0, tone: (actionAttention?.summary?.dueToday ?? 0) > 0 ? 'warning' : 'default' },
+                        { label: 'Без ответственного', value: actionAttention?.summary?.unassigned ?? 0, tone: (actionAttention?.summary?.unassigned ?? 0) > 0 ? 'warning' : 'success' },
+                        { label: 'Потери сейчас', value: attentionLossLabel(actionAttention?.summary?.totalEstimatedLoss ?? 0), tone: (actionAttention?.summary?.totalEstimatedLoss ?? 0) > 0 ? 'danger' : 'success' },
+                        { label: 'Потеря в день', value: attentionLossLabel(actionAttention?.summary?.totalDailyLoss ?? 0), tone: (actionAttention?.summary?.totalDailyLoss ?? 0) > 0 ? 'warning' : 'success' },
+                      ].map(item => (
+                        <div key={item.label} className={`rounded-xl border px-3 py-3 ${
+                          item.tone === 'danger'
+                            ? 'border-red-300 bg-red-50/70 dark:border-red-900/70 dark:bg-red-950/20'
+                            : item.tone === 'warning'
+                              ? 'border-amber-300 bg-amber-50/70 dark:border-amber-900/70 dark:bg-amber-950/20'
+                              : item.tone === 'success'
+                                ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/70 dark:bg-emerald-950/20'
+                                : 'border-border bg-secondary/50'
+                        }`}>
+                          <p className="text-xs font-semibold text-muted-foreground">{item.label}</p>
+                          <p className="mt-1 text-xl font-extrabold text-foreground">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {actionAttentionQuery.isLoading ? (
+                      <div className="rounded-xl border border-border bg-secondary/40 px-4 py-5 text-sm text-muted-foreground">Загружаем очередь внимания...</div>
+                    ) : topAttentionActions.length === 0 ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-5 text-sm font-semibold text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200">
+                        Критичных действий на сегодня нет.
+                      </div>
+                    ) : (
+                      <div className="overflow-hidden rounded-xl border border-border">
+                        <div className="divide-y divide-border">
+                          {topAttentionActions.map(item => (
+                            <div key={item.actionId} className="grid gap-3 px-4 py-3 text-sm md:grid-cols-[minmax(0,1.25fr)_minmax(0,0.9fr)_minmax(0,0.75fr)_minmax(0,0.75fr)_auto] md:items-center">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge variant={item.priority === 'critical' ? 'danger' : item.priority === 'high' ? 'warning' : 'default'}>
+                                    {ATTENTION_PRIORITY_LABELS[item.priority] || 'Средний'}
+                                  </Badge>
+                                  {item.isOverdue ? <Badge variant="danger">Просрочено</Badge> : null}
+                                  {item.isUnassigned ? <Badge variant="warning">Без ответственного</Badge> : null}
+                                </div>
+                                <p className="mt-2 truncate font-semibold text-foreground">{item.title}</p>
+                              </div>
+                              <div className="min-w-0 text-muted-foreground">
+                                <p className="truncate">Техника: {item.equipmentId || 'не указана'}</p>
+                                <p className="truncate">{ATTENTION_AREA_LABELS[item.responsibleArea] || ATTENTION_AREA_LABELS.unknown}</p>
+                              </div>
+                              <div className="text-muted-foreground">{attentionAssigneeLabel(item)}</div>
+                              <div className="text-muted-foreground">{attentionDueLabel(item)}</div>
+                              <div className="flex items-center gap-3 md:justify-end">
+                                <span className="font-semibold text-foreground">{attentionLossLabel(item.estimatedLoss)}</span>
+                                <Button asChild variant="ghost" size="sm">
+                                  <Link to={item.links.equipment || '/equipment'}>Открыть</Link>
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
             {overviewKpiCards.map(item => {

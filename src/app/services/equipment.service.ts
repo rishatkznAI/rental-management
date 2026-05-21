@@ -1,6 +1,6 @@
 import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import { normalizeEquipment, normalizeEquipmentList, normalizeEquipmentPatch } from '../lib/equipmentClassification';
-import type { Equipment, FleetReadinessResponse, ManagementActionAssigneesResponse, ManagementActionQueueResponse, ManagementActionStateUpdate, RepairRecord, ShippingPhoto } from '../types';
+import type { Equipment, FleetReadinessResponse, ManagementActionAssigneesResponse, ManagementActionAttentionResponse, ManagementActionQueueResponse, ManagementActionStateUpdate, RepairRecord, ShippingPhoto } from '../types';
 
 export const equipmentService = {
   getAll: (): Promise<Equipment[]> =>
@@ -18,6 +18,9 @@ export const equipmentService = {
 
   getManagementActionQueue: (): Promise<ManagementActionQueueResponse> =>
     api.get<ManagementActionQueueResponse>('/api/management/action-queue'),
+
+  getManagementActionAttention: (): Promise<ManagementActionAttentionResponse> =>
+    api.get<ManagementActionAttentionResponse>('/api/management/action-queue?view=attention'),
 
   getManagementActionAssignees: (): Promise<ManagementActionAssigneesResponse> =>
     api.get<ManagementActionAssigneesResponse>('/api/management/action-queue/assignees'),

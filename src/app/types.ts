@@ -326,6 +326,52 @@ export interface ManagementActionQueueResponse {
   items: ManagementActionQueueItem[];
 }
 
+export interface ManagementActionAttentionItem {
+  actionId: string;
+  equipmentId: string;
+  title: string;
+  priority: ManagementActionPriority;
+  responsibleArea: FleetReadinessResponsibleArea;
+  readinessStatus: FleetReadinessStatus;
+  estimatedLoss: number;
+  estimatedDailyLoss: number;
+  blockedDays: number | null;
+  assignedToName: string;
+  dueDate: string;
+  isUnassigned: boolean;
+  isOverdue: boolean;
+  isDueToday: boolean;
+  isStale: boolean;
+  accountabilityLabel: string;
+  urgencyLabel: string;
+  links: {
+    equipment?: string;
+    serviceTicket?: string;
+    delivery?: string;
+    document?: string;
+  };
+}
+
+export interface ManagementActionAttentionResponse {
+  ok: true;
+  summary: {
+    critical: number;
+    overdue: number;
+    dueToday: number;
+    unassigned: number;
+    stale: number;
+    totalEstimatedLoss: number;
+    totalDailyLoss: number;
+  };
+  groups: {
+    critical: ManagementActionAttentionItem[];
+    today: ManagementActionAttentionItem[];
+    unassigned: ManagementActionAttentionItem[];
+    topLoss: ManagementActionAttentionItem[];
+    byResponsibleArea: Array<{ responsibleArea: FleetReadinessResponsibleArea; count: number }>;
+  };
+}
+
 export interface ManagementActionStateUpdate {
   status: ManagementActionExecutionStatus;
   assignedToUserId?: string;

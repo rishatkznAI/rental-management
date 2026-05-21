@@ -114,6 +114,29 @@ test('management action queue filters include execution statuses, overdue, mine,
   assert.match(equipmentPageSource, /item\.responsibleArea === filter/);
 });
 
+test('management action queue reads URL filter params with safe fallback', () => {
+  assert.match(equipmentPageSource, /useSearchParams/);
+  assert.match(equipmentPageSource, /normalizeActionQueueFilter/);
+  assert.match(equipmentPageSource, /const actionQueueFilterParam = searchParams\.get\('actionQueueFilter'\) \|\| searchParams\.get\('actionQueue'\)/);
+  assert.match(equipmentPageSource, /ACTION_QUEUE_FILTERS\.some\(option => option\.value === value\)/);
+  assert.match(equipmentPageSource, /: 'all'/);
+  assert.match(equipmentPageSource, /normalizeActionQueueFilter\(actionQueueFilterParam\)/);
+  assert.match(equipmentPageSource, /\[actionQueueFilterParam\]/);
+  assert.match(equipmentPageSource, /initialFilter=\{initialActionQueueFilter\}/);
+  assert.match(equipmentPageSource, /React\.useEffect\(\(\) => \{\s*setFilter\(initialFilter\);/);
+});
+
+test('management action queue URL filters support dashboard attention shortcuts', () => {
+  assert.match(equipmentPageSource, /value: 'unassigned'/);
+  assert.match(equipmentPageSource, /value: 'overdue'/);
+  assert.match(equipmentPageSource, /value: 'due_today'/);
+  assert.match(equipmentPageSource, /value: 'stale'/);
+  assert.match(equipmentPageSource, /value: 'critical'/);
+  assert.match(equipmentPageSource, /activeFilterLabel/);
+  assert.match(equipmentPageSource, /Активный фильтр:/);
+  assert.match(equipmentPageSource, /aria-pressed=\{filter === option\.value\}/);
+});
+
 test('management action queue table renders sorted API items without raw undefined states', () => {
   assert.match(equipmentPageSource, /Приоритет/);
   assert.match(equipmentPageSource, /Действие/);

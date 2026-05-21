@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Archive,
@@ -165,6 +165,12 @@ const ACTION_QUEUE_FILTERS: Array<{ value: ManagementActionQueueFilter; label: s
   { value: 'admin', label: 'Админ' },
 ];
 
+function normalizeActionQueueFilter(value: string | null | undefined): ManagementActionQueueFilter {
+  return ACTION_QUEUE_FILTERS.some(option => option.value === value)
+    ? value as ManagementActionQueueFilter
+    : 'all';
+}
+
 const ACTION_EXECUTION_STATUS_OPTIONS: Array<{ value: ManagementActionExecutionStatus; label: string }> = [
   { value: 'open', label: 'Открыто' },
   { value: 'in_progress', label: 'В работе' },
@@ -266,14 +272,16 @@ function ManagementActionQueueSection({
   isLoading,
   error,
   currentUser,
+  initialFilter = 'all',
 }: {
   items: ManagementActionQueueItem[];
   summary?: ManagementActionQueueSummary;
   isLoading: boolean;
   error: unknown;
   currentUser?: { id?: string; name?: string } | null;
+  initialFilter?: ManagementActionQueueFilter;
 }) {
-  const [filter, setFilter] = React.useState<ManagementActionQueueFilter>('all');
+  const [filter, setFilter] = React.useState<ManagementActionQueueFilter>(initialFilter);
   const [editingItem, setEditingItem] = React.useState<ManagementActionQueueItem | null>(null);
   const updateState = useUpdateManagementActionState();
   const assigneesQuery = useManagementActionAssignees();
@@ -284,6 +292,10 @@ function ManagementActionQueueSection({
     dueDate: '',
     comment: '',
   });
+
+  React.useEffect(() => {
+    setFilter(initialFilter);
+  }, [initialFilter]);
 
   const openEditor = React.useCallback((item: ManagementActionQueueItem) => {
     setEditingItem(item);
@@ -358,6 +370,7 @@ function ManagementActionQueueSection({
     { label: 'Сегодня', value: executionKpis.dueToday, icon: CalendarPlus, className: 'text-blue-400' },
     { label: 'Зависли', value: executionKpis.stale, icon: ClipboardList, className: 'text-yellow-400' },
   ];
+  const activeFilterLabel = ACTION_QUEUE_FILTERS.find(option => option.value === filter)?.label || 'Все';
 
   const formDaysUntilDue = React.useMemo(() => {
     if (!form.dueDate) return null;
@@ -401,6 +414,7 @@ function ManagementActionQueueSection({
               <button
                 key={option.value}
                 type="button"
+                aria-pressed={filter === option.value}
                 onClick={() => setFilter(option.value)}
                 className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
                   filter === option.value
@@ -413,6 +427,7 @@ function ManagementActionQueueSection({
             ))}
           </div>
         </div>
+        <div className="mt-3 text-xs font-semibold text-muted-foreground">Активный фильтр: {activeFilterLabel}</div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {kpis.map(({ label, value, icon: Icon, className }) => (
@@ -1344,6 +1359,7 @@ function apiErrorMessage(error: unknown, fallback: string) {
 }
 
 export default function Equipment() {
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const { can, canView, canReadCollection } = usePermissions();
   const canViewRentals = canView('rentals');
@@ -1365,6 +1381,11 @@ export default function Equipment() {
   const [showFilters, setShowFilters] = React.useState(false);
   const [pageSize, setPageSize] = React.useState(DEFAULT_EQUIPMENT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = React.useState(1);
+  const actionQueueFilterParam = searchParams.get('actionQueueFilter') || searchParams.get('actionQueue');
+  const initialActionQueueFilter = React.useMemo(
+    () => normalizeActionQueueFilter(actionQueueFilterParam),
+    [actionQueueFilterParam],
+  );
   const equipmentQuery = useEquipmentList();
   const readinessQuery = useEquipmentReadiness();
   const actionQueueQuery = useManagementActionQueue();
@@ -1960,6 +1981,7 @@ export default function Equipment() {
         isLoading={actionQueueQuery.isLoading}
         error={actionQueueQuery.error}
         currentUser={user}
+        initialFilter={initialActionQueueFilter}
       />
 
       <div className="space-y-3 sm:hidden">

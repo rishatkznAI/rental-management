@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { buildDashboardAttentionSummary } from '../src/app/lib/dashboardAttention.js';
+
+const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
+const equipmentServiceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/equipment.service.ts'), 'utf8');
+const equipmentHooksSource = fs.readFileSync(path.join(process.cwd(), 'src/app/hooks/useEquipment.ts'), 'utf8');
 
 test('dashboard attention summary calculates daily risks without NaN values', () => {
   const summary = buildDashboardAttentionSummary({
@@ -82,4 +88,31 @@ test('dashboard attention summary is defensive for missing legacy arrays', () =>
   assert.equal(summary.documents.items.length, 0);
   assert.equal(summary.highRiskClients.top.length, 0);
   assert.equal(JSON.stringify(summary).includes('NaN'), false);
+});
+
+test('dashboard renders management attention block from compact action queue API', () => {
+  assert.match(dashboardSource, /Что требует внимания сегодня/);
+  assert.match(dashboardSource, /data-testid="dashboard-attention-block"/);
+  assert.match(equipmentServiceSource, /getManagementActionAttention: \(\): Promise<ManagementActionAttentionResponse> =>\s*api\.get<ManagementActionAttentionResponse>\('\/api\/management\/action-queue\?view=attention'\)/);
+  assert.match(equipmentHooksSource, /useManagementActionAttention/);
+  assert.match(dashboardSource, /useManagementActionAttention\(\{\s*enabled: canViewAttentionBlock && canViewEquipment/);
+});
+
+test('dashboard attention block renders KPIs, rows, empty and error states', () => {
+  for (const label of ['Критично', 'Просрочено', 'Сегодня', 'Без ответственного', 'Потери сейчас', 'Потеря в день']) {
+    assert.match(dashboardSource, new RegExp(label));
+  }
+  assert.match(dashboardSource, /topAttentionActions\.map/);
+  assert.match(dashboardSource, /Критичных действий на сегодня нет\./);
+  assert.match(dashboardSource, /Не удалось загрузить блок внимания/);
+  assert.match(dashboardSource, /Открыть очередь/);
+  assert.match(dashboardSource, /Показать без ответственного/);
+  assert.match(dashboardSource, /Показать просроченные/);
+  assert.match(dashboardSource, /\/equipment\?actionQueueFilter=unassigned/);
+  assert.match(dashboardSource, /\/equipment\?actionQueueFilter=overdue/);
+  assert.doesNotMatch(dashboardSource, /\/equipment\?actionQueue=unassigned/);
+  assert.doesNotMatch(dashboardSource, /\/equipment\?actionQueue=overdue/);
+  assert.doesNotMatch(dashboardSource, />undefined</);
+  assert.doesNotMatch(dashboardSource, />null</);
+  assert.doesNotMatch(dashboardSource, />\\[object Object\\]</);
 });

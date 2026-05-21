@@ -7,6 +7,7 @@ export const EQUIPMENT_KEYS = {
   all: ['equipment'] as const,
   readiness: ['equipment', 'readiness'] as const,
   managementActionQueue: ['equipment', 'management-action-queue'] as const,
+  managementActionAttention: ['equipment', 'management-action-attention'] as const,
   managementActionAssignees: ['equipment', 'management-action-assignees'] as const,
   paginated: (params: PaginatedQueryParams) => ['equipment', 'paginated', params] as const,
   detail: (id: string) => ['equipment', id] as const,
@@ -39,6 +40,18 @@ export function useManagementActionQueue(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: EQUIPMENT_KEYS.managementActionQueue,
     queryFn: equipmentService.getManagementActionQueue,
+    enabled: options.enabled ?? true,
+    staleTime: 1000 * 60,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: 1,
+  });
+}
+
+export function useManagementActionAttention(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: EQUIPMENT_KEYS.managementActionAttention,
+    queryFn: equipmentService.getManagementActionAttention,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,

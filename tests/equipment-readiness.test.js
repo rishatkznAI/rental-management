@@ -671,6 +671,107 @@ test('GET /api/management/action-queue returns accountability summary and derive
   });
 });
 
+test('GET /api/management/action-queue?view=attention returns compact summary groups', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const daysFromToday = days => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  await withServer(createApp({
+    equipment: [
+      baseEquipment({ id: 'EQ-ready', inventoryNumber: 'INV-ready' }),
+      baseEquipment({ id: 'EQ-rented', inventoryNumber: 'INV-rented' }),
+      baseEquipment({ id: 'EQ-overdue', inventoryNumber: 'INV-overdue', status: 'in_service', dailyRate: 10000 }),
+      baseEquipment({ id: 'EQ-today', inventoryNumber: 'INV-today', status: 'in_service', dailyRate: 9000 }),
+      baseEquipment({ id: 'EQ-unassigned', inventoryNumber: 'INV-unassigned', status: 'in_service', dailyRate: 25000 }),
+      baseEquipment({ id: 'EQ-low-loss', inventoryNumber: 'INV-low-loss', dailyRate: 4000 }),
+    ],
+    rentals: [{ id: 'R-rented', equipmentId: 'EQ-rented', status: 'active', startDate: today, dailyRate: 7000 }],
+    service: [
+      { id: 'S-overdue', equipmentId: 'EQ-overdue', status: 'new', createdAt: daysFromToday(-5) },
+      { id: 'S-today', equipmentId: 'EQ-today', status: 'new', createdAt: daysFromToday(-1) },
+      { id: 'S-unassigned', equipmentId: 'EQ-unassigned', status: 'new', createdAt: daysFromToday(-3) },
+    ],
+    deliveries: [{ id: 'D-low-loss', equipmentId: 'EQ-low-loss', status: 'sent', scheduledDate: daysFromToday(-1) }],
+    management_action_states: [
+      {
+        id: 'STATE-overdue',
+        actionId: 'equipment_readiness:EQ-overdue:in_service',
+        sourceType: 'equipment_readiness',
+        sourceKey: 'EQ-overdue',
+        equipmentId: 'EQ-overdue',
+        status: 'open',
+        assignedToUserId: 'U-mechanic',
+        assignedToName: 'Механик',
+        dueDate: daysFromToday(-1),
+        updatedAt: today,
+      },
+      {
+        id: 'STATE-today',
+        actionId: 'equipment_readiness:EQ-today:in_service',
+        sourceType: 'equipment_readiness',
+        sourceKey: 'EQ-today',
+        equipmentId: 'EQ-today',
+        status: 'open',
+        assignedToUserId: 'U-mechanic',
+        assignedToName: 'Механик',
+        dueDate: today,
+        updatedAt: today,
+      },
+      {
+        id: 'STATE-low-loss',
+        actionId: 'equipment_readiness:EQ-low-loss:delivery_blocked',
+        sourceType: 'equipment_readiness',
+        sourceKey: 'EQ-low-loss',
+        equipmentId: 'EQ-low-loss',
+        status: 'resolved',
+        dueDate: daysFromToday(-1),
+        updatedAt: today,
+      },
+    ],
+  }).app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/management/action-queue?view=attention', 'admin-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.items, undefined);
+    assert.equal(response.body.summary.overdue, 1);
+    assert.equal(response.body.summary.dueToday, 1);
+    assert.equal(response.body.summary.unassigned, 1);
+    assert.equal(response.body.summary.critical >= 2, true);
+    assert.equal(response.body.summary.totalEstimatedLoss >= 112000, true);
+    assert.equal(response.body.summary.totalDailyLoss, 44000);
+    assert.equal(response.body.groups.critical[0].equipmentId, 'EQ-overdue');
+    assert.equal(response.body.groups.today.some(item => item.equipmentId === 'EQ-today'), true);
+    assert.equal(response.body.groups.unassigned.some(item => item.equipmentId === 'EQ-unassigned'), true);
+    assert.equal(response.body.groups.topLoss[0].equipmentId, 'EQ-unassigned');
+    assert.equal(response.body.groups.byResponsibleArea.some(item => item.responsibleArea === 'service' && item.count === 3), true);
+    const payload = JSON.stringify(response.body);
+    assert.equal(payload.includes('EQ-ready'), false);
+    assert.equal(payload.includes('EQ-rented'), false);
+    assert.equal(payload.includes('password'), false);
+    assert.equal(payload.includes('token'), false);
+    assert.equal(payload.includes('[object Object]'), false);
+  });
+});
+
+test('GET /api/management/action-queue?view=attention preserves role visibility', async () => {
+  await withServer(createApp({
+    equipment: [
+      baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 5000 }),
+      baseEquipment({ id: 'EQ-delivery', inventoryNumber: 'INV-delivery', dailyRate: 8000 }),
+    ],
+    service: [{ id: 'S-service', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-18' }],
+    deliveries: [{ id: 'D-delivery', equipmentId: 'EQ-delivery', status: 'sent', scheduledDate: '2026-05-18' }],
+  }).app, async (baseUrl) => {
+    const mechanic = await getJson(baseUrl, '/api/management/action-queue?view=attention', 'mechanic-token');
+    assert.equal(mechanic.status, 200);
+    assert.equal(mechanic.body.groups.byResponsibleArea.find(item => item.responsibleArea === 'service').count, 1);
+    assert.equal(JSON.stringify(mechanic.body).includes('EQ-delivery'), false);
+
+    const investor = await getJson(baseUrl, '/api/management/action-queue?view=attention', 'investor-token');
+    assert.equal(investor.status, 200);
+    assert.equal(investor.body.summary.critical, 0);
+    assert.equal(investor.body.groups.critical.length, 0);
+  });
+});
+
 test('GET /api/management/action-queue/assignees returns safe active users for managers only', async () => {
   await withServer(createApp({
     users: [

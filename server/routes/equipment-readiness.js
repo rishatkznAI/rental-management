@@ -289,6 +289,84 @@ function buildActionQueueSummary(items) {
   return { summary, items };
 }
 
+function compactAttentionAction(item) {
+  return {
+    actionId: String(item.actionId || ''),
+    equipmentId: String(item.equipmentId || ''),
+    title: String(item.title || 'Действие требует внимания'),
+    priority: item.priority || 'low',
+    responsibleArea: item.responsibleArea || 'unknown',
+    readinessStatus: item.readinessStatus || 'unknown',
+    estimatedLoss: Number(item.estimatedLoss || 0),
+    estimatedDailyLoss: Number(item.estimatedDailyLoss || 0),
+    blockedDays: item.blockedDays ?? null,
+    assignedToName: String(item.assignedToName || ''),
+    dueDate: String(item.dueDate || ''),
+    isUnassigned: Boolean(item.isUnassigned),
+    isOverdue: Boolean(item.isOverdue || item.executionOverdue),
+    isDueToday: Boolean(item.isDueToday),
+    isStale: Boolean(item.isStale),
+    accountabilityLabel: String(item.accountabilityLabel || ''),
+    urgencyLabel: String(item.urgencyLabel || ''),
+    links: {
+      equipment: item.links?.equipment || (item.equipmentId ? `/equipment/${item.equipmentId}` : ''),
+      serviceTicket: item.links?.serviceTicket || '',
+      delivery: item.links?.delivery || '',
+      document: item.links?.document || '',
+    },
+  };
+}
+
+function attentionActionSort(left, right) {
+  const priorityRank = { critical: 4, high: 3, medium: 2, low: 1 };
+  return Number(right.isOverdue) - Number(left.isOverdue)
+    || ((priorityRank[right.priority] || 0) >= 3 ? 1 : 0) - ((priorityRank[left.priority] || 0) >= 3 ? 1 : 0)
+    || Number(right.estimatedLoss || 0) - Number(left.estimatedLoss || 0)
+    || Number(right.isUnassigned) - Number(left.isUnassigned)
+    || Number(right.isDueToday) - Number(left.isDueToday)
+    || (priorityRank[right.priority] || 0) - (priorityRank[left.priority] || 0);
+}
+
+function buildAttentionActionQueueView(queue) {
+  const activeItems = (queue.items || [])
+    .filter(item => !TERMINAL_ACTION_STATUSES.has(item.executionStatus))
+    .map(compactAttentionAction)
+    .sort(attentionActionSort);
+  const criticalItems = activeItems.filter(item =>
+    item.isOverdue
+    || item.priority === 'critical'
+    || item.priority === 'high'
+    || item.estimatedLoss >= STALE_HIGH_LOSS_THRESHOLD
+    || (item.isUnassigned && item.estimatedLoss > 0)
+  );
+  const byResponsibleArea = ['service', 'logistics', 'office', 'admin', 'unknown'].map(area => ({
+    responsibleArea: area,
+    count: activeItems.filter(item => (item.responsibleArea || 'unknown') === area).length,
+  }));
+  const roundMoney = value => Math.round(value * 100) / 100;
+  return {
+    summary: {
+      critical: criticalItems.length,
+      overdue: activeItems.filter(item => item.isOverdue).length,
+      dueToday: activeItems.filter(item => item.isDueToday).length,
+      unassigned: activeItems.filter(item => item.isUnassigned).length,
+      stale: activeItems.filter(item => item.isStale).length,
+      totalEstimatedLoss: roundMoney(activeItems.reduce((sum, item) => sum + Number(item.estimatedLoss || 0), 0)),
+      totalDailyLoss: roundMoney(activeItems.reduce((sum, item) => sum + Number(item.estimatedDailyLoss || 0), 0)),
+    },
+    groups: {
+      critical: criticalItems.slice(0, 7),
+      today: activeItems.filter(item => item.isDueToday).slice(0, 7),
+      unassigned: activeItems.filter(item => item.isUnassigned).slice(0, 7),
+      topLoss: activeItems
+        .filter(item => Number(item.estimatedLoss || 0) > 0)
+        .sort((left, right) => Number(right.estimatedLoss || 0) - Number(left.estimatedLoss || 0))
+        .slice(0, 7),
+      byResponsibleArea,
+    },
+  };
+}
+
 function actionQueueContext({ readData, req, accessControl, canReadCollection }) {
   return {
     equipment: scopedCollection({ collection: 'equipment', req, readData, accessControl, canReadCollection }),
@@ -412,6 +490,15 @@ function registerEquipmentReadinessRoutes(deps) {
       counts: contextCounts(context, states),
       itemsReturned: visibleQueue.items.length,
     });
+    if (req.query.view === 'attention') {
+      const attention = buildAttentionActionQueueView(visibleQueue);
+      return res.json({
+        ok: true,
+        summary: attention.summary,
+        groups: attention.groups,
+      });
+    }
+
     return res.json({
       ok: true,
       summary: visibleQueue.summary,
@@ -521,6 +608,7 @@ function registerEquipmentReadinessRoutes(deps) {
 module.exports = {
   registerEquipmentReadinessRoutes,
   attachExecutionState,
+  buildAttentionActionQueueView,
   isActionOverdue,
   actionExecutionLabel,
 };

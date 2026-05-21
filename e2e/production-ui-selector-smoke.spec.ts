@@ -40,6 +40,12 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
   test.setTimeout(180_000);
 
   const blockedWrites = await installProductionReadOnlyGuard(page);
+  const requestCounts = { readiness: 0, actionQueue: 0 };
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/equipment/readiness') requestCounts.readiness += 1;
+    if (path === '/api/management/action-queue') requestCounts.actionQueue += 1;
+  });
   const apiUrl = requiredEnv('PRODUCTION_API_URL', 'production UI selector smoke').replace(/\/$/, '');
   const frontendUrl = requiredEnv('PRODUCTION_FRONTEND_URL', 'production UI selector smoke').replace(/\/$/, '');
   const expectedCommit = String(process.env.EXPECTED_RELEASE_COMMIT || '').trim();
@@ -123,5 +129,9 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
   expect((await cellText(firstReadinessRow, 5)).length, 'readiness row should render estimated loss').toBeGreaterThan(0);
   expect((await cellText(firstReadinessRow, 6)).length, 'readiness row should render responsible field').toBeGreaterThan(0);
 
+  const visibleText = await page.locator('body').innerText();
+  expect(visibleText, 'production UI should not render raw undefined/null/object placeholders').not.toMatch(/\bundefined\b|\bnull\b|\[object Object\]/i);
+  expect(requestCounts.readiness, 'production UI selector smoke should not refetch readiness excessively').toBeLessThanOrEqual(3);
+  expect(requestCounts.actionQueue, 'production UI selector smoke should not refetch action queue excessively').toBeLessThanOrEqual(3);
   expect(blockedWrites, 'production UI selector smoke must not attempt protected write endpoints').toEqual([]);
 });

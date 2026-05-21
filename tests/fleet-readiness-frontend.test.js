@@ -68,6 +68,8 @@ test('readiness error state is safe and endpoint is centralized in service hook'
   assert.match(equipmentServiceSource, /getReadiness: \(\): Promise<FleetReadinessResponse> =>\s*api\.get<FleetReadinessResponse>\('\/api\/equipment\/readiness'\)/);
   assert.match(equipmentHookSource, /useEquipmentReadiness/);
   assert.match(equipmentHookSource, /EQUIPMENT_KEYS\.readiness/);
+  assert.match(equipmentHookSource, /refetchOnWindowFocus: false/);
+  assert.match(equipmentHookSource, /refetchOnReconnect: false/);
 });
 
 test('management action queue section renders on the equipment page', () => {
@@ -144,4 +146,6 @@ test('management action queue empty and error states are safe', () => {
   assert.match(equipmentServiceSource, /getManagementActionQueue: \(\): Promise<ManagementActionQueueResponse> =>\s*api\.get<ManagementActionQueueResponse>\('\/api\/management\/action-queue'\)/);
   assert.match(equipmentHookSource, /useManagementActionQueue/);
   assert.match(equipmentHookSource, /EQUIPMENT_KEYS\.managementActionQueue/);
+  assert.match(equipmentHookSource, /refetchOnWindowFocus: false/);
+  assert.match(equipmentHookSource, /refetchOnReconnect: false/);
 });

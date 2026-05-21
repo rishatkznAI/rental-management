@@ -343,7 +343,8 @@ const MAX_POLL_INTERVAL_MS = Math.max(3000, Number(process.env.MAX_POLL_INTERVAL
 const MAX_POLL_INITIAL_REPLAY_MS = Math.max(0, Number(process.env.MAX_POLL_INITIAL_REPLAY_MS || 5 * 60 * 1000));
 const MAX_POLL_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.MAX_POLL_REQUEST_TIMEOUT_MS || 8000));
 const SHOULD_REGISTER_MAX_WEBHOOKS = Boolean(WEBHOOK_URL) &&
-  MAX_BOT_TRANSPORT !== 'polling';
+  MAX_BOT_TRANSPORT !== 'polling' &&
+  !botDisabledConfig.disabled;
 
 function logMaxBotRuntimeConfig() {
   console.log('[BOT] MAX config:', JSON.stringify({
@@ -353,6 +354,7 @@ function logMaxBotRuntimeConfig() {
     transport: MAX_BOT_TRANSPORT,
     webhookPath: MAIN_BOT_WEBHOOK_PATH,
     sharedToken: managerAndDeliveryShareToken,
+    botDisabled: botDisabledConfig.disabled,
   }));
   if (!MAIN_BOT_TOKEN) {
     console.error('[BOT] Критично: BOT_TOKEN не задан, отправка сообщений MAX работать не будет.');
@@ -413,6 +415,7 @@ const {
   webhookPath: MAIN_BOT_WEBHOOK_PATH,
   webhookSecret: MAX_WEBHOOK_SECRET,
   logger: console,
+  botDisabled: botDisabledConfig.disabled,
 });
 
 async function sendMessage(target, text, options = {}) {
@@ -2582,7 +2585,9 @@ startServer({
     applyAdminResetFromEnv,
     registerWebhook: async () => {
       if (!SHOULD_REGISTER_MAX_WEBHOOKS) {
-        console.log(`[BOT] Webhook MAX пропущен: транспорт ${MAX_BOT_TRANSPORT}`);
+        console.log(botDisabledConfig.disabled
+          ? '[BOT] Webhook MAX пропущен: BOT_DISABLED=true'
+          : `[BOT] Webhook MAX пропущен: транспорт ${MAX_BOT_TRANSPORT}`);
         return;
       }
       await registerMainWebhook();

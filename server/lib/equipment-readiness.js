@@ -2,6 +2,7 @@ const {
   equipmentMatchesServiceTicket,
   rentalMatchesEquipment,
   normalizeEquipmentRef,
+  buildEquipmentLookup,
 } = require('./equipment-matching');
 
 const READINESS_LABELS = {
@@ -91,6 +92,158 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function pushMapArray(map, key, value) {
+  const normalized = normalizeEquipmentRef(key);
+  if (!normalized) return;
+  if (!map.has(normalized)) map.set(normalized, []);
+  map.get(normalized).push(value);
+}
+
+function setMapFirst(map, key, value) {
+  const normalized = normalizeEquipmentRef(key);
+  if (normalized && !map.has(normalized)) map.set(normalized, value);
+}
+
+function lookupUnique(map, counts, ref) {
+  const normalized = normalizeEquipmentRef(ref);
+  if (!normalized || (counts.get(normalized) || 0) !== 1) return null;
+  return map.get(normalized) || null;
+}
+
+function resolveEquipmentIdsFromRefs(record, lookup, refs = []) {
+  const ids = new Set();
+  const directId = normalizeEquipmentRef(record?.equipmentId);
+  if (directId && lookup.byId.has(directId)) ids.add(directId);
+
+  const scalarRefs = [
+    record?.equipmentInv,
+    record?.inventoryNumber,
+    record?.serialNumber,
+    record?.equipmentInventoryNumber,
+  ];
+  for (const ref of [...scalarRefs, ...refs].flat()) {
+    const normalized = normalizeEquipmentRef(ref);
+    if (!normalized) continue;
+    const byId = lookup.byId.get(normalized);
+    if (byId?.id) ids.add(normalizeEquipmentRef(byId.id));
+    const byInventory = lookupUnique(lookup.byInventory, lookup.inventoryCounts, normalized);
+    if (byInventory?.id) ids.add(normalizeEquipmentRef(byInventory.id));
+    const byEquipmentInv = lookupUnique(lookup.byEquipmentInv, lookup.equipmentInvCounts, normalized);
+    if (byEquipmentInv?.id) ids.add(normalizeEquipmentRef(byEquipmentInv.id));
+    const bySerial = lookupUnique(lookup.bySerial, lookup.serialCounts, normalized);
+    if (bySerial?.id) ids.add(normalizeEquipmentRef(bySerial.id));
+  }
+  return ids;
+}
+
+function addLatestByTime(map, key, item, fields) {
+  const normalized = normalizeEquipmentRef(key);
+  if (!normalized) return;
+  const time = Math.max(...fields.map(field => parseTime(item?.[field])));
+  const previous = map.get(normalized);
+  if (!previous || time > previous.time) map.set(normalized, { item, time });
+}
+
+function buildReadinessIndexes(context = {}) {
+  const equipmentList = asArray(context.equipment);
+  const lookup = buildEquipmentLookup(equipmentList);
+  const rentalsByEquipmentId = new Map();
+  const serviceByEquipmentId = new Map();
+  const deliveriesByEquipmentId = new Map();
+  const documentsByEquipmentId = new Map();
+  const receivingPhotosByEquipmentId = new Map();
+  const latestGsmPacketByEquipmentId = new Map();
+  const rentalRatesByCategory = new Map();
+  const unmatchedRentals = [];
+  const unmatchedServiceTickets = [];
+  const unmatchedDeliveries = [];
+  const unmatchedDocuments = [];
+  const unmatchedReceivingPhotos = [];
+
+  for (const rental of [...asArray(context.rentals), ...asArray(context.ganttRentals)]) {
+    const ids = resolveEquipmentIdsFromRefs(rental, lookup, Array.isArray(rental?.equipment) ? rental.equipment : []);
+    if (ids.size === 0) unmatchedRentals.push(rental);
+    for (const id of ids) {
+      pushMapArray(rentalsByEquipmentId, id, rental);
+      const equipment = lookup.byId.get(id);
+      const categoryKey = lower(equipment?.type || equipment?.category || equipment?.model);
+      const rateEntry = categoryKey ? rateEntryFromRentalForEquipment(rental, id) : null;
+      if (rateEntry) pushMapArray(rentalRatesByCategory, categoryKey, rateEntry);
+    }
+  }
+
+  for (const ticket of asArray(context.serviceTickets)) {
+    const ids = resolveEquipmentIdsFromRefs(ticket, lookup);
+    if (ids.size === 0) unmatchedServiceTickets.push(ticket);
+    for (const id of ids) pushMapArray(serviceByEquipmentId, id, ticket);
+  }
+
+  for (const delivery of asArray(context.deliveries)) {
+    const ids = resolveEquipmentIdsFromRefs(delivery, lookup, [delivery?.equipmentLabel, delivery?.cargo]);
+    if (ids.size === 0) unmatchedDeliveries.push(delivery);
+    for (const id of ids) pushMapArray(deliveriesByEquipmentId, id, delivery);
+  }
+
+  for (const document of asArray(context.documents)) {
+    const ids = resolveEquipmentIdsFromRefs(document, lookup);
+    if (ids.size === 0) unmatchedDocuments.push(document);
+    for (const id of ids) pushMapArray(documentsByEquipmentId, id, document);
+  }
+
+  for (const photo of asArray(context.shippingPhotos)) {
+    if (lower(photo?.type) !== 'receiving') continue;
+    const ids = resolveEquipmentIdsFromRefs(photo, lookup, [photo?.equipmentInv]);
+    if (ids.size === 0) unmatchedReceivingPhotos.push(photo);
+    for (const id of ids) pushMapArray(receivingPhotosByEquipmentId, id, photo);
+  }
+
+  const equipmentIdByGsmImei = new Map();
+  const equipmentIdByGsmDeviceId = new Map();
+  const equipmentIdByGsmTrackerId = new Map();
+  for (const item of equipmentList) {
+    setMapFirst(equipmentIdByGsmImei, item?.gsmImei, item?.id);
+    setMapFirst(equipmentIdByGsmDeviceId, item?.gsmDeviceId, item?.id);
+    setMapFirst(equipmentIdByGsmTrackerId, item?.gsmTrackerId, item?.id);
+  }
+  for (const packet of asArray(context.gsmPackets)) {
+    const ids = new Set();
+    if (packet?.equipmentId && lookup.byId.has(normalizeEquipmentRef(packet.equipmentId))) ids.add(normalizeEquipmentRef(packet.equipmentId));
+    const byImei = equipmentIdByGsmImei.get(normalizeEquipmentRef(packet?.imei));
+    const byDevice = equipmentIdByGsmDeviceId.get(normalizeEquipmentRef(packet?.deviceId));
+    const byTracker = equipmentIdByGsmTrackerId.get(normalizeEquipmentRef(packet?.trackerId));
+    if (byImei) ids.add(normalizeEquipmentRef(byImei));
+    if (byDevice) ids.add(normalizeEquipmentRef(byDevice));
+    if (byTracker) ids.add(normalizeEquipmentRef(byTracker));
+    for (const id of ids) addLatestByTime(latestGsmPacketByEquipmentId, id, packet, ['deviceTime', 'receivedAt', 'createdAt']);
+  }
+
+  return {
+    rentalsByEquipmentId,
+    serviceByEquipmentId,
+    deliveriesByEquipmentId,
+    documentsByEquipmentId,
+    receivingPhotosByEquipmentId,
+    latestGsmPacketByEquipmentId,
+    rentalRatesByCategory,
+    unmatchedRentals,
+    unmatchedServiceTickets,
+    unmatchedDeliveries,
+    unmatchedDocuments,
+    unmatchedReceivingPhotos,
+  };
+}
+
+function readinessIndexes(context = {}) {
+  if (!context.__readinessIndexes) {
+    Object.defineProperty(context, '__readinessIndexes', {
+      value: buildReadinessIndexes(context),
+      enumerable: false,
+      configurable: true,
+    });
+  }
+  return context.__readinessIndexes;
+}
+
 function parseTime(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
   const time = Date.parse(normalizeText(value));
@@ -159,6 +312,11 @@ function rateEntryFromRental(rental) {
   };
 }
 
+function rateEntryFromRentalForEquipment(rental, equipmentId) {
+  const entry = rateEntryFromRental(rental);
+  return entry ? { ...entry, equipmentId: normalizeEquipmentRef(equipmentId) } : null;
+}
+
 function inferEquipmentDailyPrice(equipment) {
   const explicit = parseMoneyValue(
     equipment?.dailyRate ??
@@ -189,15 +347,12 @@ function estimateDailyRate({ equipment, relatedRentals, context }) {
   const equipmentRate = inferEquipmentDailyPrice(equipment);
   if (equipmentRate !== null) return { estimatedDailyRate: equipmentRate, estimatedDailyRateSource: 'equipment_price' };
 
-  const equipmentList = asArray(context.equipment);
   const categoryKey = lower(equipment?.type || equipment?.category || equipment?.model);
   if (categoryKey) {
-    const allRentals = [...asArray(context.rentals), ...asArray(context.ganttRentals)];
-    const categoryRates = equipmentList
-      .filter(item => item?.id !== equipment?.id && lower(item?.type || item?.category || item?.model) === categoryKey)
-      .flatMap(item => allRentals.filter(rental => rentalMatchesEquipment(rental, item, equipmentList)))
-      .map(rateEntryFromRental)
-      .filter(Boolean);
+    const currentEquipmentId = normalizeEquipmentRef(equipment?.id);
+    const categoryRates = asArray(readinessIndexes(context).rentalRatesByCategory.get(categoryKey))
+      .filter(entry => entry.equipmentId !== currentEquipmentId)
+      .filter(entry => entry.rate > 0);
     if (categoryRates.length > 0) {
       const average = categoryRates.reduce((sum, entry) => sum + entry.rate, 0) / categoryRates.length;
       return { estimatedDailyRate: roundMoney(average), estimatedDailyRateSource: 'category_average' };
@@ -327,10 +482,12 @@ function latestByTime(items, fields) {
 
 function getEquipmentGsmLastSeen(equipment, packets) {
   const direct = parseTime(equipment?.gsmLastSeenAt || equipment?.gsmLastSignalAt);
-  const latestPacket = latestByTime(
-    asArray(packets).filter(packet => packetMatchesEquipment(packet, equipment)),
-    ['deviceTime', 'receivedAt', 'createdAt'],
-  );
+  const latestPacket = packets && !Array.isArray(packets) && packets.latestGsmPacketByEquipmentId
+    ? packets.latestGsmPacketByEquipmentId.get(normalizeEquipmentRef(equipment?.id))?.item || null
+    : latestByTime(
+      asArray(packets).filter(packet => packetMatchesEquipment(packet, equipment)),
+      ['deviceTime', 'receivedAt', 'createdAt'],
+    );
   return {
     lastSeenMs: Math.max(direct, parseTime(latestPacket?.deviceTime || latestPacket?.receivedAt || latestPacket?.createdAt)),
     latestPacket,
@@ -350,6 +507,8 @@ function pickStatus(candidates) {
 
 function calculateEquipmentReadiness(equipment, context = {}) {
   const equipmentList = asArray(context.equipment);
+  const indexes = readinessIndexes(context);
+  const equipmentId = normalizeEquipmentRef(equipment?.id);
   const now = context.now instanceof Date ? context.now : new Date();
   const nowMs = now.getTime();
   const candidates = [];
@@ -357,8 +516,11 @@ function calculateEquipmentReadiness(equipment, context = {}) {
     equipment: `/equipment/${encodeURIComponent(equipment?.id || '')}`,
   };
 
-  const relatedRentals = [...asArray(context.rentals), ...asArray(context.ganttRentals)]
-    .filter(rental => rentalMatchesEquipment(rental, equipment, equipmentList));
+  let relatedRentals = asArray(indexes.rentalsByEquipmentId.get(equipmentId));
+  if (relatedRentals.length === 0) {
+    relatedRentals = asArray(indexes.unmatchedRentals)
+      .filter(rental => rentalMatchesEquipment(rental, equipment, equipmentList));
+  }
   const activeRental = relatedRentals.find(isActiveRental);
   if (activeRental) {
     addCandidate(candidates, 'rented', `Активная аренда ${activeRental.id || ''}`.trim(), { rental: activeRental.id }, { blockedSince: dateKey(activeRental.startDate) });
@@ -369,27 +531,39 @@ function calculateEquipmentReadiness(equipment, context = {}) {
     addCandidate(candidates, 'needs_check', `Есть будущая бронь/аренда ${futureRental.id || ''}`.trim(), { rental: futureRental.id }, { blockedSince: dateKey(futureRental.createdAt || futureRental.startDate) });
   }
 
-  const openServiceTicket = asArray(context.serviceTickets)
-    .filter(ticket => isOpenServiceTicket(ticket) && equipmentMatchesServiceTicket(ticket, equipment, equipmentList))[0];
+  let openServiceTicket = asArray(indexes.serviceByEquipmentId.get(equipmentId))
+    .find(ticket => isOpenServiceTicket(ticket));
+  if (!openServiceTicket) {
+    openServiceTicket = asArray(indexes.unmatchedServiceTickets)
+      .find(ticket => isOpenServiceTicket(ticket) && equipmentMatchesServiceTicket(ticket, equipment, equipmentList));
+  }
   if (openServiceTicket) {
     addCandidate(candidates, 'in_service', `Открыта сервисная заявка ${openServiceTicket.id || ''}`.trim(), { serviceTicket: openServiceTicket.id }, { blockedSince: dateKey(openServiceTicket.createdAt || openServiceTicket.startDate || openServiceTicket.date) });
   }
 
-  const activeDelivery = asArray(context.deliveries)
-    .find(delivery => isActiveDelivery(delivery) && deliveryMatchesEquipment(delivery, equipment, equipmentList));
+  let activeDelivery = asArray(indexes.deliveriesByEquipmentId.get(equipmentId))
+    .find(delivery => isActiveDelivery(delivery));
+  if (!activeDelivery) {
+    activeDelivery = asArray(indexes.unmatchedDeliveries)
+      .find(delivery => isActiveDelivery(delivery) && deliveryMatchesEquipment(delivery, equipment, equipmentList));
+  }
   if (activeDelivery) {
     addCandidate(candidates, 'delivery_blocked', `Активная доставка ${activeDelivery.id || ''}`.trim(), { delivery: activeDelivery.id }, { blockedSince: dateKey(activeDelivery.scheduledDate || activeDelivery.plannedDate || activeDelivery.createdAt) });
   }
 
-  const blockingDocument = asArray(context.documents)
-    .find(document => documentMatchesEquipment(document, equipment) && DOCUMENT_BLOCKER_STATUSES.has(lower(document.status || document.documentStatus)));
+  let blockingDocument = asArray(indexes.documentsByEquipmentId.get(equipmentId))
+    .find(document => DOCUMENT_BLOCKER_STATUSES.has(lower(document.status || document.documentStatus)));
+  if (!blockingDocument) {
+    blockingDocument = asArray(indexes.unmatchedDocuments)
+      .find(document => documentMatchesEquipment(document, equipment) && DOCUMENT_BLOCKER_STATUSES.has(lower(document.status || document.documentStatus)));
+  }
   if (blockingDocument) {
     addCandidate(candidates, 'document_blocked', `Проблемный документ ${blockingDocument.documentNumber || blockingDocument.number || blockingDocument.id || ''}`.trim(), { document: blockingDocument.id }, { blockedSince: dateKey(blockingDocument.createdAt || blockingDocument.date || blockingDocument.documentDate) });
   }
 
   const hasGsmLink = Boolean(equipment?.gsmImei || equipment?.gsmDeviceId || equipment?.gsmTrackerId);
   if (hasGsmLink) {
-    const { lastSeenMs, latestPacket } = getEquipmentGsmLastSeen(equipment, context.gsmPackets);
+    const { lastSeenMs, latestPacket } = getEquipmentGsmLastSeen(equipment, indexes);
     const staleMs = Number(context.gsmStaleMs || 72 * 60 * 60 * 1000);
     if (!lastSeenMs) {
       addCandidate(candidates, 'gsm_attention', 'GSM-трекер привязан, но пакетов/last seen нет', {}, { blockedSince: dateKey(equipment?.gsmCreatedAt || equipment?.updatedAt) });
@@ -401,8 +575,11 @@ function calculateEquipmentReadiness(equipment, context = {}) {
   }
 
   if (isEquipmentAvailableStatus(equipment)) {
-    const returnLikePhotos = asArray(context.shippingPhotos)
-      .filter(photo => shippingPhotoMatchesEquipment(photo, equipment, equipmentList) && lower(photo.type) === 'receiving');
+    let returnLikePhotos = asArray(indexes.receivingPhotosByEquipmentId.get(equipmentId));
+    if (returnLikePhotos.length === 0) {
+      returnLikePhotos = asArray(indexes.unmatchedReceivingPhotos)
+        .filter(photo => shippingPhotoMatchesEquipment(photo, equipment, equipmentList) && lower(photo.type) === 'receiving');
+    }
     const latestClosedRental = latestByTime(
       relatedRentals.filter(rental => CLOSED_RENTAL_STATUSES.has(lower(rental?.status)) || rental?.actualReturnDate),
       ['actualReturnDate', 'returnDate', 'endDate', 'updatedAt'],
@@ -473,6 +650,7 @@ function topKey(totals) {
 }
 
 function buildFleetReadinessReport(context = {}) {
+  readinessIndexes(context);
   const items = asArray(context.equipment).map(equipment => calculateEquipmentReadiness(equipment, context));
   const summary = {
     total: items.length,
@@ -637,6 +815,7 @@ module.exports = {
   RECOMMENDED_ACTIONS,
   PRIORITY,
   calculateEquipmentReadiness,
+  buildReadinessIndexes,
   buildFleetReadinessReport,
   buildManagementActionQueue,
   buildManagementActionQueueFromReadiness,

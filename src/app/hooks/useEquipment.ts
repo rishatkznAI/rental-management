@@ -28,6 +28,9 @@ export function useEquipmentReadiness(options: { enabled?: boolean } = {}) {
     queryFn: equipmentService.getReadiness,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: 1,
   });
 }
 
@@ -37,6 +40,9 @@ export function useManagementActionQueue(options: { enabled?: boolean } = {}) {
     queryFn: equipmentService.getManagementActionQueue,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: 1,
   });
 }
 

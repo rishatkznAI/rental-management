@@ -2962,6 +2962,32 @@ test('MAX webhook ensure keeps existing subscription', async () => {
   assert.equal(requests[0].options.method, 'GET');
 });
 
+test('MAX webhook registration is skipped when BOT_DISABLED=true', async () => {
+  const requests = [];
+  const logs = [];
+  const client = createMaxApiClient({
+    botToken: 'token',
+    maxApiBase: 'https://platform-api.example',
+    webhookUrl: 'https://app.example',
+    botDisabled: true,
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { json: async () => ({ success: true }) };
+    },
+    logger: {
+      log: message => logs.push(String(message)),
+      warn: message => logs.push(String(message)),
+      error: message => logs.push(String(message)),
+    },
+  });
+
+  assert.deepEqual(await client.registerWebhook(), { ok: true, disabled: true });
+  assert.deepEqual(await client.ensureWebhookRegistered(), { ok: true, disabled: true });
+  assert.equal(client.startWebhookWatchdog(), null);
+  assert.equal(requests.length, 0);
+  assert.match(logs.join('\n'), /BOT_DISABLED=true/);
+});
+
 test('bot callback sends the new message before slow cleanup finishes', async () => {
   let deleteStarted = false;
   let answerStarted = false;

@@ -1,10 +1,19 @@
 const express = require('express');
-const { buildFleetReadinessReport, buildManagementActionQueue } = require('../lib/equipment-readiness');
+const {
+  buildFleetReadinessReport,
+  buildManagementActionQueue,
+  buildManagementActionQueueFromReadiness,
+} = require('../lib/equipment-readiness');
 
 const ACTION_STATE_COLLECTION = 'management_action_states';
 const ACTION_EXECUTION_STATUSES = new Set(['open', 'in_progress', 'postponed', 'resolved', 'ignored']);
 const TERMINAL_ACTION_STATUSES = new Set(['resolved', 'ignored']);
 const MAX_ACTION_COMMENT_LENGTH = 1000;
+
+function makeRequestId(req) {
+  return String(req.headers?.['x-request-id'] || req.headers?.['x-railway-request-id'] || '').slice(0, 120)
+    || `readiness-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 function scopedCollection({ collection, req, readData, accessControl, canReadCollection }) {
   if (typeof canReadCollection === 'function' && !canReadCollection(req, collection)) return [];
@@ -166,6 +175,46 @@ function actionQueueContext({ readData, req, accessControl, canReadCollection })
   };
 }
 
+function contextCounts(context, actionStates = []) {
+  return {
+    equipment: context.equipment.length,
+    rentals: context.rentals.length,
+    ganttRentals: context.ganttRentals.length,
+    service: context.serviceTickets.length,
+    deliveries: context.deliveries.length,
+    documents: context.documents.length,
+    gsmPackets: context.gsmPackets.length,
+    shippingPhotos: context.shippingPhotos.length,
+    actionStates: actionStates.length,
+  };
+}
+
+function logEndpointDiagnostic(logger, {
+  endpoint,
+  req,
+  startedAt,
+  counts,
+  itemsReturned,
+  statusCode = 200,
+  warningMs = 2000,
+}) {
+  const durationMs = Date.now() - startedAt;
+  const payload = {
+    requestId: makeRequestId(req),
+    endpoint,
+    durationMs,
+    statusCode,
+    counts,
+    itemsReturned,
+  };
+  const line = `[diagnostic] ${endpoint} ${JSON.stringify(payload)}`;
+  if (durationMs > warningMs) {
+    (logger?.warn || console.warn)(`${line} slow=true`);
+  } else {
+    (logger?.log || console.log)(line);
+  }
+}
+
 function registerEquipmentReadinessRoutes(deps) {
   const {
     readData,
@@ -175,12 +224,22 @@ function registerEquipmentReadinessRoutes(deps) {
     canReadCollection,
     accessControl,
     auditLog,
+    logger = console,
   } = deps;
 
   const router = express.Router();
 
   router.get('/equipment/readiness', requireAuth, requireRead('equipment'), (req, res) => {
-    const report = buildFleetReadinessReport(actionQueueContext({ readData, req, accessControl, canReadCollection }));
+    const startedAt = Date.now();
+    const context = actionQueueContext({ readData, req, accessControl, canReadCollection });
+    const report = buildFleetReadinessReport(context);
+    logEndpointDiagnostic(logger, {
+      endpoint: '/api/equipment/readiness',
+      req,
+      startedAt,
+      counts: contextCounts(context),
+      itemsReturned: report.items.length,
+    });
 
     return res.json({
       ok: true,
@@ -190,9 +249,20 @@ function registerEquipmentReadinessRoutes(deps) {
   });
 
   router.get('/management/action-queue', requireAuth, (req, res) => {
-    const queue = buildManagementActionQueue(actionQueueContext({ readData, req, accessControl, canReadCollection }));
-    const queueWithState = attachExecutionState(queue, readActionStates(readData));
+    const startedAt = Date.now();
+    const context = actionQueueContext({ readData, req, accessControl, canReadCollection });
+    const report = buildFleetReadinessReport(context);
+    const queue = buildManagementActionQueueFromReadiness(report.items);
+    const states = readActionStates(readData);
+    const queueWithState = attachExecutionState(queue, states);
     const visibleQueue = filterActionQueueForUser(queueWithState, req.user, accessControl);
+    logEndpointDiagnostic(logger, {
+      endpoint: '/api/management/action-queue',
+      req,
+      startedAt,
+      counts: contextCounts(context, states),
+      itemsReturned: visibleQueue.items.length,
+    });
     return res.json({
       ok: true,
       summary: visibleQueue.summary,

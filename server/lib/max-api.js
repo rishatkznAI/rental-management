@@ -13,6 +13,7 @@ function createMaxApiClient({
   slowRequestMs = Number(process.env.MAX_API_SLOW_MS || 1500),
   useNativeUpload = true,
   publicAssetBaseUrl = webhookUrl,
+  botDisabled = false,
 }) {
   const uploadPayloadCache = new Map();
 
@@ -391,6 +392,10 @@ function createMaxApiClient({
   }
 
   async function registerWebhook() {
+    if (botDisabled) {
+      logger.log('[BOT] Webhook registration skipped: BOT_DISABLED=true');
+      return { ok: true, disabled: true };
+    }
     if (!botToken) return;
     if (!webhookUrl) {
       logger.log('[BOT] WEBHOOK_URL не задан — пропускаем регистрацию.');
@@ -410,6 +415,10 @@ function createMaxApiClient({
   }
 
   async function ensureWebhookRegistered() {
+    if (botDisabled) {
+      logger.log('[BOT] Webhook ensure skipped: BOT_DISABLED=true');
+      return { ok: true, disabled: true };
+    }
     if (!botToken || !webhookUrl) return null;
     const subscriptionUrl = getWebhookSubscriptionUrl();
     const res = await maxRequest('GET', '/subscriptions');
@@ -421,6 +430,10 @@ function createMaxApiClient({
   }
 
   function startWebhookWatchdog(intervalMs = Number(process.env.MAX_WEBHOOK_WATCHDOG_MS || 60_000)) {
+    if (botDisabled) {
+      logger.log('[BOT] Watchdog webhook MAX skipped: BOT_DISABLED=true');
+      return null;
+    }
     if (!botToken || !webhookUrl || !Number.isFinite(intervalMs) || intervalMs <= 0) return null;
     const tick = () => {
       ensureWebhookRegistered().catch(error => {

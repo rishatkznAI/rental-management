@@ -10,6 +10,7 @@ const { createAccessControl } = require('../server/lib/access-control.js');
 const {
   buildManagementActionQueue,
   buildFleetReadinessReport,
+  buildReadinessIndexes,
   calculateEquipmentReadiness,
 } = require('../server/lib/equipment-readiness.js');
 const { registerEquipmentReadinessRoutes } = require('../server/routes/equipment-readiness.js');
@@ -142,6 +143,53 @@ test('fleet readiness summary counts practical statuses', () => {
   assert.equal(report.summary.ready, 1);
   assert.equal(report.summary.inService, 1);
   assert.equal(report.summary.rented, 1);
+});
+
+test('fleet readiness builds direct lookup indexes for large related collections', () => {
+  const equipment = Array.from({ length: 200 }, (_, index) => baseEquipment({
+    id: `EQ-${index}`,
+    inventoryNumber: `INV-${index}`,
+    serialNumber: `SN-${index}`,
+    model: index % 2 === 0 ? 'AS1413' : 'S1930',
+    status: index % 5 === 0 ? 'in_service' : 'available',
+    gsmImei: `IMEI-${index}`,
+    dailyRate: 5000 + index,
+  }));
+  const serviceTickets = equipment
+    .filter((_, index) => index % 5 === 0)
+    .map(item => ({ id: `S-${item.id}`, equipmentId: item.id, status: 'new', createdAt: '2026-05-18' }));
+  const deliveries = equipment
+    .filter((_, index) => index % 7 === 0)
+    .map(item => ({ id: `D-${item.id}`, equipmentId: item.id, status: 'sent', scheduledDate: '2026-05-19' }));
+  const documents = equipment
+    .filter((_, index) => index % 11 === 0)
+    .map(item => ({ id: `DOC-${item.id}`, equipmentId: item.id, status: 'missing', createdAt: '2026-05-19' }));
+  const gsmPackets = equipment.flatMap((item, index) => [
+    { id: `G-old-${item.id}`, imei: item.gsmImei, receivedAt: '2026-05-01T00:00:00.000Z', parseStatus: 'ok' },
+    { id: `G-new-${item.id}`, imei: item.gsmImei, receivedAt: `2026-05-${String((index % 20) + 1).padStart(2, '0')}T12:00:00.000Z`, parseStatus: index % 13 === 0 ? 'failed' : 'ok' },
+  ]);
+  const context = {
+    now: new Date('2026-05-20T12:00:00Z'),
+    equipment,
+    rentals: equipment.map(item => ({ id: `R-${item.id}`, equipmentId: item.id, status: 'closed', startDate: '2026-04-01', endDate: '2026-04-03', dailyRate: 5000 })),
+    serviceTickets,
+    deliveries,
+    documents,
+    gsmPackets,
+    shippingPhotos: [],
+  };
+
+  const indexes = buildReadinessIndexes(context);
+  assert.equal(indexes.serviceByEquipmentId.get('EQ-0').length, 1);
+  assert.equal(indexes.deliveriesByEquipmentId.get('EQ-7').length, 1);
+  assert.equal(indexes.documentsByEquipmentId.get('EQ-11').length, 1);
+  assert.equal(indexes.latestGsmPacketByEquipmentId.get('EQ-0').item.id, 'G-new-EQ-0');
+
+  const startedAt = performance.now();
+  const report = buildFleetReadinessReport(context);
+  const elapsedMs = performance.now() - startedAt;
+  assert.equal(report.summary.total, equipment.length);
+  assert.ok(elapsedMs < 1000, `large readiness fixture took ${elapsedMs}ms`);
 });
 
 test('fleet readiness summary includes financial loss totals', () => {

@@ -105,6 +105,11 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
   expect((await cellText(firstActionRow, 4)).length, 'action queue row should render responsible area').toBeGreaterThan(0);
   expect((await cellText(firstActionRow, 5)).length, 'action queue row should render estimated loss').toBeGreaterThan(0);
   expect((await cellText(firstActionRow, 6)).length, 'action queue row should render estimated daily loss').toBeGreaterThan(0);
+  await firstActionRow.getByRole('button', { name: 'Изменить' }).click();
+  const editDialog = page.getByRole('dialog', { name: 'Исполнение действия' });
+  await expect(editDialog, 'action queue edit dialog should open without saving').toBeVisible();
+  await editDialog.getByRole('button', { name: 'Отмена' }).click();
+  await expect(editDialog, 'action queue edit dialog should close without saving').toBeHidden();
 
   const readiness = page.getByTestId('fleet-readiness-section');
   await expect(readiness).toBeVisible();

@@ -154,6 +154,26 @@ function detectProductionLikeBackendUrls(urls, expectedApiUrl) {
   });
 }
 
+function classifyHost(url) {
+  const hostname = new URL(url).hostname.toLowerCase();
+  if (hostname.endsWith('.up.railway.app')) return 'railway';
+  if (hostname.endsWith('.vercel.app')) return 'vercel';
+  if (hostname.endsWith('.github.io')) return 'github-pages';
+  if (hostname.endsWith('.netlify.app')) return 'netlify';
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'local';
+  return 'external-static';
+}
+
+function classifyApiTarget(url, expectedApiUrl) {
+  const normalized = normalizeUrl(url);
+  if (normalized === normalizeUrl(expectedApiUrl)) return 'staging';
+  if (/rental-management-production|production-[a-z0-9-]*\.up\.railway\.app/i.test(normalized)) return 'prod';
+  if (/staging|stage/i.test(normalized)) return 'staging-like';
+  if (/railway\.app/i.test(normalized)) return 'railway-unknown';
+  if (/localhost|127\.0\.0\.1/i.test(normalized)) return 'local';
+  return 'unknown';
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!ENVIRONMENTS.has(args.env)) {
@@ -169,6 +189,7 @@ async function main() {
 
   console.log(`[release-preflight] environment=${args.env}`);
   console.log(`[release-preflight] frontend=${frontendUrl}`);
+  console.log(`[release-preflight] frontend host type=${classifyHost(frontendUrl)}`);
   console.log(`[release-preflight] api=${apiUrl}`);
   console.log(`[release-preflight] expectedCommit=${shortCommit(expectedCommit)}`);
 
@@ -197,8 +218,16 @@ async function main() {
   const productionLikeBackendUrls = detectProductionLikeBackendUrls(detectedApiUrls, apiUrl);
   const markerFound = frontend.combinedText.includes(expectedShort) || frontend.combinedText.includes(expectedCommit);
   const expectedApiFound = frontend.combinedText.includes(apiUrl);
+  const apiTargetClasses = unique(detectedApiUrls.map(url => classifyApiTarget(url, apiUrl)));
 
   console.log(`[release-preflight] frontend marker expected=${expectedShort} found=${markerFound ? 'yes' : 'no'}`);
+  if (!markerFound) {
+    console.log(`[release-preflight] frontend marker status=BLOCKED url=${frontendUrl}`);
+  }
+  console.log(`[release-preflight] frontend API target class=${apiTargetClasses.join(', ') || 'unknown'}`);
+  if (args.env === 'staging' && !apiTargetClasses.includes('staging')) {
+    console.log('[release-preflight] staging API target status=RISK');
+  }
   console.log(`[release-preflight] frontend detected API-like URLs=${detectedApiUrls.length ? detectedApiUrls.join(', ') : 'none'}`);
   if (args.env === 'staging' && productionLikeBackendUrls.length > 0) {
     console.warn(`[release-preflight] WARNING: staging frontend bundle contains production-like backend URL(s): ${productionLikeBackendUrls.join(', ')}`);

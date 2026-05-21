@@ -44,7 +44,7 @@ test('staging read-only smoke', async ({ page }) => {
       for (const key of ['critical', 'overdue', 'dueToday', 'unassigned', 'stale']) {
         expect(Number.isFinite(Number(attentionJson.summary[key])), `attention summary ${key} should be numeric`).toBeTruthy();
       }
-      for (const key of ['critical', 'today', 'unassigned', 'topLoss', 'responsibleArea']) {
+      for (const key of ['critical', 'today', 'unassigned', 'topLoss', 'byResponsibleArea']) {
         expect(attentionJson?.groups?.[key], `attention group ${key} should exist`).toBeTruthy();
       }
       expect(JSON.stringify(attentionJson), 'attention API should not expose raw placeholders').not.toMatch(/undefined|\[object Object\]|password|token|secret/i);

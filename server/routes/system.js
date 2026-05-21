@@ -418,6 +418,7 @@ function buildSystemControlCenterStatus({
       usesSqlite: true,
     },
     storage: {
+      classification: dbPathKind,
       volumeSignals,
       mountPath: storageSignal.mountPath,
       available: Boolean(storageSignal.available),

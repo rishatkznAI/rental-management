@@ -61,6 +61,26 @@ function executionFieldsPresent(items) {
   );
 }
 
+function safeAssigneeFieldsPresent(items) {
+  if (!Array.isArray(items)) return false;
+  return items.every(item =>
+    Object.prototype.hasOwnProperty.call(item, 'userId') &&
+    Object.prototype.hasOwnProperty.call(item, 'name') &&
+    Object.prototype.hasOwnProperty.call(item, 'role') &&
+    Object.prototype.hasOwnProperty.call(item, 'active')
+  );
+}
+
+function hasObjectKey(value, key) {
+  if (Array.isArray(value)) return value.some(item => hasObjectKey(item, key));
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).some(([entryKey, entryValue]) => entryKey === key || hasObjectKey(entryValue, key));
+}
+
+function unsafeAssigneeFieldsAbsent(payload) {
+  return ['email', 'password', 'passwordHash', 'token', 'secret'].every(key => !hasObjectKey(payload, key));
+}
+
 async function timedJson(baseUrl, path, options = {}) {
   const started = performance.now();
   const response = await fetch(`${baseUrl}${path}`, {
@@ -125,7 +145,7 @@ async function main() {
     appDisabled: Boolean(scc.json?.conservation?.appDisabled),
     botDisabled: Boolean(scc.json?.conservation?.botDisabled),
     gsmDisabled: Boolean(scc.json?.conservation?.gsmDisabled),
-    storageClassification: scc.json?.storage?.classification || 'unknown',
+    storageClassification: scc.json?.storage?.classification || scc.json?.database?.dbPathKind || 'unknown',
   });
 
   const readiness = await timedJson(apiUrl, '/api/equipment/readiness', { headers: authHeaders });
@@ -142,8 +162,26 @@ async function main() {
   assertOk(executionFieldsPresent(actionQueue.json?.items), '/api/management/action-queue items must expose execution fields');
   logProbe('actionQueue', actionQueue, {
     items: Array.isArray(actionQueue.json?.items) ? actionQueue.json.items.length : 0,
-    summaryCount: summaryCount(actionQueue.json?.summary),
-    executionFieldsPresent: true,
+    summaryUnassigned: Number(actionQueue.json?.summary?.unassigned || 0),
+    summaryOverdue: Number(actionQueue.json?.summary?.overdue || 0),
+    summaryDueToday: Number(actionQueue.json?.summary?.dueToday || 0),
+    summaryStale: Number(actionQueue.json?.summary?.stale || 0),
+    summaryInProgress: Number(actionQueue.json?.summary?.inProgress || 0),
+    summaryResolved: Number(actionQueue.json?.summary?.resolved || 0),
+    executionStatusPresent: true,
+    executionLabelPresent: true,
+    executionOverduePresent: true,
+  });
+
+  const assignees = await timedJson(apiUrl, '/api/management/action-queue/assignees', { headers: authHeaders });
+  assertOk(assignees.response.status === 200, `/api/management/action-queue/assignees must return 200. HTTP ${assignees.response.status}`);
+  assertOk(!hasUnsafeText(assignees.json), '/api/management/action-queue/assignees exposed unsafe text or raw placeholder values');
+  assertOk(safeAssigneeFieldsPresent(assignees.json?.items), '/api/management/action-queue/assignees must expose safe fields');
+  assertOk(unsafeAssigneeFieldsAbsent(assignees.json), '/api/management/action-queue/assignees must not expose unsafe fields');
+  logProbe('assignees', assignees, {
+    items: Array.isArray(assignees.json?.items) ? assignees.json.items.length : 0,
+    safeFieldsPresent: true,
+    unsafeFieldsAbsent: true,
   });
 
   console.log('[targeted-smoke] PASS');

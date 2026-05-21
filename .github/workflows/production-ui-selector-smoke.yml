@@ -6,7 +6,7 @@ on:
       expected_release_commit:
         description: Production commit expected from /api/version and frontend debug marker
         required: true
-        default: 7839a039bc0e
+        default: 553d0c31515929430871f5e46f8ad9f0b1af7a2e
 
 permissions:
   contents: read
@@ -53,19 +53,3 @@ jobs:
 
       - name: Run focused read-only production UI selector smoke
         run: npx playwright test e2e/production-ui-selector-smoke.spec.ts --config=playwright.production.config.ts --trace=off
-
-      - name: Upload Playwright report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-ui-selector-playwright-report
-          path: playwright-report/
-          if-no-files-found: ignore
-
-      - name: Upload Playwright test results
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-ui-selector-test-results
-          path: test-results/
-          if-no-files-found: ignore

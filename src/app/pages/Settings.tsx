@@ -952,6 +952,7 @@ type SystemControlCenterStatus = {
     usesSqlite: boolean;
   };
   storage: {
+    classification: 'production-volume' | 'staging-volume' | 'local' | 'unknown';
     volumeSignals: string[];
     mountPath: string;
     available: boolean;

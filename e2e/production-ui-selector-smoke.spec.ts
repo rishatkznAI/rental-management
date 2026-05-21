@@ -44,6 +44,21 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
   const frontendUrl = requiredEnv('PRODUCTION_FRONTEND_URL', 'production UI selector smoke').replace(/\/$/, '');
   const expectedCommit = String(process.env.EXPECTED_RELEASE_COMMIT || '').trim();
 
+  const preflightApi = await playwrightRequest.newContext({ baseURL: apiUrl });
+  try {
+    const readinessResponse = await preflightApi.get('/health/ready');
+    expect(readinessResponse.ok(), 'production /health/ready should return 200').toBeTruthy();
+    const readiness = await readinessResponse.json() as { ok?: boolean };
+    expect(readiness.ok, 'production /health/ready should report ok=true').toBe(true);
+
+    const versionResponse = await preflightApi.get('/api/version');
+    expect(versionResponse.ok(), 'production /api/version should return 200').toBeTruthy();
+    const version = await versionResponse.json() as { app?: { disabled?: boolean } };
+    expect(version.app?.disabled, 'production app.disabled should remain false for UI selector smoke').toBe(false);
+  } finally {
+    await preflightApi.dispose();
+  }
+
   await runReleaseSmoke(page, {
     environmentName: 'production',
     frontendUrl,

@@ -2,6 +2,11 @@ name: Staging Smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      expected_release_commit:
+        description: 'Expected deployed staging app commit SHA. Defaults to workflow SHA.'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -19,7 +24,7 @@ jobs:
       STAGING_FRONTEND_URL: ${{ secrets.STAGING_FRONTEND_URL }}
       STAGING_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
       STAGING_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
-      EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+      EXPECTED_RELEASE_COMMIT: ${{ inputs.expected_release_commit || github.sha }}
     steps:
       - uses: actions/checkout@v6
 

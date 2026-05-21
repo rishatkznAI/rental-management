@@ -103,6 +103,7 @@ test('management action queue filters include execution statuses, overdue, mine,
   assert.match(equipmentPageSource, /item\.executionOverdue/);
   assert.match(equipmentPageSource, /item\.assignedToUserId === currentUser\.id/);
   assert.match(equipmentPageSource, /item\.executionStatus/);
+  assert.match(equipmentPageSource, /item\.executionLabel/);
   assert.match(equipmentPageSource, /item\.priority === filter/);
   assert.match(equipmentPageSource, /item\.responsibleArea === filter/);
 });
@@ -118,6 +119,8 @@ test('management action queue table renders sorted API items without raw undefin
   assert.match(equipmentPageSource, /Сколько дней/);
   assert.match(equipmentPageSource, /Ссылка/);
   assert.match(equipmentPageSource, /filteredItems\.map/);
+  assert.match(equipmentPageSource, /executionStatusLabel\(item\.executionStatus, item\.executionLabel\)/);
+  assert.match(equipmentPageSource, /item\.executionOverdue \? <Badge variant="danger">Просрочено<\/Badge> : null/);
   assert.match(equipmentPageSource, /readinessLossText\(item\.estimatedLoss/);
   assert.doesNotMatch(equipmentPageSource, /\[object Object\]/);
   assert.doesNotMatch(equipmentPageSource, />undefined</);

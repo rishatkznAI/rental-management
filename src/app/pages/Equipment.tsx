@@ -211,8 +211,8 @@ function queuePriorityVariant(priority: ManagementActionPriority) {
   return 'default';
 }
 
-function executionStatusLabel(status?: ManagementActionExecutionStatus) {
-  return ACTION_EXECUTION_STATUS_OPTIONS.find(option => option.value === status)?.label || 'Открыто';
+function executionStatusLabel(status?: ManagementActionExecutionStatus, label?: string) {
+  return label || ACTION_EXECUTION_STATUS_OPTIONS.find(option => option.value === status)?.label || 'Открыто';
 }
 
 function executionStatusVariant(status?: ManagementActionExecutionStatus) {
@@ -442,7 +442,7 @@ function ManagementActionQueueSection({
                   <td className="px-3 py-3 text-xs text-muted-foreground">
                     <div className="flex flex-col gap-1.5">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant={executionStatusVariant(item.executionStatus)}>{executionStatusLabel(item.executionStatus)}</Badge>
+                        <Badge variant={executionStatusVariant(item.executionStatus)}>{executionStatusLabel(item.executionStatus, item.executionLabel)}</Badge>
                         {item.executionOverdue ? <Badge variant="danger">Просрочено</Badge> : null}
                       </div>
                       <span>{item.assignedToName || 'Без ответственного'}</span>

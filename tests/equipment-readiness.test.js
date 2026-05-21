@@ -483,6 +483,7 @@ test('GET /api/management/action-queue includes execution state and overdue flag
     const item = response.body.items[0];
     assert.equal(item.actionId, actionId);
     assert.equal(item.executionStatus, 'in_progress');
+    assert.equal(item.executionLabel, 'В работе');
     assert.equal(item.assignedToUserId, 'U-mechanic');
     assert.equal(item.assignedToName, 'Механик');
     assert.equal(item.dueDate, '2020-01-01');
@@ -492,6 +493,70 @@ test('GET /api/management/action-queue includes execution state and overdue flag
     assert.equal(payload.includes('updatedByUserId'), false);
     assert.equal(payload.includes('password'), false);
     assert.equal(payload.includes('token'), false);
+  });
+});
+
+test('GET /api/management/action-queue defaults execution DTO for new actions', async () => {
+  await withServer(createApp({
+    equipment: [baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 30000 })],
+    service: [{ id: 'S-critical', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-18' }],
+    management_action_states: [],
+  }).app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/management/action-queue', 'admin-token');
+    assert.equal(response.status, 200);
+    const item = response.body.items[0];
+    assert.equal(item.executionStatus, 'open');
+    assert.equal(item.executionLabel, 'Открыто');
+    assert.equal(typeof item.executionOverdue, 'boolean');
+    assert.equal(item.executionOverdue, false);
+    assert.equal(item.assignedToUserId, '');
+    assert.equal(item.assignedToName, '');
+    assert.equal(item.dueDate, '');
+    assert.equal(item.executionComment, '');
+    assert.equal(item.updatedAt, '');
+  });
+});
+
+test('GET /api/management/action-queue does not mark terminal states overdue', async () => {
+  await withServer(createApp({
+    equipment: [
+      baseEquipment({ id: 'EQ-resolved', inventoryNumber: 'INV-resolved', status: 'in_service', dailyRate: 30000 }),
+      baseEquipment({ id: 'EQ-ignored', inventoryNumber: 'INV-ignored', status: 'in_service', dailyRate: 30000 }),
+    ],
+    service: [
+      { id: 'S-resolved', equipmentId: 'EQ-resolved', status: 'new', createdAt: '2026-05-18' },
+      { id: 'S-ignored', equipmentId: 'EQ-ignored', status: 'new', createdAt: '2026-05-18' },
+    ],
+    management_action_states: [
+      {
+        id: 'STATE-resolved',
+        actionId: 'equipment_readiness:EQ-resolved:in_service',
+        sourceType: 'equipment_readiness',
+        sourceKey: 'EQ-resolved',
+        equipmentId: 'EQ-resolved',
+        status: 'resolved',
+        dueDate: '2020-01-01',
+      },
+      {
+        id: 'STATE-ignored',
+        actionId: 'equipment_readiness:EQ-ignored:in_service',
+        sourceType: 'equipment_readiness',
+        sourceKey: 'EQ-ignored',
+        equipmentId: 'EQ-ignored',
+        status: 'ignored',
+        dueDate: '2020-01-01',
+      },
+    ],
+  }).app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/management/action-queue', 'admin-token');
+    assert.equal(response.status, 200);
+    const byEquipment = Object.fromEntries(response.body.items.map(item => [item.equipmentId, item]));
+    assert.equal(byEquipment['EQ-resolved'].executionStatus, 'resolved');
+    assert.equal(byEquipment['EQ-resolved'].executionLabel, 'Решено');
+    assert.equal(byEquipment['EQ-resolved'].executionOverdue, false);
+    assert.equal(byEquipment['EQ-ignored'].executionStatus, 'ignored');
+    assert.equal(byEquipment['EQ-ignored'].executionLabel, 'Игнорировано');
+    assert.equal(byEquipment['EQ-ignored'].executionOverdue, false);
   });
 });
 
@@ -510,6 +575,7 @@ test('PATCH /api/management/action-queue/:actionId/state updates action state', 
     }, 'admin-token');
     assert.equal(response.status, 200);
     assert.equal(response.body.state.executionStatus, 'postponed');
+    assert.equal(response.body.state.executionLabel, 'Отложено');
     assert.equal(response.body.state.assignedToName, 'Механик');
   });
   assert.equal(created.state.management_action_states.length, 1);

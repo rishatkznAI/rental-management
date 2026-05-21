@@ -9,6 +9,13 @@ const ACTION_STATE_COLLECTION = 'management_action_states';
 const ACTION_EXECUTION_STATUSES = new Set(['open', 'in_progress', 'postponed', 'resolved', 'ignored']);
 const TERMINAL_ACTION_STATUSES = new Set(['resolved', 'ignored']);
 const MAX_ACTION_COMMENT_LENGTH = 1000;
+const ACTION_EXECUTION_LABELS = {
+  open: 'Открыто',
+  in_progress: 'В работе',
+  postponed: 'Отложено',
+  resolved: 'Решено',
+  ignored: 'Игнорировано',
+};
 
 function makeRequestId(req) {
   return String(req.headers?.['x-request-id'] || req.headers?.['x-railway-request-id'] || '').slice(0, 120)
@@ -111,6 +118,10 @@ function isActionOverdue(state, today = todayDateString()) {
   );
 }
 
+function actionExecutionLabel(status) {
+  return ACTION_EXECUTION_LABELS[status] || ACTION_EXECUTION_LABELS.open;
+}
+
 function attachExecutionState(queue, states, { now = new Date() } = {}) {
   const byKey = indexActionStates(states);
   const today = todayDateString(now);
@@ -122,6 +133,7 @@ function attachExecutionState(queue, states, { now = new Date() } = {}) {
       ...item,
       sourceKey,
       executionStatus,
+      executionLabel: actionExecutionLabel(executionStatus),
       assignedToUserId: state?.assignedToUserId || '',
       assignedToName: state?.assignedToName || '',
       dueDate: state?.dueDate || '',
@@ -345,6 +357,7 @@ function registerEquipmentReadinessRoutes(deps) {
         sourceKey: next.sourceKey,
         equipmentId: next.equipmentId,
         executionStatus: next.status,
+        executionLabel: actionExecutionLabel(next.status),
         assignedToUserId: next.assignedToUserId,
         assignedToName: next.assignedToName,
         dueDate: next.dueDate,
@@ -362,4 +375,5 @@ module.exports = {
   registerEquipmentReadinessRoutes,
   attachExecutionState,
   isActionOverdue,
+  actionExecutionLabel,
 };

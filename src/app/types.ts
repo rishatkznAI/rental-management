@@ -279,6 +279,7 @@ export interface ManagementActionQueueItem {
   dueHint: string;
   recommendedAction: string;
   executionStatus: ManagementActionExecutionStatus;
+  executionLabel: string;
   assignedToUserId: string;
   assignedToName: string;
   dueDate: string;

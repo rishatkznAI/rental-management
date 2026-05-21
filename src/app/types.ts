@@ -261,10 +261,12 @@ export interface FleetReadinessResponse {
 
 export type ManagementActionPriority = 'critical' | 'high' | 'medium' | 'low';
 export type ManagementActionSourceType = 'equipment_readiness';
+export type ManagementActionExecutionStatus = 'open' | 'in_progress' | 'postponed' | 'resolved' | 'ignored';
 
 export interface ManagementActionQueueItem {
   actionId: string;
   sourceType: ManagementActionSourceType;
+  sourceKey: string;
   equipmentId: string;
   title: string;
   description: string;
@@ -276,6 +278,13 @@ export interface ManagementActionQueueItem {
   blockedDays: number | null;
   dueHint: string;
   recommendedAction: string;
+  executionStatus: ManagementActionExecutionStatus;
+  assignedToUserId: string;
+  assignedToName: string;
+  dueDate: string;
+  executionComment: string;
+  updatedAt: string;
+  executionOverdue: boolean;
   links: {
     equipment?: string;
     serviceTicket?: string;
@@ -300,6 +309,14 @@ export interface ManagementActionQueueResponse {
   ok: true;
   summary: ManagementActionQueueSummary;
   items: ManagementActionQueueItem[];
+}
+
+export interface ManagementActionStateUpdate {
+  status: ManagementActionExecutionStatus;
+  assignedToUserId?: string;
+  assignedToName?: string;
+  dueDate?: string;
+  comment?: string;
 }
 
 export type GsmPacketDirection = 'inbound' | 'outbound';

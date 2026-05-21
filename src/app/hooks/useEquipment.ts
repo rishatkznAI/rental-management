@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { equipmentService } from '../services/equipment.service';
 import type { PaginatedQueryParams } from '../lib/api';
-import type { Equipment } from '../types';
+import type { Equipment, ManagementActionStateUpdate } from '../types';
 
 export const EQUIPMENT_KEYS = {
   all: ['equipment'] as const,
@@ -37,6 +37,17 @@ export function useManagementActionQueue(options: { enabled?: boolean } = {}) {
     queryFn: equipmentService.getManagementActionQueue,
     enabled: options.enabled ?? true,
     staleTime: 1000 * 60,
+  });
+}
+
+export function useUpdateManagementActionState() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ actionId, data }: { actionId: string; data: ManagementActionStateUpdate }) =>
+      equipmentService.updateManagementActionState(actionId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.managementActionQueue });
+    },
   });
 }
 

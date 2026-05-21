@@ -81,6 +81,7 @@ function buildFixtures(now = new Date()) {
   const staleIso = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString();
   const futureIso = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const closedIso = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const overdueIso = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const historicalStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const historicalEnd = new Date(now.getTime() - 24 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const blockedStart = new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000).toISOString();
@@ -335,7 +336,90 @@ function buildFixtures(now = new Date()) {
     },
   ];
 
-  return { equipment, rentals, service, deliveries, documents, gsmPackets };
+  const managementActionStates = [
+    {
+      id: `${PREFIX}ACTION-STATE-SERVICE-OPEN`,
+      actionId: `equipment_readiness:${PREFIX}EQ-SERVICE:in_service`,
+      sourceType: 'equipment_readiness',
+      sourceKey: `${PREFIX}EQ-SERVICE`,
+      equipmentId: `${PREFIX}EQ-SERVICE`,
+      status: 'open',
+      assignedToUserId: '',
+      assignedToName: '',
+      dueDate: futureIso,
+      comment: 'STAGING TEST FIXTURE: open critical action. No real customer data.',
+      updatedByUserId: 'staging-fixture',
+      updatedAt: iso,
+      createdAt: iso,
+      fixtureTag: PREFIX,
+    },
+    {
+      id: `${PREFIX}ACTION-STATE-DELIVERY-IN-PROGRESS`,
+      actionId: `equipment_readiness:${PREFIX}EQ-DELIVERY:delivery_blocked`,
+      sourceType: 'equipment_readiness',
+      sourceKey: `${PREFIX}EQ-DELIVERY`,
+      equipmentId: `${PREFIX}EQ-DELIVERY`,
+      status: 'in_progress',
+      assignedToUserId: `${PREFIX}USER-MANAGER`,
+      assignedToName: 'STAGING TEST MANAGER',
+      dueDate: futureIso,
+      comment: 'STAGING TEST FIXTURE: carrier follow-up in progress.',
+      updatedByUserId: 'staging-fixture',
+      updatedAt: iso,
+      createdAt: iso,
+      fixtureTag: PREFIX,
+    },
+    {
+      id: `${PREFIX}ACTION-STATE-GSM-POSTPONED`,
+      actionId: `equipment_readiness:${PREFIX}EQ-GSM:gsm_attention`,
+      sourceType: 'equipment_readiness',
+      sourceKey: `${PREFIX}EQ-GSM`,
+      equipmentId: `${PREFIX}EQ-GSM`,
+      status: 'postponed',
+      assignedToUserId: '',
+      assignedToName: 'STAGING TEST TECH',
+      dueDate: futureIso,
+      comment: 'STAGING TEST FIXTURE: check after planned network window.',
+      updatedByUserId: 'staging-fixture',
+      updatedAt: iso,
+      createdAt: iso,
+      fixtureTag: PREFIX,
+    },
+    {
+      id: `${PREFIX}ACTION-STATE-DOC-OVERDUE`,
+      actionId: `equipment_readiness:${PREFIX}EQ-DOC:document_blocked`,
+      sourceType: 'equipment_readiness',
+      sourceKey: `${PREFIX}EQ-DOC`,
+      equipmentId: `${PREFIX}EQ-DOC`,
+      status: 'open',
+      assignedToUserId: '',
+      assignedToName: '',
+      dueDate: overdueIso,
+      comment: 'STAGING TEST FIXTURE: overdue document action.',
+      updatedByUserId: 'staging-fixture',
+      updatedAt: iso,
+      createdAt: iso,
+      fixtureTag: PREFIX,
+    },
+    {
+      id: `${PREFIX}ACTION-STATE-CHECK-RESOLVED`,
+      actionId: `equipment_readiness:${PREFIX}EQ-CHECK:needs_check`,
+      sourceType: 'equipment_readiness',
+      sourceKey: `${PREFIX}EQ-CHECK`,
+      equipmentId: `${PREFIX}EQ-CHECK`,
+      status: 'resolved',
+      assignedToUserId: '',
+      assignedToName: 'STAGING TEST MANAGER',
+      dueDate: closedIso,
+      comment: 'STAGING TEST FIXTURE: resolved manually for UI verification.',
+      updatedByUserId: 'staging-fixture',
+      updatedAt: iso,
+      createdAt: iso,
+      fixtureTag: PREFIX,
+    },
+  ];
+
+  return { equipment, rentals, service, deliveries, documents, gsmPackets, managementActionStates };
 }
 
 function seedStagingReadinessFixtures({ env = process.env, now = new Date() } = {}) {
@@ -348,6 +432,7 @@ function seedStagingReadinessFixtures({ env = process.env, now = new Date() } = 
     replaceFixtures('deliveries', fixtures.deliveries),
     replaceFixtures('documents', fixtures.documents, hasFixtureDocument),
     replaceFixtures('gsm_packets', fixtures.gsmPackets),
+    replaceFixtures('management_action_states', fixtures.managementActionStates),
   ];
   return {
     ok: true,

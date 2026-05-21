@@ -1,6 +1,11 @@
 const express = require('express');
 const { buildFleetReadinessReport, buildManagementActionQueue } = require('../lib/equipment-readiness');
 
+const ACTION_STATE_COLLECTION = 'management_action_states';
+const ACTION_EXECUTION_STATUSES = new Set(['open', 'in_progress', 'postponed', 'resolved', 'ignored']);
+const TERMINAL_ACTION_STATUSES = new Set(['resolved', 'ignored']);
+const MAX_ACTION_COMMENT_LENGTH = 1000;
+
 function scopedCollection({ collection, req, readData, accessControl, canReadCollection }) {
   if (typeof canReadCollection === 'function' && !canReadCollection(req, collection)) return [];
   const raw = readData(collection) || [];
@@ -40,6 +45,82 @@ function filterActionQueueForUser(queue, user, accessControl) {
   const allowedAreas = managementActionAreasForUser(user, accessControl);
   if (allowedAreas === null) return queue;
   const items = queue.items.filter(item => allowedAreas.has(item.responsibleArea));
+  return buildActionQueueSummary(items);
+}
+
+function todayDateString(now = new Date()) {
+  return now.toISOString().slice(0, 10);
+}
+
+function actionSourceKey(action) {
+  return action?.sourceKey || action?.equipmentId || '';
+}
+
+function stateKey(action) {
+  return `${action?.actionId || ''}::${actionSourceKey(action)}`;
+}
+
+function normalizeActionState(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const status = ACTION_EXECUTION_STATUSES.has(raw.status) ? raw.status : 'open';
+  return {
+    id: String(raw.id || ''),
+    actionId: String(raw.actionId || ''),
+    sourceType: String(raw.sourceType || 'equipment_readiness'),
+    sourceKey: String(raw.sourceKey || raw.equipmentId || ''),
+    equipmentId: String(raw.equipmentId || raw.sourceKey || ''),
+    status,
+    assignedToUserId: String(raw.assignedToUserId || ''),
+    assignedToName: String(raw.assignedToName || ''),
+    dueDate: String(raw.dueDate || ''),
+    comment: String(raw.comment || '').slice(0, MAX_ACTION_COMMENT_LENGTH),
+    updatedByUserId: String(raw.updatedByUserId || ''),
+    updatedAt: String(raw.updatedAt || ''),
+    createdAt: String(raw.createdAt || raw.updatedAt || ''),
+  };
+}
+
+function readActionStates(readData) {
+  return internalCollection(readData, ACTION_STATE_COLLECTION)
+    .map(normalizeActionState)
+    .filter(state => state && state.actionId);
+}
+
+function indexActionStates(states) {
+  const byKey = new Map();
+  for (const state of states) {
+    byKey.set(`${state.actionId}::${state.sourceKey || state.equipmentId || ''}`, state);
+  }
+  return byKey;
+}
+
+function isActionOverdue(state, today = todayDateString()) {
+  return Boolean(
+    state?.dueDate &&
+    state.dueDate < today &&
+    !TERMINAL_ACTION_STATUSES.has(state.status)
+  );
+}
+
+function attachExecutionState(queue, states, { now = new Date() } = {}) {
+  const byKey = indexActionStates(states);
+  const today = todayDateString(now);
+  const items = queue.items.map(item => {
+    const sourceKey = actionSourceKey(item);
+    const state = byKey.get(`${item.actionId}::${sourceKey}`) || null;
+    const executionStatus = state?.status || 'open';
+    return {
+      ...item,
+      sourceKey,
+      executionStatus,
+      assignedToUserId: state?.assignedToUserId || '',
+      assignedToName: state?.assignedToName || '',
+      dueDate: state?.dueDate || '',
+      executionComment: state?.comment || '',
+      updatedAt: state?.updatedAt || '',
+      executionOverdue: isActionOverdue(state, today),
+    };
+  });
   return buildActionQueueSummary(items);
 }
 
@@ -88,10 +169,12 @@ function actionQueueContext({ readData, req, accessControl, canReadCollection })
 function registerEquipmentReadinessRoutes(deps) {
   const {
     readData,
+    writeData,
     requireAuth,
     requireRead,
     canReadCollection,
     accessControl,
+    auditLog,
   } = deps;
 
   const router = express.Router();
@@ -108,11 +191,97 @@ function registerEquipmentReadinessRoutes(deps) {
 
   router.get('/management/action-queue', requireAuth, (req, res) => {
     const queue = buildManagementActionQueue(actionQueueContext({ readData, req, accessControl, canReadCollection }));
-    const visibleQueue = filterActionQueueForUser(queue, req.user, accessControl);
+    const queueWithState = attachExecutionState(queue, readActionStates(readData));
+    const visibleQueue = filterActionQueueForUser(queueWithState, req.user, accessControl);
     return res.json({
       ok: true,
       summary: visibleQueue.summary,
       items: visibleQueue.items,
+    });
+  });
+
+  router.patch('/management/action-queue/:actionId/state', requireAuth, (req, res) => {
+    if (typeof writeData !== 'function') {
+      return res.status(500).json({ ok: false, error: 'Action state storage is unavailable' });
+    }
+    const actionId = String(req.params.actionId || '');
+    const queue = buildManagementActionQueue(actionQueueContext({ readData, req, accessControl, canReadCollection }));
+    const action = queue.items.find(item => item.actionId === actionId);
+    if (!action) return res.status(404).json({ ok: false, error: 'Action not found' });
+
+    const visibleQueue = filterActionQueueForUser(queue, req.user, accessControl);
+    if (!visibleQueue.items.some(item => item.actionId === actionId)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden: action is outside user scope' });
+    }
+
+    const status = String(req.body?.status || '').trim();
+    if (!ACTION_EXECUTION_STATUSES.has(status)) {
+      return res.status(400).json({ ok: false, error: 'Invalid action execution status' });
+    }
+
+    const dueDate = String(req.body?.dueDate || '').trim();
+    if (dueDate) {
+      const parsed = new Date(`${dueDate}T00:00:00Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== dueDate) {
+        return res.status(400).json({ ok: false, error: 'Invalid dueDate' });
+      }
+    }
+
+    const assignedToUserId = String(req.body?.assignedToUserId || '').trim();
+    const users = internalCollection(readData, 'users');
+    const assignedUser = assignedToUserId ? users.find(user => String(user.id) === assignedToUserId) : null;
+    const assignedToName = assignedUser?.name
+      ? String(assignedUser.name)
+      : String(req.body?.assignedToName || '').trim().slice(0, 120);
+    const comment = String(req.body?.comment || '').trim().slice(0, MAX_ACTION_COMMENT_LENGTH);
+    const nowIso = new Date().toISOString();
+    const states = readActionStates(readData);
+    const key = stateKey(action);
+    const previousIndex = states.findIndex(state => stateKey(state) === key);
+    const previous = previousIndex >= 0 ? states[previousIndex] : null;
+    const next = {
+      id: previous?.id || `management_action_state:${action.sourceType}:${actionSourceKey(action)}:${Date.now()}`,
+      actionId,
+      sourceType: action.sourceType || 'equipment_readiness',
+      sourceKey: actionSourceKey(action),
+      equipmentId: action.equipmentId || actionSourceKey(action),
+      status,
+      assignedToUserId,
+      assignedToName,
+      dueDate,
+      comment,
+      updatedByUserId: req.user?.userId || '',
+      updatedAt: nowIso,
+      createdAt: previous?.createdAt || nowIso,
+    };
+    const nextStates = previousIndex >= 0
+      ? states.map((state, index) => index === previousIndex ? next : state)
+      : [...states, next];
+    writeData(ACTION_STATE_COLLECTION, nextStates);
+    auditLog?.(req, {
+      action: 'management_action_state.update',
+      entityType: ACTION_STATE_COLLECTION,
+      entityId: next.id,
+      before: previous ? { status: previous.status, assignedToUserId: previous.assignedToUserId, dueDate: previous.dueDate } : null,
+      after: { status: next.status, assignedToUserId: next.assignedToUserId, dueDate: next.dueDate },
+      metadata: { actionId, sourceKey: next.sourceKey },
+    });
+
+    return res.json({
+      ok: true,
+      state: {
+        actionId: next.actionId,
+        sourceType: next.sourceType,
+        sourceKey: next.sourceKey,
+        equipmentId: next.equipmentId,
+        executionStatus: next.status,
+        assignedToUserId: next.assignedToUserId,
+        assignedToName: next.assignedToName,
+        dueDate: next.dueDate,
+        executionComment: next.comment,
+        updatedAt: next.updatedAt,
+        executionOverdue: isActionOverdue(next),
+      },
     });
   });
 
@@ -121,4 +290,6 @@ function registerEquipmentReadinessRoutes(deps) {
 
 module.exports = {
   registerEquipmentReadinessRoutes,
+  attachExecutionState,
+  isActionOverdue,
 };

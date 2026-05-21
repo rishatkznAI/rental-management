@@ -1438,10 +1438,12 @@ registerDocumentRoutes(apiRouter, {
 
 apiRouter.use(registerEquipmentReadinessRoutes({
   readData,
+  writeData,
   requireAuth,
   requireRead,
   canReadCollection,
   accessControl,
+  auditLog,
 }));
 
 registerPayrollRoutes(apiRouter, {

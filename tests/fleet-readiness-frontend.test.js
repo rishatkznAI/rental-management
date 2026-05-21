@@ -78,21 +78,29 @@ test('management action queue section renders on the equipment page', () => {
 });
 
 test('management action queue KPI cards render', () => {
-  assert.match(equipmentPageSource, /Всего действий/);
-  assert.match(equipmentPageSource, /Критичные/);
-  assert.match(equipmentPageSource, /Потери сейчас/);
-  assert.match(equipmentPageSource, /Потеря в день/);
+  assert.match(equipmentPageSource, /В работе/);
+  assert.match(equipmentPageSource, /Просрочено/);
+  assert.match(equipmentPageSource, /Решено/);
+  assert.match(equipmentPageSource, /Без ответственного/);
 });
 
-test('management action queue filters include priorities and responsible areas', () => {
+test('management action queue filters include execution statuses, overdue, mine, priorities, and responsible areas', () => {
   assert.match(equipmentPageSource, /ACTION_QUEUE_FILTERS/);
   assert.match(equipmentPageSource, /value: 'all'/);
+  assert.match(equipmentPageSource, /value: 'open'/);
+  assert.match(equipmentPageSource, /value: 'in_progress'/);
+  assert.match(equipmentPageSource, /value: 'overdue'/);
+  assert.match(equipmentPageSource, /value: 'resolved'/);
+  assert.match(equipmentPageSource, /value: 'my_actions'/);
   assert.match(equipmentPageSource, /value: 'critical'/);
   assert.match(equipmentPageSource, /value: 'high'/);
   assert.match(equipmentPageSource, /value: 'service'/);
   assert.match(equipmentPageSource, /value: 'logistics'/);
   assert.match(equipmentPageSource, /value: 'office'/);
   assert.match(equipmentPageSource, /value: 'admin'/);
+  assert.match(equipmentPageSource, /item\.executionOverdue/);
+  assert.match(equipmentPageSource, /item\.assignedToUserId === currentUser\.id/);
+  assert.match(equipmentPageSource, /item\.executionStatus/);
   assert.match(equipmentPageSource, /item\.priority === filter/);
   assert.match(equipmentPageSource, /item\.responsibleArea === filter/);
 });
@@ -100,6 +108,7 @@ test('management action queue filters include priorities and responsible areas',
 test('management action queue table renders sorted API items without raw undefined states', () => {
   assert.match(equipmentPageSource, /Приоритет/);
   assert.match(equipmentPageSource, /Действие/);
+  assert.match(equipmentPageSource, /Исполнение/);
   assert.match(equipmentPageSource, /Техника/);
   assert.match(equipmentPageSource, /Ответственный блок/);
   assert.match(equipmentPageSource, /Уже потеряно/);
@@ -111,6 +120,21 @@ test('management action queue table renders sorted API items without raw undefin
   assert.doesNotMatch(equipmentPageSource, /\[object Object\]/);
   assert.doesNotMatch(equipmentPageSource, />undefined</);
   assert.doesNotMatch(equipmentPageSource, />null</);
+});
+
+test('management action queue execution controls render and call state endpoint', () => {
+  assert.match(equipmentPageSource, /ACTION_EXECUTION_STATUS_OPTIONS/);
+  assert.match(equipmentPageSource, /Открыто/);
+  assert.match(equipmentPageSource, /В работе/);
+  assert.match(equipmentPageSource, /Отложено/);
+  assert.match(equipmentPageSource, /Решено/);
+  assert.match(equipmentPageSource, /Игнорировано/);
+  assert.match(equipmentPageSource, /В работу/);
+  assert.match(equipmentPageSource, /Отложить/);
+  assert.match(equipmentPageSource, /Исполнение действия/);
+  assert.match(equipmentPageSource, /useUpdateManagementActionState/);
+  assert.match(equipmentServiceSource, /updateManagementActionState: \(actionId: string, data: ManagementActionStateUpdate\)/);
+  assert.match(equipmentServiceSource, /\/api\/management\/action-queue\/\$\{encodeURIComponent\(actionId\)\}\/state/);
 });
 
 test('management action queue empty and error states are safe', () => {

@@ -23,10 +23,14 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Input } from '../components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Textarea } from '../components/ui/textarea';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { getInvestorBinding, isInvestorUser, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
-import { useEquipmentList, useEquipmentReadiness, useManagementActionQueue } from '../hooks/useEquipment';
+import { useEquipmentList, useEquipmentReadiness, useManagementActionQueue, useUpdateManagementActionState } from '../hooks/useEquipment';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
@@ -112,6 +116,7 @@ import type {
   FleetReadinessResponsibleArea,
   FleetReadinessSeverity,
   FleetReadinessStatus,
+  ManagementActionExecutionStatus,
   ManagementActionPriority,
   ManagementActionQueueItem,
   ManagementActionQueueSummary,
@@ -128,7 +133,7 @@ type PermissionCan = ReturnType<typeof usePermissions>['can'];
 const EQUIPMENT_REGISTRY_MATCH_OPTIONS = { canEquipmentParticipateInRentals };
 
 type FleetReadinessFilter = FleetReadinessStatus | 'all' | 'with_loss' | 'without_rate' | 'high_loss';
-type ManagementActionQueueFilter = 'all' | ManagementActionPriority | FleetReadinessResponsibleArea;
+type ManagementActionQueueFilter = 'all' | ManagementActionPriority | FleetReadinessResponsibleArea | ManagementActionExecutionStatus | 'overdue' | 'my_actions';
 
 const READINESS_FILTERS: Array<{ value: FleetReadinessFilter; label: string }> = [
   { value: 'all', label: 'Все' },
@@ -144,12 +149,25 @@ const READINESS_FILTERS: Array<{ value: FleetReadinessFilter; label: string }> =
 
 const ACTION_QUEUE_FILTERS: Array<{ value: ManagementActionQueueFilter; label: string }> = [
   { value: 'all', label: 'Все' },
+  { value: 'open', label: 'Открытые' },
+  { value: 'in_progress', label: 'В работе' },
+  { value: 'overdue', label: 'Просрочено' },
+  { value: 'resolved', label: 'Решено' },
+  { value: 'my_actions', label: 'Мои' },
   { value: 'critical', label: 'Критичные' },
   { value: 'high', label: 'Высокие' },
   { value: 'service', label: 'Сервис' },
   { value: 'logistics', label: 'Логистика' },
   { value: 'office', label: 'Офис' },
   { value: 'admin', label: 'Админ' },
+];
+
+const ACTION_EXECUTION_STATUS_OPTIONS: Array<{ value: ManagementActionExecutionStatus; label: string }> = [
+  { value: 'open', label: 'Открыто' },
+  { value: 'in_progress', label: 'В работе' },
+  { value: 'postponed', label: 'Отложено' },
+  { value: 'resolved', label: 'Решено' },
+  { value: 'ignored', label: 'Игнорировано' },
 ];
 
 function readinessBadgeVariant(severity: FleetReadinessSeverity) {
@@ -193,6 +211,18 @@ function queuePriorityVariant(priority: ManagementActionPriority) {
   return 'default';
 }
 
+function executionStatusLabel(status?: ManagementActionExecutionStatus) {
+  return ACTION_EXECUTION_STATUS_OPTIONS.find(option => option.value === status)?.label || 'Открыто';
+}
+
+function executionStatusVariant(status?: ManagementActionExecutionStatus) {
+  if (status === 'resolved') return 'success';
+  if (status === 'ignored') return 'default';
+  if (status === 'postponed') return 'warning';
+  if (status === 'in_progress') return 'info';
+  return 'danger';
+}
+
 function responsibleAreaLabel(area: FleetReadinessResponsibleArea) {
   const labels: Record<FleetReadinessResponsibleArea, string> = {
     service: 'Сервис',
@@ -224,28 +254,102 @@ function ManagementActionQueueSection({
   summary,
   isLoading,
   error,
+  currentUser,
 }: {
   items: ManagementActionQueueItem[];
   summary?: ManagementActionQueueSummary;
   isLoading: boolean;
   error: unknown;
+  currentUser?: { id?: string; name?: string } | null;
 }) {
   const [filter, setFilter] = React.useState<ManagementActionQueueFilter>('all');
+  const [editingItem, setEditingItem] = React.useState<ManagementActionQueueItem | null>(null);
+  const updateState = useUpdateManagementActionState();
+  const [form, setForm] = React.useState({
+    status: 'open' as ManagementActionExecutionStatus,
+    assignedToUserId: '',
+    assignedToName: '',
+    dueDate: '',
+    comment: '',
+  });
+
+  const openEditor = React.useCallback((item: ManagementActionQueueItem) => {
+    setEditingItem(item);
+    setForm({
+      status: item.executionStatus || 'open',
+      assignedToUserId: item.assignedToUserId || '',
+      assignedToName: item.assignedToName || '',
+      dueDate: item.dueDate || '',
+      comment: item.executionComment || '',
+    });
+  }, []);
+
+  const updateActionStatus = React.useCallback((item: ManagementActionQueueItem, status: ManagementActionExecutionStatus) => {
+    updateState.mutate({
+      actionId: item.actionId,
+      data: {
+        status,
+        assignedToUserId: item.assignedToUserId || currentUser?.id || '',
+        assignedToName: item.assignedToName || currentUser?.name || '',
+        dueDate: item.dueDate || '',
+        comment: item.executionComment || '',
+      },
+    });
+  }, [currentUser?.id, currentUser?.name, updateState]);
+
+  const responsibleOptions = React.useMemo(() => {
+    const options = new Map<string, string>();
+    if (currentUser?.id) options.set(currentUser.id, currentUser.name || 'Текущий пользователь');
+    for (const item of items) {
+      if (item.assignedToUserId) options.set(item.assignedToUserId, item.assignedToName || item.assignedToUserId);
+    }
+    return Array.from(options, ([value, label]) => ({ value, label }));
+  }, [currentUser?.id, currentUser?.name, items]);
+
   const filteredItems = React.useMemo(() => {
     const list = filter === 'all'
       ? items
+      : filter === 'open' || filter === 'in_progress' || filter === 'postponed' || filter === 'resolved' || filter === 'ignored'
+        ? items.filter(item => (item.executionStatus || 'open') === filter)
+      : filter === 'overdue'
+        ? items.filter(item => item.executionOverdue)
+      : filter === 'my_actions'
+        ? items.filter(item => currentUser?.id && item.assignedToUserId === currentUser.id)
       : filter === 'critical' || filter === 'high'
         ? items.filter(item => item.priority === filter)
         : items.filter(item => item.responsibleArea === filter);
     return list.slice(0, 10);
-  }, [filter, items]);
+  }, [currentUser?.id, filter, items]);
+
+  const executionKpis = React.useMemo(() => ({
+    inProgress: items.filter(item => item.executionStatus === 'in_progress').length,
+    overdue: items.filter(item => item.executionOverdue).length,
+    resolved: items.filter(item => item.executionStatus === 'resolved').length,
+    unassigned: items.filter(item => !item.assignedToUserId && !item.assignedToName).length,
+  }), [items]);
 
   const kpis = [
-    { label: 'Всего действий', value: summary?.total ?? 0, icon: ClipboardList, className: 'text-blue-400' },
-    { label: 'Критичные', value: summary?.critical ?? 0, icon: AlertTriangle, className: 'text-red-400' },
-    { label: 'Потери сейчас', value: readinessLossText(summary?.totalEstimatedLoss ?? 0, ' оценочно'), icon: BadgeDollarSign, className: 'text-orange-400' },
-    { label: 'Потеря в день', value: readinessLossText(summary?.totalDailyLoss ?? 0, ' оценочно'), icon: BadgeDollarSign, className: 'text-red-400' },
+    { label: 'В работе', value: executionKpis.inProgress, icon: ClipboardList, className: 'text-blue-400' },
+    { label: 'Просрочено', value: executionKpis.overdue, icon: AlertTriangle, className: 'text-red-400' },
+    { label: 'Решено', value: executionKpis.resolved, icon: CheckCircle2, className: 'text-green-400' },
+    { label: 'Без ответственного', value: executionKpis.unassigned, icon: PenLine, className: 'text-orange-400' },
   ];
+
+  const handleSave = React.useCallback(() => {
+    if (!editingItem) return;
+    updateState.mutate({
+      actionId: editingItem.actionId,
+      data: {
+        status: form.status,
+        assignedToUserId: form.assignedToUserId,
+        assignedToName: form.assignedToName,
+        dueDate: form.dueDate,
+        comment: form.comment,
+      },
+    }, {
+      onSuccess: () => setEditingItem(null),
+    });
+  }, [editingItem, form, updateState]);
 
   return (
     <section className="app-panel overflow-hidden" data-testid="management-action-queue-section">
@@ -253,7 +357,7 @@ function ManagementActionQueueSection({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="app-shell-title text-xl font-extrabold text-foreground">Очередь управленческих действий</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Приоритетные действия, чтобы вернуть технику в доходное состояние</p>
+            <p className="mt-1 text-sm text-muted-foreground">Контроль исполнения управленческих действий по готовности техники</p>
           </div>
           <div className="flex flex-wrap gap-2" aria-label="Фильтр очереди управленческих действий">
             {ACTION_QUEUE_FILTERS.map(option => (
@@ -301,6 +405,7 @@ function ManagementActionQueueSection({
               <tr>
                 <th className="px-5 py-3 font-medium">Приоритет</th>
                 <th className="px-3 py-3 font-medium">Действие</th>
+                <th className="px-3 py-3 font-medium">Исполнение</th>
                 <th className="px-3 py-3 font-medium">Техника</th>
                 <th className="px-3 py-3 font-medium">Ответственный блок</th>
                 <th className="px-3 py-3 font-medium">Уже потеряно</th>
@@ -319,6 +424,31 @@ function ManagementActionQueueSection({
                   <td className="max-w-[360px] px-3 py-3">
                     <div className="font-semibold text-foreground">{item.title || 'Уточнить действие'}</div>
                     <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.description || item.recommendedAction || 'Проверьте блокер техники.'}</div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <Button size="sm" type="button" onClick={() => updateActionStatus(item, 'in_progress')} disabled={updateState.isPending}>
+                        В работу
+                      </Button>
+                      <Button size="sm" variant="outline" type="button" onClick={() => updateActionStatus(item, 'postponed')} disabled={updateState.isPending}>
+                        Отложить
+                      </Button>
+                      <Button size="sm" variant="secondary" type="button" onClick={() => updateActionStatus(item, 'resolved')} disabled={updateState.isPending}>
+                        Решено
+                      </Button>
+                      <Button size="sm" variant="ghost" type="button" onClick={() => openEditor(item)}>
+                        Изменить
+                      </Button>
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground">
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant={executionStatusVariant(item.executionStatus)}>{executionStatusLabel(item.executionStatus)}</Badge>
+                        {item.executionOverdue ? <Badge variant="danger">Просрочено</Badge> : null}
+                      </div>
+                      <span>{item.assignedToName || 'Без ответственного'}</span>
+                      <span>{item.dueDate ? `Срок: ${item.dueDate}` : 'Срок не задан'}</span>
+                      {item.executionComment ? <span className="line-clamp-2 text-muted-foreground">{item.executionComment}</span> : null}
+                    </div>
                   </td>
                   <td className="px-3 py-3 text-xs text-muted-foreground">{item.equipmentId || 'Не указана'}</td>
                   <td className="px-3 py-3 text-xs text-muted-foreground">{responsibleAreaLabel(item.responsibleArea)}</td>
@@ -342,6 +472,69 @@ function ManagementActionQueueSection({
           </table>
         </div>
       )}
+      <Dialog open={Boolean(editingItem)} onOpenChange={(open) => !open && setEditingItem(null)}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Исполнение действия</DialogTitle>
+            <DialogDescription>{editingItem?.title || 'Уточнить действие'}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 overflow-y-auto py-2">
+            <label className="grid gap-1.5 text-sm font-medium text-foreground">
+              Статус
+              <Select value={form.status} onValueChange={(value) => setForm(prev => ({ ...prev, status: value as ManagementActionExecutionStatus }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ACTION_EXECUTION_STATUS_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium text-foreground">
+              Ответственный
+              <Select
+                value={form.assignedToUserId || 'manual'}
+                onValueChange={(value) => {
+                  if (value === 'manual') {
+                    setForm(prev => ({ ...prev, assignedToUserId: '' }));
+                    return;
+                  }
+                  const option = responsibleOptions.find(item => item.value === value);
+                  setForm(prev => ({ ...prev, assignedToUserId: value, assignedToName: option?.label || '' }));
+                }}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual">Указать вручную</SelectItem>
+                  {responsibleOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                value={form.assignedToName}
+                onChange={(event) => setForm(prev => ({ ...prev, assignedToName: event.target.value, assignedToUserId: '' }))}
+                placeholder="Имя ответственного"
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium text-foreground">
+              Срок
+              <Input type="date" value={form.dueDate} onChange={(event) => setForm(prev => ({ ...prev, dueDate: event.target.value }))} />
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium text-foreground">
+              Комментарий
+              <Textarea value={form.comment} maxLength={1000} onChange={(event) => setForm(prev => ({ ...prev, comment: event.target.value }))} />
+            </label>
+            {updateState.error ? (
+              <div className="text-sm text-red-200">Не удалось сохранить. {apiErrorMessage(updateState.error, 'Проверьте права на изменение действия.')}</div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditingItem(null)}>Отмена</Button>
+            <Button type="button" onClick={handleSave} disabled={updateState.isPending}>Сохранить</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -1706,6 +1899,7 @@ export default function Equipment() {
         summary={actionQueueQuery.data?.summary}
         isLoading={actionQueueQuery.isLoading}
         error={actionQueueQuery.error}
+        currentUser={user}
       />
 
       <div className="space-y-3 sm:hidden">

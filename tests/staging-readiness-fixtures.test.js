@@ -75,8 +75,13 @@ test('staging readiness fixture seed is guarded and idempotent', () => {
 
     const equipment = readCollection(dbPath, 'equipment');
     const rentals = readCollection(dbPath, 'rentals');
+    const actionStates = readCollection(dbPath, 'management_action_states');
     assert.equal(equipment.filter(item => String(item.id).startsWith('STG-READINESS-')).length, 8);
     assert.equal(rentals.filter(item => String(item.id).startsWith('STG-READINESS-')).length, 5);
+    assert.equal(actionStates.filter(item => String(item.id).startsWith('STG-READINESS-')).length, 5);
+    assert.ok(actionStates.some(item => item.status === 'in_progress'));
+    assert.ok(actionStates.some(item => item.status === 'postponed'));
+    assert.ok(actionStates.some(item => item.status === 'resolved'));
     assert.ok(rentals.some(item => String(item.id).startsWith('STG-READINESS-') && (item.rate || item.dailyRate || item.monthlyRate)));
   } finally {
     rmSync(dir, { recursive: true, force: true });

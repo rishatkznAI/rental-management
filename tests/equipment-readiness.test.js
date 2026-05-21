@@ -261,7 +261,11 @@ test('management action queue summary totals are correct', () => {
 
 function createApp(stateOverride = {}) {
   const state = {
-    users: [{ id: 'U-admin', name: 'Админ', role: 'Администратор', status: 'Активен' }],
+    users: [
+      { id: 'U-admin', name: 'Админ', role: 'Администратор', status: 'Активен' },
+      { id: 'U-mechanic', name: 'Механик', role: 'Механик', status: 'Активен' },
+      { id: 'U-investor', name: 'Инвестор', role: 'Инвестор', status: 'Активен', ownerId: 'OWN-1' },
+    ],
     equipment: [baseEquipment({ password: 'hidden', token: 'hidden-token' })],
     rentals: [],
     gantt_rentals: [],
@@ -270,20 +274,28 @@ function createApp(stateOverride = {}) {
     documents: [],
     gsm_packets: [],
     shipping_photos: [],
+    management_action_states: [],
     ...stateOverride,
   };
   const app = express();
   app.use(express.json());
   const readData = collection => state[collection] || [];
+  const writeData = (collection, value) => {
+    state[collection] = value;
+  };
   const accessControl = createAccessControl({ readData });
-  const sessions = new Map([['admin-token', 'U-admin']]);
+  const sessions = new Map([
+    ['admin-token', 'U-admin'],
+    ['mechanic-token', 'U-mechanic'],
+    ['investor-token', 'U-investor'],
+  ]);
   const readable = new Set(['equipment', 'rentals', 'gantt_rentals', 'service', 'deliveries', 'documents', 'gsm_packets', 'shipping_photos']);
 
   function requireAuth(req, res, next) {
     const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const user = state.users.find(item => item.id === sessions.get(token));
     if (!user) return res.status(401).json({ ok: false, error: 'Unauthorized' });
-    req.user = { userId: user.id, userName: user.name, userRole: user.role, role: user.role };
+    req.user = { userId: user.id, userName: user.name, userRole: user.role, role: user.role, ownerId: user.ownerId || null };
     next();
   }
 
@@ -300,12 +312,14 @@ function createApp(stateOverride = {}) {
 
   app.use('/api', registerEquipmentReadinessRoutes({
     readData,
+    writeData,
     requireAuth,
     requireRead,
     canReadCollection,
     accessControl,
+    auditLog: () => {},
   }));
-  return app;
+  return { app, state };
 }
 
 async function withServer(app, fn) {
@@ -328,15 +342,28 @@ async function getJson(baseUrl, path, token) {
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
 
+async function patchJson(baseUrl, path, body, token) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  return { status: response.status, body: text ? JSON.parse(text) : null };
+}
+
 test('GET /api/equipment/readiness requires auth', async () => {
-  await withServer(createApp(), async (baseUrl) => {
+  await withServer(createApp().app, async (baseUrl) => {
     const response = await getJson(baseUrl, '/api/equipment/readiness');
     assert.equal(response.status, 401);
   });
 });
 
 test('GET /api/equipment/readiness returns summary and does not expose secrets', async () => {
-  await withServer(createApp(), async (baseUrl) => {
+  await withServer(createApp().app, async (baseUrl) => {
     const response = await getJson(baseUrl, '/api/equipment/readiness', 'admin-token');
     assert.equal(response.status, 200);
     assert.equal(response.body.ok, true);
@@ -350,7 +377,7 @@ test('GET /api/equipment/readiness returns summary and does not expose secrets',
 });
 
 test('GET /api/management/action-queue requires auth', async () => {
-  await withServer(createApp(), async (baseUrl) => {
+  await withServer(createApp().app, async (baseUrl) => {
     const response = await getJson(baseUrl, '/api/management/action-queue');
     assert.equal(response.status, 401);
   });
@@ -365,7 +392,7 @@ test('GET /api/management/action-queue returns prioritized items and does not ex
     ],
     service: [{ id: 'S-critical', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-18' }],
     deliveries: [{ id: 'D-high', equipmentId: 'EQ-delivery', status: 'sent', scheduledDate: '2026-05-20' }],
-  }), async (baseUrl) => {
+  }).app, async (baseUrl) => {
     const response = await getJson(baseUrl, '/api/management/action-queue', 'admin-token');
     assert.equal(response.status, 200);
     assert.equal(response.body.ok, true);
@@ -379,6 +406,127 @@ test('GET /api/management/action-queue returns prioritized items and does not ex
     assert.equal(payload.includes('hidden-password'), false);
     assert.equal(payload.includes('password'), false);
     assert.equal(payload.includes('token'), false);
+  });
+});
+
+test('GET /api/management/action-queue includes execution state and overdue flag', async () => {
+  const actionId = 'equipment_readiness:EQ-service:in_service';
+  await withServer(createApp({
+    equipment: [baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 30000, ownerId: 'OWN-1' })],
+    service: [{ id: 'S-critical', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-18' }],
+    management_action_states: [{
+      id: 'STATE-1',
+      actionId,
+      sourceType: 'equipment_readiness',
+      sourceKey: 'EQ-service',
+      equipmentId: 'EQ-service',
+      status: 'in_progress',
+      assignedToUserId: 'U-mechanic',
+      assignedToName: 'Механик',
+      dueDate: '2020-01-01',
+      comment: 'Взято в работу',
+      updatedByUserId: 'U-admin',
+      updatedAt: '2026-05-20T12:00:00.000Z',
+      createdAt: '2026-05-20T12:00:00.000Z',
+    }],
+  }).app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/management/action-queue', 'admin-token');
+    assert.equal(response.status, 200);
+    const item = response.body.items[0];
+    assert.equal(item.actionId, actionId);
+    assert.equal(item.executionStatus, 'in_progress');
+    assert.equal(item.assignedToUserId, 'U-mechanic');
+    assert.equal(item.assignedToName, 'Механик');
+    assert.equal(item.dueDate, '2020-01-01');
+    assert.equal(item.executionComment, 'Взято в работу');
+    assert.equal(item.executionOverdue, true);
+    const payload = JSON.stringify(response.body);
+    assert.equal(payload.includes('updatedByUserId'), false);
+    assert.equal(payload.includes('password'), false);
+    assert.equal(payload.includes('token'), false);
+  });
+});
+
+test('PATCH /api/management/action-queue/:actionId/state updates action state', async () => {
+  const created = createApp({
+    equipment: [baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 30000 })],
+    service: [{ id: 'S-critical', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-18' }],
+  });
+  const actionId = 'equipment_readiness:EQ-service:in_service';
+  await withServer(created.app, async (baseUrl) => {
+    const response = await patchJson(baseUrl, `/api/management/action-queue/${encodeURIComponent(actionId)}/state`, {
+      status: 'postponed',
+      assignedToUserId: 'U-mechanic',
+      dueDate: '2026-05-30',
+      comment: 'Ждем запчасть',
+    }, 'admin-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.state.executionStatus, 'postponed');
+    assert.equal(response.body.state.assignedToName, 'Механик');
+  });
+  assert.equal(created.state.management_action_states.length, 1);
+  assert.equal(created.state.management_action_states[0].status, 'postponed');
+  assert.equal(created.state.management_action_states[0].comment, 'Ждем запчасть');
+});
+
+test('PATCH /api/management/action-queue/:actionId/state validates status and auth', async () => {
+  const actionId = 'equipment_readiness:EQ-service:in_service';
+  await withServer(createApp({
+    equipment: [baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 30000, ownerId: 'OWN-1' })],
+    service: [{ id: 'S-critical', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-18' }],
+  }).app, async (baseUrl) => {
+    const unauthenticated = await patchJson(baseUrl, `/api/management/action-queue/${encodeURIComponent(actionId)}/state`, {
+      status: 'resolved',
+    });
+    assert.equal(unauthenticated.status, 401);
+
+    const invalid = await patchJson(baseUrl, `/api/management/action-queue/${encodeURIComponent(actionId)}/state`, {
+      status: 'done',
+    }, 'admin-token');
+    assert.equal(invalid.status, 400);
+
+    const badDate = await patchJson(baseUrl, `/api/management/action-queue/${encodeURIComponent(actionId)}/state`, {
+      status: 'resolved',
+      dueDate: '2026-02-31',
+    }, 'admin-token');
+    assert.equal(badDate.status, 400);
+  });
+});
+
+test('PATCH /api/management/action-queue/:actionId/state denies roles outside action scope', async () => {
+  const actionId = 'equipment_readiness:EQ-service:in_service';
+  await withServer(createApp({
+    equipment: [baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 30000, ownerId: 'OWN-1' })],
+    service: [{ id: 'S-critical', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-18' }],
+  }).app, async (baseUrl) => {
+    const response = await patchJson(baseUrl, `/api/management/action-queue/${encodeURIComponent(actionId)}/state`, {
+      status: 'resolved',
+    }, 'investor-token');
+    assert.equal(response.status, 403);
+  });
+});
+
+test('management action state persists across generated queue recalculation', async () => {
+  const created = createApp({
+    equipment: [baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 30000 })],
+    service: [{ id: 'S-critical', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-18' }],
+  });
+  const actionId = 'equipment_readiness:EQ-service:in_service';
+  await withServer(created.app, async (baseUrl) => {
+    const patch = await patchJson(baseUrl, `/api/management/action-queue/${encodeURIComponent(actionId)}/state`, {
+      status: 'in_progress',
+      dueDate: '2026-05-30',
+      comment: 'Назначено',
+    }, 'admin-token');
+    assert.equal(patch.status, 200);
+
+    created.state.rentals.push({ id: 'R-history', equipmentId: 'EQ-service', status: 'closed', dailyRate: 5000, startDate: '2026-04-01', endDate: '2026-04-02' });
+
+    const get = await getJson(baseUrl, '/api/management/action-queue', 'admin-token');
+    assert.equal(get.status, 200);
+    const item = get.body.items.find(row => row.actionId === actionId);
+    assert.equal(item.executionStatus, 'in_progress');
+    assert.equal(item.executionComment, 'Назначено');
   });
 });
 

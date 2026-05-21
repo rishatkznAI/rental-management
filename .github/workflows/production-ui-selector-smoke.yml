@@ -1,0 +1,71 @@
+name: Production UI Selector Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_release_commit:
+        description: Production commit expected from /api/version and frontend debug marker
+        required: true
+        default: 7839a039bc0e
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-ui-selector-smoke
+  cancel-in-progress: false
+
+jobs:
+  production-ui-selector-smoke:
+    name: Focused read-only production UI selector smoke
+    runs-on: ubuntu-latest
+    env:
+      PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+      PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+      PRODUCTION_ADMIN_EMAIL: ${{ secrets.PRODUCTION_ADMIN_EMAIL }}
+      PRODUCTION_ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
+      EXPECTED_RELEASE_COMMIT: ${{ inputs.expected_release_commit }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Validate production smoke secrets
+        run: |
+          test -n "$PRODUCTION_API_URL"
+          test -n "$PRODUCTION_FRONTEND_URL"
+          test -n "$PRODUCTION_ADMIN_EMAIL"
+          test -n "$PRODUCTION_ADMIN_PASSWORD"
+          test -n "$EXPECTED_RELEASE_COMMIT"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run focused read-only production UI selector smoke
+        run: npx playwright test e2e/production-ui-selector-smoke.spec.ts --config=playwright.production.config.ts --trace=off --screenshot=off --video=off
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-ui-selector-playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+
+      - name: Upload Playwright test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-ui-selector-test-results
+          path: test-results/
+          if-no-files-found: ignore

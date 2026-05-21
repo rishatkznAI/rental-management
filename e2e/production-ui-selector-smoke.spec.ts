@@ -5,11 +5,17 @@ const EXPECTED_EXECUTION_LABELS = new Set(['Открыто', 'В работе', 
 const SAFE_ASSIGNEE_FIELDS = ['userId', 'name', 'role', 'active'] as const;
 const UNSAFE_ASSIGNEE_FIELDS = ['email', 'password', 'passwordHash', 'token', 'secret'] as const;
 const UNSAFE_TEXT_PATTERN = /password|token|secret|Bearer\s+|undefined|\[object Object\]/i;
+const UNSAFE_VISIBLE_TEXT_PATTERN = /\bundefined\b|\bnull\b|\[object Object\]/i;
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
 function sanitizeUrl(url: string) {
   return url.replace(/[?&](token|password|secret|auth|access_token)=[^&]+/gi, '$1=[secret]');
+}
+
+function productionAppUrl(frontendUrl: string, route = '/') {
+  const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
+  return `${frontendUrl.replace(/\/$/, '')}/?debugVersion=1&_smoke=${Date.now()}#${normalizedRoute}`;
 }
 
 async function installProductionReadOnlyGuard(page: Page) {
@@ -62,6 +68,36 @@ function safeSmokeLog(label: string, fields: Record<string, unknown>) {
   console.log(`[production-ui-selector-smoke] ${label} ${JSON.stringify(fields)}`);
 }
 
+function installSafeAggregateMonitor(page: Page, apiUrl: string) {
+  const counts = {
+    consoleErrors: 0,
+    pageErrors: 0,
+    apiErrors: 0,
+  };
+
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    const text = message.text();
+    if (/ResizeObserver loop|Download the React DevTools|favicon/i.test(text)) return;
+    counts.consoleErrors += 1;
+  });
+
+  page.on('pageerror', () => {
+    counts.pageErrors += 1;
+  });
+
+  page.on('response', (response) => {
+    const status = response.status();
+    const url = response.url();
+    const path = new URL(url).pathname;
+    const isApi = url.startsWith(apiUrl) || /\/api\//.test(url);
+    const expectedAnonymousMe = status === 401 && path === '/api/auth/me';
+    if (isApi && status >= 400 && !expectedAnonymousMe) counts.apiErrors += 1;
+  });
+
+  return counts;
+}
+
 async function expectColumnHeader(section: Locator, label: string | RegExp) {
   await expect(section.getByRole('columnheader', { name: label, exact: typeof label === 'string' })).toBeVisible();
 }
@@ -70,15 +106,18 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
   test.setTimeout(180_000);
 
   const blockedWrites = await installProductionReadOnlyGuard(page);
-  const requestCounts = { readiness: 0, actionQueue: 0 };
+  const requestCounts = { readiness: 0, actionQueue: 0, attention: 0 };
   page.on('request', (request) => {
-    const path = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const path = url.pathname;
     if (path === '/api/equipment/readiness') requestCounts.readiness += 1;
-    if (path === '/api/management/action-queue') requestCounts.actionQueue += 1;
+    if (path === '/api/management/action-queue' && url.searchParams.get('view') === 'attention') requestCounts.attention += 1;
+    if (path === '/api/management/action-queue' && url.searchParams.get('view') !== 'attention') requestCounts.actionQueue += 1;
   });
   const apiUrl = requiredEnv('PRODUCTION_API_URL', 'production UI selector smoke').replace(/\/$/, '');
   const frontendUrl = requiredEnv('PRODUCTION_FRONTEND_URL', 'production UI selector smoke').replace(/\/$/, '');
   const expectedCommit = String(process.env.EXPECTED_RELEASE_COMMIT || '').trim();
+  const safeAggregateCounts = installSafeAggregateMonitor(page, apiUrl);
 
   const preflightApi = await playwrightRequest.newContext({ baseURL: apiUrl });
   try {
@@ -165,6 +204,30 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
     expect(executionLabelPresent, 'queue API should expose execution label fields').toBeTruthy();
     expect(executionOverduePresent, 'queue API should expose execution overdue flags').toBeTruthy();
 
+    const attentionStartedAt = Date.now();
+    const attentionResponse = await api.get('/api/management/action-queue?view=attention');
+    const attentionDurationMs = Date.now() - attentionStartedAt;
+    expect(attentionResponse.ok(), 'management action queue attention GET should succeed').toBeTruthy();
+    const attention = await attentionResponse.json() as {
+      groups?: Record<string, unknown>;
+      summary?: Record<string, unknown>;
+    };
+    expect(JSON.stringify(attention), 'attention API should not expose unsafe text').not.toMatch(UNSAFE_TEXT_PATTERN);
+    safeSmokeLog('attention', {
+      status: attentionResponse.status(),
+      durationMs: attentionDurationMs,
+      summaryCritical: numberSummaryValue(attention.summary, 'critical'),
+      summaryOverdue: numberSummaryValue(attention.summary, 'overdue'),
+      summaryDueToday: numberSummaryValue(attention.summary, 'dueToday'),
+      summaryUnassigned: numberSummaryValue(attention.summary, 'unassigned'),
+      summaryStale: numberSummaryValue(attention.summary, 'stale'),
+      groupCritical: countItems(attention.groups?.critical),
+      groupToday: countItems(attention.groups?.today),
+      groupUnassigned: countItems(attention.groups?.unassigned),
+      groupTopLoss: countItems(attention.groups?.topLoss),
+      groupResponsibleArea: countItems(attention.groups?.byResponsibleArea),
+    });
+
     const assigneesResponse = await api.get('/api/management/action-queue/assignees');
     expect(assigneesResponse.ok(), 'management action queue assignees GET should succeed').toBeTruthy();
     const assignees = await assigneesResponse.json() as { items?: Array<Record<string, unknown>> };
@@ -183,7 +246,62 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
     await api.dispose();
   }
 
-  const actionQueue = page.getByTestId('management-action-queue-section');
+  await page.goto(productionAppUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: 'Дашборд', exact: true })).toBeVisible();
+
+  const attentionBlock = page.getByTestId('dashboard-attention-block');
+  await expect(attentionBlock).toBeVisible();
+  await expect(attentionBlock.getByRole('heading', { name: 'Что требует внимания сегодня' })).toBeVisible();
+  for (const label of ['Критично', 'Просрочено', 'Сегодня', 'Без ответственного', 'Потери сейчас', 'Потеря в день']) {
+    await expect(attentionBlock.getByText(label, { exact: true }).first(), `dashboard attention KPI ${label} should be visible`).toBeVisible();
+  }
+  await expect(attentionBlock.getByText('Загружаем очередь внимания...', { exact: true })).toBeHidden();
+  const topActionRowCount = await attentionBlock.locator('a').evaluateAll(links =>
+    links.filter(link => link.textContent?.trim() === 'Открыть').length,
+  );
+  const hasEmptyState = await attentionBlock.getByText('Критичных действий на сегодня нет.', { exact: true }).count();
+  expect(topActionRowCount + hasEmptyState, 'dashboard attention should render top actions or an empty state').toBeGreaterThan(0);
+  await expect(attentionBlock.getByRole('link', { name: 'Открыть очередь' })).toBeVisible();
+  await expect(attentionBlock.getByRole('link', { name: 'Показать без ответственного' })).toHaveAttribute('href', /actionQueueFilter=unassigned/);
+  await expect(attentionBlock.getByRole('link', { name: 'Показать просроченные' })).toHaveAttribute('href', /actionQueueFilter=overdue/);
+  safeSmokeLog('dashboardAttention', {
+    blockVisible: true,
+    kpiCardsVisible: true,
+    topActionRows: topActionRowCount,
+    emptyStateVisible: hasEmptyState > 0,
+    openQueueLink: true,
+    unassignedFilterLink: true,
+    overdueFilterLink: true,
+  });
+
+  await attentionBlock.getByRole('link', { name: 'Открыть очередь' }).click();
+  let actionQueue = page.getByTestId('management-action-queue-section');
+  await expect(actionQueue).toBeVisible();
+  await expect(page.getByText('Активный фильтр: Все', { exact: true })).toBeVisible();
+  await expect(actionQueue.getByRole('button', { name: 'Все', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  await page.goto(productionAppUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
+  await page.getByTestId('dashboard-attention-block').getByRole('link', { name: 'Показать без ответственного' }).click();
+  actionQueue = page.getByTestId('management-action-queue-section');
+  await expect(actionQueue).toBeVisible();
+  await expect(page.getByText('Активный фильтр: Без ответственного', { exact: true })).toBeVisible();
+  await expect(actionQueue.getByRole('button', { name: 'Без ответственного', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  await page.goto(productionAppUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
+  await page.getByTestId('dashboard-attention-block').getByRole('link', { name: 'Показать просроченные' }).click();
+  actionQueue = page.getByTestId('management-action-queue-section');
+  await expect(actionQueue).toBeVisible();
+  await expect(page.getByText('Активный фильтр: Просрочено', { exact: true })).toBeVisible();
+  await expect(actionQueue.getByRole('button', { name: 'Просрочено', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  safeSmokeLog('dashboardAttentionLinks', {
+    openQueueFilterVisible: true,
+    unassignedFilterVisible: true,
+    overdueFilterVisible: true,
+  });
+
+  await page.goto(productionAppUrl(frontendUrl, '/equipment'), { waitUntil: 'domcontentloaded' });
+
+  actionQueue = page.getByTestId('management-action-queue-section');
   await expect(actionQueue).toBeVisible();
   await expectColumnHeader(actionQueue, /^(Статус исполнения|Исполнение)$/);
   await expectColumnHeader(actionQueue, 'Ответственный');
@@ -224,8 +342,20 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
   expect((await cellText(firstReadinessRow, 6)).length, 'readiness row should render responsible field').toBeGreaterThan(0);
 
   const visibleText = await page.locator('body').innerText();
-  expect(visibleText, 'production UI should not render raw undefined/null/object placeholders').not.toMatch(/\bundefined\b|\bnull\b|\[object Object\]/i);
-  expect(requestCounts.readiness, 'production UI selector smoke should not refetch readiness excessively').toBeLessThanOrEqual(3);
-  expect(requestCounts.actionQueue, 'production UI selector smoke should not refetch action queue excessively').toBeLessThanOrEqual(3);
+  expect(visibleText, 'production UI should not render raw undefined/null/object placeholders').not.toMatch(UNSAFE_VISIBLE_TEXT_PATTERN);
+  safeSmokeLog('safeAggregates', {
+    requestReadiness: requestCounts.readiness,
+    requestActionQueue: requestCounts.actionQueue,
+    requestAttention: requestCounts.attention,
+    consoleErrors: safeAggregateCounts.consoleErrors,
+    pageErrors: safeAggregateCounts.pageErrors,
+    apiErrors: safeAggregateCounts.apiErrors,
+  });
+  expect(requestCounts.readiness, 'production UI selector smoke should not refetch readiness excessively').toBeLessThanOrEqual(6);
+  expect(requestCounts.actionQueue, 'production UI selector smoke should not refetch action queue excessively').toBeLessThanOrEqual(6);
+  expect(requestCounts.attention, 'production UI selector smoke should not refetch attention action queue excessively').toBeLessThanOrEqual(5);
+  expect(safeAggregateCounts.consoleErrors, 'production UI selector smoke should not emit console errors').toBe(0);
+  expect(safeAggregateCounts.pageErrors, 'production UI selector smoke should not emit page errors').toBe(0);
+  expect(safeAggregateCounts.apiErrors, 'production UI selector smoke should not receive API errors').toBe(0);
   expect(blockedWrites, 'production UI selector smoke must not attempt protected write endpoints').toEqual([]);
 });

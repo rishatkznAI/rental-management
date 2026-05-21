@@ -17,6 +17,7 @@
     "test:e2e:staging-smoke": "playwright test e2e/staging-smoke.spec.ts --config=playwright.staging.config.ts",
     "test:e2e:production-smoke": "playwright test e2e/production-smoke.spec.ts --config=playwright.production.config.ts",
     "release:preflight": "node scripts/release-preflight.mjs",
+    "release:targeted-smoke": "node scripts/release-targeted-smoke.mjs",
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {

@@ -153,6 +153,13 @@ jobs:
           PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
           EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
 
+      - name: Run production targeted GET smoke
+        run: npm run release:targeted-smoke -- --env production
+        env:
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          PRODUCTION_ADMIN_EMAIL: ${{ secrets.PRODUCTION_ADMIN_EMAIL }}
+          PRODUCTION_ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
+
       - name: Run production smoke login
         run: npm run test:e2e:production-smoke
         env:

@@ -48,6 +48,9 @@ jobs:
       - name: Run staging release preflight
         run: npm run release:preflight -- --env staging --expected-commit "$EXPECTED_RELEASE_COMMIT"
 
+      - name: Run staging targeted GET smoke
+        run: npm run release:targeted-smoke -- --env staging
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 

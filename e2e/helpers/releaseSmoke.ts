@@ -258,6 +258,11 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
     const healthJson = await health.json();
     expect(healthJson.ok).toBe(true);
 
+    const ready = await api.get('/health/ready');
+    expect(ready.ok(), await ready.text()).toBeTruthy();
+    const readyJson = await ready.json();
+    expect(readyJson.ok).toBe(true);
+
     const version = await api.get('/api/version');
     expect(version.ok(), await version.text()).toBeTruthy();
     const versionJson = await version.json();

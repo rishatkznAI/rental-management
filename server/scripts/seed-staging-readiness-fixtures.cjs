@@ -3,6 +3,7 @@
 const { DB_PATH, getData, setData } = require('../db');
 
 const PREFIX = 'STG-READINESS-';
+const ACTION_PREFIX = 'STG-ACTION-';
 
 function envText(env = process.env) {
   return [
@@ -47,7 +48,8 @@ function asArray(value) {
 }
 
 function hasFixtureId(record) {
-  return String(record?.id || '').startsWith(PREFIX);
+  const id = String(record?.id || '');
+  return id.startsWith(PREFIX) || id.startsWith(ACTION_PREFIX);
 }
 
 function hasFixtureDocument(record) {
@@ -66,6 +68,7 @@ function buildFixtures(now = new Date()) {
   const iso = now.toISOString();
   const staleIso = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString();
   const futureIso = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const todayIso = iso.slice(0, 10);
   const closedIso = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const overdueIso = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const historicalStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -93,6 +96,7 @@ function buildFixtures(now = new Date()) {
       base('GSM', 'GSM Lift 18', 'available', { gsmImei: `${PREFIX}IMEI-0001`, gsmLastSeenAt: staleIso }),
       base('CHECK', 'Return Check Lift 20', 'available'),
       base('DOC', 'Document Lift 22', 'available', { plannedMonthlyRevenue: 150000 }),
+      base('ACTION-LOSS', 'Action Loss Lift 26', 'in_service', { plannedMonthlyRevenue: 900000 }),
       base('UNKNOWN', 'Legacy Lift 24', 'legacy_hold'),
     ],
     rentals: [
@@ -188,18 +192,50 @@ function buildFixtures(now = new Date()) {
         fixtureTag: PREFIX,
         updatedAt: iso,
       },
+      {
+        id: `${PREFIX}RENTAL-ACTION-LOSS-HISTORY`,
+        rentalId: `${PREFIX}RENTAL-ACTION-LOSS-HISTORY`,
+        equipmentId: `${PREFIX}EQ-ACTION-LOSS`,
+        equipmentInv: `${PREFIX}INV-ACTION-LOSS`,
+        status: 'closed',
+        clientId: `${PREFIX}CLIENT-TEST`,
+        client: 'STAGING TEST CLIENT',
+        clientName: 'STAGING TEST CLIENT',
+        startDate: historicalStart,
+        endDate: historicalEnd,
+        actualReturnDate: historicalEnd,
+        dailyRate: 30000,
+        amount: 210000,
+        price: 210000,
+        notes: 'STAGING TEST FIXTURE: high loss action queue case.',
+        fixtureTag: PREFIX,
+        updatedAt: iso,
+      },
     ],
-    service: [{
-      id: `${PREFIX}SERVICE-OPEN`,
-      equipmentId: `${PREFIX}EQ-SERVICE`,
-      equipmentInv: `${PREFIX}INV-SERVICE`,
-      status: 'in_progress',
-      title: 'STAGING TEST FIXTURE: readiness service ticket',
-      description: 'STAGING TEST FIXTURE. No real customer data.',
-      createdAt: blockedStart,
-      updatedAt: iso,
-      fixtureTag: PREFIX,
-    }],
+    service: [
+      {
+        id: `${PREFIX}SERVICE-OPEN`,
+        equipmentId: `${PREFIX}EQ-SERVICE`,
+        equipmentInv: `${PREFIX}INV-SERVICE`,
+        status: 'in_progress',
+        title: 'STAGING TEST FIXTURE: readiness service ticket',
+        description: 'STAGING TEST FIXTURE. No real customer data.',
+        createdAt: blockedStart,
+        updatedAt: iso,
+        fixtureTag: PREFIX,
+      },
+      {
+        id: `${PREFIX}SERVICE-ACTION-LOSS`,
+        equipmentId: `${PREFIX}EQ-ACTION-LOSS`,
+        equipmentInv: `${PREFIX}INV-ACTION-LOSS`,
+        status: 'new',
+        title: 'STAGING TEST FIXTURE: high loss action queue ticket',
+        description: 'STAGING TEST FIXTURE. No real customer data.',
+        createdAt: blockedStart,
+        updatedAt: iso,
+        fixtureTag: PREFIX,
+      },
+    ],
     deliveries: [{
       id: `${PREFIX}DELIVERY-ACTIVE`,
       equipmentId: `${PREFIX}EQ-DELIVERY`,
@@ -238,7 +274,7 @@ function buildFixtures(now = new Date()) {
     }],
     managementActionStates: [
       {
-        id: `${PREFIX}ACTION-STATE-SERVICE-OPEN`,
+        id: `${ACTION_PREFIX}STATE-SERVICE-UNASSIGNED`,
         actionId: `equipment_readiness:${PREFIX}EQ-SERVICE:in_service`,
         sourceType: 'equipment_readiness',
         sourceKey: `${PREFIX}EQ-SERVICE`,
@@ -254,7 +290,7 @@ function buildFixtures(now = new Date()) {
         fixtureTag: PREFIX,
       },
       {
-        id: `${PREFIX}ACTION-STATE-DELIVERY-IN-PROGRESS`,
+        id: `${ACTION_PREFIX}STATE-DELIVERY-STALE-IN-PROGRESS`,
         actionId: `equipment_readiness:${PREFIX}EQ-DELIVERY:delivery_blocked`,
         sourceType: 'equipment_readiness',
         sourceKey: `${PREFIX}EQ-DELIVERY`,
@@ -265,12 +301,12 @@ function buildFixtures(now = new Date()) {
         dueDate: futureIso,
         comment: 'STAGING TEST FIXTURE: carrier follow-up in progress.',
         updatedByUserId: 'staging-fixture',
-        updatedAt: iso,
-        createdAt: iso,
+        updatedAt: staleIso,
+        createdAt: staleIso,
         fixtureTag: PREFIX,
       },
       {
-        id: `${PREFIX}ACTION-STATE-GSM-POSTPONED`,
+        id: `${ACTION_PREFIX}STATE-GSM-DUE-TODAY`,
         actionId: `equipment_readiness:${PREFIX}EQ-GSM:gsm_attention`,
         sourceType: 'equipment_readiness',
         sourceKey: `${PREFIX}EQ-GSM`,
@@ -278,7 +314,7 @@ function buildFixtures(now = new Date()) {
         status: 'postponed',
         assignedToUserId: '',
         assignedToName: 'STAGING TEST TECH',
-        dueDate: futureIso,
+        dueDate: todayIso,
         comment: 'STAGING TEST FIXTURE: check after planned network window.',
         updatedByUserId: 'staging-fixture',
         updatedAt: iso,
@@ -286,7 +322,7 @@ function buildFixtures(now = new Date()) {
         fixtureTag: PREFIX,
       },
       {
-        id: `${PREFIX}ACTION-STATE-DOC-OVERDUE`,
+        id: `${ACTION_PREFIX}STATE-DOC-OVERDUE`,
         actionId: `equipment_readiness:${PREFIX}EQ-DOC:document_blocked`,
         sourceType: 'equipment_readiness',
         sourceKey: `${PREFIX}EQ-DOC`,
@@ -302,7 +338,7 @@ function buildFixtures(now = new Date()) {
         fixtureTag: PREFIX,
       },
       {
-        id: `${PREFIX}ACTION-STATE-CHECK-RESOLVED`,
+        id: `${ACTION_PREFIX}STATE-CHECK-RESOLVED`,
         actionId: `equipment_readiness:${PREFIX}EQ-CHECK:needs_check`,
         sourceType: 'equipment_readiness',
         sourceKey: `${PREFIX}EQ-CHECK`,
@@ -312,6 +348,22 @@ function buildFixtures(now = new Date()) {
         assignedToName: 'STAGING TEST MANAGER',
         dueDate: closedIso,
         comment: 'STAGING TEST FIXTURE: resolved manually for UI verification.',
+        updatedByUserId: 'staging-fixture',
+        updatedAt: iso,
+        createdAt: iso,
+        fixtureTag: PREFIX,
+      },
+      {
+        id: `${ACTION_PREFIX}STATE-HIGH-LOSS-UNASSIGNED`,
+        actionId: `equipment_readiness:${PREFIX}EQ-ACTION-LOSS:in_service`,
+        sourceType: 'equipment_readiness',
+        sourceKey: `${PREFIX}EQ-ACTION-LOSS`,
+        equipmentId: `${PREFIX}EQ-ACTION-LOSS`,
+        status: 'open',
+        assignedToUserId: '',
+        assignedToName: '',
+        dueDate: futureIso,
+        comment: 'STAGING TEST FIXTURE: high loss action without assignee.',
         updatedByUserId: 'staging-fixture',
         updatedAt: iso,
         createdAt: iso,

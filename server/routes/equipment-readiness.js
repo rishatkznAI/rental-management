@@ -9,6 +9,9 @@ const ACTION_STATE_COLLECTION = 'management_action_states';
 const ACTION_EXECUTION_STATUSES = new Set(['open', 'in_progress', 'postponed', 'resolved', 'ignored']);
 const TERMINAL_ACTION_STATUSES = new Set(['resolved', 'ignored']);
 const MAX_ACTION_COMMENT_LENGTH = 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const STALE_ACTION_DAYS = 3;
+const STALE_HIGH_LOSS_THRESHOLD = 50000;
 const ACTION_EXECUTION_LABELS = {
   open: 'Открыто',
   in_progress: 'В работе',
@@ -62,6 +65,16 @@ function filterActionQueueForUser(queue, user, accessControl) {
   if (allowedAreas === null) return queue;
   const items = queue.items.filter(item => allowedAreas.has(item.responsibleArea));
   return buildActionQueueSummary(items);
+}
+
+function canManageActionQueue(user, accessControl) {
+  if (!user || !accessControl) return false;
+  return Boolean(
+    accessControl.isAdmin?.(user) ||
+    accessControl.isOfficeManager?.(user) ||
+    accessControl.isRentalManager?.(user) ||
+    accessControl.isSalesManager?.(user)
+  );
 }
 
 function todayDateString(now = new Date()) {
@@ -118,6 +131,90 @@ function isActionOverdue(state, today = todayDateString()) {
   );
 }
 
+function parseDateKey(value) {
+  const text = String(value || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
+  const parsed = new Date(`${text}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text) return '';
+  return text;
+}
+
+function daysBetweenDateKeys(left, right) {
+  const leftKey = parseDateKey(left);
+  const rightKey = parseDateKey(right);
+  if (!leftKey || !rightKey) return null;
+  return Math.round((new Date(`${leftKey}T00:00:00.000Z`).getTime() - new Date(`${rightKey}T00:00:00.000Z`).getTime()) / DAY_MS);
+}
+
+function isTerminalAction(status) {
+  return TERMINAL_ACTION_STATUSES.has(status);
+}
+
+function actionUrgencyLabel(priority) {
+  if (priority === 'critical') return 'Критично';
+  if (priority === 'high') return 'Высокий';
+  if (priority === 'medium') return 'Средний';
+  return 'Низкий';
+}
+
+function actionAccountabilityLabel({ executionStatus, isUnassigned, isOverdue, isDueToday }) {
+  if (executionStatus === 'resolved') return 'Решено';
+  if (executionStatus === 'ignored') return 'Решено';
+  if (isOverdue) return 'Просрочено';
+  if (isDueToday) return 'Сегодня';
+  if (executionStatus === 'in_progress') return 'В работе';
+  if (isUnassigned) return 'Без ответственного';
+  return actionExecutionLabel(executionStatus);
+}
+
+function actionSortScore(item) {
+  const priorityScore = { critical: 30000, high: 20000, medium: 10000, low: 0 }[item.priority] || 0;
+  const lossScore = Math.min(Number(item.estimatedLoss || 0), 9999999) / 100;
+  const daysScore = Math.min(Number(item.blockedDays || 0), 365) * 10;
+  return Math.round(
+    (item.isOverdue ? 1000000 : 0)
+    + priorityScore
+    + lossScore
+    + daysScore
+    + (item.isUnassigned ? 500 : 0)
+  );
+}
+
+function deriveActionExecutionFields(item, { today }) {
+  const executionStatus = item.executionStatus || 'open';
+  const dueDate = parseDateKey(item.dueDate);
+  const daysUntilDue = dueDate ? daysBetweenDateKeys(dueDate, today) : null;
+  const terminal = isTerminalAction(executionStatus);
+  const isUnassigned = Boolean(
+    !terminal &&
+    (!String(item.assignedToUserId || '').trim() || !String(item.assignedToName || '').trim())
+  );
+  const isOverdue = Boolean(!terminal && dueDate && dueDate < today);
+  const isDueToday = Boolean(!terminal && dueDate && dueDate === today);
+  const updatedAgeDays = item.updatedAt ? daysBetweenDateKeys(today, item.updatedAt) : null;
+  const isStale = Boolean(
+    ['open', 'in_progress'].includes(executionStatus) &&
+    (
+      Number(item.blockedDays || 0) >= STALE_ACTION_DAYS ||
+      (updatedAgeDays !== null && updatedAgeDays >= STALE_ACTION_DAYS) ||
+      Number(item.estimatedLoss || 0) >= STALE_HIGH_LOSS_THRESHOLD
+    )
+  );
+  const next = {
+    ...item,
+    dueDate,
+    isUnassigned,
+    isOverdue,
+    isDueToday,
+    isStale,
+    daysUntilDue,
+    accountabilityLabel: actionAccountabilityLabel({ executionStatus, isUnassigned, isOverdue, isDueToday }),
+    urgencyLabel: actionUrgencyLabel(item.priority),
+  };
+  next.sortScore = actionSortScore(next);
+  return next;
+}
+
 function actionExecutionLabel(status) {
   return ACTION_EXECUTION_LABELS[status] || ACTION_EXECUTION_LABELS.open;
 }
@@ -129,7 +226,7 @@ function attachExecutionState(queue, states, { now = new Date() } = {}) {
     const sourceKey = actionSourceKey(item);
     const state = byKey.get(`${item.actionId}::${sourceKey}`) || null;
     const executionStatus = state?.status || 'open';
-    return {
+    return deriveActionExecutionFields({
       ...item,
       sourceKey,
       executionStatus,
@@ -140,7 +237,13 @@ function attachExecutionState(queue, states, { now = new Date() } = {}) {
       executionComment: state?.comment || '',
       updatedAt: state?.updatedAt || '',
       executionOverdue: isActionOverdue(state, today),
-    };
+    }, { today });
+  }).sort((left, right) => {
+    const scoreDiff = Number(right.sortScore || 0) - Number(left.sortScore || 0);
+    if (scoreDiff !== 0) return scoreDiff;
+    const lossDiff = Number(right.estimatedLoss || 0) - Number(left.estimatedLoss || 0);
+    if (lossDiff !== 0) return lossDiff;
+    return Number(right.blockedDays || 0) - Number(left.blockedDays || 0);
   });
   return buildActionQueueSummary(items);
 }
@@ -162,6 +265,12 @@ function buildActionQueueSummary(items) {
     low: 0,
     totalEstimatedLoss: 0,
     totalDailyLoss: 0,
+    unassigned: 0,
+    overdue: 0,
+    dueToday: 0,
+    stale: 0,
+    inProgress: 0,
+    resolved: 0,
     byResponsibleArea,
   };
   const roundMoney = value => Math.round(value * 100) / 100;
@@ -169,6 +278,12 @@ function buildActionQueueSummary(items) {
     if (summary[item.priority] !== undefined) summary[item.priority] += 1;
     summary.totalEstimatedLoss = roundMoney(summary.totalEstimatedLoss + Number(item.estimatedLoss || 0));
     summary.totalDailyLoss = roundMoney(summary.totalDailyLoss + Number(item.estimatedDailyLoss || 0));
+    if (item.isUnassigned) summary.unassigned += 1;
+    if (item.isOverdue || item.executionOverdue) summary.overdue += 1;
+    if (item.isDueToday) summary.dueToday += 1;
+    if (item.isStale) summary.stale += 1;
+    if (item.executionStatus === 'in_progress') summary.inProgress += 1;
+    if (item.executionStatus === 'resolved') summary.resolved += 1;
     byResponsibleArea[item.responsibleArea] = (byResponsibleArea[item.responsibleArea] || 0) + 1;
   }
   return { summary, items };
@@ -227,6 +342,28 @@ function logEndpointDiagnostic(logger, {
   }
 }
 
+function isActiveUserRecord(user) {
+  const status = String(user?.status || user?.state || '').trim().toLowerCase();
+  const active = user?.active;
+  if (active === false) return false;
+  if (status && ['inactive', 'disabled', 'blocked', 'уволен', 'неактивен', 'заблокирован'].includes(status)) return false;
+  if (active === true) return true;
+  return ['active', 'enabled', 'активен'].includes(status);
+}
+
+function safeActionQueueAssignees(readData) {
+  return internalCollection(readData, 'users')
+    .filter(isActiveUserRecord)
+    .map(user => ({
+      userId: String(user.id || user.userId || ''),
+      name: String(user.name || user.userName || '').trim(),
+      role: String(user.role || user.userRole || '').trim(),
+      active: true,
+    }))
+    .filter(user => user.userId && user.name)
+    .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+}
+
 function registerEquipmentReadinessRoutes(deps) {
   const {
     readData,
@@ -279,6 +416,16 @@ function registerEquipmentReadinessRoutes(deps) {
       ok: true,
       summary: visibleQueue.summary,
       items: visibleQueue.items,
+    });
+  });
+
+  router.get('/management/action-queue/assignees', requireAuth, (req, res) => {
+    if (!canManageActionQueue(req.user, accessControl)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    return res.json({
+      ok: true,
+      items: safeActionQueueAssignees(readData),
     });
   });
 

@@ -286,6 +286,14 @@ export interface ManagementActionQueueItem {
   executionComment: string;
   updatedAt: string;
   executionOverdue: boolean;
+  isUnassigned: boolean;
+  isOverdue: boolean;
+  isDueToday: boolean;
+  isStale: boolean;
+  daysUntilDue: number | null;
+  accountabilityLabel: string;
+  urgencyLabel: string;
+  sortScore: number;
   links: {
     equipment?: string;
     serviceTicket?: string;
@@ -303,6 +311,12 @@ export interface ManagementActionQueueSummary {
   low: number;
   totalEstimatedLoss: number;
   totalDailyLoss: number;
+  unassigned: number;
+  overdue: number;
+  dueToday: number;
+  stale: number;
+  inProgress: number;
+  resolved: number;
   byResponsibleArea: Record<FleetReadinessResponsibleArea, number>;
 }
 
@@ -318,6 +332,18 @@ export interface ManagementActionStateUpdate {
   assignedToName?: string;
   dueDate?: string;
   comment?: string;
+}
+
+export interface ManagementActionAssignee {
+  userId: string;
+  name: string;
+  role: string;
+  active: boolean;
+}
+
+export interface ManagementActionAssigneesResponse {
+  ok: true;
+  items: ManagementActionAssignee[];
 }
 
 export type GsmPacketDirection = 'inbound' | 'outbound';

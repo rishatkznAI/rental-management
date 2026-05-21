@@ -80,18 +80,21 @@ test('management action queue section renders on the equipment page', () => {
 });
 
 test('management action queue KPI cards render', () => {
-  assert.match(equipmentPageSource, /В работе/);
-  assert.match(equipmentPageSource, /Просрочено/);
-  assert.match(equipmentPageSource, /Решено/);
   assert.match(equipmentPageSource, /Без ответственного/);
+  assert.match(equipmentPageSource, /Просрочено/);
+  assert.match(equipmentPageSource, /Сегодня/);
+  assert.match(equipmentPageSource, /Зависли/);
 });
 
 test('management action queue filters include execution statuses, overdue, mine, priorities, and responsible areas', () => {
   assert.match(equipmentPageSource, /ACTION_QUEUE_FILTERS/);
   assert.match(equipmentPageSource, /value: 'all'/);
+  assert.match(equipmentPageSource, /value: 'unassigned'/);
+  assert.match(equipmentPageSource, /value: 'overdue'/);
+  assert.match(equipmentPageSource, /value: 'due_today'/);
+  assert.match(equipmentPageSource, /value: 'stale'/);
   assert.match(equipmentPageSource, /value: 'open'/);
   assert.match(equipmentPageSource, /value: 'in_progress'/);
-  assert.match(equipmentPageSource, /value: 'overdue'/);
   assert.match(equipmentPageSource, /value: 'resolved'/);
   assert.match(equipmentPageSource, /value: 'my_actions'/);
   assert.match(equipmentPageSource, /value: 'critical'/);
@@ -100,7 +103,10 @@ test('management action queue filters include execution statuses, overdue, mine,
   assert.match(equipmentPageSource, /value: 'logistics'/);
   assert.match(equipmentPageSource, /value: 'office'/);
   assert.match(equipmentPageSource, /value: 'admin'/);
-  assert.match(equipmentPageSource, /item\.executionOverdue/);
+  assert.match(equipmentPageSource, /item\.isUnassigned/);
+  assert.match(equipmentPageSource, /item\.isOverdue/);
+  assert.match(equipmentPageSource, /item\.isDueToday/);
+  assert.match(equipmentPageSource, /item\.isStale/);
   assert.match(equipmentPageSource, /item\.assignedToUserId === currentUser\.id/);
   assert.match(equipmentPageSource, /item\.executionStatus/);
   assert.match(equipmentPageSource, /item\.executionLabel/);
@@ -111,16 +117,19 @@ test('management action queue filters include execution statuses, overdue, mine,
 test('management action queue table renders sorted API items without raw undefined states', () => {
   assert.match(equipmentPageSource, /Приоритет/);
   assert.match(equipmentPageSource, /Действие/);
-  assert.match(equipmentPageSource, /Исполнение/);
+  assert.match(equipmentPageSource, /Ответственный/);
+  assert.match(equipmentPageSource, /Срок/);
+  assert.match(equipmentPageSource, /Просрочка\/сегодня|actionDueHintLabel/);
+  assert.match(equipmentPageSource, /Статус исполнения/);
   assert.match(equipmentPageSource, /Техника/);
   assert.match(equipmentPageSource, /Ответственный блок/);
-  assert.match(equipmentPageSource, /Уже потеряно/);
+  assert.match(equipmentPageSource, /Потеря/);
   assert.match(equipmentPageSource, /Потеря\/день/);
-  assert.match(equipmentPageSource, /Сколько дней/);
   assert.match(equipmentPageSource, /Ссылка/);
   assert.match(equipmentPageSource, /filteredItems\.map/);
   assert.match(equipmentPageSource, /executionStatusLabel\(item\.executionStatus, item\.executionLabel\)/);
-  assert.match(equipmentPageSource, /item\.executionOverdue \? <Badge variant="danger">Просрочено<\/Badge> : null/);
+  assert.match(equipmentPageSource, /item\.isUnassigned \? <Badge variant="warning">Без ответственного<\/Badge> : null/);
+  assert.match(equipmentPageSource, /item\.isOverdue \? <Badge variant="danger">Просрочено<\/Badge> : null/);
   assert.match(equipmentPageSource, /readinessLossText\(item\.estimatedLoss/);
   assert.doesNotMatch(equipmentPageSource, /\[object Object\]/);
   assert.doesNotMatch(equipmentPageSource, />undefined</);
@@ -137,6 +146,10 @@ test('management action queue execution controls render and call state endpoint'
   assert.match(equipmentPageSource, /В работу/);
   assert.match(equipmentPageSource, /Отложить/);
   assert.match(equipmentPageSource, /Исполнение действия/);
+  assert.match(equipmentPageSource, /actionDueHintLabel\(formDaysUntilDue, form\.dueDate\)/);
+  assert.match(equipmentPageSource, /Высокий риск сохраняется без ответственного/);
+  assert.match(equipmentPageSource, /useManagementActionAssignees/);
+  assert.match(equipmentServiceSource, /getManagementActionAssignees/);
   assert.match(equipmentPageSource, /useUpdateManagementActionState/);
   assert.match(equipmentServiceSource, /updateManagementActionState: \(actionId: string, data: ManagementActionStateUpdate\)/);
   assert.match(equipmentServiceSource, /\/api\/management\/action-queue\/\$\{encodeURIComponent\(actionId\)\}\/state/);

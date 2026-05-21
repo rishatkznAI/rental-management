@@ -30,7 +30,7 @@ import { Textarea } from '../components/ui/textarea';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { getInvestorBinding, isInvestorUser, isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
-import { useEquipmentList, useEquipmentReadiness, useManagementActionQueue, useUpdateManagementActionState } from '../hooks/useEquipment';
+import { useEquipmentList, useEquipmentReadiness, useManagementActionAssignees, useManagementActionQueue, useUpdateManagementActionState } from '../hooks/useEquipment';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
@@ -133,7 +133,7 @@ type PermissionCan = ReturnType<typeof usePermissions>['can'];
 const EQUIPMENT_REGISTRY_MATCH_OPTIONS = { canEquipmentParticipateInRentals };
 
 type FleetReadinessFilter = FleetReadinessStatus | 'all' | 'with_loss' | 'without_rate' | 'high_loss';
-type ManagementActionQueueFilter = 'all' | ManagementActionPriority | FleetReadinessResponsibleArea | ManagementActionExecutionStatus | 'overdue' | 'my_actions';
+type ManagementActionQueueFilter = 'all' | ManagementActionPriority | FleetReadinessResponsibleArea | ManagementActionExecutionStatus | 'unassigned' | 'overdue' | 'due_today' | 'stale' | 'my_actions';
 
 const READINESS_FILTERS: Array<{ value: FleetReadinessFilter; label: string }> = [
   { value: 'all', label: 'Все' },
@@ -149,9 +149,12 @@ const READINESS_FILTERS: Array<{ value: FleetReadinessFilter; label: string }> =
 
 const ACTION_QUEUE_FILTERS: Array<{ value: ManagementActionQueueFilter; label: string }> = [
   { value: 'all', label: 'Все' },
+  { value: 'unassigned', label: 'Без ответственного' },
+  { value: 'overdue', label: 'Просрочено' },
+  { value: 'due_today', label: 'Сегодня' },
+  { value: 'stale', label: 'Зависли' },
   { value: 'open', label: 'Открытые' },
   { value: 'in_progress', label: 'В работе' },
-  { value: 'overdue', label: 'Просрочено' },
   { value: 'resolved', label: 'Решено' },
   { value: 'my_actions', label: 'Мои' },
   { value: 'critical', label: 'Критичные' },
@@ -223,6 +226,14 @@ function executionStatusVariant(status?: ManagementActionExecutionStatus) {
   return 'danger';
 }
 
+function actionDueHintLabel(daysUntilDue: number | null, dueDate?: string) {
+  if (!dueDate) return 'Срок не задан';
+  if (daysUntilDue === 0) return 'Сегодня';
+  if (typeof daysUntilDue === 'number' && daysUntilDue < 0) return `Просрочено на ${Math.abs(daysUntilDue)} дн.`;
+  if (typeof daysUntilDue === 'number') return `Осталось ${daysUntilDue} дн.`;
+  return 'Срок указан';
+}
+
 function responsibleAreaLabel(area: FleetReadinessResponsibleArea) {
   const labels: Record<FleetReadinessResponsibleArea, string> = {
     service: 'Сервис',
@@ -265,6 +276,7 @@ function ManagementActionQueueSection({
   const [filter, setFilter] = React.useState<ManagementActionQueueFilter>('all');
   const [editingItem, setEditingItem] = React.useState<ManagementActionQueueItem | null>(null);
   const updateState = useUpdateManagementActionState();
+  const assigneesQuery = useManagementActionAssignees();
   const [form, setForm] = React.useState({
     status: 'open' as ManagementActionExecutionStatus,
     assignedToUserId: '',
@@ -298,21 +310,31 @@ function ManagementActionQueueSection({
   }, [currentUser?.id, currentUser?.name, updateState]);
 
   const responsibleOptions = React.useMemo(() => {
-    const options = new Map<string, string>();
-    if (currentUser?.id) options.set(currentUser.id, currentUser.name || 'Текущий пользователь');
-    for (const item of items) {
-      if (item.assignedToUserId) options.set(item.assignedToUserId, item.assignedToName || item.assignedToUserId);
+    const options = new Map<string, { label: string; name: string }>();
+    for (const user of assigneesQuery.data?.items || []) {
+      options.set(user.userId, { label: user.role ? `${user.name} · ${user.role}` : user.name, name: user.name });
     }
-    return Array.from(options, ([value, label]) => ({ value, label }));
-  }, [currentUser?.id, currentUser?.name, items]);
+    if (currentUser?.id) options.set(currentUser.id, { label: currentUser.name || 'Текущий пользователь', name: currentUser.name || 'Текущий пользователь' });
+    for (const item of items) {
+      if (item.assignedToUserId) options.set(item.assignedToUserId, { label: item.assignedToName || item.assignedToUserId, name: item.assignedToName || item.assignedToUserId });
+    }
+    return Array.from(options, ([value, option]) => ({ value, ...option }));
+  }, [assigneesQuery.data?.items, currentUser?.id, currentUser?.name, items]);
+  const hasSafeAssigneeSource = Boolean(assigneesQuery.data?.items?.length);
 
   const filteredItems = React.useMemo(() => {
     const list = filter === 'all'
       ? items
       : filter === 'open' || filter === 'in_progress' || filter === 'postponed' || filter === 'resolved' || filter === 'ignored'
         ? items.filter(item => (item.executionStatus || 'open') === filter)
+      : filter === 'unassigned'
+        ? items.filter(item => item.isUnassigned)
       : filter === 'overdue'
-        ? items.filter(item => item.executionOverdue)
+        ? items.filter(item => item.isOverdue || item.executionOverdue)
+      : filter === 'due_today'
+        ? items.filter(item => item.isDueToday)
+      : filter === 'stale'
+        ? items.filter(item => item.isStale)
       : filter === 'my_actions'
         ? items.filter(item => currentUser?.id && item.assignedToUserId === currentUser.id)
       : filter === 'critical' || filter === 'high'
@@ -322,18 +344,33 @@ function ManagementActionQueueSection({
   }, [currentUser?.id, filter, items]);
 
   const executionKpis = React.useMemo(() => ({
-    inProgress: items.filter(item => item.executionStatus === 'in_progress').length,
-    overdue: items.filter(item => item.executionOverdue).length,
-    resolved: items.filter(item => item.executionStatus === 'resolved').length,
-    unassigned: items.filter(item => !item.assignedToUserId && !item.assignedToName).length,
-  }), [items]);
+    inProgress: summary?.inProgress ?? items.filter(item => item.executionStatus === 'in_progress').length,
+    overdue: summary?.overdue ?? items.filter(item => item.isOverdue || item.executionOverdue).length,
+    resolved: summary?.resolved ?? items.filter(item => item.executionStatus === 'resolved').length,
+    unassigned: summary?.unassigned ?? items.filter(item => item.isUnassigned).length,
+    dueToday: summary?.dueToday ?? items.filter(item => item.isDueToday).length,
+    stale: summary?.stale ?? items.filter(item => item.isStale).length,
+  }), [items, summary]);
 
   const kpis = [
-    { label: 'В работе', value: executionKpis.inProgress, icon: ClipboardList, className: 'text-blue-400' },
-    { label: 'Просрочено', value: executionKpis.overdue, icon: AlertTriangle, className: 'text-red-400' },
-    { label: 'Решено', value: executionKpis.resolved, icon: CheckCircle2, className: 'text-green-400' },
     { label: 'Без ответственного', value: executionKpis.unassigned, icon: PenLine, className: 'text-orange-400' },
+    { label: 'Просрочено', value: executionKpis.overdue, icon: AlertTriangle, className: 'text-red-400' },
+    { label: 'Сегодня', value: executionKpis.dueToday, icon: CalendarPlus, className: 'text-blue-400' },
+    { label: 'Зависли', value: executionKpis.stale, icon: ClipboardList, className: 'text-yellow-400' },
   ];
+
+  const formDaysUntilDue = React.useMemo(() => {
+    if (!form.dueDate) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    return Math.round((new Date(`${form.dueDate}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / 86400000);
+  }, [form.dueDate]);
+  const savingHighPriorityWithoutAssignee = Boolean(
+    editingItem &&
+    ['critical', 'high'].includes(editingItem.priority) &&
+    !form.assignedToUserId.trim() &&
+    !form.assignedToName.trim() &&
+    !['resolved', 'ignored'].includes(form.status)
+  );
 
   const handleSave = React.useCallback(() => {
     if (!editingItem) return;
@@ -400,25 +437,26 @@ function ManagementActionQueueSection({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1120px] text-left text-sm">
+          <table className="w-full min-w-[1180px] text-left text-sm">
             <thead className="border-b border-border bg-secondary/60 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
               <tr>
                 <th className="px-5 py-3 font-medium">Приоритет</th>
                 <th className="px-3 py-3 font-medium">Действие</th>
-                <th className="px-3 py-3 font-medium">Исполнение</th>
+                <th className="px-3 py-3 font-medium">Ответственный</th>
+                <th className="px-3 py-3 font-medium">Срок</th>
+                <th className="px-3 py-3 font-medium">Статус исполнения</th>
                 <th className="px-3 py-3 font-medium">Техника</th>
                 <th className="px-3 py-3 font-medium">Ответственный блок</th>
-                <th className="px-3 py-3 font-medium">Уже потеряно</th>
+                <th className="px-3 py-3 font-medium">Потеря</th>
                 <th className="px-3 py-3 font-medium">Потеря/день</th>
-                <th className="px-3 py-3 font-medium">Сколько дней</th>
                 <th className="px-5 py-3 font-medium">Ссылка</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/80">
               {filteredItems.map(item => (
-                <tr key={item.actionId} className="align-top">
+                <tr key={item.actionId} className={`align-top ${item.isOverdue ? 'bg-red-950/10' : ''}`}>
                   <td className="px-5 py-3">
-                    <Badge variant={queuePriorityVariant(item.priority)}>{queuePriorityLabel(item.priority)}</Badge>
+                    <Badge variant={queuePriorityVariant(item.priority)}>{item.urgencyLabel || queuePriorityLabel(item.priority)}</Badge>
                     <div className="mt-1 text-xs text-muted-foreground">{item.dueHint || 'Плановая проверка'}</div>
                   </td>
                   <td className="max-w-[360px] px-3 py-3">
@@ -441,12 +479,25 @@ function ManagementActionQueueSection({
                   </td>
                   <td className="px-3 py-3 text-xs text-muted-foreground">
                     <div className="flex flex-col gap-1.5">
+                      <span className="font-semibold text-foreground">{item.assignedToName || 'Ответственный не назначен'}</span>
+                      {item.isUnassigned ? <Badge variant="warning">Без ответственного</Badge> : null}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground">
+                    <div className="flex flex-col gap-1.5">
+                      <span>{item.dueDate || 'Срок не задан'}</span>
+                      <span className="font-semibold text-foreground">{actionDueHintLabel(item.daysUntilDue, item.dueDate)}</span>
+                      {item.isOverdue ? <Badge variant="danger">Просрочено</Badge> : null}
+                      {item.isDueToday ? <Badge variant="info">Сегодня</Badge> : null}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground">
+                    <div className="flex flex-col gap-1.5">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge variant={executionStatusVariant(item.executionStatus)}>{executionStatusLabel(item.executionStatus, item.executionLabel)}</Badge>
-                        {item.executionOverdue ? <Badge variant="danger">Просрочено</Badge> : null}
+                        {item.isStale ? <Badge variant="warning">Зависло</Badge> : null}
                       </div>
-                      <span>{item.assignedToName || 'Без ответственного'}</span>
-                      <span>{item.dueDate ? `Срок: ${item.dueDate}` : 'Срок не задан'}</span>
+                      <span>{item.accountabilityLabel || 'Открыто'}</span>
                       {item.executionComment ? <span className="line-clamp-2 text-muted-foreground">{item.executionComment}</span> : null}
                     </div>
                   </td>
@@ -454,7 +505,6 @@ function ManagementActionQueueSection({
                   <td className="px-3 py-3 text-xs text-muted-foreground">{responsibleAreaLabel(item.responsibleArea)}</td>
                   <td className="px-3 py-3 text-xs font-semibold text-foreground">{readinessLossText(item.estimatedLoss, item.estimatedLoss && item.estimatedLoss > 0 ? ' оценочно' : '')}</td>
                   <td className="px-3 py-3 text-xs font-semibold text-foreground">{readinessLossText(item.estimatedDailyLoss)}</td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">{item.blockedDays ? `${item.blockedDays} дн.` : 'не ясно'}</td>
                   <td className="px-5 py-3 text-xs">
                     <div className="flex flex-wrap gap-2">
                       <Link className="inline-flex items-center gap-1 text-primary hover:underline" to={item.links.equipment || `/equipment/${item.equipmentId}`}>
@@ -500,27 +550,37 @@ function ManagementActionQueueSection({
                     return;
                   }
                   const option = responsibleOptions.find(item => item.value === value);
-                  setForm(prev => ({ ...prev, assignedToUserId: value, assignedToName: option?.label || '' }));
+                  setForm(prev => ({ ...prev, assignedToUserId: value, assignedToName: option?.name || '' }));
                 }}
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="manual">Указать вручную</SelectItem>
-                  {responsibleOptions.map(option => (
+                  <SelectItem value="manual">{hasSafeAssigneeSource ? 'Указать вручную' : 'Ответственный не назначен'}</SelectItem>
+                  {hasSafeAssigneeSource ? responsibleOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                  ))}
+                  )) : null}
                 </SelectContent>
               </Select>
+              {!hasSafeAssigneeSource ? (
+                <span className="text-xs font-normal text-muted-foreground">Назначить ответственного можно после подключения безопасного списка пользователей.</span>
+              ) : null}
               <Input
                 value={form.assignedToName}
                 onChange={(event) => setForm(prev => ({ ...prev, assignedToName: event.target.value, assignedToUserId: '' }))}
                 placeholder="Имя ответственного"
+                disabled={!hasSafeAssigneeSource}
               />
             </label>
             <label className="grid gap-1.5 text-sm font-medium text-foreground">
               Срок
               <Input type="date" value={form.dueDate} onChange={(event) => setForm(prev => ({ ...prev, dueDate: event.target.value }))} />
+              <span className="text-xs font-normal text-muted-foreground">{actionDueHintLabel(formDaysUntilDue, form.dueDate)}</span>
             </label>
+            {savingHighPriorityWithoutAssignee ? (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                Высокий риск сохраняется без ответственного.
+              </div>
+            ) : null}
             <label className="grid gap-1.5 text-sm font-medium text-foreground">
               Комментарий
               <Textarea value={form.comment} maxLength={1000} onChange={(event) => setForm(prev => ({ ...prev, comment: event.target.value }))} />

@@ -70,18 +70,20 @@ test('staging readiness fixture seed is guarded and idempotent', () => {
     assert.equal(second.status, 0, second.stderr);
     const secondPayload = JSON.parse(second.stdout);
     const equipmentResult = secondPayload.results.find(item => item.collection === 'equipment');
-    assert.equal(equipmentResult.removed, 8);
-    assert.equal(equipmentResult.upserted, 8);
+    assert.equal(equipmentResult.removed, 9);
+    assert.equal(equipmentResult.upserted, 9);
 
     const equipment = readCollection(dbPath, 'equipment');
     const rentals = readCollection(dbPath, 'rentals');
     const actionStates = readCollection(dbPath, 'management_action_states');
-    assert.equal(equipment.filter(item => String(item.id).startsWith('STG-READINESS-')).length, 8);
-    assert.equal(rentals.filter(item => String(item.id).startsWith('STG-READINESS-')).length, 5);
-    assert.equal(actionStates.filter(item => String(item.id).startsWith('STG-READINESS-')).length, 5);
+    assert.equal(equipment.filter(item => String(item.id).startsWith('STG-READINESS-')).length, 9);
+    assert.equal(rentals.filter(item => String(item.id).startsWith('STG-READINESS-')).length, 6);
+    assert.equal(actionStates.filter(item => String(item.id).startsWith('STG-ACTION-')).length, 6);
     assert.ok(actionStates.some(item => item.status === 'in_progress'));
     assert.ok(actionStates.some(item => item.status === 'postponed'));
     assert.ok(actionStates.some(item => item.status === 'resolved'));
+    assert.ok(actionStates.some(item => item.dueDate === new Date().toISOString().slice(0, 10)));
+    assert.ok(actionStates.some(item => String(item.id).includes('HIGH-LOSS-UNASSIGNED')));
     assert.ok(rentals.some(item => String(item.id).startsWith('STG-READINESS-') && (item.rate || item.dailyRate || item.monthlyRate)));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -121,5 +123,6 @@ test('staging readiness fixtures produce expected management action queue', () =
   assert.equal(queue.items.find(item => item.equipmentId === 'STG-READINESS-EQ-DOC')?.responsibleArea, 'office');
   assert.equal(queue.items.find(item => item.equipmentId === 'STG-READINESS-EQ-GSM')?.responsibleArea, 'admin');
   assert.ok(queue.items.some(item => item.equipmentId === 'STG-READINESS-EQ-CHECK' && ['service', 'office'].includes(item.responsibleArea)));
+  assert.equal(queue.items.find(item => item.equipmentId === 'STG-READINESS-EQ-ACTION-LOSS')?.priority, 'critical');
   assert.ok(queue.items.some(item => item.equipmentId === 'STG-READINESS-EQ-UNKNOWN' && ['low', 'medium'].includes(item.priority)));
 });

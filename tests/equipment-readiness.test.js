@@ -560,6 +560,145 @@ test('GET /api/management/action-queue does not mark terminal states overdue', a
   });
 });
 
+test('GET /api/management/action-queue returns accountability summary and derived labels', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const daysFromToday = days => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const oldIso = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+  await withServer(createApp({
+    equipment: [
+      baseEquipment({ id: 'EQ-unassigned', inventoryNumber: 'INV-unassigned', status: 'in_service', dailyRate: 5000 }),
+      baseEquipment({ id: 'EQ-overdue', inventoryNumber: 'INV-overdue', status: 'in_service', dailyRate: 6000 }),
+      baseEquipment({ id: 'EQ-today', inventoryNumber: 'INV-today', status: 'in_service', dailyRate: 7000 }),
+      baseEquipment({ id: 'EQ-stale', inventoryNumber: 'INV-stale', status: 'in_service', dailyRate: 8000 }),
+      baseEquipment({ id: 'EQ-resolved-summary', inventoryNumber: 'INV-resolved-summary', status: 'in_service', dailyRate: 9000 }),
+    ],
+    service: [
+      { id: 'S-unassigned', equipmentId: 'EQ-unassigned', status: 'new', createdAt: today },
+      { id: 'S-overdue', equipmentId: 'EQ-overdue', status: 'new', createdAt: today },
+      { id: 'S-today', equipmentId: 'EQ-today', status: 'new', createdAt: today },
+      { id: 'S-stale', equipmentId: 'EQ-stale', status: 'new', createdAt: today },
+      { id: 'S-resolved-summary', equipmentId: 'EQ-resolved-summary', status: 'new', createdAt: today },
+    ],
+    management_action_states: [
+      {
+        id: 'STATE-unassigned',
+        actionId: 'equipment_readiness:EQ-unassigned:in_service',
+        sourceType: 'equipment_readiness',
+        sourceKey: 'EQ-unassigned',
+        equipmentId: 'EQ-unassigned',
+        status: 'open',
+        assignedToUserId: '',
+        assignedToName: '',
+        dueDate: daysFromToday(5),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 'STATE-overdue',
+        actionId: 'equipment_readiness:EQ-overdue:in_service',
+        sourceType: 'equipment_readiness',
+        sourceKey: 'EQ-overdue',
+        equipmentId: 'EQ-overdue',
+        status: 'open',
+        assignedToUserId: 'U-mechanic',
+        assignedToName: 'Механик',
+        dueDate: daysFromToday(-2),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 'STATE-today',
+        actionId: 'equipment_readiness:EQ-today:in_service',
+        sourceType: 'equipment_readiness',
+        sourceKey: 'EQ-today',
+        equipmentId: 'EQ-today',
+        status: 'open',
+        assignedToUserId: 'U-mechanic',
+        assignedToName: 'Механик',
+        dueDate: today,
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 'STATE-stale',
+        actionId: 'equipment_readiness:EQ-stale:in_service',
+        sourceType: 'equipment_readiness',
+        sourceKey: 'EQ-stale',
+        equipmentId: 'EQ-stale',
+        status: 'in_progress',
+        assignedToUserId: 'U-mechanic',
+        assignedToName: 'Механик',
+        dueDate: daysFromToday(3),
+        updatedAt: oldIso,
+      },
+      {
+        id: 'STATE-resolved-summary',
+        actionId: 'equipment_readiness:EQ-resolved-summary:in_service',
+        sourceType: 'equipment_readiness',
+        sourceKey: 'EQ-resolved-summary',
+        equipmentId: 'EQ-resolved-summary',
+        status: 'resolved',
+        assignedToUserId: '',
+        assignedToName: '',
+        dueDate: daysFromToday(-2),
+        updatedAt: oldIso,
+      },
+    ],
+  }).app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/management/action-queue', 'admin-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.summary.unassigned, 1);
+    assert.equal(response.body.summary.overdue, 1);
+    assert.equal(response.body.summary.dueToday, 1);
+    assert.equal(response.body.summary.stale >= 1, true);
+    assert.equal(response.body.summary.inProgress, 1);
+    assert.equal(response.body.summary.resolved, 1);
+    const byEquipment = Object.fromEntries(response.body.items.map(item => [item.equipmentId, item]));
+    assert.equal(byEquipment['EQ-unassigned'].isUnassigned, true);
+    assert.equal(byEquipment['EQ-overdue'].isOverdue, true);
+    assert.equal(byEquipment['EQ-today'].isDueToday, true);
+    assert.equal(byEquipment['EQ-stale'].isStale, true);
+    assert.equal(byEquipment['EQ-resolved-summary'].isOverdue, false);
+    for (const item of response.body.items) {
+      assert.equal(typeof item.accountabilityLabel, 'string');
+      assert.equal(typeof item.urgencyLabel, 'string');
+      assert.equal(typeof item.sortScore, 'number');
+      assert.notEqual(item.accountabilityLabel, '');
+      assert.notEqual(item.urgencyLabel, '');
+    }
+    assert.equal(response.body.items[0].isOverdue, true);
+    const payload = JSON.stringify(response.body);
+    assert.equal(payload.includes('password'), false);
+    assert.equal(payload.includes('token'), false);
+    assert.equal(payload.includes('[object Object]'), false);
+  });
+});
+
+test('GET /api/management/action-queue/assignees returns safe active users for managers only', async () => {
+  await withServer(createApp({
+    users: [
+      { id: 'U-admin', name: 'Админ', role: 'Администратор', status: 'Активен', email: 'admin@example.test', passwordHash: 'hidden' },
+      { id: 'U-mechanic', name: 'Механик', role: 'Механик', status: 'Активен', token: 'hidden-token' },
+      { id: 'U-inactive', name: 'Бывший', role: 'Механик', status: 'Неактивен' },
+      { id: 'U-investor', name: 'Инвестор', role: 'Инвестор', status: 'Активен', ownerId: 'OWN-1' },
+    ],
+  }).app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/management/action-queue/assignees', 'admin-token');
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.items.find(item => item.userId === 'U-admin'), {
+      userId: 'U-admin',
+      name: 'Админ',
+      role: 'Администратор',
+      active: true,
+    });
+    assert.equal(response.body.items.some(item => item.userId === 'U-inactive'), false);
+    const payload = JSON.stringify(response.body);
+    assert.equal(payload.includes('email'), false);
+    assert.equal(payload.includes('passwordHash'), false);
+    assert.equal(payload.includes('token'), false);
+
+    const forbidden = await getJson(baseUrl, '/api/management/action-queue/assignees', 'investor-token');
+    assert.equal(forbidden.status, 403);
+  });
+});
+
 test('PATCH /api/management/action-queue/:actionId/state updates action state', async () => {
   const created = createApp({
     equipment: [baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 30000 })],

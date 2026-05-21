@@ -59,7 +59,7 @@ test('staging read-only smoke', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Что требует внимания сегодня' })).toBeVisible();
   const dashboardAttentionBlock = page.getByTestId('dashboard-attention-block');
   for (const label of ['Критично', 'Просрочено', 'Сегодня', 'Без ответственного', 'Потери сейчас', 'Потеря в день']) {
-    await expect(dashboardAttentionBlock.getByText(label, { exact: true })).toBeVisible();
+    await expect(dashboardAttentionBlock.getByText(label, { exact: true }).first()).toBeVisible();
   }
   await expect(dashboardAttentionBlock.getByRole('link', { name: 'Открыть очередь' })).toBeVisible();
   await expect(dashboardAttentionBlock.getByRole('link', { name: 'Показать без ответственного' })).toHaveAttribute('href', /actionQueueFilter=unassigned/);

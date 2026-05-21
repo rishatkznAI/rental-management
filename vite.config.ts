@@ -21,6 +21,9 @@ const commitHash = process.env.VITE_GIT_COMMIT_SHA ||
   process.env.VITE_COMMIT_SHA ||
   process.env.VERCEL_GIT_COMMIT_SHA ||
   process.env.RAILWAY_GIT_COMMIT_SHA ||
+  process.env.GIT_COMMIT_SHA ||
+  process.env.COMMIT_SHA ||
+  process.env.SOURCE_VERSION ||
   process.env.GITHUB_SHA ||
   readGitCommit()
 const buildTime = process.env.VITE_BUILD_TIME || process.env.BUILD_TIME || new Date().toISOString()

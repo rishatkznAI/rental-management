@@ -913,6 +913,66 @@ test('/api/service returns 200 for service roles and 403 for forbidden roles', a
   });
 });
 
+test('/api/service/repeat-breakdowns is authenticated read-only analytics with scoped output', async () => {
+  const { app, state } = createSecurityApp();
+  state.equipment.push({ id: 'EQ-repeat', manufacturer: 'Genie', model: 'Z-45', inventoryNumber: 'STG-REPEAT-API', status: 'in_service' });
+  state.service.push(
+    {
+      id: 'S-repeat-prev',
+      equipmentId: 'EQ-repeat',
+      equipment: 'Genie Z-45',
+      inventoryNumber: 'STG-REPEAT-API',
+      status: 'closed',
+      serviceKind: 'repair',
+      reason: 'Течь гидравлики',
+      assignedMechanicId: 'M-1',
+      assignedMechanicName: 'Петров',
+      createdAt: '2026-05-01T08:00:00.000Z',
+      closedAt: '2026-05-02T08:00:00.000Z',
+      password: 'must-not-leak',
+      token: 'must-not-leak',
+    },
+    {
+      id: 'S-repeat-next',
+      equipmentId: 'EQ-repeat',
+      equipment: 'Genie Z-45',
+      inventoryNumber: 'STG-REPEAT-API',
+      status: 'in_progress',
+      priority: 'high',
+      serviceKind: 'repair',
+      reason: 'Течь гидравлики',
+      assignedMechanicId: 'M-1',
+      assignedMechanicName: 'Петров',
+      createdAt: '2026-05-05T08:00:00.000Z',
+      secret: 'must-not-leak',
+    },
+  );
+  state.repair_work_items.push(
+    { id: 'RW-repeat-prev', repairId: 'S-repeat-prev', workId: 'SW-1', nameSnapshot: 'Диагностика гидравлики' },
+    { id: 'RW-repeat-next', repairId: 'S-repeat-next', workId: 'SW-1', nameSnapshot: 'Диагностика гидравлики' },
+  );
+
+  await withServer(app, async (baseUrl) => {
+    assert.equal((await request(baseUrl, 'GET', '/api/service/repeat-breakdowns', null)).status, 401);
+    assert.equal((await request(baseUrl, 'GET', '/api/service/repeat-breakdowns', 'investor-token')).status, 403);
+
+    const admin = await request(baseUrl, 'GET', '/api/service/repeat-breakdowns', 'admin-token');
+    assert.equal(admin.status, 200);
+    assert.equal(admin.body.ok, true);
+    assert.equal(admin.body.summary.repeatWithin7, 1);
+    assert.equal(admin.body.items[0].equipmentId, 'EQ-repeat');
+    assert.deepEqual(Object.keys(admin.body.groups).sort(), ['byEquipment', 'byMechanic', 'byModel', 'byScenario'].sort());
+    const serialized = JSON.stringify(admin.body);
+    assert.equal(serialized.includes('must-not-leak'), false);
+    assert.equal(serialized.includes('[object Object]'), false);
+    assert.equal(serialized.includes('undefined'), false);
+
+    const mechanic = await request(baseUrl, 'GET', '/api/service/repeat-breakdowns', 'mechanic-token');
+    assert.equal(mechanic.status, 200);
+    assert.equal(mechanic.body.items.some(item => item.equipmentId === 'EQ-repeat'), true);
+  });
+});
+
 test('/api/documents remains readable for roles with Documents section access', async () => {
   const { app } = createSecurityApp();
 

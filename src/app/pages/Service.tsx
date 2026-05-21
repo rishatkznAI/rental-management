@@ -49,6 +49,7 @@ import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { clientsService } from '../services/clients.service';
 import { mechanicsService } from '../services/mechanics.service';
+import { serviceTicketsService, type ServiceRepeatBreakdownsResponse, type ServiceRepeatBreakdownItem } from '../services/service-tickets.service';
 import { useServerPagination } from '../hooks/useServerPagination';
 import { PaginationControls } from '../components/common/PaginationControls';
 
@@ -876,6 +877,218 @@ function ServiceQueueTab({
   );
 }
 
+function repeatSeverityLabel(severity: ServiceRepeatBreakdownItem['repeatSeverity']) {
+  return {
+    critical: 'Критично',
+    high: 'Высокий',
+    medium: 'Средний',
+    low: 'Низкий',
+  }[severity] || 'Низкий';
+}
+
+function repeatSeverityClass(severity: ServiceRepeatBreakdownItem['repeatSeverity']) {
+  return {
+    critical: 'bg-red-100 text-red-800 ring-1 ring-red-200 dark:bg-red-500/15 dark:text-red-200 dark:ring-red-900',
+    high: 'bg-orange-100 text-orange-800 ring-1 ring-orange-200 dark:bg-orange-500/15 dark:text-orange-200 dark:ring-orange-900',
+    medium: 'bg-amber-100 text-amber-800 ring-1 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-900',
+    low: 'bg-gray-100 text-gray-700 ring-1 ring-gray-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/10',
+  }[severity] || 'bg-gray-100 text-gray-700';
+}
+
+function safeRepeatText(value: string | number | undefined, fallback = '—') {
+  const text = String(value ?? '').trim();
+  if (!text || text === 'undefined' || text === 'null' || text === '[object Object]') return fallback;
+  return text;
+}
+
+function RepeatBreakdownsTab({
+  data,
+  isLoading,
+  error,
+}: {
+  data?: ServiceRepeatBreakdownsResponse;
+  isLoading: boolean;
+  error: unknown;
+}) {
+  const [periodFilter, setPeriodFilter] = React.useState<'7' | '14' | '30'>('30');
+  const [severityFilter, setSeverityFilter] = React.useState('all');
+  const [modelFilter, setModelFilter] = React.useState('all');
+  const [mechanicFilter, setMechanicFilter] = React.useState('all');
+  const [scenarioFilter, setScenarioFilter] = React.useState('all');
+  const [highOnly, setHighOnly] = React.useState(false);
+
+  const items = React.useMemo(() => data?.items ?? [], [data?.items]);
+  const filteredItems = React.useMemo(() => {
+    const period = Number(periodFilter);
+    return items
+      .filter(item => item.repeatWindow <= period)
+      .filter(item => severityFilter === 'all' || item.repeatSeverity === severityFilter)
+      .filter(item => modelFilter === 'all' || item.model === modelFilter)
+      .filter(item => mechanicFilter === 'all' || item.mechanicName === mechanicFilter)
+      .filter(item => scenarioFilter === 'all' || item.scenario === scenarioFilter)
+      .filter(item => !highOnly || ['critical', 'high'].includes(item.repeatSeverity));
+  }, [highOnly, items, mechanicFilter, modelFilter, periodFilter, scenarioFilter, severityFilter]);
+
+  const modelOptions = React.useMemo(() => (
+    Array.from(new Set(items.map(item => item.model).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'ru'))
+  ), [items]);
+  const mechanicOptions = React.useMemo(() => (
+    Array.from(new Set(items.map(item => item.mechanicName).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'ru'))
+  ), [items]);
+  const scenarioOptions = React.useMemo(() => (
+    Array.from(new Set(items.map(item => item.scenario).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'ru'))
+  ), [items]);
+  const filteredHighCritical = filteredItems.filter(item => item.repeatSeverity === 'critical' || item.repeatSeverity === 'high').length;
+  const problematicEquipment = new Set(filteredItems.map(item => item.equipmentId).filter(Boolean)).size;
+  const problematicModels = new Set(filteredItems.map(item => item.model).filter(Boolean)).size;
+  const problematicMechanics = new Set(filteredItems.map(item => item.mechanicName).filter(Boolean)).size;
+
+  if (isLoading) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-gray-400">
+        Загружаем аналитику качества ремонта...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-100">
+        Не удалось загрузить аналитику повторных поломок. Попробуйте обновить страницу или проверьте права доступа.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <ServiceMetricCard title="Повторов за 7 дней" value={data?.summary.repeatWithin7 ?? 0} caption="После завершения ремонта" tone="red" icon={<AlertTriangle className="h-4 w-4" />} />
+        <ServiceMetricCard title="Повторов за 30 дней" value={data?.summary.repeatWithin30 ?? 0} caption="Все окна контроля" tone="orange" icon={<CalendarClock className="h-4 w-4" />} />
+        <ServiceMetricCard title="Критичные" value={data?.summary.critical ?? 0} caption="Максимальный риск" tone="red" icon={<ShieldAlert className="h-4 w-4" />} />
+        <ServiceMetricCard title="Проблемная техника" value={problematicEquipment} caption="По текущим фильтрам" tone="blue" icon={<Wrench className="h-4 w-4" />} />
+        <ServiceMetricCard title="Проблемные модели" value={problematicModels} caption="Модели с повторами" tone="purple" icon={<PackageSearch className="h-4 w-4" />} />
+        <ServiceMetricCard title="Повторы по механику" value={problematicMechanics} caption="Затронутые механики" tone="amber" icon={<UserRound className="h-4 w-4" />} />
+      </div>
+
+      <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[repeat(5,minmax(150px,1fr))_auto]">
+          <Select value={periodFilter} onValueChange={(value) => setPeriodFilter(value as '7' | '14' | '30')}>
+            <SelectTrigger><SelectValue placeholder="Период" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7">7 дней</SelectItem>
+              <SelectItem value="14">14 дней</SelectItem>
+              <SelectItem value="30">30 дней</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={severityFilter} onValueChange={setSeverityFilter}>
+            <SelectTrigger><SelectValue placeholder="Severity" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все уровни</SelectItem>
+              <SelectItem value="critical">Критичные</SelectItem>
+              <SelectItem value="high">Высокие</SelectItem>
+              <SelectItem value="medium">Средние</SelectItem>
+              <SelectItem value="low">Низкие</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={modelFilter} onValueChange={setModelFilter}>
+            <SelectTrigger><SelectValue placeholder="Модель" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все модели</SelectItem>
+              {modelOptions.map(model => <SelectItem key={model} value={model}>{model}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={mechanicFilter} onValueChange={setMechanicFilter}>
+            <SelectTrigger><SelectValue placeholder="Механик" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все механики</SelectItem>
+              {mechanicOptions.map(mechanic => <SelectItem key={mechanic} value={mechanic}>{mechanic}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={scenarioFilter} onValueChange={setScenarioFilter}>
+            <SelectTrigger><SelectValue placeholder="Сценарий" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все сценарии</SelectItem>
+              {scenarioOptions.map(scenario => <SelectItem key={scenario} value={scenario}>{scenario}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Button
+            type="button"
+            variant={highOnly ? 'default' : 'secondary'}
+            className="h-10 whitespace-nowrap"
+            onClick={() => setHighOnly(value => !value)}
+          >
+            Только high/critical
+          </Button>
+        </div>
+      </section>
+
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+        <div className="hidden grid-cols-[minmax(180px,1fr)_minmax(128px,0.65fr)_minmax(128px,0.65fr)_86px_130px_110px_minmax(180px,1fr)_minmax(170px,0.9fr)_120px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] 2xl:grid">
+          <div>Техника</div>
+          <div>Предыдущая заявка</div>
+          <div>Повторная заявка</div>
+          <div>Дней</div>
+          <div>Механик</div>
+          <div>Сценарий</div>
+          <div>Причина</div>
+          <div>Рекомендация</div>
+          <div>Ссылки</div>
+        </div>
+        {filteredItems.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-14 text-center">
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 dark:bg-white/8">
+              <Search className="h-7 w-7 text-gray-400 dark:text-gray-500" />
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white">Повторных поломок за выбранный период не найдено</h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Фильтры не нашли повторов или данных для вывода пока недостаточно.</p>
+          </div>
+        ) : (
+          filteredItems.map(item => (
+            <div key={`${item.previousTicketId}-${item.repeatTicketId}`} className="grid gap-3 border-b border-gray-100 px-4 py-4 last:border-b-0 dark:border-white/6 2xl:grid-cols-[minmax(180px,1fr)_minmax(128px,0.65fr)_minmax(128px,0.65fr)_86px_130px_110px_minmax(180px,1fr)_minmax(170px,0.9fr)_120px] 2xl:items-center">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-bold text-gray-900 dark:text-white">{safeRepeatText(item.equipmentLabel)}</div>
+                <div className="mt-0.5 truncate text-xs text-gray-500">{safeRepeatText(item.model)} · INV: {safeRepeatText(item.inventoryNumber)}</div>
+                <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-bold ${repeatSeverityClass(item.repeatSeverity)}`}>{repeatSeverityLabel(item.repeatSeverity)}</span>
+              </div>
+              <div className="min-w-0">
+                <div className="font-mono text-sm font-bold text-[--color-primary]">{safeRepeatText(item.previousTicketNumber)}</div>
+                <div className="mt-1 text-xs text-gray-500">{formatShortDate(item.previousClosedAt)}</div>
+              </div>
+              <div className="min-w-0">
+                <div className="font-mono text-sm font-bold text-[--color-primary]">{safeRepeatText(item.repeatTicketNumber)}</div>
+                <div className="mt-1 text-xs text-gray-500">{formatShortDate(item.repeatCreatedAt)}</div>
+              </div>
+              <div className="text-sm font-bold text-gray-900 dark:text-white">{Number.isFinite(item.daysBetween) ? item.daysBetween : 0}</div>
+              <div className="truncate text-sm text-gray-700 dark:text-gray-200">{safeRepeatText(item.mechanicName, 'Не назначен')}</div>
+              <div className="truncate text-sm text-gray-700 dark:text-gray-200">{safeRepeatText(item.scenario)}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-300">{safeRepeatText(item.reason)}</div>
+              <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{safeRepeatText(item.recommendedAction)}</div>
+              <div className="flex flex-wrap gap-2">
+                {item.links.equipment && <Link className="text-sm font-semibold text-[--color-primary] hover:underline" to={item.links.equipment}>Техника</Link>}
+                {item.links.previousServiceTicket && <Link className="text-sm font-semibold text-[--color-primary] hover:underline" to={item.links.previousServiceTicket}>Пред.</Link>}
+                {item.links.repeatServiceTicket && <Link className="text-sm font-semibold text-[--color-primary] hover:underline" to={item.links.repeatServiceTicket}>Повтор</Link>}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {(data?.groups.byEquipment ?? []).slice(0, 4).map(group => (
+          <div key={group.id} className="rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-white/10 dark:bg-white/[0.03]">
+            <div className="truncate font-semibold text-gray-900 dark:text-white">{group.label}</div>
+            <div className="mt-1 text-gray-500 dark:text-gray-400">Повторов: {group.count} · high/critical: {group.high + group.critical}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="text-xs text-gray-500 dark:text-gray-500">
+        Показано {filteredItems.length} из {items.length}. High/critical по текущим фильтрам: {filteredHighCritical}.
+      </div>
+    </div>
+  );
+}
+
 function ServiceManagementPanel({
   metrics,
   queue,
@@ -1201,6 +1414,12 @@ export default function Service() {
     enabled: showDayPlan,
     staleTime: 1000 * 60 * 2,
   });
+  const repeatBreakdownsQuery = useQuery<ServiceRepeatBreakdownsResponse>({
+    queryKey: ['service', 'repeat-breakdowns'],
+    queryFn: serviceTicketsService.getRepeatBreakdowns,
+    enabled: can('view', 'service'),
+    staleTime: 1000 * 60 * 2,
+  });
 
 
   const clientLookup = React.useMemo(() => {
@@ -1370,6 +1589,7 @@ export default function Service() {
     ready: metrics.ready,
     archive: archivedTickets.length,
   };
+  const repeatHighCriticalCount = (repeatBreakdownsQuery.data?.summary.high ?? 0) + (repeatBreakdownsQuery.data?.summary.critical ?? 0);
 
   return (
     <div className="space-y-3 bg-slate-50/70 p-4 sm:p-5 md:p-6 dark:bg-gray-950">
@@ -1547,6 +1767,9 @@ export default function Service() {
               <ServiceTabLabel label="Рекламации" />
             </TabsTrigger>
           )}
+          <TabsTrigger value="repeat-breakdowns" className={serviceTabTriggerClass('repeat-breakdowns')}>
+            <ServiceTabLabel label="Повторные поломки" count={repeatHighCriticalCount} />
+          </TabsTrigger>
           {showDayPlan && (
             <TabsTrigger value="day-plan" className={serviceTabTriggerClass('day-plan')}>
               <ServiceTabLabel label="Планировщик" count={mechanicsQuery.data?.length ?? 0} />
@@ -2133,6 +2356,14 @@ export default function Service() {
             canEditService={can('edit', 'service')}
             canAssignServiceTasks={can('edit', 'service') && canManageDayPlan}
             onOpenTicket={openTicketCard}
+          />
+        </TabsContent>
+
+        <TabsContent value="repeat-breakdowns" className="space-y-5">
+          <RepeatBreakdownsTab
+            data={repeatBreakdownsQuery.data}
+            isLoading={repeatBreakdownsQuery.isFetching && !repeatBreakdownsQuery.data}
+            error={repeatBreakdownsQuery.error}
           />
         </TabsContent>
 

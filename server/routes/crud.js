@@ -14,6 +14,7 @@ const {
   normalizeServiceTicketRecord,
   serviceCreatedAtValue,
 } = require('../lib/service-dto');
+const { buildServiceRepeatBreakdowns } = require('../lib/service-repeat-breakdowns');
 const {
   SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE,
   assertRepairItemsAdmin,
@@ -1207,6 +1208,52 @@ function registerCrudRoutes(deps) {
           ok: true,
           duplicates: buildClientInnDuplicateReport(data),
         });
+      });
+    }
+
+    if (collection === 'service') {
+      router.get('/service/repeat-breakdowns', requireAuth, requireRead('service'), (req, res) => {
+        try {
+          accessControl.assertCanReadCollection('service', req.user);
+          const tickets = accessControl.sanitizeCollectionForRead(
+            'service',
+            accessControl.filterCollectionByScope('service', normalizeServiceTicketList(readData('service') || []), req.user),
+            req.user,
+          );
+          const workItems = accessControl.sanitizeCollectionForRead(
+            'repair_work_items',
+            accessControl.filterCollectionByScope('repair_work_items', readData('repair_work_items') || [], req.user),
+            req.user,
+          );
+          const partItems = accessControl.sanitizeCollectionForRead(
+            'repair_part_items',
+            accessControl.filterCollectionByScope('repair_part_items', readData('repair_part_items') || [], req.user),
+            req.user,
+          );
+          const equipment = accessControl.sanitizeCollectionForRead(
+            'equipment',
+            accessControl.filterCollectionByScope('equipment', readData('equipment') || [], req.user),
+            req.user,
+          );
+          const mechanics = canReadCollectionForSummary('mechanics', req.user)
+            ? accessControl.sanitizeCollectionForRead(
+                'mechanics',
+                accessControl.filterCollectionByScope('mechanics', readData('mechanics') || [], req.user),
+                req.user,
+              )
+            : [];
+          return res.json(buildServiceRepeatBreakdowns({
+            tickets,
+            equipment,
+            mechanics,
+            workItems,
+            partItems,
+            fieldTrips: accessControl.filterCollectionByScope('service_field_trips', readData('service_field_trips') || [], req.user),
+            warrantyClaims: accessControl.filterCollectionByScope('warranty_claims', readData('warranty_claims') || [], req.user),
+          }));
+        } catch (error) {
+          return sendAccessError(res, error);
+        }
       });
     }
 

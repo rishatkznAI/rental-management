@@ -17,6 +17,69 @@ export interface ServiceAuditLogEntry {
   createdAt: string;
 }
 
+export type RepeatBreakdownSeverity = 'low' | 'medium' | 'high' | 'critical';
+export type RepeatBreakdownConfidence = 'low' | 'medium' | 'high';
+
+export interface ServiceRepeatBreakdownItem {
+  equipmentId: string;
+  equipmentLabel: string;
+  model: string;
+  inventoryNumber: string;
+  previousTicketId: string;
+  previousTicketNumber: string;
+  previousClosedAt: string;
+  repeatTicketId: string;
+  repeatTicketNumber: string;
+  repeatCreatedAt: string;
+  daysBetween: number;
+  repeatWindow: 7 | 14 | 30;
+  repeatSeverity: RepeatBreakdownSeverity;
+  confidence: RepeatBreakdownConfidence;
+  mechanicName: string;
+  scenario: string;
+  reason: string;
+  recommendedAction: string;
+  links: {
+    equipment: string;
+    previousServiceTicket: string;
+    repeatServiceTicket: string;
+  };
+}
+
+export interface ServiceRepeatBreakdownGroup {
+  id: string;
+  label: string;
+  count: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+}
+
+export interface ServiceRepeatBreakdownsResponse {
+  ok: true;
+  summary: {
+    totalRepeats: number;
+    repeatWithin7: number;
+    repeatWithin14: number;
+    repeatWithin30: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    topEquipmentCount: number;
+    topMechanicCount: number;
+    topModelCount: number;
+  };
+  items: ServiceRepeatBreakdownItem[];
+  groups: {
+    byEquipment: ServiceRepeatBreakdownGroup[];
+    byModel: ServiceRepeatBreakdownGroup[];
+    byMechanic: ServiceRepeatBreakdownGroup[];
+    byScenario: ServiceRepeatBreakdownGroup[];
+  };
+}
+
 const SERVICE_STATUSES = new Set<ServiceStatus>(['new', 'in_progress', 'waiting_parts', 'needs_revision', 'ready', 'closed']);
 const SERVICE_PRIORITIES = new Set<ServicePriority>(['critical', 'high', 'medium', 'low']);
 const SERVICE_SCENARIOS = new Set<ServiceScenario>(['repair', 'to', 'chto', 'pto']);
@@ -250,6 +313,9 @@ export const serviceTicketsService = {
 
   getAudit: (id: string): Promise<ServiceAuditLogEntry[]> =>
     api.get<ServiceAuditLogEntry[]>(`/api/service/${encodeURIComponent(id)}/audit`),
+
+  getRepeatBreakdowns: (): Promise<ServiceRepeatBreakdownsResponse> =>
+    api.get<ServiceRepeatBreakdownsResponse>('/api/service/repeat-breakdowns'),
 
   bulkReplace: (list: ServiceTicket[]): Promise<void> =>
     api.put('/api/service', list),

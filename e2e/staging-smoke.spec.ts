@@ -162,7 +162,10 @@ test('staging read-only smoke', async ({ page }) => {
   await expect(page.getByText('Повторов за 7 дней', { exact: true })).toBeVisible();
   await expect(page.getByText('Повторов за 30 дней', { exact: true })).toBeVisible();
   await expect(page.getByText('Критичные', { exact: true })).toBeVisible();
-  await expect(page.getByText('Проблемная техника', { exact: true })).toBeVisible();
+  const repairQualitySection = page.locator('section', {
+    has: page.getByRole('heading', { name: 'Контроль качества ремонта', exact: true }),
+  });
+  await expect(repairQualitySection.getByText('Проблемная техника', { exact: true })).toBeVisible();
   await expect(page.getByText('Проблемные модели', { exact: true })).toBeVisible();
   await expect(page.getByText('Повторы по механику', { exact: true })).toBeVisible();
   await expect(page.getByText('Только high/critical', { exact: true })).toBeVisible();

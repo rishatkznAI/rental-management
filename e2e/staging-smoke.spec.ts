@@ -159,6 +159,7 @@ test('staging read-only smoke', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Сервис', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: /Повторные поломки/ }).click();
   await expect(page.getByRole('tab', { name: /Повторные поломки/ })).toHaveAttribute('aria-selected', 'true');
+  const repeatBreakdownsTab = page.getByRole('tabpanel', { name: /Повторные поломки/ });
   await expect(page.getByText('Повторов за 7 дней', { exact: true })).toBeVisible();
   await expect(page.getByText('Повторов за 30 дней', { exact: true })).toBeVisible();
   await expect(page.getByText('Критичные', { exact: true })).toBeVisible();
@@ -168,14 +169,14 @@ test('staging read-only smoke', async ({ page }) => {
   await expect(repairQualitySection.getByText('Проблемная техника', { exact: true })).toBeVisible();
   await expect(page.getByText('Проблемные модели', { exact: true })).toBeVisible();
   await expect(page.getByText('Повторы по механику', { exact: true })).toBeVisible();
-  await expect(page.getByText('Только high/critical', { exact: true })).toBeVisible();
+  const highOnly = repeatBreakdownsTab.getByRole('button', { name: 'Только высокие/критичные' });
+  await expect(highOnly).toBeVisible();
 
   const main = page.locator('main');
   const repeatBreakdownsText = await main.innerText();
   expect(repeatBreakdownsText, 'repeat breakdown fixtures should show populated rows').toMatch(/STG-REPEAT-|Пред\.|Повтор/);
   expect(repeatBreakdownsText, 'repeat breakdowns should show non-zero summary or visible list content').toMatch(/Повторов:|STG-REPEAT-/);
 
-  const highOnly = page.getByRole('button', { name: 'Только high/critical' });
   await highOnly.click();
   await expect(highOnly).toBeVisible();
   await expect(main.getByText(/Критично|Высокий/).first()).toBeVisible();

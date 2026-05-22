@@ -172,10 +172,14 @@ test('quality view returns safe summary equipment mechanics scenarios works and 
   const serialized = JSON.stringify(result);
 
   assert.equal(result.ok, true);
+  assert.equal(result.summary.totalRepeats, 1);
   assert.equal(result.summary.totalRepeatCases, 1);
   assert.equal(result.summary.critical, 1);
   assert.equal(result.summary.affectedEquipment, 1);
   assert.equal(result.summary.affectedMechanics, 1);
+  assert.equal(result.summary.repeatWithin14, 1);
+  assert.equal(typeof result.summary.lostDaysEstimate, 'number');
+  assert.equal(typeof result.summary.lostAmountEstimate, 'number');
   assert.equal(result.summary.topScenario, 'Ремонт');
   assert.equal(result.equipment[0].equipmentId, 'EQ-1');
   assert.equal(result.equipment[0].qualityRisk, 'critical');

@@ -121,6 +121,7 @@ export interface ServiceRepairQualityPattern {
 export interface ServiceRepairQualityResponse {
   ok: true;
   summary: {
+    totalRepeats: number;
     totalRepeatCases: number;
     critical: number;
     high: number;
@@ -129,7 +130,10 @@ export interface ServiceRepairQualityResponse {
     affectedEquipment: number;
     affectedMechanics: number;
     repeatWithin7: number;
+    repeatWithin14: number;
     repeatWithin30: number;
+    lostDaysEstimate: number;
+    lostAmountEstimate: number;
     topScenario: string;
   };
   equipment: ServiceRepairQualityEquipment[];

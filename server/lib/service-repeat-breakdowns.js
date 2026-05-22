@@ -530,6 +530,7 @@ function buildServiceRepairQualityView(input = {}) {
     partRows: parts,
   });
   const summary = {
+    totalRepeats: enrichedItems.length,
     totalRepeatCases: enrichedItems.length,
     critical: equipmentRows.filter(item => item.qualityRisk === 'critical').length,
     high: equipmentRows.filter(item => item.qualityRisk === 'high').length,
@@ -538,7 +539,10 @@ function buildServiceRepairQualityView(input = {}) {
     affectedEquipment: equipmentRows.length,
     affectedMechanics: mechanicRows.filter(item => item.mechanicId !== 'unassigned').length,
     repeatWithin7: enrichedItems.filter(item => item.repeatWindow <= 7).length,
+    repeatWithin14: enrichedItems.filter(item => item.repeatWindow <= 14).length,
     repeatWithin30: enrichedItems.filter(item => item.repeatWindow <= 30).length,
+    lostDaysEstimate: equipmentRows.reduce((sum, item) => sum + (Number(item.lostDaysEstimate) || 0), 0),
+    lostAmountEstimate: Math.round(equipmentRows.reduce((sum, item) => sum + (Number(item.lostAmountEstimate) || 0), 0) * 100) / 100,
     topScenario: scenarios[0]?.scenario || '',
   };
 

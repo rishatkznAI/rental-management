@@ -7,6 +7,15 @@ type BuildInfo = {
   apiBaseUrl?: string;
 };
 
+type VersionInfo = {
+  ok?: boolean;
+  build?: BuildInfo;
+  app?: {
+    disabled?: boolean;
+    message?: string;
+  };
+};
+
 type UiIssue = {
   type: string;
   action: string;
@@ -123,6 +132,21 @@ async function expectHealthyMain(page: Page, label: string) {
   await expect(page.getByText(/Cannot read properties|Maximum update depth exceeded|Unexpected Application Error|Application error|Something went wrong|ошибка приложения/i)).toHaveCount(0);
 }
 
+async function expectMaintenanceUiVisible(page: Page, config: ReleaseSmokeConfig, frontendBuild?: BuildInfo | null, backendBuild?: BuildInfo | null, loginStatus?: number | null) {
+  const bodyText = await visibleBodyText(page);
+  if (!/Система временно отключена|Работа приложения приостановлена|conserved|maintenance|временно отключена/i.test(bodyText)) {
+    await failWithPageDiagnostics(
+      page,
+      config,
+      `${config.environmentName} is conserved but the frontend did not render maintenance/conservation state.`,
+      frontendBuild,
+      backendBuild,
+      loginStatus,
+    );
+  }
+  await expect(page.locator('main'), 'conserved production maintenance shell should be visible').toBeVisible();
+}
+
 async function visibleBodyText(page: Page) {
   const text = await page.locator('body').innerText().catch(() => '');
   return sanitize(text.trim(), 1200);
@@ -235,6 +259,20 @@ ${await responseText(login)}`);
   }
 }
 
+async function directConservedLoginSmoke(config: ReleaseSmokeConfig) {
+  const api = await playwrightRequest.newContext({ baseURL: config.apiUrl });
+  try {
+    const login = await api.post('/api/auth/login', {
+      data: { email: config.adminEmail, password: config.adminPassword },
+    });
+    const status = login.status();
+    expect(status, `${config.environmentName} conserved login should be blocked with HTTP 503`).toBe(503);
+    return { status };
+  } finally {
+    await api.dispose();
+  }
+}
+
 export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
   const normalizedConfig = {
     ...config,
@@ -247,6 +285,7 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
   let action = 'backend preflight';
   let backendBuild: BuildInfo | null = null;
   let frontendBuild: BuildInfo | null = null;
+  let versionJson: VersionInfo | null = null;
   let loginStatus: number | null = null;
 
   installReadOnlyGuards(page, normalizedConfig, issues, () => action);
@@ -265,7 +304,7 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
 
     const version = await api.get('/api/version');
     expect(version.ok(), await version.text()).toBeTruthy();
-    const versionJson = await version.json();
+    versionJson = await version.json() as VersionInfo;
     expect(versionJson.ok).toBe(true);
     backendBuild = (versionJson.build || {}) as BuildInfo;
     expect(backendBuild.commit || backendBuild.commitFull, 'backend commit should be exposed by /api/version').toBeTruthy();
@@ -279,6 +318,31 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
       commitsMatch(backendCommit, normalizedConfig.expectedCommit) || commitsMatch(backendBuild.commit || '', shortCommit(normalizedConfig.expectedCommit)),
       `backend commit should match expected release commit: expected=${shortCommit(normalizedConfig.expectedCommit)}, backend=${backendCommit}`,
     ).toBeTruthy();
+  }
+
+  if (normalizedConfig.environmentName === 'production' && versionJson?.app?.disabled === true) {
+    const directLogin = await directConservedLoginSmoke(normalizedConfig);
+    loginStatus = directLogin.status;
+
+    action = 'frontend conservation';
+    await page.goto(appUrl(normalizedConfig.frontendUrl, '/login'), { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('body')).toBeVisible();
+    await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit));
+    frontendBuild = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
+    expect(frontendBuild?.commit, 'frontend commit should be available with debugVersion=1').toBeTruthy();
+    expect(frontendBuild?.apiBaseUrl, 'frontend build marker should expose API base URL').toBe(normalizedConfig.apiUrl);
+
+    if (normalizedConfig.expectedCommit) {
+      expect(
+        commitsMatch(frontendBuild?.commit || '', shortCommit(normalizedConfig.expectedCommit)),
+        `frontend commit should match expected release commit: expected=${shortCommit(normalizedConfig.expectedCommit)}, frontend=${frontendBuild?.commit || 'missing'}`,
+      ).toBeTruthy();
+    }
+
+    await expectMaintenanceUiVisible(page, normalizedConfig, frontendBuild, backendBuild, loginStatus);
+    console.log('Production is conserved: login HTTP 503 is expected.');
+    expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);
+    return;
   }
 
   const directLogin = await directLoginSmoke(normalizedConfig);

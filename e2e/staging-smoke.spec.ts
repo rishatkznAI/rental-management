@@ -76,6 +76,12 @@ test('staging read-only smoke', async ({ page }) => {
       expect(repeatBreakdowns.status(), 'repeat breakdowns endpoint should return 200').toBe(200);
       const repeatJson = await repeatBreakdowns.json();
       expect(repeatBreakdownsShapeValid(repeatJson), 'repeat breakdowns response shape should match contract').toBe(true);
+      expect(repeatJson.items.length, 'repeat breakdowns staging fixtures should produce populated rows').toBeGreaterThan(0);
+      expect(Number(repeatJson.summary.totalRepeats || 0), 'repeat breakdowns totalRepeats should be non-zero').toBeGreaterThan(0);
+      expect(Number(repeatJson.summary.critical || 0) + Number(repeatJson.summary.high || 0), 'repeat breakdowns should include high/critical fixtures').toBeGreaterThan(0);
+      expect(Number(repeatJson.summary.medium || 0), 'repeat breakdowns should include medium fixtures').toBeGreaterThan(0);
+      expect(Object.values(repeatJson.groups || {}).some((value: any) => Array.isArray(value) && value.length > 0), 'repeat breakdown groups should be non-zero').toBe(true);
+      expect(repeatJson.items.some((item: any) => item.links?.equipment && item.links?.previousServiceTicket && item.links?.repeatServiceTicket), 'repeat breakdown links should be present').toBe(true);
       expect(hasUnsafePayloadText(repeatJson), 'repeat breakdowns API should not expose unsafe fields or placeholders').toBe(false);
       console.log(`[staging-smoke] repeatBreakdownsAPI ${JSON.stringify({
         status: repeatBreakdowns.status(),
@@ -91,6 +97,7 @@ test('staging read-only smoke', async ({ page }) => {
         high: Number(repeatJson.summary.high || 0),
         medium: Number(repeatJson.summary.medium || 0),
         low: Number(repeatJson.summary.low || 0),
+        linksPresent: repeatJson.items.some((item: any) => item.links?.equipment && item.links?.previousServiceTicket && item.links?.repeatServiceTicket),
       })}`);
     } finally {
       await authedApi.dispose();
@@ -161,21 +168,21 @@ test('staging read-only smoke', async ({ page }) => {
   await expect(page.getByText('Только high/critical', { exact: true })).toBeVisible();
 
   const main = page.locator('main');
-  expect(await main.innerText(), 'repeat breakdowns should show an empty state or visible list content').toMatch(
-    /Повторных поломок за выбранный период не найдено|Пред\.|Повтор|Повторов:/,
-  );
+  const repeatBreakdownsText = await main.innerText();
+  expect(repeatBreakdownsText, 'repeat breakdown fixtures should show populated rows').toMatch(/STG-REPEAT-|Пред\.|Повтор/);
+  expect(repeatBreakdownsText, 'repeat breakdowns should show non-zero summary or visible list content').toMatch(/Повторов:|STG-REPEAT-/);
 
   const highOnly = page.getByRole('button', { name: 'Только high/critical' });
   await highOnly.click();
   await expect(highOnly).toBeVisible();
+  await expect(main.getByText(/Критично|Высокий/).first()).toBeVisible();
   await highOnly.click();
 
   const serviceLinks = main.getByRole('link', { name: /^(Техника|Пред\.|Повтор)$/ });
   const serviceLinkCount = await serviceLinks.count();
-  if (serviceLinkCount > 0) {
-    const href = await serviceLinks.first().getAttribute('href');
-    expect(href, 'repeat breakdowns read-only links should point to app detail routes').toMatch(/\/(equipment|service)\//);
-  }
+  expect(serviceLinkCount, 'repeat breakdown populated rows should include read-only links').toBeGreaterThan(0);
+  const href = await serviceLinks.first().getAttribute('href');
+  expect(href, 'repeat breakdowns read-only links should point to app detail routes').toMatch(/\/(equipment|service)\//);
 
   await page.waitForTimeout(2500);
   expect(repeatBreakdownApiCalls, 'repeat breakdowns query should run and not refetch-loop').toBeGreaterThan(0);

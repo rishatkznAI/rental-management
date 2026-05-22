@@ -88,6 +88,19 @@ function appUrl(frontendUrl: string, route = '/') {
   return `${frontendUrl.replace(/\/$/, '')}/?debugVersion=1&_smoke=${Date.now()}#${normalizedRoute}`;
 }
 
+function conservedAppUrl(frontendUrl: string, expectedCommit?: string) {
+  const url = new URL(frontendUrl.replace(/\/$/, ''));
+  url.searchParams.set('debugVersion', '1');
+  url.searchParams.set('v', shortCommit(expectedCommit) || String(Date.now()));
+  return url.toString();
+}
+
+function hasMaintenanceUiText(bodyText: string, appDisabledMessage?: string) {
+  const expectedMessage = String(appDisabledMessage || '').trim();
+  if (expectedMessage && bodyText.includes(expectedMessage)) return true;
+  return /Система временно отключена|Работа приложения приостановлена|техническ(?:ое|ого|ом|ий|ая)\s+обслуживан|временно\s+(?:закрыто|отключена|недоступн)|обслуживан|conserved|maintenance/i.test(bodyText);
+}
+
 function installReadOnlyGuards(page: Page, config: ReleaseSmokeConfig, issues: UiIssue[], getAction: () => string) {
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
@@ -132,9 +145,18 @@ async function expectHealthyMain(page: Page, label: string) {
   await expect(page.getByText(/Cannot read properties|Maximum update depth exceeded|Unexpected Application Error|Application error|Something went wrong|ошибка приложения/i)).toHaveCount(0);
 }
 
-async function expectMaintenanceUiVisible(page: Page, config: ReleaseSmokeConfig, frontendBuild?: BuildInfo | null, backendBuild?: BuildInfo | null, loginStatus?: number | null) {
+async function expectMaintenanceUiVisible(page: Page, config: ReleaseSmokeConfig, appDisabledMessage?: string, frontendBuild?: BuildInfo | null, backendBuild?: BuildInfo | null, loginStatus?: number | null) {
+  await expect.poll(
+    async () => hasMaintenanceUiText(await visibleBodyText(page), appDisabledMessage),
+    {
+      message: `${config.environmentName} conserved frontend should render maintenance/conservation UI`,
+      timeout: 15_000,
+      intervals: [250, 500, 1000],
+    },
+  ).toBe(true);
+
   const bodyText = await visibleBodyText(page);
-  if (!/Система временно отключена|Работа приложения приостановлена|conserved|maintenance|временно отключена/i.test(bodyText)) {
+  if (!hasMaintenanceUiText(bodyText, appDisabledMessage)) {
     await failWithPageDiagnostics(
       page,
       config,
@@ -325,7 +347,7 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
     loginStatus = directLogin.status;
 
     action = 'frontend conservation';
-    await page.goto(appUrl(normalizedConfig.frontendUrl, '/login'), { waitUntil: 'domcontentloaded' });
+    await page.goto(conservedAppUrl(normalizedConfig.frontendUrl, normalizedConfig.expectedCommit), { waitUntil: 'domcontentloaded' });
     await expect(page.locator('body')).toBeVisible();
     await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit));
     frontendBuild = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
@@ -339,8 +361,8 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
       ).toBeTruthy();
     }
 
-    await expectMaintenanceUiVisible(page, normalizedConfig, frontendBuild, backendBuild, loginStatus);
-    console.log('Production is conserved: login HTTP 503 is expected.');
+    await expectMaintenanceUiVisible(page, normalizedConfig, versionJson.app.message, frontendBuild, backendBuild, loginStatus);
+    console.log('Production is conserved: login HTTP 503 is expected, authenticated smoke skipped.');
     expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);
     return;
   }

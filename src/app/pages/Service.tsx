@@ -49,7 +49,7 @@ import { equipmentService } from '../services/equipment.service';
 import { rentalsService } from '../services/rentals.service';
 import { clientsService } from '../services/clients.service';
 import { mechanicsService } from '../services/mechanics.service';
-import { serviceTicketsService, type ServiceRepeatBreakdownsResponse, type ServiceRepeatBreakdownItem } from '../services/service-tickets.service';
+import { serviceTicketsService, type ServiceRepeatBreakdownsResponse, type ServiceRepeatBreakdownItem, type ServiceRepairQualityResponse, type ServiceRepairQualityRisk } from '../services/service-tickets.service';
 import { useServerPagination } from '../hooks/useServerPagination';
 import { PaginationControls } from '../components/common/PaginationControls';
 
@@ -479,11 +479,11 @@ function ServiceMetricCard({
   }[tone];
 
   return (
-    <div data-service-kpi-card="true" className="flex min-h-[104px] rounded-lg border border-[#E5EAF3] bg-white p-3.5 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+    <div data-service-kpi-card="true" className="flex min-h-[104px] min-w-0 rounded-lg border border-[#E5EAF3] bg-white p-3.5 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
       <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${toneClasses.icon}`} aria-hidden="true">
           {icon ?? <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.accent}`} />}
       </div>
-      <div className="ml-3 min-w-0">
+      <div className="ml-3 min-w-0 flex-1">
         <div className={`text-[26px] font-bold leading-none ${toneClasses.value}`}>{safeValue}</div>
         <div className="mt-1 truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{title}</div>
         <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-500">{caption}</div>
@@ -886,35 +886,78 @@ function repeatSeverityLabel(severity: ServiceRepeatBreakdownItem['repeatSeverit
   }[severity] || 'Низкий';
 }
 
-function repeatSeverityClass(severity: ServiceRepeatBreakdownItem['repeatSeverity']) {
+function repairQualityRiskLabel(risk: ServiceRepairQualityRisk) {
+  return {
+    critical: 'Критично',
+    high: 'Высокий',
+    medium: 'Средний',
+    low: 'Низкий',
+    unknown: 'Недостаточно данных',
+  }[risk] || 'Недостаточно данных';
+}
+
+function repeatSeverityClass(severity: ServiceRepeatBreakdownItem['repeatSeverity'] | ServiceRepairQualityRisk) {
   return {
     critical: 'bg-red-100 text-red-800 ring-1 ring-red-200 dark:bg-red-500/15 dark:text-red-200 dark:ring-red-900',
     high: 'bg-orange-100 text-orange-800 ring-1 ring-orange-200 dark:bg-orange-500/15 dark:text-orange-200 dark:ring-orange-900',
     medium: 'bg-amber-100 text-amber-800 ring-1 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-900',
     low: 'bg-gray-100 text-gray-700 ring-1 ring-gray-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/10',
+    unknown: 'bg-gray-100 text-gray-700 ring-1 ring-gray-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/10',
   }[severity] || 'bg-gray-100 text-gray-700';
 }
 
-function safeRepeatText(value: string | number | undefined, fallback = '—') {
+function safeRepeatText(value: string | number | undefined | null, fallback = '—') {
   const text = String(value ?? '').trim();
   if (!text || text === 'undefined' || text === 'null' || text === '[object Object]') return fallback;
   return text;
 }
 
+const REPEAT_PERIOD_FILTER_LABELS: Record<'7' | '14' | '30', string> = {
+  '7': '7 дней',
+  '14': '14 дней',
+  '30': '30 дней',
+};
+
+const REPEAT_SEVERITY_FILTER_LABELS: Record<string, string> = {
+  all: 'Все уровни',
+  critical: 'Критичные',
+  high: 'Высокие',
+  medium: 'Средние',
+  low: 'Низкие',
+};
+
+const REPEAT_QUALITY_FILTER_LABELS: Record<string, string> = {
+  all: 'Все',
+  critical: 'Критичные',
+  high: 'Высокие',
+  repeat_7_days: 'Повторы 7 дней',
+  repeat_30_days: 'Повторы 30 дней',
+  by_equipment: 'По технике',
+  by_mechanic: 'По механикам',
+  by_scenario: 'По сценариям',
+};
+
 function RepeatBreakdownsTab({
   data,
+  qualityData,
   isLoading,
+  isQualityLoading,
   error,
+  qualityError,
 }: {
   data?: ServiceRepeatBreakdownsResponse;
+  qualityData?: ServiceRepairQualityResponse;
   isLoading: boolean;
+  isQualityLoading: boolean;
   error: unknown;
+  qualityError: unknown;
 }) {
   const [periodFilter, setPeriodFilter] = React.useState<'7' | '14' | '30'>('30');
   const [severityFilter, setSeverityFilter] = React.useState('all');
   const [modelFilter, setModelFilter] = React.useState('all');
   const [mechanicFilter, setMechanicFilter] = React.useState('all');
   const [scenarioFilter, setScenarioFilter] = React.useState('all');
+  const [qualityFilter, setQualityFilter] = React.useState('all');
   const [highOnly, setHighOnly] = React.useState(false);
 
   const items = React.useMemo(() => data?.items ?? [], [data?.items]);
@@ -942,6 +985,26 @@ function RepeatBreakdownsTab({
   const problematicEquipment = new Set(filteredItems.map(item => item.equipmentId).filter(Boolean)).size;
   const problematicModels = new Set(filteredItems.map(item => item.model).filter(Boolean)).size;
   const problematicMechanics = new Set(filteredItems.map(item => item.mechanicName).filter(Boolean)).size;
+  const qualityEquipment = React.useMemo(() => {
+    const rows = qualityData?.equipment ?? [];
+    if (qualityFilter === 'critical' || qualityFilter === 'high') return rows.filter(item => item.qualityRisk === qualityFilter);
+    if (qualityFilter === 'repeat_7_days') return rows.filter(item => item.repeatWithin7 > 0);
+    if (qualityFilter === 'repeat_30_days') return rows.filter(item => item.repeatWithin30 > 0);
+    return rows;
+  }, [qualityData?.equipment, qualityFilter]);
+  const qualityMechanics = React.useMemo(() => {
+    const rows = qualityData?.mechanics ?? [];
+    if (qualityFilter === 'critical' || qualityFilter === 'high') return rows.filter(item => item.qualityRisk === qualityFilter);
+    if (qualityFilter === 'by_mechanic') return rows.filter(item => item.repeatRelatedTickets > 0);
+    return rows;
+  }, [qualityData?.mechanics, qualityFilter]);
+  const qualityScenarios = React.useMemo(() => {
+    const rows = qualityData?.scenarios ?? [];
+    if (qualityFilter === 'critical' || qualityFilter === 'high') return rows.filter(item => item.riskLevel === qualityFilter);
+    if (qualityFilter === 'by_scenario') return rows;
+    return rows;
+  }, [qualityData?.scenarios, qualityFilter]);
+  const topQualityScenario = safeRepeatText(qualityData?.summary.topScenario, 'Нет данных');
 
   if (isLoading) {
     return (
@@ -961,6 +1024,124 @@ function RepeatBreakdownsTab({
 
   return (
     <div className="space-y-5">
+      <section className="space-y-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Контроль качества ремонта</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Повторы показываются как зоны для разбора, без обвинительного рейтинга механиков.</p>
+          </div>
+          <Select value={qualityFilter} onValueChange={setQualityFilter}>
+            <SelectTrigger className="w-full md:w-56">
+              <span className="truncate">{REPEAT_QUALITY_FILTER_LABELS[qualityFilter] ?? 'Фокус'}</span>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все</SelectItem>
+              <SelectItem value="critical">Критичные</SelectItem>
+              <SelectItem value="high">Высокие</SelectItem>
+              <SelectItem value="repeat_7_days">Повторы 7 дней</SelectItem>
+              <SelectItem value="repeat_30_days">Повторы 30 дней</SelectItem>
+              <SelectItem value="by_equipment">По технике</SelectItem>
+              <SelectItem value="by_mechanic">По механикам</SelectItem>
+              <SelectItem value="by_scenario">По сценариям</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {isQualityLoading ? (
+          <div className="rounded-lg border border-gray-200 bg-white p-5 text-sm text-gray-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-gray-400">
+            Загружаем контроль качества ремонта...
+          </div>
+        ) : qualityError ? (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-100">
+            Не удалось загрузить контроль качества ремонта. Данные повторных поломок ниже остаются доступными, если они загрузились.
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              <ServiceMetricCard title="Критичные повторы" value={qualityData?.summary.critical ?? 0} caption="Требуют разбора" tone="red" icon={<ShieldAlert className="h-4 w-4" />} />
+              <ServiceMetricCard title="Техника с повторами" value={qualityData?.summary.affectedEquipment ?? 0} caption="Затронутые единицы" tone="blue" icon={<Wrench className="h-4 w-4" />} />
+              <ServiceMetricCard title="Повторы за 7 дней" value={qualityData?.summary.repeatWithin7 ?? 0} caption="После закрытия" tone="orange" icon={<AlertTriangle className="h-4 w-4" />} />
+              <ServiceMetricCard title="Повторы за 30 дней" value={qualityData?.summary.repeatWithin30 ?? 0} caption="Окно контроля" tone="amber" icon={<CalendarClock className="h-4 w-4" />} />
+              <ServiceMetricCard title="Механики в разборе" value={qualityData?.summary.affectedMechanics ?? 0} caption="Не рейтинг вины" tone="purple" icon={<UserRound className="h-4 w-4" />} />
+              <ServiceMetricCard title="Главный сценарий" value={qualityData?.summary.totalRepeatCases ?? 0} caption={topQualityScenario} tone="neutral" icon={<PackageSearch className="h-4 w-4" />} />
+            </div>
+
+            {(qualityData?.summary.totalRepeatCases ?? 0) === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-lg border border-gray-200 bg-white py-12 text-center dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 dark:bg-white/8">
+                  <CheckCircle2 className="h-7 w-7 text-emerald-500" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white">Повторов для контроля качества нет</h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Когда появятся повторные ремонты, здесь будут зоны для управленческого разбора.</p>
+              </div>
+            ) : (
+              <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+                <div className="min-w-0 space-y-4">
+                  <div className="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
+                    <div className="border-b border-gray-100 px-4 py-3 font-bold text-gray-900 dark:border-white/10 dark:text-white">Проблемная техника</div>
+                    {qualityEquipment.slice(0, 6).map(item => (
+                      <div key={item.equipmentId} className="grid min-w-0 gap-3 border-b border-gray-100 px-4 py-3 last:border-b-0 dark:border-white/6 lg:grid-cols-[minmax(180px,1fr)_90px_110px_minmax(180px,1fr)_120px] lg:items-center">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{safeRepeatText(item.equipmentLabel)}</div>
+                          <div className="mt-0.5 truncate text-xs text-gray-500">INV: {safeRepeatText(item.inventoryNumber)} · {formatShortDate(item.lastRepeatDate)}</div>
+                        </div>
+                        <div className="text-sm text-gray-700 dark:text-gray-200">{item.repeatCount} повторов</div>
+                        <span className={`w-fit rounded-full px-2 py-0.5 text-xs font-bold ${repeatSeverityClass(item.qualityRisk)}`}>{repairQualityRiskLabel(item.qualityRisk)}</span>
+                        <div className="text-sm text-gray-600 dark:text-gray-300">{safeRepeatText(item.recommendedAction)}</div>
+                        <div className="flex flex-wrap gap-2">
+                          {item.links.equipment && <Link className="text-sm font-semibold text-[--color-primary] hover:underline" to={item.links.equipment}>Техника</Link>}
+                          {item.links.repeatServiceTicket && <Link className="text-sm font-semibold text-[--color-primary] hover:underline" to={item.links.repeatServiceTicket}>Заявка</Link>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
+                    <div className="border-b border-gray-100 px-4 py-3 font-bold text-gray-900 dark:border-white/10 dark:text-white">Сценарии повторов</div>
+                    {qualityScenarios.slice(0, 5).map(item => (
+                      <div key={item.scenario} className="grid min-w-0 gap-3 border-b border-gray-100 px-4 py-3 last:border-b-0 dark:border-white/6 md:grid-cols-[minmax(180px,1fr)_100px_110px_minmax(180px,1fr)] md:items-center">
+                        <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{safeRepeatText(item.scenario)}</div>
+                        <div className="text-sm text-gray-600 dark:text-gray-300">{item.repeatCount} повторов</div>
+                        <span className={`w-fit rounded-full px-2 py-0.5 text-xs font-bold ${repeatSeverityClass(item.riskLevel)}`}>{repairQualityRiskLabel(item.riskLevel)}</span>
+                        <div className="text-sm text-gray-600 dark:text-gray-300">Проверить диагностику и регламент</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="min-w-0 space-y-4">
+                  <div className="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
+                    <div className="border-b border-gray-100 px-4 py-3 font-bold text-gray-900 dark:border-white/10 dark:text-white">Зоны разбора по механикам</div>
+                    {qualityMechanics.slice(0, 5).map(item => (
+                      <div key={item.mechanicId} className="border-b border-gray-100 px-4 py-3 last:border-b-0 dark:border-white/6">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0 truncate text-sm font-semibold text-gray-900 dark:text-white">{safeRepeatText(item.mechanicName, 'Не назначен')}</div>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${repeatSeverityClass(item.qualityRisk)}`}>{repairQualityRiskLabel(item.qualityRisk)}</span>
+                        </div>
+                        <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">{item.repeatRelatedTickets} связанных повторов · доля повторов {Math.round(item.repeatRate * 100)}%</div>
+                        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{safeRepeatText(item.note)}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="min-w-0 rounded-lg border border-gray-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                    <div className="font-bold text-gray-900 dark:text-white">Что сделать</div>
+                    <div className="mt-3 space-y-2">
+                      {(qualityData?.recommendations ?? []).map(item => (
+                        <div key={item} className="flex gap-2 text-sm text-gray-700 dark:text-gray-200">
+                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                          <span>{safeRepeatText(item)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <ServiceMetricCard title="Повторов за 7 дней" value={data?.summary.repeatWithin7 ?? 0} caption="После завершения ремонта" tone="red" icon={<AlertTriangle className="h-4 w-4" />} />
         <ServiceMetricCard title="Повторов за 30 дней" value={data?.summary.repeatWithin30 ?? 0} caption="Все окна контроля" tone="orange" icon={<CalendarClock className="h-4 w-4" />} />
@@ -973,7 +1154,7 @@ function RepeatBreakdownsTab({
       <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[repeat(5,minmax(150px,1fr))_auto]">
           <Select value={periodFilter} onValueChange={(value) => setPeriodFilter(value as '7' | '14' | '30')}>
-            <SelectTrigger><SelectValue placeholder="Период" /></SelectTrigger>
+            <SelectTrigger><span className="truncate">{REPEAT_PERIOD_FILTER_LABELS[periodFilter]}</span></SelectTrigger>
             <SelectContent>
               <SelectItem value="7">7 дней</SelectItem>
               <SelectItem value="14">14 дней</SelectItem>
@@ -981,7 +1162,7 @@ function RepeatBreakdownsTab({
             </SelectContent>
           </Select>
           <Select value={severityFilter} onValueChange={setSeverityFilter}>
-            <SelectTrigger><SelectValue placeholder="Severity" /></SelectTrigger>
+            <SelectTrigger><span className="truncate">{REPEAT_SEVERITY_FILTER_LABELS[severityFilter] ?? 'Уровень'}</span></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Все уровни</SelectItem>
               <SelectItem value="critical">Критичные</SelectItem>
@@ -991,21 +1172,21 @@ function RepeatBreakdownsTab({
             </SelectContent>
           </Select>
           <Select value={modelFilter} onValueChange={setModelFilter}>
-            <SelectTrigger><SelectValue placeholder="Модель" /></SelectTrigger>
+            <SelectTrigger><span className="truncate">{modelFilter === 'all' ? 'Все модели' : safeRepeatText(modelFilter, 'Модель')}</span></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Все модели</SelectItem>
               {modelOptions.map(model => <SelectItem key={model} value={model}>{model}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={mechanicFilter} onValueChange={setMechanicFilter}>
-            <SelectTrigger><SelectValue placeholder="Механик" /></SelectTrigger>
+            <SelectTrigger><span className="truncate">{mechanicFilter === 'all' ? 'Все механики' : safeRepeatText(mechanicFilter, 'Механик')}</span></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Все механики</SelectItem>
               {mechanicOptions.map(mechanic => <SelectItem key={mechanic} value={mechanic}>{mechanic}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={scenarioFilter} onValueChange={setScenarioFilter}>
-            <SelectTrigger><SelectValue placeholder="Сценарий" /></SelectTrigger>
+            <SelectTrigger><span className="truncate">{scenarioFilter === 'all' ? 'Все сценарии' : safeRepeatText(scenarioFilter, 'Сценарий')}</span></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Все сценарии</SelectItem>
               {scenarioOptions.map(scenario => <SelectItem key={scenario} value={scenario}>{scenario}</SelectItem>)}
@@ -1017,7 +1198,7 @@ function RepeatBreakdownsTab({
             className="h-10 whitespace-nowrap"
             onClick={() => setHighOnly(value => !value)}
           >
-            Только high/critical
+            Только высокие/критичные
           </Button>
         </div>
       </section>
@@ -1075,15 +1256,15 @@ function RepeatBreakdownsTab({
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {(data?.groups.byEquipment ?? []).slice(0, 4).map(group => (
-          <div key={group.id} className="rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-white/10 dark:bg-white/[0.03]">
+          <div key={group.id} className="min-w-0 rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-white/10 dark:bg-white/[0.03]">
             <div className="truncate font-semibold text-gray-900 dark:text-white">{group.label}</div>
-            <div className="mt-1 text-gray-500 dark:text-gray-400">Повторов: {group.count} · high/critical: {group.high + group.critical}</div>
+            <div className="mt-1 text-gray-500 dark:text-gray-400">Повторов: {group.count} · высоких/критичных: {group.high + group.critical}</div>
           </div>
         ))}
       </div>
 
       <div className="text-xs text-gray-500 dark:text-gray-500">
-        Показано {filteredItems.length} из {items.length}. High/critical по текущим фильтрам: {filteredHighCritical}.
+        Показано {filteredItems.length} из {items.length}. Высоких/критичных по текущим фильтрам: {filteredHighCritical}.
       </div>
     </div>
   );
@@ -1417,6 +1598,12 @@ export default function Service() {
   const repeatBreakdownsQuery = useQuery<ServiceRepeatBreakdownsResponse>({
     queryKey: ['service', 'repeat-breakdowns'],
     queryFn: serviceTicketsService.getRepeatBreakdowns,
+    enabled: can('view', 'service'),
+    staleTime: 1000 * 60 * 2,
+  });
+  const repairQualityQuery = useQuery<ServiceRepairQualityResponse>({
+    queryKey: ['service', 'repeat-breakdowns', 'quality'],
+    queryFn: serviceTicketsService.getRepairQuality,
     enabled: can('view', 'service'),
     staleTime: 1000 * 60 * 2,
   });
@@ -2362,8 +2549,11 @@ export default function Service() {
         <TabsContent value="repeat-breakdowns" className="space-y-5">
           <RepeatBreakdownsTab
             data={repeatBreakdownsQuery.data}
+            qualityData={repairQualityQuery.data}
             isLoading={repeatBreakdownsQuery.isFetching && !repeatBreakdownsQuery.data}
+            isQualityLoading={repairQualityQuery.isFetching && !repairQualityQuery.data}
             error={repeatBreakdownsQuery.error}
+            qualityError={repairQualityQuery.error}
           />
         </TabsContent>
 

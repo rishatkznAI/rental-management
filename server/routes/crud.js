@@ -14,7 +14,7 @@ const {
   normalizeServiceTicketRecord,
   serviceCreatedAtValue,
 } = require('../lib/service-dto');
-const { buildServiceRepeatBreakdowns } = require('../lib/service-repeat-breakdowns');
+const { buildServiceRepeatBreakdowns, buildServiceRepairQualityView } = require('../lib/service-repeat-breakdowns');
 const {
   SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE,
   assertRepairItemsAdmin,
@@ -1242,7 +1242,7 @@ function registerCrudRoutes(deps) {
                 req.user,
               )
             : [];
-          return res.json(buildServiceRepeatBreakdowns({
+          const payload = {
             tickets,
             equipment,
             mechanics,
@@ -1250,7 +1250,11 @@ function registerCrudRoutes(deps) {
             partItems,
             fieldTrips: accessControl.filterCollectionByScope('service_field_trips', readData('service_field_trips') || [], req.user),
             warrantyClaims: accessControl.filterCollectionByScope('warranty_claims', readData('warranty_claims') || [], req.user),
-          }));
+          };
+          if (String(req.query.view || '').trim() === 'quality') {
+            return res.json(buildServiceRepairQualityView(payload));
+          }
+          return res.json(buildServiceRepeatBreakdowns(payload));
         } catch (error) {
           return sendAccessError(res, error);
         }

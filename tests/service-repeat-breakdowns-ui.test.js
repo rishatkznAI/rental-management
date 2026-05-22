@@ -9,15 +9,22 @@ test('service repeat breakdowns tab renders with KPI cards filters table and sta
   assert.match(servicePageSource, /function RepeatBreakdownsTab/);
   assert.match(servicePageSource, /label="Повторные поломки"/);
   for (const label of [
+    'Контроль качества ремонта',
+    'Критичные повторы',
+    'Техника с повторами',
+    'Механики в разборе',
+    'Главный сценарий',
     'Повторов за 7 дней',
     'Повторов за 30 дней',
     'Критичные',
     'Проблемная техника',
     'Проблемные модели',
     'Повторы по механику',
-    'Только high/critical',
+    'Только высокие/критичные',
     'Повторных поломок за выбранный период не найдено',
+    'Повторов для контроля качества нет',
     'Не удалось загрузить аналитику повторных поломок',
+    'Не удалось загрузить контроль качества ремонта',
   ]) {
     assert.match(servicePageSource, new RegExp(label));
   }
@@ -64,9 +71,13 @@ test('service repeat breakdowns populated rows render summaries filters links an
 
 test('service repeat breakdowns use one stable API query and local filters', () => {
   assert.match(serviceTicketsServiceSource, /getRepeatBreakdowns/);
+  assert.match(serviceTicketsServiceSource, /getRepairQuality/);
   assert.match(serviceTicketsServiceSource, /\/api\/service\/repeat-breakdowns/);
+  assert.match(serviceTicketsServiceSource, /\/api\/service\/repeat-breakdowns\?view=quality/);
   assert.match(servicePageSource, /queryKey: \['service', 'repeat-breakdowns'\]/);
+  assert.match(servicePageSource, /queryKey: \['service', 'repeat-breakdowns', 'quality'\]/);
   assert.match(servicePageSource, /queryFn: serviceTicketsService\.getRepeatBreakdowns/);
+  assert.match(servicePageSource, /queryFn: serviceTicketsService\.getRepairQuality/);
   assert.match(servicePageSource, /staleTime: 1000 \* 60 \* 2/);
   assert.doesNotMatch(servicePageSource, /queryKey: \['service', 'repeat-breakdowns', periodFilter/);
 });
@@ -76,4 +87,26 @@ test('service repeat breakdowns sanitize visible fallback text', () => {
   assert.match(servicePageSource, /text === 'undefined'/);
   assert.match(servicePageSource, /text === 'null'/);
   assert.equal(servicePageSource.includes("text === '[object Object]'"), true);
+});
+
+test('service repair quality blocks render filters recommendations and safe links', () => {
+  for (const snippet of [
+    /SelectItem value="repeat_7_days">Повторы 7 дней/,
+    /SelectItem value="repeat_30_days">Повторы 30 дней/,
+    /SelectItem value="by_equipment">По технике/,
+    /SelectItem value="by_mechanic">По механикам/,
+    /SelectItem value="by_scenario">По сценариям/,
+    /Проблемная техника/,
+    /Сценарии повторов/,
+    /Зоны разбора по механикам/,
+    /Что сделать/,
+    /qualityData\?\.recommendations/,
+    /repairQualityRiskLabel/,
+    /item\.links\.equipment && <Link/,
+    /item\.links\.repeatServiceTicket && <Link/,
+    /доля повторов/,
+    /Не рейтинг вины/,
+  ]) {
+    assert.match(servicePageSource, snippet);
+  }
 });

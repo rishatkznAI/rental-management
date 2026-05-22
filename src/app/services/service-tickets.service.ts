@@ -19,6 +19,7 @@ export interface ServiceAuditLogEntry {
 
 export type RepeatBreakdownSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type RepeatBreakdownConfidence = 'low' | 'medium' | 'high';
+export type ServiceRepairQualityRisk = 'unknown' | RepeatBreakdownSeverity;
 
 export interface ServiceRepeatBreakdownItem {
   equipmentId: string;
@@ -78,6 +79,65 @@ export interface ServiceRepeatBreakdownsResponse {
     byMechanic: ServiceRepeatBreakdownGroup[];
     byScenario: ServiceRepeatBreakdownGroup[];
   };
+}
+
+export interface ServiceRepairQualityEquipment {
+  equipmentId: string;
+  equipmentLabel: string;
+  inventoryNumber: string;
+  repeatCount: number;
+  repeatWithin7: number;
+  repeatWithin14: number;
+  repeatWithin30: number;
+  lastRepeatDate: string;
+  qualityRisk: ServiceRepairQualityRisk;
+  qualityReason: string;
+  recommendedAction: string;
+  lostDaysEstimate: number;
+  lostAmountEstimate: number;
+  links: ServiceRepeatBreakdownItem['links'];
+}
+
+export interface ServiceRepairQualityMechanic {
+  mechanicId: string;
+  mechanicName: string;
+  totalClosedTickets: number;
+  repeatRelatedTickets: number;
+  repeatRate: number;
+  highRiskRepeats: number;
+  qualityRisk: ServiceRepairQualityRisk;
+  note: string;
+}
+
+export interface ServiceRepairQualityPattern {
+  scenario?: string;
+  workName?: string;
+  partName?: string;
+  repeatCount: number;
+  affectedEquipmentCount: number;
+  riskLevel: ServiceRepairQualityRisk;
+}
+
+export interface ServiceRepairQualityResponse {
+  ok: true;
+  summary: {
+    totalRepeatCases: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    affectedEquipment: number;
+    affectedMechanics: number;
+    repeatWithin7: number;
+    repeatWithin30: number;
+    topScenario: string;
+  };
+  equipment: ServiceRepairQualityEquipment[];
+  mechanics: ServiceRepairQualityMechanic[];
+  scenarios: ServiceRepairQualityPattern[];
+  works: ServiceRepairQualityPattern[];
+  parts: ServiceRepairQualityPattern[];
+  recommendations: string[];
 }
 
 const SERVICE_STATUSES = new Set<ServiceStatus>(['new', 'in_progress', 'waiting_parts', 'needs_revision', 'ready', 'closed']);
@@ -316,6 +376,9 @@ export const serviceTicketsService = {
 
   getRepeatBreakdowns: (): Promise<ServiceRepeatBreakdownsResponse> =>
     api.get<ServiceRepeatBreakdownsResponse>('/api/service/repeat-breakdowns'),
+
+  getRepairQuality: (): Promise<ServiceRepairQualityResponse> =>
+    api.get<ServiceRepairQualityResponse>('/api/service/repeat-breakdowns?view=quality'),
 
   bulkReplace: (list: ServiceTicket[]): Promise<void> =>
     api.put('/api/service', list),

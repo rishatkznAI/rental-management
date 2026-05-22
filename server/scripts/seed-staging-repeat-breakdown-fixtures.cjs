@@ -68,22 +68,32 @@ function buildRepeatBreakdownFixtures(now = new Date()) {
     ...extra,
   });
 
-  const highTickets = [
-    ticketBase('HIGH-1', 'HIGH', 'closed', 10, {
+  const criticalTickets = [
+    ticketBase('CRITICAL-1', 'CRITICAL', 'closed', 10, {
       reason: 'STG-SERVICE-REPEAT hydraulic leak',
       closedAt: daysAgo(now, 9),
       completedAt: daysAgo(now, 9),
       resultData: { completedAt: daysAgo(now, 9) },
     }),
-    ticketBase('HIGH-2', 'HIGH', 'closed', 7, {
+    ticketBase('CRITICAL-2', 'CRITICAL', 'closed', 7, {
       reason: 'STG-SERVICE-REPEAT hydraulic leak',
       closedAt: daysAgo(now, 6),
       completedAt: daysAgo(now, 6),
       resultData: { completedAt: daysAgo(now, 6) },
     }),
-    ticketBase('HIGH-3', 'HIGH', 'in_progress', 4, {
+    ticketBase('CRITICAL-3', 'CRITICAL', 'in_progress', 4, {
       priority: 'critical',
       reason: 'STG-SERVICE-REPEAT hydraulic leak',
+    }),
+  ];
+  const highTickets = [
+    ticketBase('HIGH-1', 'HIGH', 'closed', 25, {
+      reason: 'STG-SERVICE-REPEAT steering drift',
+      closedAt: daysAgo(now, 24),
+      completedAt: daysAgo(now, 24),
+    }),
+    ticketBase('HIGH-2', 'HIGH', 'new', 8, {
+      reason: 'STG-SERVICE-REPEAT steering drift',
     }),
   ];
   const mediumTickets = [
@@ -104,24 +114,33 @@ function buildRepeatBreakdownFixtures(now = new Date()) {
     }),
   ];
 
-  const highWorkItems = highTickets.map((ticket, index) => ({
-    id: `${SERVICE_PREFIX}WORK-HIGH-${index + 1}`,
+  const qualityWorkTickets = [...criticalTickets, ...highTickets];
+  const qualityWorkItems = qualityWorkTickets.map((ticket, index) => ({
+    id: `${SERVICE_PREFIX}WORK-QUALITY-${index + 1}`,
     repairId: ticket.id,
     serviceTicketId: ticket.id,
-    workId: `${SERVICE_PREFIX}WORK-HYDRAULIC`,
-    nameSnapshot: 'STG-SERVICE-REPEAT hydraulic inspection',
-    categorySnapshot: 'STG-SERVICE-REPEAT hydraulic system',
+    workId: ticket.id.includes('CRITICAL')
+      ? `${SERVICE_PREFIX}WORK-HYDRAULIC`
+      : ticket.id.includes('HIGH')
+        ? `${SERVICE_PREFIX}WORK-STEERING`
+        : `${SERVICE_PREFIX}WORK-DIAGNOSTICS`,
+    nameSnapshot: ticket.id.includes('CRITICAL')
+      ? 'STG-SERVICE-REPEAT hydraulic inspection'
+      : ticket.id.includes('HIGH')
+        ? 'STG-SERVICE-REPEAT steering adjustment'
+        : 'STG-SERVICE-REPEAT diagnostic check',
+    categorySnapshot: 'STG-SERVICE-REPEAT quality control',
     quantity: 1,
     fixtureTag: SERVICE_PREFIX,
     updatedAt: iso,
   }));
-  const highPartItems = highTickets.map((ticket, index) => ({
-    id: `${SERVICE_PREFIX}PART-HIGH-${index + 1}`,
+  const qualityPartItems = [...criticalTickets, ...highTickets].map((ticket, index) => ({
+    id: `${SERVICE_PREFIX}PART-QUALITY-${index + 1}`,
     repairId: ticket.id,
     serviceTicketId: ticket.id,
-    partId: `${SERVICE_PREFIX}PART-SEAL`,
-    nameSnapshot: 'STG-SERVICE-REPEAT seal kit',
-    articleSnapshot: `${SERVICE_PREFIX}SEAL-KIT`,
+    partId: ticket.id.includes('CRITICAL') ? `${SERVICE_PREFIX}PART-SEAL` : `${SERVICE_PREFIX}PART-BUSHING`,
+    nameSnapshot: ticket.id.includes('CRITICAL') ? 'STG-SERVICE-REPEAT seal kit' : 'STG-SERVICE-REPEAT bushing kit',
+    articleSnapshot: ticket.id.includes('CRITICAL') ? `${SERVICE_PREFIX}SEAL-KIT` : `${SERVICE_PREFIX}BUSHING-KIT`,
     quantity: 1,
     priceSnapshot: 0,
     fixtureTag: SERVICE_PREFIX,
@@ -130,13 +149,14 @@ function buildRepeatBreakdownFixtures(now = new Date()) {
 
   return {
     equipment: [
+      equipmentBase('CRITICAL', 'STG-REPEAT Critical Quality Lift', 'in_service'),
       equipmentBase('HIGH', 'STG-REPEAT High Repeat Lift', 'in_service'),
       equipmentBase('MEDIUM', 'STG-REPEAT Medium Repeat Lift', 'available'),
       equipmentBase('CONTROL', 'STG-REPEAT Control Lift', 'available'),
     ],
-    service: [...highTickets, ...mediumTickets, ...controlTickets],
-    repairWorkItems: highWorkItems,
-    repairPartItems: highPartItems,
+    service: [...criticalTickets, ...highTickets, ...mediumTickets, ...controlTickets],
+    repairWorkItems: qualityWorkItems,
+    repairPartItems: qualityPartItems,
   };
 }
 

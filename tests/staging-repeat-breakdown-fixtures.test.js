@@ -101,10 +101,10 @@ test('staging repeat breakdown fixture seed is idempotent and scoped to fixture 
     assert.deepEqual(
       Object.fromEntries(secondPayload.results.map(item => [item.collection, [item.removed, item.upserted]])),
       {
-        equipment: [3, 3],
-        service: [6, 6],
-        repair_work_items: [3, 3],
-        repair_part_items: [3, 3],
+        equipment: [4, 4],
+        service: [8, 8],
+        repair_work_items: [5, 5],
+        repair_part_items: [5, 5],
       },
     );
 
@@ -130,6 +130,24 @@ test('high repeat fixture produces critical or high repeat items with links', ()
   assert.ok(highItems.every(item => item.links.equipment === `/equipment/${encodeURIComponent(item.equipmentId)}`));
   assert.ok(highItems.every(item => item.links.previousServiceTicket.startsWith('/service/')));
   assert.ok(highItems.every(item => item.links.repeatServiceTicket.startsWith('/service/')));
+});
+
+test('repeat fixtures include critical high medium and clean quality cases', () => {
+  const fixtures = buildRepeatBreakdownFixtures(NOW);
+  const result = buildServiceRepeatBreakdowns({
+    equipment: fixtures.equipment,
+    tickets: fixtures.service,
+    workItems: fixtures.repairWorkItems,
+    partItems: fixtures.repairPartItems,
+  });
+  const criticalItems = result.items.filter(item => item.equipmentId === `${EQUIPMENT_PREFIX}EQ-CRITICAL`);
+  const highItems = result.items.filter(item => item.equipmentId === `${EQUIPMENT_PREFIX}EQ-HIGH`);
+  const mediumItems = result.items.filter(item => item.equipmentId === `${EQUIPMENT_PREFIX}EQ-MEDIUM`);
+
+  assert.ok(criticalItems.some(item => item.repeatSeverity === 'critical'));
+  assert.ok(highItems.some(item => ['high', 'medium'].includes(item.repeatSeverity)));
+  assert.ok(mediumItems.some(item => item.repeatSeverity === 'medium'));
+  assert.equal(result.items.some(item => item.equipmentId === `${EQUIPMENT_PREFIX}EQ-CONTROL`), false);
 });
 
 test('medium repeat fixture produces lower-severity repeat item', () => {

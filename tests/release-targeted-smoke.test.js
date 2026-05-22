@@ -11,3 +11,12 @@ test('targeted smoke validates current action queue execution DTO', () => {
   assert.match(smokeSource, /hasOwnProperty\.call\(item, 'executionOverdue'\)/);
   assert.match(smokeSource, /\/api\/management\/action-queue items must expose execution fields/);
 });
+
+test('targeted smoke covers service repeat breakdowns read-only analytics', () => {
+  assert.match(smokeSource, /function repeatBreakdownsShapeValid\(payload\)/);
+  assert.match(smokeSource, /\/api\/service\/repeat-breakdowns/);
+  assert.match(smokeSource, /returned an unexpected response shape/);
+  assert.match(smokeSource, /totalRepeats/);
+  assert.match(smokeSource, /byEquipment/);
+  assert.doesNotMatch(smokeSource, /JSON\.stringify\(repeatBreakdowns\.json\)/);
+});

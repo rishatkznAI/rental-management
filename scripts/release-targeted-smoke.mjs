@@ -52,6 +52,23 @@ function hasUnsafeText(value) {
   return /password|token|secret|Bearer\s+|undefined|\[object Object\]/i.test(text);
 }
 
+function hasUnsafeKey(value, unsafeKeys) {
+  if (Array.isArray(value)) return value.some(item => hasUnsafeKey(item, unsafeKeys));
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).some(([key, child]) => unsafeKeys.has(String(key).toLowerCase()) || hasUnsafeKey(child, unsafeKeys));
+}
+
+function textFieldsSafe(value) {
+  if (Array.isArray(value)) return value.every(textFieldsSafe);
+  if (!value || typeof value !== 'object') return true;
+  return Object.entries(value).every(([key, child]) => {
+    if (typeof child === 'string' && /(label|text|name|number|reason|action|scenario|model|inventory)/i.test(key)) {
+      return child.trim() !== '' && !/undefined|null|\[object Object\]/.test(child);
+    }
+    return textFieldsSafe(child);
+  });
+}
+
 function executionFieldsPresent(items) {
   if (!Array.isArray(items) || items.length === 0) return true;
   return items.every(item =>
@@ -79,6 +96,29 @@ function hasObjectKey(value, key) {
 
 function unsafeAssigneeFieldsAbsent(payload) {
   return ['email', 'password', 'passwordHash', 'token', 'secret'].every(key => !hasObjectKey(payload, key));
+}
+
+function repeatBreakdownsShapeValid(payload) {
+  if (!payload || typeof payload !== 'object') return false;
+  if (payload.ok !== true) return false;
+  if (!payload.summary || typeof payload.summary !== 'object') return false;
+  if (!Array.isArray(payload.items)) return false;
+  if (!payload.groups || typeof payload.groups !== 'object') return false;
+  for (const key of ['totalRepeats', 'repeatWithin7', 'repeatWithin14', 'repeatWithin30', 'critical', 'high', 'medium', 'low']) {
+    if (!Number.isFinite(Number(payload.summary[key]))) return false;
+  }
+  for (const key of ['byEquipment', 'byMechanic', 'byModel', 'byScenario']) {
+    if (!Array.isArray(payload.groups[key])) return false;
+  }
+  return payload.items.every(item => (
+    item
+    && typeof item === 'object'
+    && ['critical', 'high', 'medium', 'low'].includes(item.repeatSeverity)
+    && [7, 14, 30].includes(Number(item.repeatWindow))
+    && Number.isFinite(Number(item.daysBetween))
+    && item.links
+    && typeof item.links === 'object'
+  ));
 }
 
 async function timedJson(baseUrl, path, options = {}) {
@@ -182,6 +222,26 @@ async function main() {
     items: Array.isArray(assignees.json?.items) ? assignees.json.items.length : 0,
     safeFieldsPresent: true,
     unsafeFieldsAbsent: true,
+  });
+
+  const repeatBreakdowns = await timedJson(apiUrl, '/api/service/repeat-breakdowns', { headers: authHeaders });
+  assertOk(repeatBreakdowns.response.status === 200, `/api/service/repeat-breakdowns must return 200. HTTP ${repeatBreakdowns.response.status}`);
+  assertOk(repeatBreakdownsShapeValid(repeatBreakdowns.json), '/api/service/repeat-breakdowns returned an unexpected response shape');
+  assertOk(!hasUnsafeText(repeatBreakdowns.json), '/api/service/repeat-breakdowns exposed unsafe text or raw placeholder values');
+  assertOk(!hasUnsafeKey(repeatBreakdowns.json, new Set(['email', 'password', 'passwordhash', 'token', 'secret', 'hash'])), '/api/service/repeat-breakdowns exposed unsafe fields');
+  assertOk(textFieldsSafe(repeatBreakdowns.json), '/api/service/repeat-breakdowns exposed unsafe label/text placeholders');
+  logProbe('repeatBreakdowns', repeatBreakdowns, {
+    items: repeatBreakdowns.json.items.length,
+    summaryKeys: Object.keys(repeatBreakdowns.json.summary || {}).sort(),
+    groups: Object.fromEntries(Object.entries(repeatBreakdowns.json.groups || {}).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0])),
+    totalRepeats: Number(repeatBreakdowns.json.summary.totalRepeats || 0),
+    repeatWithin7: Number(repeatBreakdowns.json.summary.repeatWithin7 || 0),
+    repeatWithin14: Number(repeatBreakdowns.json.summary.repeatWithin14 || 0),
+    repeatWithin30: Number(repeatBreakdowns.json.summary.repeatWithin30 || 0),
+    critical: Number(repeatBreakdowns.json.summary.critical || 0),
+    high: Number(repeatBreakdowns.json.summary.high || 0),
+    medium: Number(repeatBreakdowns.json.summary.medium || 0),
+    low: Number(repeatBreakdowns.json.summary.low || 0),
   });
 
   console.log('[targeted-smoke] PASS');

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildServiceRepeatBreakdowns, isFinishedTicket, serviceFinishedAt } = require('../server/lib/service-repeat-breakdowns.js');
+const { buildServiceRepeatBreakdowns, buildServiceRepairQualityView, isFinishedTicket, serviceFinishedAt } = require('../server/lib/service-repeat-breakdowns.js');
 
 function baseCollections() {
   return {
@@ -165,4 +165,54 @@ test('labels do not expose undefined null or object placeholders', () => {
   assert.equal(serialized.includes('[object Object]'), false);
   assert.equal(serialized.includes('undefined'), false);
   assert.equal(serialized.includes('null'), false);
+});
+
+test('quality view returns safe summary equipment mechanics scenarios works and parts', () => {
+  const result = buildServiceRepairQualityView(baseCollections());
+  const serialized = JSON.stringify(result);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.totalRepeats, 1);
+  assert.equal(result.summary.totalRepeatCases, 1);
+  assert.equal(result.summary.critical, 1);
+  assert.equal(result.summary.affectedEquipment, 1);
+  assert.equal(result.summary.affectedMechanics, 1);
+  assert.equal(result.summary.repeatWithin14, 1);
+  assert.equal(typeof result.summary.lostDaysEstimate, 'number');
+  assert.equal(typeof result.summary.lostAmountEstimate, 'number');
+  assert.equal(result.summary.topScenario, 'Ремонт');
+  assert.equal(result.equipment[0].equipmentId, 'EQ-1');
+  assert.equal(result.equipment[0].qualityRisk, 'critical');
+  assert.match(result.equipment[0].recommendedAction, /разбор|диагност/i);
+  assert.equal(result.mechanics[0].mechanicId, 'M-1');
+  assert.equal(result.mechanics[0].repeatRelatedTickets, 1);
+  assert.match(result.mechanics[0].note, /не персональная оценка вины/);
+  assert.equal(result.scenarios[0].scenario, 'Ремонт');
+  assert.equal(result.works[0].workName, 'Ремонт гидравлики');
+  assert.equal(result.parts[0].partName, 'Манжета');
+  assert.equal(/password|token|secret|hash|email|Bearer\s+/i.test(serialized), false);
+  assert.equal(/undefined|null|\[object Object\]/.test(serialized), false);
+});
+
+test('quality view calculates high medium and clean control safely', () => {
+  const collections = {
+    equipment: [
+      { id: 'EQ-high', model: 'High risk' },
+      { id: 'EQ-medium', model: 'Medium risk' },
+      { id: 'EQ-clean', model: 'Clean control' },
+    ],
+    mechanics: [{ id: 'M-1', name: 'Иванов' }],
+    tickets: [
+      { id: 'H-1', equipmentId: 'EQ-high', status: 'closed', reason: 'Шум редуктора', assignedMechanicId: 'M-1', createdAt: '2026-05-01T08:00:00.000Z', closedAt: '2026-05-02T08:00:00.000Z' },
+      { id: 'H-2', equipmentId: 'EQ-high', status: 'new', reason: 'Шум редуктора', assignedMechanicId: 'M-1', createdAt: '2026-05-20T08:00:00.000Z' },
+      { id: 'M-1', equipmentId: 'EQ-medium', status: 'closed', reason: 'Неисправность', createdAt: '2026-05-01T08:00:00.000Z', closedAt: '2026-05-02T08:00:00.000Z' },
+      { id: 'M-2', equipmentId: 'EQ-medium', status: 'new', reason: 'Другая проблема', createdAt: '2026-05-18T08:00:00.000Z' },
+      { id: 'C-1', equipmentId: 'EQ-clean', status: 'closed', reason: 'Контроль', createdAt: '2026-05-01T08:00:00.000Z', closedAt: '2026-05-02T08:00:00.000Z' },
+    ],
+  };
+  const result = buildServiceRepairQualityView(collections);
+
+  assert.equal(result.equipment.find(item => item.equipmentId === 'EQ-high')?.qualityRisk, 'high');
+  assert.equal(result.equipment.find(item => item.equipmentId === 'EQ-medium')?.qualityRisk, 'medium');
+  assert.equal(result.equipment.some(item => item.equipmentId === 'EQ-clean'), false);
 });

@@ -970,6 +970,16 @@ test('/api/service/repeat-breakdowns is authenticated read-only analytics with s
     const mechanic = await request(baseUrl, 'GET', '/api/service/repeat-breakdowns', 'mechanic-token');
     assert.equal(mechanic.status, 200);
     assert.equal(mechanic.body.items.some(item => item.equipmentId === 'EQ-repeat'), true);
+
+    const quality = await request(baseUrl, 'GET', '/api/service/repeat-breakdowns?view=quality', 'admin-token');
+    assert.equal(quality.status, 200);
+    assert.equal(quality.body.ok, true);
+    assert.equal(quality.body.summary.totalRepeatCases, 1);
+    assert.equal(quality.body.equipment[0].qualityRisk, 'critical');
+    assert.equal(quality.body.mechanics[0].mechanicName, 'Петров');
+    assert.equal(quality.body.scenarios[0].scenario, 'Ремонт');
+    const qualitySerialized = JSON.stringify(quality.body);
+    assert.equal(/must-not-leak|password|token|secret|email|\[object Object\]|undefined|null/i.test(qualitySerialized), false);
   });
 });
 

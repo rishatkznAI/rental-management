@@ -166,11 +166,36 @@ async function main() {
 
   console.log(`[targeted-smoke] environment=${args.env}`);
 
+  const health = await timedJson(apiUrl, '/health');
+  assertOk(health.response.status === 200, `/health must return 200. HTTP ${health.response.status}`);
+  assertOk(health.json?.ok === true, '/health JSON must include ok=true');
+  logProbe('health', health);
+
+  const ready = await timedJson(apiUrl, '/health/ready');
+  assertOk(ready.response.status === 200, `/health/ready must return 200. HTTP ${ready.response.status}`);
+  assertOk(ready.json?.ok === true, '/health/ready JSON must include ok=true');
+  logProbe('ready', ready);
+
+  const version = await timedJson(apiUrl, '/api/version');
+  assertOk(version.response.status === 200, `/api/version must return 200. HTTP ${version.response.status}`);
+  assertOk(version.json?.ok === true, '/api/version JSON must include ok=true');
+  logProbe('version', version, {
+    appDisabled: version.json?.app?.disabled === true,
+  });
+
   const login = await timedJson(apiUrl, '/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
+  if (args.env === 'production' && version.json?.app?.disabled === true) {
+    assertOk(login.response.status === 503, `/api/auth/login must return 503 when app.disabled=true. HTTP ${login.response.status}`);
+    console.log(`[targeted-smoke] login ${JSON.stringify({ status: login.response.status, durationMs: login.durationMs, appDisabled: true })}`);
+    console.log('[targeted-smoke] Production is conserved: login HTTP 503 is expected.');
+    console.log('[targeted-smoke] PASS');
+    return;
+  }
+
   assertOk(login.response.status === 200, `/api/auth/login must return 200. HTTP ${login.response.status}`);
   const token = login.json?.token;
   assertOk(token, '/api/auth/login must return a token');

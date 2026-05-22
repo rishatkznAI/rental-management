@@ -20,3 +20,14 @@ test('targeted smoke covers service repeat breakdowns read-only analytics', () =
   assert.match(smokeSource, /byEquipment/);
   assert.doesNotMatch(smokeSource, /JSON\.stringify\(repeatBreakdowns\.json\)/);
 });
+
+test('targeted smoke allows conserved production only after public probes and blocked login', () => {
+  assert.match(smokeSource, /timedJson\(apiUrl, '\/health'\)/);
+  assert.match(smokeSource, /timedJson\(apiUrl, '\/health\/ready'\)/);
+  assert.match(smokeSource, /timedJson\(apiUrl, '\/api\/version'\)/);
+  assert.match(smokeSource, /version\.json\?\.app\?\.disabled === true/);
+  assert.match(smokeSource, /args\.env === 'production' && version\.json\?\.app\?\.disabled === true/);
+  assert.match(smokeSource, /login\.response\.status === 503/);
+  assert.match(smokeSource, /Production is conserved: login HTTP 503 is expected\./);
+  assert.match(smokeSource, /login\.response\.status === 200/);
+});

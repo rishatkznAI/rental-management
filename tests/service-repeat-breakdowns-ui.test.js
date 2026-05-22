@@ -42,6 +42,26 @@ test('service repeat breakdowns table exposes expected Russian columns and links
   assert.match(servicePageSource, /to=\{item\.links\.repeatServiceTicket\}/);
 });
 
+test('service repeat breakdowns populated rows render summaries filters links and empty state', () => {
+  for (const snippet of [
+    /data\?\.summary\.repeatWithin7 \?\? 0/,
+    /data\?\.summary\.repeatWithin30 \?\? 0/,
+    /data\?\.summary\.critical \?\? 0/,
+    /filteredItems\.map\(item =>/,
+    /repeatSeverityLabel\(item\.repeatSeverity\)/,
+    /\['critical', 'high'\]\.includes\(item\.repeatSeverity\)/,
+    /SelectItem value="critical">Критичные/,
+    /SelectItem value="high">Высокие/,
+    /SelectItem value="medium">Средние/,
+    /item\.links\.equipment && <Link/,
+    /item\.links\.previousServiceTicket && <Link/,
+    /item\.links\.repeatServiceTicket && <Link/,
+    /Повторных поломок за выбранный период не найдено/,
+  ]) {
+    assert.match(servicePageSource, snippet);
+  }
+});
+
 test('service repeat breakdowns use one stable API query and local filters', () => {
   assert.match(serviceTicketsServiceSource, /getRepeatBreakdowns/);
   assert.match(serviceTicketsServiceSource, /\/api\/service\/repeat-breakdowns/);

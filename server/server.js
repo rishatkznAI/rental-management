@@ -105,6 +105,7 @@ const {
   getBotDisabledConfig,
   getGsmDisabledConfig,
   sendAppDisabled,
+  shouldWarnForMissingMaxWebhookSecret,
 } = require('./lib/feature-flags');
 const { getDemoPublicInfo, isDemoMode } = require('./lib/demo-mode');
 const { seedDemoData } = require('./scripts/seed-demo-data');
@@ -363,7 +364,11 @@ function logMaxBotRuntimeConfig() {
   if (MAX_BOT_TRANSPORT === 'webhook' && !WEBHOOK_URL) {
     console.warn('[BOT] WEBHOOK_URL не задан при webhook-транспорте; регистрация webhook будет пропущена.');
   }
-  if (!MAX_WEBHOOK_SECRET) {
+  if (shouldWarnForMissingMaxWebhookSecret({
+    botDisabled: botDisabledConfig.disabled,
+    transport: MAX_BOT_TRANSPORT,
+    webhookSecret: MAX_WEBHOOK_SECRET,
+  })) {
     console.warn('[BOT] MAX_WEBHOOK_SECRET не задан. Webhook будет принят без secret, чтобы бот не молчал, но для production рекомендуется включить secret.');
   }
 }

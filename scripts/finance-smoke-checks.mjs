@@ -1,5 +1,6 @@
 const UNSAFE_KEY_PATTERN = /password|pass(hash)?|token|cookie|secret|private[-_ ]?key|authorization|auth[-_ ]?header|raw[-_ ]?env|database[-_ ]?url|db[-_ ]?url/i;
 const UNSAFE_STRING_PATTERN = /\bundefined\b|\bnull\b|\[object Object\]|Bearer\s+|sk-[A-Za-z0-9_-]+|postgres(?:ql)?:\/\/|sqlite:\/\/|mongodb(?:\+srv)?:\/\//i;
+export const EQUIPMENT_ECONOMICS_UI_STATE_PATTERN = /Остаточная стоимость|Экономика техники доступна только ролям с финансовым доступом|Финансовые показатели скрыты правами роли|Амортизация не настроена|Экономика не настроена|Недостаточно данных|Нет данных для расч[её]та|Нет данных/i;
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -55,6 +56,19 @@ export function assertNoUnsafeFinanceSmokePayload(payload) {
 
 export function hasUnsafeFinanceSmokeText(text) {
   return UNSAFE_STRING_PATTERN.test(String(text || ''));
+}
+
+export function assertEquipmentEconomicsUiStateSafe(text) {
+  const normalizedText = String(text || '');
+  if (hasUnsafeFinanceSmokeText(normalizedText)) {
+    throw new Error('equipment economics UI contains unsafe placeholder or secret-like text');
+  }
+  if (!/Экономика техники|Амортизация/i.test(normalizedText)) {
+    throw new Error('equipment economics UI must include economics or depreciation context');
+  }
+  if (!EQUIPMENT_ECONOMICS_UI_STATE_PATTERN.test(normalizedText)) {
+    throw new Error('equipment economics UI must render full, restricted, not_configured, or empty safe state');
+  }
 }
 
 export function assertCashFlowResponseShape(payload) {

@@ -8,6 +8,11 @@ const express = serverRequire('express');
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { registerFinanceRoutes } = require('../server/routes/finance.js');
 const financeCore = require('../server/lib/finance-core.js');
+const receivablesCore = require('../server/lib/receivables-core.js');
+
+test('finance core exports company economics builder for production route wiring', () => {
+  assert.equal(typeof financeCore.buildCompanyEconomics, 'function');
+});
 
 function createApp() {
   const state = {
@@ -113,7 +118,19 @@ function createApp() {
     writeData: (name, value) => { state[name] = value; },
     accessControl,
     generateId: prefix => `${prefix}-1`,
-    ...financeCore,
+    getEffectivePaidAmount: financeCore.getEffectivePaidAmount,
+    getRentalDebtOverdueDays: financeCore.getRentalDebtOverdueDays,
+    buildRentalDebtRows: financeCore.buildRentalDebtRows,
+    buildClientReceivables: financeCore.buildClientReceivables,
+    buildClientFinancialSnapshots: financeCore.buildClientFinancialSnapshots,
+    buildManagerReceivables: financeCore.buildManagerReceivables,
+    buildOverdueBuckets: financeCore.buildOverdueBuckets,
+    buildFinanceReport: financeCore.buildFinanceReport,
+    buildCompanyEconomics: financeCore.buildCompanyEconomics,
+    buildReceivables: receivablesCore.buildReceivables,
+    normalizeAction: receivablesCore.normalizeAction,
+    normalizePaymentPlan: receivablesCore.normalizePaymentPlan,
+    validateStageTransition: receivablesCore.validateStageTransition,
   });
   app.use('/api', router);
   return { app, state };

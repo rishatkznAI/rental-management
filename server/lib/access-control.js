@@ -104,6 +104,7 @@ const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'debt_collection_plans',
   'debt_collection_actions',
   'equipment_downtimes',
+  'equipment_finance',
   'finance_accounts',
   'finance_operations',
   'receivable_payment_plans',
@@ -1151,6 +1152,8 @@ function canAccessEntity(collection, entity, user, readData) {
       return false;
     case 'equipment_downtimes':
       return isOfficeManager(user) || isRentalManager(user);
+    case 'equipment_finance':
+      return isOfficeManager(user) || isHead(user);
     case 'owners':
       if (isInvestor(user)) return isEquipmentOwnedBy(entity, user) || getOwnerKeys(user).some(key => sameText(key, entity.id) || sameText(key, entity.name));
       return false;

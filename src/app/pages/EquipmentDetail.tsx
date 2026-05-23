@@ -980,6 +980,11 @@ export default function EquipmentDetail() {
     queryFn: paymentsService.getAll,
     enabled: canViewFinance,
   });
+  const { data: equipmentEconomics } = useQuery({
+    queryKey: ['equipment', id, 'economics'],
+    queryFn: () => equipmentService.getEconomics(id || ''),
+    enabled: Boolean(id && canViewFinance),
+  });
   const { data: documentData = EMPTY_DOCUMENTS } = useQuery({
     queryKey: ['documents'],
     queryFn: documentsService.getAll,
@@ -3201,9 +3206,28 @@ export default function EquipmentDetail() {
                   <SaleField label="Дней простоя за месяц" value={String(freeDaysThisMonth)} />
                   <SaleField label="Утилизация" value={`${utilizationMonth}%`} />
                   <SaleField label="Сервисные расходы" value={serviceCost > 0 ? formatCurrency(serviceCost) : 'Нет данных'} />
-                  <SaleField label="Окупаемость / маржа" value="Нет данных" />
+                  <SaleField label="Окупаемость / маржа" value={equipmentEconomics?.depreciation.status === 'configured' ? formatCurrency(Math.round(actualMonthRevenue - serviceCost - equipmentEconomics.depreciation.monthlyDepreciation)) : 'Недостаточно данных'} />
                   <SaleField label="Факт месяца" value={formatCurrency(Math.round(actualMonthRevenue))} />
                 </div>
+              </SalePanel>
+              <SalePanel title="Амортизация">
+                <p className="mb-3 text-sm text-muted-foreground">
+                  Управленческая амортизация, не бухгалтерский и не налоговый регистр.
+                </p>
+                {equipmentEconomics?.depreciation.status === 'configured' ? (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <SaleField label="Первоначальная стоимость" value={formatCurrency(equipmentEconomics.finance.purchasePrice || 0)} />
+                    <SaleField label="Дата ввода" value={formatDate(equipmentEconomics.finance.commissioningDate || equipmentEconomics.finance.depreciationStartDate)} />
+                    <SaleField label="Срок полезного использования" value={`${equipmentEconomics.finance.usefulLifeMonths || 0} мес.`} />
+                    <SaleField label="Амортизация в месяц" value={formatCurrency(equipmentEconomics.depreciation.monthlyDepreciation)} />
+                    <SaleField label="Накопленная амортизация" value={formatCurrency(equipmentEconomics.depreciation.accumulatedDepreciation)} />
+                    <SaleField label="Остаточная стоимость" value={formatCurrency(equipmentEconomics.depreciation.residualValue)} />
+                    <SaleField label="Метод" value={equipmentEconomics.finance.depreciationMethod === 'manual' ? 'Ручной' : 'Линейный'} />
+                    <SaleField label="Статус" value={equipmentEconomics.finance.depreciationPaused ? 'Пауза' : 'Активна'} />
+                  </div>
+                ) : (
+                  <EmptyState icon={<DollarSign className="h-12 w-12" />} text="Амортизация не настроена: недостаточно данных для управленческого расчёта" />
+                )}
               </SalePanel>
             </>
           ) : (

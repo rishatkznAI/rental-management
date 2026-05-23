@@ -504,6 +504,7 @@ const WARRANTY_MECHANIC_ROLES = [WARRANTY_MECHANIC_ROLE, ...WARRANTY_MECHANIC_RO
 const WRITE_PERMISSIONS = {
   equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по продажам', ...MECHANIC_ROLES],
   equipment_downtimes: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  equipment_finance: ['Администратор', 'Офис-менеджер'],
   client_objects: ['Администратор', 'Офис-менеджер'],
   client_contracts: ['Администратор', 'Офис-менеджер'],
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
@@ -556,6 +557,7 @@ const WRITE_PERMISSIONS = {
 const READ_PERMISSIONS = {
   equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', HEAD_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   equipment_downtimes: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
+  equipment_finance: ['Администратор', 'Офис-менеджер', HEAD_ROLE],
   client_objects: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   client_contracts: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', HEAD_ROLE, ...WARRANTY_MECHANIC_ROLES],
@@ -942,6 +944,7 @@ function generateId(prefix) {
 const ID_PREFIXES = {
   equipment:      'eq',
   equipment_downtimes: 'EDT',
+  equipment_finance: 'EF',
   rentals:        'R',
   gantt_rentals:  'GR',
   rental_change_requests: 'RCR',
@@ -1227,6 +1230,7 @@ const apiRouter = express.Router();
 const COLLECTIONS = [
   'equipment',
   'equipment_downtimes',
+  'equipment_finance',
   'service',
   'warranty_claims',
   'clients',

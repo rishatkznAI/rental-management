@@ -2,6 +2,9 @@ import { api } from '../lib/api';
 import type {
   FinanceAccount,
   FinanceOperation,
+  CashFlowResponse,
+  CompanyTaxSettings,
+  DepreciationResponse,
   ManagerBreakdownResponse,
   ReceivableCollectionAction,
   ReceivablePaymentPlanItem,
@@ -36,6 +39,30 @@ export const financeService = {
     const suffix = params.toString() ? `?${params.toString()}` : '';
     return api.get<FinanceOperation[]>(`/api/finance/operations${suffix}`);
   },
+  getTaxSettings: (): Promise<CompanyTaxSettings> =>
+    api.get<CompanyTaxSettings>('/api/finance/tax-settings'),
+  updateTaxSettings: (data: CompanyTaxSettings): Promise<CompanyTaxSettings> =>
+    api.patch<CompanyTaxSettings>('/api/finance/tax-settings', data),
+  getCashFlow: (params: {
+    dateFrom: string;
+    dateTo: string;
+    groupBy: 'day' | 'week' | 'month';
+    mode: 'expected' | 'factual' | 'all';
+    includeVat: boolean;
+    includeDepreciation: boolean;
+  }): Promise<CashFlowResponse> => {
+    const query = new URLSearchParams({
+      dateFrom: params.dateFrom,
+      dateTo: params.dateTo,
+      groupBy: params.groupBy,
+      mode: params.mode,
+      includeVat: String(params.includeVat),
+      includeDepreciation: String(params.includeDepreciation),
+    });
+    return api.get<CashFlowResponse>(`/api/finance/cash-flow?${query.toString()}`);
+  },
+  getDepreciation: (): Promise<DepreciationResponse> =>
+    api.get<DepreciationResponse>('/api/finance/depreciation'),
   createOperation: (
     data: Omit<FinanceOperation, 'id' | 'createdAt' | 'updatedAt' | 'source'>,
   ): Promise<FinanceOperation> =>

@@ -231,6 +231,8 @@ export interface EquipmentEconomicsResponse {
   equipmentId: string;
   finance: Partial<EquipmentFinance>;
   depreciation: EquipmentDepreciationResult;
+  status?: 'ok' | 'restricted';
+  economicsAvailable?: boolean;
 }
 
 export type FleetReadinessStatus =
@@ -1534,7 +1536,7 @@ export interface CashFlowItem {
   date: string;
   type: string;
   source: string;
-  direction: 'incoming' | 'outgoing';
+  direction: 'incoming' | 'outgoing' | 'non_cash';
   amount: number;
   netAmount: number;
   vatAmount: number;
@@ -1568,6 +1570,10 @@ export interface CashFlowResponse {
     upcomingPayments: number;
     vatPayableEstimate: number;
     depreciationTotal: number;
+    nonCashAdjustments?: number;
+    economicsOverlay?: {
+      depreciationTotal: number;
+    };
   };
   periods: CashFlowPeriod[];
   items: CashFlowItem[];

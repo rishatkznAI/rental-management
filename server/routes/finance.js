@@ -788,11 +788,12 @@ function registerFinanceRoutes(router, deps) {
     });
   });
 
-  router.get('/equipment/:id/economics', requireAuth, requireRead('equipment'), (req, res) => {
+  router.get('/equipment/:id/economics', requireAuth, requireRead('equipment_finance'), (req, res) => {
     const equipment = accessControl.filterCollectionByScope('equipment', collectionList('equipment'), req.user)
       .find(item => text(item.id) === text(req.params.id));
     if (!equipment) return res.status(404).json({ ok: false, error: 'Техника не найдена' });
-    const finance = collectionList('equipment_finance').find(item => text(item.equipmentId) === text(req.params.id)) || {};
+    const finance = accessControl.filterCollectionByScope('equipment_finance', collectionList('equipment_finance'), req.user)
+      .find(item => text(item.equipmentId) === text(req.params.id)) || {};
     const depreciation = calculateEquipmentDepreciation(finance, dateOnly(req.query.asOfDate) || nowIso().slice(0, 10));
     return res.json({ equipmentId: req.params.id, finance, depreciation });
   });
@@ -818,7 +819,7 @@ function registerFinanceRoutes(router, deps) {
     }
   });
 
-  router.get('/equipment/:id/economics/summary', requireAuth, requireRead('equipment'), (req, res) => {
+  router.get('/equipment/:id/economics/summary', requireAuth, requireRead('equipment_finance'), (req, res) => {
     const { equipment, equipmentFinance, rentals, payments } = getFinanceCollections(req.user);
     const item = buildEquipmentEconomics({ equipment, equipmentFinance, rentals, payments, service: collectionList('service'), asOfDate: dateOnly(req.query.asOfDate) || nowIso().slice(0, 10) })
       .find(row => text(row.equipmentId) === text(req.params.id));

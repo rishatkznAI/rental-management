@@ -14,8 +14,9 @@ const taxSettings = {
   vatIncludedByDefault: true,
 };
 
-test('cash flow includes expected payments, expenses, VAT and optional depreciation', () => {
+test('cash flow includes expected payments, expenses, VAT and non-cash depreciation overlay', () => {
   const result = buildCashFlow({
+    financeAccounts: [{ id: 'FA-1', balance: 10000, status: 'active' }],
     rentals: [
       { id: 'GR-1', clientId: 'C-1', client: 'ООО Альфа', equipmentId: 'EQ-1', amount: 120000, startDate: '2026-05-01', endDate: '2026-05-31', expectedPaymentDate: '2026-05-20', status: 'active' },
     ],
@@ -37,10 +38,17 @@ test('cash flow includes expected payments, expenses, VAT and optional depreciat
   });
 
   assert.equal(result.summary.incomingTotal, 120000);
-  assert.equal(result.summary.outgoingTotal, 90000);
+  assert.equal(result.summary.outgoingTotal, 60000);
+  assert.equal(result.summary.netCashFlow, 60000);
+  assert.equal(result.summary.closingBalanceForecast, 70000);
   assert.equal(result.summary.depreciationTotal, 30000);
+  assert.equal(result.summary.nonCashAdjustments, 30000);
   assert.equal(result.summary.vatPayableEstimate, 10000);
   assert.equal(result.periods[0].period, '2026-05');
+  assert.equal(result.periods[0].outgoing, 60000);
+  assert.equal(result.periods[0].depreciation, 30000);
+  assert.equal(result.items.find(item => item.type === 'depreciation')?.direction, 'non_cash');
+  assert.match(result.warnings.join(' '), /non-cash/);
 });
 
 test('cash flow includes factual payments and overdue receivables', () => {
@@ -81,4 +89,21 @@ test('cash flow does not duplicate linked rental ids', () => {
 
   assert.equal(result.items.filter(item => item.id === 'payment:P-1').length, 1);
   assert.equal(result.items.some(item => item.id === 'rental:GR-1'), false);
+});
+
+test('cash flow omits depreciation overlay when includeDepreciation is false', () => {
+  const result = buildCashFlow({
+    equipmentFinance: [
+      { equipmentId: 'EQ-1', purchasePrice: 1200000, salvageValue: 120000, usefulLifeMonths: 36, depreciationStartDate: '2026-01-01' },
+    ],
+    companyTaxSettings: taxSettings,
+  }, {
+    dateFrom: '2026-05-01',
+    dateTo: '2026-05-31',
+    includeDepreciation: false,
+  });
+
+  assert.equal(result.summary.depreciationTotal, 0);
+  assert.equal(result.summary.nonCashAdjustments, 0);
+  assert.equal(result.items.some(item => item.type === 'depreciation'), false);
 });

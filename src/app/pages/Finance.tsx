@@ -1576,7 +1576,12 @@ export default function Finance() {
             <FinanceKpiCard title="НДС ориентировочно" value={formatCurrency(cashFlow?.summary.vatPayableEstimate || 0)} icon={ReceiptText} />
             <FinanceKpiCard title="Просроченная дебиторка" value={formatCurrency(cashFlow?.summary.overdueReceivables || 0)} icon={History} tone={(cashFlow?.summary.overdueReceivables || 0) > 0 ? 'warning' : 'success'} />
             <FinanceKpiCard title="Ближайшие платежи" value={formatCurrency(cashFlow?.summary.upcomingPayments || 0)} icon={CalendarDays} />
-            <FinanceKpiCard title="Амортизация" value={cashFlowIncludeDepreciation ? formatCurrency(cashFlow?.summary.depreciationTotal || 0) : 'Выключено'} icon={Settings2} />
+            <FinanceKpiCard
+              title="Амортизация"
+              value={cashFlowIncludeDepreciation ? formatCurrency(cashFlow?.summary.depreciationTotal || 0) : 'Выключено'}
+              hint="Non-cash, не денежный расход"
+              icon={Settings2}
+            />
           </div>
 
           {(cashFlow?.warnings || []).length > 0 && (
@@ -1633,9 +1638,12 @@ export default function Finance() {
                         <TableCell>{formatDate(item.date)}</TableCell>
                         <TableCell>{item.description}</TableCell>
                         <TableCell>{item.clientName || '—'}</TableCell>
-                        <TableCell className={`text-right font-semibold ${item.direction === 'incoming' ? 'text-emerald-600' : 'text-red-600'}`}>{item.direction === 'incoming' ? '+' : '-'}{formatCurrency(item.amount)}</TableCell>
+                        <TableCell className={`text-right font-semibold ${item.direction === 'incoming' ? 'text-emerald-600' : item.direction === 'outgoing' ? 'text-red-600' : 'text-slate-600 dark:text-slate-300'}`}>
+                          {item.direction === 'incoming' ? '+' : item.direction === 'outgoing' ? '-' : ''}
+                          {formatCurrency(item.amount)}
+                        </TableCell>
                         <TableCell className="text-right">{item.vatAmount > 0 ? `${formatCurrency(item.vatAmount)} · ${item.vatRate}%` : '—'}</TableCell>
-                        <TableCell>{item.status || '—'}</TableCell>
+                        <TableCell>{item.direction === 'non_cash' ? 'Non-cash' : item.status || '—'}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

@@ -3214,7 +3214,9 @@ export default function EquipmentDetail() {
                 <p className="mb-3 text-sm text-muted-foreground">
                   Управленческая амортизация, не бухгалтерский и не налоговый регистр.
                 </p>
-                {equipmentEconomics?.depreciation.status === 'configured' ? (
+                {equipmentEconomics?.status === 'restricted' ? (
+                  <EmptyState icon={<DollarSign className="h-12 w-12" />} text="Экономика техники доступна только ролям с финансовым доступом" />
+                ) : equipmentEconomics?.depreciation.status === 'configured' ? (
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <SaleField label="Первоначальная стоимость" value={formatCurrency(equipmentEconomics.finance.purchasePrice || 0)} />
                     <SaleField label="Дата ввода" value={formatDate(equipmentEconomics.finance.commissioningDate || equipmentEconomics.finance.depreciationStartDate)} />

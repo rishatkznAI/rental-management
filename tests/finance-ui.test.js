@@ -11,6 +11,7 @@ test('Finance contains Cash Flow and VAT settings UI without unsafe labels', () 
   assert.match(financeSource, /Тип налогообложения/);
   assert.match(financeSource, /Ставка НДС по умолчанию/);
   assert.match(financeSource, /Расчёт управленческий, не заменяет бухгалтерскую отчётность/);
+  assert.match(financeSource, /Non-cash, не денежный расход/);
   assert.match(financeServiceSource, /\/api\/finance\/cash-flow/);
   assert.doesNotMatch(financeSource, /\[object Object\]|secret|token|password/i);
 });
@@ -19,6 +20,7 @@ test('Equipment detail contains depreciation economics block', () => {
   assert.match(equipmentDetailSource, /Амортизация/);
   assert.match(equipmentDetailSource, /Управленческая амортизация/);
   assert.match(equipmentDetailSource, /Остаточная стоимость/);
+  assert.match(equipmentDetailSource, /Экономика техники доступна только ролям с финансовым доступом/);
   assert.match(equipmentDetailSource, /getEconomics/);
   assert.doesNotMatch(equipmentDetailSource, /\[object Object\]/);
 });

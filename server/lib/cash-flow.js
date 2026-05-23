@@ -171,6 +171,7 @@ function buildCashFlow(payload = {}, options = {}) {
 
   let depreciationTotal = 0;
   if (includeDepreciation) {
+    warnings.push('Амортизация показана как управленческий non-cash показатель и не уменьшает денежный поток.');
     for (const finance of payload.equipmentFinance || []) {
       const depreciation = calculateEquipmentDepreciation(finance, to);
       if (depreciation.status !== 'configured' || depreciation.monthlyDepreciation <= 0) continue;
@@ -180,7 +181,7 @@ function buildCashFlow(payload = {}, options = {}) {
         date: to,
         type: 'depreciation',
         source: 'equipment_finance',
-        direction: 'outgoing',
+        direction: 'non_cash',
         amount: depreciation.monthlyDepreciation,
         netAmount: depreciation.monthlyDepreciation,
         vatAmount: 0,
@@ -219,7 +220,7 @@ function buildCashFlow(payload = {}, options = {}) {
     if (item.direction === 'incoming') {
       period.incoming += item.amount;
       period.vatIncoming += item.vatAmount;
-    } else {
+    } else if (item.direction === 'outgoing') {
       period.outgoing += item.amount;
       period.vatOutgoing += item.vatAmount;
     }
@@ -252,6 +253,10 @@ function buildCashFlow(payload = {}, options = {}) {
       vatPayableEstimate: Math.max(0, items.filter(item => item.direction === 'incoming').reduce((sum, item) => sum + item.vatAmount, 0)
         - items.filter(item => item.direction === 'outgoing').reduce((sum, item) => sum + item.vatAmount, 0)),
       depreciationTotal,
+      nonCashAdjustments: depreciationTotal,
+      economicsOverlay: {
+        depreciationTotal,
+      },
     },
     periods,
     items,

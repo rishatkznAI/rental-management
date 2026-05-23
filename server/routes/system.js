@@ -18,6 +18,7 @@ const {
   buildBrokenGanttRentalsRepairPlan,
 } = require('../lib/gantt-rental-repair-diagnostics');
 const { buildRentalLinkDiagnostics } = require('../lib/rental-link-diagnostics');
+const { buildServiceRepairQualityView } = require('../lib/service-repeat-breakdowns');
 const {
   envFlagDisabled,
   envFlagEnabled,
@@ -283,10 +284,171 @@ function inspectStorageSignal({ mountPath = '/data', execFile = execFileSync } =
   return result;
 }
 
+function safeText(value, fallback = '') {
+  const text = String(value ?? '').trim();
+  if (!text || text === 'undefined' || text === 'null' || text === '[object Object]') return fallback;
+  return text;
+}
+
+function safeEnvironmentLabel(environment) {
+  if (environment.isProductionLike) return 'production';
+  if (environment.isStagingLike) return 'staging';
+  if (environment.nodeEnv === 'development') return 'development';
+  return 'unknown';
+}
+
+function safeFrontendCommit({ requestCommit = '', env = process.env } = {}) {
+  return safeText(
+    requestCommit
+    || env.FRONTEND_COMMIT
+    || env.VITE_GIT_COMMIT
+    || env.RAILWAY_GIT_COMMIT_SHA,
+    'unknown',
+  );
+}
+
+function safeDbSizeBytes(dbPath) {
+  const text = String(dbPath || '').trim();
+  if (!text || text === ':memory:') return 0;
+  try {
+    const stat = fs.statSync(text);
+    return Number.isFinite(Number(stat.size)) ? Number(stat.size) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function safeWalPresent(dbPath) {
+  const text = String(dbPath || '').trim();
+  if (!text || text === ':memory:') return 'unknown';
+  try {
+    return fs.existsSync(`${text}-wal`);
+  } catch {
+    return 'unknown';
+  }
+}
+
+function statusRank(status) {
+  return { ok: 0, warning: 1, risk: 2, unknown: 1, danger: 2 }[status] ?? 1;
+}
+
+function highestStatus(statuses) {
+  return statuses.reduce((highest, status) => (
+    statusRank(status) > statusRank(highest) ? status : highest
+  ), 'ok');
+}
+
+function traverseValues(value, visit) {
+  visit(value);
+  if (Array.isArray(value)) {
+    value.forEach(item => traverseValues(item, visit));
+    return;
+  }
+  if (isPlainObject(value)) {
+    Object.values(value).forEach(item => traverseValues(item, visit));
+  }
+}
+
+function buildDataRisks(readData) {
+  const collections = [
+    'equipment',
+    'rentals',
+    'gantt_rentals',
+    'clients',
+    'payments',
+    'documents',
+    'service',
+    'deliveries',
+    'warranty_claims',
+    'repair_work_items',
+    'repair_part_items',
+  ];
+  const risks = {
+    undefinedLikeCount: 0,
+    nullLikeCount: 0,
+    objectObjectLikeCount: 0,
+    brokenEquipmentLinks: 0,
+    brokenRentalLinks: 0,
+    brokenServiceLinks: 0,
+  };
+
+  for (const collection of collections) {
+    const list = Array.isArray(readData?.(collection)) ? readData(collection) : [];
+    traverseValues(list, value => {
+      if (value === undefined || value === 'undefined') risks.undefinedLikeCount += 1;
+      if (value === null || value === 'null') risks.nullLikeCount += 1;
+      if (value === '[object Object]') risks.objectObjectLikeCount += 1;
+    });
+  }
+
+  const equipmentIds = new Set((readData?.('equipment') || []).map(item => safeText(item?.id)).filter(Boolean));
+  const rentalIds = new Set([
+    ...(readData?.('rentals') || []),
+    ...(readData?.('gantt_rentals') || []),
+  ].map(item => safeText(item?.id || item?.rentalId)).filter(Boolean));
+  const serviceIds = new Set((readData?.('service') || []).map(item => safeText(item?.id)).filter(Boolean));
+
+  const equipmentLinkedCollections = [
+    ...(readData?.('rentals') || []),
+    ...(readData?.('gantt_rentals') || []),
+    ...(readData?.('service') || []),
+    ...(readData?.('deliveries') || []),
+  ];
+  risks.brokenEquipmentLinks = equipmentLinkedCollections
+    .map(item => safeText(item?.equipmentId))
+    .filter(id => id && !equipmentIds.has(id)).length;
+
+  const rentalLinkedCollections = [
+    ...(readData?.('payments') || []),
+    ...(readData?.('documents') || []),
+    ...(readData?.('deliveries') || []),
+  ];
+  risks.brokenRentalLinks = rentalLinkedCollections
+    .flatMap(item => [item?.rentalId, item?.linkedRentalId, item?.sourceRentalId])
+    .map(value => safeText(value))
+    .filter(id => id && !rentalIds.has(id)).length;
+
+  const serviceLinkedCollections = [
+    ...(readData?.('warranty_claims') || []),
+    ...(readData?.('repair_work_items') || []),
+    ...(readData?.('repair_part_items') || []),
+  ];
+  risks.brokenServiceLinks = serviceLinkedCollections
+    .flatMap(item => [item?.serviceTicketId, item?.repairId])
+    .map(value => safeText(value))
+    .filter(id => id && !serviceIds.has(id)).length;
+
+  return risks;
+}
+
+function buildServiceQualitySummary(readData) {
+  const quality = buildServiceRepairQualityView({
+    equipment: readData?.('equipment') || [],
+    tickets: readData?.('service') || [],
+    mechanics: readData?.('mechanics') || [],
+    workItems: readData?.('repair_work_items') || [],
+    partItems: readData?.('repair_part_items') || [],
+  });
+  return {
+    totalRepeats: Number(quality.summary?.totalRepeats) || 0,
+    critical: Number(quality.summary?.critical) || 0,
+    high: Number(quality.summary?.high) || 0,
+    affectedEquipment: Number(quality.summary?.affectedEquipment) || 0,
+    affectedMechanics: Number(quality.summary?.affectedMechanics) || 0,
+    topScenario: safeText(quality.summary?.topScenario, 'Нет повторов'),
+  };
+}
+
+function recommendation(level, title, description, action) {
+  return { level, title, description, action };
+}
+
 function buildSystemControlCenterStatus({
   dbPath,
   buildInfo,
   getAppDisabledConfig,
+  readData = () => [],
+  requestFrontendCommit = '',
   env = process.env,
   inspectStorage = inspectStorageSignal,
 } = {}) {
@@ -375,27 +537,68 @@ function buildSystemControlCenterStatus({
   );
 
   if (environment.isProductionLike && !appDisabled.disabled) {
-    recommendations.push('Verify Railway production APP_DISABLED=true before keeping production conserved.');
+    recommendations.push(recommendation('info', 'Production открыт', 'APP_DISABLED=false: приложение доступно авторизованным пользователям.', 'Оставить как есть, если это ожидаемое рабочее состояние.'));
   }
   if (environment.isProductionLike && !botDisabled.disabled) {
-    recommendations.push('Verify Railway production BOT_DISABLED=true or use only test bot credentials.');
+    recommendations.push(recommendation('risk', 'MAX bot выглядит включённым', 'В production ожидается выключенный bot/write режим.', 'Проверить BOT_DISABLED во внешней панели переменных без изменения из приложения.'));
   }
   if (environment.isProductionLike && !gsmWritesBlocked) {
-    recommendations.push('Verify Railway production GSM_ENABLED=false or GSM_DISABLED=true before allowing telemetry traffic.');
+    recommendations.push(recommendation('risk', 'GSM/GPRS выглядит включённым', 'В production ожидается выключенный GSM/write режим.', 'Проверить GSM_DISABLED/GSM_ENABLED во внешней панели переменных без изменения из приложения.'));
   }
   if (isolationUnknown) {
-    recommendations.push('Verify Railway volume and DB_PATH manually; this app cannot prove staging/production volume isolation from runtime signals.');
+    recommendations.push(recommendation('warning', 'Storage isolation не подтверждён', 'Runtime-сигналы не доказывают разделение staging/production volume.', 'Проверить Railway volume и DB_PATH вручную.'));
   }
   if (!storageSignal.signalPresent) {
-    recommendations.push('Verify the /data mount with Railway runtime shell because df/stat storage signal is unavailable.');
+    recommendations.push(recommendation('warning', 'Storage signal недоступен', 'df/stat сигнал по volume не получен.', 'Проверить /data mount во внешней runtime shell.'));
   }
-  recommendations.push('Use only safe probes for conserved production: GET /health, GET /health/ready, GET /api/version.');
-  recommendations.push('Do not mutate Railway variables from inside the app; change conservation flags in Railway UI or CLI with an external approval workflow.');
 
   const build = buildInfo && typeof buildInfo === 'object' ? buildInfo : {};
+  const backendCommit = safeText(build.commit || build.commitFull, 'unknown');
+  const frontendCommit = safeFrontendCommit({ requestCommit: requestFrontendCommit, env });
+  const versionMatch = backendCommit === 'unknown' || frontendCommit === 'unknown'
+    ? 'unknown'
+    : backendCommit === frontendCommit;
+  const dataRisks = buildDataRisks(readData);
+  const serviceQuality = buildServiceQualitySummary(readData);
+  const hasDataRisk = Object.values(dataRisks).some(value => Number(value) > 0);
+  const environmentLabel = safeEnvironmentLabel(environment);
+  const runtimeRisk = (environment.isProductionLike && (!botDisabled.disabled || !gsmWritesBlocked)) ? 'risk' : 'ok';
+  const dataRiskStatus = hasDataRisk ? 'warning' : 'ok';
+  const serviceStatus = serviceQuality.critical > 0 ? 'risk' : serviceQuality.high > 0 ? 'warning' : 'ok';
+  const storageStatus = isolationUnknown || !storageSignal.signalPresent ? 'warning' : 'ok';
+  const versionStatus = versionMatch === false ? 'warning' : 'ok';
+  const topStatus = highestStatus([runtimeRisk, dataRiskStatus, serviceStatus, storageStatus, versionStatus]);
+
+  if (versionMatch === false) {
+    recommendations.push(recommendation('warning', 'Версии backend/frontend отличаются', 'Commit backend и frontend не совпадают.', 'Проверить, что фронтенд собран из ожидаемого commit.'));
+  }
+  if (hasDataRisk) {
+    recommendations.push(recommendation('warning', 'Есть признаки грязных данных', 'Найдены placeholder-значения или битые ссылки.', 'Проверить записи точечно перед любыми исправлениями.'));
+  }
+  if (serviceQuality.critical > 0) {
+    recommendations.push(recommendation('risk', 'Есть критичные повторы ремонта', 'Контроль качества ремонта показывает критичные повторные обращения.', 'Провести спокойный разбор диагностики и регламента без персональных обвинений.'));
+  } else if (serviceQuality.high > 0) {
+    recommendations.push(recommendation('warning', 'Есть высокие повторы ремонта', 'Контроль качества ремонта показывает повторные обращения высокого уровня.', 'Проверить сценарии и типовые работы.'));
+  }
+  recommendations.push(recommendation('info', 'Страница read-only', 'Раздел не пишет данные и не меняет runtime flags.', 'Для изменений использовать существующие утверждённые процедуры.'));
+
   return {
+    status: topStatus,
     ok: true,
     generatedAt: new Date().toISOString(),
+    runtime: {
+      appDisabled: Boolean(appDisabled.disabled),
+      botDisabled: Boolean(botDisabled.disabled),
+      gsmDisabled: Boolean(gsmDisabled.disabled),
+      environment: environmentLabel,
+    },
+    health: {
+      api: 'ok',
+      ready: 'unknown',
+      lastCheckedAt: new Date().toISOString(),
+    },
+    dataRisks,
+    serviceQuality,
     environment,
     conservation: {
       appDisabled: Boolean(appDisabled.disabled),
@@ -407,9 +610,13 @@ function buildSystemControlCenterStatus({
       gsmWritesBlocked,
     },
     version: {
-      backendCommit: build.commit || build.commitFull || '',
-      buildTime: build.buildTime || build.startedAt || '',
-      frontendCommit: null,
+      backendCommit,
+      backendBuildTime: safeText(build.buildTime || build.startedAt, 'unknown'),
+      nodeEnv: environmentLabel,
+      frontendCommitFromRequestOrConfig: frontendCommit,
+      versionMatch,
+      buildTime: safeText(build.buildTime || build.startedAt, 'unknown'),
+      frontendCommit,
     },
     database: {
       dbPathPresent: Boolean(dbPath),
@@ -418,16 +625,21 @@ function buildSystemControlCenterStatus({
       usesSqlite: true,
     },
     storage: {
+      dbSafeLabel: 'sqlite',
+      dbPathSafeLabel: safeDbPathLabel(dbPath),
+      volumeSafeSignal: storageSignal.signalPresent ? 'available' : storageSignal.available ? 'unknown' : 'unavailable',
+      walPresent: safeWalPresent(dbPath),
+      dbSizeBytes: safeDbSizeBytes(dbPath),
       classification: dbPathKind,
       volumeSignals,
       mountPath: storageSignal.mountPath,
       available: Boolean(storageSignal.available),
       signalPresent: Boolean(storageSignal.signalPresent),
       device: storageSignal.device || '',
-      statDevice: storageSignal.statDevice,
-      totalKb: storageSignal.totalKb,
-      usedKb: storageSignal.usedKb,
-      freeKb: storageSignal.freeKb,
+      statDevice: Number.isFinite(Number(storageSignal.statDevice)) ? Number(storageSignal.statDevice) : 0,
+      totalKb: Number.isFinite(Number(storageSignal.totalKb)) ? Number(storageSignal.totalKb) : 0,
+      usedKb: Number.isFinite(Number(storageSignal.usedKb)) ? Number(storageSignal.usedKb) : 0,
+      freeKb: Number.isFinite(Number(storageSignal.freeKb)) ? Number(storageSignal.freeKb) : 0,
       capacity: storageSignal.capacity || '',
       error: storageSignal.error || '',
       risk: isolationUnknown || !storageSignal.signalPresent ? 'unknown' : checks.some(check => check.status === 'warning' || check.status === 'danger') ? 'warning' : 'ok',
@@ -1054,11 +1266,13 @@ function registerSystemRoutes(app, deps) {
     });
   });
 
-  app.get('/api/admin/system-control-center', requireAuth, requireAdmin, (_req, res) => {
+  app.get('/api/admin/system-control-center', requireAuth, requireAdmin, (req, res) => {
     return res.json(buildSystemControlCenterStatus({
       dbPath,
       buildInfo: buildInfo(),
       getAppDisabledConfig,
+      readData,
+      requestFrontendCommit: req.headers['x-frontend-commit'],
     }));
   });
 

@@ -263,8 +263,11 @@ test('/api/admin/system-control-center returns safe admin status without env sec
       const response = await getJson(baseUrl, '/api/admin/system-control-center');
       assert.equal(response.status, 200);
       assert.equal(response.body.ok, true);
+      assert.match(response.body.status, /^(ok|warning|risk)$/);
       assert.equal(response.body.conservation.appDisabled, false);
       assert.equal(response.body.version.backendCommit, 'abc123def456');
+      assert.equal(response.body.runtime.appDisabled, false);
+      assert.equal(response.body.storage.dbSafeLabel, 'sqlite');
       assert.equal(response.body.database.usesSqlite, true);
       assert.equal(response.body.database.dbPathSafeLabel, 'volume/app.sqlite');
 
@@ -326,7 +329,7 @@ test('system control center interprets conservation flags and unknown DB isolati
   assert.equal(status.storage.signalPresent, true);
   assert.equal(status.storage.device, '/dev/zd1232');
   assert.equal(status.storage.totalKb, 899836);
-  assert.ok(status.recommendations.some(item => item.includes('Railway volume and DB_PATH manually')));
+  assert.ok(status.recommendations.some(item => `${item.title} ${item.action}`.includes('Railway volume') || `${item.title} ${item.action}`.includes('DB_PATH')));
   assert.ok(status.checks.some(item => item.id === 'db_isolation' && item.status === 'unknown'));
   assert.ok(status.checks.some(item => item.id === 'production_conserved' && item.status === 'ok'));
 });

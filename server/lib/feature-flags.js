@@ -31,6 +31,12 @@ function getGsmDisabledConfig(env = process.env) {
   };
 }
 
+function shouldWarnForMissingMaxWebhookSecret({ botDisabled = false, transport = '', webhookSecret = '' } = {}) {
+  return !botDisabled &&
+    String(transport || '').trim().toLowerCase() === 'webhook' &&
+    !String(webhookSecret || '').trim();
+}
+
 function buildDisabledResponse(config, code) {
   return {
     ok: false,
@@ -68,4 +74,5 @@ module.exports = {
   getBotDisabledConfig,
   getGsmDisabledConfig,
   sendAppDisabled,
+  shouldWarnForMissingMaxWebhookSecret,
 };

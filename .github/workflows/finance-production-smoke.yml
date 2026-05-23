@@ -1,0 +1,76 @@
+name: Finance Production Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_release_commit:
+        description: Expected production commit hash
+        required: true
+        default: a984b035f8c674213ca1416e7e1cea36ed8eedac
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finance-production-smoke
+  cancel-in-progress: false
+
+jobs:
+  finance-production-smoke:
+    name: Read-only finance production smoke
+    runs-on: ubuntu-latest
+    env:
+      PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+      PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+      PRODUCTION_ADMIN_EMAIL: ${{ secrets.PRODUCTION_ADMIN_EMAIL }}
+      PRODUCTION_ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
+      EXPECTED_RELEASE_COMMIT: ${{ inputs.expected_release_commit }}
+      CI: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Validate required smoke secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in PRODUCTION_API_URL PRODUCTION_FRONTEND_URL PRODUCTION_ADMIN_EMAIL PRODUCTION_ADMIN_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing secret::${name} is required for finance production smoke"
+              exit 1
+            fi
+          done
+          echo "Required production smoke secrets are present."
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run finance production smoke
+        run: npx playwright test e2e/finance-production-smoke.spec.ts --config=playwright.production.config.ts --trace=off
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: finance-production-smoke-playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Upload Playwright results on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: finance-production-smoke-test-results
+          path: test-results/
+          retention-days: 7

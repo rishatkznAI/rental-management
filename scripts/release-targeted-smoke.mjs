@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { fileURLToPath } from 'node:url';
+
 const ENVIRONMENTS = new Set(['staging', 'production']);
 
 function parseArgs(argv) {
@@ -47,9 +49,62 @@ function summaryCount(summary) {
   return Object.values(summary).reduce((total, value) => total + (Number.isFinite(Number(value)) ? Number(value) : 0), 0);
 }
 
-function hasUnsafeText(value) {
-  const text = JSON.stringify(value);
-  return /password|token|secret|Bearer\s+|undefined|\[object Object\]/i.test(text);
+const UNSAFE_RESPONSE_KEYS = new Set([
+  'authorization',
+  'cookie',
+  'databaseurl',
+  'database_url',
+  'env',
+  'envdump',
+  'password',
+  'passwordhash',
+  'passhash',
+  'privatekey',
+  'secret',
+  'token',
+]);
+
+const UNSAFE_STRING_VALUE_PATTERN = /(password|token|secret|Bearer\s+|cookie|private key|process\.env|DATABASE_URL|postgres:\/\/|mysql:\/\/|mongodb:\/\/)/i;
+
+function normalizedKeyName(key) {
+  return String(key || '').replace(/[^a-z0-9_]/gi, '').toLowerCase();
+}
+
+function unsafeStringValueReason(value) {
+  const text = String(value || '').trim();
+  if (/^(undefined|null|\[object Object\])$/i.test(text)) return 'placeholder-value';
+  if (UNSAFE_STRING_VALUE_PATTERN.test(text)) return 'sensitive-value';
+  return '';
+}
+
+export function findUnsafePayloadViolations(value, path = '$') {
+  const violations = [];
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      violations.push(...findUnsafePayloadViolations(item, `${path}[${index}]`));
+    });
+    return violations;
+  }
+  if (!value || typeof value !== 'object') {
+    if (typeof value === 'string') {
+      const reason = unsafeStringValueReason(value);
+      if (reason) violations.push({ path, type: reason });
+    }
+    return violations;
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = `${path}.${key}`;
+    if (UNSAFE_RESPONSE_KEYS.has(normalizedKeyName(key))) {
+      violations.push({ path: childPath, type: 'sensitive-key' });
+    }
+    violations.push(...findUnsafePayloadViolations(child, childPath));
+  }
+  return violations;
+}
+
+export function hasUnsafeText(value) {
+  return findUnsafePayloadViolations(value).length > 0;
 }
 
 function hasUnsafeKey(value, unsafeKeys) {
@@ -272,7 +327,9 @@ async function main() {
   console.log('[targeted-smoke] PASS');
 }
 
-main().catch(error => {
-  console.error(`[targeted-smoke] FAIL: ${error.message}`);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    console.error(`[targeted-smoke] FAIL: ${error.message}`);
+    process.exit(1);
+  });
+}

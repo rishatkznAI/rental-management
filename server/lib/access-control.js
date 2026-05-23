@@ -108,6 +108,7 @@ const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'finance_operations',
   'receivable_payment_plans',
   'equipment',
+  'equipment_finance',
   'gantt_rentals',
   'gsm_commands',
   'gsm_packets',
@@ -1149,6 +1150,8 @@ function canAccessEntity(collection, entity, user, readData) {
       if (isInvestor(user)) return isEquipmentOwnedBy(entity, user);
       if (isOfficeManager(user) || isRentalManager(user) || isSalesManager(user) || isHead(user) || isMechanic(user) || isWarrantyMechanic(user)) return true;
       return false;
+    case 'equipment_finance':
+      return isOfficeManager(user);
     case 'equipment_downtimes':
       return isOfficeManager(user) || isRentalManager(user);
     case 'owners':

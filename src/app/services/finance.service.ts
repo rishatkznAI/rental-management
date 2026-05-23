@@ -1,6 +1,7 @@
 import { api } from '../lib/api';
 import type {
   FinanceAccount,
+  FinanceEconomicsResponse,
   FinanceOperation,
   ManagerBreakdownResponse,
   ReceivableCollectionAction,
@@ -45,6 +46,24 @@ export const financeService = {
     data: Partial<FinanceOperation>,
   ): Promise<FinanceOperation> =>
     api.patch<FinanceOperation>(`/api/finance/operations/${id}`, data),
+  getEconomics: (params: {
+    dateFrom?: string;
+    dateTo?: string;
+    groupBy?: 'month' | 'quarter' | 'year';
+    includeDepreciation?: boolean;
+    includeVat?: boolean;
+    equipmentGroup?: 'all' | 'rented' | 'idle' | 'service' | 'sale';
+  }): Promise<FinanceEconomicsResponse> => {
+    const query = new URLSearchParams();
+    if (params.dateFrom) query.set('dateFrom', params.dateFrom);
+    if (params.dateTo) query.set('dateTo', params.dateTo);
+    if (params.groupBy) query.set('groupBy', params.groupBy);
+    if (params.includeDepreciation != null) query.set('includeDepreciation', String(params.includeDepreciation));
+    if (params.includeVat != null) query.set('includeVat', String(params.includeVat));
+    if (params.equipmentGroup) query.set('equipmentGroup', params.equipmentGroup);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return api.get<FinanceEconomicsResponse>(`/api/finance/economics${suffix}`);
+  },
   previewPaymentAllocation: (paymentId: string): Promise<{ paymentId: string; unallocatedAmount: number; suggestedAllocations: unknown[] }> =>
     api.post<{ paymentId: string; unallocatedAmount: number; suggestedAllocations: unknown[] }>(
       `/api/finance/payments/${paymentId}/allocation-preview`,

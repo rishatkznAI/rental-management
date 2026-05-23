@@ -33,6 +33,7 @@ function createState() {
     payments: [],
     documents: [],
     service: [],
+    manager_activity: [],
   };
 }
 
@@ -56,6 +57,7 @@ function createApp(state = createState()) {
     ['sales-token', { userId: 'U-sales' }],
   ]);
   const readData = name => state[name] || [];
+  const writeData = (name, value) => { state[name] = value; };
   function requireAuth(req, res, next) {
     const auth = req.headers.authorization || '';
     if (!auth.startsWith('Bearer ')) return res.status(401).json({ ok: false, error: 'Unauthorized' });
@@ -71,9 +73,12 @@ function createApp(state = createState()) {
   }
   app.use('/api', registerManagerMyPlanRoutes({
     readData,
+    writeData,
     requireAuth,
     getRoleAccessSummary: accessSummary,
     todayKey: '2026-05-23',
+    nowIso: () => '2026-05-23T10:00:00.000Z',
+    generateId: prefix => `${prefix}-${state.manager_activity.length + 1}`,
   }));
   return app;
 }
@@ -287,5 +292,50 @@ test('managerId query and equipment owner fields do not widen manager scope', as
     const response = await getJson(baseUrl, '/api/manager/my-plan?managerId=U-other', 'manager-token');
     assert.equal(response.status, 200);
     assert.deepEqual(response.body.rentals.active.map(item => item.id), ['GR-own']);
+  });
+});
+
+test('my-plan recentActivity does not resolve labels for inaccessible related ids', async () => {
+  const state = createState();
+  addFleet(state, 3);
+  state.clients.push({ id: 'C-other', company: 'ООО Чужой', managerId: 'U-other', manager: 'Анна' });
+  state.equipment.push({ id: 'EQ-other', inventoryNumber: '999', name: 'Чужая техника', status: 'available', activeInFleet: true, category: 'own' });
+  state.gantt_rentals.push({
+    id: 'GR-other',
+    managerId: 'U-other',
+    manager: 'Анна',
+    clientId: 'C-other',
+    client: 'ООО Чужая аренда',
+    equipmentId: 'EQ-other',
+    status: 'active',
+    plannedReturnDate: '2026-05-30',
+  });
+  state.manager_activity.push({
+    id: 'MA-poison',
+    createdAt: '2026-05-23T09:00:00.000Z',
+    userId: 'U-manager',
+    managerId: 'U-manager',
+    activityType: 'note',
+    resultStatus: 'info',
+    relatedClientId: 'C-other',
+    relatedRentalId: 'GR-other',
+    relatedEquipmentId: 'EQ-other',
+    comment: 'Старая запись с недоступными связями',
+    activityDate: '2026-05-23',
+    effectiveAt: '2026-05-23T09:00:00.000Z',
+  });
+
+  await withServer(createApp(state), async baseUrl => {
+    const response = await getJson(baseUrl, '/api/manager/my-plan', 'manager-token');
+    assert.equal(response.status, 200);
+    const activity = response.body.recentActivity.find(item => item.id === 'MA-poison');
+    assert.ok(activity);
+    assert.equal(activity.relatedClientId, '');
+    assert.equal(activity.relatedRentalId, '');
+    assert.equal(activity.relatedEquipmentId, '');
+    assert.equal(activity.relatedLabel, '');
+    assert.doesNotMatch(JSON.stringify(response.body.recentActivity), /C-other|GR-other|EQ-other|ООО Чужой|Чужая техника|Чужая аренда/);
+    assertNoNullUndefinedOrObjectString(response.body);
+    assertNoSecrets(response.body);
   });
 });

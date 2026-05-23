@@ -20,7 +20,7 @@ import {
   Plus, TrendingUp, AlertTriangle, Wrench, DollarSign, Calendar,
   User, Target, FileText, CreditCard, RefreshCw, CheckCircle, Truck,
   ShieldAlert, Clock, Ban, ArrowRight, ChevronDown, ChevronUp,
-  PackageX, ClipboardX, Zap, ListChecks, Activity,
+  PackageX, ClipboardX, Zap, ListChecks, Activity, Phone, MapPin, MessageSquare,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
@@ -40,13 +40,13 @@ import {
 import { formatCurrency, formatDate, getRentalDays } from '../lib/utils';
 import { assessServiceRisk } from '../lib/serviceRisk';
 import { useQueryClient } from '@tanstack/react-query';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEquipmentList, useManagementActionAttention } from '../hooks/useEquipment';
 import { useRentalsList, useGanttData } from '../hooks/useRentals';
 import { rentalsService } from '../services/rentals.service';
 import { equipmentService } from '../services/equipment.service';
 import { financeService } from '../services/finance.service';
-import { managerMyPlanService, type ManagerMyPlanResponse } from '../services/manager-my-plan.service';
+import { managerMyPlanService, type ManagerActivityInput, type ManagerActivityItem, type ManagerMyPlanResponse } from '../services/manager-my-plan.service';
 import { reportsService, type MechanicsWorkloadReport } from '../services/reports.service';
 import { deliveriesService } from '../services/deliveries.service';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
@@ -270,35 +270,130 @@ function managerPlanTaskTone(level: string) {
   return 'border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/70 dark:bg-blue-950/20 dark:text-blue-200';
 }
 
+function managerActivityLabel(type: ManagerActivityItem['activityType']) {
+  if (type === 'call') return 'Звонок';
+  if (type === 'site_visit') return 'Выезд';
+  return 'Заметка';
+}
+
+function managerActivityResultLabel(status: ManagerActivityItem['resultStatus']) {
+  if (status === 'completed') return 'Выполнено';
+  if (status === 'no_answer') return 'Не ответил';
+  if (status === 'scheduled') return 'Запланировано';
+  if (status === 'info') return 'Информация';
+  return 'Другое';
+}
+
+function managerActivityIcon(type: ManagerActivityItem['activityType']) {
+  if (type === 'call') return Phone;
+  if (type === 'site_visit') return MapPin;
+  return MessageSquare;
+}
+
+function managerPlanProgress(done = 0, target = 0) {
+  if (target <= 0) return 100;
+  return Math.max(0, Math.min(100, Math.round((done / target) * 100)));
+}
+
+function ManagerPlanProgressRow({
+  label,
+  done,
+  target,
+  helper,
+}: {
+  label: string;
+  done: number;
+  target: number;
+  helper: string;
+}) {
+  const percent = managerPlanProgress(done, target);
+  const left = Math.max(0, target - done);
+  return (
+    <div className="rounded-lg border border-border/80 bg-background/70 px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold text-foreground">{label}</p>
+          <p className="text-xs text-muted-foreground">{helper}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-lg font-extrabold text-foreground">{done} / {target}</p>
+          <p className="text-xs text-muted-foreground">{left > 0 ? `Осталось ${left}` : 'Норма закрыта'}</p>
+        </div>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-[width] duration-300 motion-reduce:transition-none"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function ManagerMyPlanBlock({
   plan,
   isLoading,
   isError,
+  canAddActivity,
 }: {
   plan?: ManagerMyPlanResponse;
   isLoading: boolean;
   isError: boolean;
+  canAddActivity: boolean;
 }) {
+  const queryClient = useQueryClient();
+  const [activityDraft, setActivityDraft] = useState<ManagerActivityInput>({
+    activityType: 'call',
+    resultStatus: 'completed',
+    comment: '',
+    relatedClientId: '',
+    relatedRentalId: '',
+  });
+  const createActivityMutation = useMutation({
+    mutationFn: managerMyPlanService.createActivity,
+    onSuccess: () => {
+      setActivityDraft({
+        activityType: 'call',
+        resultStatus: 'completed',
+        comment: '',
+        relatedClientId: '',
+        relatedRentalId: '',
+      });
+      queryClient.invalidateQueries({ queryKey: ['manager-my-plan'] });
+    },
+  });
   const summary = plan?.summary;
   const activityTarget = plan?.activityTarget;
+  const callsDone = activityTarget?.todayCallsDone ?? summary?.todayCallsDone ?? 0;
+  const callsTarget = activityTarget?.todayCallsTarget ?? activityTarget?.dailyCallsTarget ?? 0;
+  const visitsDone = activityTarget?.weekSiteVisitsDone ?? summary?.weekSiteVisitsDone ?? 0;
+  const visitsTarget = activityTarget?.weekSiteVisitsTarget ?? activityTarget?.weeklySiteVisitsTarget ?? 0;
+  const completionPercent = activityTarget?.completionPercent ?? summary?.completionPercent ?? 0;
+  const recentActivity = plan?.recentActivity ?? [];
   const kpis = [
-    { label: 'Загрузка парка', value: summary ? `${summary.fleetUtilizationPercent}%` : '—', hint: activityTarget?.message || 'Ждем данные', icon: Target },
-    { label: 'Активные аренды', value: String(summary?.activeRentals ?? 0), hint: 'В работе сейчас', icon: Calendar },
-    { label: 'Возвраты сегодня/завтра', value: String((plan?.rentals.endingToday.length ?? 0) + (plan?.rentals.endingTomorrow.length ?? 0)), hint: 'Проверить логистику', icon: Truck },
-    { label: 'Просроченные возвраты', value: String(summary?.overdueReturns ?? 0), hint: 'Есть риск блокировки техники', icon: AlertTriangle },
-    { label: 'Долг', value: formatCurrency(summary?.debtAmount ?? 0), hint: 'Клиенты с открытой задолженностью', icon: CreditCard },
-    { label: 'Документы', value: String(summary?.documentsMissing ?? 0), hint: 'Договоры, УПД и подписи', icon: FileText },
+    { label: 'Загрузка парка', value: summary ? `${summary.fleetUtilizationPercent}%` : '—', hint: activityTarget?.message || 'Ждем данные', badge: summary?.planStatus === 'done' ? 'Норма' : 'Фокус', icon: Target },
+    { label: 'Активные аренды', value: String(summary?.activeRentals ?? 0), hint: 'В работе сейчас', badge: 'Парк', icon: Calendar },
+    { label: 'Звонки сегодня', value: `${callsDone} / ${callsTarget || '—'}`, hint: callsTarget > 0 ? `Осталось ${Math.max(0, callsTarget - callsDone)}` : 'Не жесткая норма', badge: callsDone >= callsTarget && callsTarget > 0 ? 'Готово' : 'В работе', icon: Phone },
+    { label: 'Выезды за неделю', value: `${visitsDone} / ${visitsTarget || '—'}`, hint: visitsTarget > 0 ? `Осталось ${Math.max(0, visitsTarget - visitsDone)}` : 'По необходимости', badge: visitsDone >= visitsTarget && visitsTarget > 0 ? 'Готово' : 'План', icon: MapPin },
+    { label: 'Возвраты сегодня/завтра', value: String((plan?.rentals.endingToday.length ?? 0) + (plan?.rentals.endingTomorrow.length ?? 0)), hint: 'Проверить логистику', badge: 'Операции', icon: Truck },
+    { label: 'Просроченные возвраты', value: String(summary?.overdueReturns ?? 0), hint: 'Есть риск блокировки техники', badge: summary?.overdueReturns ? 'Есть риск' : 'Ок', icon: AlertTriangle },
+    { label: 'Долг', value: formatCurrency(summary?.debtAmount ?? 0), hint: 'Клиенты с открытой задолженностью', badge: summary?.debtAmount ? 'Есть риск' : 'Чисто', icon: CreditCard },
+    { label: 'Документы', value: String(summary?.documentsMissing ?? 0), hint: 'Договоры, УПД и подписи', badge: summary?.documentsMissing ? 'Проверить' : 'Ок', icon: FileText },
   ];
+  const handleSubmitActivity = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    createActivityMutation.mutate(activityDraft);
+  };
 
   return (
-    <Card className="app-panel border-border/80 bg-card/95" data-testid="manager-my-plan">
-      <CardHeader className="pb-4">
+    <Card className="app-panel overflow-hidden border-border/80 bg-card/95" data-testid="manager-my-plan">
+      <CardHeader className="border-b border-border/70 bg-muted/20 pb-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <Badge variant="info" className="bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-200">Мой план</Badge>
             <CardTitle className="app-shell-title mt-2 text-xl font-extrabold">Мой план</CardTitle>
             <CardDescription>
-              Личная рабочая сводка: аренды, возвраты, долги, документы и рекомендуемые действия на день.
+              Фокус дня, план активности, задачи и последние действия менеджера по аренде.
             </CardDescription>
           </div>
           {summary ? (
@@ -308,7 +403,7 @@ function ManagerMyPlanBlock({
           ) : null}
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-5 p-5">
         {isError ? (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200">
             Не удалось загрузить “Мой план”. Проверьте доступ к разделу аренды.
@@ -319,64 +414,184 @@ function ManagerMyPlanBlock({
           <div className="rounded-xl border border-border bg-secondary/40 px-4 py-5 text-sm text-muted-foreground">Нет данных для рабочего плана.</div>
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {kpis.map(item => {
                 const Icon = item.icon;
                 return (
-                  <div key={item.label} className="rounded-xl border border-border bg-white px-3 py-3 dark:bg-background/30">
+                  <div key={item.label} className="flex min-h-[132px] flex-col justify-between rounded-xl border border-border bg-background/80 px-4 py-4 shadow-sm dark:bg-background/30">
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-xs font-semibold text-muted-foreground">{item.label}</p>
-                      <Icon className="h-4 w-4 shrink-0 text-primary" />
+                      <p className="text-xs font-bold uppercase tracking-normal text-muted-foreground">{item.label}</p>
+                      <div className="rounded-lg bg-primary/10 p-2 text-primary">
+                        <Icon className="h-4 w-4 shrink-0" />
+                      </div>
                     </div>
-                    <p className="mt-2 text-xl font-extrabold text-foreground">{item.value}</p>
-                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.hint}</p>
+                    <div>
+                      <p className="mt-3 text-2xl font-extrabold text-foreground">{item.value}</p>
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <p className="line-clamp-2 text-xs text-muted-foreground">{item.hint}</p>
+                        <Badge variant="default" className="shrink-0 border-border bg-muted text-[11px] text-muted-foreground">{item.badge}</Badge>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
             </div>
 
-            <div className="rounded-xl border border-border bg-secondary/40 px-4 py-4">
-              <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <p className="text-sm font-bold text-foreground">План активности</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{plan.activityTarget.message}</p>
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+              <div className="rounded-xl border border-border bg-background/75 p-4 shadow-sm">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-base font-extrabold text-foreground">План активности</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{plan.activityTarget.nextRecommendedAction || plan.activityTarget.message}</p>
+                  </div>
+                  <Badge variant={plan.activityTarget.required ? 'warning' : 'success'} className="w-fit">
+                    {plan.activityTarget.required ? 'Сегодня нужно' : 'Фокус на удержании'}
+                  </Badge>
                 </div>
-                {plan.activityTarget.required ? (
-                  <div className="flex flex-wrap gap-2 text-sm font-semibold">
-                    <Badge variant="warning">40 звонков/день</Badge>
-                    <Badge variant="warning">2 выезда/неделю</Badge>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <ManagerPlanProgressRow label="Звонки" done={callsDone} target={callsTarget} helper="За сегодня" />
+                  <ManagerPlanProgressRow label="Выезды" done={visitsDone} target={visitsTarget} helper="За текущую неделю" />
+                </div>
+                <div className="mt-4 rounded-lg border border-border/80 bg-muted/30 px-3 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-foreground">Прогресс активности</p>
+                    <p className="text-sm font-extrabold text-foreground">{completionPercent}%</p>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-background">
+                    <div className="h-full rounded-full bg-emerald-500 transition-[width] duration-300 motion-reduce:transition-none" style={{ width: `${Math.max(0, Math.min(100, completionPercent))}%` }} />
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleSubmitActivity} className="rounded-xl border border-border bg-background/75 p-4 shadow-sm" data-testid="manager-plan-quick-add-activity">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-base font-extrabold text-foreground">Быстро добавить активность</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Звонок, выезд или заметка по результату контакта.</p>
+                  </div>
+                  <Activity className="h-5 w-5 text-primary" />
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1 text-xs font-semibold text-muted-foreground">
+                    Тип
+                    <select
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                      value={activityDraft.activityType}
+                      onChange={event => setActivityDraft(prev => ({ ...prev, activityType: event.target.value as ManagerActivityInput['activityType'] }))}
+                    >
+                      <option value="call">Звонок</option>
+                      <option value="site_visit">Выезд</option>
+                      <option value="note">Заметка</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs font-semibold text-muted-foreground">
+                    Результат
+                    <select
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                      value={activityDraft.resultStatus}
+                      onChange={event => setActivityDraft(prev => ({ ...prev, resultStatus: event.target.value as ManagerActivityInput['resultStatus'] }))}
+                    >
+                      <option value="completed">Выполнено</option>
+                      <option value="no_answer">Не ответил</option>
+                      <option value="scheduled">Запланировано</option>
+                      <option value="info">Информация</option>
+                      <option value="other">Другое</option>
+                    </select>
+                  </label>
+                </div>
+                <textarea
+                  className="mt-3 min-h-[84px] w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
+                  placeholder="Заметка или результат"
+                  value={activityDraft.comment}
+                  onChange={event => setActivityDraft(prev => ({ ...prev, comment: event.target.value }))}
+                />
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <input
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground"
+                    placeholder="ID клиента (опционально)"
+                    value={activityDraft.relatedClientId}
+                    onChange={event => setActivityDraft(prev => ({ ...prev, relatedClientId: event.target.value }))}
+                  />
+                  <input
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground"
+                    placeholder="ID аренды (опционально)"
+                    value={activityDraft.relatedRentalId}
+                    onChange={event => setActivityDraft(prev => ({ ...prev, relatedRentalId: event.target.value }))}
+                  />
+                </div>
+                <Button type="submit" className="mt-3 w-full" disabled={!canAddActivity || createActivityMutation.isPending}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  {!canAddActivity ? 'Доступно менеджеру аренды' : createActivityMutation.isPending ? 'Добавляем...' : 'Добавить активность'}
+                </Button>
+                {createActivityMutation.isError ? (
+                  <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-300">Не удалось добавить активность.</p>
+                ) : null}
+              </form>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+              <div className="rounded-xl border border-border bg-background/75 shadow-sm">
+                <div className="border-b border-border/80 px-4 py-3">
+                  <p className="text-base font-extrabold text-foreground">Задачи</p>
+                  <p className="text-sm text-muted-foreground">Приоритеты по возвратам, долгам, документам и свободной технике.</p>
+                </div>
+                {plan.tasks.length === 0 ? (
+                  <div className="px-4 py-5 text-sm font-semibold text-emerald-700 dark:text-emerald-200">
+                    На сегодня нет критичных задач. Данные загружены безопасно.
                   </div>
                 ) : (
-                  <Badge variant="success" className="w-fit">Фокус на удержании и закрытии хвостов</Badge>
+                  <div className="divide-y divide-border/80">
+                    {plan.tasks.slice(0, 10).map((item, index) => (
+                      <div key={`${item.type}-${item.link.id}-${index}`} className="grid gap-3 px-4 py-3 text-sm lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,0.85fr)_auto] lg:items-center">
+                        <Badge variant="default" className={managerPlanTaskTone(item.level)}>
+                          {item.level === 'risk' ? 'Есть риск' : item.level === 'warning' ? 'Нужно действие' : 'Инфо'}
+                        </Badge>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-foreground">{item.title}</p>
+                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.description}</p>
+                        </div>
+                        <p className="text-xs font-medium text-muted-foreground">Рекомендуемое действие: {item.action}</p>
+                        <Button asChild variant="ghost" size="sm">
+                          <Link to={managerPlanLinkHref(item.link)}>{item.link.label || 'Открыть'}</Link>
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-border bg-background/75 shadow-sm">
+                <div className="border-b border-border/80 px-4 py-3">
+                  <p className="text-base font-extrabold text-foreground">Последние действия</p>
+                  <p className="text-sm text-muted-foreground">Лента активности без лишней таблицы.</p>
+                </div>
+                {recentActivity.length === 0 ? (
+                  <div className="px-4 py-5 text-sm text-muted-foreground">Пока нет зафиксированных действий. Добавьте звонок, выезд или заметку.</div>
+                ) : (
+                  <div className="divide-y divide-border/80">
+                    {recentActivity.slice(0, 8).map(item => {
+                      const Icon = managerActivityIcon(item.activityType);
+                      return (
+                        <div key={item.id} className="flex gap-3 px-4 py-3">
+                          <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
+                            <Icon className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-semibold text-foreground">{managerActivityLabel(item.activityType)}</p>
+                              <Badge variant="default" className="border-border bg-muted text-[11px] text-muted-foreground">{managerActivityResultLabel(item.resultStatus)}</Badge>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">{item.effectiveAt ? formatDate(item.effectiveAt) : item.activityDate}</p>
+                            {item.comment ? <p className="mt-1 line-clamp-2 text-sm text-foreground">{item.comment}</p> : null}
+                            {item.relatedLabel ? <p className="mt-1 truncate text-xs text-muted-foreground">Связано: {item.relatedLabel}</p> : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             </div>
-
-            {plan.tasks.length === 0 ? (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-5 text-sm font-semibold text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200">
-                На сегодня нет критичных задач. Данные загружены безопасно.
-              </div>
-            ) : (
-              <div className="overflow-hidden rounded-xl border border-border">
-                <div className="divide-y divide-border">
-                  {plan.tasks.slice(0, 10).map((item, index) => (
-                    <div key={`${item.type}-${item.link.id}-${index}`} className="grid gap-3 px-4 py-3 text-sm lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-center">
-                      <Badge variant="default" className={managerPlanTaskTone(item.level)}>
-                        {item.level === 'risk' ? 'Есть риск' : item.level === 'warning' ? 'Нужно действие' : 'Инфо'}
-                      </Badge>
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold text-foreground">{item.title}</p>
-                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.description}</p>
-                      </div>
-                      <p className="text-xs font-medium text-muted-foreground">Рекомендуемое действие: {item.action}</p>
-                      <Button asChild variant="ghost" size="sm">
-                        <Link to={managerPlanLinkHref(item.link)}>{item.link.label || 'Открыть'}</Link>
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </>
         )}
       </CardContent>
@@ -2675,6 +2890,7 @@ export default function Dashboard() {
           plan={managerMyPlanQuery.data}
           isLoading={managerMyPlanQuery.isLoading}
           isError={managerMyPlanQuery.isError}
+          canAddActivity={user?.role === 'Менеджер по аренде' || user?.role === 'Администратор'}
         />
       )}
 

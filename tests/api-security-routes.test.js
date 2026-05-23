@@ -243,6 +243,7 @@ function createSecurityApp(state = createState()) {
   }));
   apiRouter.use(registerManagerMyPlanRoutes({
     readData,
+    writeData,
     requireAuth,
     getRoleAccessSummary: role => ({
       normalizedRole: normalizeRole(role),
@@ -254,6 +255,8 @@ function createSecurityApp(state = createState()) {
         .map(([collection]) => collection),
     }),
     todayKey: '2026-05-23',
+    nowIso: () => '2026-05-23T10:00:00.000Z',
+    generateId: prefix => `${prefix}-new`,
   }));
   apiRouter.use(registerRentalRoutes({
     readData,

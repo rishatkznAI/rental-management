@@ -139,6 +139,7 @@ const { registerEquipmentReadinessRoutes } = require('./routes/equipment-readine
 const { registerFinanceRoutes } = require('./routes/finance');
 const { registerGsmRoutes } = require('./routes/gsm');
 const { registerLeasingRoutes } = require('./routes/leasing');
+const { registerManagerMyPlanRoutes } = require('./routes/manager-my-plan');
 const { registerPayrollRoutes } = require('./routes/payroll');
 const { registerPlannerRoutes } = require('./routes/planner');
 const { registerReportRoutes } = require('./routes/reports');
@@ -1289,6 +1290,12 @@ apiRouter.get('/access-diagnostics', requireAuth, (req, res) => {
 apiRouter.get('/bot/notification-diagnostics', requireAuth, requireAdmin, (req, res) => {
   return res.json(botNotifications.getDiagnostics());
 });
+
+apiRouter.use(registerManagerMyPlanRoutes({
+  readData,
+  requireAuth,
+  getRoleAccessSummary: roleAccessSummary,
+}));
 
 apiRouter.use(registerRentalRoutes({
   readData,

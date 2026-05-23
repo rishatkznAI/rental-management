@@ -33,6 +33,7 @@ function createState() {
     payments: [],
     documents: [],
     service: [],
+    manager_activity: [],
   };
 }
 
@@ -56,6 +57,7 @@ function createApp(state = createState()) {
     ['sales-token', { userId: 'U-sales' }],
   ]);
   const readData = name => state[name] || [];
+  const writeData = (name, value) => { state[name] = value; };
   function requireAuth(req, res, next) {
     const auth = req.headers.authorization || '';
     if (!auth.startsWith('Bearer ')) return res.status(401).json({ ok: false, error: 'Unauthorized' });
@@ -71,9 +73,12 @@ function createApp(state = createState()) {
   }
   app.use('/api', registerManagerMyPlanRoutes({
     readData,
+    writeData,
     requireAuth,
     getRoleAccessSummary: accessSummary,
     todayKey: '2026-05-23',
+    nowIso: () => '2026-05-23T10:00:00.000Z',
+    generateId: prefix => `${prefix}-${state.manager_activity.length + 1}`,
   }));
   return app;
 }

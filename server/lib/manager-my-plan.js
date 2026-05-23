@@ -6,6 +6,8 @@ const INACTIVE_EQUIPMENT_STATUSES = new Set(['inactive', 'sold', 'written_off', 
 const RENTAL_MANAGER_ROLE = 'Менеджер по аренде';
 const PLAN_ROLES = new Set(['Администратор', RENTAL_MANAGER_ROLE, 'Офис-менеджер', 'Руководитель']);
 const SECRET_KEY_PATTERN = /(password|token|cookie|secret|private[_-]?key|authorization|auth[_-]?header|db[_-]?url|hash)/i;
+const ACTIVITY_TYPES = new Set(['call', 'site_visit', 'note']);
+const ACTIVITY_RESULTS = new Set(['completed', 'no_answer', 'scheduled', 'info', 'other']);
 
 function text(value) {
   return String(value ?? '').trim();
@@ -29,11 +31,34 @@ function dateKey(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
+function isoOrNow(value, fallback) {
+  const raw = text(value);
+  if (raw) {
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return fallback;
+}
+
 function addDays(todayKey, days) {
   const parsed = new Date(`${todayKey}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime())) return '';
   parsed.setUTCDate(parsed.getUTCDate() + days);
   return parsed.toISOString().slice(0, 10);
+}
+
+function weekRange(todayKey) {
+  const parsed = new Date(`${todayKey}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return { start: todayKey, end: todayKey };
+  const day = parsed.getUTCDay() || 7;
+  const start = new Date(parsed);
+  start.setUTCDate(parsed.getUTCDate() - day + 1);
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
 }
 
 function isActiveRental(rental) {
@@ -47,6 +72,14 @@ function hasManagerLink(record, manager) {
   const ids = [record?.managerId, record?.responsibleManagerId, record?.createdByUserId].map(text);
   if (manager.id && ids.includes(manager.id)) return true;
   const names = [record?.manager, record?.managerName, record?.responsibleManagerName, record?.createdByName].map(lower);
+  return Boolean(manager.name && names.includes(lower(manager.name)));
+}
+
+function hasActivityManagerLink(record, manager) {
+  if (!manager.id && !manager.name) return true;
+  const ids = [record?.managerId, record?.userId, record?.createdBy].map(text);
+  if (manager.id && ids.includes(manager.id)) return true;
+  const names = [record?.managerName, record?.createdByName].map(lower);
   return Boolean(manager.name && names.includes(lower(manager.name)));
 }
 
@@ -90,6 +123,32 @@ function safeClient(client) {
     label: text(client?.company || client?.name) || 'Клиент',
     lastActivityDate: dateKey(client?.lastActivityDate || client?.lastRentalDate || client?.updatedAt || client?.createdAt),
     managerName: text(client?.manager || client?.managerName),
+  };
+}
+
+function safeActivity(activity, clientsById = new Map(), rentalsById = new Map(), equipmentById = new Map()) {
+  const relatedClientId = text(activity?.relatedClientId);
+  const relatedRentalId = text(activity?.relatedRentalId);
+  const relatedEquipmentId = text(activity?.relatedEquipmentId);
+  const rental = rentalsById.get(relatedRentalId);
+  const equipment = equipmentById.get(relatedEquipmentId);
+  const client = clientsById.get(relatedClientId || text(rental?.clientId));
+  return {
+    id: text(activity?.id),
+    createdAt: isoOrNow(activity?.createdAt, ''),
+    createdBy: text(activity?.createdBy || activity?.userId),
+    userId: text(activity?.userId || activity?.createdBy),
+    managerId: text(activity?.managerId || activity?.userId || activity?.createdBy),
+    managerName: text(activity?.managerName || activity?.createdByName),
+    activityType: ACTIVITY_TYPES.has(activity?.activityType) ? activity.activityType : 'note',
+    relatedClientId,
+    relatedRentalId,
+    relatedEquipmentId,
+    relatedLabel: text(client?.company || client?.name || rental?.clientName || rental?.client || equipment?.name || equipment?.inventoryNumber),
+    resultStatus: ACTIVITY_RESULTS.has(activity?.resultStatus) ? activity.resultStatus : 'other',
+    comment: text(activity?.comment).slice(0, 1000),
+    activityDate: dateKey(activity?.activityDate || activity?.effectiveAt || activity?.createdAt),
+    effectiveAt: isoOrNow(activity?.effectiveAt || activity?.activityDate || activity?.createdAt, ''),
   };
 }
 
@@ -255,6 +314,67 @@ function assertNoSecretKeys(value, path = '$') {
   }
 }
 
+function activityMatchesPeriod(activity, fromKey, toKey) {
+  const key = dateKey(activity?.activityDate || activity?.effectiveAt || activity?.createdAt);
+  if (!key) return false;
+  if (fromKey && key < fromKey) return false;
+  if (toKey && key > toKey) return false;
+  return true;
+}
+
+function buildActivityAggregates({
+  activityRows = [],
+  manager,
+  todayKey,
+  dailyCallsTarget = 0,
+  weeklySiteVisitsTarget = 0,
+  required = false,
+  clientsById = new Map(),
+  rentalsById = new Map(),
+  equipmentById = new Map(),
+}) {
+  const week = weekRange(todayKey);
+  const scoped = activityRows
+    .filter(item => hasActivityManagerLink(item, manager))
+    .map(item => safeActivity(item, clientsById, rentalsById, equipmentById))
+    .filter(item => item.id);
+  const todayCallsDone = scoped.filter(item => item.activityType === 'call' && item.activityDate === todayKey).length;
+  const weekSiteVisitsDone = scoped.filter(item => (
+    item.activityType === 'site_visit'
+    && item.activityDate >= week.start
+    && item.activityDate <= week.end
+  )).length;
+  const completionBase = dailyCallsTarget + weeklySiteVisitsTarget;
+  const completionDone = Math.min(todayCallsDone, dailyCallsTarget) + Math.min(weekSiteVisitsDone, weeklySiteVisitsTarget);
+  const completionPercent = completionBase > 0 ? Math.round((completionDone / completionBase) * 100) : 100;
+  const activityProgressStatus = !required
+    ? 'optional'
+    : completionPercent >= 100
+      ? 'complete'
+      : completionPercent > 0
+        ? 'in_progress'
+        : 'not_started';
+  const nextRecommendedAction = !required
+    ? 'Фокус дня — удержание, продления, возвраты, долги и документы.'
+    : todayCallsDone < dailyCallsTarget
+      ? 'Нужен звонок клиенту.'
+      : weekSiteVisitsDone < weeklySiteVisitsTarget
+        ? 'Нужен выезд на объект.'
+        : 'План активности выполнен, проверьте задачи с рисками.';
+  return {
+    todayCallsDone,
+    todayCallsTarget: dailyCallsTarget,
+    weekSiteVisitsDone,
+    weekSiteVisitsTarget: weeklySiteVisitsTarget,
+    activityProgressStatus,
+    nextRecommendedAction,
+    completionPercent,
+    recentActivity: scoped
+      .sort((a, b) => text(b.effectiveAt || b.createdAt).localeCompare(text(a.effectiveAt || a.createdAt)))
+      .slice(0, 8),
+  };
+}
+
 function buildManagerMyPlan(input) {
   const {
     req,
@@ -277,6 +397,7 @@ function buildManagerMyPlan(input) {
   const payments = read('payments');
   const documentsRaw = read('documents');
   const service = read('service');
+  const activityRows = readData('manager_activity') || [];
 
   const clientsById = new Map(clients.map(item => [text(item.id), item]));
   const equipmentById = new Map(equipment.map(item => [text(item.id), item]));
@@ -284,6 +405,7 @@ function buildManagerMyPlan(input) {
     ? rentalsRaw.filter(item => hasManagerLink(item, manager))
     : rentalsRaw;
   const activeRentals = rentals.filter(isActiveRental);
+  const rentalsById = new Map(rentals.map(item => [text(item.id), item]));
   const utilization = canRead(access, 'equipment')
     ? calculateUtilization(equipment, activeRentals)
     : { percent: 0, known: false, reason: 'Нет доступа к данным техники для расчета загрузки парка.' };
@@ -438,6 +560,17 @@ function buildManagerMyPlan(input) {
     : planStatus === 'needs_activity'
       ? 'Загрузка ниже 80%, нужен активный поиск аренды.'
       : `Загрузку нельзя посчитать: ${utilization.reason}`;
+  const activityAggregates = buildActivityAggregates({
+    activityRows,
+    manager,
+    todayKey,
+    dailyCallsTarget: activityRequired ? 40 : 0,
+    weeklySiteVisitsTarget: activityRequired ? 2 : 0,
+    required: activityRequired,
+    clientsById,
+    rentalsById,
+    equipmentById,
+  });
 
   const body = {
     summary: {
@@ -450,6 +583,13 @@ function buildManagerMyPlan(input) {
       debtAmount: totalDebt,
       documentsMissing: missingContractRentals.length + missingUpdRentals.length + unsignedDocuments.length,
       clientsWithoutActivity: clientsWithoutRecentActivity.length,
+      todayCallsDone: activityAggregates.todayCallsDone,
+      todayCallsTarget: activityAggregates.todayCallsTarget,
+      weekSiteVisitsDone: activityAggregates.weekSiteVisitsDone,
+      weekSiteVisitsTarget: activityAggregates.weekSiteVisitsTarget,
+      activityProgressStatus: activityAggregates.activityProgressStatus,
+      nextRecommendedAction: activityAggregates.nextRecommendedAction,
+      completionPercent: activityAggregates.completionPercent,
     },
     activityTarget: {
       required: activityRequired,
@@ -457,7 +597,15 @@ function buildManagerMyPlan(input) {
       dailyCallsTarget: activityRequired ? 40 : 0,
       weeklySiteVisitsTarget: activityRequired ? 2 : 0,
       message: activityMessage,
+      todayCallsDone: activityAggregates.todayCallsDone,
+      todayCallsTarget: activityAggregates.todayCallsTarget,
+      weekSiteVisitsDone: activityAggregates.weekSiteVisitsDone,
+      weekSiteVisitsTarget: activityAggregates.weekSiteVisitsTarget,
+      activityProgressStatus: activityAggregates.activityProgressStatus,
+      nextRecommendedAction: activityAggregates.nextRecommendedAction,
+      completionPercent: activityAggregates.completionPercent,
     },
+    recentActivity: activityAggregates.recentActivity,
     tasks: tasks.slice(0, 40),
     rentals: {
       endingToday: endingToday.map(item => safeRental(item, clientsById, equipmentById)),
@@ -485,5 +633,12 @@ function buildManagerMyPlan(input) {
 
 module.exports = {
   buildManagerMyPlan,
+  buildActivityAggregates,
+  safeActivity,
+  activityMatchesPeriod,
+  chooseManagerScope,
+  buildAccess,
+  text,
+  dateKey,
   isPlanRoleAllowed,
 };

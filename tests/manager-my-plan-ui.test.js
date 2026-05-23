@@ -26,8 +26,10 @@ test('Dashboard contains read-only manager my plan block', () => {
 
 test('Dashboard shows low-utilization activity targets and safe empty state', () => {
   const block = managerPlanBlockSource();
-  assert.match(block, /40 звонков\/день/);
-  assert.match(block, /2 выезда\/неделю/);
+  assert.match(block, /Звонки сегодня/);
+  assert.match(block, /Выезды за неделю/);
+  assert.match(block, /План активности/);
+  assert.match(block, /Прогресс активности/);
   assert.match(block, /Нет данных для рабочего плана/);
   assert.match(block, /На сегодня нет критичных задач/);
   assert.doesNotMatch(block, /\{[^}]*undefined[^}]*\}/);
@@ -37,7 +39,7 @@ test('Dashboard shows low-utilization activity targets and safe empty state', ()
 test('Manager my plan UI does not add destructive controls or secret-like labels', () => {
   const block = managerPlanBlockSource();
   assert.doesNotMatch(block, />\\s*(Создать|Изменить|Удалить|Сохранить|Архивировать|Списать)\\s*</);
-  assert.doesNotMatch(block, /api\.(post|patch|put|del)\(/);
+  assert.doesNotMatch(block, /api\.(patch|put|del)\(/);
   assert.doesNotMatch(block, /password|token|cookie|secret|privateKey|authorization|hash/i);
-  assert.doesNotMatch(serviceSource, /api\.(post|patch|put|del)\(/);
+  assert.doesNotMatch(serviceSource, /api\.(patch|put|del)\(/);
 });

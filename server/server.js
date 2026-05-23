@@ -1293,8 +1293,11 @@ apiRouter.get('/bot/notification-diagnostics', requireAuth, requireAdmin, (req, 
 
 apiRouter.use(registerManagerMyPlanRoutes({
   readData,
+  writeData,
   requireAuth,
   getRoleAccessSummary: roleAccessSummary,
+  generateId,
+  nowIso,
 }));
 
 apiRouter.use(registerRentalRoutes({

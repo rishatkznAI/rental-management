@@ -19,7 +19,10 @@ function runSeed(dbPath, extraEnv = {}) {
       ...process.env,
       DB_PATH: dbPath,
       DEMO_MODE: 'true',
+      DEMO_ENV: 'true',
+      ALLOW_DEMO_SEED: 'true',
       NODE_ENV: 'test',
+      DEMO_DEFAULT_PASSWORD: 'unit-test-demo-password',
       ...extraEnv,
     },
   });
@@ -72,7 +75,7 @@ test('seed script creates demo entities and demo users in an isolated DB', () =>
   const dbPath = join(dir, 'demo.sqlite');
   try {
     const output = runSeed(dbPath);
-    assert.match(output, /Seeded demo database/);
+    assert.match(output, /Seeded demo records/);
 
     const users = readCollection(dbPath, 'users');
     const clients = readCollection(dbPath, 'clients');
@@ -84,11 +87,11 @@ test('seed script creates demo entities and demo users in an isolated DB', () =>
     const deliveries = readCollection(dbPath, 'deliveries');
     const plans = readCollection(dbPath, 'debt_collection_plans');
 
-    assert.deepEqual(users.map(user => user.id), ['demo-admin', 'demo-office', 'demo-rental-manager', 'demo-service']);
+    assert.deepEqual(users.map(user => user.id), ['DEMO-USER-ADMIN', 'DEMO-USER-MANAGER', 'DEMO-USER-SERVICE', 'DEMO-USER-VIEWER']);
     assert.ok(users.every(user => user.status === 'Активен' && String(user.password || '').startsWith('h2:scrypt:')));
     assert.ok(clients.every(client => typeof client.creditLimit === 'number' && Number.isFinite(client.creditLimit)));
-    assert.ok(clients.length >= 2);
-    assert.ok(equipment.length >= 3);
+    assert.ok(clients.length >= 5);
+    assert.ok(equipment.length >= 20);
     assert.ok(rentals.length >= 2);
     assert.ok(documents.length >= 2);
     assert.ok(payments.length >= 2);
@@ -128,7 +131,7 @@ test('demo seed creates planner-visible equipment and linked gantt rentals', () 
   }
 });
 
-test('demo reset removes created demo records and restores seed data', () => {
+test('demo reset replaces demo records and preserves non-demo records', () => {
   const dir = mkdtempSync(join(tmpdir(), 'rental-demo-'));
   const dbPath = join(dir, 'demo.sqlite');
   try {
@@ -141,9 +144,9 @@ test('demo reset removes created demo records and restores seed data', () => {
 
     runSeed(dbPath);
     const resetClients = readCollection(dbPath, 'clients');
-    assert.equal(resetClients.some(client => client.id === 'smoke-client'), false);
-    assert.equal(resetClients.some(client => client.id === 'demo-client-alpha'), true);
-    assert.equal(resetClients.length, clients.length);
+    assert.equal(resetClients.some(client => client.id === 'smoke-client'), true);
+    assert.equal(resetClients.some(client => client.id === 'DEMO-CLIENT-001'), true);
+    assert.equal(resetClients.length, clients.length + 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -220,7 +223,7 @@ test('demo public flag and frontend indicator are wired without exposing secrets
   assert.match(routesSource, /requireAuth, requireAdmin/);
   assert.match(serverSource, /DEMO_MODE \? '' : \(process\.env\.BOT_TOKEN \|\| ''\)/);
   assert.match(serverSource, /enabled: !DEMO_MODE/);
-  assert.match(packageSource, /"demo:reset": "DEMO_MODE=true DB_PATH=server\/data\/demo\.sqlite/);
+  assert.match(packageSource, /"demo:reset": "DEMO_ENV=true DEMO_MODE=true ALLOW_DEMO_SEED=true DB_PATH=server\/data\/demo\.sqlite/);
   assert.doesNotMatch(packageSource, /demo:reset[^"]*app\.sqlite/);
   assert.doesNotMatch(badgeSource, /password|token|secret/i);
 });

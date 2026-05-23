@@ -2,6 +2,7 @@ const { normalizeRole } = require('./role-groups');
 
 const ACTIVE_RENTAL_STATUSES = new Set(['active', 'confirmed', 'return_planned', 'delivery']);
 const CLOSED_RENTAL_STATUSES = new Set(['closed', 'returned', 'cancelled', 'completed', 'done']);
+const INACTIVE_EQUIPMENT_STATUSES = new Set(['inactive', 'sold', 'written_off', 'written-off', 'archived', 'decommissioned', 'disposed', 'scrapped']);
 const RENTAL_MANAGER_ROLE = 'Менеджер по аренде';
 const PLAN_ROLES = new Set(['Администратор', RENTAL_MANAGER_ROLE, 'Офис-менеджер', 'Руководитель']);
 const SECRET_KEY_PATTERN = /(password|token|cookie|secret|private[_-]?key|authorization|auth[_-]?header|db[_-]?url|hash)/i;
@@ -43,9 +44,9 @@ function isActiveRental(rental) {
 
 function hasManagerLink(record, manager) {
   if (!manager.id && !manager.name) return true;
-  const ids = [record?.managerId, record?.ownerId, record?.responsibleManagerId, record?.createdByUserId].map(text);
+  const ids = [record?.managerId, record?.responsibleManagerId, record?.createdByUserId].map(text);
   if (manager.id && ids.includes(manager.id)) return true;
-  const names = [record?.manager, record?.managerName, record?.ownerName, record?.responsibleManagerName, record?.createdByName].map(lower);
+  const names = [record?.manager, record?.managerName, record?.responsibleManagerName, record?.createdByName].map(lower);
   return Boolean(manager.name && names.includes(lower(manager.name)));
 }
 
@@ -154,8 +155,35 @@ function activeFleetEquipment(equipment) {
     if (category === 'sold' || category === 'client') return false;
     if (item?.activeInFleet === false) return false;
     const status = lower(item?.status);
-    return status !== 'inactive';
+    return !INACTIVE_EQUIPMENT_STATUSES.has(status);
   });
+}
+
+function rentalIdentityKeys(rental) {
+  return [
+    rental?.id,
+    rental?.rentalId,
+    rental?.sourceRentalId,
+    rental?.linkedRentalId,
+  ].map(text).filter(Boolean);
+}
+
+function dedupeRentals(rentals) {
+  const byKey = new Map();
+  const result = [];
+  for (const rental of rentals) {
+    const keys = rentalIdentityKeys(rental);
+    const existingIndex = keys.map(key => byKey.get(key)).find(index => index !== undefined);
+    if (existingIndex === undefined) {
+      const index = result.length;
+      result.push(rental);
+      keys.forEach(key => byKey.set(key, index));
+      continue;
+    }
+    result[existingIndex] = { ...result[existingIndex], ...rental };
+    rentalIdentityKeys(result[existingIndex]).forEach(key => byKey.set(key, existingIndex));
+  }
+  return result;
 }
 
 function rentalEquipmentId(rental) {
@@ -244,7 +272,7 @@ function buildManagerMyPlan(input) {
   const canScopeByManager = Boolean(manager.id || manager.name);
   const read = collection => (canRead(access, collection) ? (readData(collection) || []) : []);
   const equipment = read('equipment');
-  const rentalsRaw = [...read('rentals'), ...read('gantt_rentals')];
+  const rentalsRaw = dedupeRentals([...read('rentals'), ...read('gantt_rentals')]);
   const clients = read('clients');
   const payments = read('payments');
   const documentsRaw = read('documents');

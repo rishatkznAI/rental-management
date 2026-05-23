@@ -212,3 +212,80 @@ test('admin can request a safe manager slice', async () => {
     assert.equal(response.body.rentals.active.some(item => item.id === 'GR-other'), false);
   });
 });
+
+test('linked classic and gantt rentals are counted once and inactive fleet is excluded', async () => {
+  const state = createState();
+  state.equipment = [
+    { id: 'EQ-1', inventoryNumber: '101', status: 'available', activeInFleet: true, category: 'own' },
+    { id: 'EQ-2', inventoryNumber: '102', status: 'sold', activeInFleet: true, category: 'own' },
+    { id: 'EQ-3', inventoryNumber: '103', status: 'available', activeInFleet: true, category: 'own', isForSale: true },
+  ];
+  state.rentals = [{
+    id: 'R-1',
+    managerId: 'U-manager',
+    manager: 'Руслан',
+    clientId: 'C-1',
+    client: 'ООО План',
+    equipmentId: 'EQ-1',
+    status: 'active',
+    plannedReturnDate: '2026-05-23',
+  }];
+  state.gantt_rentals = [{
+    id: 'GR-1',
+    rentalId: 'R-1',
+    managerId: 'U-manager',
+    manager: 'Руслан',
+    clientId: 'C-1',
+    client: 'ООО План',
+    equipmentId: 'EQ-1',
+    status: 'active',
+    plannedReturnDate: '2026-05-23',
+  }];
+
+  await withServer(createApp(state), async baseUrl => {
+    const response = await getJson(baseUrl, '/api/manager/my-plan', 'manager-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.summary.activeRentals, 1);
+    assert.equal(response.body.rentals.active.length, 1);
+    assert.equal(response.body.summary.fleetUtilizationPercent, 100);
+    assert.equal(response.body.summary.planStatus, 'done');
+  });
+});
+
+test('managerId query and equipment owner fields do not widen manager scope', async () => {
+  const state = createState();
+  state.equipment = [
+    { id: 'EQ-1', inventoryNumber: '101', status: 'available', activeInFleet: true, category: 'own' },
+    { id: 'EQ-2', inventoryNumber: '102', status: 'available', activeInFleet: true, category: 'own' },
+  ];
+  state.gantt_rentals = [
+    {
+      id: 'GR-own',
+      managerId: 'U-manager',
+      manager: 'Руслан',
+      clientId: 'C-1',
+      client: 'ООО Свой',
+      equipmentId: 'EQ-1',
+      status: 'active',
+      plannedReturnDate: '2026-05-23',
+    },
+    {
+      id: 'GR-owner-only',
+      ownerId: 'U-manager',
+      ownerName: 'Руслан',
+      managerId: 'U-other',
+      manager: 'Анна',
+      clientId: 'C-2',
+      client: 'ООО Чужой',
+      equipmentId: 'EQ-2',
+      status: 'active',
+      plannedReturnDate: '2026-05-23',
+    },
+  ];
+
+  await withServer(createApp(state), async baseUrl => {
+    const response = await getJson(baseUrl, '/api/manager/my-plan?managerId=U-other', 'manager-token');
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.rentals.active.map(item => item.id), ['GR-own']);
+  });
+});

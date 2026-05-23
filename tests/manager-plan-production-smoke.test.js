@@ -20,6 +20,13 @@ function safePayload(overrides = {}) {
       debtAmount: 0,
       documentsMissing: 0,
       clientsWithoutActivity: 0,
+      todayCallsDone: 0,
+      todayCallsTarget: 0,
+      weekSiteVisitsDone: 0,
+      weekSiteVisitsTarget: 0,
+      activityProgressStatus: 'optional',
+      nextRecommendedAction: 'Проверить задачи дня.',
+      completionPercent: 100,
       ...overrides.summary,
     },
     activityTarget: {
@@ -28,8 +35,16 @@ function safePayload(overrides = {}) {
       dailyCallsTarget: 0,
       weeklySiteVisitsTarget: 0,
       message: 'Парк загружен, фокус на удержании.',
+      todayCallsDone: 0,
+      todayCallsTarget: 0,
+      weekSiteVisitsDone: 0,
+      weekSiteVisitsTarget: 0,
+      activityProgressStatus: 'optional',
+      nextRecommendedAction: 'Проверить задачи дня.',
+      completionPercent: 100,
       ...overrides.activityTarget,
     },
+    recentActivity: overrides.recentActivity || [],
     tasks: overrides.tasks || [],
     rentals: overrides.rentals || { endingToday: [], endingTomorrow: [], overdue: [], active: [] },
     money: overrides.money || { debtors: [], totalDebt: 0 },
@@ -51,8 +66,23 @@ test('safe manager plan smoke payload passes shape and unsafe scans', () => {
 
 test('low utilization payload requires 40 calls and 2 site visits', () => {
   const payload = safePayload({
-    summary: { fleetUtilizationPercent: 64, planStatus: 'needs_activity' },
-    activityTarget: { required: true, dailyCallsTarget: 40, weeklySiteVisitsTarget: 2 },
+    summary: {
+      fleetUtilizationPercent: 64,
+      planStatus: 'needs_activity',
+      todayCallsTarget: 40,
+      weekSiteVisitsTarget: 2,
+      activityProgressStatus: 'not_started',
+      completionPercent: 0,
+    },
+    activityTarget: {
+      required: true,
+      dailyCallsTarget: 40,
+      weeklySiteVisitsTarget: 2,
+      todayCallsTarget: 40,
+      weekSiteVisitsTarget: 2,
+      activityProgressStatus: 'not_started',
+      completionPercent: 0,
+    },
   });
   assert.doesNotThrow(() => assertManagerPlanResponseShape(payload));
 });

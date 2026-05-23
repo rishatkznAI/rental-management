@@ -220,14 +220,22 @@ test('production manager plan smoke stays read-only', async ({ page }) => {
   const planBlock = page.getByTestId('manager-my-plan');
   await expect(planBlock, 'dashboard manager plan block should be visible').toBeVisible();
   await expect(planBlock.getByRole('heading', { name: 'Мой план', exact: true })).toBeVisible();
-  for (const label of ['Загрузка парка', 'Активные аренды', 'Возвраты сегодня/завтра', 'Просроченные возвраты', 'Долг', 'Документы']) {
+  for (const label of ['Загрузка парка', 'Активные аренды', 'Звонки сегодня', 'Возвраты сегодня/завтра', 'Просроченные возвраты', 'Долг', 'Документы']) {
     await expect(planBlock.getByText(label, { exact: true }).first(), `manager plan KPI ${label} should be visible`).toBeVisible();
   }
-  await expect(planBlock.getByText('План активности', { exact: true })).toBeVisible();
+  const activityPlanSection = planBlock.locator('div').filter({ hasText: 'План активности' }).filter({ hasText: 'Прогресс активности' }).first();
+  await expect(activityPlanSection, 'manager plan activity section should be visible').toBeVisible();
+  await expect(activityPlanSection.getByText('План активности', { exact: true })).toBeVisible();
+  await expect(activityPlanSection.getByText('Прогресс активности', { exact: true })).toBeVisible();
+  await expect(planBlock.getByText('Быстро добавить активность', { exact: true })).toBeVisible();
+  await expect(planBlock.getByText('Задачи', { exact: true })).toBeVisible();
+  await expect(planBlock.getByText('Последние действия', { exact: true })).toBeVisible();
 
   if (managerPlanPayload?.summary?.planStatus === 'needs_activity') {
-    await expect(planBlock.getByText('40 звонков/день', { exact: true })).toBeVisible();
-    await expect(planBlock.getByText('2 выезда/неделю', { exact: true })).toBeVisible();
+    await expect(activityPlanSection.getByText('Звонки', { exact: true })).toBeVisible();
+    await expect(activityPlanSection.getByText(/\d+\s*\/\s*40/).first(), 'daily calls progress should show current count out of 40').toBeVisible();
+    await expect(activityPlanSection.getByText('Выезды', { exact: true })).toBeVisible();
+    await expect(activityPlanSection.getByText(/\d+\s*\/\s*2/).first(), 'weekly site visits progress should show current count out of 2').toBeVisible();
   } else {
     await expect(planBlock.getByText(/Фокус на удержании|Недостаточно данных|Парк загружен|нужен активный поиск/i).first()).toBeVisible();
   }

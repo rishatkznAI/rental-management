@@ -1,5 +1,6 @@
-const REQUIRED_SECTIONS = ['summary', 'activityTarget', 'tasks', 'rentals', 'money', 'documents', 'clients'];
+const REQUIRED_SECTIONS = ['summary', 'activityTarget', 'recentActivity', 'tasks', 'rentals', 'money', 'documents', 'clients'];
 const VALID_PLAN_STATUSES = new Set(['done', 'needs_activity', 'unknown']);
+const VALID_ACTIVITY_PROGRESS_STATUSES = new Set(['optional', 'complete', 'in_progress', 'not_started']);
 const UNSAFE_KEY_PATTERN = /password|pass(hash)?|token|cookie|secret|private[-_ ]?key|authorization|auth[-_ ]?header|raw[-_ ]?env|database[-_ ]?url|db[-_ ]?url/i;
 const UNSAFE_STRING_PATTERN = /\bundefined\b|\bnull\b|\[object Object\]|Bearer\s+|sk-[A-Za-z0-9_-]+|postgres(?:ql)?:\/\/|sqlite:\/\/|mongodb(?:\+srv)?:\/\//i;
 
@@ -62,12 +63,22 @@ export function assertManagerPlanResponseShape(payload) {
   }
 
   if (!isPlainObject(payload.activityTarget)) throw new Error('activityTarget must be an object');
+  for (const [sectionName, section] of [['summary', payload.summary], ['activityTarget', payload.activityTarget]]) {
+    for (const field of ['todayCallsDone', 'todayCallsTarget', 'weekSiteVisitsDone', 'weekSiteVisitsTarget', 'completionPercent']) {
+      const value = section[field];
+      if (!Number.isFinite(value)) throw new Error(`${sectionName}.${field} must be numeric`);
+    }
+    if (!VALID_ACTIVITY_PROGRESS_STATUSES.has(section.activityProgressStatus)) {
+      throw new Error(`${sectionName}.activityProgressStatus must be valid`);
+    }
+  }
   if (payload.summary.planStatus === 'needs_activity') {
     if (payload.activityTarget.required !== true) throw new Error('low utilization must require activity');
     if (payload.activityTarget.dailyCallsTarget !== 40) throw new Error('low utilization must require 40 daily calls');
     if (payload.activityTarget.weeklySiteVisitsTarget !== 2) throw new Error('low utilization must require 2 weekly site visits');
   }
 
+  if (!Array.isArray(payload.recentActivity)) throw new Error('recentActivity must be an array');
   if (!Array.isArray(payload.tasks)) throw new Error('tasks must be an array');
   if (!isPlainObject(payload.rentals)) throw new Error('rentals must be an object');
   if (!isPlainObject(payload.money)) throw new Error('money must be an object');

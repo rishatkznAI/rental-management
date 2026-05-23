@@ -46,6 +46,7 @@ import { useRentalsList, useGanttData } from '../hooks/useRentals';
 import { rentalsService } from '../services/rentals.service';
 import { equipmentService } from '../services/equipment.service';
 import { financeService } from '../services/finance.service';
+import { managerMyPlanService, type ManagerMyPlanResponse } from '../services/manager-my-plan.service';
 import { reportsService, type MechanicsWorkloadReport } from '../services/reports.service';
 import { deliveriesService } from '../services/deliveries.service';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
@@ -254,6 +255,135 @@ type DashboardRisk = {
   tone?: DashboardTone;
 };
 
+function managerPlanLinkHref(link?: { type: string; id: string }) {
+  if (!link?.id) return '/';
+  const encoded = encodeURIComponent(link.id);
+  if (link.type === 'client') return `/clients/${encoded}`;
+  if (link.type === 'equipment') return `/equipment/${encoded}`;
+  if (link.type === 'document') return `/documents?documentId=${encoded}`;
+  return `/rentals/${encoded}`;
+}
+
+function managerPlanTaskTone(level: string) {
+  if (level === 'risk') return 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/70 dark:bg-red-950/20 dark:text-red-200';
+  if (level === 'warning') return 'border-amber-200 bg-amber-50/70 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200';
+  return 'border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900/70 dark:bg-blue-950/20 dark:text-blue-200';
+}
+
+function ManagerMyPlanBlock({
+  plan,
+  isLoading,
+  isError,
+}: {
+  plan?: ManagerMyPlanResponse;
+  isLoading: boolean;
+  isError: boolean;
+}) {
+  const summary = plan?.summary;
+  const activityTarget = plan?.activityTarget;
+  const kpis = [
+    { label: 'Загрузка парка', value: summary ? `${summary.fleetUtilizationPercent}%` : '—', hint: activityTarget?.message || 'Ждем данные', icon: Target },
+    { label: 'Активные аренды', value: String(summary?.activeRentals ?? 0), hint: 'В работе сейчас', icon: Calendar },
+    { label: 'Возвраты сегодня/завтра', value: String((plan?.rentals.endingToday.length ?? 0) + (plan?.rentals.endingTomorrow.length ?? 0)), hint: 'Проверить логистику', icon: Truck },
+    { label: 'Просроченные возвраты', value: String(summary?.overdueReturns ?? 0), hint: 'Есть риск блокировки техники', icon: AlertTriangle },
+    { label: 'Долг', value: formatCurrency(summary?.debtAmount ?? 0), hint: 'Клиенты с открытой задолженностью', icon: CreditCard },
+    { label: 'Документы', value: String(summary?.documentsMissing ?? 0), hint: 'Договоры, УПД и подписи', icon: FileText },
+  ];
+
+  return (
+    <Card className="app-panel border-border/80 bg-card/95" data-testid="manager-my-plan">
+      <CardHeader className="pb-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <Badge variant="info" className="bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-200">Мой план</Badge>
+            <CardTitle className="app-shell-title mt-2 text-xl font-extrabold">Мой план</CardTitle>
+            <CardDescription>
+              Личная рабочая сводка: аренды, возвраты, долги, документы и рекомендуемые действия на день.
+            </CardDescription>
+          </div>
+          {summary ? (
+            <Badge variant={summary.planStatus === 'done' ? 'success' : summary.planStatus === 'needs_activity' ? 'warning' : 'default'}>
+              {summary.planStatus === 'done' ? 'План выполнен' : summary.planStatus === 'needs_activity' ? 'Нужно действие' : 'Недостаточно данных'}
+            </Badge>
+          ) : null}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isError ? (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200">
+            Не удалось загрузить “Мой план”. Проверьте доступ к разделу аренды.
+          </div>
+        ) : isLoading ? (
+          <div className="rounded-xl border border-border bg-secondary/40 px-4 py-5 text-sm text-muted-foreground">Загружаем рабочий план...</div>
+        ) : !plan ? (
+          <div className="rounded-xl border border-border bg-secondary/40 px-4 py-5 text-sm text-muted-foreground">Нет данных для рабочего плана.</div>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              {kpis.map(item => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.label} className="rounded-xl border border-border bg-white px-3 py-3 dark:bg-background/30">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-semibold text-muted-foreground">{item.label}</p>
+                      <Icon className="h-4 w-4 shrink-0 text-primary" />
+                    </div>
+                    <p className="mt-2 text-xl font-extrabold text-foreground">{item.value}</p>
+                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.hint}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="rounded-xl border border-border bg-secondary/40 px-4 py-4">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-sm font-bold text-foreground">План активности</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{plan.activityTarget.message}</p>
+                </div>
+                {plan.activityTarget.required ? (
+                  <div className="flex flex-wrap gap-2 text-sm font-semibold">
+                    <Badge variant="warning">40 звонков/день</Badge>
+                    <Badge variant="warning">2 выезда/неделю</Badge>
+                  </div>
+                ) : (
+                  <Badge variant="success" className="w-fit">Фокус на удержании и закрытии хвостов</Badge>
+                )}
+              </div>
+            </div>
+
+            {plan.tasks.length === 0 ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-5 text-sm font-semibold text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200">
+                На сегодня нет критичных задач. Данные загружены безопасно.
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-border">
+                <div className="divide-y divide-border">
+                  {plan.tasks.slice(0, 10).map((item, index) => (
+                    <div key={`${item.type}-${item.link.id}-${index}`} className="grid gap-3 px-4 py-3 text-sm lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-center">
+                      <Badge variant="default" className={managerPlanTaskTone(item.level)}>
+                        {item.level === 'risk' ? 'Есть риск' : item.level === 'warning' ? 'Нужно действие' : 'Инфо'}
+                      </Badge>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-foreground">{item.title}</p>
+                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.description}</p>
+                      </div>
+                      <p className="text-xs font-medium text-muted-foreground">Рекомендуемое действие: {item.action}</p>
+                      <Button asChild variant="ghost" size="sm">
+                        <Link to={managerPlanLinkHref(item.link)}>{item.link.label || 'Открыть'}</Link>
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 const DASHBOARD_CHART_COLORS = ['#2563eb', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#64748b'];
 
 const toneStyles: Record<DashboardTone, { bubble: string; accent: string; dot: string }> = {
@@ -444,6 +574,14 @@ export default function Dashboard() {
   const canViewPlanner = can('view', 'planner');
   const canViewDeliveries = can('view', 'deliveries');
   const canViewTasksCenter = can('view', 'tasks_center');
+  const canViewManagerMyPlan = Boolean(
+    canViewRentals && (
+      user?.role === 'Менеджер по аренде'
+      || user?.role === 'Администратор'
+      || user?.role === 'Офис-менеджер'
+      || user?.role === 'Руководитель'
+    )
+  );
 
   // All data via react-query (auto-refetches on window focus by default)
   const { data: equipment = [] }  = useEquipmentList({ enabled: canViewEquipment });
@@ -477,6 +615,12 @@ export default function Dashboard() {
     queryKey: ['deliveries', 'dashboard'],
     queryFn: deliveriesService.getAll,
     enabled: canViewDeliveries && canReadCollection('deliveries'),
+    staleTime: 1000 * 60 * 2,
+  });
+  const managerMyPlanQuery = useQuery<ManagerMyPlanResponse>({
+    queryKey: ['manager-my-plan', user?.id],
+    queryFn: managerMyPlanService.get,
+    enabled: canViewManagerMyPlan,
     staleTime: 1000 * 60 * 2,
   });
   const { data: mechanicWorkload } = useQuery<MechanicsWorkloadReport>({
@@ -2524,6 +2668,14 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {canViewManagerMyPlan && (
+        <ManagerMyPlanBlock
+          plan={managerMyPlanQuery.data}
+          isLoading={managerMyPlanQuery.isLoading}
+          isError={managerMyPlanQuery.isError}
+        />
       )}
 
       {activeDashboardTab === 'overview' && (

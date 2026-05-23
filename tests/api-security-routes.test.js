@@ -15,6 +15,7 @@ const { registerRentalChangeRequestRoutes } = require('../server/routes/rental-c
 const { registerRentalRoutes } = require('../server/routes/rentals.js');
 const { registerBotRoutes } = require('../server/routes/bot.js');
 const { registerStaffRoutes } = require('../server/routes/staff.js');
+const { registerManagerMyPlanRoutes } = require('../server/routes/manager-my-plan.js');
 
 const WARRANTY_MECHANIC_ROLE = 'Механик по гарантии';
 const WARRANTY_MECHANIC_ROLE_ALIASES = ['warranty_mechanic', 'mechanic_warranty', 'warrantyMechanic', 'mechanicWarranty', 'warranty-mechanic', 'mechanic-warranty', 'механик по гарантии'];
@@ -239,6 +240,20 @@ function createSecurityApp(state = createState()) {
   apiRouter.use(registerStaffRoutes({
     readData,
     requireAuth,
+  }));
+  apiRouter.use(registerManagerMyPlanRoutes({
+    readData,
+    requireAuth,
+    getRoleAccessSummary: role => ({
+      normalizedRole: normalizeRole(role),
+      readableCollections: Object.entries(READ_PERMISSIONS)
+        .filter(([, roles]) => roles.includes(normalizeRole(role)))
+        .map(([collection]) => collection),
+      writableCollections: Object.entries(WRITE_PERMISSIONS)
+        .filter(([, roles]) => roles.includes(normalizeRole(role)))
+        .map(([collection]) => collection),
+    }),
+    todayKey: '2026-05-23',
   }));
   apiRouter.use(registerRentalRoutes({
     readData,
@@ -1915,4 +1930,27 @@ test('MAX webhook accepts header secret and rejects missing, wrong, or query sec
   });
 
   assert.doesNotMatch(JSON.stringify(auditEntries), /webhook-secret/);
+});
+
+test('/api/manager/my-plan is read-only and does not expose secret-like fields', async () => {
+  const { app, state } = createSecurityApp();
+  state.equipment = [
+    { id: 'EQ-1', inventoryNumber: '101', status: 'available', activeInFleet: true, category: 'own', password: 'hidden' },
+    { id: 'EQ-2', inventoryNumber: '102', status: 'available', activeInFleet: true, category: 'own', token: 'hidden' },
+  ];
+  state.gantt_rentals = [
+    { id: 'GR-1', managerId: 'U-manager', manager: 'Руслан', clientId: 'C-1', client: 'ООО План', equipmentId: 'EQ-1', status: 'active', plannedReturnDate: '2026-05-23', debt: 1000, cookie: 'hidden' },
+  ];
+  state.clients = [{ id: 'C-1', company: 'ООО План', managerId: 'U-manager', manager: 'Руслан', passwordHash: 'hidden' }];
+  const before = JSON.stringify(state);
+
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'GET', '/api/manager/my-plan', 'manager-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.summary.managerName, 'Руслан');
+    assert.equal(response.body.summary.planStatus, 'needs_activity');
+    assert.doesNotMatch(JSON.stringify(response.body), /hidden|password|token|cookie|secret|privateKey|authorization/i);
+  });
+
+  assert.equal(JSON.stringify(state), before);
 });

@@ -6,7 +6,7 @@ on:
       expected_release_commit:
         description: Expected production commit hash
         required: true
-        default: 2bca18230c4488c709b13820b74c30e116374666
+        default: 59b91017dd7847d42d4619a775fbac7d6fff907d
 
 permissions:
   contents: read

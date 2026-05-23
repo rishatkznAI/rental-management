@@ -24,6 +24,7 @@ function registerFinanceRoutes(router, deps) {
     buildManagerReceivables,
     buildOverdueBuckets,
     buildFinanceReport,
+    buildCompanyEconomics,
     buildReceivables,
     normalizeAction,
     normalizePaymentPlan,
@@ -77,6 +78,29 @@ function registerFinanceRoutes(router, deps) {
       equipmentFinance: accessControl.filterCollectionByScope('equipment_finance', equipmentFinance, user),
       actions: accessControl.filterCollectionByScope('debt_collection_actions', actions, user),
       paymentPlans: accessControl.filterCollectionByScope('receivable_payment_plans', paymentPlans, user),
+    };
+  }
+
+  function boolParam(value, fallback) {
+    if (value === undefined) return fallback;
+    return String(value).trim().toLowerCase() === 'true';
+  }
+
+  function getEconomicsCollections(user) {
+    return {
+      rentals: accessControl.filterCollectionByScope('rentals', collectionList('rentals'), user),
+      ganttRentals: accessControl.filterCollectionByScope('gantt_rentals', collectionList('gantt_rentals'), user),
+      payments: accessControl.filterCollectionByScope('payments', collectionList('payments'), user),
+      paymentAllocations: accessControl.filterCollectionByScope('payment_allocations', collectionList('payment_allocations'), user),
+      companyExpenses: accessControl.filterCollectionByScope('company_expenses', collectionList('company_expenses'), user),
+      leasingPaymentSchedule: accessControl.filterCollectionByScope('leasing_payment_schedule', collectionList('leasing_payment_schedule'), user),
+      service: accessControl.filterCollectionByScope('service', collectionList('service'), user),
+      repairWorkItems: accessControl.filterCollectionByScope('repair_work_items', collectionList('repair_work_items'), user),
+      repairPartItems: accessControl.filterCollectionByScope('repair_part_items', collectionList('repair_part_items'), user),
+      deliveries: accessControl.filterCollectionByScope('deliveries', collectionList('deliveries'), user),
+      equipment: accessControl.filterCollectionByScope('equipment', collectionList('equipment'), user),
+      equipmentFinance: accessControl.filterCollectionByScope('equipment_finance', collectionList('equipment_finance'), user),
+      financeOperations: accessControl.filterCollectionByScope('finance_operations', collectionList('finance_operations'), user),
     };
   }
 
@@ -538,6 +562,18 @@ function registerFinanceRoutes(router, deps) {
       })
       .sort((left, right) => String(right.date || '').localeCompare(String(left.date || '')));
     return res.json(rows);
+  });
+
+  router.get('/finance/economics', requireAuth, requireRead('finance_operations'), (req, res) => {
+    const result = buildCompanyEconomics(getEconomicsCollections(req.user), {
+      dateFrom: req.query.dateFrom,
+      dateTo: req.query.dateTo,
+      groupBy: req.query.groupBy,
+      includeDepreciation: boolParam(req.query.includeDepreciation, true),
+      includeVat: boolParam(req.query.includeVat, false),
+      equipmentGroup: req.query.equipmentGroup,
+    });
+    return res.json(result);
   });
 
   router.post('/finance/operations', requireAuth, requireWrite('finance_operations'), (req, res) => {

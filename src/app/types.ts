@@ -1580,6 +1580,64 @@ export interface CashFlowResponse {
   warnings: string[];
 }
 
+export type FinanceEconomicsEquipmentStatus = 'profitable' | 'loss' | 'not_configured' | 'unknown';
+
+export interface FinanceEconomicsSummary {
+  revenueTotal: number;
+  cashInTotal: number;
+  directExpensesTotal: number;
+  serviceExpensesTotal: number;
+  deliveryExpensesTotal: number;
+  leasingExpensesTotal: number;
+  companyExpensesTotal: number;
+  depreciationTotal: number;
+  profitBeforeDepreciation: number;
+  profitAfterDepreciation: number;
+  marginBeforeDepreciationPercent: number;
+  marginAfterDepreciationPercent: number;
+  paybackProgressPercent: number | null;
+  equipmentCount: number;
+  profitableEquipmentCount: number;
+  lossMakingEquipmentCount: number;
+  notConfiguredDepreciationCount: number;
+}
+
+export interface FinanceEconomicsPeriod {
+  period: string;
+  revenue: number;
+  expenses: number;
+  depreciation: number;
+  profitBeforeDepreciation: number;
+  profitAfterDepreciation: number;
+}
+
+export interface FinanceEconomicsEquipment {
+  equipmentId: string;
+  label: string;
+  revenue: number;
+  expenses: number;
+  serviceExpenses: number;
+  depreciation: number;
+  profitBeforeDepreciation: number;
+  profitAfterDepreciation: number;
+  paybackPercent: number | null;
+  residualValue: number | null;
+  status: FinanceEconomicsEquipmentStatus;
+  recommendation: string;
+}
+
+export interface FinanceEconomicsWarning {
+  level: 'info' | 'warning' | 'risk';
+  message: string;
+}
+
+export interface FinanceEconomicsResponse {
+  summary: FinanceEconomicsSummary;
+  periods: FinanceEconomicsPeriod[];
+  equipment: FinanceEconomicsEquipment[];
+  warnings: FinanceEconomicsWarning[];
+}
+
 export interface DepreciationResponse {
   summary: {
     equipmentWithDepreciation: number;

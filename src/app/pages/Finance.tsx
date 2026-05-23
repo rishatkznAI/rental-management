@@ -2,10 +2,13 @@ import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  AlertTriangle,
   Archive,
   ArrowDownRight,
   ArrowUpRight,
   Banknote,
+  BarChart3,
+  Calculator,
   CalendarDays,
   CheckCircle2,
   Download,
@@ -77,6 +80,7 @@ import type {
   FinanceAccount,
   FinanceAccountStatus,
   FinanceAccountType,
+  FinanceEconomicsEquipmentStatus,
   FinanceOperation,
   FinanceOperationType,
   LeasingPaymentScheduleItem,
@@ -134,6 +138,8 @@ type FlowBucket = {
 
 type Grouping = 'day' | 'week' | 'month';
 type CashFlowMode = 'expected' | 'factual' | 'all';
+type EconomicsGrouping = 'month' | 'quarter' | 'year';
+type EconomicsEquipmentGroup = 'all' | 'rented' | 'idle' | 'service' | 'sale';
 
 type OperationFormState = {
   type: FinanceOperationType;
@@ -209,6 +215,27 @@ const ACCOUNT_TYPE_LABELS: Record<FinanceAccountType, string> = {
 const ACCOUNT_STATUS_LABELS: Record<FinanceAccountStatus, string> = {
   active: 'Активен',
   archived: 'Архив',
+};
+
+const ECONOMICS_GROUP_LABELS: Record<EconomicsGrouping, string> = {
+  month: 'Месяц',
+  quarter: 'Квартал',
+  year: 'Год',
+};
+
+const ECONOMICS_EQUIPMENT_GROUP_LABELS: Record<EconomicsEquipmentGroup, string> = {
+  all: 'Весь парк',
+  rented: 'В аренде',
+  idle: 'Свободная',
+  service: 'Сервис',
+  sale: 'Продажа',
+};
+
+const ECONOMICS_STATUS_LABELS: Record<FinanceEconomicsEquipmentStatus, string> = {
+  profitable: 'Плюс',
+  loss: 'Минус',
+  not_configured: 'Без амортизации',
+  unknown: 'Нет данных',
 };
 
 function createEmptyAccountForm(defaultDate = dateKey(new Date())): AccountFormState {
@@ -615,6 +642,17 @@ function FinanceKpiCard({
   );
 }
 
+function getEconomicsStatusBadge(status: FinanceEconomicsEquipmentStatus) {
+  const variant = status === 'profitable'
+    ? 'success'
+    : status === 'loss'
+      ? 'danger'
+      : status === 'not_configured'
+        ? 'warning'
+        : 'default';
+  return <Badge variant={variant}>{ECONOMICS_STATUS_LABELS[status]}</Badge>;
+}
+
 function optionValues(options: AdminListOption[]) {
   return options.map(option => option.value);
 }
@@ -639,6 +677,10 @@ export default function Finance() {
   const [cashFlowMode, setCashFlowMode] = React.useState<CashFlowMode>('all');
   const [cashFlowIncludeVat, setCashFlowIncludeVat] = React.useState(true);
   const [cashFlowIncludeDepreciation, setCashFlowIncludeDepreciation] = React.useState(false);
+  const [economicsGrouping, setEconomicsGrouping] = React.useState<EconomicsGrouping>('month');
+  const [includeDepreciation, setIncludeDepreciation] = React.useState(true);
+  const [includeVat, setIncludeVat] = React.useState(false);
+  const [economicsEquipmentGroup, setEconomicsEquipmentGroup] = React.useState<EconomicsEquipmentGroup>('all');
   const [taxForm, setTaxForm] = React.useState<Required<CompanyTaxSettings>>(() => createTaxSettingsForm());
   const [operationFilter, setOperationFilter] = React.useState<'all' | 'income' | 'expense' | 'transfer'>('all');
   const [operationCategoryFilter, setOperationCategoryFilter] = React.useState('all');
@@ -708,6 +750,19 @@ export default function Finance() {
       mode: cashFlowMode,
       includeVat: cashFlowIncludeVat,
       includeDepreciation: cashFlowIncludeDepreciation,
+    }),
+    staleTime: 1000 * 60,
+    enabled: canViewFinance,
+  });
+  const { data: economics, isLoading: economicsLoading } = useQuery({
+    queryKey: ['finance', 'economics', dateFrom, dateTo, economicsGrouping, includeDepreciation, includeVat, economicsEquipmentGroup],
+    queryFn: () => financeService.getEconomics({
+      dateFrom,
+      dateTo,
+      groupBy: economicsGrouping,
+      includeDepreciation,
+      includeVat,
+      equipmentGroup: economicsEquipmentGroup,
     }),
     staleTime: 1000 * 60,
     enabled: canViewFinance,
@@ -959,6 +1014,23 @@ export default function Finance() {
   const isTransferSaving = transferAccount.isPending;
   const isTaxSaving = updateTaxSettings.isPending;
   const canEditTaxSettings = user?.role === 'Администратор' || user?.userRole === 'Администратор';
+  const economicsSummary = economics?.summary;
+  const problemEquipment = React.useMemo(
+    () => (economics?.equipment || []).filter(item => item.status === 'loss').slice(0, 5),
+    [economics],
+  );
+  const noDepreciationEquipment = React.useMemo(
+    () => (economics?.equipment || []).filter(item => item.status === 'not_configured').slice(0, 5),
+    [economics],
+  );
+  const highRevenueEquipment = React.useMemo(
+    () => (economics?.equipment || []).filter(item => item.revenue > 0).slice().sort((left, right) => right.revenue - left.revenue).slice(0, 5),
+    [economics],
+  );
+  const highServiceExpenseEquipment = React.useMemo(
+    () => (economics?.equipment || []).filter(item => item.serviceExpenses > 0).slice().sort((left, right) => right.serviceExpenses - left.serviceExpenses).slice(0, 5),
+    [economics],
+  );
 
   if (!canViewFinance) {
     return <Navigate to="/" replace />;
@@ -1343,6 +1415,7 @@ export default function Finance() {
         <TabsList className="w-full justify-start overflow-x-auto sm:w-fit">
           <TabsTrigger value="overview">Обзор</TabsTrigger>
           <TabsTrigger value="cash-flow">Cash Flow</TabsTrigger>
+          <TabsTrigger value="economics">Экономика</TabsTrigger>
           <TabsTrigger value="operations">Операции</TabsTrigger>
           <TabsTrigger value="expenses">Постоянные расходы</TabsTrigger>
           <TabsTrigger value="receivables">Дебиторка</TabsTrigger>
@@ -1651,6 +1724,208 @@ export default function Finance() {
               </div>
               {(cashFlow?.items || []).length === 0 && (
                 <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">Недостаточно данных для Cash Flow за выбранный период.</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="economics" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <CardTitle>Экономика компании</CardTitle>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Управленческая экономика парка за период. Не является бухгалтерской отчётностью.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={economicsGrouping} onValueChange={(value) => setEconomicsGrouping(value as EconomicsGrouping)}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(ECONOMICS_GROUP_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={economicsEquipmentGroup} onValueChange={(value) => setEconomicsEquipmentGroup(value as EconomicsEquipmentGroup)}>
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(ECONOMICS_EQUIPMENT_GROUP_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant={includeDepreciation ? 'default' : 'secondary'}
+                  onClick={() => setIncludeDepreciation(value => !value)}
+                >
+                  <Calculator className="h-4 w-4" />
+                  {includeDepreciation ? 'С амортизацией' : 'Без амортизации'}
+                </Button>
+                <Button
+                  type="button"
+                  variant={includeVat ? 'default' : 'secondary'}
+                  onClick={() => setIncludeVat(value => !value)}
+                >
+                  <ReceiptText className="h-4 w-4" />
+                  {includeVat ? 'С НДС' : 'Без НДС'}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/35 dark:text-blue-100">
+                Амортизация — non-cash показатель, не денежный расход. Cash Flow и экономика считаются отдельно.
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <FinanceKpiCard title="Выручка" value={economicsSummary ? formatCurrency(economicsSummary.revenueTotal) : '—'} hint="Начислено по арендам" icon={ArrowDownRight} tone="success" />
+            <FinanceKpiCard title="Денег поступило" value={economicsSummary ? formatCurrency(economicsSummary.cashInTotal) : '—'} hint="Фактические оплаты, не ДДС" icon={WalletCards} />
+            <FinanceKpiCard title="Расходы" value={economicsSummary ? formatCurrency(economicsSummary.directExpensesTotal) : '—'} hint="Сервис, лизинг, доставка, компания" icon={ArrowUpRight} tone="danger" />
+            <FinanceKpiCard title="Прибыль до амортизации" value={economicsSummary ? formatCurrency(economicsSummary.profitBeforeDepreciation) : '—'} icon={TrendingUp} tone={(economicsSummary?.profitBeforeDepreciation || 0) >= 0 ? 'success' : 'danger'} />
+            <FinanceKpiCard title="Амортизация" value={economicsSummary ? formatCurrency(economicsSummary.depreciationTotal) : '—'} hint="Non-cash" icon={Calculator} tone="warning" />
+            <FinanceKpiCard title="Прибыль после амортизации" value={economicsSummary ? formatCurrency(economicsSummary.profitAfterDepreciation) : '—'} icon={BarChart3} tone={(economicsSummary?.profitAfterDepreciation || 0) >= 0 ? 'success' : 'danger'} />
+            <FinanceKpiCard title="Маржинальность" value={economicsSummary ? `${economicsSummary.marginAfterDepreciationPercent}%` : '—'} hint="После амортизации" icon={TrendingUp} />
+            <FinanceKpiCard title="Окупаемость парка" value={economicsSummary?.paybackProgressPercent == null ? '—' : `${economicsSummary.paybackProgressPercent}%`} hint="По настроенной стоимости" icon={WalletCards} />
+          </div>
+
+          {economics?.warnings?.length ? (
+            <div className="grid gap-2 md:grid-cols-2">
+              {economics.warnings.map((warning, index) => (
+                <div
+                  key={`${warning.level}-${index}`}
+                  className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+                >
+                  <AlertTriangle className={`mt-0.5 h-4 w-4 ${warning.level === 'risk' ? 'text-red-500' : warning.level === 'warning' ? 'text-amber-500' : 'text-blue-500'}`} />
+                  <span>{warning.message || 'Недостаточно данных для точного расчёта'}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Выручка / расходы / прибыль</CardTitle>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Амортизация показана отдельной non-cash линией.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={economics?.periods || []} margin={{ top: 12, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.28)" />
+                      <XAxis dataKey="period" tickLine={false} axisLine={false} fontSize={12} />
+                      <YAxis tickFormatter={(value) => formatCurrency(Number(value)).replace(',00', '')} tickLine={false} axisLine={false} fontSize={12} width={88} />
+                      <Tooltip formatter={(value, name) => [
+                        formatCurrency(Number(value)),
+                        name === 'revenue'
+                          ? 'Выручка'
+                          : name === 'expenses'
+                            ? 'Расходы'
+                            : name === 'depreciation'
+                              ? 'Амортизация'
+                              : 'Прибыль',
+                      ]} />
+                      <Area type="monotone" dataKey="revenue" stroke="#059669" fill="#10b98122" strokeWidth={2} name="revenue" />
+                      <Area type="monotone" dataKey="expenses" stroke="#dc2626" fill="#ef444422" strokeWidth={2} name="expenses" />
+                      <Area type="monotone" dataKey="profitAfterDepreciation" stroke="#2563eb" fill="transparent" strokeWidth={2} name="profit" />
+                      <Area type="monotone" dataKey="depreciation" stroke="#f59e0b" fill="transparent" strokeDasharray="4 4" strokeWidth={2} name="depreciation" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                {!economicsLoading && (!economics?.periods || economics.periods.length === 0) && (
+                  <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">Недостаточно данных для точного расчёта.</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Проблемные блоки</CardTitle>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Сигналы без паники, для управленческого разбора.</p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {[
+                  ['Техника в минусе', problemEquipment],
+                  ['Техника без настроенной амортизации', noDepreciationEquipment],
+                  ['Техника с высокой выручкой', highRevenueEquipment],
+                  ['Техника с высокими сервисными расходами', highServiceExpenseEquipment],
+                ].map(([title, rows]) => (
+                  <div key={String(title)} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{String(title)}</p>
+                      <Badge variant="default">{(rows as typeof problemEquipment).length}</Badge>
+                    </div>
+                    {(rows as typeof problemEquipment).length > 0 ? (
+                      <div className="space-y-1.5">
+                        {(rows as typeof problemEquipment).map(item => (
+                          <div key={`${title}-${item.equipmentId || item.label}`} className="flex items-center justify-between gap-3 text-sm">
+                            <span className="min-w-0 truncate text-gray-600 dark:text-gray-300">{item.label}</span>
+                            <span className="shrink-0 font-medium text-gray-900 dark:text-white">{formatCurrency(Math.abs(item.profitAfterDepreciation || item.revenue || item.serviceExpenses))}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Нет данных для блока.</p>
+                    )}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Экономика по единицам техники</CardTitle>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Детализация агрегированной картины компании без raw id в таблице.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Техника</TableHead>
+                      <TableHead className="text-right">Выручка</TableHead>
+                      <TableHead className="text-right">Расходы</TableHead>
+                      <TableHead className="text-right">Амортизация</TableHead>
+                      <TableHead className="text-right">Прибыль после амортизации</TableHead>
+                      <TableHead className="text-right">Окупаемость</TableHead>
+                      <TableHead>Статус</TableHead>
+                      <TableHead>Рекомендация</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(economics?.equipment || []).map(item => (
+                      <TableRow key={item.equipmentId || item.label}>
+                        <TableCell className="min-w-[220px] font-medium text-gray-900 dark:text-white">{item.label || 'Техника без названия'}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(item.revenue)}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(item.expenses)}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(item.depreciation)}</TableCell>
+                        <TableCell className={`text-right font-semibold ${item.profitAfterDepreciation >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {formatCurrency(item.profitAfterDepreciation)}
+                        </TableCell>
+                        <TableCell className="text-right">{item.paybackPercent == null ? '—' : `${item.paybackPercent}%`}</TableCell>
+                        <TableCell>{getEconomicsStatusBadge(item.status)}</TableCell>
+                        <TableCell className="min-w-[220px] text-sm text-gray-600 dark:text-gray-300">{item.recommendation || 'Недостаточно данных для точного расчёта.'}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {!economicsLoading && (!economics?.equipment || economics.equipment.length === 0) && (
+                <div className="rounded-lg border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  Недостаточно данных для точного расчёта.
+                </div>
               )}
             </CardContent>
           </Card>

@@ -44,6 +44,9 @@ const DEBT_AGE_BUCKETS = [
   { key: '60_plus', label: '60+ дней', rentals: 0, debt: 0 },
 ];
 
+const ECONOMICS_GROUPS = new Set(['month', 'quarter', 'year']);
+const EQUIPMENT_GROUPS = new Set(['all', 'rented', 'idle', 'service', 'sale']);
+
 function normalizeStatus(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -625,6 +628,526 @@ function buildFinanceReport({ clients, rentals, payments, paymentAllocations, cl
   };
 }
 
+function dateText(value) {
+  const text = String(value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
+
+function parseDate(value) {
+  const text = dateText(value);
+  if (!text) return null;
+  const date = new Date(`${text}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function daysInclusive(start, end) {
+  const left = parseDate(start);
+  const right = parseDate(end);
+  if (!left || !right || right < left) return 0;
+  return Math.floor((right.getTime() - left.getTime()) / 86400000) + 1;
+}
+
+function overlapDays(start, end, dateFrom, dateTo) {
+  const left = parseDate(start);
+  const right = parseDate(end);
+  const from = parseDate(dateFrom);
+  const to = parseDate(dateTo);
+  if (!left || !right || !from || !to || right < from || left > to) return 0;
+  return daysInclusive(
+    new Date(Math.max(left.getTime(), from.getTime())).toISOString().slice(0, 10),
+    new Date(Math.min(right.getTime(), to.getTime())).toISOString().slice(0, 10),
+  );
+}
+
+function addMonths(date, months) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
+}
+
+function monthCountInRange(dateFrom, dateTo) {
+  const from = parseDate(dateFrom);
+  const to = parseDate(dateTo);
+  if (!from || !to || to < from) return 0;
+  let count = 0;
+  let cursor = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1));
+  while (cursor <= end) {
+    count += 1;
+    cursor = addMonths(cursor, 1);
+  }
+  return count;
+}
+
+function getPeriodKey(dateValue, groupBy) {
+  const date = parseDate(dateValue);
+  if (!date) return '';
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  if (groupBy === 'year') return String(year);
+  if (groupBy === 'quarter') return `${year}-Q${Math.floor((month - 1) / 3) + 1}`;
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+function seedPeriods(dateFrom, dateTo, groupBy) {
+  const from = parseDate(dateFrom);
+  const to = parseDate(dateTo);
+  const map = new Map();
+  if (!from || !to || to < from) return map;
+  let cursor = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1));
+  while (cursor <= end) {
+    const key = getPeriodKey(cursor.toISOString().slice(0, 10), groupBy);
+    if (!map.has(key)) {
+      map.set(key, {
+        period: key,
+        revenue: 0,
+        expenses: 0,
+        depreciation: 0,
+        profitBeforeDepreciation: 0,
+        profitAfterDepreciation: 0,
+      });
+    }
+    cursor = addMonths(cursor, 1);
+  }
+  return map;
+}
+
+function addPeriodValue(periods, dateValue, groupBy, field, amount) {
+  const key = getPeriodKey(dateValue, groupBy);
+  if (!key || !Number.isFinite(amount) || amount === 0) return;
+  if (!periods.has(key)) {
+    periods.set(key, {
+      period: key,
+      revenue: 0,
+      expenses: 0,
+      depreciation: 0,
+      profitBeforeDepreciation: 0,
+      profitAfterDepreciation: 0,
+    });
+  }
+  periods.get(key)[field] += amount;
+}
+
+function getRentalStart(rental) {
+  return dateText(rental?.startDate || rental?.rentalStartDate || rental?.dateFrom);
+}
+
+function getRentalEnd(rental) {
+  return dateText(rental?.endDate || rental?.plannedReturnDate || rental?.actualReturnDate || rental?.rentalEndDate || rental?.dateTo || getRentalStart(rental));
+}
+
+function getRentalCanonicalId(rental) {
+  return String(rental?.rentalId || rental?.sourceRentalId || rental?.originalRentalId || rental?.id || '').trim();
+}
+
+function getRentalDedupeKey(rental) {
+  const canonicalId = getRentalCanonicalId(rental);
+  return canonicalId || JSON.stringify([
+    getRentalStart(rental),
+    getRentalEnd(rental),
+    rental?.clientId || rental?.client || '',
+    rental?.equipmentId || rental?.equipmentInv || rental?.equipment || '',
+  ]);
+}
+
+function collectEquipmentIds(record) {
+  const ids = new Set();
+  for (const field of ['equipmentId', 'equipment_id']) {
+    const value = String(record?.[field] || '').trim();
+    if (value) ids.add(value);
+  }
+  if (Array.isArray(record?.equipmentIds)) {
+    record.equipmentIds.forEach(value => {
+      const id = String(value || '').trim();
+      if (id) ids.add(id);
+    });
+  }
+  if (Array.isArray(record?.equipment)) {
+    record.equipment.forEach(value => {
+      if (typeof value === 'object') {
+        const id = String(value?.id || value?.equipmentId || '').trim();
+        if (id) ids.add(id);
+      }
+    });
+  }
+  return [...ids];
+}
+
+function getEquipmentInv(record) {
+  return String(record?.equipmentInv || record?.inventoryNumber || record?.inventoryNo || record?.equipmentInventoryNumber || '').trim();
+}
+
+function equipmentLabel(equipment) {
+  return [
+    equipment?.manufacturer,
+    equipment?.model,
+    getEquipmentInv(equipment) ? `INV ${getEquipmentInv(equipment)}` : '',
+  ].filter(Boolean).join(' / ') || String(equipment?.name || equipment?.title || equipment?.id || 'Техника без названия');
+}
+
+function getEquipmentFinanceRecord(equipment, financeByEquipmentId) {
+  const id = String(equipment?.id || '').trim();
+  const nested = equipment?.finance || equipment?.equipmentFinance || equipment?.depreciation || {};
+  return {
+    ...nested,
+    ...(id ? financeByEquipmentId.get(id) || {} : {}),
+  };
+}
+
+function financeNumber(record, fields) {
+  for (const field of fields) {
+    const value = toNumber(record?.[field]);
+    if (value > 0) return value;
+  }
+  return 0;
+}
+
+function getMonthlyDepreciation(equipment, financeRecord) {
+  return financeNumber(financeRecord, [
+    'monthlyDepreciation',
+    'depreciationMonthly',
+    'monthlyDepreciationAmount',
+    'depreciationPerMonth',
+    'amountPerMonth',
+  ]) || financeNumber(equipment, [
+    'monthlyDepreciation',
+    'depreciationMonthly',
+    'monthlyDepreciationAmount',
+  ]);
+}
+
+function getPurchaseCost(equipment, financeRecord) {
+  return financeNumber(financeRecord, [
+    'purchasePrice',
+    'purchaseCost',
+    'acquisitionCost',
+    'initialCost',
+    'bookValue',
+  ]) || financeNumber(equipment, [
+    'purchasePrice',
+    'purchaseCost',
+    'saleCostPrice',
+    'costPrice',
+  ]);
+}
+
+function getResidualValue(equipment, financeRecord) {
+  const value = financeNumber(financeRecord, ['residualValue', 'currentResidualValue', 'bookResidualValue'])
+    || financeNumber(equipment, ['residualValue', 'currentResidualValue']);
+  return value > 0 ? value : null;
+}
+
+function normalizeEquipmentGroup(status) {
+  const value = normalizeStatus(status);
+  if (['rented', 'active_rental'].includes(value)) return 'rented';
+  if (['in_service', 'service', 'repair', 'maintenance'].includes(value)) return 'service';
+  if (['sale', 'for_sale', 'sold'].includes(value)) return 'sale';
+  return 'idle';
+}
+
+function isStatusActive(status) {
+  return !['archived', 'deleted', 'cancelled', 'canceled', 'closed', 'inactive'].includes(normalizeStatus(status));
+}
+
+function getExpenseDate(row) {
+  return dateText(row?.date || row?.paidDate || row?.dueDate || row?.nextPaymentDate || row?.createdAt?.slice?.(0, 10));
+}
+
+function getExpenseAmount(row) {
+  return Math.max(0, toNumber(row?.amount ?? row?.paidAmount ?? row?.totalCost ?? row?.cost));
+}
+
+function getServiceExpenseAmount(ticket) {
+  const result = ticket?.resultData || {};
+  const partCosts = (result.partsUsed || ticket?.parts || []).reduce((sum, part) => {
+    const qty = toNumber(part?.qty ?? part?.quantity);
+    const cost = toNumber(part?.cost ?? part?.price ?? part?.priceSnapshot);
+    return sum + (qty > 0 && cost > 0 ? qty * cost : cost);
+  }, 0);
+  const workCosts = (result.worksPerformed || []).reduce((sum, work) => sum + toNumber(work?.totalCost ?? work?.amount), 0);
+  return partCosts + workCosts + toNumber(ticket?.amount ?? ticket?.cost ?? ticket?.serviceCost);
+}
+
+function buildCompanyEconomics(input = {}, rawOptions = {}) {
+  const today = new Date();
+  const defaultDateFrom = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)).toISOString().slice(0, 10);
+  const defaultDateTo = today.toISOString().slice(0, 10);
+  const options = {
+    dateFrom: dateText(rawOptions.dateFrom) || defaultDateFrom,
+    dateTo: dateText(rawOptions.dateTo) || defaultDateTo,
+    groupBy: ECONOMICS_GROUPS.has(rawOptions.groupBy) ? rawOptions.groupBy : 'month',
+    includeDepreciation: rawOptions.includeDepreciation !== false,
+    includeVat: rawOptions.includeVat === true,
+    equipmentGroup: EQUIPMENT_GROUPS.has(rawOptions.equipmentGroup) ? rawOptions.equipmentGroup : 'all',
+  };
+  const warnings = [{
+    level: 'info',
+    message: 'Управленческая экономика. Не является бухгалтерской отчётностью.',
+  }];
+  if (!options.includeVat) {
+    warnings.push({ level: 'info', message: 'НДС не выделяется в MVP-расчёте экономики.' });
+  }
+
+  const periods = seedPeriods(options.dateFrom, options.dateTo, options.groupBy);
+  const financeByEquipmentId = new Map((input.equipmentFinance || input.equipment_finance || [])
+    .filter(item => item?.equipmentId || item?.equipment_id)
+    .map(item => [String(item.equipmentId || item.equipment_id), item]));
+  const equipmentRows = (input.equipment || [])
+    .filter(item => item?.activeInFleet !== false)
+    .filter(item => options.equipmentGroup === 'all' || normalizeEquipmentGroup(item?.status) === options.equipmentGroup)
+    .map(item => {
+      const financeRecord = getEquipmentFinanceRecord(item, financeByEquipmentId);
+      const monthlyDepreciation = getMonthlyDepreciation(item, financeRecord);
+      const purchaseCost = getPurchaseCost(item, financeRecord);
+      const residualValue = getResidualValue(item, financeRecord);
+      return {
+        equipmentId: String(item?.id || '').trim(),
+        label: equipmentLabel(item),
+        inv: getEquipmentInv(item),
+        statusGroup: normalizeEquipmentGroup(item?.status),
+        revenue: 0,
+        expenses: 0,
+        serviceExpenses: 0,
+        depreciation: options.includeDepreciation ? Math.round(monthlyDepreciation * monthCountInRange(options.dateFrom, options.dateTo)) : 0,
+        purchaseCost,
+        residualValue,
+        configuredDepreciation: monthlyDepreciation > 0,
+      };
+    });
+  const equipmentById = new Map(equipmentRows.filter(item => item.equipmentId).map(item => [item.equipmentId, item]));
+  const equipmentByInv = new Map(equipmentRows.filter(item => item.inv).map(item => [item.inv, item]));
+
+  function resolveEquipment(record) {
+    for (const id of collectEquipmentIds(record)) {
+      if (equipmentById.has(id)) return equipmentById.get(id);
+    }
+    const inv = getEquipmentInv(record);
+    if (inv && equipmentByInv.has(inv)) return equipmentByInv.get(inv);
+    return null;
+  }
+
+  const rentals = [];
+  const seenRentals = new Set();
+  for (const rental of [...(input.rentals || []), ...(input.ganttRentals || input.gantt_rentals || [])]) {
+    if (!shouldCountRental(rental)) continue;
+    const key = getRentalDedupeKey(rental);
+    if (seenRentals.has(key)) continue;
+    seenRentals.add(key);
+    rentals.push(rental);
+  }
+  if ((input.rentals || []).length && (input.ganttRentals || input.gantt_rentals || []).length) {
+    warnings.push({ level: 'info', message: 'Аренды из rentals и gantt_rentals дедуплицированы по стабильному rentalId.' });
+  }
+
+  let revenueTotal = 0;
+  for (const rental of rentals) {
+    const start = getRentalStart(rental);
+    const end = getRentalEnd(rental);
+    const overlap = overlapDays(start, end, options.dateFrom, options.dateTo);
+    if (overlap <= 0) continue;
+    const totalDays = Math.max(1, daysInclusive(start, end));
+    const amount = Math.round(getRentalBillingAmount(rental) * (overlap / totalDays));
+    if (amount <= 0) continue;
+    revenueTotal += amount;
+    addPeriodValue(periods, start < options.dateFrom ? options.dateFrom : start, options.groupBy, 'revenue', amount);
+    const row = resolveEquipment(rental);
+    if (row) row.revenue += amount;
+  }
+
+  const cashInTotal = (input.payments || [])
+    .filter(payment => shouldCountPayment(payment))
+    .filter(payment => {
+      const date = getExpenseDate(payment);
+      return date && date >= options.dateFrom && date <= options.dateTo;
+    })
+    .reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0);
+
+  let serviceExpensesTotal = 0;
+  for (const ticket of input.service || input.serviceTickets || []) {
+    const date = getExpenseDate(ticket);
+    if (!date || date < options.dateFrom || date > options.dateTo) continue;
+    const amount = getServiceExpenseAmount(ticket);
+    if (amount <= 0) continue;
+    serviceExpensesTotal += amount;
+    addPeriodValue(periods, date, options.groupBy, 'expenses', amount);
+    const row = resolveEquipment(ticket);
+    if (row) {
+      row.expenses += amount;
+      row.serviceExpenses += amount;
+    }
+  }
+
+  for (const item of input.repairWorkItems || input.repair_work_items || []) {
+    const date = getExpenseDate(item);
+    if (!date || date < options.dateFrom || date > options.dateTo) continue;
+    const amount = getExpenseAmount(item);
+    if (amount <= 0) continue;
+    serviceExpensesTotal += amount;
+    addPeriodValue(periods, date, options.groupBy, 'expenses', amount);
+    const row = resolveEquipment(item);
+    if (row) {
+      row.expenses += amount;
+      row.serviceExpenses += amount;
+    }
+  }
+
+  for (const item of input.repairPartItems || input.repair_part_items || []) {
+    const date = getExpenseDate(item);
+    if (!date || date < options.dateFrom || date > options.dateTo) continue;
+    const quantity = Math.max(1, toNumber(item?.quantity));
+    const amount = getExpenseAmount(item) * quantity;
+    if (amount <= 0) continue;
+    serviceExpensesTotal += amount;
+    addPeriodValue(periods, date, options.groupBy, 'expenses', amount);
+    const row = resolveEquipment(item);
+    if (row) {
+      row.expenses += amount;
+      row.serviceExpenses += amount;
+    }
+  }
+
+  let companyExpensesTotal = 0;
+  for (const expense of input.companyExpenses || input.company_expenses || []) {
+    if (!isStatusActive(expense?.status)) continue;
+    const amount = toNumber(expense?.amount);
+    if (amount <= 0) continue;
+    const monthly = expense?.frequency === 'yearly' ? amount / 12 : expense?.frequency === 'quarterly' ? amount / 3 : amount;
+    const total = Math.round(monthly * monthCountInRange(options.dateFrom, options.dateTo));
+    if (total <= 0) continue;
+    companyExpensesTotal += total;
+    addPeriodValue(periods, options.dateFrom, options.groupBy, 'expenses', total);
+    const row = resolveEquipment(expense);
+    if (row) row.expenses += total;
+  }
+
+  for (const operation of input.financeOperations || input.finance_operations || []) {
+    if (operation?.type !== 'expense' || normalizeStatus(operation?.status) === 'archived') continue;
+    const date = getExpenseDate(operation);
+    if (!date || date < options.dateFrom || date > options.dateTo) continue;
+    const amount = getExpenseAmount(operation);
+    if (amount <= 0) continue;
+    companyExpensesTotal += amount;
+    addPeriodValue(periods, date, options.groupBy, 'expenses', amount);
+    const row = resolveEquipment(operation);
+    if (row) row.expenses += amount;
+  }
+
+  let leasingExpensesTotal = 0;
+  for (const item of input.leasingPaymentSchedule || input.leasing_payment_schedule || []) {
+    const date = dateText(item?.dueDate || item?.paidDate);
+    if (!date || date < options.dateFrom || date > options.dateTo || normalizeStatus(item?.status) === 'skipped') continue;
+    const amount = toNumber(item?.outstanding ?? item?.amount);
+    if (amount <= 0) continue;
+    leasingExpensesTotal += amount;
+    addPeriodValue(periods, date, options.groupBy, 'expenses', amount);
+  }
+
+  let deliveryExpensesTotal = 0;
+  for (const item of input.deliveries || []) {
+    const date = getExpenseDate(item);
+    if (!date || date < options.dateFrom || date > options.dateTo) continue;
+    const amount = toNumber(item?.cost ?? item?.amount ?? item?.price);
+    if (amount <= 0) continue;
+    deliveryExpensesTotal += amount;
+    addPeriodValue(periods, date, options.groupBy, 'expenses', amount);
+    const row = resolveEquipment(item);
+    if (row) row.expenses += amount;
+  }
+
+  for (const row of equipmentRows) {
+    if (row.depreciation > 0) addPeriodValue(periods, options.dateFrom, options.groupBy, 'depreciation', row.depreciation);
+  }
+
+  const depreciationTotal = equipmentRows.reduce((sum, row) => sum + row.depreciation, 0);
+  const directExpensesTotal = serviceExpensesTotal + deliveryExpensesTotal + leasingExpensesTotal + companyExpensesTotal;
+  const profitBeforeDepreciation = revenueTotal - directExpensesTotal;
+  const profitAfterDepreciation = profitBeforeDepreciation - depreciationTotal;
+  const notConfiguredDepreciationCount = equipmentRows.filter(row => !row.configuredDepreciation).length;
+  if (notConfiguredDepreciationCount > 0) {
+    warnings.push({
+      level: 'warning',
+      message: `Амортизация не настроена по ${notConfiguredDepreciationCount} единицам техники.`,
+    });
+  }
+  if (revenueTotal === 0 && directExpensesTotal === 0) {
+    warnings.push({ level: 'info', message: 'Недостаточно данных для точного расчёта.' });
+  }
+
+  const equipment = equipmentRows
+    .map(row => {
+      const profitBefore = row.revenue - row.expenses;
+      const profitAfter = profitBefore - row.depreciation;
+      const paybackPercent = row.purchaseCost > 0 ? Math.round((Math.max(0, row.revenue - row.expenses) / row.purchaseCost) * 1000) / 10 : null;
+      const status = !row.configuredDepreciation
+        ? 'not_configured'
+        : profitAfter < 0
+          ? 'loss'
+          : row.revenue > 0 || row.expenses > 0
+            ? 'profitable'
+            : 'unknown';
+      const recommendation = status === 'not_configured'
+        ? 'Настроить амортизацию для точного управленческого результата.'
+        : status === 'loss'
+          ? 'Проверить ставку аренды, простой и сервисные расходы.'
+          : status === 'profitable'
+            ? 'Экономика положительная за выбранный период.'
+            : 'Недостаточно данных для точного расчёта.';
+      return {
+        equipmentId: row.equipmentId,
+        label: row.label,
+        revenue: Math.round(row.revenue),
+        expenses: Math.round(row.expenses),
+        serviceExpenses: Math.round(row.serviceExpenses),
+        depreciation: Math.round(row.depreciation),
+        profitBeforeDepreciation: Math.round(profitBefore),
+        profitAfterDepreciation: Math.round(profitAfter),
+        paybackPercent,
+        residualValue: row.residualValue,
+        status,
+        recommendation,
+      };
+    })
+    .sort((left, right) => right.profitAfterDepreciation - left.profitAfterDepreciation || left.label.localeCompare(right.label, 'ru'));
+
+  const paybackRows = equipmentRows.filter(row => row.purchaseCost > 0);
+  const paybackProgressPercent = paybackRows.length
+    ? Math.round((paybackRows.reduce((sum, row) => sum + Math.max(0, row.revenue - row.expenses), 0) / paybackRows.reduce((sum, row) => sum + row.purchaseCost, 0)) * 1000) / 10
+    : null;
+
+  return {
+    summary: {
+      revenueTotal: Math.round(revenueTotal),
+      cashInTotal: Math.round(cashInTotal),
+      directExpensesTotal: Math.round(directExpensesTotal),
+      serviceExpensesTotal: Math.round(serviceExpensesTotal),
+      deliveryExpensesTotal: Math.round(deliveryExpensesTotal),
+      leasingExpensesTotal: Math.round(leasingExpensesTotal),
+      companyExpensesTotal: Math.round(companyExpensesTotal),
+      depreciationTotal: Math.round(depreciationTotal),
+      profitBeforeDepreciation: Math.round(profitBeforeDepreciation),
+      profitAfterDepreciation: Math.round(profitAfterDepreciation),
+      marginBeforeDepreciationPercent: revenueTotal > 0 ? Math.round((profitBeforeDepreciation / revenueTotal) * 1000) / 10 : 0,
+      marginAfterDepreciationPercent: revenueTotal > 0 ? Math.round((profitAfterDepreciation / revenueTotal) * 1000) / 10 : 0,
+      paybackProgressPercent,
+      equipmentCount: equipmentRows.length,
+      profitableEquipmentCount: equipment.filter(row => row.status === 'profitable').length,
+      lossMakingEquipmentCount: equipment.filter(row => row.status === 'loss').length,
+      notConfiguredDepreciationCount,
+    },
+    periods: Array.from(periods.values())
+      .map(period => ({
+        ...period,
+        revenue: Math.round(period.revenue),
+        expenses: Math.round(period.expenses),
+        depreciation: Math.round(period.depreciation),
+        profitBeforeDepreciation: Math.round(period.revenue - period.expenses),
+        profitAfterDepreciation: Math.round(period.revenue - period.expenses - period.depreciation),
+      }))
+      .sort((left, right) => left.period.localeCompare(right.period)),
+    equipment,
+    warnings,
+  };
+}
+
 module.exports = {
   shouldCountPayment,
   shouldCountRental,
@@ -645,4 +1168,5 @@ module.exports = {
   buildAllocationPreview,
   backfillPaymentAllocations,
   buildFinanceReport,
+  buildCompanyEconomics,
 };

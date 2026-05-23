@@ -15,7 +15,7 @@ function rolePermissionBlock(role) {
 test('admin can see System Control Center in the admin panel', () => {
   assert.match(rolePermissionBlock('Администратор'), /admin_panel:\s+ALL/);
   assert.match(sidebarSource, /Панель администратора/);
-  assert.match(settingsSource, /Центр контроля системы/);
+  assert.match(settingsSource, /Контроль системы/);
   assert.match(settingsSource, /value:\s*'system-control'/);
   assert.match(settingsSource, /<SystemControlCenterSection \/>/);
 });
@@ -27,13 +27,13 @@ test('non-admin roles do not get the admin panel menu route', () => {
 });
 
 test('System Control Center renders app, bot, GSM cards and unknown storage warning', () => {
-  assert.match(settingsSource, /App access/);
-  assert.match(settingsSource, /Bot/);
+  assert.match(settingsSource, /APP_DISABLED/);
+  assert.match(settingsSource, /MAX bot/);
   assert.match(settingsSource, /GSM/);
   assert.match(settingsSource, /Проверьте Railway volume и DB_PATH вручную/);
-  assert.match(settingsSource, /Railway production variables/);
-  assert.match(settingsSource, /staging frontend VITE_API_URL/);
-  assert.match(settingsSource, /bot\/GSM test secrets or disabled flags/);
+  assert.match(settingsSource, /Режим работы/);
+  assert.match(settingsSource, /Хранилище/);
+  assert.match(settingsSource, /Рекомендации/);
 });
 
 test('System Control Center has explicit forbidden and backend error states', () => {
@@ -42,4 +42,3 @@ test('System Control Center has explicit forbidden and backend error states', ()
   assert.match(settingsSource, /data-testid="system-control-error"/);
   assert.match(settingsSource, /Не удалось получить статус системы/);
 });
-

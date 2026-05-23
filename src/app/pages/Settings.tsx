@@ -400,7 +400,7 @@ export default function Settings() {
             { value: 'data',          label: 'Данные системы' },
             { value: 'audit',         label: 'Журнал действий' },
             { value: 'diagnostics',   label: 'Диагностика' },
-            { value: 'system-control', label: 'Центр контроля системы' },
+            { value: 'system-control', label: 'Контроль системы' },
           ].map(tab => (
             <TabsTrigger
               key={tab.value}
@@ -920,11 +920,39 @@ type ProductionDiagnostics = {
   }>;
 };
 
-type SystemControlStatusLevel = 'ok' | 'warning' | 'danger' | 'unknown';
+type SystemControlStatusLevel = 'ok' | 'warning' | 'risk' | 'danger' | 'unknown';
 
 type SystemControlCenterStatus = {
+  status: 'ok' | 'warning' | 'risk';
   ok: boolean;
   generatedAt: string;
+  runtime: {
+    appDisabled: boolean;
+    botDisabled: boolean;
+    gsmDisabled: boolean;
+    environment: 'production' | 'staging' | 'development' | 'unknown';
+  };
+  health: {
+    api: 'ok' | 'warning' | 'risk';
+    ready: 'ok' | 'warning' | 'risk' | 'unknown';
+    lastCheckedAt: string;
+  };
+  dataRisks: {
+    undefinedLikeCount: number;
+    nullLikeCount: number;
+    objectObjectLikeCount: number;
+    brokenEquipmentLinks: number;
+    brokenRentalLinks: number;
+    brokenServiceLinks: number;
+  };
+  serviceQuality: {
+    totalRepeats: number;
+    critical: number;
+    high: number;
+    affectedEquipment: number;
+    affectedMechanics: number;
+    topScenario: string;
+  };
   environment: {
     nodeEnv: string;
     appEnvironment: string;
@@ -942,8 +970,12 @@ type SystemControlCenterStatus = {
   };
   version: {
     backendCommit: string;
+    backendBuildTime: string;
+    nodeEnv: string;
+    frontendCommitFromRequestOrConfig: string;
+    versionMatch: boolean | 'unknown';
     buildTime: string;
-    frontendCommit: string | null;
+    frontendCommit: string;
   };
   database: {
     dbPathPresent: boolean;
@@ -952,6 +984,11 @@ type SystemControlCenterStatus = {
     usesSqlite: boolean;
   };
   storage: {
+    dbSafeLabel: 'sqlite';
+    dbPathSafeLabel: string;
+    volumeSafeSignal: 'available' | 'unavailable' | 'unknown';
+    walPresent: boolean | 'unknown';
+    dbSizeBytes: number;
     classification: 'production-volume' | 'staging-volume' | 'local' | 'unknown';
     volumeSignals: string[];
     mountPath: string;
@@ -972,7 +1009,12 @@ type SystemControlCenterStatus = {
     status: SystemControlStatusLevel;
     message: string;
   }>;
-  recommendations: string[];
+  recommendations: Array<{
+    level: 'info' | 'warning' | 'risk';
+    title: string;
+    description: string;
+    action: string;
+  }>;
 };
 
 type VersionProbeResponse = {
@@ -1234,7 +1276,7 @@ function statusBadgeVariant(status: SystemControlStatusLevel): 'success' | 'warn
 function statusBadgeLabel(status: SystemControlStatusLevel) {
   if (status === 'ok') return 'OK';
   if (status === 'warning') return 'WARNING';
-  if (status === 'danger') return 'DANGER';
+  if (status === 'risk' || status === 'danger') return 'RISK';
   return 'UNKNOWN';
 }
 
@@ -1245,8 +1287,20 @@ function formatKb(value: number | null | undefined) {
   return `${mb.toFixed(1)} MB`;
 }
 
+function formatBytes(value: number | null | undefined) {
+  if (!Number.isFinite(Number(value))) return '—';
+  const bytes = Number(value);
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
 function environmentLabel(status?: SystemControlCenterStatus) {
   if (!status) return 'Unknown';
+  if (status.runtime?.environment === 'production') return 'Production';
+  if (status.runtime?.environment === 'staging') return 'Staging';
+  if (status.runtime?.environment === 'development') return 'Development';
   if (status.environment.isProductionLike) return 'Production';
   if (status.environment.isStagingLike) return 'Staging';
   if (status.environment.nodeEnv === 'development' || status.database.dbPathKind === 'local') return 'Local';
@@ -1703,13 +1757,15 @@ function SystemControlCenterSection() {
 
   const status = statusQuery.data;
   const forbidden = statusQuery.error && typeof statusQuery.error === 'object' && 'status' in statusQuery.error && Number((statusQuery.error as { status?: number }).status) === 403;
-  const highestRisk: SystemControlStatusLevel = React.useMemo(() => {
-    const levels = status?.checks.map(check => check.status) || [];
-    if (levels.includes('danger')) return 'danger';
-    if (levels.includes('warning')) return 'warning';
-    if (levels.includes('unknown') || status?.storage.risk === 'unknown') return 'unknown';
-    return 'ok';
-  }, [status?.checks, status?.storage.risk]);
+  const highestRisk: SystemControlStatusLevel = status?.status || 'unknown';
+  const dataRiskTotal = status
+    ? status.dataRisks.undefinedLikeCount
+      + status.dataRisks.nullLikeCount
+      + status.dataRisks.objectObjectLikeCount
+      + status.dataRisks.brokenEquipmentLinks
+      + status.dataRisks.brokenRentalLinks
+      + status.dataRisks.brokenServiceLinks
+    : 0;
   const refresh = () => {
     void statusQuery.refetch();
     void healthQuery.refetch();
@@ -1720,7 +1776,7 @@ function SystemControlCenterSection() {
     return (
       <Card data-testid="system-control-forbidden">
         <CardHeader>
-          <CardTitle>Центр контроля системы</CardTitle>
+          <CardTitle>Контроль системы</CardTitle>
           <CardDescription>Недостаточно прав для просмотра системного статуса.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -1736,7 +1792,7 @@ function SystemControlCenterSection() {
     return (
       <Card data-testid="system-control-error">
         <CardHeader>
-          <CardTitle>Центр контроля системы</CardTitle>
+          <CardTitle>Контроль системы</CardTitle>
           <CardDescription>Не удалось получить статус системы.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1758,8 +1814,8 @@ function SystemControlCenterSection() {
         <CardHeader>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <CardTitle>Центр контроля системы</CardTitle>
-              <CardDescription>Read-only статус среды, conservation flags, версии и storage-сигналов без секретов.</CardDescription>
+              <CardTitle>Контроль системы</CardTitle>
+              <CardDescription>Read-only обзор среды, версий, режимов работы и сервисных сигналов без чувствительных данных.</CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant={statusBadgeVariant(highestRisk)}>{statusBadgeLabel(highestRisk)}</Badge>
@@ -1771,44 +1827,50 @@ function SystemControlCenterSection() {
           </div>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <DiagnosticsField label="Environment type" value={environmentLabel(status)} />
+          <div className="md:col-span-2 xl:col-span-4">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Версии</h3>
+          </div>
+          <DiagnosticsField label="Среда" value={environmentLabel(status)} />
           <DiagnosticsField label="Backend commit" value={<span className="font-mono">{formatValue(status?.version.backendCommit)}</span>} />
-          <DiagnosticsField label="Frontend commit" value={<span className="font-mono">{formatValue(frontendBuildInfo.commit || status?.version.frontendCommit)}</span>} />
-          <DiagnosticsField label="Frontend build" value={formatValue(frontendBuildInfo.buildTime)} />
-          <DiagnosticsField label="Current API URL" value={<span className="font-mono">{API_BASE_URL || '(same origin / Vite proxy)'}</span>} />
-          <DiagnosticsField label="Node env" value={formatValue(status?.environment.nodeEnv)} />
-          <DiagnosticsField label="App environment" value={formatValue(status?.environment.appEnvironment)} />
-          <DiagnosticsField label="Generated" value={formatValue(status?.generatedAt)} />
+          <DiagnosticsField label="Frontend commit" value={<span className="font-mono">{formatValue(frontendBuildInfo.commit || status?.version.frontendCommitFromRequestOrConfig)}</span>} />
+          <DiagnosticsField label="Совпадение версий" value={status?.version.versionMatch === true ? <Badge variant="success">совпадают</Badge> : status?.version.versionMatch === false ? <Badge variant="warning">отличаются</Badge> : <Badge variant="secondary">неизвестно</Badge>} />
+          {status?.version.versionMatch === false ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 xl:col-span-4">
+              Backend и frontend собраны из разных commit. Проверьте release перед изменениями.
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
       <div className="grid gap-6 xl:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle>Conservation</CardTitle>
-            <CardDescription>Фактическая интерпретация runtime flags.</CardDescription>
+            <CardTitle>Режим работы</CardTitle>
+            <CardDescription>Фактическая интерпретация APP_DISABLED, BOT и GSM.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <DiagnosticsField label="App access" value={status?.conservation.webAccessBlocked ? <Badge variant="warning">Conserved</Badge> : <Badge variant="success">Open</Badge>} />
-            <DiagnosticsField label="Bot" value={status?.conservation.botWritesBlocked ? <Badge variant="success">Disabled</Badge> : <Badge variant="warning">Enabled</Badge>} />
-            <DiagnosticsField label="GSM" value={status?.conservation.gsmWritesBlocked ? <Badge variant="success">Disabled</Badge> : <Badge variant="warning">Enabled</Badge>} />
+            <DiagnosticsField label="APP_DISABLED" value={status?.runtime.appDisabled ? <Badge variant="warning">закрыто</Badge> : <Badge variant="success">открыто</Badge>} />
+            <DiagnosticsField label="MAX bot" value={status?.runtime.botDisabled ? <Badge variant="success">выключен</Badge> : <Badge variant="danger">включён</Badge>} />
+            <DiagnosticsField label="GSM/GPRS" value={status?.runtime.gsmDisabled ? <Badge variant="success">выключен</Badge> : <Badge variant="danger">включён</Badge>} />
+            {status?.runtime.environment === 'production' && !status.runtime.appDisabled ? (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
+                Production открыт для авторизованных пользователей.
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Database / storage</CardTitle>
-            <CardDescription>Safe labels only; no absolute DB paths.</CardDescription>
+            <CardTitle>Хранилище</CardTitle>
+            <CardDescription>Только безопасные SQLite и volume-сигналы.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <DiagnosticsField label="SQLite detected" value={status?.database.usesSqlite ? 'yes' : 'no'} />
-            <DiagnosticsField label="DB path kind" value={formatValue(status?.database.dbPathKind)} />
-            <DiagnosticsField label="DB path label" value={<span className="font-mono">{formatValue(status?.database.dbPathSafeLabel)}</span>} />
-            <DiagnosticsField label="Volume isolation" value={status?.database.dbPathKind === 'unknown' ? <Badge variant="warning">unknown</Badge> : <Badge variant="success">confirmed</Badge>} />
-            <DiagnosticsField label="Storage mount" value={<span className="font-mono">{formatValue(status?.storage.mountPath)}</span>} />
-            <DiagnosticsField label="Runtime device" value={<span className="font-mono">{formatValue(status?.storage.device || status?.storage.statDevice)}</span>} />
-            <DiagnosticsField label="Storage used" value={`${formatKb(status?.storage.usedKb)} / ${formatKb(status?.storage.totalKb)}`} />
-            <DiagnosticsField label="Storage signal" value={status?.storage.signalPresent ? <Badge variant="success">present</Badge> : <Badge variant="warning">unknown</Badge>} />
+            <DiagnosticsField label="База" value={status?.storage.dbSafeLabel || 'sqlite'} />
+            <DiagnosticsField label="Путь" value={<span className="font-mono">{formatValue(status?.storage.dbPathSafeLabel)}</span>} />
+            <DiagnosticsField label="Volume signal" value={<Badge variant={status?.storage.volumeSafeSignal === 'available' ? 'success' : 'warning'}>{formatValue(status?.storage.volumeSafeSignal)}</Badge>} />
+            <DiagnosticsField label="WAL" value={String(status?.storage.walPresent ?? 'unknown')} />
+            <DiagnosticsField label="Размер БД" value={formatBytes(status?.storage.dbSizeBytes)} />
             {status?.database.dbPathKind === 'unknown' && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
                 Проверьте Railway volume и DB_PATH вручную
@@ -1819,50 +1881,70 @@ function SystemControlCenterSection() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Safe probes</CardTitle>
-            <CardDescription>Публичные probes остаются безопасными при conservation mode.</CardDescription>
+            <CardTitle>Health</CardTitle>
+            <CardDescription>Безопасные проверки доступности без вывода env.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <DiagnosticsField label="/health available" value={healthQuery.data?.ok ? <Badge variant="success">available</Badge> : healthQuery.isError ? <Badge variant="danger">unavailable</Badge> : 'Проверяем...'} />
-            <DiagnosticsField label="/api/version available" value={versionQuery.data?.ok ? <Badge variant="success">available</Badge> : versionQuery.isError ? <Badge variant="danger">unavailable</Badge> : 'Проверяем...'} />
-            <DiagnosticsField label="app.disabled" value={String(versionQuery.data?.app?.disabled ?? status?.conservation.appDisabled ?? 'unknown')} />
+            <DiagnosticsField label="/health" value={healthQuery.data?.ok ? <Badge variant="success">ok</Badge> : healthQuery.isError ? <Badge variant="danger">risk</Badge> : 'Проверяем...'} />
+            <DiagnosticsField label="/api/version" value={versionQuery.data?.ok ? <Badge variant="success">ok</Badge> : versionQuery.isError ? <Badge variant="danger">risk</Badge> : 'Проверяем...'} />
+            <DiagnosticsField label="Последняя проверка" value={formatValue(status?.health.lastCheckedAt)} />
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Риски данных</CardTitle>
+            <CardDescription>Сводка по placeholder-значениям и битым ID-связям.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            <DiagnosticsField label="undefined-like" value={status?.dataRisks.undefinedLikeCount ?? 0} />
+            <DiagnosticsField label="null-like" value={status?.dataRisks.nullLikeCount ?? 0} />
+            <DiagnosticsField label="[object Object]-like" value={status?.dataRisks.objectObjectLikeCount ?? 0} />
+            <DiagnosticsField label="Битые связи техники" value={status?.dataRisks.brokenEquipmentLinks ?? 0} />
+            <DiagnosticsField label="Битые связи аренд" value={status?.dataRisks.brokenRentalLinks ?? 0} />
+            <DiagnosticsField label="Битые связи сервиса" value={status?.dataRisks.brokenServiceLinks ?? 0} />
+            {dataRiskTotal > 0 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 sm:col-span-2">
+                Найдены данные для ручной проверки. Раздел ничего не исправляет автоматически.
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Качество ремонта</CardTitle>
+            <CardDescription>Сводка повторных поломок без персональных оценок вины.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            <DiagnosticsField label="Всего повторов" value={status?.serviceQuality.totalRepeats ?? 0} />
+            <DiagnosticsField label="Критичные" value={status?.serviceQuality.critical ?? 0} />
+            <DiagnosticsField label="Высокие" value={status?.serviceQuality.high ?? 0} />
+            <DiagnosticsField label="Техника" value={status?.serviceQuality.affectedEquipment ?? 0} />
+            <DiagnosticsField label="Механики в разборе" value={status?.serviceQuality.affectedMechanics ?? 0} />
+            <DiagnosticsField label="Главный сценарий" value={formatValue(status?.serviceQuality.topScenario)} />
           </CardContent>
         </Card>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Checks</CardTitle>
-          <CardDescription>Warnings are informational; this page never changes Railway variables.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2">
-          {(status?.checks || []).map(check => (
-            <div key={check.id} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium text-gray-900 dark:text-white">{check.label}</p>
-                <Badge variant={statusBadgeVariant(check.status)}>{statusBadgeLabel(check.status)}</Badge>
-              </div>
-              <p className="mt-2 text-sm text-muted-foreground">{check.message}</p>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Recommendations</CardTitle>
-          <CardDescription>Manual checks still required outside the app.</CardDescription>
+          <CardTitle>Рекомендации</CardTitle>
+          <CardDescription>Только чтение: без restart, redeploy, delete и изменения переменных.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <ul className="list-disc space-y-2 pl-5 text-sm text-muted-foreground">
-            <li>Railway production variables</li>
-            <li>Railway staging volume</li>
-            <li>staging frontend VITE_API_URL</li>
-            <li>bot/GSM test secrets or disabled flags</li>
-            {(status?.recommendations || []).map(item => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
+          {(status?.recommendations || []).map(item => (
+            <div key={`${item.level}-${item.title}`} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={item.level === 'risk' ? 'danger' : item.level === 'warning' ? 'warning' : 'info'}>{item.level}</Badge>
+                <p className="font-medium text-gray-900 dark:text-white">{item.title}</p>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">{item.description}</p>
+              <p className="mt-2 text-sm text-gray-700 dark:text-gray-200">{item.action}</p>
+            </div>
+          ))}
         </CardContent>
       </Card>
     </div>

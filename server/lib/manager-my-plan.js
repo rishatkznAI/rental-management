@@ -127,12 +127,17 @@ function safeClient(client) {
 }
 
 function safeActivity(activity, clientsById = new Map(), rentalsById = new Map(), equipmentById = new Map()) {
-  const relatedClientId = text(activity?.relatedClientId);
-  const relatedRentalId = text(activity?.relatedRentalId);
-  const relatedEquipmentId = text(activity?.relatedEquipmentId);
-  const rental = rentalsById.get(relatedRentalId);
+  const shouldScopeRelated = arguments.length > 1;
+  const rawClientId = text(activity?.relatedClientId);
+  const rawRentalId = text(activity?.relatedRentalId);
+  const rawEquipmentId = text(activity?.relatedEquipmentId);
+  const rental = rentalsById.get(rawRentalId);
+  const rentalClientId = text(rental?.clientId);
+  const relatedClientId = shouldScopeRelated && rawClientId && !clientsById.has(rawClientId) ? '' : rawClientId;
+  const relatedRentalId = shouldScopeRelated && rawRentalId && !rental ? '' : rawRentalId;
+  const relatedEquipmentId = shouldScopeRelated && rawEquipmentId && !equipmentById.has(rawEquipmentId) ? '' : rawEquipmentId;
   const equipment = equipmentById.get(relatedEquipmentId);
-  const client = clientsById.get(relatedClientId || text(rental?.clientId));
+  const client = clientsById.get(relatedClientId || rentalClientId);
   return {
     id: text(activity?.id),
     createdAt: isoOrNow(activity?.createdAt, ''),
@@ -567,9 +572,16 @@ function buildManagerMyPlan(input) {
     dailyCallsTarget: activityRequired ? 40 : 0,
     weeklySiteVisitsTarget: activityRequired ? 2 : 0,
     required: activityRequired,
-    clientsById,
+    clientsById: canScopeByManager
+      ? new Map(scopedClients.map(item => [text(item.id), item]))
+      : clientsById,
     rentalsById,
-    equipmentById,
+    equipmentById: canScopeByManager
+      ? new Map(rentals
+        .map(item => equipmentById.get(rentalEquipmentId(item)))
+        .filter(Boolean)
+        .map(item => [text(item.id), item]))
+      : equipmentById,
   });
 
   const body = {
@@ -637,6 +649,7 @@ module.exports = {
   safeActivity,
   activityMatchesPeriod,
   chooseManagerScope,
+  hasManagerLink,
   buildAccess,
   text,
   dateKey,

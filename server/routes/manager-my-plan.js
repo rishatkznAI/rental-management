@@ -6,6 +6,7 @@ const {
   buildManagerMyPlan,
   chooseManagerScope,
   dateKey,
+  hasManagerLink,
   isPlanRoleAllowed,
   safeActivity,
   text,
@@ -27,6 +28,50 @@ function registerManagerMyPlanRoutes(deps) {
 
   const router = express.Router();
 
+  function canRead(access, collection) {
+    return access.readableCollections.includes(collection);
+  }
+
+  function equipmentIdFromRental(rental) {
+    return text(rental?.equipmentId || rental?.equipment?.[0] || rental?.equipmentIds?.[0]);
+  }
+
+  function buildScopedRelations(context, collections) {
+    const { access, manager } = context;
+    const clients = canRead(access, 'clients') ? collections.clients : [];
+    const rentals = [
+      ...(canRead(access, 'rentals') ? collections.rentals : []),
+      ...(canRead(access, 'gantt_rentals') ? collections.ganttRentals : []),
+    ];
+    const equipment = canRead(access, 'equipment') ? collections.equipment : [];
+    const unrestricted = access.normalizedRole === 'Администратор' && !manager.id;
+    const scopedRentals = unrestricted ? rentals : rentals.filter(item => hasManagerLink(item, manager));
+    const scopedRentalClientIds = new Set(scopedRentals.map(item => text(item.clientId)).filter(Boolean));
+    const scopedRentalEquipmentIds = new Set(scopedRentals.map(equipmentIdFromRental).filter(Boolean));
+    const scopedClients = unrestricted
+      ? clients
+      : clients.filter(item => hasManagerLink(item, manager) || scopedRentalClientIds.has(text(item.id)));
+    const scopedEquipment = unrestricted
+      ? equipment
+      : equipment.filter(item => hasManagerLink(item, manager) || scopedRentalEquipmentIds.has(text(item.id)));
+
+    return {
+      clientsById: new Map(scopedClients.map(item => [text(item.id), item])),
+      rentalsById: new Map(scopedRentals.map(item => [text(item.id), item])),
+      equipmentById: new Map(scopedEquipment.map(item => [text(item.id), item])),
+    };
+  }
+
+  function validateRelatedAccess(body, scopedRelations) {
+    const relatedClientId = text(body?.relatedClientId);
+    const relatedRentalId = text(body?.relatedRentalId);
+    const relatedEquipmentId = text(body?.relatedEquipmentId);
+    if (relatedClientId && !scopedRelations.clientsById.has(relatedClientId)) return false;
+    if (relatedRentalId && !scopedRelations.rentalsById.has(relatedRentalId)) return false;
+    if (relatedEquipmentId && !scopedRelations.equipmentById.has(relatedEquipmentId)) return false;
+    return true;
+  }
+
   function commonContext(req) {
     const access = buildAccess(req.user?.userRole, getRoleAccessSummary);
     if (!isPlanRoleAllowed(access)) return { access, forbidden: true };
@@ -41,14 +86,19 @@ function registerManagerMyPlanRoutes(deps) {
     const context = commonContext(req);
     if (context.forbidden) return context;
     const clients = readData('clients') || [];
-    const rentals = [...(readData('rentals') || []), ...(readData('gantt_rentals') || [])];
+    const rentals = readData('rentals') || [];
+    const ganttRentals = readData('gantt_rentals') || [];
     const equipment = readData('equipment') || [];
+    const scopedRelations = buildScopedRelations(context, {
+      clients,
+      rentals,
+      ganttRentals,
+      equipment,
+    });
     return {
       ...context,
       activityRows: readData('manager_activity') || [],
-      clientsById: new Map(clients.map(item => [text(item.id), item])),
-      rentalsById: new Map(rentals.map(item => [text(item.id), item])),
-      equipmentById: new Map(equipment.map(item => [text(item.id), item])),
+      ...scopedRelations,
     };
   }
 
@@ -110,6 +160,15 @@ function registerManagerMyPlanRoutes(deps) {
     const now = nowIso();
     const activityType = ACTIVITY_TYPES.has(req.body?.activityType) ? req.body.activityType : '';
     if (!activityType) return res.status(400).json({ ok: false, error: 'Unsupported activity type' });
+    const scopedRelations = buildScopedRelations(context, {
+      clients: readData('clients') || [],
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      equipment: readData('equipment') || [],
+    });
+    if (!validateRelatedAccess(req.body, scopedRelations)) {
+      return res.status(403).json({ ok: false, error: 'Связанная сущность недоступна' });
+    }
     const resultStatus = ACTIVITY_RESULTS.has(req.body?.resultStatus) ? req.body.resultStatus : 'other';
     const effectiveAt = req.body?.effectiveAt || req.body?.activityDate || now;
     const item = {
@@ -130,7 +189,7 @@ function registerManagerMyPlanRoutes(deps) {
     };
     const rows = readData('manager_activity') || [];
     writeData('manager_activity', [...rows, item]);
-    return res.status(201).json({ ok: true, item: safeActivity(item) });
+    return res.status(201).json({ ok: true, item: safeActivity(item, scopedRelations.clientsById, scopedRelations.rentalsById, scopedRelations.equipmentById) });
   });
 
   return router;

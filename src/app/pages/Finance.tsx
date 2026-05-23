@@ -15,6 +15,7 @@ import {
   Plus,
   ReceiptText,
   Search,
+  Settings2,
   Trash2,
   TrendingUp,
   WalletCards,
@@ -72,6 +73,7 @@ import type {
   CompanyExpense,
   CompanyExpenseFrequency,
   CompanyExpenseStatus,
+  CompanyTaxSettings,
   FinanceAccount,
   FinanceAccountStatus,
   FinanceAccountType,
@@ -131,6 +133,7 @@ type FlowBucket = {
 };
 
 type Grouping = 'day' | 'week' | 'month';
+type CashFlowMode = 'expected' | 'factual' | 'all';
 
 type OperationFormState = {
   type: FinanceOperationType;
@@ -245,6 +248,20 @@ function createEmptyOperationForm(defaultDate = dateKey(new Date())): OperationF
     relatedEntityId: '',
     relatedEntityLabel: '',
     comment: '',
+  };
+}
+
+function createTaxSettingsForm(settings?: CompanyTaxSettings): Required<CompanyTaxSettings> {
+  return {
+    companyName: settings?.companyName || '',
+    taxRegime: settings?.taxRegime || '',
+    vatMode: settings?.vatMode || 'none',
+    defaultVatRate: Number(settings?.defaultVatRate || 0),
+    inputVatEnabled: Boolean(settings?.inputVatEnabled),
+    outputVatEnabled: Boolean(settings?.outputVatEnabled),
+    vatIncludedByDefault: Boolean(settings?.vatIncludedByDefault),
+    effectiveFrom: settings?.effectiveFrom || '',
+    comment: settings?.comment || '',
   };
 }
 
@@ -618,6 +635,11 @@ export default function Finance() {
   const [dateFrom, setDateFrom] = React.useState(() => monthStartKey());
   const [dateTo, setDateTo] = React.useState(() => monthEndKey());
   const [flowGrouping, setFlowGrouping] = React.useState<Grouping>('day');
+  const [cashFlowGrouping, setCashFlowGrouping] = React.useState<Grouping>('month');
+  const [cashFlowMode, setCashFlowMode] = React.useState<CashFlowMode>('all');
+  const [cashFlowIncludeVat, setCashFlowIncludeVat] = React.useState(true);
+  const [cashFlowIncludeDepreciation, setCashFlowIncludeDepreciation] = React.useState(false);
+  const [taxForm, setTaxForm] = React.useState<Required<CompanyTaxSettings>>(() => createTaxSettingsForm());
   const [operationFilter, setOperationFilter] = React.useState<'all' | 'income' | 'expense' | 'transfer'>('all');
   const [operationCategoryFilter, setOperationCategoryFilter] = React.useState('all');
   const [operationAccountFilter, setOperationAccountFilter] = React.useState('all');
@@ -677,6 +699,29 @@ export default function Finance() {
     staleTime: 1000 * 60,
     enabled: canViewFinance,
   });
+  const { data: cashFlow } = useQuery({
+    queryKey: ['finance', 'cash-flow', dateFrom, dateTo, cashFlowGrouping, cashFlowMode, cashFlowIncludeVat, cashFlowIncludeDepreciation],
+    queryFn: () => financeService.getCashFlow({
+      dateFrom,
+      dateTo,
+      groupBy: cashFlowGrouping,
+      mode: cashFlowMode,
+      includeVat: cashFlowIncludeVat,
+      includeDepreciation: cashFlowIncludeDepreciation,
+    }),
+    staleTime: 1000 * 60,
+    enabled: canViewFinance,
+  });
+  const { data: taxSettings } = useQuery({
+    queryKey: ['finance', 'tax-settings'],
+    queryFn: financeService.getTaxSettings,
+    staleTime: 1000 * 60,
+    enabled: canViewFinance,
+  });
+
+  React.useEffect(() => {
+    setTaxForm(createTaxSettingsForm(taxSettings));
+  }, [taxSettings]);
 
   const createExpense = useMutation({
     mutationFn: (data: Omit<CompanyExpense, 'id'>) => companyExpensesService.create(data),
@@ -725,6 +770,10 @@ export default function Finance() {
       queryClient.invalidateQueries({ queryKey: ['finance', 'accounts'] });
       queryClient.invalidateQueries({ queryKey: ['finance', 'operations'] });
     },
+  });
+  const updateTaxSettings = useMutation({
+    mutationFn: financeService.updateTaxSettings,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['finance', 'tax-settings'] }),
   });
 
   const expenseFormFields = React.useMemo(
@@ -908,6 +957,8 @@ export default function Finance() {
   const isSaving = createExpense.isPending || updateExpense.isPending;
   const isAccountSaving = createAccount.isPending || updateAccount.isPending;
   const isTransferSaving = transferAccount.isPending;
+  const isTaxSaving = updateTaxSettings.isPending;
+  const canEditTaxSettings = user?.role === 'Администратор' || user?.userRole === 'Администратор';
 
   if (!canViewFinance) {
     return <Navigate to="/" replace />;
@@ -927,6 +978,13 @@ export default function Finance() {
       },
     }));
     setFormError('');
+  };
+
+  const saveTaxSettings = async () => {
+    await updateTaxSettings.mutateAsync({
+      ...taxForm,
+      defaultVatRate: Number(taxForm.defaultVatRate || 0),
+    });
   };
 
   const getField = (key: string): AdminFormFieldSetting | undefined => fieldMap.get(key);
@@ -1284,11 +1342,13 @@ export default function Finance() {
       <Tabs defaultValue="overview" className="gap-4">
         <TabsList className="w-full justify-start overflow-x-auto sm:w-fit">
           <TabsTrigger value="overview">Обзор</TabsTrigger>
+          <TabsTrigger value="cash-flow">Cash Flow</TabsTrigger>
           <TabsTrigger value="operations">Операции</TabsTrigger>
           <TabsTrigger value="expenses">Постоянные расходы</TabsTrigger>
           <TabsTrigger value="receivables">Дебиторка</TabsTrigger>
           <TabsTrigger value="leasing">Лизинг</TabsTrigger>
           <TabsTrigger value="accounts">Счета и кассы</TabsTrigger>
+          <TabsTrigger value="tax-settings">НДС</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -1477,6 +1537,123 @@ export default function Finance() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        <TabsContent value="cash-flow" className="space-y-4">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+            Cash Flow, НДС и амортизация здесь являются управленческим расчётом и не заменяют бухгалтерскую отчётность.
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={cashFlowMode} onValueChange={(value) => setCashFlowMode(value as CashFlowMode)}>
+              <SelectTrigger className="w-[170px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Факт и прогноз</SelectItem>
+                <SelectItem value="factual">Только факт</SelectItem>
+                <SelectItem value="expected">Только прогноз</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={cashFlowGrouping} onValueChange={(value) => setCashFlowGrouping(value as Grouping)}>
+              <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="day">По дням</SelectItem>
+                <SelectItem value="week">По неделям</SelectItem>
+                <SelectItem value="month">По месяцам</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant={cashFlowIncludeVat ? 'default' : 'secondary'} onClick={() => setCashFlowIncludeVat(value => !value)}>
+              {cashFlowIncludeVat ? 'С НДС' : 'Без НДС'}
+            </Button>
+            <Button variant={cashFlowIncludeDepreciation ? 'default' : 'secondary'} onClick={() => setCashFlowIncludeDepreciation(value => !value)}>
+              Амортизация
+            </Button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <FinanceKpiCard title="Денег ожидается" value={formatCurrency(cashFlow?.summary.incomingTotal || 0)} icon={ArrowDownRight} tone="success" />
+            <FinanceKpiCard title="Денег уйдёт" value={formatCurrency(cashFlow?.summary.outgoingTotal || 0)} icon={ArrowUpRight} tone="danger" />
+            <FinanceKpiCard title="Чистый поток" value={formatCurrency(cashFlow?.summary.netCashFlow || 0)} icon={TrendingUp} tone={(cashFlow?.summary.netCashFlow || 0) >= 0 ? 'success' : 'warning'} />
+            <FinanceKpiCard title="Прогноз остатка" value={formatCurrency(cashFlow?.summary.closingBalanceForecast || 0)} icon={WalletCards} />
+            <FinanceKpiCard title="НДС ориентировочно" value={formatCurrency(cashFlow?.summary.vatPayableEstimate || 0)} icon={ReceiptText} />
+            <FinanceKpiCard title="Просроченная дебиторка" value={formatCurrency(cashFlow?.summary.overdueReceivables || 0)} icon={History} tone={(cashFlow?.summary.overdueReceivables || 0) > 0 ? 'warning' : 'success'} />
+            <FinanceKpiCard title="Ближайшие платежи" value={formatCurrency(cashFlow?.summary.upcomingPayments || 0)} icon={CalendarDays} />
+            <FinanceKpiCard
+              title="Амортизация"
+              value={cashFlowIncludeDepreciation ? formatCurrency(cashFlow?.summary.depreciationTotal || 0) : 'Выключено'}
+              hint="Non-cash, не денежный расход"
+              icon={Settings2}
+            />
+          </div>
+
+          {(cashFlow?.warnings || []).length > 0 && (
+            <Card>
+              <CardContent className="space-y-2 pt-6">
+                {cashFlow?.warnings.map(warning => <p key={warning} className="text-sm text-amber-700 dark:text-amber-300">{warning}</p>)}
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Прогноз движения денег</CardTitle>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Входящие, исходящие и net по выбранной группировке.</p>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={cashFlow?.periods || []} margin={{ top: 12, right: 16, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.28)" />
+                    <XAxis dataKey="period" tickLine={false} axisLine={false} fontSize={12} />
+                    <YAxis tickFormatter={(value) => formatCurrency(Number(value)).replace(',00', '')} tickLine={false} axisLine={false} fontSize={12} width={88} />
+                    <Tooltip formatter={(value, name) => [formatCurrency(Number(value)), name === 'incoming' ? 'Входящие' : name === 'outgoing' ? 'Исходящие' : 'Net']} />
+                    <Area type="monotone" dataKey="incoming" stroke="#10b981" fill="#10b98122" strokeWidth={2} />
+                    <Area type="monotone" dataKey="outgoing" stroke="#ef4444" fill="#ef444422" strokeWidth={2} />
+                    <Area type="monotone" dataKey="net" stroke="#2563eb" fill="transparent" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Основа расчёта</CardTitle>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Каждая сумма показывает источник, статус и НДС.</p>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Дата</TableHead>
+                      <TableHead>Статья</TableHead>
+                      <TableHead>Клиент / контрагент</TableHead>
+                      <TableHead className="text-right">Сумма</TableHead>
+                      <TableHead className="text-right">НДС</TableHead>
+                      <TableHead>Статус</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(cashFlow?.items || []).map(item => (
+                      <TableRow key={item.id}>
+                        <TableCell>{formatDate(item.date)}</TableCell>
+                        <TableCell>{item.description}</TableCell>
+                        <TableCell>{item.clientName || '—'}</TableCell>
+                        <TableCell className={`text-right font-semibold ${item.direction === 'incoming' ? 'text-emerald-600' : item.direction === 'outgoing' ? 'text-red-600' : 'text-slate-600 dark:text-slate-300'}`}>
+                          {item.direction === 'incoming' ? '+' : item.direction === 'outgoing' ? '-' : ''}
+                          {formatCurrency(item.amount)}
+                        </TableCell>
+                        <TableCell className="text-right">{item.vatAmount > 0 ? `${formatCurrency(item.vatAmount)} · ${item.vatRate}%` : '—'}</TableCell>
+                        <TableCell>{item.direction === 'non_cash' ? 'Non-cash' : item.status || '—'}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {(cashFlow?.items || []).length === 0 && (
+                <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">Недостаточно данных для Cash Flow за выбранный период.</div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="operations" className="space-y-4">
@@ -2007,6 +2184,78 @@ export default function Finance() {
                   </div>
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="tax-settings" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Настройки финансового профиля</CardTitle>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Расчёт управленческий, не заменяет бухгалтерскую отчётность.</p>
+            </CardHeader>
+            <CardContent className="grid gap-4 lg:grid-cols-2">
+              <label className="space-y-1 text-sm font-medium">
+                <span>Компания</span>
+                <Input value={taxForm.companyName} onChange={(event) => setTaxForm(current => ({ ...current, companyName: event.target.value }))} disabled={!canEditTaxSettings} />
+              </label>
+              <label className="space-y-1 text-sm font-medium">
+                <span>Тип налогообложения</span>
+                <Select value={taxForm.taxRegime || 'unknown'} onValueChange={(value) => setTaxForm(current => ({ ...current, taxRegime: value === 'unknown' ? '' : value as CompanyTaxSettings['taxRegime'] }))} disabled={!canEditTaxSettings}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unknown">Не выбран</SelectItem>
+                    <SelectItem value="OSNO">ОСНО</SelectItem>
+                    <SelectItem value="USN">УСН</SelectItem>
+                    <SelectItem value="USN_VAT_EXEMPT">УСН без НДС</SelectItem>
+                    <SelectItem value="USN_VAT">УСН с НДС</SelectItem>
+                    <SelectItem value="PATENT">Патент</SelectItem>
+                    <SelectItem value="OTHER">Другое</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1 text-sm font-medium">
+                <span>НДС</span>
+                <Select value={taxForm.vatMode} onValueChange={(value) => setTaxForm(current => ({ ...current, vatMode: value as CompanyTaxSettings['vatMode'] }))} disabled={!canEditTaxSettings}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Без НДС</SelectItem>
+                    <SelectItem value="standard">Стандартный</SelectItem>
+                    <SelectItem value="simplified">Упрощённый</SelectItem>
+                    <SelectItem value="custom">Настраиваемый</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1 text-sm font-medium">
+                <span>Ставка НДС по умолчанию, %</span>
+                <Input type="number" min="0" step="0.01" value={taxForm.defaultVatRate} onChange={(event) => setTaxForm(current => ({ ...current, defaultVatRate: Number(event.target.value) }))} disabled={!canEditTaxSettings} />
+              </label>
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input type="checkbox" checked={taxForm.outputVatEnabled} onChange={(event) => setTaxForm(current => ({ ...current, outputVatEnabled: event.target.checked }))} disabled={!canEditTaxSettings} />
+                Исходящий НДС включён
+              </label>
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input type="checkbox" checked={taxForm.inputVatEnabled} onChange={(event) => setTaxForm(current => ({ ...current, inputVatEnabled: event.target.checked }))} disabled={!canEditTaxSettings} />
+                Входящий НДС учитывать
+              </label>
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input type="checkbox" checked={taxForm.vatIncludedByDefault} onChange={(event) => setTaxForm(current => ({ ...current, vatIncludedByDefault: event.target.checked }))} disabled={!canEditTaxSettings} />
+                Цены указывать с НДС
+              </label>
+              <label className="space-y-1 text-sm font-medium">
+                <span>Действует с</span>
+                <Input type="date" value={taxForm.effectiveFrom} onChange={(event) => setTaxForm(current => ({ ...current, effectiveFrom: event.target.value }))} disabled={!canEditTaxSettings} />
+              </label>
+              <label className="space-y-1 text-sm font-medium lg:col-span-2">
+                <span>Комментарий</span>
+                <Textarea value={taxForm.comment} onChange={(event) => setTaxForm(current => ({ ...current, comment: event.target.value }))} disabled={!canEditTaxSettings} />
+              </label>
+              <div className="lg:col-span-2">
+                <Button onClick={saveTaxSettings} disabled={!canEditTaxSettings || isTaxSaving}>
+                  <CheckCircle2 className="h-4 w-4" />
+                  Сохранить настройки НДС
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

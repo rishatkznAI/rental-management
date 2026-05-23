@@ -188,6 +188,53 @@ export interface Equipment {
   history?: AuditEntry[];
 }
 
+export type TaxRegime = 'OSNO' | 'USN' | 'USN_VAT_EXEMPT' | 'USN_VAT' | 'PATENT' | 'OTHER' | '';
+export type VatMode = 'none' | 'standard' | 'simplified' | 'custom';
+
+export interface CompanyTaxSettings {
+  companyName?: string;
+  taxRegime?: TaxRegime;
+  vatMode?: VatMode;
+  defaultVatRate?: number;
+  inputVatEnabled?: boolean;
+  outputVatEnabled?: boolean;
+  vatIncludedByDefault?: boolean;
+  effectiveFrom?: string;
+  comment?: string;
+}
+
+export interface EquipmentFinance {
+  id?: string;
+  equipmentId: string;
+  purchasePrice?: number;
+  purchaseDate?: string;
+  commissioningDate?: string;
+  usefulLifeMonths?: number;
+  depreciationMethod?: 'straight_line' | 'manual';
+  salvageValue?: number;
+  accumulatedDepreciation?: number;
+  depreciationStartDate?: string;
+  depreciationPaused?: boolean;
+  comment?: string;
+}
+
+export interface EquipmentDepreciationResult {
+  status: 'configured' | 'not_configured';
+  monthlyDepreciation: number;
+  accumulatedDepreciation: number;
+  residualValue: number;
+  elapsedMonths?: number;
+  reason: string;
+}
+
+export interface EquipmentEconomicsResponse {
+  equipmentId: string;
+  finance: Partial<EquipmentFinance>;
+  depreciation: EquipmentDepreciationResult;
+  status?: 'ok' | 'restricted';
+  economicsAvailable?: boolean;
+}
+
 export type FleetReadinessStatus =
   | 'ready'
   | 'needs_check'
@@ -1482,6 +1529,77 @@ export interface FinanceAccount {
   updatedAt?: string;
   updatedBy?: string;
   updatedByUserId?: string;
+}
+
+export interface CashFlowItem {
+  id: string;
+  date: string;
+  type: string;
+  source: string;
+  direction: 'incoming' | 'outgoing' | 'non_cash';
+  amount: number;
+  netAmount: number;
+  vatAmount: number;
+  vatRate: number;
+  status: string;
+  clientName?: string;
+  description: string;
+  link?: string;
+}
+
+export interface CashFlowPeriod {
+  period: string;
+  incoming: number;
+  outgoing: number;
+  net: number;
+  vatIncoming: number;
+  vatOutgoing: number;
+  vatPayableEstimate: number;
+  depreciation: number;
+  closingBalanceForecast: number;
+}
+
+export interface CashFlowResponse {
+  summary: {
+    openingBalance: number;
+    incomingTotal: number;
+    outgoingTotal: number;
+    netCashFlow: number;
+    closingBalanceForecast: number;
+    overdueReceivables: number;
+    upcomingPayments: number;
+    vatPayableEstimate: number;
+    depreciationTotal: number;
+    nonCashAdjustments?: number;
+    economicsOverlay?: {
+      depreciationTotal: number;
+    };
+  };
+  periods: CashFlowPeriod[];
+  items: CashFlowItem[];
+  warnings: string[];
+}
+
+export interface DepreciationResponse {
+  summary: {
+    equipmentWithDepreciation: number;
+    monthlyDepreciationTotal: number;
+    residualValueTotal: number;
+    purchaseValueTotal: number;
+  };
+  items: Array<{
+    equipmentId: string;
+    inventoryNumber: string;
+    equipmentLabel: string;
+    finance: Partial<EquipmentFinance>;
+    depreciation: EquipmentDepreciationResult;
+    revenue: number;
+    paidRevenue: number;
+    serviceExpenses: number;
+    grossProfit: number;
+    profitAfterDepreciation: number;
+    rentalCount: number;
+  }>;
 }
 
 export type LeasingContractStatus = 'active' | 'closed' | 'paused' | 'overdue' | 'archived';

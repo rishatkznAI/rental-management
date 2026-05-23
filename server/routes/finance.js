@@ -1,5 +1,7 @@
 const express = require('express');
 const { buildAllocationPreview, getPaymentAllocationCap } = require('../lib/finance-core');
+const { buildCashFlow } = require('../lib/cash-flow');
+const { normalizeEquipmentFinance, calculateEquipmentDepreciation, buildEquipmentEconomics } = require('../lib/equipment-depreciation');
 const {
   prepareDocumentCreate,
   readNumberingSettings,
@@ -50,6 +52,11 @@ function registerFinanceRoutes(router, deps) {
     const leasingContracts = readData('leasing_contracts') || [];
     const leasingPaymentSchedule = readData('leasing_payment_schedule') || [];
     const documents = readData('documents') || [];
+    const financeOperations = readData('finance_operations') || [];
+    const financeAccounts = readData('finance_accounts') || [];
+    const companyExpenses = readData('company_expenses') || [];
+    const equipment = readData('equipment') || [];
+    const equipmentFinance = readData('equipment_finance') || [];
     const actions = readData('debt_collection_actions') || [];
     const paymentPlans = readData('receivable_payment_plans') || [];
     // IMPORTANT: finance reports must use backend-scoped collections. Frontend visibility
@@ -63,6 +70,11 @@ function registerFinanceRoutes(router, deps) {
       leasingContracts: accessControl.filterCollectionByScope('leasing_contracts', leasingContracts, user),
       leasingPaymentSchedule: accessControl.filterCollectionByScope('leasing_payment_schedule', leasingPaymentSchedule, user),
       documents: accessControl.filterCollectionByScope('documents', documents, user),
+      financeOperations: accessControl.filterCollectionByScope('finance_operations', financeOperations, user),
+      financeAccounts: accessControl.filterCollectionByScope('finance_accounts', financeAccounts, user),
+      companyExpenses: accessControl.filterCollectionByScope('company_expenses', companyExpenses, user),
+      equipment: accessControl.filterCollectionByScope('equipment', equipment, user),
+      equipmentFinance: accessControl.filterCollectionByScope('equipment_finance', equipmentFinance, user),
       actions: accessControl.filterCollectionByScope('debt_collection_actions', actions, user),
       paymentPlans: accessControl.filterCollectionByScope('receivable_payment_plans', paymentPlans, user),
     };
@@ -273,6 +285,45 @@ function registerFinanceRoutes(router, deps) {
 
   function documentSettings() {
     return readNumberingSettings(collectionList('app_settings'));
+  }
+
+  function readCompanyTaxSettings() {
+    const settings = collectionList('app_settings');
+    const row = settings.find(item => item?.key === 'company_tax_settings');
+    return row?.value && typeof row.value === 'object' ? row.value : {};
+  }
+
+  function normalizeCompanyTaxSettings(input = {}, previous = {}) {
+    const taxRegime = text(input.taxRegime ?? previous.taxRegime).toUpperCase();
+    const vatMode = text(input.vatMode ?? previous.vatMode ?? 'none').toLowerCase();
+    const defaultVatRate = Number(input.defaultVatRate ?? previous.defaultVatRate ?? 0);
+    return {
+      companyName: text(input.companyName ?? previous.companyName) || undefined,
+      taxRegime: taxRegime || undefined,
+      vatMode: ['none', 'standard', 'simplified', 'custom'].includes(vatMode) ? vatMode : 'none',
+      defaultVatRate: Number.isFinite(defaultVatRate) && defaultVatRate >= 0 ? defaultVatRate : 0,
+      inputVatEnabled: Boolean(input.inputVatEnabled ?? previous.inputVatEnabled),
+      outputVatEnabled: Boolean(input.outputVatEnabled ?? previous.outputVatEnabled),
+      vatIncludedByDefault: Boolean(input.vatIncludedByDefault ?? previous.vatIncludedByDefault),
+      effectiveFrom: dateOnly(input.effectiveFrom ?? previous.effectiveFrom) || undefined,
+      comment: text(input.comment ?? previous.comment) || undefined,
+    };
+  }
+
+  function writeCompanyTaxSettings(value) {
+    const settings = collectionList('app_settings');
+    const now = nowIso();
+    const existing = settings.find(item => item?.key === 'company_tax_settings');
+    const next = {
+      ...(existing || {}),
+      id: existing?.id || generateId(idPrefixes.app_settings || 'APS'),
+      key: 'company_tax_settings',
+      value,
+      updatedAt: now,
+    };
+    if (!existing) next.createdAt = now;
+    writeData('app_settings', existing ? settings.map(item => item === existing ? next : item) : [...settings, next]);
+    return next.value;
   }
 
   function saveDocumentSettings(settings) {
@@ -682,6 +733,98 @@ function registerFinanceRoutes(router, deps) {
     const { clients, rentals, payments, paymentAllocations, clientObjects, leasingContracts, leasingPaymentSchedule } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
     res.json(buildFinanceReport({ clients, rentals, payments, paymentAllocations, clientObjects, leasingContracts, leasingPaymentSchedule }, today));
+  });
+
+  router.get('/finance/tax-settings', requireAuth, requireRead('finance_operations'), (_req, res) => {
+    res.json(readCompanyTaxSettings());
+  });
+
+  router.patch('/finance/tax-settings', requireAuth, requireWrite('app_settings'), (req, res) => {
+    try {
+      const previous = readCompanyTaxSettings();
+      const next = normalizeCompanyTaxSettings(req.body, previous);
+      const saved = writeCompanyTaxSettings(next);
+      audit(req, 'company_tax_settings.update', 'app_settings', previous, saved);
+      return res.json(saved);
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось сохранить настройки НДС' });
+    }
+  });
+
+  router.get('/finance/cash-flow', requireAuth, requireRead('finance_operations'), (req, res) => {
+    const collections = getFinanceCollections(req.user);
+    return res.json(buildCashFlow({
+      rentals: collections.rentals,
+      payments: collections.payments,
+      paymentAllocations: collections.paymentAllocations,
+      financeOperations: collections.financeOperations,
+      financeAccounts: collections.financeAccounts,
+      companyExpenses: collections.companyExpenses,
+      leasingPaymentSchedule: collections.leasingPaymentSchedule,
+      equipmentFinance: collections.equipmentFinance,
+      companyTaxSettings: readCompanyTaxSettings(),
+    }, {
+      dateFrom: req.query.dateFrom,
+      dateTo: req.query.dateTo,
+      groupBy: req.query.groupBy,
+      mode: req.query.mode,
+      includeVat: String(req.query.includeVat || 'true') !== 'false',
+      includeDepreciation: String(req.query.includeDepreciation || 'false') === 'true',
+    }));
+  });
+
+  router.get('/finance/depreciation', requireAuth, requireRead('finance_operations'), (req, res) => {
+    const { equipment, equipmentFinance, rentals, payments } = getFinanceCollections(req.user);
+    const items = buildEquipmentEconomics({ equipment, equipmentFinance, rentals, payments, asOfDate: dateOnly(req.query.asOfDate) || nowIso().slice(0, 10) });
+    const configured = items.filter(item => item.depreciation.status === 'configured');
+    res.json({
+      summary: {
+        equipmentWithDepreciation: configured.length,
+        monthlyDepreciationTotal: configured.reduce((sum, item) => sum + item.depreciation.monthlyDepreciation, 0),
+        residualValueTotal: configured.reduce((sum, item) => sum + item.depreciation.residualValue, 0),
+        purchaseValueTotal: configured.reduce((sum, item) => sum + Number(item.finance.purchasePrice || 0), 0),
+      },
+      items,
+    });
+  });
+
+  router.get('/equipment/:id/economics', requireAuth, requireRead('equipment_finance'), (req, res) => {
+    const equipment = accessControl.filterCollectionByScope('equipment', collectionList('equipment'), req.user)
+      .find(item => text(item.id) === text(req.params.id));
+    if (!equipment) return res.status(404).json({ ok: false, error: 'Техника не найдена' });
+    const finance = accessControl.filterCollectionByScope('equipment_finance', collectionList('equipment_finance'), req.user)
+      .find(item => text(item.equipmentId) === text(req.params.id)) || {};
+    const depreciation = calculateEquipmentDepreciation(finance, dateOnly(req.query.asOfDate) || nowIso().slice(0, 10));
+    return res.json({ equipmentId: req.params.id, finance, depreciation });
+  });
+
+  router.patch('/equipment/:id/economics', requireAuth, requireWrite('equipment_finance'), (req, res) => {
+    try {
+      const equipment = collectionList('equipment').find(item => text(item.id) === text(req.params.id));
+      if (!equipment) return res.status(404).json({ ok: false, error: 'Техника не найдена' });
+      const rows = collectionList('equipment_finance');
+      const index = rows.findIndex(item => text(item.equipmentId) === text(req.params.id));
+      const previous = index >= 0 ? rows[index] : null;
+      const next = normalizeEquipmentFinance(req.body, previous || {}, req.params.id);
+      next.id = previous?.id || text(req.body.id) || generateId(idPrefixes.equipment_finance || 'EF');
+      next.updatedAt = nowIso();
+      if (!previous) next.createdAt = next.updatedAt;
+      if (index >= 0) rows[index] = next;
+      else rows.push(next);
+      writeData('equipment_finance', rows);
+      audit(req, 'equipment_finance.update', 'equipment_finance', previous, next);
+      return res.json({ equipmentId: req.params.id, finance: next, depreciation: calculateEquipmentDepreciation(next, nowIso().slice(0, 10)) });
+    } catch (error) {
+      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось сохранить экономику техники' });
+    }
+  });
+
+  router.get('/equipment/:id/economics/summary', requireAuth, requireRead('equipment_finance'), (req, res) => {
+    const { equipment, equipmentFinance, rentals, payments } = getFinanceCollections(req.user);
+    const item = buildEquipmentEconomics({ equipment, equipmentFinance, rentals, payments, service: collectionList('service'), asOfDate: dateOnly(req.query.asOfDate) || nowIso().slice(0, 10) })
+      .find(row => text(row.equipmentId) === text(req.params.id));
+    if (!item) return res.status(404).json({ ok: false, error: 'Техника не найдена' });
+    return res.json(item);
   });
 
   router.post('/finance/payments/:id/allocation-preview', requireAuth, requireRead('finance_operations'), (req, res) => {

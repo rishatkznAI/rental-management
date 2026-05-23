@@ -1,6 +1,6 @@
-import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
+import { ApiError, api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResponse } from '../lib/api';
 import { normalizeEquipment, normalizeEquipmentList, normalizeEquipmentPatch } from '../lib/equipmentClassification';
-import type { Equipment, FleetReadinessResponse, ManagementActionAssigneesResponse, ManagementActionAttentionResponse, ManagementActionQueueResponse, ManagementActionStateUpdate, RepairRecord, ShippingPhoto } from '../types';
+import type { Equipment, EquipmentEconomicsResponse, EquipmentFinance, FleetReadinessResponse, ManagementActionAssigneesResponse, ManagementActionAttentionResponse, ManagementActionQueueResponse, ManagementActionStateUpdate, RepairRecord, ShippingPhoto } from '../types';
 
 export const equipmentService = {
   getAll: (): Promise<Equipment[]> =>
@@ -12,6 +12,29 @@ export const equipmentService = {
 
   getById: (id: string): Promise<Equipment | undefined> =>
     api.get<Equipment>(`/api/equipment/${id}`).then(normalizeEquipment).catch(() => undefined),
+
+  getEconomics: (id: string): Promise<EquipmentEconomicsResponse> =>
+    api.get<EquipmentEconomicsResponse>(`/api/equipment/${id}/economics`).catch(error => {
+      if (error instanceof ApiError && error.status === 403) {
+        return {
+          equipmentId: id,
+          finance: {},
+          depreciation: {
+            status: 'not_configured',
+            monthlyDepreciation: 0,
+            accumulatedDepreciation: 0,
+            residualValue: 0,
+            reason: 'restricted',
+          },
+          status: 'restricted',
+          economicsAvailable: false,
+        };
+      }
+      throw error;
+    }),
+
+  updateEconomics: (id: string, data: Partial<EquipmentFinance>): Promise<EquipmentEconomicsResponse> =>
+    api.patch<EquipmentEconomicsResponse>(`/api/equipment/${id}/economics`, data),
 
   getReadiness: (): Promise<FleetReadinessResponse> =>
     api.get<FleetReadinessResponse>('/api/equipment/readiness'),

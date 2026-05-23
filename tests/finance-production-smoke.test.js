@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   assertCashFlowResponseShape,
   assertDepreciationIsNonCash,
+  assertEquipmentEconomicsUiStateSafe,
   assertEconomicsResponseSafe,
   assertNoUnsafeFinanceSmokePayload,
   assertTaxSettingsSafe,
@@ -92,6 +93,47 @@ test('restricted economics response passes if safe', () => {
   };
 
   assert.doesNotThrow(() => assertEconomicsResponseSafe(payload, { restricted: true }));
+});
+
+test('full economics UI state passes smoke checks', () => {
+  assert.doesNotThrow(() => assertEquipmentEconomicsUiStateSafe(`
+    Экономика техники
+    Остаточная стоимость
+    1 200 000 ₽
+    Амортизация
+  `));
+});
+
+test('restricted economics UI state passes smoke checks', () => {
+  assert.doesNotThrow(() => assertEquipmentEconomicsUiStateSafe(`
+    Экономика техники
+    Финансовые показатели скрыты правами роли
+  `));
+});
+
+test('not configured economics UI state passes smoke checks', () => {
+  assert.doesNotThrow(() => assertEquipmentEconomicsUiStateSafe(`
+    Экономика техники
+    Амортизация
+    Амортизация не настроена: недостаточно данных для управленческого расчёта
+  `));
+});
+
+test('empty economics UI state passes smoke checks', () => {
+  assert.doesNotThrow(() => assertEquipmentEconomicsUiStateSafe(`
+    Экономика техники
+    Текущая ставка / план
+    Нет данных
+    Окупаемость / маржа
+    Недостаточно данных
+  `));
+});
+
+test('missing economics UI state fails smoke checks', () => {
+  assert.throws(() => assertEquipmentEconomicsUiStateSafe(`
+    Экономика техники
+    Амортизация
+  `), /full, restricted, not_configured, or empty safe state/);
 });
 
 test('safe tax settings response passes', () => {

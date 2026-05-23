@@ -2,8 +2,10 @@ import { expect, request as playwrightRequest, test, type APIResponse, type Page
 import { requiredEnv } from './helpers/releaseSmoke';
 import {
   assertDepreciationIsNonCash,
+  assertEquipmentEconomicsUiStateSafe,
   assertEconomicsResponseSafe,
   assertNoUnsafeFinanceSmokePayload,
+  EQUIPMENT_ECONOMICS_UI_STATE_PATTERN,
   assertTaxSettingsSafe,
   financeSmokeSummary,
   hasUnsafeFinanceSmokeText,
@@ -273,10 +275,14 @@ test('production finance smoke stays read-only', async ({ page }) => {
     await page.goto(productionAppUrl(frontendUrl, `/equipment/${encodeURIComponent(equipment.id)}`), { waitUntil: 'domcontentloaded' });
     await expect(page.locator('main'), 'Equipment detail main should be visible').toBeVisible();
     await page.getByRole('tab', { name: 'Экономика' }).click();
-    await expect(page.getByText(/Экономика техники|Амортизация/i).first()).toBeVisible();
-    const fullEconomics = page.getByText('Остаточная стоимость', { exact: true });
-    const restrictedEconomics = page.getByText(/Экономика техники доступна только ролям с финансовым доступом|Финансовые показатели скрыты правами роли/i);
-    await expect(fullEconomics.or(restrictedEconomics).first(), 'equipment economics should render full or safe restricted state').toBeVisible();
+    const economicsPanel = page.getByRole('tabpanel', { name: 'Экономика' });
+    await expect(economicsPanel, 'Equipment economics tab panel should be visible').toBeVisible();
+    await expect(economicsPanel.getByText(/Экономика техники|Амортизация/i).first()).toBeVisible();
+    await expect(
+      economicsPanel.getByText(EQUIPMENT_ECONOMICS_UI_STATE_PATTERN).first(),
+      'equipment economics should render full, restricted, not_configured, or empty safe state',
+    ).toBeVisible();
+    assertEquipmentEconomicsUiStateSafe(await economicsPanel.innerText());
     await expectSafeVisibleText(page, 'Equipment Economics');
   }
 

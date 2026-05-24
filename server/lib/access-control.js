@@ -220,6 +220,56 @@ const SERVICE_NON_ADMIN_STATUSES = new Set([
   'ready',
 ]);
 
+const STRICT_REPAIR_ITEM_MUTATION_FIELDS = {
+  repair_work_items: new Set([
+    'repairId',
+    'serviceTicketId',
+    'workId',
+    'workCatalogId',
+    'quantity',
+    'normHoursSnapshot',
+    'ratePerHourSnapshot',
+    'fixedAmountSnapshot',
+    'nameSnapshot',
+    'workNameSnapshot',
+    'categorySnapshot',
+    'mechanicId',
+    'mechanicName',
+    'mechanicNameSnapshot',
+    'equipmentId',
+    'equipmentInv',
+    'inventoryNumber',
+    'serialNumber',
+    'modelSnapshot',
+    'equipmentType',
+    'equipmentSnapshot',
+    'performedAt',
+    'completedAt',
+    'normHours',
+    'rate',
+    'fixedAmount',
+    'amount',
+    'payType',
+    'status',
+    'source',
+    'comment',
+  ]),
+  repair_part_items: new Set([
+    'repairId',
+    'serviceTicketId',
+    'partId',
+    'sparePartId',
+    'quantity',
+    'priceSnapshot',
+    'nameSnapshot',
+    'articleSnapshot',
+    'unitSnapshot',
+    'status',
+    'source',
+    'comment',
+  ]),
+};
+
 const WARRANTY_CLAIM_MUTATION_FIELDS = new Set([
   'serviceTicketId',
   'equipmentId',
@@ -1457,6 +1507,19 @@ function sanitizeAdminGenericPatchInput(collection, input) {
   return safe;
 }
 
+function sanitizeStrictRepairItemMutationInput(collection, input) {
+  const allowedFields = STRICT_REPAIR_ITEM_MUTATION_FIELDS[collection];
+  if (!allowedFields) return null;
+  const safe = {};
+  for (const [field, value] of Object.entries(input || {})) {
+    if (!allowedFields.has(field)) {
+      throw forbidden(`Поле ${field} нельзя сохранять в ${collection}.`);
+    }
+    safe[field] = value;
+  }
+  return safe;
+}
+
 function stripMassAssignmentFields(input, user, collection, mode = 'update') {
   const body = input && typeof input === 'object' ? input : {};
   if (isAdmin(user)) return { ...body };
@@ -1474,6 +1537,10 @@ function sanitizeCreateInput(collection, input, user) {
   if (!isKnownRole(user) || !isKnownCollection(collection)) {
     throw forbidden();
   }
+  const strictRepairItemInput = sanitizeStrictRepairItemMutationInput(collection, input);
+  if (strictRepairItemInput) return isAdmin(user)
+    ? strictRepairItemInput
+    : stripMassAssignmentFields(strictRepairItemInput, user, collection, 'create');
   const safe = stripMassAssignmentFields(input, user, collection, 'create');
   if (!isAdmin(user)) {
     delete safe.id;
@@ -1494,6 +1561,10 @@ function sanitizeUpdateInput(collection, input, user, existing = null) {
   if (!isKnownRole(user) || !isKnownCollection(collection)) {
     throw forbidden();
   }
+  const strictRepairItemInput = sanitizeStrictRepairItemMutationInput(collection, input);
+  if (strictRepairItemInput) return isAdmin(user)
+    ? sanitizeAdminGenericPatchInput(collection, strictRepairItemInput)
+    : stripMassAssignmentFields(strictRepairItemInput, user, collection);
   if (isAdmin(user)) return sanitizeAdminGenericPatchInput(collection, input);
   if (collection === 'equipment' && isMechanic(user)) {
     const allowed = new Set([

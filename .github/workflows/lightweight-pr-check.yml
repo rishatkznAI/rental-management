@@ -1,0 +1,54 @@
+name: Lightweight PR Check
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - server/**
+      - tests/**
+      - src/**
+      - package.json
+      - package-lock.json
+      - .github/workflows/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lightweight-pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  lightweight-pr-check:
+    name: lightweight-pr-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm ci --prefix server
+
+      - name: Check whitespace
+        run: git diff --check origin/main...HEAD
+
+      - name: Run auth security tests
+        run: node --test tests/auth-security.test.js
+
+      - name: Run API security route tests
+        run: node --test tests/api-security-routes.test.js

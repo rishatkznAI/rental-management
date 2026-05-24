@@ -448,7 +448,6 @@ function clientPayload(overrides = {}) {
     phone: '+79991234567',
     email: 'client@example.test',
     paymentTerms: 'Постоплата 14 дней',
-    totalRentals: 0,
     ...overrides,
   };
 }
@@ -547,6 +546,224 @@ test('/api/clients allows office manager to save client rail contacts and partne
     assert.equal(response.body.partnerCardFileName, 'Карта партнёра.pdf');
     assert.equal(response.body.debt, 0);
   });
+});
+
+test('/api/clients rejects unknown top-level fields on create without leaking nested client data', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const created = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Легальный клиент',
+      inn: '1655123456',
+      contacts: [{ id: 'primary', name: 'Иван', phone: '+7900' }],
+      bankName: 'АО Тест Банк',
+      bankBik: '044525225',
+      bankAccount: '40702810900000000001',
+      corrAccount: '30101810400000000225',
+    }));
+    assert.equal(created.status, 201);
+    assert.equal(created.body.contacts[0].name, 'Иван');
+    assert.equal(created.body.bankName, 'АО Тест Банк');
+
+    const rejected = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Поле Атаки',
+      inn: '7700654321',
+      metadata: {
+        bankAccount: '40702810999999999999',
+        secret: 'nested-client-secret',
+      },
+    }));
+    assert.equal(rejected.status, 403);
+    assert.match(rejected.body.error, /metadata/);
+    assert.doesNotMatch(rejected.body.error, /nested-client-secret/);
+    assert.doesNotMatch(rejected.body.error, /40702810999999999999/);
+  });
+
+  assert.equal(state.clients.length, 1);
+  assert.equal(state.clients.some(client => Object.prototype.hasOwnProperty.call(client, 'metadata')), false);
+});
+
+test('/api/clients rejects unknown top-level fields on patch without mutating existing client', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({
+      id: 'C-1',
+      company: 'ООО Альфа',
+      inn: '1655123456',
+      email: 'alpha@example.test',
+      contacts: [],
+      bankName: 'АО Старый Банк',
+    }),
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const allowed = await request(baseUrl, 'PATCH', '/api/clients/C-1', 'admin-token', {
+      contacts: [{ id: 'bookkeeper', name: 'Мария', role: 'Бухгалтер', phone: '+7901' }],
+      bankName: 'АО Новый Банк',
+      bankBik: '044525225',
+    });
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.body.contacts[0].name, 'Мария');
+    assert.equal(allowed.body.bankName, 'АО Новый Банк');
+
+    const rejected = await request(baseUrl, 'PATCH', '/api/clients/C-1', 'admin-token', {
+      notes: 'Это легальное поле',
+      requisites: {
+        inn: '1655123456',
+        bankAccount: '40702810999999999999',
+        secret: 'nested-requisites-secret',
+      },
+    });
+    assert.equal(rejected.status, 403);
+    assert.match(rejected.body.error, /requisites/);
+    assert.doesNotMatch(rejected.body.error, /nested-requisites-secret/);
+    assert.doesNotMatch(rejected.body.error, /40702810999999999999/);
+  });
+
+  assert.equal(state.clients[0].notes, undefined);
+  assert.equal(state.clients[0].requisites, undefined);
+  assert.equal(state.clients[0].bankName, 'АО Новый Банк');
+});
+
+test('/api/clients rejects derived financial fields on ordinary writes', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({
+      id: 'C-1',
+      company: 'ООО Альфа',
+      inn: '1655123456',
+      email: 'alpha@example.test',
+      debt: 0,
+      totalRentals: 2,
+      lastRentalDate: '2026-05-01',
+    }),
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const createWithLegacySummary = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Legacy Summary',
+      inn: '7700654321',
+      totalRentals: 999,
+      lastRentalDate: '2099-01-01',
+    }));
+    assert.equal(createWithLegacySummary.status, 201);
+    assert.equal(Object.prototype.hasOwnProperty.call(createWithLegacySummary.body, 'totalRentals'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(createWithLegacySummary.body, 'lastRentalDate'), false);
+
+    const createRejected = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Производное Поле',
+      inn: '7800654321',
+      currentDebt: 500000,
+    }));
+    assert.equal(createRejected.status, 403);
+    assert.match(createRejected.body.error, /currentDebt/);
+
+    const patchPreserved = await request(baseUrl, 'PATCH', '/api/clients/C-1', 'admin-token', {
+      totalRentals: 999,
+      lastRentalDate: '2099-01-01',
+    });
+    assert.equal(patchPreserved.status, 200);
+    assert.equal(patchPreserved.body.totalRentals, 2);
+    assert.equal(patchPreserved.body.lastRentalDate, '2026-05-01');
+  });
+
+  assert.equal(state.clients.length, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(state.clients[1], 'totalRentals'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(state.clients[1], 'lastRentalDate'), false);
+  assert.equal(state.clients[0].totalRentals, 2);
+  assert.equal(state.clients[0].lastRentalDate, '2026-05-01');
+});
+
+test('/api/clients rejects audit timestamp spoofing on patch but allows legacy timestamps in bulk replace', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({
+      id: 'C-1',
+      company: 'ООО Аудит',
+      inn: '1655123456',
+      email: 'audit@example.test',
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-02T00:00:00.000Z',
+    }),
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const patchRejected = await request(baseUrl, 'PATCH', '/api/clients/C-1', 'admin-token', {
+      createdAt: '2000-01-01T00:00:00.000Z',
+    });
+    assert.equal(patchRejected.status, 403);
+    assert.match(patchRejected.body.error, /createdAt/);
+
+    const bulkAllowed = await request(baseUrl, 'PUT', '/api/clients', 'admin-token', [
+      clientPayload({
+        id: 'C-1',
+        company: 'ООО Аудит Импорт',
+        inn: '1655123456',
+        email: 'audit@example.test',
+        createdAt: '2020-01-01T00:00:00.000Z',
+        updatedAt: '2020-01-02T00:00:00.000Z',
+        totalRentals: 7,
+        lastRentalDate: '2020-01-10',
+      }),
+    ]);
+    assert.equal(bulkAllowed.status, 200);
+  });
+
+  assert.equal(state.clients.length, 1);
+  assert.equal(state.clients[0].createdAt, '2020-01-01T00:00:00.000Z');
+  assert.equal(state.clients[0].updatedAt, '2020-01-02T00:00:00.000Z');
+  assert.equal(state.clients[0].totalRentals, 7);
+  assert.equal(state.clients[0].lastRentalDate, '2020-01-10');
+});
+
+test('/api/clients bulk replace rejects unknown top-level fields without corrupting existing data', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({
+      id: 'C-1',
+      company: 'ООО Альфа',
+      inn: '1655123456',
+      email: 'alpha@example.test',
+      contacts: [{ id: 'primary', name: 'Иван' }],
+      createdAt: '2026-05-01T00:00:00.000Z',
+    }),
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const allowed = await request(baseUrl, 'PUT', '/api/clients', 'admin-token', [
+      clientPayload({
+        id: 'C-1',
+        company: 'ООО Альфа Обновлено',
+        inn: '1655123456',
+        email: 'alpha@example.test',
+        contacts: [{ id: 'primary', name: 'Иван' }],
+        legalAddress: 'Москва, ул. Тестовая, 1',
+        bankName: 'АО Тест Банк',
+        createdAt: '2026-05-01T00:00:00.000Z',
+        updatedAt: '2026-05-24T00:00:00.000Z',
+      }),
+    ]);
+    assert.equal(allowed.status, 200);
+    assert.equal(state.clients[0].company, 'ООО Альфа Обновлено');
+    assert.equal(state.clients[0].legalAddress, 'Москва, ул. Тестовая, 1');
+
+    const rejected = await request(baseUrl, 'PUT', '/api/clients', 'admin-token', [
+      clientPayload({
+        id: 'C-1',
+        company: 'ООО Должно Не Сохраниться',
+        inn: '1655123456',
+        email: 'alpha@example.test',
+        metadata: { secret: 'bulk-nested-secret' },
+      }),
+    ]);
+    assert.equal(rejected.status, 403);
+    assert.match(rejected.body.error, /metadata/);
+    assert.doesNotMatch(rejected.body.error, /bulk-nested-secret/);
+  });
+
+  assert.equal(state.clients.length, 1);
+  assert.equal(state.clients[0].company, 'ООО Альфа Обновлено');
+  assert.equal(state.clients[0].metadata, undefined);
 });
 
 test('/api/clients rejects clearing INN on save', async () => {

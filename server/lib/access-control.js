@@ -172,11 +172,16 @@ const SERVICE_MECHANIC_UPDATE_FIELDS = new Set([
   'photos',
   'attachments',
   'result',
+  'repairResult',
+  'repairSummary',
   'resultData',
   'summary',
-  'workLog',
-  'parts',
-  'works',
+]);
+
+const SERVICE_NON_ADMIN_STATUSES = new Set([
+  'in_progress',
+  'waiting_parts',
+  'ready',
 ]);
 
 const WARRANTY_CLAIM_MUTATION_FIELDS = new Set([
@@ -1466,7 +1471,26 @@ function sanitizeUpdateInput(collection, input, user, existing = null) {
   if (collection === 'service' && isMechanic(user)) {
     const safe = {};
     for (const [field, value] of Object.entries(input || {})) {
-      if (SERVICE_MECHANIC_UPDATE_FIELDS.has(field)) safe[field] = value;
+      if (!SERVICE_MECHANIC_UPDATE_FIELDS.has(field)) {
+        throw forbidden('Недостаточно прав: это поле сервисной заявки нельзя менять через общий PATCH.');
+      }
+      if (field === 'status' && !SERVICE_NON_ADMIN_STATUSES.has(String(value || '').trim())) {
+        throw forbidden('Недостаточно прав: закрывать или возвращать сервисные заявки нужно через специальный workflow.');
+      }
+      safe[field] = value;
+    }
+    return safe;
+  }
+  if (collection === 'service') {
+    const safe = {};
+    for (const [field, value] of Object.entries(input || {})) {
+      if (!SERVICE_MECHANIC_UPDATE_FIELDS.has(field)) {
+        throw forbidden('Недостаточно прав: это поле сервисной заявки нельзя менять через общий PATCH.');
+      }
+      if (field === 'status' && !SERVICE_NON_ADMIN_STATUSES.has(String(value || '').trim())) {
+        throw forbidden('Недостаточно прав: закрывать или возвращать сервисные заявки нужно через специальный workflow.');
+      }
+      safe[field] = value;
     }
     return safe;
   }

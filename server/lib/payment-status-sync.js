@@ -51,9 +51,54 @@ function deriveRentalPaymentStatus(rental, payments) {
   return 'unpaid';
 }
 
-function syncGanttRentalPaymentStatuses(ganttRentals, payments) {
+function getPaymentAllocationAmount(allocation) {
+  const amount = Number(allocation?.amount ?? allocation?.allocatedAmount);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function buildPaymentsForStatusSync(payments, paymentAllocations) {
+  if (!Array.isArray(paymentAllocations) || paymentAllocations.length === 0) return payments;
+
+  const allocationsByPaymentId = new Map();
+  for (const allocation of paymentAllocations) {
+    const paymentId = String(allocation?.paymentId || '').trim();
+    if (!paymentId || normalizeStatus(allocation?.status) === 'cancelled') continue;
+    if (!allocationsByPaymentId.has(paymentId)) allocationsByPaymentId.set(paymentId, []);
+    allocationsByPaymentId.get(paymentId).push(allocation);
+  }
+  if (allocationsByPaymentId.size === 0) return payments;
+
+  const normalized = [];
+  for (const payment of payments || []) {
+    const paymentId = String(payment?.id || '').trim();
+    const allocations = paymentId ? allocationsByPaymentId.get(paymentId) : null;
+    if (!allocations) {
+      normalized.push(payment);
+      continue;
+    }
+    const cap = getEffectivePaidAmount(payment);
+    let remaining = cap;
+    for (const allocation of allocations) {
+      if (remaining <= 0) break;
+      const requested = getPaymentAllocationAmount(allocation);
+      if (requested <= 0) continue;
+      const amount = Math.min(requested, remaining);
+      remaining -= amount;
+      normalized.push({
+        ...payment,
+        rentalId: allocation.rentalId,
+        amount,
+        paidAmount: amount,
+      });
+    }
+  }
+  return normalized;
+}
+
+function syncGanttRentalPaymentStatuses(ganttRentals, payments, paymentAllocations) {
+  const statusPayments = buildPaymentsForStatusSync(payments, paymentAllocations);
   return (ganttRentals || []).map((rental) => {
-    const nextStatus = deriveRentalPaymentStatus(rental, payments);
+    const nextStatus = deriveRentalPaymentStatus(rental, statusPayments);
     if (rental.paymentStatus === nextStatus) return rental;
     return {
       ...rental,
@@ -67,4 +112,5 @@ module.exports = {
   getEffectivePaidAmount,
   deriveRentalPaymentStatus,
   syncGanttRentalPaymentStatuses,
+  buildPaymentsForStatusSync,
 };

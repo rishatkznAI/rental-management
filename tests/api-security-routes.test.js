@@ -35,6 +35,7 @@ const READ_PERMISSIONS = {
   rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   deliveries: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Руководитель', 'Перевозчик'],
   payments: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  payment_allocations: ['Администратор', 'Офис-менеджер'],
   crm_deals: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   repair_work_items: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   repair_part_items: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
@@ -56,6 +57,7 @@ const WRITE_PERMISSIONS = {
   equipment: ['Администратор', 'Офис-менеджер'],
   equipment_downtimes: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   payments: ['Администратор', 'Офис-менеджер'],
+  payment_allocations: ['Администратор', 'Офис-менеджер'],
   crm_deals: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   repair_work_items: ['Администратор'],
   repair_part_items: ['Администратор'],
@@ -112,6 +114,7 @@ function createState() {
     service_vehicles: [{ id: 'SV-1', make: 'Lada', model: 'Largus', plateNumber: 'A001AA', status: 'active' }],
     vehicle_trips: [{ id: 'VT-1', vehicleId: 'SV-1', driver: 'Петров', route: 'Склад — объект', date: '2026-05-01' }],
     payments: [{ id: 'P-1', rentalId: 'R-own', amount: 1000, status: 'new' }],
+    payment_allocations: [],
     rental_change_requests: [],
     crm_deals: [{
       id: 'CRM-own',
@@ -291,6 +294,7 @@ function createSecurityApp(state = createState()) {
       'warranty_claims',
       'app_settings',
       'payments',
+      'payment_allocations',
       'users',
       'repair_work_items',
       'repair_part_items',
@@ -311,6 +315,7 @@ function createSecurityApp(state = createState()) {
 	      service: 'S',
       warranty_claims: 'WC',
       payments: 'P',
+      payment_allocations: 'PA',
       users: 'U',
       repair_work_items: 'RW',
       repair_part_items: 'RP',
@@ -2101,6 +2106,147 @@ test('payments API rejects dangerous patch fields without mutating existing paym
       assert.match(response.body.error, new RegExp(field));
       assert.equal(JSON.stringify(state.payments.find(item => item.id === 'P-1')), before, field);
     }
+  });
+});
+
+test('payments API blocks high-risk direct edits when payment has allocations', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [{ id: 'C-1', company: 'ООО Свой' }];
+  state.client_objects = [{ id: 'OBJ-1', clientId: 'C-1', name: 'Объект 1', status: 'active' }];
+  state.client_contracts = [{ id: 'CTR-1', clientId: 'C-1', objectId: 'OBJ-1', number: 'Д-1', status: 'active' }];
+  state.gantt_rentals = [{ id: 'GR-own', clientId: 'C-1', objectId: 'OBJ-1', contractId: 'CTR-1', amount: 1000 }];
+  state.payments = [{
+    id: 'P-allocated',
+    rentalId: 'GR-own',
+    clientId: 'C-1',
+    objectId: 'OBJ-1',
+    contractId: 'CTR-1',
+    amount: 1000,
+    paidAmount: 1000,
+    status: 'paid',
+    comment: 'initial',
+    method: 'bank',
+  }];
+  state.payment_allocations = [{ id: 'PA-1', paymentId: 'P-allocated', rentalId: 'GR-own', amount: 1000, status: 'active' }];
+
+  await withServer(app, async (baseUrl) => {
+    const cases = [
+      ['amount', 900],
+      ['paidAmount', 900],
+      ['status', 'cancelled'],
+      ['status', 'reversed'],
+      ['status', 'closed'],
+      ['rentalId', 'GR-other'],
+      ['clientId', 'C-2'],
+      ['objectId', 'OBJ-2'],
+      ['contractId', 'CTR-2'],
+    ];
+    for (const [field, value] of cases) {
+      const before = JSON.stringify(state.payments[0]);
+      const response = await request(baseUrl, 'PATCH', '/api/payments/P-allocated', 'admin-token', { [field]: value });
+      assert.equal(response.status, 409, field);
+      assert.match(response.body.error, /Payment has allocations/);
+      assert.equal(JSON.stringify(state.payments[0]), before, field);
+    }
+
+    const lowRisk = await request(baseUrl, 'PATCH', '/api/payments/P-allocated', 'admin-token', {
+      comment: 'safe comment',
+      method: 'cash',
+      invoiceNumber: 'INV-2',
+      dueDate: '2026-05-24',
+      paidDate: '2026-05-24',
+    });
+    assert.equal(lowRisk.status, 200);
+    assert.equal(lowRisk.body.comment, 'safe comment');
+    assert.equal(lowRisk.body.method, 'cash');
+    assert.equal(lowRisk.body.invoiceNumber, 'INV-2');
+    assert.equal(lowRisk.body.dueDate, '2026-05-24');
+    assert.equal(lowRisk.body.paidDate, '2026-05-24');
+  });
+});
+
+test('payments API blocks physical delete when payment has allocations', async () => {
+  const { app, state } = createSecurityApp();
+  state.payments = [
+    { id: 'P-allocated', amount: 1000, paidAmount: 1000, status: 'paid' },
+    { id: 'P-free', amount: 500, paidAmount: 500, status: 'paid' },
+  ];
+  state.payment_allocations = [{ id: 'PA-1', paymentId: 'P-allocated', rentalId: 'GR-own', amount: 1000, status: 'active' }];
+
+  await withServer(app, async (baseUrl) => {
+    const blocked = await request(baseUrl, 'DELETE', '/api/payments/P-allocated', 'admin-token');
+    assert.equal(blocked.status, 409);
+    assert.match(blocked.body.error, /Reverse or cancel/);
+    assert.equal(state.payments.some(item => item.id === 'P-allocated'), true);
+
+    const deleted = await request(baseUrl, 'DELETE', '/api/payments/P-free', 'admin-token');
+    assert.equal(deleted.status, 200);
+    assert.equal(state.payments.some(item => item.id === 'P-free'), false);
+  });
+});
+
+test('payment allocations API validates existence cap and syncs rental payment status', async () => {
+  const { app, state } = createSecurityApp();
+  state.payments = [{ id: 'P-paid', amount: 1000, paidAmount: 1000, status: 'paid' }];
+  state.gantt_rentals = [{ id: 'GR-own', amount: 1000, paymentStatus: 'unpaid' }];
+
+  await withServer(app, async (baseUrl) => {
+    const missingPayment = await request(baseUrl, 'POST', '/api/payment_allocations', 'admin-token', {
+      paymentId: 'P-missing',
+      rentalId: 'GR-own',
+      amount: 100,
+    });
+    assert.equal(missingPayment.status, 400);
+    assert.match(missingPayment.body.error, /Платёж для распределения не найден/);
+
+    const missingRental = await request(baseUrl, 'POST', '/api/payment_allocations', 'admin-token', {
+      paymentId: 'P-paid',
+      rentalId: 'GR-missing',
+      amount: 100,
+    });
+    assert.equal(missingRental.status, 400);
+    assert.match(missingRental.body.error, /Аренда для распределения не найдена/);
+
+    const overCap = await request(baseUrl, 'POST', '/api/payment_allocations', 'admin-token', {
+      paymentId: 'P-paid',
+      rentalId: 'GR-own',
+      amount: 1001,
+    });
+    assert.equal(overCap.status, 400);
+    assert.match(overCap.body.error, /не может превышать сумму платежа/);
+
+    const overCapBulk = await request(baseUrl, 'PUT', '/api/payment_allocations', 'admin-token', [
+      { id: 'PA-bulk-1', paymentId: 'P-paid', rentalId: 'GR-own', amount: 600 },
+      { id: 'PA-bulk-2', paymentId: 'P-paid', rentalId: 'GR-own', amount: 600 },
+    ]);
+    assert.equal(overCapBulk.status, 400);
+    assert.match(overCapBulk.body.error, /не может превышать сумму платежа/);
+    assert.equal(state.payment_allocations.length, 0);
+
+    const missingPaymentBulk = await request(baseUrl, 'PUT', '/api/payment_allocations', 'admin-token', [
+      { id: 'PA-bulk-missing-payment', paymentId: 'P-missing', rentalId: 'GR-own', amount: 100 },
+    ]);
+    assert.equal(missingPaymentBulk.status, 400);
+    assert.match(missingPaymentBulk.body.error, /Платёж для распределения не найден/);
+    assert.equal(state.payment_allocations.length, 0);
+
+    const missingDocumentBulk = await request(baseUrl, 'PUT', '/api/payment_allocations', 'admin-token', [
+      { id: 'PA-bulk-missing-document', paymentId: 'P-paid', rentalId: 'GR-own', documentId: 'D-missing', amount: 100 },
+    ]);
+    assert.equal(missingDocumentBulk.status, 400);
+    assert.match(missingDocumentBulk.body.error, /Документ для распределения не найден/);
+    assert.equal(state.payment_allocations.length, 0);
+
+    const valid = await request(baseUrl, 'POST', '/api/payment_allocations', 'admin-token', {
+      paymentId: 'P-paid',
+      rentalId: 'GR-own',
+      amount: 1000,
+      comment: 'valid allocation',
+    });
+    assert.equal(valid.status, 201);
+    assert.equal(valid.body.paymentId, 'P-paid');
+    assert.equal(state.payment_allocations.length, 1);
+    assert.equal(state.gantt_rentals[0].paymentStatus, 'paid');
   });
 });
 

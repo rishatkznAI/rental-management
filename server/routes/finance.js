@@ -1,5 +1,6 @@
 const express = require('express');
 const { buildAllocationPreview, getPaymentAllocationCap } = require('../lib/finance-core');
+const { syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
 const { buildCashFlow } = require('../lib/cash-flow');
 const { normalizeEquipmentFinance, calculateEquipmentDepreciation, buildEquipmentEconomics } = require('../lib/equipment-depreciation');
 const {
@@ -110,6 +111,17 @@ function registerFinanceRoutes(router, deps) {
 
   function collectionList(name) {
     return Array.isArray(readData(name)) ? readData(name) : [];
+  }
+
+  function syncPaymentStatusesAfterAllocationWrite() {
+    writeData(
+      'gantt_rentals',
+      syncGanttRentalPaymentStatuses(
+        collectionList('gantt_rentals'),
+        collectionList('payments'),
+        collectionList('payment_allocations'),
+      ),
+    );
   }
 
   function dateOnly(value) {
@@ -873,6 +885,16 @@ function registerFinanceRoutes(router, deps) {
       const { rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
       const payment = payments.find(item => text(item?.id) === text(req.params.id));
       if (!payment) return res.status(404).json({ ok: false, error: 'Платёж не найден' });
+      const rentalIds = new Set(
+        [...collectionList('gantt_rentals'), ...collectionList('rentals')]
+          .map(item => text(item?.id))
+          .filter(Boolean)
+      );
+      const documentIds = new Set(
+        collectionList('documents')
+          .map(item => text(item?.id))
+          .filter(Boolean)
+      );
       const preview = buildAllocationPreview({ payments, paymentAllocations, rentals }, req.params.id);
       const requested = Array.isArray(req.body?.allocations) ? req.body.allocations : preview.suggestedAllocations;
       const allocations = collectionList('payment_allocations');
@@ -886,6 +908,14 @@ function registerFinanceRoutes(router, deps) {
         if (remaining <= 0) break;
         const requestedAmount = money(item?.amount);
         if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) continue;
+        const rentalId = text(item.rentalId);
+        if (rentalId && !rentalIds.has(rentalId)) {
+          return res.status(400).json({ ok: false, error: 'Аренда для распределения не найдена' });
+        }
+        const documentId = text(item.documentId);
+        if (documentId && !documentIds.has(documentId)) {
+          return res.status(400).json({ ok: false, error: 'Invalid allocation documentId. Document does not exist.' });
+        }
         const amount = Math.min(requestedAmount, remaining);
         created.push({
           id: text(item.id) || generateId(idPrefixes.payment_allocations || 'PA'),
@@ -893,8 +923,8 @@ function registerFinanceRoutes(router, deps) {
           clientId: text(item.clientId) || undefined,
           objectId: text(item.objectId) || undefined,
           contractId: text(item.contractId) || undefined,
-          rentalId: text(item.rentalId) || undefined,
-          documentId: text(item.documentId) || undefined,
+          rentalId: rentalId || undefined,
+          documentId: documentId || undefined,
           amount,
           status: 'active',
           comment: text(item.comment) || undefined,
@@ -906,6 +936,7 @@ function registerFinanceRoutes(router, deps) {
       }
       for (const item of created) accessControl.assertCanCreateCollection('payment_allocations', req.user, item);
       writeData('payment_allocations', [...allocations, ...created]);
+      syncPaymentStatusesAfterAllocationWrite();
       created.forEach(item => audit(req, 'payment_allocations.create', 'payment_allocations', null, item));
       return res.status(201).json({ paymentId: req.params.id, allocations: created });
     } catch (error) {

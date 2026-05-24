@@ -3222,6 +3222,7 @@ function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) 
     try {
       const result = await api.post<ExternalPhotoArchiveResponse>('/api/admin/media/archive-external-photos', {
         allowDomains: ['i.oneme.ru'],
+        confirm: true,
       });
       setArchiveMessage({
         type: 'success',
@@ -4375,7 +4376,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
     setMessage(null);
     setIsMigratingRepairFacts(true);
     try {
-      const result = await reportsService.migrateRepairFacts();
+      const result = await reportsService.migrateRepairFacts({ confirm: true });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] }),
         queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),

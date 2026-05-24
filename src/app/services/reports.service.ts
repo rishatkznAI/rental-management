@@ -237,6 +237,8 @@ export interface ManagerReportSummary {
 
 export interface RepairFactsMigrationResult {
   ok: true;
+  dryRun: boolean;
+  applied: boolean;
   createdWorkRefs: number;
   createdPartRefs: number;
   migratedWorkItems: number;
@@ -290,6 +292,6 @@ export const reportsService = {
   getMechanicsWorkload: (): Promise<MechanicsWorkloadReport> =>
     api.get<MechanicsWorkloadReport>('/api/reports/mechanics-workload'),
 
-  migrateRepairFacts: (): Promise<RepairFactsMigrationResult> =>
-    api.post<RepairFactsMigrationResult>('/api/admin/migrate-repair-facts', {}),
+  migrateRepairFacts: (payload: { confirm?: boolean; dryRun?: boolean } = {}): Promise<RepairFactsMigrationResult> =>
+    api.post<RepairFactsMigrationResult>('/api/admin/migrate-repair-facts', payload),
 };

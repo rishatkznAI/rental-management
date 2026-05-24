@@ -1394,6 +1394,7 @@ function registerSystemRoutes(app, deps) {
   });
 
   app.post('/api/admin/media/archive-external-photos', requireAuth, requireAdmin, async (req, res) => {
+    const dryRun = req.body?.confirm !== true || req.body?.dryRun === true || req.query.dryRun === '1';
     const requestedDomains = Array.isArray(req.body?.allowDomains)
       ? req.body.allowDomains
       : DEFAULT_ALLOWED_DOMAINS;
@@ -1406,28 +1407,32 @@ function registerSystemRoutes(app, deps) {
     try {
       const result = await archiveExternalPhotos({
         readData,
-        writeData,
+        writeData: dryRun ? undefined : writeData,
         collections: jsonCollections,
         uploadsRoot,
         allowDomains,
-        dryRun: false,
-        downloadPhoto: (url) => downloadAllowlistedPhoto(url, { allowDomains, maxBytes: DEFAULT_MAX_BYTES }),
+        dryRun,
+        downloadPhoto: dryRun
+          ? undefined
+          : (url) => downloadAllowlistedPhoto(url, { allowDomains, maxBytes: DEFAULT_MAX_BYTES }),
       });
-      auditLog?.(req, {
-        action: 'media.external_photos.archive',
-        entityType: 'media',
-        entityId: 'external_photos',
-        metadata: {
-          found: result.summary.found,
-          archived: result.summary.archived,
-          skipped: result.summary.skipped,
-          failed: result.summary.failed,
-          alreadyArchived: result.summary.alreadyArchived,
-          allowDomains,
-          collections: result.summary.collections,
-          domains: result.summary.domains,
-        },
-      });
+      if (!dryRun) {
+        auditLog?.(req, {
+          action: 'media.external_photos.archive',
+          entityType: 'media',
+          entityId: 'external_photos',
+          metadata: {
+            found: result.summary.found,
+            archived: result.summary.archived,
+            skipped: result.summary.skipped,
+            failed: result.summary.failed,
+            alreadyArchived: result.summary.alreadyArchived,
+            allowDomains,
+            collections: result.summary.collections,
+            domains: result.summary.domains,
+          },
+        });
+      }
       return res.json(result);
     } catch (error) {
       return res.status(500).json({ ok: false, error: error.message || 'Не удалось архивировать внешние фото.' });
@@ -1605,7 +1610,7 @@ function registerSystemRoutes(app, deps) {
   });
 
   app.post('/api/admin/rental-equipment-diagnostics/backfill', requireAuth, requireAdmin, (req, res) => {
-    const dryRun = req.body?.confirm !== true || req.body?.dryRun === true;
+    const dryRun = req.body?.confirm !== true || req.body?.dryRun === true || req.query.dryRun === '1';
     const before = analyzeRentalEquipmentDiagnostics({
       equipment: readData('equipment') || [],
       rentals: readData('rentals') || [],

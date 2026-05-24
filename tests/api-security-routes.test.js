@@ -1143,6 +1143,23 @@ test('real Express API routes deny direct object-level bypasses', async () => {
       assert.equal(partResponse.status, 403, token);
       assert.equal(partResponse.body.error, 'Недостаточно прав. Работы и запчасти может изменять только администратор');
     }
+    const unknownWorkField = await request(baseUrl, 'POST', '/api/repair_work_items', 'admin-token', {
+      repairId: 'S-other',
+      workId: 'SW-1',
+      quantity: 1,
+      strayTopLevel: 'should-not-persist',
+    });
+    assert.equal(unknownWorkField.status, 403);
+    assert.match(unknownWorkField.body.error, /strayTopLevel/);
+    assert.equal(state.repair_work_items.some(item => item.strayTopLevel), false);
+
+    const unknownPartField = await request(baseUrl, 'PATCH', '/api/repair_part_items/RP-1', 'admin-token', {
+      strayTopLevel: 'should-not-persist',
+    });
+    assert.equal(unknownPartField.status, 403);
+    assert.match(unknownPartField.body.error, /strayTopLevel/);
+    assert.equal(state.repair_part_items.find(item => item.id === 'RP-1').strayTopLevel, undefined);
+
     const adminWork = await request(baseUrl, 'POST', '/api/repair_work_items', 'admin-token', { repairId: 'S-other', workId: 'SW-1', quantity: 2, nameSnapshot: 'Диагностика' });
     assert.equal(adminWork.status, 201);
     assert.equal(state.service_audit_log.at(-1).action, 'work_added');

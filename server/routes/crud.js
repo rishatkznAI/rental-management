@@ -553,6 +553,20 @@ function registerCrudRoutes(deps) {
     return next;
   }
 
+  function preserveExistingUserAuthState(nextUser, existingUser) {
+    if (!existingUser) return nextUser;
+    const next = { ...nextUser };
+    if (!Object.prototype.hasOwnProperty.call(next, 'tokenVersion')
+      && Object.prototype.hasOwnProperty.call(existingUser, 'tokenVersion')) {
+      next.tokenVersion = existingUser.tokenVersion;
+    }
+    if (!Object.prototype.hasOwnProperty.call(next, 'passwordChangedAt')
+      && Object.prototype.hasOwnProperty.call(existingUser, 'passwordChangedAt')) {
+      next.passwordChangedAt = existingUser.passwordChangedAt;
+    }
+    return next;
+  }
+
   function isActiveUser(user) {
     return user?.status === 'Активен';
   }
@@ -1965,11 +1979,12 @@ function registerCrudRoutes(deps) {
         const existing = readData('users') || [];
         const existingById = new Map(existing.map(item => [item.id, item]));
         const merged = list.map(item => {
+          const existingUser = existingById.get(item.id);
           if (!item.password) {
-            const existingPwd = existingById.get(item.id)?.password;
-            if (existingPwd) return { ...item, password: existingPwd };
+            const existingPwd = existingUser?.password;
+            if (existingPwd) return preserveExistingUserAuthState({ ...item, password: existingPwd }, existingUser);
           }
-          return normalizeUserPasswordForWrite(item, existingById.get(item.id));
+          return preserveExistingUserAuthState(normalizeUserPasswordForWrite(item, existingUser), existingUser);
         });
         const incomingIds = new Set(merged.map(item => String(item?.id || '')));
         for (const existingUser of existing) {

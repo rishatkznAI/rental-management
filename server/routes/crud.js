@@ -89,6 +89,7 @@ function registerCrudRoutes(deps) {
     'assertCanUpdateEntity',
     'assertCanDeleteEntity',
     'assertCanBulkReplace',
+    'assertSafeAdminBulkReplaceInput',
     'canAccessEntity',
     'filterCollectionByScope',
     'sanitizeCreateInput',
@@ -1891,6 +1892,7 @@ function registerCrudRoutes(deps) {
       }
       try {
         accessControl.assertCanBulkReplace(collection, req.user);
+        accessControl.assertSafeAdminBulkReplaceInput(collection, list);
       } catch (error) {
         return sendAccessError(res, error);
       }

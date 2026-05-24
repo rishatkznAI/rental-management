@@ -1,4 +1,8 @@
 const { isMechanicRole } = require('../lib/role-groups');
+const {
+  assertSafeAdminBulkReplaceInput,
+  isAdminBulkReplaceBlockedField,
+} = require('../lib/access-control');
 const { redactAuditValue } = require('../lib/security-audit');
 const { cleanupBackupArchive, createFullBackupArchive } = require('../lib/full-backup');
 const { DEFAULT_ALLOWED_DOMAINS, DEFAULT_MAX_BYTES, archiveExternalPhotos } = require('../lib/external-photo-archive');
@@ -736,6 +740,7 @@ function analyzeSystemDataImport(payload, readData) {
   const clientInnDuplicates = [];
   const conflicts = {};
   const invalidCollections = [];
+  const forbiddenFields = {};
   const sanitizedCollections = {};
 
   for (const collection of SYSTEM_DATA_COLLECTIONS) {
@@ -750,6 +755,14 @@ function analyzeSystemDataImport(payload, readData) {
       .map(item => sanitizeSystemRecord(collection, item, stats))
       .filter(item => item !== null);
     sanitizedCollections[collection] = sanitized;
+    const blocked = new Set();
+    for (const item of sanitized) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      for (const field of Object.keys(item)) {
+        if (isAdminBulkReplaceBlockedField(collection, field)) blocked.add(field);
+      }
+    }
+    if (blocked.size > 0) forbiddenFields[collection] = Array.from(blocked).sort();
     collections[collection] = {
       incoming: sanitized.length,
       existing: Array.isArray(readData(collection)) ? (readData(collection) || []).length : 0,
@@ -790,6 +803,7 @@ function analyzeSystemDataImport(payload, readData) {
     ...invalidCollections.map(name => name.startsWith('clients:')
       ? name.slice('clients:'.length)
       : `Коллекция ${name} должна быть массивом`),
+    ...Object.entries(forbiddenFields).map(([name, fields]) => `Запрещённые поля в ${name}: ${fields.join(', ')}`),
     ...Object.entries(duplicates).map(([name, ids]) => `Дубликаты id в ${name}: ${ids.join(', ')}`),
     ...(clientInnDuplicates.length > 0 ? ['SYSTEM_IMPORT_CLIENT_INN_DUPLICATES: импорт содержит клиентов с одинаковым ИНН'] : []),
   ];
@@ -802,6 +816,7 @@ function analyzeSystemDataImport(payload, readData) {
     duplicateIds: duplicates,
     clientInnDuplicates,
     conflicts,
+    forbiddenFields,
     errorCode: clientInnDuplicates.length > 0 ? 'SYSTEM_IMPORT_CLIENT_INN_DUPLICATES' : undefined,
     strippedSensitiveFields: stats.strippedSensitiveFields,
     skippedSensitiveSettings: stats.skippedSensitiveSettings,
@@ -1018,6 +1033,25 @@ function registerSystemRoutes(app, deps) {
       const normalizedClients = Array.isArray(clients) ? clients.map(normalizeClientInnFields) : clients;
       if (Array.isArray(normalizedClients)) {
         assertClientInnWriteAllowed(prev.clients || [], normalizedClients);
+      }
+      const syncPayload = {
+        equipment,
+        rentals,
+        gantt_rentals,
+        service,
+        warranty_claims,
+        clients: normalizedClients,
+        payments,
+        company_expenses,
+        users,
+        documents,
+        mechanic_documents,
+        shipping_photos,
+      };
+      for (const [collection, value] of Object.entries(syncPayload)) {
+        if (Array.isArray(value)) {
+          assertSafeAdminBulkReplaceInput(collection, value, 'legacy sync');
+        }
       }
 
       if (equipment) writeData('equipment', equipment);

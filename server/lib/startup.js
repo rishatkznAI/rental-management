@@ -3,6 +3,17 @@ const path = require('path');
 
 const CRM_ARCHIVE_SETTING_KEY = 'crm_archive_state';
 const CRM_ARCHIVE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const STARTUP_BUSINESS_MAINTENANCE_ENV = 'STARTUP_BUSINESS_MAINTENANCE';
+
+function isStartupBusinessMaintenanceEnabled(env = process.env) {
+  return String(env[STARTUP_BUSINESS_MAINTENANCE_ENV] || '').trim().toLowerCase() === 'apply';
+}
+
+function logStartupBusinessMaintenanceDisabled(logger = console) {
+  logger.warn?.(
+    `[startup] business data maintenance is disabled. Set ${STARTUP_BUSINESS_MAINTENANCE_ENV}=apply only for a planned, backed-up maintenance run.`,
+  );
+}
 
 function seedServiceWorks({ readData, writeData, normalizeServiceWorkRecord, seedsDir, logger = console }) {
   try {
@@ -139,12 +150,17 @@ async function startServer({ app, port, deps, logger = console }) {
   } = deps;
 
   return app.listen(port, async () => {
+    const startupBusinessMaintenanceEnabled = isStartupBusinessMaintenanceEnabled();
     migrateJsonFilesToDb();
     cleanupExpiredSessions();
     seedDefaultUsers();
     ensureLegacyDefaultUsers();
     migrateReferenceCollections();
-    migrateLegacyRepairFacts();
+    if (startupBusinessMaintenanceEnabled) {
+      migrateLegacyRepairFacts();
+    } else {
+      logStartupBusinessMaintenanceDisabled(logger);
+    }
     if (typeof backfillServiceTicketCreatedAt === 'function') {
       try {
         const currentService = deps.readData('service') || [];
@@ -161,7 +177,7 @@ async function startServer({ app, port, deps, logger = console }) {
         logger.warn(`[service] createdAt backfill skipped: ${error?.message || String(error)}`);
       }
     }
-    if (typeof backfillPaymentAllocations === 'function') {
+    if (startupBusinessMaintenanceEnabled && typeof backfillPaymentAllocations === 'function') {
       try {
         const result = backfillPaymentAllocations({
           payments: deps.readData('payments') || [],
@@ -182,14 +198,14 @@ async function startServer({ app, port, deps, logger = console }) {
         logger.warn(`[payments] payment_allocations backfill skipped: ${error?.message || String(error)}`);
       }
     }
-    if (typeof normalizeClientLinks === 'function') {
+    if (startupBusinessMaintenanceEnabled && typeof normalizeClientLinks === 'function') {
       normalizeClientLinks({
         readData: deps.readData,
         writeData: deps.writeData,
         logger,
       });
     }
-    if (typeof backfillGanttRentalLinks === 'function') {
+    if (startupBusinessMaintenanceEnabled && typeof backfillGanttRentalLinks === 'function') {
       try {
         backfillGanttRentalLinks({
           readData: deps.readData,
@@ -241,11 +257,13 @@ async function startServer({ app, port, deps, logger = console }) {
       seedsDir: deps.seedsDir,
       logger,
     });
-    cleanupArchivedCrm({
-      readData: deps.readData,
-      writeData: deps.writeData,
-      logger,
-    });
+    if (startupBusinessMaintenanceEnabled) {
+      cleanupArchivedCrm({
+        readData: deps.readData,
+        writeData: deps.writeData,
+        logger,
+      });
+    }
     applyAdminResetFromEnv();
     if (typeof startGprsGateway === 'function') {
       startGprsGateway();
@@ -253,14 +271,16 @@ async function startServer({ app, port, deps, logger = console }) {
     if (typeof startWialonIpsGateway === 'function') {
       startWialonIpsGateway();
     }
-    const crmCleanupTimer = setInterval(() => {
-      cleanupArchivedCrm({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        logger,
-      });
-    }, 60 * 60 * 1000);
-    crmCleanupTimer.unref?.();
+    if (startupBusinessMaintenanceEnabled) {
+      const crmCleanupTimer = setInterval(() => {
+        cleanupArchivedCrm({
+          readData: deps.readData,
+          writeData: deps.writeData,
+          logger,
+        });
+      }, 60 * 60 * 1000);
+      crmCleanupTimer.unref?.();
+    }
 
     logger.log('');
     logger.log('╔══════════════════════════════════════════════════════╗');
@@ -319,7 +339,9 @@ async function startServer({ app, port, deps, logger = console }) {
 }
 
 module.exports = {
+  STARTUP_BUSINESS_MAINTENANCE_ENV,
   ensureKnowledgeBaseProgress,
+  isStartupBusinessMaintenanceEnabled,
   seedKnowledgeBaseModules,
   seedSpareParts,
   seedServiceRouteNorms,

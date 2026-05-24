@@ -1257,6 +1257,21 @@ test('service delete audits cascaded repair item snapshots before removing them'
   });
 });
 
+test('non-admin cannot delete service ticket with repair facts', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'DELETE', '/api/service/S-other', 'office-token');
+
+    assert.equal(response.status, 403);
+    assert.match(response.body.error, /только администратору/);
+    assert.equal(state.service.some(item => item.id === 'S-other'), true);
+    assert.equal(state.repair_work_items.some(item => item.id === 'RW-1'), true);
+    assert.equal(state.repair_part_items.some(item => item.id === 'RP-1'), true);
+    assert.equal(state.service_audit_log.length, 0);
+  });
+});
+
 test('service_audit_log is not mutable through generic CRUD routes', async () => {
   const { app, state } = createSecurityApp();
   state.service_audit_log.push({

@@ -788,11 +788,13 @@ test('/api/admin/rental-equipment-diagnostics/backfill dry-run does not write an
     assert.equal(dryRun.body.dryRun, true);
     assert.equal(dryRun.body.backfill.summary.rentalsUpdated, 2);
     assert.equal(collections.rentals.find(item => item.id === 'R-2').equipmentId, undefined);
+    assert.equal(auditEntries.some(entry => entry.action === 'rental_equipment.backfill'), false);
 
     const queryDryRun = await postJson(baseUrl, '/api/admin/rental-equipment-diagnostics/backfill?dryRun=1', { confirm: true });
     assert.equal(queryDryRun.status, 200);
     assert.equal(queryDryRun.body.dryRun, true);
     assert.equal(collections.rentals.find(item => item.id === 'R-2').equipmentId, undefined);
+    assert.equal(auditEntries.some(entry => entry.action === 'rental_equipment.backfill'), false);
 
     const applied = await postJson(baseUrl, '/api/admin/rental-equipment-diagnostics/backfill', { confirm: true });
     assert.equal(applied.status, 200);
@@ -846,12 +848,14 @@ test('/api/admin/rental-link-diagnostics/backfill defaults to dry-run and requir
     assert.equal(defaultPost.body.backfill.linked, 1);
     assert.equal(collections.gantt_rentals[0].rentalId, undefined);
     assert.equal(writeCount, 0);
+    assert.equal(auditEntries.some(entry => entry.action === 'rental_links.backfill'), false);
 
     const explicitDryRun = await postJson(baseUrl, '/api/admin/rental-link-diagnostics/backfill?dryRun=1', { confirm: true });
     assert.equal(explicitDryRun.status, 200);
     assert.equal(explicitDryRun.body.backfill.dryRun, true);
     assert.equal(collections.gantt_rentals[0].rentalId, undefined);
     assert.equal(writeCount, 0);
+    assert.equal(auditEntries.some(entry => entry.action === 'rental_links.backfill'), false);
 
     const applied = await postJson(baseUrl, '/api/admin/rental-link-diagnostics/backfill', { confirm: true });
     assert.equal(applied.status, 200);

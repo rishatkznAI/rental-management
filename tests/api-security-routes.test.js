@@ -2182,10 +2182,10 @@ test('payments API errors name rejected fields without leaking nested payment va
   });
 });
 
-test('rental change request payment approval rejects unsanitized payment newValue', async () => {
+test('rental change request payment approval sanitizes ordinary payment patches', async () => {
   const { app, state } = createSecurityApp();
   state.rental_change_requests = [{
-    id: 'RCR-payment-unsafe',
+    id: 'RCR-payment-safe',
     entityType: 'payment',
     entityId: 'P-1',
     paymentId: 'P-1',
@@ -2197,20 +2197,68 @@ test('rental change request payment approval rejects unsanitized payment newValu
       id: 'P-client-supplied',
       amount: 2000,
       status: 'paid',
-      payment_allocations: [{ secret: 'approval-secret' }],
-      source: 'bank-import',
+      comment: 'approved correction',
     },
   }];
 
   await withServer(app, async (baseUrl) => {
-    const before = JSON.stringify(state.payments);
-    const response = await request(baseUrl, 'POST', '/api/rental_change_requests/RCR-payment-unsafe/approve', 'admin-token', {});
-    assert.equal(response.status, 403);
-    assert.match(response.body.error, /payment_allocations/);
-    assert.equal(response.body.error.includes('approval-secret'), false);
-    assert.equal(JSON.stringify(state.payments), before);
-    assert.equal(state.rental_change_requests[0].status, 'pending');
+    const response = await request(baseUrl, 'POST', '/api/rental_change_requests/RCR-payment-safe/approve', 'admin-token', {});
+    assert.equal(response.status, 200);
+    assert.equal(state.payments[0].id, 'P-1');
+    assert.equal(state.payments[0].amount, 2000);
+    assert.equal(state.payments[0].comment, 'approved correction');
+    assert.equal(state.rental_change_requests[0].status, 'approved');
   });
+});
+
+test('rental change request payment approval rejects unsanitized payment newValue fields', async () => {
+  const unsafeFields = [
+    ['unknownTopLevel', 'blocked'],
+    ['allocatedAmount', 100],
+    ['unallocatedAmount', 50],
+    ['debt', 1000],
+    ['balance', 1000],
+    ['receivable', 1000],
+    ['payment_allocations', [{ secret: 'approval-secret' }]],
+    ['createdAt', '2026-05-24T00:00:00.000Z'],
+    ['updatedAt', '2026-05-24T00:00:00.000Z'],
+    ['createdBy', 'U-other'],
+    ['updatedBy', 'U-other'],
+    ['confirmed', true],
+    ['posted', true],
+    ['imported', true],
+    ['source', 'bank-import'],
+    ['documentId', 'D-ordinary'],
+  ];
+
+  for (const [field, value] of unsafeFields) {
+    const { app, state } = createSecurityApp();
+    state.rental_change_requests = [{
+      id: `RCR-payment-unsafe-${field}`,
+      entityType: 'payment',
+      entityId: 'P-1',
+      paymentId: 'P-1',
+      rentalId: 'R-own',
+      operation: 'update',
+      type: 'Удаление или корректировка платежей',
+      status: 'pending',
+      newValue: {
+        amount: 2000,
+        status: 'paid',
+        [field]: value,
+      },
+    }];
+
+    await withServer(app, async (baseUrl) => {
+      const before = JSON.stringify(state.payments);
+      const response = await request(baseUrl, 'POST', `/api/rental_change_requests/RCR-payment-unsafe-${field}/approve`, 'admin-token', {});
+      assert.equal(response.status, 403, field);
+      assert.match(response.body.error, new RegExp(field), field);
+      assert.equal(response.body.error.includes('approval-secret'), false, field);
+      assert.equal(JSON.stringify(state.payments), before, field);
+      assert.equal(state.rental_change_requests[0].status, 'pending', field);
+    });
+  }
 });
 
 test('CRM rejects negative budget', async () => {

@@ -528,7 +528,7 @@ function registerRentalRoutes(deps) {
     }
 
     function openServiceStatuses() {
-      return ['new', 'in_progress', 'waiting_parts'];
+      return ['new', 'in_progress', 'waiting_parts', 'needs_revision', 'ready'];
     }
 
     function findEquipmentForRental(rental, equipmentList) {
@@ -1564,7 +1564,10 @@ function registerRentalRoutes(deps) {
         const resolvedLinkedGanttRental = resolution.linkedGanttRental ||
           findLinkedGanttRental(resolution.rental, linkedGanttRentalId) ||
           null;
-        repairGanttRentalLinkIfResolved(resolvedLinkedGanttRental, resolution);
+        const isRestorePatch = isRestoringReturnedClassicRental(resolution.rental, { ...resolution.rental, ...patch });
+        if (!isRestorePatch) {
+          repairGanttRentalLinkIfResolved(resolvedLinkedGanttRental, resolution);
+        }
         idx = resolution.rentalIndex;
         const linkedGanttRental = resolvedLinkedGanttRental;
         const linkedGanttMatchesRental = [

@@ -36,6 +36,7 @@ test('rental detail does not directly update linked planner rows', () => {
   const restoreBlock = extract(rentalDetailSource, 'const handleRestoreRental = async () => {', 'const displayPlannedReturn');
   assert.match(restoreBlock, /rentalsService\.update\(rental\.id/);
   assert.doesNotMatch(restoreBlock, /equipmentService\.update/);
+  assert.match(restoreBlock, /setSaveError\(error instanceof Error \? error\.message : 'Не удалось восстановить аренду\.'\)/);
 });
 
 test('rental creation keeps stable equipment and manager links in the classic rental payload', () => {

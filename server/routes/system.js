@@ -1636,16 +1636,18 @@ function registerSystemRoutes(app, deps) {
         ganttRentals: readData('gantt_rentals') || [],
       });
 
-    auditLog?.(req, {
-      action: 'rental_equipment.backfill',
-      entityType: 'rental_equipment',
-      after: {
-        dryRun,
-        rentalsUpdated: plan.summary.rentalsUpdated,
-        ganttUpdated: plan.summary.ganttUpdated,
-        skipped: plan.summary.skipped,
-      },
-    });
+    if (!dryRun) {
+      auditLog?.(req, {
+        action: 'rental_equipment.backfill',
+        entityType: 'rental_equipment',
+        after: {
+          dryRun,
+          rentalsUpdated: plan.summary.rentalsUpdated,
+          ganttUpdated: plan.summary.ganttUpdated,
+          skipped: plan.summary.skipped,
+        },
+      });
+    }
 
     const { nextRentals, nextGanttRentals, ...publicPlan } = plan;
     return res.json({
@@ -1682,17 +1684,19 @@ function registerSystemRoutes(app, deps) {
       targetId: req.body?.id || req.query.id || '',
       limit: req.body?.limit || req.query.limit || 100,
     });
-    auditLog?.(req, {
-      action: 'rental_links.backfill',
-      entityType: 'rental_links',
-      after: {
-        dryRun: backfill.dryRun,
-        linked: backfill.linked,
-        missingLink: backfill.missingLink,
-        ambiguous: backfill.ambiguous.length,
-        unresolved: backfill.unresolved.length,
-      },
-    });
+    if (!dryRun) {
+      auditLog?.(req, {
+        action: 'rental_links.backfill',
+        entityType: 'rental_links',
+        after: {
+          dryRun: backfill.dryRun,
+          linked: backfill.linked,
+          missingLink: backfill.missingLink,
+          ambiguous: backfill.ambiguous.length,
+          unresolved: backfill.unresolved.length,
+        },
+      });
+    }
     return res.json({ ok: true, before, backfill, after });
   });
 

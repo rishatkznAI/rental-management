@@ -1763,6 +1763,18 @@ function registerCrudRoutes(deps) {
         });
         return res.status(202).json({ ok: true, changeRequest: request });
       }
+      if (collection === 'service' && req.user?.userRole !== 'Администратор') {
+        const repairId = removedItem.id;
+        const hasRepairFacts =
+          (readData('repair_work_items') || []).some(item => item.repairId === repairId || item.serviceTicketId === repairId) ||
+          (readData('repair_part_items') || []).some(item => item.repairId === repairId || item.serviceTicketId === repairId);
+        if (hasRepairFacts) {
+          return res.status(403).json({
+            ok: false,
+            error: 'Удаление сервисной заявки с работами или запчастями доступно только администратору.',
+          });
+        }
+      }
       if (collection === 'users') {
         try {
           validateUserSafetyChange(req, data, removedItem, null, 'delete', req.body);

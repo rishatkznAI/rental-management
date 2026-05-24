@@ -369,7 +369,6 @@ test('backend update preserves existing service createdAt and refreshes updatedA
   await withServer(app, async baseUrl => {
     const response = await request(baseUrl, 'PATCH', '/api/service/S-1', {
       reason: 'Обновлено',
-      createdAt: '2030-01-01T00:00:00.000Z',
     });
 
     assert.equal(response.status, 200);
@@ -377,6 +376,29 @@ test('backend update preserves existing service createdAt and refreshes updatedA
     assert.equal(response.body.updatedAt, '2026-05-18T10:00:00.000Z');
     assert.equal(state.service[0].createdAt, '2026-05-01T09:00:00.000Z');
     assert.equal(state.service[0].updatedAt, '2026-05-18T10:00:00.000Z');
+  });
+});
+
+test('backend rejects service createdAt changes through generic PATCH', async () => {
+  const { app, state } = createApp({
+    ...createState(),
+    service: [{
+      id: 'S-1',
+      ...baseTicket,
+      createdAt: '2026-05-01T09:00:00.000Z',
+      updatedAt: '2026-05-01T09:00:00.000Z',
+    }],
+  });
+
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'PATCH', '/api/service/S-1', {
+      createdAt: '2030-01-01T00:00:00.000Z',
+    });
+
+    assert.equal(response.status, 403);
+    assert.match(response.body.error, /createdAt/);
+    assert.equal(state.service[0].createdAt, '2026-05-01T09:00:00.000Z');
+    assert.equal(state.service[0].updatedAt, '2026-05-01T09:00:00.000Z');
   });
 });
 

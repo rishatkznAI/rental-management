@@ -1320,6 +1320,68 @@ test('service_audit_log is not mutable through generic CRUD routes', async () =>
   });
 });
 
+test('admin generic CRUD PATCH rejects system and credential fields', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const before = { ...state.equipment.find(item => item.id === 'EQ-own') };
+    const response = await request(baseUrl, 'PATCH', '/api/equipment/EQ-own', 'admin-token', {
+      notes: 'allowed',
+      createdAt: '2030-01-01T00:00:00.000Z',
+      passwordHash: 'forged',
+    });
+
+    assert.equal(response.status, 403);
+    assert.match(response.body.error, /createdAt|passwordHash/);
+    const equipment = state.equipment.find(item => item.id === 'EQ-own');
+    assert.equal(equipment.notes, before.notes);
+    assert.equal(equipment.createdAt, before.createdAt);
+    assert.equal(equipment.passwordHash, undefined);
+  });
+});
+
+test('admin rental PATCH rejects system fields before writing', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const before = { ...state.rentals.find(item => item.id === 'R-own') };
+    const response = await request(baseUrl, 'PATCH', '/api/rentals/R-own', 'admin-token', {
+      client: 'ООО Новый клиент',
+      auditLog: [{ action: 'forged' }],
+    });
+
+    assert.equal(response.status, 403);
+    assert.match(response.body.error, /auditLog/);
+    assert.deepEqual(state.rentals.find(item => item.id === 'R-own'), before);
+  });
+});
+
+test('admin user PATCH keeps user workflow but rejects runtime fields', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const valid = await request(baseUrl, 'PATCH', '/api/users/U-sales', 'admin-token', {
+      role: 'Менеджер по аренде',
+      password: 'new-password',
+      confirm: true,
+    });
+
+    assert.equal(valid.status, 200);
+    const updatedUser = state.users.find(user => user.id === 'U-sales');
+    assert.equal(updatedUser.role, 'Менеджер по аренде');
+    assert.equal(updatedUser.password, 'hash:new-password');
+    assert.equal(updatedUser.tokenVersion, 1);
+
+    const blocked = await request(baseUrl, 'PATCH', '/api/users/U-sales', 'admin-token', {
+      tokenVersion: 999,
+    });
+
+    assert.equal(blocked.status, 403);
+    assert.match(blocked.body.error, /tokenVersion/);
+    assert.equal(state.users.find(user => user.id === 'U-sales').tokenVersion, 1);
+  });
+});
+
 test('old bearer token stops working after password change', async () => {
   const { app } = createSecurityApp();
 

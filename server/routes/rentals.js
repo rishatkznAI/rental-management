@@ -1475,7 +1475,8 @@ function registerRentalRoutes(deps) {
         return res.status(403).json({ ok: false, error: forbiddenReason });
       }
 
-      const { patch, meta: rawMeta } = stripRentalPatchMeta(req.body);
+      const { patch: rawPatch, meta: rawMeta } = stripRentalPatchMeta(req.body);
+      let patch = rawPatch;
       let meta = rawMeta;
       const data = readData(collection) || [];
       let idx = data.findIndex(entry => String(entry.id) === String(req.params.id));
@@ -1593,6 +1594,13 @@ function registerRentalRoutes(deps) {
         accessControl.assertCanUpdateEntity(collection, data[idx], req.user);
       } catch (error) {
         return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+      }
+      if (req.user?.userRole === 'Администратор') {
+        try {
+          patch = accessControl.sanitizeUpdateInput(collection, patch, req.user, data[idx]);
+        } catch (error) {
+          return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+        }
       }
       if (isRentalDateExtensionPatch(collection, data[idx], patch)) {
         return res.status(400).json({

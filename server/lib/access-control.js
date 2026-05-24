@@ -67,6 +67,42 @@ const MASS_ASSIGNMENT_BLOCKED_FIELDS = new Set([
   'deletedAt',
 ]);
 
+const ADMIN_GENERIC_PATCH_BLOCKED_FIELDS = new Set([
+  'id',
+  '_id',
+  'createdAt',
+  'updatedAt',
+  'deletedAt',
+  'createdBy',
+  'createdById',
+  'createdByUserId',
+  'updatedBy',
+  'updatedById',
+  'audit',
+  'auditLog',
+  'service_audit_log',
+  'system',
+  'internal',
+  'passwordHash',
+  'permissions',
+  'token',
+  'tokenVersion',
+  'passwordChangedAt',
+  'botToken',
+  'session',
+  'secret',
+  'webhookSecret',
+  'apiKey',
+  'api_key',
+  'authorization',
+  'cookie',
+]);
+
+const ADMIN_GENERIC_PATCH_USER_WORKFLOW_FIELDS = new Set([
+  'password',
+  'role',
+]);
+
 const HEAD_REDACTED_FIELDS = new Set([
   'amount',
   'balance',
@@ -1398,6 +1434,24 @@ function isSystemField(field) {
   return SYSTEM_FIELD_PATTERN.test(field) || MASS_ASSIGNMENT_BLOCKED_FIELDS.has(field);
 }
 
+function isAdminGenericPatchBlockedField(collection, field) {
+  if (SYSTEM_FIELD_PATTERN.test(field)) return true;
+  if (ADMIN_GENERIC_PATCH_BLOCKED_FIELDS.has(field)) return true;
+  if (ADMIN_GENERIC_PATCH_USER_WORKFLOW_FIELDS.has(field) && collection !== 'users') return true;
+  return false;
+}
+
+function sanitizeAdminGenericPatchInput(collection, input) {
+  const safe = {};
+  for (const [field, value] of Object.entries(input || {})) {
+    if (isAdminGenericPatchBlockedField(collection, field)) {
+      throw forbidden(`Поле ${field} нельзя менять через общий PATCH.`);
+    }
+    safe[field] = value;
+  }
+  return safe;
+}
+
 function stripMassAssignmentFields(input, user, collection, mode = 'update') {
   const body = input && typeof input === 'object' ? input : {};
   if (isAdmin(user)) return { ...body };
@@ -1435,7 +1489,7 @@ function sanitizeUpdateInput(collection, input, user, existing = null) {
   if (!isKnownRole(user) || !isKnownCollection(collection)) {
     throw forbidden();
   }
-  if (isAdmin(user)) return { ...(input || {}) };
+  if (isAdmin(user)) return sanitizeAdminGenericPatchInput(collection, input);
   if (collection === 'equipment' && isMechanic(user)) {
     const allowed = new Set([
       'saleReceiptStatus',

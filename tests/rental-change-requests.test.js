@@ -2101,6 +2101,7 @@ test('approve detects stale old values and does not overwrite newer rental dates
 test('gantt create restores rentalId from one exact classic rental match', async () => {
   const { app, state } = createApprovalApp();
   const classicRental = state.rentals.find(item => item.id === 'R-1');
+  state.gantt_rentals = state.gantt_rentals.filter(item => item.rentalId !== 'R-1');
 
   await withServer(app, async (baseUrl) => {
     const created = await request(baseUrl, 'POST', '/api/gantt_rentals', 'admin-token', {
@@ -2200,6 +2201,7 @@ test('rentals patch returns clear error when legacy gantt has no rental match', 
 test('gantt create canonicalizes wrong equipment from the matched rental', async () => {
   const { app, state } = createApprovalApp();
   const classicRental = state.rentals.find(item => item.id === 'R-1');
+  state.gantt_rentals = state.gantt_rentals.filter(item => item.rentalId !== 'R-1');
 
   await withServer(app, async (baseUrl) => {
     const created = await request(baseUrl, 'POST', '/api/gantt_rentals', 'admin-token', {

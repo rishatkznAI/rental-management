@@ -5156,6 +5156,8 @@ export default function Dashboard() {
             contact: '',
             startDate: formData.startDate || '',
             plannedReturnDate: formData.endDate || '',
+            equipmentId: formData.equipmentId || '',
+            equipmentInv: formData.equipmentInv || '',
             equipment: [formData.equipmentInv || ''],
             rate: formData.amount && formData.startDate && formData.endDate
               ? `${Math.round(Number(formData.amount) / Math.max(1, getRentalDays(formData.startDate, formData.endDate)))} ₽/день`
@@ -5166,10 +5168,7 @@ export default function Dashboard() {
             manager: formData.manager || '',
             status: 'new',
             comments: '',
-          }).then((savedClassicRental) => rentalsService.createGanttEntry({
-            ...newRental,
-            rentalId: savedClassicRental.id,
-          })).then(() => {
+          }).then(() => {
             if (formData.equipmentId) {
               const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
               const eq = equipmentList.find(e => e.id === formData.equipmentId);

@@ -1134,14 +1134,14 @@ function ensureMigratedPartReference(legacyPart, spareParts) {
   return created;
 }
 
-function migrateLegacyRepairFacts() {
+function migrateLegacyRepairFacts({ dryRun = false } = {}) {
   const tickets = readData('service') || [];
   const existingServiceWorks = readData('service_works') || [];
   const existingSpareParts = readData('spare_parts') || [];
   const serviceWorks = existingServiceWorks.map(normalizeServiceWorkRecord);
   const spareParts = existingSpareParts.map(normalizeSparePartRecord);
-  const repairWorkItems = readData('repair_work_items') || [];
-  const repairPartItems = readData('repair_part_items') || [];
+  const repairWorkItems = [...(readData('repair_work_items') || [])];
+  const repairPartItems = [...(readData('repair_part_items') || [])];
 
   let worksChanged = false;
   let partsChanged = false;
@@ -1216,12 +1216,16 @@ function migrateLegacyRepairFacts() {
   workRefsChanged = serviceWorks.length !== originalWorksCount;
   partRefsChanged = spareParts.length !== originalPartsCount;
 
-  if (workRefsChanged) writeData('service_works', serviceWorks);
-  if (partRefsChanged) writeData('spare_parts', spareParts);
-  if (worksChanged) writeData('repair_work_items', repairWorkItems);
-  if (partsChanged) writeData('repair_part_items', repairPartItems);
+  if (!dryRun) {
+    if (workRefsChanged) writeData('service_works', serviceWorks);
+    if (partRefsChanged) writeData('spare_parts', spareParts);
+    if (worksChanged) writeData('repair_work_items', repairWorkItems);
+    if (partsChanged) writeData('repair_part_items', repairPartItems);
+  }
 
   return {
+    dryRun,
+    applied: !dryRun,
     createdWorkRefs,
     createdPartRefs,
     migratedWorkItems,
@@ -1532,6 +1536,7 @@ registerServiceRoutes(apiRouter, {
   readData,
   writeData,
   requireAuth,
+  requireAdmin,
   requireRead,
   requireWrite,
   normalizeServiceWorkRecord,

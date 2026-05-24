@@ -789,6 +789,11 @@ test('/api/admin/rental-equipment-diagnostics/backfill dry-run does not write an
     assert.equal(dryRun.body.backfill.summary.rentalsUpdated, 2);
     assert.equal(collections.rentals.find(item => item.id === 'R-2').equipmentId, undefined);
 
+    const queryDryRun = await postJson(baseUrl, '/api/admin/rental-equipment-diagnostics/backfill?dryRun=1', { confirm: true });
+    assert.equal(queryDryRun.status, 200);
+    assert.equal(queryDryRun.body.dryRun, true);
+    assert.equal(collections.rentals.find(item => item.id === 'R-2').equipmentId, undefined);
+
     const applied = await postJson(baseUrl, '/api/admin/rental-equipment-diagnostics/backfill', { confirm: true });
     assert.equal(applied.status, 200);
     assert.equal(applied.body.dryRun, false);
@@ -1529,6 +1534,7 @@ test('/api/admin/media/archive-external-photos archives allowed images and backu
     await withServer(app, async (baseUrl) => {
       const archive = await postJson(baseUrl, '/api/admin/media/archive-external-photos', {
         allowDomains: ['i.oneme.ru'],
+        confirm: true,
       });
       assert.equal(archive.status, 200);
       assert.equal(archive.body.summary.archived, 1);
@@ -1551,6 +1557,55 @@ test('/api/admin/media/archive-external-photos archives allowed images and backu
       const auditText = JSON.stringify(auditEntries);
       assert.equal(auditEntries.some(entry => entry.action === 'media.external_photos.archive'), true);
       assert.doesNotMatch(auditText, /archive-me|https:\/\/i\.oneme\.ru|base64|password|token/i);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('/api/admin/media/archive-external-photos POST defaults to dry-run and dryRun overrides confirm', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'external-photo-dry-run-'));
+  const externalPhotoUrl = 'https://i.oneme.ru/i?r=dry-run-only';
+  const collections = {
+    shipping_photos: [{ id: 'SP-1', photos: [externalPhotoUrl] }],
+  };
+  let fetchCount = 0;
+  let writeCount = 0;
+  const { app, auditEntries } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, data) => {
+      writeCount += 1;
+      collections[name] = data;
+    },
+    jsonCollections: ['shipping_photos'],
+    uploadRoot: path.join(tempDir, 'uploads'),
+    fetchImpl: async () => {
+      fetchCount += 1;
+      return fakeFetchResponse();
+    },
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const defaultPost = await postJson(baseUrl, '/api/admin/media/archive-external-photos', {
+        allowDomains: ['i.oneme.ru'],
+      });
+      assert.equal(defaultPost.status, 200);
+      assert.equal(defaultPost.body.dryRun, true);
+      assert.equal(defaultPost.body.summary.found, 1);
+      assert.equal(fetchCount, 0);
+      assert.equal(writeCount, 0);
+      assert.equal(collections.shipping_photos[0].photos[0], externalPhotoUrl);
+
+      const explicitDryRun = await postJson(baseUrl, '/api/admin/media/archive-external-photos?dryRun=1', {
+        allowDomains: ['i.oneme.ru'],
+        confirm: true,
+      });
+      assert.equal(explicitDryRun.status, 200);
+      assert.equal(explicitDryRun.body.dryRun, true);
+      assert.equal(fetchCount, 0);
+      assert.equal(writeCount, 0);
+      assert.equal(auditEntries.some(entry => entry.action === 'media.external_photos.archive'), false);
     });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1584,6 +1639,7 @@ test('/api/admin/media/archive-external-photos skips disallowed non-image and to
     await withServer(app, async (baseUrl) => {
       const response = await postJson(baseUrl, '/api/admin/media/archive-external-photos', {
         allowDomains: ['i.oneme.ru'],
+        confirm: true,
       });
       assert.equal(response.status, 200);
       assert.equal(response.body.summary.archived, 0);
@@ -1620,6 +1676,7 @@ test('/api/admin/media/archive-external-photos request cannot expand configured 
   await withServer(app, async (baseUrl) => {
     const response = await postJson(baseUrl, '/api/admin/media/archive-external-photos', {
       allowDomains: ['cdn.example.test'],
+      confirm: true,
     });
     assert.equal(response.status, 200);
     assert.deepEqual(response.body.allowDomains, []);

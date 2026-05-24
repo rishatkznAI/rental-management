@@ -15,6 +15,7 @@ function registerServiceRoutes(router, deps) {
     readData,
     writeData,
     requireAuth,
+    requireAdmin,
     requireRead,
     requireWrite,
     normalizeServiceWorkRecord,
@@ -966,10 +967,16 @@ function registerServiceRoutes(router, deps) {
     res.json({ summary, rows, fieldTrips: completedFieldTripRows, repeatFailures, productivity });
   });
 
-  router.post('/admin/migrate-repair-facts', requireAuth, requireWrite('service_works'), (req, res) => {
-    const result = migrateLegacyRepairFacts();
-    res.json({ ok: true, ...result });
-  });
+  router.post(
+    '/admin/migrate-repair-facts',
+    requireAuth,
+    requireAdmin || requireWrite('service_works'),
+    (req, res) => {
+      const dryRun = req.body?.confirm !== true || req.body?.dryRun === true || req.query.dryRun === '1';
+      const result = migrateLegacyRepairFacts({ dryRun });
+      res.json({ ok: true, ...result, dryRun, applied: !dryRun });
+    },
+  );
 }
 
 module.exports = {

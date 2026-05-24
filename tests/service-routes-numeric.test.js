@@ -49,7 +49,7 @@ function normalizeSparePartRecord(record) {
   };
 }
 
-function createServiceApp(state = createState(), user = { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' }) {
+function createServiceApp(state = createState(), user = { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' }, overrides = {}) {
   const app = express();
   app.use(express.json());
   const readData = name => state[name] || [];
@@ -78,6 +78,7 @@ function createServiceApp(state = createState(), user = { userId: 'U-admin', use
     readData,
     writeData,
     requireAuth: (_req, _res, next) => next(),
+    requireAdmin: overrides.requireAdmin || ((_req, _res, next) => next()),
     requireRead: () => (_req, _res, next) => next(),
     requireWrite: () => (_req, _res, next) => next(),
     normalizeServiceWorkRecord,
@@ -96,7 +97,7 @@ function createServiceApp(state = createState(), user = { userId: 'U-admin', use
       }
       return ticket;
     },
-    migrateLegacyRepairFacts: () => ({ changed: false }),
+    migrateLegacyRepairFacts: overrides.migrateLegacyRepairFacts || (() => ({ changed: false })),
     accessControl,
     auditLog: () => {},
     serviceAuditLog,
@@ -129,6 +130,62 @@ async function request(baseUrl, method, path, body) {
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
+
+test('/api/admin/migrate-repair-facts defaults to dry-run and requires confirm to apply', async () => {
+  const calls = [];
+  const { app } = createServiceApp(createState(), undefined, {
+    migrateLegacyRepairFacts: options => {
+      calls.push(options);
+      return {
+        dryRun: options.dryRun,
+        applied: !options.dryRun,
+        ticketsScanned: 2,
+        createdWorkRefs: 1,
+        createdPartRefs: 0,
+        migratedWorkItems: 1,
+        migratedPartItems: 0,
+      };
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const preview = await request(baseUrl, 'POST', '/api/admin/migrate-repair-facts', {});
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.dryRun, true);
+    assert.equal(preview.body.applied, false);
+
+    const dryRunOverride = await request(baseUrl, 'POST', '/api/admin/migrate-repair-facts?dryRun=1', { confirm: true });
+    assert.equal(dryRunOverride.status, 200);
+    assert.equal(dryRunOverride.body.dryRun, true);
+    assert.equal(dryRunOverride.body.applied, false);
+
+    const applied = await request(baseUrl, 'POST', '/api/admin/migrate-repair-facts', { confirm: true });
+    assert.equal(applied.status, 200);
+    assert.equal(applied.body.dryRun, false);
+    assert.equal(applied.body.applied, true);
+    assert.deepEqual(calls, [{ dryRun: true }, { dryRun: true }, { dryRun: false }]);
+  });
+});
+
+test('/api/admin/migrate-repair-facts is admin-only', async () => {
+  let migrated = false;
+  const { app } = createServiceApp(createState(), { userId: 'U-manager', userName: 'Менеджер', userRole: 'Менеджер по аренде' }, {
+    requireAdmin: (req, res, next) => {
+      if (req.user?.userRole !== 'Администратор') return res.status(403).json({ ok: false, error: 'Forbidden' });
+      return next();
+    },
+    migrateLegacyRepairFacts: () => {
+      migrated = true;
+      return {};
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/admin/migrate-repair-facts', { confirm: true });
+    assert.equal(response.status, 403);
+    assert.equal(migrated, false);
+  });
+});
 
 async function requestRaw(baseUrl, method, path, body) {
   const response = await fetch(`${baseUrl}${path}`, {

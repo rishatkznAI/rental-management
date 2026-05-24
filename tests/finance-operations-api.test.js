@@ -340,3 +340,34 @@ test('payment allocation preview is read-only and apply caps allocations by paym
     assert.equal(state.payment_allocations.reduce((sum, item) => sum + item.amount, 0), 120000);
   });
 });
+
+test('payment allocation preview apply validates documentId before creating allocations', async () => {
+  const { app, state } = createApp();
+  state.clients = [{ id: 'c-1', company: 'Клиент' }];
+  state.gantt_rentals = [
+    { id: 'r-1', clientId: 'c-1', contractId: 'ct-1', objectId: 'o-1', client: 'Клиент', equipmentInv: '1', manager: 'Руслан', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
+  ];
+  state.payments = [{ id: 'p-1', clientId: 'c-1', contractId: 'ct-1', amount: 100000, paidAmount: 100000, status: 'paid' }];
+  state.documents = [{ id: 'd-1', clientId: 'c-1', rentalId: 'r-1', type: 'invoice' }];
+
+  await withServer(app, async (baseUrl) => {
+    const missingDocument = await request(baseUrl, 'POST', '/api/finance/payments/p-1/apply-allocation-preview', 'office', {
+      allocations: [
+        { rentalId: 'r-1', clientId: 'c-1', contractId: 'ct-1', objectId: 'o-1', documentId: 'd-missing', amount: 1000 },
+      ],
+    });
+    assert.equal(missingDocument.response.status, 400);
+    assert.match(missingDocument.json.error, /Invalid allocation documentId/);
+    assert.equal(state.payment_allocations.length, 0);
+
+    const validDocument = await request(baseUrl, 'POST', '/api/finance/payments/p-1/apply-allocation-preview', 'office', {
+      allocations: [
+        { rentalId: 'r-1', clientId: 'c-1', contractId: 'ct-1', objectId: 'o-1', documentId: 'd-1', amount: 1000 },
+      ],
+    });
+    assert.equal(validDocument.response.status, 201);
+    assert.equal(validDocument.json.allocations.length, 1);
+    assert.equal(validDocument.json.allocations[0].documentId, 'd-1');
+    assert.equal(state.payment_allocations.length, 1);
+  });
+});

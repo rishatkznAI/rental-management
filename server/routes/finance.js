@@ -890,6 +890,11 @@ function registerFinanceRoutes(router, deps) {
           .map(item => text(item?.id))
           .filter(Boolean)
       );
+      const documentIds = new Set(
+        collectionList('documents')
+          .map(item => text(item?.id))
+          .filter(Boolean)
+      );
       const preview = buildAllocationPreview({ payments, paymentAllocations, rentals }, req.params.id);
       const requested = Array.isArray(req.body?.allocations) ? req.body.allocations : preview.suggestedAllocations;
       const allocations = collectionList('payment_allocations');
@@ -907,6 +912,10 @@ function registerFinanceRoutes(router, deps) {
         if (rentalId && !rentalIds.has(rentalId)) {
           return res.status(400).json({ ok: false, error: 'Аренда для распределения не найдена' });
         }
+        const documentId = text(item.documentId);
+        if (documentId && !documentIds.has(documentId)) {
+          return res.status(400).json({ ok: false, error: 'Invalid allocation documentId. Document does not exist.' });
+        }
         const amount = Math.min(requestedAmount, remaining);
         created.push({
           id: text(item.id) || generateId(idPrefixes.payment_allocations || 'PA'),
@@ -915,7 +924,7 @@ function registerFinanceRoutes(router, deps) {
           objectId: text(item.objectId) || undefined,
           contractId: text(item.contractId) || undefined,
           rentalId: rentalId || undefined,
-          documentId: text(item.documentId) || undefined,
+          documentId: documentId || undefined,
           amount,
           status: 'active',
           comment: text(item.comment) || undefined,

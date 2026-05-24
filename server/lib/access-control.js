@@ -385,6 +385,32 @@ const WARRANTY_CLAIM_MUTATION_FIELDS = new Set([
   'resolution',
 ]);
 
+const STRICT_PAYMENT_ORDINARY_MUTATION_FIELDS = new Set([
+  'rentalId',
+  'clientId',
+  'client',
+  'objectId',
+  'contractId',
+  'invoiceNumber',
+  'amount',
+  'paidAmount',
+  'dueDate',
+  'paidDate',
+  'status',
+  'method',
+  'comment',
+  'attachments',
+]);
+
+const STRICT_PAYMENT_BULK_REPLACE_FIELDS = new Set([
+  'id',
+  ...STRICT_PAYMENT_ORDINARY_MUTATION_FIELDS,
+  'date',
+  'paymentDate',
+  'documentId',
+  'document',
+]);
+
 const NON_ADMIN_UPDATE_FIELDS = {
   clients: new Set([
     'company',
@@ -1582,6 +1608,7 @@ function isAdminBulkReplaceBlockedField(collection, field) {
   if (field === 'id') return false;
   if (collection === 'users' && !STRICT_USER_MUTATION_FIELDS.has(field)) return true;
   if (collection === 'clients') return !STRICT_CLIENT_BULK_REPLACE_FIELDS.has(field);
+  if (collection === 'payments') return !STRICT_PAYMENT_BULK_REPLACE_FIELDS.has(field);
   return isAdminGenericPatchBlockedField(collection, field);
 }
 
@@ -1639,6 +1666,19 @@ function sanitizeStrictClientMutationInput(collection, input) {
   return safe;
 }
 
+function sanitizeStrictPaymentMutationInput(collection, input, { mode = 'ordinary' } = {}) {
+  if (collection !== 'payments') return null;
+  const allowedFields = mode === 'bulk' ? STRICT_PAYMENT_BULK_REPLACE_FIELDS : STRICT_PAYMENT_ORDINARY_MUTATION_FIELDS;
+  const safe = {};
+  for (const [field, value] of Object.entries(input || {})) {
+    if (!allowedFields.has(field)) {
+      throw forbidden(`Поле ${field} нельзя сохранять в payments.`);
+    }
+    safe[field] = value;
+  }
+  return safe;
+}
+
 function stripMassAssignmentFields(input, user, collection, mode = 'update') {
   const body = input && typeof input === 'object' ? input : {};
   if (isAdmin(user)) return { ...body };
@@ -1668,6 +1708,10 @@ function sanitizeCreateInput(collection, input, user) {
   if (strictClientInput) return isAdmin(user)
     ? strictClientInput
     : stripMassAssignmentFields(strictClientInput, user, collection, 'create');
+  const strictPaymentInput = sanitizeStrictPaymentMutationInput(collection, input);
+  if (strictPaymentInput) return isAdmin(user)
+    ? strictPaymentInput
+    : stripMassAssignmentFields(strictPaymentInput, user, collection, 'create');
   const safe = stripMassAssignmentFields(input, user, collection, 'create');
   if (!isAdmin(user)) {
     delete safe.id;
@@ -1700,6 +1744,10 @@ function sanitizeUpdateInput(collection, input, user, existing = null) {
   if (strictClientInput) return isAdmin(user)
     ? sanitizeAdminGenericPatchInput(collection, strictClientInput)
     : stripMassAssignmentFields(strictClientInput, user, collection);
+  const strictPaymentInput = sanitizeStrictPaymentMutationInput(collection, input);
+  if (strictPaymentInput) return isAdmin(user)
+    ? sanitizeAdminGenericPatchInput(collection, strictPaymentInput)
+    : stripMassAssignmentFields(strictPaymentInput, user, collection);
   if (isAdmin(user)) return sanitizeAdminGenericPatchInput(collection, input);
   if (collection === 'equipment' && isMechanic(user)) {
     const allowed = new Set([
@@ -1866,6 +1914,8 @@ function assertCanBulkReplace(collection, user) {
 function assertSafeAdminBulkReplaceInput(collection, list, context = 'массовое обновление') {
   for (const item of Array.isArray(list) ? list : []) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const strictPaymentInput = sanitizeStrictPaymentMutationInput(collection, item, { mode: 'bulk' });
+    if (strictPaymentInput) continue;
     for (const field of Object.keys(item)) {
       if (isAdminBulkReplaceBlockedField(collection, field)) {
         throw forbidden(`Поле ${field} нельзя менять через ${context}.`);
@@ -1919,6 +1969,7 @@ function createAccessControl({ readData }) {
     sanitizeCollectionForRead,
     sanitizeEntityForRead,
     assertSafeAdminBulkReplaceInput,
+    sanitizePaymentMutationInput: (input, options) => sanitizeStrictPaymentMutationInput('payments', input, options),
     sanitizeUpdateInput,
     splitForbiddenRentalManagerPatch,
   };

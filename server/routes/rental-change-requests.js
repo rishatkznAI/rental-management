@@ -19,6 +19,7 @@ function registerRentalChangeRequestRoutes(deps) {
     validateRentalPayload,
     generateId,
     idPrefixes,
+    accessControl,
   } = deps;
 
   const router = express.Router();
@@ -187,9 +188,18 @@ function registerRentalChangeRequestRoutes(deps) {
     if (request.operation === 'delete') {
       payments.splice(paymentIdx, 1);
     } else {
+      let safePatch = request.newValue && typeof request.newValue === 'object' ? { ...request.newValue } : {};
+      delete safePatch.id;
+      if (accessControl?.sanitizePaymentMutationInput) {
+        try {
+          safePatch = accessControl.sanitizePaymentMutationInput(safePatch);
+        } catch (error) {
+          return { ok: false, status: error?.status || 400, error: error?.message || 'Некорректные поля платежа' };
+        }
+      }
       payments[paymentIdx] = {
         ...payments[paymentIdx],
-        ...(request.newValue && typeof request.newValue === 'object' ? request.newValue : {}),
+        ...safePatch,
         id: payments[paymentIdx].id,
       };
     }

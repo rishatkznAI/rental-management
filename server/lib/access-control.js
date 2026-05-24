@@ -270,6 +270,30 @@ const STRICT_REPAIR_ITEM_MUTATION_FIELDS = {
   ]),
 };
 
+const STRICT_USER_MUTATION_FIELDS = new Set([
+  'id',
+  'name',
+  'email',
+  'phone',
+  'role',
+  'status',
+  'password',
+  'profilePhoto',
+  'ownerId',
+  'ownerName',
+  'carrierId',
+  'maxUserId',
+  'botOnly',
+  'allowFrontendLogin',
+  'frontendAccess',
+]);
+
+const USER_PATCH_CONTROL_FIELDS = new Set([
+  'confirm',
+  'confirmEmail',
+  'emailConfirmation',
+]);
+
 const WARRANTY_CLAIM_MUTATION_FIELDS = new Set([
   'serviceTicketId',
   'equipmentId',
@@ -1493,6 +1517,7 @@ function isAdminGenericPatchBlockedField(collection, field) {
 
 function isAdminBulkReplaceBlockedField(collection, field) {
   if (field === 'id') return false;
+  if (collection === 'users' && !STRICT_USER_MUTATION_FIELDS.has(field)) return true;
   return isAdminGenericPatchBlockedField(collection, field);
 }
 
@@ -1520,6 +1545,21 @@ function sanitizeStrictRepairItemMutationInput(collection, input) {
   return safe;
 }
 
+function sanitizeStrictUserMutationInput(collection, input, { allowControlFields = false } = {}) {
+  if (collection !== 'users') return null;
+  const safe = {};
+  for (const [field, value] of Object.entries(input || {})) {
+    if (allowControlFields && USER_PATCH_CONTROL_FIELDS.has(field)) {
+      continue;
+    }
+    if (!STRICT_USER_MUTATION_FIELDS.has(field)) {
+      throw forbidden(`Поле ${field} нельзя сохранять в users.`);
+    }
+    safe[field] = value;
+  }
+  return safe;
+}
+
 function stripMassAssignmentFields(input, user, collection, mode = 'update') {
   const body = input && typeof input === 'object' ? input : {};
   if (isAdmin(user)) return { ...body };
@@ -1541,6 +1581,10 @@ function sanitizeCreateInput(collection, input, user) {
   if (strictRepairItemInput) return isAdmin(user)
     ? strictRepairItemInput
     : stripMassAssignmentFields(strictRepairItemInput, user, collection, 'create');
+  const strictUserInput = sanitizeStrictUserMutationInput(collection, input);
+  if (strictUserInput) return isAdmin(user)
+    ? strictUserInput
+    : stripMassAssignmentFields(strictUserInput, user, collection, 'create');
   const safe = stripMassAssignmentFields(input, user, collection, 'create');
   if (!isAdmin(user)) {
     delete safe.id;
@@ -1565,6 +1609,10 @@ function sanitizeUpdateInput(collection, input, user, existing = null) {
   if (strictRepairItemInput) return isAdmin(user)
     ? sanitizeAdminGenericPatchInput(collection, strictRepairItemInput)
     : stripMassAssignmentFields(strictRepairItemInput, user, collection);
+  const strictUserInput = sanitizeStrictUserMutationInput(collection, input, { allowControlFields: true });
+  if (strictUserInput) return isAdmin(user)
+    ? sanitizeAdminGenericPatchInput(collection, strictUserInput)
+    : stripMassAssignmentFields(strictUserInput, user, collection);
   if (isAdmin(user)) return sanitizeAdminGenericPatchInput(collection, input);
   if (collection === 'equipment' && isMechanic(user)) {
     const allowed = new Set([

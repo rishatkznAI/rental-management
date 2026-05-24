@@ -1446,6 +1446,7 @@ test('admin user PATCH keeps user workflow but rejects runtime fields', async ()
     assert.equal(updatedUser.role, 'Менеджер по аренде');
     assert.equal(updatedUser.password, 'hash:new-password');
     assert.equal(updatedUser.tokenVersion, 1);
+    assert.equal(Object.prototype.hasOwnProperty.call(updatedUser, 'confirm'), false);
 
     const blocked = await request(baseUrl, 'PATCH', '/api/users/U-sales', 'admin-token', {
       tokenVersion: 999,
@@ -1454,6 +1455,134 @@ test('admin user PATCH keeps user workflow but rejects runtime fields', async ()
     assert.equal(blocked.status, 403);
     assert.match(blocked.body.error, /tokenVersion/);
     assert.equal(state.users.find(user => user.id === 'U-sales').tokenVersion, 1);
+  });
+});
+
+test('admin user POST accepts allowed fields and rejects unknown top-level fields before writing', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const valid = await request(baseUrl, 'POST', '/api/users', 'admin-token', {
+      name: 'Новый пользователь',
+      email: 'new-user@example.test',
+      phone: '+7 900 000-00-00',
+      role: 'Инвестор',
+      status: 'Активен',
+      password: 'new-password',
+      profilePhoto: 'https://cdn.example.test/new-user.jpg',
+      ownerId: 'OW-1',
+      ownerName: 'Владелец',
+    });
+
+    assert.equal(valid.status, 201);
+    assert.equal(valid.body.id, 'U-new');
+    assert.equal(valid.body.name, 'Новый пользователь');
+    assert.equal(JSON.stringify(valid.body).includes('new-password'), false);
+
+    const created = state.users.find(user => user.email === 'new-user@example.test');
+    assert.equal(created.role, 'Инвестор');
+    assert.equal(created.password, 'hash:new-password');
+    assert.equal(created.ownerId, 'OW-1');
+
+    const countBefore = state.users.length;
+    const blocked = await request(baseUrl, 'POST', '/api/users', 'admin-token', {
+      name: 'Blocked',
+      email: 'blocked@example.test',
+      role: 'Менеджер по аренде',
+      status: 'Активен',
+      password: 'blocked-password',
+      metadata: { passwordHash: 'secret-hash-value' },
+    });
+
+    assert.equal(blocked.status, 403);
+    assert.match(blocked.body.error, /metadata/);
+    assert.equal(JSON.stringify(blocked.body).includes('secret-hash-value'), false);
+    assert.equal(state.users.length, countBefore);
+    assert.equal(state.users.some(user => user.email === 'blocked@example.test'), false);
+  });
+});
+
+test('admin user PATCH rejects unknown top-level fields before writing', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const before = { ...state.users.find(user => user.id === 'U-manager') };
+    const valid = await request(baseUrl, 'PATCH', '/api/users/U-manager', 'admin-token', {
+      name: 'Руслан Updated',
+      profilePhoto: 'https://cdn.example.test/manager.jpg',
+    });
+
+    assert.equal(valid.status, 200);
+    assert.equal(state.users.find(user => user.id === 'U-manager').name, 'Руслан Updated');
+    assert.equal(state.users.find(user => user.id === 'U-manager').profilePhoto, 'https://cdn.example.test/manager.jpg');
+
+    const blocked = await request(baseUrl, 'PATCH', '/api/users/U-manager', 'admin-token', {
+      ownerId: 'OW-1',
+      settings: { passwordHash: 'secret-hash-value' },
+    });
+
+    assert.equal(blocked.status, 403);
+    assert.match(blocked.body.error, /settings/);
+    assert.equal(JSON.stringify(blocked.body).includes('secret-hash-value'), false);
+
+    const after = state.users.find(user => user.id === 'U-manager');
+    assert.equal(after.ownerId, before.ownerId);
+    assert.equal(Object.prototype.hasOwnProperty.call(after, 'settings'), false);
+  });
+});
+
+test('admin user bulk PUT rejects unknown top-level fields before writing', async () => {
+  const { app, state, auditEntries } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const salesUser = state.users.find(user => user.id === 'U-sales');
+    salesUser.tokenVersion = 7;
+    salesUser.passwordChangedAt = '2026-05-01T12:00:00.000Z';
+    const before = JSON.stringify(state.users);
+    const auditCount = auditEntries.length;
+    const response = await request(baseUrl, 'PUT', '/api/users', 'admin-token', state.users.map(user => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      ...(user.ownerId ? { ownerId: user.ownerId } : {}),
+      ...(user.id === 'U-sales' ? { preferences: { passwordHash: 'secret-hash-value' } } : {}),
+    })));
+
+    assert.equal(response.status, 403);
+    assert.match(response.body.error, /preferences/);
+    assert.equal(JSON.stringify(response.body).includes('secret-hash-value'), false);
+    assert.equal(JSON.stringify(state.users), before);
+    assert.equal(auditEntries.length, auditCount);
+
+    const blockedRuntime = await request(baseUrl, 'PUT', '/api/users', 'admin-token', state.users.map(user => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      ...(user.id === 'U-sales' ? { tokenVersion: 999 } : {}),
+    })));
+
+    assert.equal(blockedRuntime.status, 403);
+    assert.match(blockedRuntime.body.error, /tokenVersion/);
+    assert.equal(JSON.stringify(state.users), before);
+
+    const valid = await request(baseUrl, 'PUT', '/api/users', 'admin-token', state.users.map(user => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      ...(user.ownerId ? { ownerId: user.ownerId } : {}),
+    })));
+
+    assert.equal(valid.status, 200);
+    const preserved = state.users.find(user => user.id === 'U-sales');
+    assert.equal(preserved.password, 'sales');
+    assert.equal(preserved.tokenVersion, 7);
+    assert.equal(preserved.passwordChangedAt, '2026-05-01T12:00:00.000Z');
   });
 });
 

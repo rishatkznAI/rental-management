@@ -107,3 +107,22 @@ test('syncGanttRentalPaymentStatuses counts canonical payments for planner-linke
   assert.equal(updated[1].paymentStatus, 'partial');
   assert.equal(updated[2].paymentStatus, 'unpaid');
 });
+
+test('syncGanttRentalPaymentStatuses counts allocation rows for contract-level payments', () => {
+  const updated = syncGanttRentalPaymentStatuses(
+    [
+      { id: 'gr-1', amount: 50000, paymentStatus: 'unpaid' },
+      { id: 'gr-2', amount: 70000, paymentStatus: 'unpaid' },
+    ],
+    [
+      { id: 'p-1', contractId: 'ct-1', amount: 100000, paidAmount: 100000, status: 'paid' },
+    ],
+    [
+      { id: 'pa-1', paymentId: 'p-1', rentalId: 'gr-1', amount: 50000, status: 'active' },
+      { id: 'pa-2', paymentId: 'p-1', rentalId: 'gr-2', amount: 10000, status: 'active' },
+    ],
+  );
+
+  assert.equal(updated[0].paymentStatus, 'paid');
+  assert.equal(updated[1].paymentStatus, 'partial');
+});

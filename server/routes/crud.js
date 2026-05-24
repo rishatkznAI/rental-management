@@ -129,7 +129,7 @@ function registerCrudRoutes(deps) {
 
   function syncPaymentStatusesAfterPaymentWrite(payments) {
     const currentGanttRentals = readData('gantt_rentals') || [];
-    const nextGanttRentals = syncGanttRentalPaymentStatuses(currentGanttRentals, payments);
+    const nextGanttRentals = syncGanttRentalPaymentStatuses(currentGanttRentals, payments, readData('payment_allocations') || []);
     writeData('gantt_rentals', nextGanttRentals);
   }
 
@@ -762,6 +762,51 @@ function registerCrudRoutes(deps) {
     if (hasPaidAmount) parsePaymentMoney(record?.paidAmount, 'Оплачено');
   }
 
+  const PAYMENT_ALLOCATION_EDIT_GUARD_FIELDS = new Set([
+    'amount',
+    'paidAmount',
+    'status',
+    'rentalId',
+    'clientId',
+    'objectId',
+    'contractId',
+  ]);
+
+  function hasActivePaymentAllocations(paymentId) {
+    const id = String(paymentId || '').trim();
+    if (!id) return false;
+    return (readData('payment_allocations') || []).some(item =>
+      String(item?.paymentId || '').trim() === id &&
+      String(item?.status || '').trim().toLowerCase() !== 'cancelled'
+    );
+  }
+
+  function comparablePaymentFieldValue(field, value) {
+    if (field === 'amount' || field === 'paidAmount') {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : value;
+    }
+    return value == null ? '' : String(value);
+  }
+
+  function assertAllocatedPaymentPatchSafe(previous, patch) {
+    if (!hasActivePaymentAllocations(previous?.id)) return;
+    for (const field of PAYMENT_ALLOCATION_EDIT_GUARD_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(patch || {}, field)) continue;
+      if (comparablePaymentFieldValue(field, previous?.[field]) === comparablePaymentFieldValue(field, patch[field])) continue;
+      const error = new Error('Payment has allocations. Use correction/reversal workflow instead of direct edit.');
+      error.status = 409;
+      throw error;
+    }
+  }
+
+  function assertAllocatedPaymentDeleteSafe(payment) {
+    if (!hasActivePaymentAllocations(payment?.id)) return;
+    const error = new Error('Payment has allocations. Reverse or cancel it with reason instead of deleting.');
+    error.status = 409;
+    throw error;
+  }
+
   function paymentAllocationCap(payment) {
     const paid = getEffectivePaidAmount(payment);
     const amount = Number(payment?.amount);
@@ -775,6 +820,17 @@ function registerCrudRoutes(deps) {
     if (amount <= 0) throw new Error('Сумма распределения должна быть больше 0');
     const payment = (readData('payments') || []).find(item => String(item?.id || '').trim() === paymentId);
     if (!payment) throw new Error('Платёж для распределения не найден');
+    const rentalId = String(record?.rentalId || '').trim();
+    if (rentalId) {
+      const rentalExists = [...(readData('gantt_rentals') || []), ...(readData('rentals') || [])]
+        .some(item => String(item?.id || '').trim() === rentalId);
+      if (!rentalExists) throw new Error('Аренда для распределения не найдена');
+    }
+    const documentId = String(record?.documentId || '').trim();
+    if (documentId) {
+      const documentExists = (readData('documents') || []).some(item => String(item?.id || '').trim() === documentId);
+      if (!documentExists) throw new Error('Документ для распределения не найден');
+    }
     const allocated = (readData('payment_allocations') || [])
       .filter(item => String(item?.paymentId || '').trim() === paymentId)
       .filter(item => String(item?.id || '').trim() !== String(existing?.id || record?.id || '').trim())
@@ -782,6 +838,39 @@ function registerCrudRoutes(deps) {
       .reduce((sum, item) => sum + (Number.isFinite(Number(item?.amount)) && Number(item.amount) > 0 ? Number(item.amount) : 0), 0);
     if (allocated + amount > paymentAllocationCap(payment) + 0.000001) {
       throw new Error('Сумма распределений не может превышать сумму платежа');
+    }
+  }
+
+  function validatePaymentAllocationBulkReplace(records) {
+    const paymentsById = new Map((readData('payments') || [])
+      .map(item => [String(item?.id || '').trim(), item])
+      .filter(([id]) => id));
+    const rentalIds = new Set([...(readData('gantt_rentals') || []), ...(readData('rentals') || [])]
+      .map(item => String(item?.id || '').trim())
+      .filter(Boolean));
+    const documentIds = new Set((readData('documents') || [])
+      .map(item => String(item?.id || '').trim())
+      .filter(Boolean));
+    const totalsByPaymentId = new Map();
+    for (const record of records || []) {
+      const paymentId = String(record?.paymentId || '').trim();
+      if (!paymentId) throw new Error('Для распределения платежа укажите paymentId');
+      if (!paymentsById.has(paymentId)) throw new Error('Платёж для распределения не найден');
+      const rentalId = String(record?.rentalId || '').trim();
+      if (rentalId && !rentalIds.has(rentalId)) throw new Error('Аренда для распределения не найдена');
+      const documentId = String(record?.documentId || '').trim();
+      if (documentId && !documentIds.has(documentId)) throw new Error('Документ для распределения не найден');
+      if (String(record?.status || '').trim().toLowerCase() === 'cancelled') continue;
+      const amount = Number(record?.amount);
+      if (!Number.isFinite(amount) || amount <= 0) continue;
+      totalsByPaymentId.set(paymentId, (totalsByPaymentId.get(paymentId) || 0) + amount);
+    }
+    for (const [paymentId, amount] of totalsByPaymentId) {
+      const payment = paymentsById.get(paymentId);
+      if (!payment) continue;
+      if (amount > paymentAllocationCap(payment) + 0.000001) {
+        throw new Error('Сумма распределений не может превышать сумму платежа');
+      }
     }
   }
 
@@ -1458,6 +1547,9 @@ function registerCrudRoutes(deps) {
         if (collection === 'payments') {
           syncPaymentStatusesAfterPaymentWrite(data);
         }
+        if (collection === 'payment_allocations') {
+          syncPaymentStatusesAfterPaymentWrite(readData('payments') || []);
+        }
         if (collection === 'service') {
           applyServiceTicketCreationEffects?.(newItem, req.user.userName);
         }
@@ -1547,6 +1639,7 @@ function registerCrudRoutes(deps) {
         }
         const previousItem = { ...data[idx] };
         if (collection === 'payments') {
+          assertAllocatedPaymentPatchSafe(data[idx], safePatch);
           validatePaymentRecord({ ...data[idx], ...safePatch });
         }
         if (collection === 'crm_deals') {
@@ -1682,6 +1775,9 @@ function registerCrudRoutes(deps) {
         if (collection === 'payments') {
           syncPaymentStatusesAfterPaymentWrite(data);
         }
+        if (collection === 'payment_allocations') {
+          syncPaymentStatusesAfterPaymentWrite(readData('payments') || []);
+        }
         if (collection === 'users') {
           return res.json(sanitizeUser(data[idx]));
         }
@@ -1763,6 +1859,13 @@ function registerCrudRoutes(deps) {
           financialImpact: buildPaymentFinancialImpact(removedItem, null, 'delete'),
         });
         return res.status(202).json({ ok: true, changeRequest: request });
+      }
+      try {
+        if (collection === 'payments') {
+          assertAllocatedPaymentDeleteSafe(removedItem);
+        }
+      } catch (error) {
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
       if (collection === 'documents' && req.user?.userRole !== 'Администратор') {
         const request = createEntityChangeRequest(req, {
@@ -1865,6 +1968,9 @@ function registerCrudRoutes(deps) {
       if (collection === 'payments') {
         syncPaymentStatusesAfterPaymentWrite(data);
       }
+      if (collection === 'payment_allocations') {
+        syncPaymentStatusesAfterPaymentWrite(readData('payments') || []);
+      }
       return res.json({ ok: true });
     });
 
@@ -1931,6 +2037,9 @@ function registerCrudRoutes(deps) {
       try {
         if (collection === 'payments') {
           for (const item of list) validatePaymentRecord(item);
+        }
+        if (collection === 'payment_allocations') {
+          validatePaymentAllocationBulkReplace(list);
         }
         if (collection === 'clients') {
           for (const item of list) assertClientInnValid(item);
@@ -2064,6 +2173,9 @@ function registerCrudRoutes(deps) {
       });
       if (collection === 'payments') {
         syncPaymentStatusesAfterPaymentWrite(normalizedList);
+      }
+      if (collection === 'payment_allocations') {
+        syncPaymentStatusesAfterPaymentWrite(readData('payments') || []);
       }
       return res.json({ ok: true, count: list.length });
     });

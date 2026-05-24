@@ -1340,6 +1340,43 @@ test('admin generic CRUD PATCH rejects system and credential fields', async () =
   });
 });
 
+test('admin generic CRUD bulk PUT rejects dangerous fields and keeps custom fields allowed', async () => {
+  const { app, state, auditEntries } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const allowed = await request(baseUrl, 'PUT', '/api/equipment', 'admin-token', [
+      {
+        id: 'EQ-own',
+        inventoryNumber: '100',
+        notes: 'allowed',
+        customFields: { region: 'north' },
+        uiOnlyCustomValue: 'kept for flexible forms',
+      },
+      state.equipment.find(item => item.id === 'EQ-other'),
+    ]);
+
+    assert.equal(allowed.status, 200);
+    assert.equal(state.equipment.find(item => item.id === 'EQ-own').customFields.region, 'north');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-own').uiOnlyCustomValue, 'kept for flexible forms');
+
+    const before = JSON.stringify(state.equipment);
+    const auditCount = auditEntries.length;
+    const blocked = await request(baseUrl, 'PUT', '/api/equipment', 'admin-token', [
+      {
+        id: 'EQ-own',
+        inventoryNumber: '100',
+        notes: 'blocked',
+        auditLog: [{ action: 'forged' }],
+      },
+    ]);
+
+    assert.equal(blocked.status, 403);
+    assert.match(blocked.body.error, /auditLog/);
+    assert.equal(JSON.stringify(state.equipment), before);
+    assert.equal(auditEntries.length, auditCount);
+  });
+});
+
 test('admin rental PATCH rejects system fields before writing', async () => {
   const { app, state } = createSecurityApp();
 
@@ -1353,6 +1390,27 @@ test('admin rental PATCH rejects system fields before writing', async () => {
     assert.equal(response.status, 403);
     assert.match(response.body.error, /auditLog/);
     assert.deepEqual(state.rentals.find(item => item.id === 'R-own'), before);
+  });
+});
+
+test('admin rental bulk PUT rejects system fields before writing', async () => {
+  const { app, state, auditEntries } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const before = JSON.stringify(state.rentals);
+    const auditCount = auditEntries.length;
+    const response = await request(baseUrl, 'PUT', '/api/rentals', 'admin-token', [
+      {
+        ...state.rentals.find(item => item.id === 'R-own'),
+        client: 'ООО Новый клиент',
+        auditLog: [{ action: 'forged' }],
+      },
+    ]);
+
+    assert.equal(response.status, 403);
+    assert.match(response.body.error, /auditLog/);
+    assert.equal(JSON.stringify(state.rentals), before);
+    assert.equal(auditEntries.length, auditCount);
   });
 });
 

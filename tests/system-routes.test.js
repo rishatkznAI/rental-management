@@ -290,6 +290,39 @@ test('/api/admin/system-control-center returns safe admin status without env sec
   }
 });
 
+test('/api/sync rejects dangerous fields when legacy sync is explicitly enabled', async () => {
+  const previousEnabled = process.env.ENABLE_LEGACY_SYNC;
+  process.env.ENABLE_LEGACY_SYNC = '1';
+  const collections = {
+    equipment: [{ id: 'EQ-1', serialNumber: 'OLD' }],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    getSnapshot: () => ({ equipment: collections.equipment }),
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/sync', {
+        equipment: [{ id: 'EQ-1', serialNumber: 'NEW', auditLog: [{ action: 'forged' }] }],
+      });
+
+      assert.equal(response.status, 403);
+      assert.match(response.body.error, /auditLog/);
+      assert.equal(collections.equipment[0].serialNumber, 'OLD');
+      assert.equal(writes.length, 0);
+    });
+  } finally {
+    if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;
+    else process.env.ENABLE_LEGACY_SYNC = previousEnabled;
+  }
+});
+
 test('system control center interprets conservation flags and unknown DB isolation honestly', () => {
   const status = buildSystemControlCenterStatus({
     dbPath: '/app/storage/app.sqlite',
@@ -1758,6 +1791,46 @@ test('/api/admin/system-data/import requires confirmation and preserves existing
     assert.equal(collections.users[0].password, 'existing-password');
     assert.equal(collections.users[0].tokenVersion, 3);
     assert.doesNotMatch(JSON.stringify(imported.body), /incoming-password|existing-password/);
+  });
+});
+
+test('/api/admin/system-data/import rejects dangerous fields before writing', async () => {
+  const collections = {
+    equipment: [{ id: 'EQ-1', serialNumber: 'OLD' }],
+    users: [{ id: 'U-1', email: 'admin@example.test', password: 'existing-password', tokenVersion: 3 }],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const dryRun = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', {
+      collections: {
+        equipment: [{ id: 'EQ-2', serialNumber: 'NEW', auditLog: [{ action: 'forged' }] }],
+        users: [{ id: 'U-1', email: 'admin@example.test', permissions: { all: true } }],
+      },
+    });
+    assert.equal(dryRun.status, 400);
+    assert.deepEqual(dryRun.body.forbiddenFields, {
+      equipment: ['auditLog'],
+      users: ['permissions'],
+    });
+    assert.equal(writes.length, 0);
+
+    const imported = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        equipment: [{ id: 'EQ-2', serialNumber: 'NEW', auditLog: [{ action: 'forged' }] }],
+      },
+    });
+    assert.equal(imported.status, 400);
+    assert.equal(collections.equipment[0].serialNumber, 'OLD');
+    assert.equal(writes.length, 0);
   });
 });
 

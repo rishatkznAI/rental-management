@@ -317,7 +317,7 @@ function registerRentalRoutes(deps) {
   } = deps;
 
   const router = express.Router();
-  const requiredAccessMethods = ['filterCollectionByScope', 'canAccessEntity', 'assertCanUpdateEntity', 'splitForbiddenRentalManagerPatch'];
+  const requiredAccessMethods = ['filterCollectionByScope', 'canAccessEntity', 'assertCanUpdateEntity', 'assertSafeAdminBulkReplaceInput', 'splitForbiddenRentalManagerPatch'];
   const missingAccessMethods = !accessControl
     ? requiredAccessMethods
     : requiredAccessMethods.filter(name => typeof accessControl[name] !== 'function');
@@ -2386,6 +2386,11 @@ function registerRentalRoutes(deps) {
       const list = Array.isArray(body) ? body : body.data;
       if (!Array.isArray(list)) {
         return res.status(400).json({ ok: false, error: 'Expected array' });
+      }
+      try {
+        accessControl.assertSafeAdminBulkReplaceInput(collection, list);
+      } catch (error) {
+        return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
       }
 
       const equipment = readData('equipment') || [];

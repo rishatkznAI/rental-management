@@ -1441,6 +1441,11 @@ function isAdminGenericPatchBlockedField(collection, field) {
   return false;
 }
 
+function isAdminBulkReplaceBlockedField(collection, field) {
+  if (field === 'id') return false;
+  return isAdminGenericPatchBlockedField(collection, field);
+}
+
 function sanitizeAdminGenericPatchInput(collection, input) {
   const safe = {};
   for (const [field, value] of Object.entries(input || {})) {
@@ -1652,6 +1657,17 @@ function assertCanBulkReplace(collection, user) {
   }
 }
 
+function assertSafeAdminBulkReplaceInput(collection, list, context = 'массовое обновление') {
+  for (const item of Array.isArray(list) ? list : []) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    for (const field of Object.keys(item)) {
+      if (isAdminBulkReplaceBlockedField(collection, field)) {
+        throw forbidden(`Поле ${field} нельзя менять через ${context}.`);
+      }
+    }
+  }
+}
+
 function splitForbiddenRentalManagerPatch(previousRental, patch) {
   const immediatePatch = {};
   const approvalFields = [];
@@ -1696,6 +1712,7 @@ function createAccessControl({ readData }) {
     sanitizeCreateInput,
     sanitizeCollectionForRead,
     sanitizeEntityForRead,
+    assertSafeAdminBulkReplaceInput,
     sanitizeUpdateInput,
     splitForbiddenRentalManagerPatch,
   };
@@ -1703,6 +1720,8 @@ function createAccessControl({ readData }) {
 
 module.exports = {
   ROLES,
+  assertSafeAdminBulkReplaceInput,
   createAccessControl,
+  isAdminBulkReplaceBlockedField,
   isCarrierDelivery,
 };

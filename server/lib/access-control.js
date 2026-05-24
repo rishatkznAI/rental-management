@@ -288,6 +288,69 @@ const STRICT_USER_MUTATION_FIELDS = new Set([
   'frontendAccess',
 ]);
 
+const STRICT_CLIENT_MUTATION_FIELDS = new Set([
+  'id',
+  'name',
+  'company',
+  'companyName',
+  'legalName',
+  'fullName',
+  'inn',
+  'innNormalized',
+  'kpp',
+  'ogrn',
+  'clientType',
+  'verified',
+  'contact',
+  'contactPerson',
+  'phone',
+  'email',
+  'contacts',
+  'address',
+  'legalAddress',
+  'actualAddress',
+  'postalAddress',
+  'mailingAddress',
+  'paymentTerms',
+  'creditLimit',
+  'debt',
+  'manager',
+  'managerId',
+  'managerName',
+  'managerRole',
+  'managerAvatar',
+  'status',
+  'notes',
+  'partnerCardFileName',
+  'partnerCardMimeType',
+  'partnerCardDataUrl',
+  'partnerCardUploadedAt',
+  'partnerCardUploadedBy',
+  'createdAt',
+  'createdBy',
+  'history',
+  'bank',
+  'bankName',
+  'bankBik',
+  'bik',
+  'bankAccount',
+  'corrAccount',
+]);
+
+const STRICT_CLIENT_BULK_REPLACE_FIELDS = new Set([
+  ...STRICT_CLIENT_MUTATION_FIELDS,
+  'lastRentalDate',
+  'lastActivityDate',
+  'totalRentals',
+  'updatedAt',
+]);
+
+const CLIENT_DERIVED_SUMMARY_FIELDS = new Set([
+  'lastRentalDate',
+  'lastActivityDate',
+  'totalRentals',
+]);
+
 const USER_PATCH_CONTROL_FIELDS = new Set([
   'confirm',
   'confirmEmail',
@@ -1518,6 +1581,7 @@ function isAdminGenericPatchBlockedField(collection, field) {
 function isAdminBulkReplaceBlockedField(collection, field) {
   if (field === 'id') return false;
   if (collection === 'users' && !STRICT_USER_MUTATION_FIELDS.has(field)) return true;
+  if (collection === 'clients') return !STRICT_CLIENT_BULK_REPLACE_FIELDS.has(field);
   return isAdminGenericPatchBlockedField(collection, field);
 }
 
@@ -1560,6 +1624,21 @@ function sanitizeStrictUserMutationInput(collection, input, { allowControlFields
   return safe;
 }
 
+function sanitizeStrictClientMutationInput(collection, input) {
+  if (collection !== 'clients') return null;
+  const safe = {};
+  for (const [field, value] of Object.entries(input || {})) {
+    if (CLIENT_DERIVED_SUMMARY_FIELDS.has(field)) {
+      continue;
+    }
+    if (!STRICT_CLIENT_MUTATION_FIELDS.has(field)) {
+      throw forbidden(`Поле ${field} нельзя сохранять в clients.`);
+    }
+    safe[field] = value;
+  }
+  return safe;
+}
+
 function stripMassAssignmentFields(input, user, collection, mode = 'update') {
   const body = input && typeof input === 'object' ? input : {};
   if (isAdmin(user)) return { ...body };
@@ -1585,6 +1664,10 @@ function sanitizeCreateInput(collection, input, user) {
   if (strictUserInput) return isAdmin(user)
     ? strictUserInput
     : stripMassAssignmentFields(strictUserInput, user, collection, 'create');
+  const strictClientInput = sanitizeStrictClientMutationInput(collection, input);
+  if (strictClientInput) return isAdmin(user)
+    ? strictClientInput
+    : stripMassAssignmentFields(strictClientInput, user, collection, 'create');
   const safe = stripMassAssignmentFields(input, user, collection, 'create');
   if (!isAdmin(user)) {
     delete safe.id;
@@ -1613,6 +1696,10 @@ function sanitizeUpdateInput(collection, input, user, existing = null) {
   if (strictUserInput) return isAdmin(user)
     ? sanitizeAdminGenericPatchInput(collection, strictUserInput)
     : stripMassAssignmentFields(strictUserInput, user, collection);
+  const strictClientInput = sanitizeStrictClientMutationInput(collection, input);
+  if (strictClientInput) return isAdmin(user)
+    ? sanitizeAdminGenericPatchInput(collection, strictClientInput)
+    : stripMassAssignmentFields(strictClientInput, user, collection);
   if (isAdmin(user)) return sanitizeAdminGenericPatchInput(collection, input);
   if (collection === 'equipment' && isMechanic(user)) {
     const allowed = new Set([

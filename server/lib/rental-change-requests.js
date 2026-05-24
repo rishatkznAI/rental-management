@@ -1566,7 +1566,10 @@ function applyRentalFieldToGantt(ganttRental, field, value) {
   }
   if (field === 'startDate') return { ...ganttRental, startDate: value };
   if (field === 'plannedReturnDate') return { ...ganttRental, endDate: value };
-  if (field === 'actualReturnDate') return { ...ganttRental, endDate: value || ganttRental.endDate, status: 'returned' };
+  if (field === 'actualReturnDate') {
+    if (!value) return ganttRental;
+    return { ...ganttRental, endDate: value, status: 'returned' };
+  }
   if (field === 'manager') return { ...ganttRental, manager: value, managerInitials: managerInitials(value) };
   if (field === 'status') return { ...ganttRental, status: rentalStatusToGanttStatus(value) };
   if (field === 'price') return { ...ganttRental, amount: Number(value) || 0 };

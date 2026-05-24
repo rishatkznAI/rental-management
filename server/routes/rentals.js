@@ -771,6 +771,10 @@ function registerRentalRoutes(deps) {
       return rental?.status === 'returned' || rental?.status === 'closed';
     }
 
+    function isRestoringReturnedClassicRental(previousRental, nextRental) {
+      return isReturnedClassicRental(previousRental) && !isReturnedClassicRental(nextRental) && nextRental?.status === 'active';
+    }
+
     function findOpenServiceTicketForEquipment(equipment) {
       if (!equipment) return null;
       const equipmentList = readData('equipment') || [];
@@ -799,6 +803,54 @@ function registerRentalRoutes(deps) {
         if (leftActive !== rightActive) return leftActive - rightActive;
         return String(left?.startDate || '').localeCompare(String(right?.startDate || ''));
       })[0] || null;
+    }
+
+    function validateRentalRestore(previousRental, nextRental) {
+      if (!isRestoringReturnedClassicRental(previousRental, nextRental)) return { ok: true };
+      const equipment = findEquipmentForRental(nextRental, readData('equipment') || []);
+      if (!equipment) {
+        return { ok: false, status: 409, error: 'Не удалось однозначно определить технику для восстановления аренды.' };
+      }
+      if (equipment.status === 'inactive') {
+        return { ok: false, status: 409, error: 'Нельзя восстановить аренду: техника списана или неактивна.' };
+      }
+      const openServiceTicket = findOpenServiceTicketForEquipment(equipment);
+      if (openServiceTicket || equipment.status === 'in_service') {
+        return {
+          ok: false,
+          status: 409,
+          error: openServiceTicket
+            ? `Нельзя восстановить аренду: есть активная сервисная заявка ${openServiceTicket.id}.`
+            : 'Нельзя восстановить аренду: техника находится в сервисе.',
+        };
+      }
+      return { ok: true, equipment };
+    }
+
+    function syncEquipmentForRestoredRental(previousRental, nextRental, author) {
+      const validation = validateRentalRestore(previousRental, nextRental);
+      if (!validation.ok || !validation.equipment) return;
+      const equipmentList = readData('equipment') || [];
+      const equipment = validation.equipment;
+      const nextEquipment = equipmentList.map(item => {
+        if (String(item?.id || '') !== String(equipment.id || '')) return item;
+        return {
+          ...item,
+          status: 'rented',
+          currentClient: nextRental.client,
+          returnDate: nextRental.plannedReturnDate,
+          history: [
+            ...(Array.isArray(item.history) ? item.history : []),
+            {
+              date: new Date().toISOString(),
+              text: `Аренда ${nextRental.id} восстановлена: техника снова в аренде`,
+              author,
+              type: 'system',
+            },
+          ],
+        };
+      });
+      writeData('equipment', nextEquipment);
     }
 
     function buildReturnServiceTicket(rental, equipment, returnDate, damageDescription, author) {
@@ -1656,6 +1708,10 @@ function registerRentalRoutes(deps) {
         if (!linkedValidation.ok) {
           return res.status(linkedValidation.status).json({ ok: false, error: linkedValidation.error });
         }
+        const restoreValidation = validateRentalRestore(data[idx], nextItem);
+        if (!restoreValidation.ok) {
+          return res.status(restoreValidation.status || 409).json({ ok: false, error: restoreValidation.error });
+        }
       }
 
       if (collection === 'gantt_rentals') {
@@ -1678,6 +1734,7 @@ function registerRentalRoutes(deps) {
       });
       if (collection === 'rentals') {
         syncLinkedGanttRental(meta.linkedGanttRentalId, previousRental, nextItem, req.user.userName);
+        syncEquipmentForRestoredRental(previousRental, nextItem, req.user.userName);
       }
       await emitRentalNotification(previousRental, nextItem);
       return res.json(data[idx]);

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const rentalNewSource = fs.readFileSync(new URL('../src/app/pages/RentalNew.tsx', import.meta.url), 'utf8');
+const rentalDetailSource = fs.readFileSync(new URL('../src/app/pages/RentalDetail.tsx', import.meta.url), 'utf8');
 const rentalsPageSource = fs.readFileSync(new URL('../src/app/pages/Rentals.tsx', import.meta.url), 'utf8');
 const dashboardSource = fs.readFileSync(new URL('../src/app/pages/Dashboard.tsx', import.meta.url), 'utf8');
 const ganttModalsSource = fs.readFileSync(new URL('../src/app/components/gantt/GanttModals.tsx', import.meta.url), 'utf8');
@@ -28,6 +29,13 @@ test('rental creation pages rely on backend linked planner row instead of creati
   assert.doesNotMatch(rentalsModalConfirm, /createGanttEntry/);
   assert.match(dashboardQuickCreate, /rentalsService\.create\(/);
   assert.doesNotMatch(dashboardQuickCreate, /createGanttEntry/);
+});
+
+test('rental detail does not directly update linked planner rows', () => {
+  assert.doesNotMatch(rentalDetailSource, /updateGanttEntry/);
+  const restoreBlock = extract(rentalDetailSource, 'const handleRestoreRental = async () => {', 'const displayPlannedReturn');
+  assert.match(restoreBlock, /rentalsService\.update\(rental\.id/);
+  assert.doesNotMatch(restoreBlock, /equipmentService\.update/);
 });
 
 test('rental creation keeps stable equipment and manager links in the classic rental payload', () => {

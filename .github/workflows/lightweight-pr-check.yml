@@ -4,13 +4,6 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - server/**
-      - tests/**
-      - src/**
-      - package.json
-      - package-lock.json
-      - .github/workflows/**
 
 permissions:
   contents: read

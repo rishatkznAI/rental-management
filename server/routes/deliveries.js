@@ -936,7 +936,7 @@ function registerDeliveryRoutes(router, deps) {
     if (isCarrierRequest(req)) {
       deliveries = deliveries.filter(item => !isClosedDelivery(item));
     }
-    if (req.query.status) {
+    if (req.query.status && !wantsPaginatedResponse(req.query)) {
       deliveries = deliveries.filter((item) => item.status === req.query.status);
     }
     if (req.query.manager) {

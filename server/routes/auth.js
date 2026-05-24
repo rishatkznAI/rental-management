@@ -207,9 +207,12 @@ function registerAuthRoutes(app, deps) {
     }
 
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : users[idx].name;
-    const profilePhoto = typeof req.body?.profilePhoto === 'string' && req.body.profilePhoto.trim()
-      ? req.body.profilePhoto.trim()
-      : undefined;
+    let profilePhoto = users[idx].profilePhoto || undefined;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'profilePhoto')) {
+      profilePhoto = typeof req.body?.profilePhoto === 'string' && req.body.profilePhoto.trim()
+        ? req.body.profilePhoto.trim()
+        : undefined;
+    }
 
     if (!name) {
       return res.status(400).json({ ok: false, error: 'Имя не может быть пустым' });

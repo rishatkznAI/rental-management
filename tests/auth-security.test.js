@@ -302,3 +302,68 @@ test('/api/auth/me rejects inactive users and destroys the bearer session', () =
   assert.deepEqual(res.payload, { ok: false, error: 'Аккаунт отключён или удалён' });
   assert.deepEqual(destroyedTokens, ['session-token']);
 });
+
+test('/api/auth/profile preserves existing profile photo when only name changes', () => {
+  const state = {
+    users: [{
+      id: 'U-1',
+      name: 'Руслан',
+      email: 'manager@example.test',
+      role: 'Менеджер по аренде',
+      status: 'Активен',
+      password: 'right',
+      profilePhoto: 'https://cdn.example.test/photo.jpg',
+    }],
+  };
+  const routes = createAuthRoutes(state, {
+    requireAuth: (req, _res, next) => {
+      req.user = { userId: 'U-1' };
+      next();
+    },
+  });
+  const updateProfile = routes['PATCH /api/auth/profile'][1];
+  const res = createMockResponse();
+
+  updateProfile({
+    body: { name: 'Руслан Обновлённый' },
+    user: { userId: 'U-1' },
+    headers: {},
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(state.users[0].name, 'Руслан Обновлённый');
+  assert.equal(state.users[0].profilePhoto, 'https://cdn.example.test/photo.jpg');
+  assert.equal(res.payload.user.profilePhoto, 'https://cdn.example.test/photo.jpg');
+});
+
+test('/api/auth/profile clears profile photo only when explicitly requested', () => {
+  const state = {
+    users: [{
+      id: 'U-1',
+      name: 'Руслан',
+      email: 'manager@example.test',
+      role: 'Менеджер по аренде',
+      status: 'Активен',
+      password: 'right',
+      profilePhoto: 'https://cdn.example.test/photo.jpg',
+    }],
+  };
+  const routes = createAuthRoutes(state, {
+    requireAuth: (req, _res, next) => {
+      req.user = { userId: 'U-1' };
+      next();
+    },
+  });
+  const updateProfile = routes['PATCH /api/auth/profile'][1];
+  const res = createMockResponse();
+
+  updateProfile({
+    body: { name: 'Руслан', profilePhoto: '' },
+    user: { userId: 'U-1' },
+    headers: {},
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(state.users[0].profilePhoto, undefined);
+  assert.equal(res.payload.user.profilePhoto, undefined);
+});

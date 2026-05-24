@@ -342,6 +342,37 @@ test('admin reads every delivery including completed and cancelled records', asy
   });
 });
 
+test('paginated delivery status groups are not pre-filtered as literal statuses', async () => {
+  const { app, state } = createDeliveryApp({
+    id: 'DL-sent',
+    status: 'sent',
+    transportDate: '2026-04-28',
+    carrierId: 'carrier-1',
+    carrierKey: 'carrier-1',
+  });
+  state.deliveries.push(
+    makeDelivery({ id: 'DL-new', status: 'new', transportDate: '2026-04-29' }),
+    makeDelivery({ id: 'DL-completed', status: 'completed', transportDate: '2026-04-27' }),
+    makeDelivery({ id: 'DL-cancelled', status: 'cancelled', transportDate: '2026-04-26' }),
+  );
+
+  await withServer(app, async (baseUrl) => {
+    const active = await request(baseUrl, 'GET', '/api/deliveries?paginated=true&status=active');
+
+    assert.equal(active.status, 200);
+    assert.deepEqual(new Set(active.body.items.map(item => item.id)), new Set(['DL-sent', 'DL-new']));
+    assert.equal(active.body.summary.active, 2);
+
+    const planned = await request(baseUrl, 'GET', '/api/deliveries?paginated=true&status=planned');
+    assert.equal(planned.status, 200);
+    assert.deepEqual(new Set(planned.body.items.map(item => item.id)), new Set(['DL-sent', 'DL-new']));
+
+    const completed = await request(baseUrl, 'GET', '/api/deliveries?paginated=true&status=completed');
+    assert.equal(completed.status, 200);
+    assert.deepEqual(completed.body.items.map(item => item.id), ['DL-completed']);
+  });
+});
+
 test('head reads deliveries as read-only movement data without financial fields', async () => {
   const { app } = createDeliveryApp({
     id: 'DL-head',

@@ -264,6 +264,40 @@ test('return without damage closes rental, returns gantt entry and makes equipme
   });
 });
 
+test('return before a future reservation keeps equipment reserved, not rented', async () => {
+  const { app, state } = createReturnApp();
+  state.gantt_rentals.push({
+    id: 'GR-future',
+    rentalId: 'R-future',
+    clientId: 'C-future',
+    client: 'ООО Будущая бронь',
+    equipmentId: 'EQ-1',
+    equipmentInv: 'INV-1',
+    startDate: '2026-04-30',
+    endDate: '2026-05-03',
+    manager: 'Админ',
+    status: 'created',
+    paymentStatus: 'unpaid',
+    amount: 5000,
+    comments: [],
+  });
+
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/rentals/GR-1/return', {
+      returnDate: '2026-04-25',
+      result: 'available',
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').status, 'closed');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').status, 'returned');
+    const equipment = state.equipment.find(item => item.id === 'EQ-1');
+    assert.equal(equipment.status, 'reserved');
+    assert.equal(equipment.currentClient, 'ООО Будущая бронь');
+    assert.equal(equipment.returnDate, '2026-05-03');
+  });
+});
+
 test('return with damage creates service ticket and keeps equipment in service', async () => {
   const { app, state } = createReturnApp();
 

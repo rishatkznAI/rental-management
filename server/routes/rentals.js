@@ -756,15 +756,21 @@ function registerRentalRoutes(deps) {
       ) || null;
     }
 
-    function hasOtherBlockingRental(ganttRentals, currentGanttId, equipment) {
-      if (!equipment) return false;
+    function findOtherBlockingRental(ganttRentals, currentGanttId, equipment) {
+      if (!equipment) return null;
       const equipmentList = readData('equipment') || [];
-      return (ganttRentals || []).some(rental =>
+      const candidates = (ganttRentals || []).filter(rental =>
         String(rental.id || '') !== String(currentGanttId || '') &&
         rentalMatchesEquipment(rental, equipment, equipmentList) &&
         rental.status !== 'returned' &&
         rental.status !== 'closed'
       );
+      return candidates.sort((left, right) => {
+        const leftActive = left?.status === 'active' ? 0 : 1;
+        const rightActive = right?.status === 'active' ? 0 : 1;
+        if (leftActive !== rightActive) return leftActive - rightActive;
+        return String(left?.startDate || '').localeCompare(String(right?.startDate || ''));
+      })[0] || null;
     }
 
     function buildReturnServiceTicket(rental, equipment, returnDate, damageDescription, author) {
@@ -2182,7 +2188,7 @@ function registerRentalRoutes(deps) {
           };
         });
 
-        const otherBlockingRental = hasOtherBlockingRental(nextGanttRentals, ganttRental?.id, equipment);
+        const otherBlockingRental = findOtherBlockingRental(nextGanttRentals, ganttRental?.id, equipment);
         const nextService = readData('service') || [];
         let createdServiceTicket = null;
         let resultingEquipmentStatus = equipment.status;
@@ -2193,7 +2199,7 @@ function registerRentalRoutes(deps) {
             nextService.push(createdServiceTicket);
           }
         } else if (otherBlockingRental) {
-          resultingEquipmentStatus = 'rented';
+          resultingEquipmentStatus = otherBlockingRental.status === 'active' ? 'rented' : 'reserved';
         } else {
           resultingEquipmentStatus = 'available';
         }
@@ -2203,8 +2209,8 @@ function registerRentalRoutes(deps) {
           return {
             ...item,
             status: resultingEquipmentStatus,
-            currentClient: otherBlockingRental ? item.currentClient : undefined,
-            returnDate: otherBlockingRental ? item.returnDate : undefined,
+            currentClient: otherBlockingRental ? otherBlockingRental.client : undefined,
+            returnDate: otherBlockingRental ? (otherBlockingRental.endDate || otherBlockingRental.plannedReturnDate) : undefined,
             history: [
               ...(Array.isArray(item.history) ? item.history : []),
               {

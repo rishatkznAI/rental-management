@@ -199,6 +199,31 @@ test('cannot create rental-type gantt row without an existing rental link', asyn
   });
 });
 
+test('cannot create duplicate linked gantt row for the same rental', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(created.status, 201);
+    assert.equal(state.gantt_rentals.length, 1);
+
+    const duplicate = await request(baseUrl, 'POST', '/api/gantt_rentals', {
+      rentalId: created.body.id,
+      clientId: 'C-1',
+      client: 'ООО Ромашка',
+      equipmentId: 'EQ-1',
+      equipmentInv: 'INV-1',
+      startDate: '2026-05-10',
+      endDate: '2026-05-20',
+      status: 'active',
+    });
+
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.body.error, 'DUPLICATE_GANTT_RENTAL_LINK');
+    assert.equal(state.gantt_rentals.length, 1);
+  });
+});
+
 test('cannot update or bulk sync gantt rows into rental-type orphans', async () => {
   const { app, state } = createApp();
 

@@ -23,6 +23,7 @@ const {
   updateRentalDowntime,
 } = require('../lib/rental-downtime-periods');
 const {
+  linkedRentalIds,
   isStandalonePlannerRow,
   validateGanttRentalLinkRequirement,
 } = require('../lib/gantt-rental-link-guard');
@@ -426,7 +427,28 @@ function registerRentalRoutes(deps) {
       writeData('gantt_rentals', ganttRentals);
     }
 
-    function linkGanttRentalForWrite(ganttRental, list, context) {
+    function duplicateGanttRentalLink(ganttRental, list, excludeId = '') {
+      if (!ganttRental || isStandalonePlannerRow(ganttRental)) return null;
+      const ids = new Set(linkedRentalIds(ganttRental));
+      if (ids.size === 0) return null;
+      const excluded = String(excludeId || '').trim();
+      return (list || []).find(item => {
+        if (!item || isStandalonePlannerRow(item)) return false;
+        if (excluded && String(item.id || '') === excluded) return false;
+        return linkedRentalIds(item).some(id => ids.has(id));
+      }) || null;
+    }
+
+    function duplicateGanttRentalLinkError(duplicate) {
+      return {
+        ok: false,
+        status: 409,
+        code: 'DUPLICATE_GANTT_RENTAL_LINK',
+        error: `Для аренды уже есть строка планировщика ${duplicate?.id || ''}`.trim(),
+      };
+    }
+
+    function linkGanttRentalForWrite(ganttRental, list, context, excludeId = '') {
       if (collection !== 'gantt_rentals') return { ok: true, item: ganttRental };
       const rentals = readData('rentals') || [];
       const linkRequirement = validateGanttRentalLinkRequirement(ganttRental, rentals);
@@ -441,6 +463,12 @@ function registerRentalRoutes(deps) {
         context,
       });
       if (!resolution.ok) return resolution;
+      const duplicate = duplicateGanttRentalLink(
+        ensureGanttRentalLink(ganttRental, resolution.rental || { id: resolution.rentalId }, equipment),
+        list,
+        excludeId,
+      );
+      if (duplicate) return duplicateGanttRentalLinkError(duplicate);
       return {
         ok: true,
         item: ensureGanttRentalLink(ganttRental, resolution.rental || { id: resolution.rentalId }, equipment),
@@ -1340,7 +1368,7 @@ function registerRentalRoutes(deps) {
       }
       let newItem = withClientLink({ ...req.body, id: newId }, `${collection}:create`);
       if (collection === 'gantt_rentals') {
-        const linked = linkGanttRentalForWrite(newItem, [], `${collection}:create`);
+        const linked = linkGanttRentalForWrite(newItem, data, `${collection}:create`, newItem.id);
         if (!linked.ok) {
           return res.status(linked.status || 400).json({ ok: false, error: linked.code || linked.error, message: linked.error });
         }
@@ -1607,7 +1635,7 @@ function registerRentalRoutes(deps) {
 
       let nextItem = withClientLink({ ...data[idx], ...patch, id: data[idx].id }, `${collection}:update:${data[idx].id}`);
       if (collection === 'gantt_rentals') {
-        const linked = linkGanttRentalForWrite(nextItem, data, `${collection}:update:${data[idx].id}`);
+        const linked = linkGanttRentalForWrite(nextItem, data, `${collection}:update:${data[idx].id}`, data[idx].id);
         if (!linked.ok) {
           return res.status(linked.status || 400).json({ ok: false, error: linked.code || linked.error, message: linked.error });
         }
@@ -2313,7 +2341,7 @@ function registerRentalRoutes(deps) {
             sourceRentalId: Object.prototype.hasOwnProperty.call(item || {}, 'sourceRentalId') ? item.sourceRentalId : existing?.sourceRentalId,
             originalRentalId: Object.prototype.hasOwnProperty.call(item || {}, 'originalRentalId') ? item.originalRentalId : existing?.originalRentalId,
           };
-          const linked = linkGanttRentalForWrite(candidate, linkedList, `${collection}:bulk:${item?.id || 'new'}`);
+          const linked = linkGanttRentalForWrite(candidate, linkedList, `${collection}:bulk:${item?.id || 'new'}`, item?.id || '');
           if (!linked.ok) {
             return res.status(linked.status || 400).json({ ok: false, error: linked.code || linked.error, message: linked.error });
           }

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 const rentalNewSource = fs.readFileSync(new URL('../src/app/pages/RentalNew.tsx', import.meta.url), 'utf8');
 const rentalsPageSource = fs.readFileSync(new URL('../src/app/pages/Rentals.tsx', import.meta.url), 'utf8');
+const dashboardSource = fs.readFileSync(new URL('../src/app/pages/Dashboard.tsx', import.meta.url), 'utf8');
 const ganttModalsSource = fs.readFileSync(new URL('../src/app/components/gantt/GanttModals.tsx', import.meta.url), 'utf8');
 const equipmentComboboxSource = fs.readFileSync(new URL('../src/app/components/ui/EquipmentCombobox.tsx', import.meta.url), 'utf8');
 
@@ -18,12 +19,15 @@ function extract(source, startMarker, endMarker) {
 test('rental creation pages rely on backend linked planner row instead of creating a duplicate gantt row', () => {
   const rentalNewSubmit = extract(rentalNewSource, 'const handleSubmit = async', 'return (');
   const rentalsModalConfirm = extract(rentalsPageSource, 'onConfirm={async (data) => {', '<RentalApprovalHistorySheet');
+  const dashboardQuickCreate = extract(dashboardSource, 'onConfirm={(formData) => {', 'setShowRentalModal(false);');
 
   assert.match(rentalNewSubmit, /rentalsService\.create\(/);
   assert.doesNotMatch(rentalNewSubmit, /createGanttEntry/);
   assert.match(rentalsModalConfirm, /rentalsService\.create\(/);
   assert.match(rentalsModalConfirm, /rentalsService\.getGanttData\(\)/);
   assert.doesNotMatch(rentalsModalConfirm, /createGanttEntry/);
+  assert.match(dashboardQuickCreate, /rentalsService\.create\(/);
+  assert.doesNotMatch(dashboardQuickCreate, /createGanttEntry/);
 });
 
 test('rental creation keeps stable equipment and manager links in the classic rental payload', () => {

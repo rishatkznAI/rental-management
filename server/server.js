@@ -1339,6 +1339,7 @@ apiRouter.use(registerRentalChangeRequestRoutes({
   validateRentalPayload,
   generateId,
   idPrefixes: ID_PREFIXES,
+  accessControl,
 }));
 
 registerFinanceRoutes(apiRouter, {

@@ -1112,12 +1112,29 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     assert.equal((await request(baseUrl, 'GET', '/api/service/S-other', 'mechanic-token')).status, 403);
     assert.equal((await request(baseUrl, 'PATCH', '/api/service/S-own', 'mechanic-token', {
       status: 'in_progress',
+    })).status, 200);
+    assert.equal(state.service.find(item => item.id === 'S-own').status, 'in_progress');
+    assert.equal((await request(baseUrl, 'PATCH', '/api/service/S-own', 'mechanic-token', {
       mechanicId: 'M-2',
       assignedMechanicId: 'M-2',
       assignedUserId: 'U-other',
-    })).status, 200);
+    })).status, 403);
     assert.equal(state.service.find(item => item.id === 'S-own').assignedMechanicId, 'M-1');
     assert.equal(state.service.find(item => item.id === 'S-own').assignedUserId, undefined);
+    assert.equal((await request(baseUrl, 'PATCH', '/api/service/S-own', 'mechanic-token', {
+      status: 'done',
+    })).status, 403);
+    assert.equal(state.service.find(item => item.id === 'S-own').status, 'in_progress');
+    assert.equal((await request(baseUrl, 'PATCH', '/api/service/S-own', 'mechanic-token', {
+      workLog: [{ name: 'forged work' }],
+      parts: [{ name: 'forged part' }],
+      works: [{ name: 'forged work list' }],
+    })).status, 403);
+    assert.equal(state.service.find(item => item.id === 'S-own').workLog, undefined);
+    assert.equal((await request(baseUrl, 'PATCH', '/api/service/S-own', 'office-token', {
+      status: 'closed',
+    })).status, 403);
+    assert.equal(state.service.find(item => item.id === 'S-own').status, 'in_progress');
     for (const token of ['mechanic-token', 'office-token', 'manager-token', 'sales-token', 'warranty-token']) {
       const response = await request(baseUrl, 'POST', '/api/repair_work_items', token, { repairId: 'S-other', workId: 'SW-1', quantity: 1 });
       assert.equal(response.status, 403, token);
@@ -1140,7 +1157,7 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     assert.equal((await request(baseUrl, 'GET', '/api/spare_parts/SP-1', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/repair_work_items/RW-1', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/repair_part_items/RP-1', 'warranty-token')).status, 200);
-    assert.equal((await request(baseUrl, 'PATCH', '/api/service/S-other', 'warranty-token', { status: 'in_progress', assignedMechanicId: 'M-1' })).status, 200);
+    assert.equal((await request(baseUrl, 'PATCH', '/api/service/S-other', 'warranty-token', { status: 'in_progress', assignedMechanicId: 'M-1' })).status, 403);
     assert.equal(state.service.find(item => item.id === 'S-other').assignedMechanicId, 'M-2');
     assert.equal((await request(baseUrl, 'GET', '/api/rentals/R-own', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/gantt_rentals/GR-other', 'warranty-token')).status, 200);

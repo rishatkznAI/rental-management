@@ -47,6 +47,8 @@ function createSystemApp(overrides = {}) {
     fetchImpl: overrides.fetchImpl || fetch,
     assertPublicHttpUrlImpl: overrides.assertPublicHttpUrlImpl || (async (url) => new URL(url)),
     auditLog: overrides.auditLog || ((_req, entry) => auditEntries.push(entry)),
+    analyzeGanttRentalLinks: overrides.analyzeGanttRentalLinks,
+    backfillGanttRentalLinks: overrides.backfillGanttRentalLinks,
     getBuildInfo: overrides.getBuildInfo || (() => ({ version: 'test' })),
     getAppDisabledConfig: overrides.getAppDisabledConfig,
     getRoleAccessSummary: () => ({
@@ -795,6 +797,86 @@ test('/api/admin/rental-equipment-diagnostics/backfill dry-run does not write an
     assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-1').equipmentId, 'EQ-2');
     assert.equal(applied.body.after.summary.rentalsWithoutEquipmentId, 0);
     assert.equal(auditEntries.some(entry => entry.action === 'rental_equipment.backfill'), true);
+  });
+});
+
+test('/api/admin/rental-link-diagnostics/backfill defaults to dry-run and requires confirm to write', async () => {
+  const collections = {
+    rentals: [{ id: 'R-1' }],
+    gantt_rentals: [{ id: 'GR-1' }],
+    equipment: [],
+  };
+  const dryRunValues = [];
+  let writeCount = 0;
+  const { app, auditEntries } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writeCount += 1;
+      collections[name] = value;
+    },
+    analyzeGanttRentalLinks: ({ ganttRentals }) => ({
+      ganttRentalsCount: ganttRentals.length,
+      missingRentalIdCount: ganttRentals.filter(item => !item.rentalId).length,
+    }),
+    backfillGanttRentalLinks: ({ readData, writeData, dryRun }) => {
+      dryRunValues.push(dryRun);
+      const ganttRentals = readData('gantt_rentals') || [];
+      const nextGanttRentals = ganttRentals.map(item => ({ ...item, rentalId: 'R-1' }));
+      if (!dryRun) writeData('gantt_rentals', nextGanttRentals);
+      return {
+        checked: ganttRentals.length,
+        missingLink: 1,
+        linked: 1,
+        ambiguous: [],
+        unresolved: [],
+        dryRun,
+      };
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const defaultPost = await postJson(baseUrl, '/api/admin/rental-link-diagnostics/backfill', {});
+    assert.equal(defaultPost.status, 200);
+    assert.equal(defaultPost.body.backfill.dryRun, true);
+    assert.equal(defaultPost.body.backfill.linked, 1);
+    assert.equal(collections.gantt_rentals[0].rentalId, undefined);
+    assert.equal(writeCount, 0);
+
+    const explicitDryRun = await postJson(baseUrl, '/api/admin/rental-link-diagnostics/backfill?dryRun=1', { confirm: true });
+    assert.equal(explicitDryRun.status, 200);
+    assert.equal(explicitDryRun.body.backfill.dryRun, true);
+    assert.equal(collections.gantt_rentals[0].rentalId, undefined);
+    assert.equal(writeCount, 0);
+
+    const applied = await postJson(baseUrl, '/api/admin/rental-link-diagnostics/backfill', { confirm: true });
+    assert.equal(applied.status, 200);
+    assert.equal(applied.body.backfill.dryRun, false);
+    assert.equal(collections.gantt_rentals[0].rentalId, 'R-1');
+    assert.equal(writeCount, 1);
+    assert.deepEqual(dryRunValues, [true, true, false]);
+    assert.equal(auditEntries.some(entry => entry.action === 'rental_links.backfill' && entry.after.dryRun === false), true);
+  });
+});
+
+test('/api/admin/rental-link-diagnostics/backfill is admin-only', async () => {
+  const { app } = createSystemApp({
+    requireAuth: (req, _res, next) => {
+      req.user = { userId: 'U-manager', userRole: 'Менеджер по аренде' };
+      next();
+    },
+    requireAdmin: (req, res, next) => {
+      if (req.user?.userRole !== 'Администратор') {
+        return res.status(403).json({ ok: false, error: 'Forbidden: admin only' });
+      }
+      return next();
+    },
+    analyzeGanttRentalLinks: () => ({}),
+    backfillGanttRentalLinks: () => ({ dryRun: true, linked: 0, ambiguous: [], unresolved: [] }),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await postJson(baseUrl, '/api/admin/rental-link-diagnostics/backfill', { confirm: true });
+    assert.equal(response.status, 403);
   });
 });
 

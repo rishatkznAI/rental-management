@@ -1656,6 +1656,7 @@ function registerSystemRoutes(app, deps) {
     if (typeof backfillGanttRentalLinks !== 'function' || typeof analyzeGanttRentalLinks !== 'function') {
       return res.status(500).json({ ok: false, error: 'Rental link backfill unavailable' });
     }
+    const dryRun = req.body?.confirm !== true || req.body?.dryRun === true || req.query.dryRun === '1';
     const before = analyzeGanttRentalLinks({
       rentals: readData('rentals') || [],
       ganttRentals: readData('gantt_rentals') || [],
@@ -1667,7 +1668,7 @@ function registerSystemRoutes(app, deps) {
       readData,
       writeData,
       logger: console,
-      dryRun: req.body?.dryRun === true || req.query.dryRun === '1',
+      dryRun,
     });
     const after = analyzeGanttRentalLinks({
       rentals: readData('rentals') || [],

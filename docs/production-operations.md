@@ -9,6 +9,18 @@ This checklist documents the production deployment shape and the minimum smoke c
 
 `VITE_API_URL` must point to the backend API host, not to the GitHub Pages frontend URL.
 
+## Branch Protection And Required Checks
+
+The protected production branch is `main`.
+
+- Direct push to `main` is forbidden.
+- Merge to `main` must go through a pull request.
+- Required check context for branch protection: `lightweight-pr-check`.
+- Do not use `Lightweight PR Check / lightweight-pr-check` as the required context. GitHub branch protection must use the actual check context, not the workflow display name or a combined workflow/job label.
+- Do not use `--admin` to bypass branch protection unless there is a separate explicit decision to do so.
+- Railway backend autodeploy runs after a PR is merged into `main` when backend watch paths changed.
+- A manual Railway deploy is not needed in the normal merge-to-main scenario.
+
 ## Railway Backend
 
 The backend runs as a separate Railway service from the frontend.

@@ -376,3 +376,76 @@ test('return without damage does not free equipment with active service repair',
     assert.equal(state.equipment.find(item => item.id === 'EQ-4').status, 'in_service');
   });
 });
+
+test('restoring a returned rental via rental patch syncs linked planner row and equipment', async () => {
+  const { app, state } = createReturnApp();
+
+  await withServer(app, async baseUrl => {
+    assert.equal((await request(baseUrl, 'POST', '/api/rentals/GR-1/return', {
+      returnDate: '2026-04-25',
+      result: 'available',
+    })).status, 200);
+
+    const restored = await request(baseUrl, 'PATCH', '/api/rentals/R-1', {
+      status: 'active',
+      actualReturnDate: '',
+      ganttRentalId: 'GR-1',
+    });
+
+    assert.equal(restored.status, 200);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').status, 'active');
+    assert.equal(state.rentals.find(item => item.id === 'R-1').actualReturnDate, '');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').status, 'active');
+    assert.equal(state.gantt_rentals.filter(item => item.rentalId === 'R-1').length, 1);
+    const equipment = state.equipment.find(item => item.id === 'EQ-1');
+    assert.equal(equipment.status, 'rented');
+    assert.equal(equipment.currentClient, 'ООО Чистый возврат');
+    assert.equal(equipment.returnDate, '2026-04-25');
+  });
+});
+
+test('restoring a returned rental is rejected while equipment has an open service ticket', async () => {
+  const { app, state } = createReturnApp();
+  state.rentals.find(item => item.id === 'R-1').status = 'closed';
+  state.rentals.find(item => item.id === 'R-1').actualReturnDate = '2026-04-25';
+  state.gantt_rentals.find(item => item.id === 'GR-1').status = 'returned';
+  state.equipment.find(item => item.id === 'EQ-1').status = 'in_service';
+  state.service.push({ id: 'S-restore', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', status: 'in_progress', reason: 'Диагностика' });
+
+  await withServer(app, async baseUrl => {
+    const restored = await request(baseUrl, 'PATCH', '/api/rentals/R-1', {
+      status: 'active',
+      actualReturnDate: '',
+      ganttRentalId: 'GR-1',
+    });
+
+    assert.equal(restored.status, 409);
+    assert.match(restored.body.error, /активная сервисная заявка/i);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').status, 'closed');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').status, 'returned');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-1').status, 'in_service');
+  });
+});
+
+test('restoring a returned rental is rejected for any unfinished service ticket status', async () => {
+  const { app, state } = createReturnApp();
+  state.rentals.find(item => item.id === 'R-1').status = 'closed';
+  state.rentals.find(item => item.id === 'R-1').actualReturnDate = '2026-04-25';
+  state.gantt_rentals.find(item => item.id === 'GR-1').status = 'returned';
+  state.equipment.find(item => item.id === 'EQ-1').status = 'available';
+  state.service.push({ id: 'S-ready', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', status: 'ready', reason: 'Ожидает закрытия' });
+
+  await withServer(app, async baseUrl => {
+    const restored = await request(baseUrl, 'PATCH', '/api/rentals/R-1', {
+      status: 'active',
+      actualReturnDate: '',
+      ganttRentalId: 'GR-1',
+    });
+
+    assert.equal(restored.status, 409);
+    assert.match(restored.body.error, /S-ready/);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').status, 'closed');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').status, 'returned');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-1').status, 'available');
+  });
+});

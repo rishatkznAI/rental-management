@@ -34,9 +34,6 @@ import {
 import { rentalsService } from '../services/rentals.service';
 import { documentsService } from '../services/documents.service';
 import { paymentsService } from '../services/payments.service';
-import { equipmentService } from '../services/equipment.service';
-import { appendRentalHistory, createRentalHistoryEntry } from '../lib/rental-history';
-import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { formatRentalAuditEvents } from '../lib/rentalAuditHistory.js';
 import { buildDocumentControl } from '../lib/documentControl.js';
 import { buildRentalQuickActions } from '../lib/quickActions.js';
@@ -438,8 +435,6 @@ export default function RentalDetail() {
     return map;
   }, [relatedPayments]);
 
-  const historyAuthor = user?.name || 'Система';
-
   const linkedGanttCandidates = useMemo(() => {
     return ganttRentals.filter(entry => {
       if (!rental) return false;
@@ -813,22 +808,6 @@ export default function RentalDetail() {
     });
   }, [documents, linkedGanttRental?.expectedPaymentDate, paidAmount, rental, rentalBillingAmount]);
 
-  const syncPaymentStatus = React.useCallback(async (nextPayments: typeof relatedPayments) => {
-    if (!linkedGanttRental) return;
-    const totalPaidForRental = nextPayments.reduce((sum, payment) => {
-      return sum + getPaymentAmountForRental(payment);
-    }, 0);
-    let paymentStatus: GanttRentalData['paymentStatus'] = 'unpaid';
-    if (totalPaidForRental >= getRentalBillingAmount(linkedGanttRental || rental)) paymentStatus = 'paid';
-    else if (totalPaidForRental > 0) paymentStatus = 'partial';
-    await rentalsService.updateGanttEntry(linkedGanttRental.id, {
-      ...appendRentalHistory(
-        { ...linkedGanttRental, paymentStatus },
-        createRentalHistoryEntry(historyAuthor, `Статус оплаты обновлён автоматически: ${paymentStatus === 'paid' ? 'Оплачено' : paymentStatus === 'partial' ? 'Частично' : 'Не оплачено'}`),
-      ),
-    });
-  }, [getPaymentAmountForRental, historyAuthor, linkedGanttRental, rental?.price]);
-
   const handleCreateDocument = async () => {
     if (!rental || !canCreateDocuments) return;
     const amount = Number(documentForm.amount);
@@ -889,7 +868,7 @@ export default function RentalDetail() {
       const nextStatus: PaymentStatus = paymentForm.status === 'pending'
         ? (paidAmount > 0 ? (paidAmount >= amount ? 'paid' : 'partial') : 'pending')
         : paymentForm.status;
-      const created = await paymentsService.create({
+      await paymentsService.create({
         invoiceNumber: paymentForm.invoiceNumber.trim(),
         rentalId: rental.id,
         clientId: rental.clientId,
@@ -901,7 +880,6 @@ export default function RentalDetail() {
         status: nextStatus,
         comment: paymentForm.comment.trim() || undefined,
       });
-      await syncPaymentStatus([...relatedPayments, created]);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['payments'] }),
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
@@ -970,28 +948,15 @@ export default function RentalDetail() {
     try {
       await rentalsService.update(rental.id, {
         status: 'active',
-        actualReturnDate: undefined,
+        actualReturnDate: '',
+        rentalId: rental.id,
+        ganttRentalId: linkedGanttRental?.id || '',
+        entityType: 'rental',
+        actionType: 'rental_detail_restore',
+        __rentalId: rental.id,
+        __linkedGanttRentalId: linkedGanttRental?.id || '',
+        __ganttRentalId: linkedGanttRental?.id || '',
       });
-      if (linkedGanttRental) {
-        const restoredGantt: GanttRentalData = {
-          ...linkedGanttRental,
-          status: 'active',
-        };
-        await rentalsService.updateGanttEntry(linkedGanttRental.id, appendRentalHistory(
-          restoredGantt,
-          createRentalHistoryEntry(historyAuthor, 'Аренда восстановлена из карточки аренды'),
-        ));
-      }
-      const eq = resolvedRentalEquipment[0];
-      await equipmentService.update(eq.id, appendAuditHistory(
-        {
-          ...eq,
-          status: 'rented',
-          currentClient: rental.client,
-          returnDate: rental.plannedReturnDate,
-        },
-        createAuditEntry(historyAuthor, `Аренда ${rental.id} восстановлена из карточки аренды`),
-      ));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.detail(rental.id) }),

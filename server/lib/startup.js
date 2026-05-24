@@ -155,8 +155,8 @@ async function startServer({ app, port, deps, logger = console }) {
     cleanupExpiredSessions();
     seedDefaultUsers();
     ensureLegacyDefaultUsers();
+    migrateReferenceCollections();
     if (startupBusinessMaintenanceEnabled) {
-      migrateReferenceCollections();
       migrateLegacyRepairFacts();
     } else {
       logStartupBusinessMaintenanceDisabled(logger);
@@ -227,39 +227,37 @@ async function startServer({ app, port, deps, logger = console }) {
         logger.warn(`[rental-links] diagnostics skipped: ${error?.message || String(error)}`);
       }
     }
-    if (startupBusinessMaintenanceEnabled) {
-      seedServiceWorks({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        normalizeServiceWorkRecord: deps.normalizeServiceWorkRecord,
-        seedsDir: deps.seedsDir,
-        logger,
-      });
-      seedKnowledgeBaseModules({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        seedsDir: deps.seedsDir,
-        logger,
-      });
-    }
+    seedServiceWorks({
+      readData: deps.readData,
+      writeData: deps.writeData,
+      normalizeServiceWorkRecord: deps.normalizeServiceWorkRecord,
+      seedsDir: deps.seedsDir,
+      logger,
+    });
+    seedKnowledgeBaseModules({
+      readData: deps.readData,
+      writeData: deps.writeData,
+      seedsDir: deps.seedsDir,
+      logger,
+    });
     ensureKnowledgeBaseProgress({
       readData: deps.readData,
       writeData: deps.writeData,
     });
+    seedSpareParts({
+      readData: deps.readData,
+      writeData: deps.writeData,
+      normalizeSparePartRecord: deps.normalizeSparePartRecord,
+      seedsDir: deps.seedsDir,
+      logger,
+    });
+    seedServiceRouteNorms({
+      readData: deps.readData,
+      writeData: deps.writeData,
+      seedsDir: deps.seedsDir,
+      logger,
+    });
     if (startupBusinessMaintenanceEnabled) {
-      seedSpareParts({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        normalizeSparePartRecord: deps.normalizeSparePartRecord,
-        seedsDir: deps.seedsDir,
-        logger,
-      });
-      seedServiceRouteNorms({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        seedsDir: deps.seedsDir,
-        logger,
-      });
       cleanupArchivedCrm({
         readData: deps.readData,
         writeData: deps.writeData,

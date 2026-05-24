@@ -96,7 +96,7 @@ test('startup business maintenance is opt-in', () => {
   assert.equal(isStartupBusinessMaintenanceEnabled({ [STARTUP_BUSINESS_MAINTENANCE_ENV]: 'apply' }), true);
 });
 
-test('server start does not auto-repair or backfill business collections by default', async () => {
+test('server start disables only business maintenance by default', async () => {
   const original = {
     rentals: [{ id: 'R-1', client: 'Legacy Client' }],
     gantt_rentals: [{ id: 'GR-1' }],
@@ -125,14 +125,52 @@ test('server start does not auto-repair or backfill business collections by defa
   assert.deepEqual(state.payment_allocations, original.payment_allocations);
   assert.deepEqual(state.documents, original.documents);
   assert.deepEqual(state.crm_deals, original.crm_deals);
-  assert.equal(events.calls.includes('migrateReferenceCollections'), false);
+  assert.equal(events.calls.includes('migrateJsonFilesToDb'), true);
+  assert.equal(events.calls.includes('cleanupExpiredSessions'), true);
+  assert.equal(events.calls.includes('seedDefaultUsers'), true);
+  assert.equal(events.calls.includes('ensureLegacyDefaultUsers'), true);
+  assert.equal(events.calls.includes('migrateReferenceCollections'), true);
   assert.equal(events.calls.includes('migrateLegacyRepairFacts'), false);
   assert.equal(events.calls.includes('backfillPaymentAllocations'), false);
   assert.equal(events.calls.includes('normalizeClientLinks'), false);
   assert.equal(events.calls.includes('backfillGanttRentalLinks'), false);
+  assert.equal(events.calls.includes('applyAdminResetFromEnv'), true);
+  assert.equal(events.writes.some(event => event.name === 'repair_work_items'), true);
   assert.equal(events.writes.some(event => event.name === 'rentals'), false);
   assert.equal(events.writes.some(event => event.name === 'gantt_rentals'), false);
   assert.equal(events.writes.some(event => event.name === 'payment_allocations'), false);
   assert.equal(events.writes.some(event => event.name === 'crm_deals'), false);
   assert.equal(warnings.some(message => message.includes(`${STARTUP_BUSINESS_MAINTENANCE_ENV}=apply`)), true);
+});
+
+test('STARTUP_BUSINESS_MAINTENANCE=apply runs business maintenance after startup essentials', async () => {
+  const state = {
+    rentals: [{ id: 'R-1', client: 'Legacy Client' }],
+    gantt_rentals: [{ id: 'GR-1' }],
+    payments: [{ id: 'P-1', rentalId: 'R-1', amount: 100, status: 'paid' }],
+    payment_allocations: [],
+    documents: [{ id: 'D-1', client: 'Legacy Client' }],
+    crm_deals: [{ id: 'CRM-1' }],
+    service: [{ id: 'S-1' }],
+    app_settings: [{ key: 'crm_archive_state', value: { status: 'archived', archivedAt: '2020-01-01T00:00:00.000Z' } }],
+  };
+
+  const events = await startAndClose({
+    state,
+    envValue: 'apply',
+    logger: {
+      log: () => {},
+      warn: () => {},
+    },
+  });
+
+  assert.equal(events.calls.includes('migrateJsonFilesToDb'), true);
+  assert.equal(events.calls.includes('cleanupExpiredSessions'), true);
+  assert.equal(events.calls.includes('migrateReferenceCollections'), true);
+  assert.equal(events.calls.includes('migrateLegacyRepairFacts'), true);
+  assert.equal(events.calls.includes('backfillPaymentAllocations'), true);
+  assert.equal(events.calls.includes('normalizeClientLinks'), true);
+  assert.equal(events.calls.includes('backfillGanttRentalLinks'), true);
+  assert.deepEqual(state.crm_deals, []);
+  assert.equal(state.app_settings[0].value.status, 'deleted');
 });

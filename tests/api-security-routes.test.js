@@ -1580,6 +1580,44 @@ test('admin generic CRUD PATCH rejects system and credential fields', async () =
   });
 });
 
+test('admin generic service writes reject embedded repair and audit fields', async () => {
+  const { app, state, auditEntries } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const originalTicket = JSON.stringify(state.service.find(item => item.id === 'S-own'));
+    const patch = await request(baseUrl, 'PATCH', '/api/service/S-own', 'admin-token', {
+      reason: 'blocked repair injection',
+      repair_work_items: [{ workId: 'SW-1', quantity: 99 }],
+      repair_part_items: [{ partId: 'SP-1', quantity: 99 }],
+      workLog: [{ name: 'forged work log' }],
+      parts: [{ name: 'forged part' }],
+      serviceAuditLog: [{ action: 'closed_without_workflow' }],
+    });
+
+    assert.equal(patch.status, 403);
+    assert.match(patch.body.error, /repair_work_items|repair_part_items|workLog|parts|serviceAuditLog/);
+    assert.equal(JSON.stringify(state.service.find(item => item.id === 'S-own')), originalTicket);
+    assert.equal(state.service.find(item => item.id === 'S-own').repair_work_items, undefined);
+    assert.equal(state.service.find(item => item.id === 'S-own').workLog, undefined);
+
+    const beforeBulk = JSON.stringify(state.service);
+    const auditCount = auditEntries.length;
+    const bulk = await request(baseUrl, 'PUT', '/api/service', 'admin-token', [
+      {
+        ...state.service.find(item => item.id === 'S-own'),
+        reason: 'blocked bulk repair injection',
+        repairWorkItems: [{ workId: 'SW-1', quantity: 1 }],
+      },
+      state.service.find(item => item.id === 'S-other'),
+    ]);
+
+    assert.equal(bulk.status, 403);
+    assert.match(bulk.body.error, /repairWorkItems/);
+    assert.equal(JSON.stringify(state.service), beforeBulk);
+    assert.equal(auditEntries.length, auditCount);
+  });
+});
+
 test('admin generic CRUD bulk PUT rejects dangerous fields and keeps custom fields allowed', async () => {
   const { app, state, auditEntries } = createSecurityApp();
 

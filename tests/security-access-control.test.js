@@ -47,21 +47,29 @@ test('manager mass assignment cannot override manager/status/payment fields', ()
 
   const safe = access.sanitizeUpdateInput('clients', {
     company: 'ООО Клиент',
-    role: 'Администратор',
-    isAdmin: true,
-    ownerId: 'OW-other',
     managerId: 'U-other',
     status: 'approved',
-    paymentStatus: 'paid',
   }, user, { id: 'C-1', manager: 'Руслан', managerId: 'U-manager' });
 
   assert.equal(safe.company, 'ООО Клиент');
-  assert.equal(safe.role, undefined);
-  assert.equal(safe.isAdmin, undefined);
-  assert.equal(safe.ownerId, undefined);
-  assert.equal(safe.managerId, 'U-manager');
+  assert.equal(safe.managerId, undefined);
   assert.equal(safe.status, undefined);
-  assert.equal(safe.paymentStatus, undefined);
+  assert.throws(() => access.sanitizeUpdateInput('clients', {
+    company: 'ООО Клиент',
+    paymentStatus: 'paid',
+  }, user, { id: 'C-1', manager: 'Руслан', managerId: 'U-manager' }), /paymentStatus/);
+  assert.throws(() => access.sanitizeUpdateInput('clients', {
+    company: 'ООО Клиент',
+    role: 'Администратор',
+  }, user, { id: 'C-1', manager: 'Руслан', managerId: 'U-manager' }), /role/);
+  assert.throws(() => access.sanitizeUpdateInput('clients', {
+    company: 'ООО Клиент',
+    isAdmin: true,
+  }, user, { id: 'C-1', manager: 'Руслан', managerId: 'U-manager' }), /isAdmin/);
+  assert.throws(() => access.sanitizeUpdateInput('clients', {
+    company: 'ООО Клиент',
+    ownerId: 'OW-other',
+  }, user, { id: 'C-1', manager: 'Руслан', managerId: 'U-manager' }), /ownerId/);
 });
 
 test('investor sees only own equipment and linked rentals', () => {
@@ -292,32 +300,34 @@ test('unknown collections and roles are denied by default', () => {
   assert.throws(() => access.assertCanReadCollection('unknown_collection', manager), /Forbidden/);
 });
 
-test('new mass assignment protected fields are stripped for non-admin roles', () => {
+test('new mass assignment protected fields are stripped or rejected for non-admin roles', () => {
   const access = createAccess({});
   const manager = { userId: 'U-manager', userName: 'Руслан', userRole: 'Менеджер по аренде' };
   const mechanic = { userId: 'U-mechanic', userName: 'Петров', userRole: 'Механик' };
   const carrier = { userId: 'U-carrier', userName: 'Перевозчик', userRole: 'Перевозчик', carrierId: 'carrier-1' };
   const investor = { userId: 'U-investor', userName: 'Инвестор', userRole: 'Инвестор', ownerId: 'OW-1' };
 
-  const managerSafe = access.sanitizeUpdateInput('clients', { managerId: 'U-other', approvedBy: 'U-admin', closedBy: 'U-admin' }, manager, {
+  const managerSafe = access.sanitizeUpdateInput('clients', { managerId: 'U-other' }, manager, {
     managerId: 'U-manager',
   });
-  assert.equal(managerSafe.managerId, 'U-manager');
-  assert.equal(managerSafe.approvedBy, undefined);
-  assert.equal(managerSafe.closedBy, undefined);
+  assert.equal(managerSafe.managerId, undefined);
+  assert.throws(() => access.sanitizeUpdateInput('clients', { approvedBy: 'U-admin' }, manager, {
+    managerId: 'U-manager',
+  }), /approvedBy/);
+  assert.throws(() => access.sanitizeUpdateInput('clients', { closedBy: 'U-admin' }, manager, {
+    managerId: 'U-manager',
+  }), /closedBy/);
 
   const mechanicSafe = access.sanitizeUpdateInput('service', {
     status: 'in_progress',
-    mechanicId: 'M-other',
-    assignedMechanicId: 'M-other',
-    assignedUserId: 'U-other',
-    closedAt: '2026-04-28T12:00:00.000Z',
   }, mechanic);
   assert.equal(mechanicSafe.status, 'in_progress');
-  assert.equal(mechanicSafe.mechanicId, undefined);
-  assert.equal(mechanicSafe.assignedMechanicId, undefined);
-  assert.equal(mechanicSafe.assignedUserId, undefined);
-  assert.equal(mechanicSafe.closedAt, undefined);
+  for (const field of ['mechanicId', 'assignedMechanicId', 'assignedUserId', 'closedAt']) {
+    assert.throws(() => access.sanitizeUpdateInput('service', {
+      status: 'in_progress',
+      [field]: field === 'closedAt' ? '2026-04-28T12:00:00.000Z' : 'M-other',
+    }, mechanic), /Недостаточно прав/);
+  }
 
   const carrierSafe = access.sanitizeUpdateInput('deliveries', {
     comment: 'ok',

@@ -103,6 +103,20 @@ const ADMIN_GENERIC_PATCH_USER_WORKFLOW_FIELDS = new Set([
   'role',
 ]);
 
+const ADMIN_GENERIC_PATCH_COLLECTION_BLOCKED_FIELDS = {
+  service: new Set([
+    'repair_work_items',
+    'repair_part_items',
+    'repairWorkItems',
+    'repairPartItems',
+    'workLog',
+    'works',
+    'parts',
+    'serviceAuditLog',
+    'service_audit',
+  ]),
+};
+
 const HEAD_REDACTED_FIELDS = new Set([
   'amount',
   'balance',
@@ -1600,6 +1614,7 @@ function isSystemField(field) {
 function isAdminGenericPatchBlockedField(collection, field) {
   if (SYSTEM_FIELD_PATTERN.test(field)) return true;
   if (ADMIN_GENERIC_PATCH_BLOCKED_FIELDS.has(field)) return true;
+  if (ADMIN_GENERIC_PATCH_COLLECTION_BLOCKED_FIELDS[collection]?.has(field)) return true;
   if (ADMIN_GENERIC_PATCH_USER_WORKFLOW_FIELDS.has(field) && collection !== 'users') return true;
   return false;
 }

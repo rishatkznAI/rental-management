@@ -1580,6 +1580,39 @@ test('admin generic CRUD PATCH rejects system and credential fields', async () =
   });
 });
 
+test('generic equipment PATCH rejects direct status workflow fields', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const equipmentFixture = state.equipment.find(item => item.id === 'EQ-own');
+    equipmentFixture.status = 'available';
+    equipmentFixture.model = 'SJ3219';
+    const before = JSON.stringify(state.equipment.find(item => item.id === 'EQ-own'));
+
+    const admin = await request(baseUrl, 'PATCH', '/api/equipment/EQ-own', 'admin-token', {
+      status: 'rented',
+    });
+    assert.equal(admin.status, 403);
+    assert.match(admin.body.error, /status|общий PATCH/);
+    assert.equal(JSON.stringify(state.equipment.find(item => item.id === 'EQ-own')), before);
+
+    const office = await request(baseUrl, 'PATCH', '/api/equipment/EQ-own', 'office-token', {
+      status: 'in_service',
+    });
+    assert.equal(office.status, 403);
+    assert.match(office.body.error, /status|общий PATCH/);
+    assert.equal(JSON.stringify(state.equipment.find(item => item.id === 'EQ-own')), before);
+
+    delete state.equipment.find(item => item.id === 'EQ-own').status;
+    const allowed = await request(baseUrl, 'PATCH', '/api/equipment/EQ-own', 'admin-token', {
+      notes: 'ordinary card field still allowed',
+    });
+    assert.equal(allowed.status, 200);
+    assert.equal(state.equipment.find(item => item.id === 'EQ-own').notes, 'ordinary card field still allowed');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-own').status, undefined);
+  });
+});
+
 test('admin generic service writes reject embedded repair and audit fields', async () => {
   const { app, state, auditEntries } = createSecurityApp();
 
@@ -1618,6 +1651,34 @@ test('admin generic service writes reject embedded repair and audit fields', asy
   });
 });
 
+test('generic service PATCH rejects terminal status without workflow', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    const before = JSON.stringify(state.service.find(item => item.id === 'S-own'));
+    const closed = await request(baseUrl, 'PATCH', '/api/service/S-own', 'admin-token', {
+      status: 'closed',
+      closedAt: '2026-05-25T10:00:00.000Z',
+    });
+    assert.equal(closed.status, 403);
+    assert.match(closed.body.error, /status|closedAt|общий PATCH/);
+    assert.equal(JSON.stringify(state.service.find(item => item.id === 'S-own')), before);
+
+    const revision = await request(baseUrl, 'PATCH', '/api/service/S-own', 'admin-token', {
+      status: 'needs_revision',
+    });
+    assert.equal(revision.status, 403);
+    assert.equal(JSON.stringify(state.service.find(item => item.id === 'S-own')), before);
+
+    const allowed = await request(baseUrl, 'PATCH', '/api/service/S-own', 'admin-token', {
+      comment: 'ordinary diagnostic note',
+    });
+    assert.equal(allowed.status, 200);
+    assert.equal(state.service.find(item => item.id === 'S-own').comment, 'ordinary diagnostic note');
+    assert.equal(state.service.find(item => item.id === 'S-own').status, 'new');
+  });
+});
+
 test('admin generic CRUD bulk PUT rejects dangerous fields and keeps custom fields allowed', async () => {
   const { app, state, auditEntries } = createSecurityApp();
 
@@ -1652,6 +1713,18 @@ test('admin generic CRUD bulk PUT rejects dangerous fields and keeps custom fiel
     assert.match(blocked.body.error, /auditLog/);
     assert.equal(JSON.stringify(state.equipment), before);
     assert.equal(auditEntries.length, auditCount);
+
+    const beforeStatusBulk = JSON.stringify(state.equipment);
+    const blockedStatus = await request(baseUrl, 'PUT', '/api/equipment', 'admin-token', [
+      {
+        id: 'EQ-own',
+        inventoryNumber: '100',
+        status: 'rented',
+      },
+    ]);
+    assert.equal(blockedStatus.status, 403);
+    assert.match(blockedStatus.body.error, /status/);
+    assert.equal(JSON.stringify(state.equipment), beforeStatusBulk);
   });
 });
 
@@ -1668,6 +1741,46 @@ test('admin rental PATCH rejects system fields before writing', async () => {
     assert.equal(response.status, 403);
     assert.match(response.body.error, /auditLog/);
     assert.deepEqual(state.rentals.find(item => item.id === 'R-own'), before);
+  });
+});
+
+test('direct rental PATCH rejects terminal states and return fields', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    state.rentals.find(item => item.id === 'R-own').status = 'active';
+    state.gantt_rentals.find(item => item.id === 'GR-own').status = 'active';
+    state.gantt_rentals.find(item => item.id === 'GR-own').rentalId = 'R-own';
+    const beforeRentals = JSON.stringify(state.rentals);
+    const beforeGantt = JSON.stringify(state.gantt_rentals);
+
+    const adminClosed = await request(baseUrl, 'PATCH', '/api/rentals/R-own', 'admin-token', {
+      status: 'closed',
+    });
+    assert.equal(adminClosed.status, 403);
+    assert.match(adminClosed.body.error, /closed|workflow|общий PATCH/);
+    assert.equal(JSON.stringify(state.rentals), beforeRentals);
+
+    const officeReturned = await request(baseUrl, 'PATCH', '/api/rentals/R-own', 'office-token', {
+      actualReturnDate: '2026-05-25',
+    });
+    assert.equal(officeReturned.status, 403);
+    assert.match(officeReturned.body.error, /actualReturnDate|workflow/);
+    assert.equal(JSON.stringify(state.rentals), beforeRentals);
+
+    const ganttReturned = await request(baseUrl, 'PATCH', '/api/gantt_rentals/GR-own', 'admin-token', {
+      status: 'returned',
+    });
+    assert.equal(ganttReturned.status, 403);
+    assert.match(ganttReturned.body.error, /returned|workflow|общий PATCH/);
+    assert.equal(JSON.stringify(state.gantt_rentals), beforeGantt);
+
+    const allowed = await request(baseUrl, 'PATCH', '/api/rentals/R-own', 'admin-token', {
+      comments: 'ordinary rental note',
+    });
+    assert.equal(allowed.status, 200);
+    assert.equal(state.rentals.find(item => item.id === 'R-own').comments, 'ordinary rental note');
+    assert.equal(state.rentals.find(item => item.id === 'R-own').status, 'active');
   });
 });
 
@@ -1689,6 +1802,43 @@ test('admin rental bulk PUT rejects system fields before writing', async () => {
     assert.match(response.body.error, /auditLog/);
     assert.equal(JSON.stringify(state.rentals), before);
     assert.equal(auditEntries.length, auditCount);
+
+    const terminalBefore = JSON.stringify(state.rentals);
+    const terminal = await request(baseUrl, 'PUT', '/api/rentals', 'admin-token', [
+      {
+        ...state.rentals.find(item => item.id === 'R-own'),
+        status: 'closed',
+      },
+    ]);
+    assert.equal(terminal.status, 403);
+    assert.match(terminal.body.error, /closed|status/);
+    assert.equal(JSON.stringify(state.rentals), terminalBefore);
+  });
+});
+
+test('rental return workflow still closes rentals and updates equipment', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async (baseUrl) => {
+    state.equipment = [
+      { id: 'EQ-own', inventoryNumber: '100', manufacturer: 'Skyjack', model: 'SJ3219', status: 'rented' },
+    ];
+    state.rentals = [
+      { id: 'R-own', client: 'ООО Свой', equipmentId: 'EQ-own', equipment: ['100'], startDate: '2026-05-01', plannedReturnDate: '2026-05-30', status: 'active' },
+    ];
+    state.gantt_rentals = [
+      { id: 'GR-own', rentalId: 'R-own', sourceRentalId: 'R-own', originalRentalId: 'R-own', client: 'ООО Свой', equipmentId: 'EQ-own', equipmentInv: '100', startDate: '2026-05-01', endDate: '2026-05-30', status: 'active' },
+    ];
+
+    const response = await request(baseUrl, 'POST', '/api/rentals/R-own/return', 'admin-token', {
+      returnDate: '2026-05-25',
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(state.rentals.find(item => item.id === 'R-own').status, 'closed');
+    assert.equal(state.rentals.find(item => item.id === 'R-own').actualReturnDate, '2026-05-25');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-own').status, 'returned');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-own').status, 'available');
   });
 });
 

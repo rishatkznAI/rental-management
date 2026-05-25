@@ -104,7 +104,35 @@ const ADMIN_GENERIC_PATCH_USER_WORKFLOW_FIELDS = new Set([
 ]);
 
 const ADMIN_GENERIC_PATCH_COLLECTION_BLOCKED_FIELDS = {
+  equipment: new Set([
+    'status',
+    'currentClient',
+    'returnDate',
+  ]),
+  rentals: new Set([
+    'actualReturnDate',
+    'returnDate',
+    'returnedAt',
+    'closedAt',
+    'completedAt',
+    'cancelledAt',
+    'canceledAt',
+    'returnCondition',
+    'damages',
+    'missingItems',
+  ]),
+  gantt_rentals: new Set([
+    'actualReturnDate',
+    'returnDate',
+    'returnedAt',
+    'closedAt',
+    'completedAt',
+    'cancelledAt',
+    'canceledAt',
+  ]),
   service: new Set([
+    'completedAt',
+    'closedAt',
     'repair_work_items',
     'repair_part_items',
     'repairWorkItems',
@@ -116,6 +144,9 @@ const ADMIN_GENERIC_PATCH_COLLECTION_BLOCKED_FIELDS = {
     'service_audit',
   ]),
 };
+
+const RENTAL_WORKFLOW_STATUSES = new Set(['closed', 'cancelled', 'canceled', 'completed', 'returned']);
+const SERVICE_WORKFLOW_STATUSES = new Set(['closed', 'completed', 'cancelled', 'canceled', 'needs_revision']);
 
 const HEAD_REDACTED_FIELDS = new Set([
   'amount',
@@ -1619,6 +1650,14 @@ function isAdminGenericPatchBlockedField(collection, field) {
   return false;
 }
 
+function isAdminGenericPatchBlockedValue(collection, field, value) {
+  if (field !== 'status') return false;
+  const status = String(value || '').trim().toLowerCase();
+  if ((collection === 'rentals' || collection === 'gantt_rentals') && RENTAL_WORKFLOW_STATUSES.has(status)) return true;
+  if (collection === 'service' && SERVICE_WORKFLOW_STATUSES.has(status)) return true;
+  return false;
+}
+
 function isAdminBulkReplaceBlockedField(collection, field) {
   if (field === 'id') return false;
   if (collection === 'users' && !STRICT_USER_MUTATION_FIELDS.has(field)) return true;
@@ -1632,6 +1671,9 @@ function sanitizeAdminGenericPatchInput(collection, input) {
   for (const [field, value] of Object.entries(input || {})) {
     if (isAdminGenericPatchBlockedField(collection, field)) {
       throw forbidden(`Поле ${field} нельзя менять через общий PATCH.`);
+    }
+    if (isAdminGenericPatchBlockedValue(collection, field, value)) {
+      throw forbidden(`Статус ${value} нельзя менять через общий PATCH.`);
     }
     safe[field] = value;
   }
@@ -1764,6 +1806,13 @@ function sanitizeUpdateInput(collection, input, user, existing = null) {
     ? sanitizeAdminGenericPatchInput(collection, strictPaymentInput)
     : stripMassAssignmentFields(strictPaymentInput, user, collection);
   if (isAdmin(user)) return sanitizeAdminGenericPatchInput(collection, input);
+  if (collection === 'equipment') {
+    for (const field of ['status', 'currentClient', 'returnDate']) {
+      if (Object.prototype.hasOwnProperty.call(input || {}, field)) {
+        throw forbidden(`Поле ${field} нельзя менять через общий PATCH.`);
+      }
+    }
+  }
   if (collection === 'equipment' && isMechanic(user)) {
     const allowed = new Set([
       'saleReceiptStatus',
@@ -1934,6 +1983,9 @@ function assertSafeAdminBulkReplaceInput(collection, list, context = 'массо
     for (const field of Object.keys(item)) {
       if (isAdminBulkReplaceBlockedField(collection, field)) {
         throw forbidden(`Поле ${field} нельзя менять через ${context}.`);
+      }
+      if (isAdminGenericPatchBlockedValue(collection, field, item[field])) {
+        throw forbidden(`Статус ${item[field]} нельзя менять через ${context}.`);
       }
     }
   }

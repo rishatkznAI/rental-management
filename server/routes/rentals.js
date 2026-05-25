@@ -679,6 +679,34 @@ function registerRentalRoutes(deps) {
       return comparison !== null && comparison > 0;
     }
 
+    function directRentalWorkflowPatchError(patch) {
+      if (!patch || typeof patch !== 'object') return null;
+      const blockedFields = [
+        'actualReturnDate',
+        'returnDate',
+        'returnedAt',
+        'closedAt',
+        'completedAt',
+        'cancelledAt',
+        'canceledAt',
+        'returnCondition',
+        'damages',
+        'missingItems',
+      ];
+      for (const field of blockedFields) {
+        if (Object.prototype.hasOwnProperty.call(patch, field)) {
+          return `Поле ${field} нельзя менять напрямую: используйте workflow возврата/закрытия аренды.`;
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'status')) {
+        const status = String(patch.status || '').trim().toLowerCase();
+        if (CLOSED_RENTAL_STATUSES.has(status)) {
+          return `Статус ${patch.status} нельзя менять напрямую: используйте workflow возврата/закрытия аренды.`;
+        }
+      }
+      return null;
+    }
+
     function parseMoneyValue(value) {
       if (value === undefined || value === null || value === '') return null;
       if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null;
@@ -1478,6 +1506,10 @@ function registerRentalRoutes(deps) {
       const { patch: rawPatch, meta: rawMeta } = stripRentalPatchMeta(req.body);
       let patch = rawPatch;
       let meta = rawMeta;
+      const earlyDirectWorkflowError = directRentalWorkflowPatchError(patch);
+      if (earlyDirectWorkflowError) {
+        return res.status(403).json({ ok: false, error: earlyDirectWorkflowError });
+      }
       const data = readData(collection) || [];
       let idx = data.findIndex(entry => String(entry.id) === String(req.params.id));
       if (collection === 'gantt_rentals' && idx !== -1) {
@@ -1607,6 +1639,10 @@ function registerRentalRoutes(deps) {
           ok: false,
           error: 'Продление аренды выполняется через отдельную операцию /extend с расчётом суммы и подтверждением клиента.',
         });
+      }
+      const directWorkflowError = directRentalWorkflowPatchError(patch);
+      if (directWorkflowError) {
+        return res.status(403).json({ ok: false, error: directWorkflowError });
       }
 
       if (collection === 'rentals' && req.user?.userRole !== 'Администратор') {

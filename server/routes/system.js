@@ -22,6 +22,7 @@ const {
   buildBrokenGanttRentalsRepairPlan,
 } = require('../lib/gantt-rental-repair-diagnostics');
 const { buildRentalLinkDiagnostics } = require('../lib/rental-link-diagnostics');
+const { buildDataIntegrityDiagnostics } = require('../lib/data-integrity-diagnostics');
 const { buildServiceRepairQualityView } = require('../lib/service-repeat-breakdowns');
 const {
   envFlagDisabled,
@@ -1565,6 +1566,36 @@ function registerSystemRoutes(app, deps) {
       generatedAt: new Date().toISOString(),
       ...diagnostics,
     });
+  });
+
+  app.get('/api/admin/data-integrity-diagnostics', requireAuth, requireAdmin, (_req, res) => {
+    const collections = {
+      equipment: readData('equipment') || [],
+      rentals: readData('rentals') || [],
+      gantt_rentals: readData('gantt_rentals') || [],
+      clients: readData('clients') || [],
+      service: readData('service') || [],
+      deliveries: readData('deliveries') || [],
+      delivery_carriers: readData('delivery_carriers') || [],
+      payments: readData('payments') || [],
+      payment_allocations: readData('payment_allocations') || [],
+      documents: readData('documents') || [],
+      users: readData('users') || [],
+      owners: readData('owners') || [],
+      mechanics: readData('mechanics') || [],
+      bot_users: readData('bot_users') || [],
+      bot_sessions: readData('bot_sessions') || [],
+      bot_activity: readData('bot_activity') || [],
+      repair_work_items: readData('repair_work_items') || [],
+      repair_part_items: readData('repair_part_items') || [],
+      service_works: readData('service_works') || [],
+      service_work_names: readData('service_work_names') || [],
+      service_work_catalog: readData('service_work_catalog') || [],
+      spare_part_names: readData('spare_part_names') || [],
+      spare_parts: readData('spare_parts') || [],
+      app_settings: readData('app_settings') || [],
+    };
+    return res.json(buildDataIntegrityDiagnostics(collections));
   });
 
   app.get('/api/admin/diagnostics/gantt-rentals-repair', requireAuth, requireAdmin, (_req, res) => {

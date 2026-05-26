@@ -332,28 +332,22 @@ export async function createRentalPair(
   expect(rentalRes.ok(), await rentalRes.text()).toBeTruthy();
   const rental = (await rentalRes.json()) as RentalRecord;
 
-  const ganttRes = await api.post('/api/gantt_rentals', {
-    data: {
-      rentalId: rental.id,
-      client: options.client,
-      clientShort: options.client.slice(0, 20),
-      equipmentId: options.equipment.id,
-      equipmentInv: options.equipment.inventoryNumber,
-      startDate: options.startDate,
-      endDate: options.endDate,
-      manager,
-      managerInitials: 'E2E',
-      status: ganttStatus,
-      paymentStatus: 'unpaid',
-      updSigned: false,
-      amount,
-      comments: [],
-    },
-  });
-  expect(ganttRes.ok()).toBeTruthy();
-  const gantt = (await ganttRes.json()) as { id: string };
+  const ganttRes = await api.get('/api/gantt_rentals');
+  expect(ganttRes.ok(), await ganttRes.text()).toBeTruthy();
+  const ganttRentals = (await ganttRes.json()) as Array<{ id: string; rentalId?: string; sourceRentalId?: string; originalRentalId?: string; status?: string }>;
+  const gantt = [...ganttRentals].reverse().find(item =>
+    [item.rentalId, item.sourceRentalId, item.originalRentalId].some(id => id === rental.id)
+  );
+  expect(gantt, `Expected linked gantt rental for rental ${rental.id}`).toBeTruthy();
 
-  return { rental, ganttId: gantt.id };
+  if (ganttStatus !== status && gantt?.status !== ganttStatus) {
+    const patchRes = await api.patch(`/api/gantt_rentals/${gantt!.id}`, {
+      data: { status: ganttStatus },
+    });
+    expect(patchRes.ok(), await patchRes.text()).toBeTruthy();
+  }
+
+  return { rental, ganttId: gantt!.id };
 }
 
 export async function findRentalByClient(api: APIRequestContext, client: string): Promise<RentalRecord> {

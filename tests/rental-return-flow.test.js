@@ -377,7 +377,7 @@ test('return without damage does not free equipment with active service repair',
   });
 });
 
-test('restoring a returned rental via rental patch syncs linked planner row and equipment', async () => {
+test('direct rental patch cannot restore returned rental workflow fields', async () => {
   const { app, state } = createReturnApp();
 
   await withServer(app, async baseUrl => {
@@ -386,25 +386,33 @@ test('restoring a returned rental via rental patch syncs linked planner row and 
       result: 'available',
     })).status, 200);
 
+    const beforeRental = JSON.stringify(state.rentals.find(item => item.id === 'R-1'));
+    const beforeGantt = JSON.stringify(state.gantt_rentals.find(item => item.id === 'GR-1'));
+    const beforeEquipment = JSON.stringify(state.equipment.find(item => item.id === 'EQ-1'));
+
     const restored = await request(baseUrl, 'PATCH', '/api/rentals/R-1', {
       status: 'active',
       actualReturnDate: '',
       ganttRentalId: 'GR-1',
     });
 
-    assert.equal(restored.status, 200);
-    assert.equal(state.rentals.find(item => item.id === 'R-1').status, 'active');
-    assert.equal(state.rentals.find(item => item.id === 'R-1').actualReturnDate, '');
-    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').status, 'active');
+    assert.equal(restored.status, 403);
+    assert.match(restored.body.error, /actualReturnDate|общий PATCH|workflow/i);
+    assert.equal(JSON.stringify(state.rentals.find(item => item.id === 'R-1')), beforeRental);
+    assert.equal(JSON.stringify(state.gantt_rentals.find(item => item.id === 'GR-1')), beforeGantt);
+    assert.equal(JSON.stringify(state.equipment.find(item => item.id === 'EQ-1')), beforeEquipment);
+    assert.equal(state.rentals.find(item => item.id === 'R-1').status, 'closed');
+    assert.equal(state.rentals.find(item => item.id === 'R-1').actualReturnDate, '2026-04-25');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').status, 'returned');
     assert.equal(state.gantt_rentals.filter(item => item.rentalId === 'R-1').length, 1);
     const equipment = state.equipment.find(item => item.id === 'EQ-1');
-    assert.equal(equipment.status, 'rented');
-    assert.equal(equipment.currentClient, 'ООО Чистый возврат');
-    assert.equal(equipment.returnDate, '2026-04-25');
+    assert.equal(equipment.status, 'available');
+    assert.equal(equipment.currentClient, undefined);
+    assert.equal(equipment.returnDate, undefined);
   });
 });
 
-test('restoring a returned rental is rejected while equipment has an open service ticket', async () => {
+test('direct rental patch restore attempt is forbidden before service conflict checks mutate data', async () => {
   const { app, state } = createReturnApp();
   state.rentals.find(item => item.id === 'R-1').status = 'closed';
   state.rentals.find(item => item.id === 'R-1').actualReturnDate = '2026-04-25';
@@ -413,21 +421,28 @@ test('restoring a returned rental is rejected while equipment has an open servic
   state.service.push({ id: 'S-restore', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', status: 'in_progress', reason: 'Диагностика' });
 
   await withServer(app, async baseUrl => {
+    const beforeRental = JSON.stringify(state.rentals.find(item => item.id === 'R-1'));
+    const beforeGantt = JSON.stringify(state.gantt_rentals.find(item => item.id === 'GR-1'));
+    const beforeEquipment = JSON.stringify(state.equipment.find(item => item.id === 'EQ-1'));
+
     const restored = await request(baseUrl, 'PATCH', '/api/rentals/R-1', {
       status: 'active',
       actualReturnDate: '',
       ganttRentalId: 'GR-1',
     });
 
-    assert.equal(restored.status, 409);
-    assert.match(restored.body.error, /активная сервисная заявка/i);
+    assert.equal(restored.status, 403);
+    assert.match(restored.body.error, /actualReturnDate|общий PATCH|workflow/i);
+    assert.equal(JSON.stringify(state.rentals.find(item => item.id === 'R-1')), beforeRental);
+    assert.equal(JSON.stringify(state.gantt_rentals.find(item => item.id === 'GR-1')), beforeGantt);
+    assert.equal(JSON.stringify(state.equipment.find(item => item.id === 'EQ-1')), beforeEquipment);
     assert.equal(state.rentals.find(item => item.id === 'R-1').status, 'closed');
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').status, 'returned');
     assert.equal(state.equipment.find(item => item.id === 'EQ-1').status, 'in_service');
   });
 });
 
-test('restoring a returned rental is rejected for any unfinished service ticket status', async () => {
+test('direct rental patch restore attempt is forbidden for any unfinished service ticket status', async () => {
   const { app, state } = createReturnApp();
   state.rentals.find(item => item.id === 'R-1').status = 'closed';
   state.rentals.find(item => item.id === 'R-1').actualReturnDate = '2026-04-25';
@@ -436,16 +451,44 @@ test('restoring a returned rental is rejected for any unfinished service ticket 
   state.service.push({ id: 'S-ready', equipmentId: 'EQ-1', inventoryNumber: 'INV-1', status: 'ready', reason: 'Ожидает закрытия' });
 
   await withServer(app, async baseUrl => {
+    const beforeRental = JSON.stringify(state.rentals.find(item => item.id === 'R-1'));
+    const beforeGantt = JSON.stringify(state.gantt_rentals.find(item => item.id === 'GR-1'));
+    const beforeEquipment = JSON.stringify(state.equipment.find(item => item.id === 'EQ-1'));
+
     const restored = await request(baseUrl, 'PATCH', '/api/rentals/R-1', {
       status: 'active',
       actualReturnDate: '',
       ganttRentalId: 'GR-1',
     });
 
-    assert.equal(restored.status, 409);
-    assert.match(restored.body.error, /S-ready/);
+    assert.equal(restored.status, 403);
+    assert.match(restored.body.error, /actualReturnDate|общий PATCH|workflow/i);
+    assert.equal(JSON.stringify(state.rentals.find(item => item.id === 'R-1')), beforeRental);
+    assert.equal(JSON.stringify(state.gantt_rentals.find(item => item.id === 'GR-1')), beforeGantt);
+    assert.equal(JSON.stringify(state.equipment.find(item => item.id === 'EQ-1')), beforeEquipment);
     assert.equal(state.rentals.find(item => item.id === 'R-1').status, 'closed');
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').status, 'returned');
     assert.equal(state.equipment.find(item => item.id === 'EQ-1').status, 'available');
+  });
+});
+
+test('direct gantt rental patch cannot set returned workflow status or return fields', async () => {
+  const { app, state } = createReturnApp();
+
+  await withServer(app, async baseUrl => {
+    const beforeGantt = JSON.stringify(state.gantt_rentals.find(item => item.id === 'GR-1'));
+    const beforeRental = JSON.stringify(state.rentals.find(item => item.id === 'R-1'));
+    const beforeEquipment = JSON.stringify(state.equipment.find(item => item.id === 'EQ-1'));
+
+    const response = await request(baseUrl, 'PATCH', '/api/gantt_rentals/GR-1', {
+      status: 'returned',
+      returnDate: '2026-04-25',
+    });
+
+    assert.equal(response.status, 403);
+    assert.match(response.body.error, /returnDate|status|workflow|общий PATCH/i);
+    assert.equal(JSON.stringify(state.gantt_rentals.find(item => item.id === 'GR-1')), beforeGantt);
+    assert.equal(JSON.stringify(state.rentals.find(item => item.id === 'R-1')), beforeRental);
+    assert.equal(JSON.stringify(state.equipment.find(item => item.id === 'EQ-1')), beforeEquipment);
   });
 });

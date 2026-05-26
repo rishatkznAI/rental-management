@@ -69,3 +69,69 @@ test('admin sees full backup block and download calls backup endpoint', async ({
   await page.getByRole('tab', { name: 'Данные системы' }).click();
   await expect(page.getByTestId('backup-history')).toContainText('skytech-backup-test.zip');
 });
+
+test('admin data tab shows read-only data integrity diagnostics', async ({ page }) => {
+  await loginAsAdmin(page);
+
+  const requestedMethods: string[] = [];
+  await page.route('**/api/admin/data-integrity-diagnostics', route => {
+    requestedMethods.push(route.request().method());
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'ok',
+        generatedAt: '2026-05-26T10:00:00.000Z',
+        counts: {
+          equipment: 10,
+          rentals: 4,
+          gantt_rentals: 5,
+          service: 2,
+          deliveries: 3,
+          payments: 6,
+          documents: 7,
+          users: 8,
+        },
+        summary: { blocker: 1, high: 2, medium: 3, low: 4 },
+        domains: {
+          equipment: {
+            issues: [{
+              severity: 'BLOCKER',
+              code: 'equipment_available_with_active_rental',
+              title: 'Equipment is available with active rental',
+              count: 1,
+              examples: [{ id: 'EQ-1', entity: 'equipment', label: 'Lift', status: 'available', relatedId: 'R-1', passwordHash: 'must-not-render' }],
+            }],
+          },
+          rentalsGantt: { issues: [] },
+          service: { issues: [] },
+          delivery: { issues: [] },
+          finance: { issues: [] },
+          documents: { issues: [] },
+          usersBot: { issues: [] },
+          references: { issues: [] },
+        },
+      }),
+    });
+  });
+
+  await navigateInApp(page, '/admin');
+  await page.getByRole('tab', { name: 'Данные системы' }).click();
+
+  const diagnostics = page.getByTestId('data-integrity-diagnostics');
+  await expect(diagnostics.getByRole('heading', { name: 'Диагностика данных' })).toBeVisible();
+  await expect(diagnostics).toContainText('Read-only проверка связности и качества данных');
+  await expect(diagnostics).toContainText('Техника');
+  await expect(diagnostics).toContainText('10');
+  await expect(diagnostics).toContainText('BLOCKER');
+  await expect(diagnostics).toContainText('Свободная техника с активной арендой');
+  await expect(diagnostics).toContainText('Проблем не найдено');
+  await expect(diagnostics).not.toContainText('EQ-1');
+  await expect(diagnostics).not.toContainText('must-not-render');
+
+  await diagnostics.getByText('Показать примеры (1)').click();
+  await expect(diagnostics).toContainText('EQ-1');
+  await expect(diagnostics).not.toContainText('passwordHash');
+  await expect(diagnostics).not.toContainText('must-not-render');
+  expect(requestedMethods.every(method => method === 'GET')).toBe(true);
+});

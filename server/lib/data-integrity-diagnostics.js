@@ -124,6 +124,17 @@ function buildIndex(list) {
   return new Map(asArray(list).map(item => [idOf(item), item]).filter(([id]) => id));
 }
 
+function buildMultiKeyIndex(list, fields) {
+  const index = new Map();
+  for (const item of asArray(list)) {
+    for (const field of fields) {
+      const key = text(item?.[field]);
+      if (key) index.set(key, item);
+    }
+  }
+  return index;
+}
+
 function getEquipmentId(record) {
   return text(record?.equipmentId || record?.equipment_id);
 }
@@ -173,6 +184,26 @@ function getRepairItemsForService(ticket, workItems, partItems) {
   ];
 }
 
+function repairItemName(item) {
+  return text(
+    item?.name ||
+    item?.title ||
+    item?.workName ||
+    item?.partName ||
+    item?.nameSnapshot ||
+    item?.workNameSnapshot ||
+    item?.partNameSnapshot,
+  );
+}
+
+function hasNegativeRepairItemAmount(item) {
+  return [item?.cost, item?.price, item?.amount, item?.priceSnapshot].some(value => value !== undefined && toNumber(value) < 0);
+}
+
+function isInvalidRepairItem(item) {
+  return toNumber(item?.quantity ?? item?.qty) < 0 || hasNegativeRepairItemAmount(item) || !repairItemName(item);
+}
+
 function deliveryEquipmentIds(delivery) {
   return [
     delivery?.equipmentId,
@@ -184,6 +215,15 @@ function deliveryEquipmentIds(delivery) {
 
 function deliveryDate(delivery) {
   return dateKey(delivery?.date || delivery?.deliveryDate || delivery?.plannedDate || delivery?.scheduledDate || delivery?.pickupDate);
+}
+
+function deliveryCarrierKeys(delivery) {
+  return [
+    delivery?.carrierId,
+    delivery?.carrier,
+    delivery?.carrierKey,
+    delivery?.maxCarrierKey,
+  ].map(text).filter(Boolean);
 }
 
 function documentEquipmentIds(document) {
@@ -303,7 +343,7 @@ function buildDataIntegrityDiagnostics(collections = {}, options = {}) {
   const paymentsById = buildIndex(payments);
   const ownersById = buildIndex(owners);
   const mechanicsById = buildIndex(mechanics);
-  const carriersById = buildIndex(carriers);
+  const carriersByKey = buildMultiKeyIndex(carriers, ['id', 'key', 'maxCarrierKey']);
   const activeRentals = rentals.filter(hasActiveStatus);
   const activeGantt = ganttRentals.filter(hasActiveStatus);
   const activeRentalEquipmentIds = new Set(activeRentals.map(getEquipmentId).filter(Boolean));
@@ -387,13 +427,16 @@ function buildDataIntegrityDiagnostics(collections = {}, options = {}) {
   addIssue(domains.service, summary, makeIssue('HIGH', 'unassigned_service_older_than_14_days', 'Unassigned service is older than 14 days', openService.filter(ticket => !text(ticket.mechanicId || ticket.assigneeId || ticket.assignedTo) && daysBeforeToday(serviceCreatedAt(ticket), today) > 14), { entity: 'service' }));
   addIssue(domains.service, summary, makeIssue('BLOCKER', 'unassigned_service_older_than_30_days', 'Unassigned service is older than 30 days', openService.filter(ticket => !text(ticket.mechanicId || ticket.assigneeId || ticket.assignedTo) && daysBeforeToday(serviceCreatedAt(ticket), today) > 30), { entity: 'service' }));
   addIssue(domains.service, summary, makeIssue('MEDIUM', 'repair_item_without_service', 'Repair item has no matching service ticket', [...workItems, ...partItems].filter(item => serviceIdFromItem(item) && !asArray(collections.service).some(ticket => idOf(ticket) === serviceIdFromItem(item))), { entity: 'repair_item' }));
-  addIssue(domains.service, summary, makeIssue('MEDIUM', 'invalid_repair_item_fields', 'Repair item has invalid quantity, cost, or name', [...workItems, ...partItems].filter(item => toNumber(item.quantity ?? item.qty) < 0 || toNumber(item.cost ?? item.price ?? item.amount) < 0 || !text(item.name || item.title || item.workName || item.partName)), { entity: 'repair_item' }));
+  addIssue(domains.service, summary, makeIssue('MEDIUM', 'invalid_repair_item_fields', 'Repair item has invalid quantity, cost, or name', [...workItems, ...partItems].filter(isInvalidRepairItem), { entity: 'repair_item' }));
 
   addIssue(domains.delivery, summary, makeIssue('HIGH', 'stale_active_delivery', 'Active delivery has a past date', deliveries.filter(item => ACTIVE_DELIVERY_STATUSES.has(lower(item.status || 'active')) && isPastDate(deliveryDate(item), today)), { entity: 'delivery' }));
-  addIssue(domains.delivery, summary, makeIssue('MEDIUM', 'delivery_missing_critical_fields', 'Delivery misses critical fields', deliveries.filter(item => !idOf(item) || !deliveryDate(item) || (!text(item.rentalId) && deliveryEquipmentIds(item).length === 0) || !text(item.carrierId || item.carrierKey)), { entity: 'delivery' }));
+  addIssue(domains.delivery, summary, makeIssue('MEDIUM', 'delivery_missing_critical_fields', 'Delivery misses critical fields', deliveries.filter(item => !idOf(item) || !deliveryDate(item) || (!text(item.rentalId) && deliveryEquipmentIds(item).length === 0) || deliveryCarrierKeys(item).length === 0), { entity: 'delivery' }));
   addIssue(domains.delivery, summary, makeIssue('HIGH', 'delivery_broken_rental_link', 'Delivery rentalId does not resolve', deliveries.filter(item => text(item.rentalId) && !rentalsById.has(text(item.rentalId)) && !ganttById.has(text(item.rentalId))), { entity: 'delivery' }));
   addIssue(domains.delivery, summary, makeIssue('HIGH', 'delivery_broken_equipment_link', 'Delivery equipment link does not resolve', deliveries.filter(item => deliveryEquipmentIds(item).some(eqId => !equipmentById.has(eqId))), { entity: 'delivery' }));
-  addIssue(domains.delivery, summary, makeIssue('MEDIUM', 'delivery_broken_carrier_link', 'Delivery carrier link does not resolve', deliveries.filter(item => text(item.carrierId || item.carrierKey) && !carriersById.has(text(item.carrierId || item.carrierKey))), { entity: 'delivery' }));
+  addIssue(domains.delivery, summary, makeIssue('MEDIUM', 'delivery_broken_carrier_link', 'Delivery carrier link does not resolve', deliveries.filter(item => {
+    const carrierKeys = deliveryCarrierKeys(item);
+    return carrierKeys.length > 0 && !carrierKeys.some(key => carriersByKey.has(key));
+  }), { entity: 'delivery' }));
 
   const allocated = allocatedByPayment(paymentAllocations);
   addIssue(domains.finance, summary, makeIssue('HIGH', 'allocation_missing_payment', 'Allocation references missing payment', paymentAllocations.filter(item => paymentIdFromAllocation(item) && !paymentsById.has(paymentIdFromAllocation(item))), { entity: 'payment_allocation' }));
@@ -452,6 +495,7 @@ function buildDataIntegrityDiagnostics(collections = {}, options = {}) {
   }
 
   for (const [collectionName, code, title] of [
+    ['service_works', 'duplicate_service_work_name', 'Duplicate service work name'],
     ['service_work_names', 'duplicate_service_work_name', 'Duplicate service work name'],
     ['service_work_catalog', 'duplicate_service_work_name', 'Duplicate service work name'],
     ['spare_part_names', 'duplicate_spare_part_name', 'Duplicate spare part name'],

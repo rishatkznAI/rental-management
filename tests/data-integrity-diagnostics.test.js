@@ -42,12 +42,21 @@ function baseState() {
     bot_activity: [],
     repair_work_items: [],
     repair_part_items: [],
+    service_works: [],
     service_work_names: [],
     service_work_catalog: [],
     spare_part_names: [],
     spare_parts: [],
     app_settings: [{ id: 'settings', webhookSecret: 'raw-secret-value' }],
   };
+}
+
+function cloneState(state = baseState()) {
+  return JSON.parse(JSON.stringify(state));
+}
+
+function findIssue(diagnostics, domain, code) {
+  return diagnostics.domains[domain].issues.find(item => item.code === code);
 }
 
 function createApp({ state = baseState(), requireAuth, requireAdmin } = {}) {
@@ -185,9 +194,108 @@ test('diagnostics detects broken payment allocation', () => {
 
 test('diagnostics detects stale delivery', () => {
   const diagnostics = buildDataIntegrityDiagnostics(baseState(), { today: '2026-05-26' });
-  const issue = diagnostics.domains.delivery.issues.find(item => item.code === 'stale_active_delivery');
+  const issue = findIssue(diagnostics, 'delivery', 'stale_active_delivery');
   assert.equal(issue.count, 1);
   assert.equal(issue.examples[0].id, 'DL-stale');
+});
+
+test('diagnostics detects duplicate names in service_works', () => {
+  const state = cloneState();
+  state.service_works = [
+    { id: 'SW-1', name: 'Oil change' },
+    { id: 'SW-2', name: ' oil change ' },
+  ];
+
+  const diagnostics = buildDataIntegrityDiagnostics(state, { today: '2026-05-26' });
+  const issue = findIssue(diagnostics, 'references', 'duplicate_service_work_name');
+  assert.equal(issue.count, 2);
+  assert.equal(issue.severity, 'LOW');
+  assert.equal(issue.examples[0].entity, 'service_works');
+});
+
+test('diagnostics does not flag valid repair item snapshot fields as invalid', () => {
+  const state = cloneState();
+  state.service = [{ id: 'S-1', equipmentId: 'EQ-active', status: 'closed', scenario: 'repair' }];
+  state.repair_work_items = [
+    { id: 'RW-1', serviceId: 'S-1', workNameSnapshot: 'Diagnostics', priceSnapshot: 1200, quantity: 1 },
+  ];
+
+  const diagnostics = buildDataIntegrityDiagnostics(state, { today: '2026-05-26' });
+  const issue = findIssue(diagnostics, 'service', 'invalid_repair_item_fields');
+  assert.equal(issue, undefined);
+});
+
+test('diagnostics still flags repair item with missing name', () => {
+  const state = cloneState();
+  state.service = [{ id: 'S-1', equipmentId: 'EQ-active', status: 'closed', scenario: 'repair' }];
+  state.repair_work_items = [
+    { id: 'RW-missing-name', serviceId: 'S-1', priceSnapshot: 1200, quantity: 1 },
+  ];
+
+  const diagnostics = buildDataIntegrityDiagnostics(state, { today: '2026-05-26' });
+  const issue = findIssue(diagnostics, 'service', 'invalid_repair_item_fields');
+  assert.equal(issue.count, 1);
+  assert.equal(issue.examples[0].id, 'RW-missing-name');
+});
+
+test('diagnostics still flags repair item with negative price or cost', () => {
+  const state = cloneState();
+  state.service = [{ id: 'S-1', equipmentId: 'EQ-active', status: 'closed', scenario: 'repair' }];
+  state.repair_work_items = [
+    { id: 'RW-negative-price', serviceId: 'S-1', workNameSnapshot: 'Diagnostics', priceSnapshot: -1, quantity: 1 },
+    { id: 'RP-negative-cost', serviceId: 'S-1', partNameSnapshot: 'Filter', cost: -5, quantity: 1 },
+  ];
+
+  const diagnostics = buildDataIntegrityDiagnostics(state, { today: '2026-05-26' });
+  const issue = findIssue(diagnostics, 'service', 'invalid_repair_item_fields');
+  assert.equal(issue.count, 2);
+  assert.deepEqual(issue.examples.map(item => item.id).sort(), ['RP-negative-cost', 'RW-negative-price']);
+});
+
+test('diagnostics resolves delivery carrier by id', () => {
+  const state = cloneState();
+  state.delivery_carriers = [{ id: 'CAR-by-id', name: 'Carrier by id' }];
+  state.deliveries = [
+    { id: 'DL-by-id', rentalId: 'R-active', equipmentId: 'EQ-active', carrierId: 'CAR-by-id', date: '2026-06-01', status: 'planned' },
+  ];
+
+  const diagnostics = buildDataIntegrityDiagnostics(state, { today: '2026-05-26' });
+  assert.equal(findIssue(diagnostics, 'delivery', 'delivery_broken_carrier_link'), undefined);
+});
+
+test('diagnostics resolves delivery carrier by key', () => {
+  const state = cloneState();
+  state.delivery_carriers = [{ id: 'CAR-row-1', key: 'carrier-key-1', name: 'Carrier by key' }];
+  state.deliveries = [
+    { id: 'DL-by-key', rentalId: 'R-active', equipmentId: 'EQ-active', carrierKey: 'carrier-key-1', date: '2026-06-01', status: 'planned' },
+  ];
+
+  const diagnostics = buildDataIntegrityDiagnostics(state, { today: '2026-05-26' });
+  assert.equal(findIssue(diagnostics, 'delivery', 'delivery_broken_carrier_link'), undefined);
+});
+
+test('diagnostics resolves delivery carrier by maxCarrierKey', () => {
+  const state = cloneState();
+  state.delivery_carriers = [{ id: 'CAR-row-2', maxCarrierKey: 'max-carrier-1', name: 'Carrier by MAX key' }];
+  state.deliveries = [
+    { id: 'DL-by-max-key', rentalId: 'R-active', equipmentId: 'EQ-active', maxCarrierKey: 'max-carrier-1', date: '2026-06-01', status: 'planned' },
+  ];
+
+  const diagnostics = buildDataIntegrityDiagnostics(state, { today: '2026-05-26' });
+  assert.equal(findIssue(diagnostics, 'delivery', 'delivery_broken_carrier_link'), undefined);
+});
+
+test('diagnostics still flags missing delivery carrier link', () => {
+  const state = cloneState();
+  state.delivery_carriers = [{ id: 'CAR-existing', key: 'carrier-existing', maxCarrierKey: 'max-existing', name: 'Carrier' }];
+  state.deliveries = [
+    { id: 'DL-missing-carrier', rentalId: 'R-active', equipmentId: 'EQ-active', carrierKey: 'carrier-missing', date: '2026-06-01', status: 'planned' },
+  ];
+
+  const diagnostics = buildDataIntegrityDiagnostics(state, { today: '2026-05-26' });
+  const issue = findIssue(diagnostics, 'delivery', 'delivery_broken_carrier_link');
+  assert.equal(issue.count, 1);
+  assert.equal(issue.examples[0].id, 'DL-missing-carrier');
 });
 
 test('diagnostics response does not include passwordHash token or secret fields', async () => {

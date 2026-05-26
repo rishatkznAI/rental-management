@@ -1588,6 +1588,7 @@ function registerSystemRoutes(app, deps) {
       bot_activity: readData('bot_activity') || [],
       repair_work_items: readData('repair_work_items') || [],
       repair_part_items: readData('repair_part_items') || [],
+      service_works: readData('service_works') || [],
       service_work_names: readData('service_work_names') || [],
       service_work_catalog: readData('service_work_catalog') || [],
       spare_part_names: readData('spare_part_names') || [],

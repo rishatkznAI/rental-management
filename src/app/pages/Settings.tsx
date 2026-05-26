@@ -63,7 +63,7 @@ import { PAYMENT_KEYS } from '../hooks/usePayments';
 import { SERVICE_TICKET_KEYS } from '../hooks/useServiceTickets';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
-import { api, API_BASE_URL, getToken } from '../lib/api';
+import { api, API_BASE_URL, ApiError, getToken } from '../lib/api';
 import { frontendBuildInfo } from '../lib/build-info';
 import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
@@ -654,6 +654,7 @@ export default function Settings() {
         {/* ── Данные системы ────────────────────────────────────────────────── */}
         <TabsContent value="data">
           <div className="space-y-6">
+            <DataIntegrityDiagnosticsSection isActive={activeTab === 'data'} />
             <SystemDataBackupSection canManageData={can('edit', 'admin_panel')} />
             <DataManagementSection canManageData={can('edit', 'admin_panel')} />
             <DataResetSection />
@@ -918,6 +919,39 @@ type ProductionDiagnostics = {
     count?: number;
     error?: string;
   }>;
+};
+
+type DataIntegritySeverity = 'BLOCKER' | 'HIGH' | 'MEDIUM' | 'LOW';
+type DataIntegritySummaryKey = 'blocker' | 'high' | 'medium' | 'low';
+
+type DataIntegrityExample = {
+  id?: string;
+  entity?: string;
+  label?: string;
+  status?: string;
+  relatedId?: string;
+};
+
+type DataIntegrityIssue = {
+  severity: DataIntegritySeverity | string;
+  code: string;
+  title?: string;
+  count: number;
+  certainty?: string;
+  examples?: DataIntegrityExample[];
+};
+
+type DataIntegrityDomain = {
+  status?: string;
+  issues?: DataIntegrityIssue[];
+};
+
+type DataIntegrityDiagnostics = {
+  status?: string;
+  generatedAt?: string;
+  counts?: Partial<Record<'equipment' | 'rentals' | 'gantt_rentals' | 'service' | 'deliveries' | 'payments' | 'documents' | 'users', number>>;
+  summary?: Partial<Record<DataIntegritySummaryKey, number>>;
+  domains?: Partial<Record<'equipment' | 'rentalsGantt' | 'service' | 'delivery' | 'finance' | 'documents' | 'usersBot' | 'references', DataIntegrityDomain>>;
 };
 
 type SystemControlStatusLevel = 'ok' | 'warning' | 'risk' | 'danger' | 'unknown';
@@ -3157,6 +3191,331 @@ function formatBackupSize(value: number): string {
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
   return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+}
+
+const DATA_INTEGRITY_COLLECTIONS: Array<{ key: keyof NonNullable<DataIntegrityDiagnostics['counts']>; label: string }> = [
+  { key: 'equipment', label: 'Техника' },
+  { key: 'rentals', label: 'Аренды' },
+  { key: 'gantt_rentals', label: 'Планировщик' },
+  { key: 'service', label: 'Сервис' },
+  { key: 'deliveries', label: 'Доставка' },
+  { key: 'payments', label: 'Платежи' },
+  { key: 'documents', label: 'Документы' },
+  { key: 'users', label: 'Пользователи' },
+];
+
+const DATA_INTEGRITY_SUMMARY: Array<{ key: DataIntegritySummaryKey; label: string; description: string; variant: BadgeVariant }> = [
+  { key: 'blocker', label: 'BLOCKER', description: 'Критично', variant: 'danger' },
+  { key: 'high', label: 'HIGH', description: 'Высокий риск', variant: 'warning' },
+  { key: 'medium', label: 'MEDIUM', description: 'Средний риск', variant: 'info' },
+  { key: 'low', label: 'LOW', description: 'Низкий риск', variant: 'info' },
+];
+
+const DATA_INTEGRITY_DOMAINS: Array<{ key: keyof NonNullable<DataIntegrityDiagnostics['domains']>; label: string }> = [
+  { key: 'equipment', label: 'Техника' },
+  { key: 'rentalsGantt', label: 'Аренды / Планировщик' },
+  { key: 'service', label: 'Сервис' },
+  { key: 'delivery', label: 'Доставка' },
+  { key: 'finance', label: 'Финансы' },
+  { key: 'documents', label: 'Документы' },
+  { key: 'usersBot', label: 'Пользователи и бот' },
+  { key: 'references', label: 'Справочники' },
+];
+
+const ISSUE_TITLE_LABELS: Record<string, string> = {
+  equipment_rented_without_active_rental: 'Техника в аренде без активной аренды',
+  equipment_available_with_active_rental: 'Свободная техника с активной арендой',
+  equipment_in_service_without_open_service: 'Техника в сервисе без открытой заявки',
+  rental_without_gantt_row: 'Аренда без строки планировщика',
+  gantt_without_rental: 'Строка планировщика без аренды',
+  duplicate_gantt_rows_per_rental: 'Дубли строк планировщика',
+  active_gantt_overlap_by_equipment: 'Пересечение активных аренд по технике',
+  stale_active_delivery: 'Активная доставка с прошедшей датой',
+  allocation_missing_related_entity: 'Платежная аллокация с битой связью',
+  document_broken_rental_link: 'Документ с битой связью аренды',
+  duplicate_user_email: 'Дубли email пользователей',
+  unknown_role: 'Неизвестная роль пользователя',
+};
+
+function dataIntegritySeverityKey(severity: unknown): DataIntegritySummaryKey {
+  const normalized = String(severity || '').trim().toLowerCase();
+  if (normalized === 'blocker' || normalized === 'high' || normalized === 'medium' || normalized === 'low') return normalized;
+  return 'low';
+}
+
+function dataIntegritySeverityRank(severity: unknown): number {
+  const ranks: Record<DataIntegritySummaryKey, number> = { blocker: 0, high: 1, medium: 2, low: 3 };
+  return ranks[dataIntegritySeverityKey(severity)];
+}
+
+function dataIntegritySeverityBadge(severity: unknown) {
+  const key = dataIntegritySeverityKey(severity);
+  const meta = DATA_INTEGRITY_SUMMARY.find(item => item.key === key) || DATA_INTEGRITY_SUMMARY[3];
+  return <Badge variant={meta.variant}>{meta.label}</Badge>;
+}
+
+function formatDataIntegrityDate(value?: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function safeDataIntegrityExample(example: DataIntegrityExample): DataIntegrityExample {
+  return {
+    id: example.id,
+    entity: example.entity,
+    label: example.label,
+    status: example.status,
+    relatedId: example.relatedId,
+  };
+}
+
+function dataIntegrityErrorMessage(error: unknown): string {
+  const status = error instanceof ApiError
+    ? error.status
+    : typeof error === 'object' && error !== null && 'status' in error
+      ? Number((error as { status?: unknown }).status)
+      : 0;
+  if (status === 401) return 'Сессия истекла или вход не выполнен. Войдите под администратором и обновите страницу.';
+  if (status === 403) return 'Недостаточно прав: диагностика данных доступна только администратору.';
+  return 'Диагностика данных недоступна. Проверьте, что текущая сессия администратора активна.';
+}
+
+function DataIntegrityDiagnosticsSection({ isActive }: { isActive: boolean }) {
+  const [openExamples, setOpenExamples] = React.useState<Set<string>>(() => new Set());
+  const query = useQuery<DataIntegrityDiagnostics>({
+    queryKey: ['admin-data-integrity-diagnostics'],
+    queryFn: () => api.get<DataIntegrityDiagnostics>('/api/admin/data-integrity-diagnostics'),
+    enabled: isActive,
+    retry: 1,
+  });
+
+  const diagnostics = query.data;
+  const hasData = Boolean(diagnostics?.counts || diagnostics?.summary || diagnostics?.domains);
+  const summary = diagnostics?.summary || {};
+  const blockerCount = summary.blocker ?? 0;
+  const highCount = summary.high ?? 0;
+  const issueTotal = DATA_INTEGRITY_SUMMARY.reduce((sum, item) => sum + (summary[item.key] ?? 0), 0);
+  const lastUpdated = formatDataIntegrityDate(diagnostics?.generatedAt);
+
+  return (
+    <Card data-testid="data-integrity-diagnostics">
+      <CardHeader>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <CardTitle>Диагностика данных</CardTitle>
+            <CardDescription>Read-only проверка связности и качества данных.</CardDescription>
+            {lastUpdated && (
+              <p className="mt-2 text-xs text-muted-foreground">Последнее успешное обновление: {lastUpdated}</p>
+            )}
+          </div>
+          <Button variant="secondary" onClick={() => void query.refetch()} disabled={query.isFetching}>
+            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} />
+            Обновить
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {query.isLoading && (
+          <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+            Загрузка...
+          </div>
+        )}
+
+        {query.isError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300" data-testid="data-integrity-error">
+            {dataIntegrityErrorMessage(query.error)}
+          </div>
+        )}
+
+        {!query.isLoading && !query.isError && !hasData && (
+          <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+            Данные диагностики пока не получены.
+          </div>
+        )}
+
+        {hasData && (
+          <>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/60 dark:bg-blue-900/20 dark:text-blue-200">
+              Диагностика показывает возможные проблемы качества данных. Она ничего не исправляет и не изменяет данные.
+            </div>
+
+            {(blockerCount > 0 || highCount > 0) && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200">
+                Перед возвратом сотрудников в систему рекомендуется разобрать BLOCKER и HIGH.
+              </div>
+            )}
+
+            {issueTotal === 0 && (
+              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-900/60 dark:bg-green-900/20 dark:text-green-200">
+                Проблем не найдено
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {DATA_INTEGRITY_COLLECTIONS.map(item => (
+                <div key={item.key} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                  <p className="text-xs font-medium uppercase text-muted-foreground">{item.label}</p>
+                  <p className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">{diagnostics?.counts?.[item.key] ?? 0}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {DATA_INTEGRITY_SUMMARY.map(item => (
+                <div key={item.key} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge variant={item.variant}>{item.label}</Badge>
+                    <span className="text-xl font-semibold text-gray-900 dark:text-white">{diagnostics?.summary?.[item.key] ?? 0}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">{item.description}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-4">
+              {DATA_INTEGRITY_DOMAINS.map(domainMeta => {
+                const domain = diagnostics?.domains?.[domainMeta.key];
+                const issues = [...(domain?.issues || [])].sort((a, b) => {
+                  const severityDiff = dataIntegritySeverityRank(a.severity) - dataIntegritySeverityRank(b.severity);
+                  if (severityDiff !== 0) return severityDiff;
+                  return (Number(b.count) || 0) - (Number(a.count) || 0);
+                });
+                const visibleIssues = issues.slice(0, 5);
+                const totals = issues.reduce<Record<DataIntegritySummaryKey, number>>((acc, issue) => {
+                  const key = dataIntegritySeverityKey(issue.severity);
+                  acc[key] += Number(issue.count) || 0;
+                  return acc;
+                }, { blocker: 0, high: 0, medium: 0, low: 0 });
+                const total = Object.values(totals).reduce((sum, value) => sum + value, 0);
+
+                return (
+                  <div key={domainMeta.key} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <h3 className="font-semibold text-gray-900 dark:text-white">{domainMeta.label}</h3>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {total > 0 ? `Типов проблем: ${issues.length} · всего записей: ${total}` : 'Проблем не найдено'}
+                        </p>
+                        {domain?.status && (
+                          <div className="mt-2">
+                            <Badge variant="info">{domain.status}</Badge>
+                          </div>
+                        )}
+                      </div>
+                      {total > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {DATA_INTEGRITY_SUMMARY.map(item => (
+                            totals[item.key] > 0 ? <Badge key={item.key} variant={item.variant}>{item.label}: {totals[item.key]}</Badge> : null
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {issues.length > 0 ? (
+                      <div className="mt-4 overflow-hidden rounded-lg border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Тип</TableHead>
+                              <TableHead>Уровень</TableHead>
+                              <TableHead>Кол-во</TableHead>
+                              <TableHead>Детали</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {visibleIssues.map((issue, issueIndex) => {
+                              const issueKey = `${domainMeta.key}:${issue.code}:${issueIndex}`;
+                              const isHighRisk = dataIntegritySeverityKey(issue.severity) === 'blocker' || dataIntegritySeverityKey(issue.severity) === 'high';
+                              return (
+                              <TableRow key={issueKey} className={isHighRisk ? 'bg-amber-50/50 dark:bg-amber-950/10' : undefined}>
+                                <TableCell>
+                                  <p className="font-medium text-gray-900 dark:text-white">{ISSUE_TITLE_LABELS[issue.code] || issue.title || issue.code}</p>
+                                  <p className="font-mono text-xs text-muted-foreground">{issue.code}</p>
+                                  {issue.certainty === 'uncertain' && (
+                                    <div className="mt-2">
+                                      <Badge variant="warning">uncertain</Badge>
+                                    </div>
+                                  )}
+                                </TableCell>
+                                <TableCell>{dataIntegritySeverityBadge(issue.severity)}</TableCell>
+                                <TableCell className="font-semibold">{issue.count}</TableCell>
+                                <TableCell>
+                                  {issue.examples?.length ? (
+                                    <div>
+                                      <button
+                                        type="button"
+                                        className="text-sm text-[--color-primary] hover:underline"
+                                        onClick={() => setOpenExamples(current => {
+                                          const next = new Set(current);
+                                          if (next.has(issueKey)) {
+                                            next.delete(issueKey);
+                                          } else {
+                                            next.add(issueKey);
+                                          }
+                                          return next;
+                                        })}
+                                      >
+                                        {openExamples.has(issueKey) ? 'Скрыть примеры' : `Показать примеры (${Math.min(issue.examples.length, 20)})`}
+                                      </button>
+                                      {openExamples.has(issueKey) && (
+                                        <div className="mt-3 max-h-64 space-y-2 overflow-auto">
+                                          {issue.examples.slice(0, 20).map((example, index) => {
+                                            const safe = safeDataIntegrityExample(example);
+                                            return (
+                                              <div key={`${issue.code}-${safe.id || index}`} className="rounded-md bg-gray-50 px-3 py-2 text-xs dark:bg-gray-900">
+                                                <div className="grid gap-1 sm:grid-cols-2">
+                                                  {Object.entries(safe).map(([key, value]) => (
+                                                    value ? (
+                                                      <div key={key}>
+                                                        <span className="text-muted-foreground">{key}: </span>
+                                                        <span className="font-mono text-gray-900 dark:text-gray-100">{String(value)}</span>
+                                                      </div>
+                                                    ) : null
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-sm text-muted-foreground">Без примеров</span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                        {issues.length > visibleIssues.length && (
+                          <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+                            Показаны top issues: {visibleIssues.length} из {issues.length}.
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                        Проблем не найдено
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function SystemDataBackupSection({ canManageData }: { canManageData: boolean }) {

@@ -61,7 +61,7 @@ import {
 import { usePaginatedEquipment } from '../hooks/useEquipment';
 import { usePaginatedRentals } from '../hooks/useRentals';
 import { usePaginatedServiceTickets } from '../hooks/useServiceTickets';
-import { buildDocumentControl, getDocumentControlStatusLabel } from '../lib/documentControl.js';
+import { buildDocumentControl, getDocumentControlStatusLabel, isUnsignedDocument } from '../lib/documentControl.js';
 import { DOCUMENT_WORKSPACE_TYPES, getDocumentRegistryItem } from '../lib/documentRegistry';
 import {
   buildQuickActionContext,
@@ -727,12 +727,13 @@ export default function Documents() {
   const documentPagination = useServerPagination<{
     type: string;
     status: string;
+    signature: string;
     clientId: string;
     rentalId: string;
   }>({
     initialSortBy: 'date',
     initialSortDir: 'desc',
-    initialFilters: { type: 'all', status: 'all', clientId: 'all', rentalId: 'all' },
+    initialFilters: { type: 'all', status: 'all', signature: 'all', clientId: 'all', rentalId: 'all' },
     storageKey: 'documents',
   });
   const documentsQuery = usePaginatedDocuments({
@@ -798,11 +799,13 @@ export default function Documents() {
   const rentalFilter = documentPagination.filters.rentalId;
   const typeFilter = documentPagination.filters.type;
   const statusFilter = documentPagination.filters.status;
+  const signatureFilter = documentPagination.filters.signature;
   const setDocumentFilters = documentPagination.setFilters;
   const setClientFilter = React.useCallback((value: string) => setDocumentFilters({ clientId: value }), [setDocumentFilters]);
   const setRentalFilter = React.useCallback((value: string) => setDocumentFilters({ rentalId: value }), [setDocumentFilters]);
   const setTypeFilter = React.useCallback((value: string) => setDocumentFilters({ type: value }), [setDocumentFilters]);
   const setStatusFilter = React.useCallback((value: string) => setDocumentFilters({ status: value }), [setDocumentFilters]);
+  const setSignatureFilter = React.useCallback((value: string) => setDocumentFilters({ signature: value }), [setDocumentFilters]);
   const [managerFilter, setManagerFilter] = React.useState<string>('all');
   const [quickTypeFilter, setQuickTypeFilter] = React.useState<DocumentQuickFilter>('all');
   const [controlRiskFilter, setControlRiskFilter] = React.useState<string>('all');
@@ -1026,6 +1029,18 @@ export default function Documents() {
   }, [referenceDocuments]);
 
   React.useEffect(() => {
+    const requestedSignature = String(searchParams.get('signature') || '').toLowerCase();
+    const requestedQuickFilter = String(searchParams.get('quickFilter') || searchParams.get('filter') || '').toLowerCase();
+    if (requestedSignature === 'unsigned' || requestedQuickFilter === 'unsigned') {
+      setView('general');
+      setQuickTypeFilter('unsigned');
+      setSignatureFilter('unsigned');
+      setStatusFilter('all');
+      setTypeFilter('all');
+    }
+  }, [searchParams, setSignatureFilter, setStatusFilter, setTypeFilter]);
+
+  React.useEffect(() => {
     const hasContext = hasClientContext(quickActionContext)
       || quickActionContext.rentalId
       || quickActionContext.equipmentId
@@ -1131,7 +1146,8 @@ export default function Documents() {
     const matchesType = typeFilter === 'all' || doc.type === typeFilter;
     const safeStatus = getSafeDocumentStatus(doc.status);
     const matchesStatus = statusFilter === 'all' || safeStatus === statusFilter;
-    const matchesUnsigned = !unsignedOnly || safeStatus !== 'signed';
+    const docIsUnsigned = isUnsignedDocument(doc);
+    const matchesUnsigned = (!unsignedOnly && signatureFilter !== 'unsigned') || docIsUnsigned;
     const matchesWithoutNumber = !withoutNumberOnly || !docNumber;
     const matchesDuplicates = !duplicatesOnly || duplicateDocumentIds.has(doc.id);
     const matchesClient = clientFilter === 'all'
@@ -1143,10 +1159,9 @@ export default function Documents() {
     }, quickActionContext);
     const matchesRental = rentalFilter === 'all' || rentalId === rentalFilter;
     const matchesManager = managerFilter === 'all' || normalizedManager === managerFilter;
-    const isUnsigned = safeStatus !== 'signed' && safeStatus !== 'cancelled';
-    const isOverdue = safeStatus === 'expired' || Boolean(doc.dueDate && doc.dueDate < new Date().toISOString().slice(0, 10) && isUnsigned);
+    const isOverdue = safeStatus === 'expired' || Boolean(doc.dueDate && doc.dueDate < new Date().toISOString().slice(0, 10) && docIsUnsigned);
     const matchesQuickType = quickTypeFilter === 'all'
-      || (quickTypeFilter === 'unsigned' && isUnsigned)
+      || (quickTypeFilter === 'unsigned' && docIsUnsigned)
       || (quickTypeFilter === 'overdue' && isOverdue)
       || (quickTypeFilter === 'draft' && safeStatus === 'draft')
       || doc.type === quickTypeFilter;
@@ -1200,6 +1215,7 @@ export default function Documents() {
     rentalFilter !== 'all',
     typeFilter !== 'all',
     statusFilter !== 'all',
+    signatureFilter !== 'all',
     managerFilter !== 'all',
     quickTypeFilter !== 'all',
   ].filter(Boolean).length;
@@ -1919,7 +1935,15 @@ export default function Documents() {
                 key={key}
                 type="button"
                 variant={quickTypeFilter === key ? 'default' : 'secondary'}
-                onClick={() => setQuickTypeFilter(key as DocumentQuickFilter)}
+                onClick={() => {
+                  setQuickTypeFilter(key as DocumentQuickFilter);
+                  setSignatureFilter(key === 'unsigned' ? 'unsigned' : 'all');
+                  if (key === 'unsigned') {
+                    setStatusFilter('all');
+                  } else {
+                    setUnsignedOnly(false);
+                  }
+                }}
                 className="shrink-0"
               >
                 {label}
@@ -1957,8 +1981,10 @@ export default function Documents() {
               setRentalFilter('all');
               setTypeFilter('all');
               setStatusFilter('all');
+              setSignatureFilter('all');
               setManagerFilter('all');
               setQuickTypeFilter('all');
+              setUnsignedOnly(false);
               setSortKey('date');
             }}
           >
@@ -1978,7 +2004,17 @@ export default function Documents() {
                 <Button
                   type="button"
                   variant={unsignedOnly ? 'default' : 'secondary'}
-                  onClick={() => setUnsignedOnly(value => !value)}
+                  onClick={() => {
+                    setUnsignedOnly(value => {
+                      const next = !value;
+                      setSignatureFilter(next ? 'unsigned' : 'all');
+                      if (next) {
+                        setQuickTypeFilter('unsigned');
+                        setStatusFilter('all');
+                      }
+                      return next;
+                    });
+                  }}
                   className="w-full justify-start"
                 >
                   <FileSignature className="h-4 w-4" />

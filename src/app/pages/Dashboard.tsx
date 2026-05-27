@@ -81,7 +81,7 @@ import type { GanttRentalData } from '../mock-data';
 import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 import { calculateRentalBilling, getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
 import { buildDashboardAttentionSummary } from '../lib/dashboardAttention.js';
-import { buildDocumentControl } from '../lib/documentControl.js';
+import { buildDocumentControl, isUnsignedDocument } from '../lib/documentControl.js';
 import { buildDebtCollectionDashboardSummary } from '../lib/debtCollectionPlans.js';
 import { taskPrioritySummaryLabel } from '../lib/tasksCenter.js';
 import { tasksCenterService } from '../services/tasks-center.service';
@@ -119,10 +119,6 @@ function formatCountLabel(value: number, one: string, few: string, many: string)
   if (last > 1 && last < 5) return few;
   if (last === 1) return one;
   return many;
-}
-
-function isUnsignedDocument(doc: Document) {
-  return (doc.type === 'contract' || doc.type === 'act') && doc.status !== 'signed';
 }
 
 function toDateKey(value?: string | null) {
@@ -1221,7 +1217,7 @@ export default function Dashboard() {
           hint: officeUnsignedDocuments.length > 0
             ? 'Есть договоры и акты, которые нужно довести до подписания'
             : 'Все ключевые документы подписаны',
-          href: '/documents',
+          href: '/documents?signature=unsigned',
           cta: 'Открыть документы',
           tone: officeUnsignedDocuments.length > 0 ? 'warning' : 'success',
           icon: ClipboardX,
@@ -1272,7 +1268,7 @@ export default function Dashboard() {
           hint: myUnsignedDocuments.length > 0
             ? 'Есть договоры и УПД без подписи'
             : 'Все ключевые документы подписаны',
-          href: '/documents',
+          href: '/documents?signature=unsigned',
           cta: 'Проверить документы',
           tone: myUnsignedDocuments.length > 0 ? 'warning' : 'success',
           icon: FileText,
@@ -1342,7 +1338,7 @@ export default function Dashboard() {
           hint: officeUnsignedDocuments.length > 0
             ? 'Нужно дожать подписание договоров и актов'
             : 'Все ключевые документы подписаны',
-          href: '/documents',
+          href: '/documents?signature=unsigned',
           cta: 'Открыть документы',
           tone: officeUnsignedDocuments.length > 0 ? 'warning' : 'success',
           icon: ClipboardX,
@@ -1846,7 +1842,7 @@ export default function Dashboard() {
         : 'Контроль подписей',
       icon: FileText,
       tone: officeUnsignedDocuments.length > 0 ? 'warning' : 'success',
-      href: '/documents',
+      href: '/documents?signature=unsigned',
     },
     canViewService && {
       id: 'service-blockers',
@@ -2296,7 +2292,7 @@ export default function Dashboard() {
       title: 'Неподписанные',
       detail: 'Документы ждут подписи или закрытия',
       value: String(documentControl.kpi.unsignedDocuments),
-      href: '/documents',
+      href: '/documents?signature=unsigned',
       tone: 'warning',
     },
     documentsWithoutFile > 0 && {

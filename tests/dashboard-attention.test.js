@@ -5,6 +5,8 @@ import path from 'node:path';
 import { buildDashboardAttentionSummary } from '../src/app/lib/dashboardAttention.js';
 
 const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
+const documentsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Documents.tsx'), 'utf8');
+const documentsRouteSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/documents.js'), 'utf8');
 const equipmentServiceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/equipment.service.ts'), 'utf8');
 const equipmentHooksSource = fs.readFileSync(path.join(process.cwd(), 'src/app/hooks/useEquipment.ts'), 'utf8');
 
@@ -52,6 +54,9 @@ test('dashboard attention summary calculates daily risks without NaN values', ()
     documents: [
       { id: 'D-1', type: 'contract', client: 'ООО Долг', rentalId: 'R-1', status: 'sent', manager: 'Руслан', date: '2026-05-01' },
       { id: 'D-2', type: 'act', client: 'ООО Долг', rentalId: 'R-1', status: 'signed', manager: 'Руслан', date: '2026-05-01' },
+      { id: 'D-3', type: 'invoice', client: 'ООО Долг', rentalId: 'R-1', status: 'sent', manager: 'Руслан', date: '2026-05-01' },
+      { id: 'D-4', documentType: 'rental_specification', client: 'ООО Долг', rentalId: 'R-1', status: 'pending_signature', manager: 'Руслан', date: '2026-05-01' },
+      { id: 'D-5', type: 'contract', client: 'ООО Долг', rentalId: 'R-1', status: 'cancelled', manager: 'Руслан', date: '2026-05-01' },
     ],
     tickets: [
       { id: 'S-1', status: 'waiting_parts', priority: 'high', equipment: 'INV-1' },
@@ -68,7 +73,7 @@ test('dashboard attention summary calculates daily risks without NaN values', ()
   assert.equal(summary.receivables.rentals60Plus, 1);
   assert.equal(summary.returns.today, 1);
   assert.equal(summary.returns.tomorrow, 1);
-  assert.equal(summary.documents.unsigned, 1);
+  assert.equal(summary.documents.unsigned, 2);
   assert.equal(summary.service.unassigned, 2);
   assert.equal(summary.service.waitingParts, 1);
   assert.equal(summary.service.urgent, 1);
@@ -121,4 +126,12 @@ test('dashboard attention block renders KPIs, rows, empty and error states', () 
   assert.doesNotMatch(dashboardSource, />undefined</);
   assert.doesNotMatch(dashboardSource, />null</);
   assert.doesNotMatch(dashboardSource, />\\[object Object\\]</);
+});
+
+test('dashboard document links open the unsigned documents list', () => {
+  assert.match(dashboardSource, /\/documents\?signature=unsigned/);
+  assert.match(documentsSource, /searchParams\.get\('signature'\)/);
+  assert.match(documentsSource, /setSignatureFilter\('unsigned'\)/);
+  assert.match(documentsRouteSource, /query\.signature/);
+  assert.match(documentsRouteSource, /isUnsignedDocumentForList/);
 });

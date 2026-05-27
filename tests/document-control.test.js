@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   DOCUMENT_CONTROL_STATUSES,
   buildDocumentControl,
+  isUnsignedDocument,
 } from '../src/app/lib/documentControl.js';
 
 const clients = [
@@ -177,6 +178,16 @@ test('cancelled or deleted chain documents do not close rental document control'
   assert.equal(summary.contract.exists, false);
   assert.equal(summary.specification.exists, false);
   assert.equal(summary.status, DOCUMENT_CONTROL_STATUSES.MISSING_CONTRACT);
+});
+
+test('unsigned document predicate matches dashboard and documents list rules', () => {
+  assert.equal(isUnsignedDocument({ id: 'D-contract', type: 'contract', status: 'sent' }), true);
+  assert.equal(isUnsignedDocument({ id: 'D-spec', documentType: 'rental_specification', status: 'pending_signature' }), true);
+  assert.equal(isUnsignedDocument({ id: 'D-upd', type: 'upd', status: 'expired' }), true);
+  assert.equal(isUnsignedDocument({ id: 'D-invoice', type: 'invoice', status: 'sent' }), false);
+  assert.equal(isUnsignedDocument({ id: 'D-signed', type: 'act', status: 'signed' }), false);
+  assert.equal(isUnsignedDocument({ id: 'D-cancelled', type: 'contract', status: 'cancelled' }), false);
+  assert.equal(isUnsignedDocument({ id: 'D-deleted', type: 'act', status: 'deleted' }), false);
 });
 
 test('legacy direct rentalId contract still closes contract requirement', () => {

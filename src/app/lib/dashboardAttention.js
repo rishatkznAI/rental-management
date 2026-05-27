@@ -1,3 +1,5 @@
+import { isUnsignedDocument } from './documentControl.js';
+
 const OPEN_RENTAL_STATUSES = new Set(['active', 'confirmed', 'return_planned']);
 const OPEN_SERVICE_STATUSES = new Set(['new', 'open', 'assigned', 'in_progress', 'waiting_parts', 'needs_revision', 'ready']);
 
@@ -63,10 +65,6 @@ function documentStatusLabel(status) {
   if (status === 'sent') return 'Отправлен';
   if (status === 'signed') return 'Подписан';
   return normalizeText(status) || 'Без статуса';
-}
-
-function isUnsignedDocument(doc) {
-  return (doc?.type === 'contract' || doc?.type === 'act') && doc?.status !== 'signed';
 }
 
 function buildHighRiskClients(clientDebtAgingRows) {

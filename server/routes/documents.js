@@ -27,6 +27,40 @@ const {
   queryGanttIndex,
 } = require('../lib/sql-shadow-indexes');
 
+const UNSIGNED_DOCUMENT_TYPES = new Set([
+  'contract',
+  'rental_contract',
+  'rental_specification',
+  'specification',
+  'spec',
+  'transfer_act_to_client',
+  'transfer_act',
+  'return_act_from_client',
+  'return_act',
+  'act',
+  'upd',
+]);
+const INACTIVE_DOCUMENT_STATUSES = new Set(['cancelled', 'canceled', 'deleted']);
+
+function normalizeDocumentListText(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function documentListType(doc) {
+  return normalizeDocumentListText(doc?.type || doc?.documentType);
+}
+
+function documentListStatus(doc) {
+  return normalizeDocumentListText(doc?.status) || 'draft';
+}
+
+function isUnsignedDocumentForList(doc) {
+  const status = documentListStatus(doc);
+  return !INACTIVE_DOCUMENT_STATUSES.has(status)
+    && UNSIGNED_DOCUMENT_TYPES.has(documentListType(doc))
+    && status !== 'signed';
+}
+
 function registerDocumentRoutes(router, deps) {
   const {
     readData,
@@ -336,6 +370,10 @@ function registerDocumentRoutes(router, deps) {
       const value = String(query[name] || '').trim();
       if (value && value !== 'all') rows = rows.filter(item => String(getter(item) || '') === value);
     });
+    const signature = normalizeDocumentListText(query.signature);
+    if (signature === 'unsigned') {
+      rows = rows.filter(isUnsignedDocumentForList);
+    }
     const dateFrom = String(query.dateFrom || '').trim();
     const dateTo = String(query.dateTo || '').trim();
     if (dateFrom || dateTo) {

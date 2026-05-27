@@ -1,7 +1,7 @@
 const RENTAL_OPEN_STATUSES = new Set(['active', 'confirmed', 'return_planned', 'planned']);
 const RENTAL_CLOSED_STATUSES = new Set(['closed', 'returned', 'completed', 'done']);
 const DOCUMENT_TYPES = new Set(['rental_contract', 'rental_specification', 'specification', 'spec', 'transfer_act_to_client', 'transfer_act', 'return_act_from_client', 'return_act', 'contract', 'act', 'invoice', 'work_order', 'upd']);
-const DOCUMENT_STATUSES = new Set(['draft', 'sent', 'signed']);
+const DOCUMENT_STATUSES = new Set(['draft', 'sent', 'pending_signature', 'signed', 'expired', 'cancelled']);
 const INACTIVE_DOCUMENT_STATUSES = new Set(['cancelled', 'canceled', 'deleted']);
 
 export const DOCUMENT_CONTROL_STATUSES = {
@@ -108,7 +108,7 @@ function getRentalEquipmentInv(rental) {
 }
 
 function documentType(doc) {
-  const type = normalizeStatus(doc?.type);
+  const type = normalizeStatus(doc?.type || doc?.documentType);
   return DOCUMENT_TYPES.has(type) ? type : 'document';
 }
 
@@ -135,7 +135,10 @@ function documentTypeLabel(type) {
 
 function documentStatusLabel(status) {
   if (status === 'signed') return 'Подписан';
+  if (status === 'pending_signature') return 'На подписи';
   if (status === 'sent') return 'Отправлен';
+  if (status === 'expired') return 'Просрочен';
+  if (status === 'cancelled') return 'Отменён';
   if (status === 'draft') return 'Черновик';
   return 'Без статуса';
 }
@@ -160,8 +163,12 @@ function isReturnAct(doc) {
   return ['return_act_from_client', 'return_act'].includes(documentType(doc));
 }
 
-function isUnsigned(doc) {
+export function isUnsignedDocument(doc) {
   return isDocumentActive(doc) && ['contract', 'rental_contract', 'rental_specification', 'specification', 'spec', 'transfer_act_to_client', 'transfer_act', 'return_act_from_client', 'return_act', 'act', 'upd'].includes(documentType(doc)) && documentStatus(doc) !== 'signed';
+}
+
+function isUnsigned(doc) {
+  return isUnsignedDocument(doc);
 }
 
 function isSentUnsigned(doc) {

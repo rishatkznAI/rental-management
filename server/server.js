@@ -64,6 +64,7 @@ const {
   buildManagerReceivables,
   buildOverdueBuckets,
   buildFinanceReport,
+  buildCompanyEconomics,
   backfillPaymentAllocations,
 } = require('./lib/finance-core');
 const {
@@ -1355,6 +1356,7 @@ registerFinanceRoutes(apiRouter, {
   buildManagerReceivables,
   buildOverdueBuckets,
   buildFinanceReport,
+  buildCompanyEconomics,
   buildReceivables,
   normalizeAction,
   normalizePaymentPlan,

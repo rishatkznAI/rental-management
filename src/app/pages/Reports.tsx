@@ -1467,18 +1467,20 @@ export default function Reports() {
         </p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ReportsTab)} className="space-y-6">
-        <TabsList className="flex h-auto w-full justify-start gap-1 rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
-          {visibleReportTabs.map(tab => (
-            <TabsTrigger
-              key={tab.value}
-              value={tab.value}
-              className="border-b-2 border-transparent px-5 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary] transition-colors"
-            >
-              {tab.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ReportsTab)} className="min-w-0 space-y-6">
+        <div className="max-w-full min-w-0 overflow-x-auto">
+          <TabsList className="flex h-auto w-max min-w-full justify-start gap-1 rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
+            {visibleReportTabs.map(tab => (
+              <TabsTrigger
+                key={tab.value}
+                value={tab.value}
+                className="border-b-2 border-transparent px-5 py-3 text-sm font-medium text-gray-500 transition-colors hover:text-gray-700 dark:hover:text-gray-300 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary]"
+              >
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
         {/* ── Analytics tab ───────────────────────────────────────────────── */}
         <TabsContent value="analytics" className="space-y-4 sm:space-y-6">

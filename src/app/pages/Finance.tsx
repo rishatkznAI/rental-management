@@ -1411,20 +1411,22 @@ export default function Finance() {
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="gap-4">
-        <TabsList className="w-full justify-start overflow-x-auto sm:w-fit">
-          <TabsTrigger value="overview">Обзор</TabsTrigger>
-          <TabsTrigger value="cash-flow">Cash Flow</TabsTrigger>
-          <TabsTrigger value="economics">Экономика</TabsTrigger>
-          <TabsTrigger value="operations">Операции</TabsTrigger>
-          <TabsTrigger value="expenses">Постоянные расходы</TabsTrigger>
-          <TabsTrigger value="receivables">Дебиторка</TabsTrigger>
-          <TabsTrigger value="leasing">Лизинг</TabsTrigger>
-          <TabsTrigger value="accounts">Счета и кассы</TabsTrigger>
-          <TabsTrigger value="tax-settings">НДС</TabsTrigger>
-        </TabsList>
+      <Tabs defaultValue="overview" className="min-w-0 gap-4">
+        <div className="max-w-full min-w-0 overflow-x-auto pb-1">
+          <TabsList className="w-max min-w-full justify-start sm:min-w-0">
+            <TabsTrigger value="overview">Обзор</TabsTrigger>
+            <TabsTrigger value="cash-flow">Cash Flow</TabsTrigger>
+            <TabsTrigger value="economics">Экономика</TabsTrigger>
+            <TabsTrigger value="operations">Операции</TabsTrigger>
+            <TabsTrigger value="expenses">Постоянные расходы</TabsTrigger>
+            <TabsTrigger value="receivables">Дебиторка</TabsTrigger>
+            <TabsTrigger value="leasing">Лизинг</TabsTrigger>
+            <TabsTrigger value="accounts">Счета и кассы</TabsTrigger>
+            <TabsTrigger value="tax-settings">НДС</TabsTrigger>
+          </TabsList>
+        </div>
 
-        <TabsContent value="overview" className="space-y-4">
+        <TabsContent value="overview" className="min-w-0 space-y-4 [&_[data-slot=card-content]]:min-w-0 [&_[data-slot=card]]:min-w-0">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <FinanceKpiCard
               title="Доходы"

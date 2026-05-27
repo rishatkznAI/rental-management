@@ -196,6 +196,12 @@ function formatCompactCurrency(value: number) {
   return value.toLocaleString('ru-RU');
 }
 
+function normalizeRentalEquipmentRefs(value: Rental['equipment'] | string | null | undefined): string[] {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === 'string' && value.trim()) return [value.trim()];
+  return [];
+}
+
 function apiErrorMessage(error: unknown, fallback: string) {
   if (!error) return fallback;
   const status = typeof error === 'object' && error && 'status' in error ? `HTTP ${(error as { status?: number }).status}` : '';
@@ -2462,7 +2468,7 @@ export default function Dashboard() {
     return r.status === 'created' && s >= today && s <= soon2;
   });
   startingSoonRentals.forEach(r => {
-    const blockedEq = (r.equipment || [])
+    const blockedEq = normalizeRentalEquipmentRefs(r.equipment)
       .map(eqName => {
         const byUniqueInventory = uniqueEquipmentByInventory.get(eqName);
         if (byUniqueInventory) return byUniqueInventory;

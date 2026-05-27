@@ -90,6 +90,12 @@ test('dashboard attention summary is defensive for missing legacy arrays', () =>
   assert.equal(JSON.stringify(summary).includes('NaN'), false);
 });
 
+test('dashboard normalizes legacy rental equipment before mapping refs', () => {
+  assert.match(dashboardSource, /function normalizeRentalEquipmentRefs/);
+  assert.match(dashboardSource, /normalizeRentalEquipmentRefs\(r\.equipment\)\s*\.map/);
+  assert.doesNotMatch(dashboardSource, /\(r\.equipment \|\| \[\]\)\s*\.map/);
+});
+
 test('dashboard renders management attention block from compact action queue API', () => {
   assert.match(dashboardSource, /Что требует внимания сегодня/);
   assert.match(dashboardSource, /data-testid="dashboard-attention-block"/);

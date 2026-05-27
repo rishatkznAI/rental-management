@@ -134,4 +134,5 @@ test('dashboard document links open the unsigned documents list', () => {
   assert.match(documentsSource, /setSignatureFilter\('unsigned'\)/);
   assert.match(documentsRouteSource, /query\.signature/);
   assert.match(documentsRouteSource, /isUnsignedDocumentForList/);
+  assert.match(documentsRouteSource, /return res\.json\(filterDocumentsForList\(documents, req\.query\)\)/);
 });

@@ -1222,7 +1222,44 @@ export default function Dashboard() {
           tone: officeUnsignedDocuments.length > 0 ? 'warning' : 'success',
           icon: ClipboardX,
         },
-      ];
+        canViewMoney && {
+          id: 'admin-debt',
+          title: 'Просроченная дебиторка',
+          value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽',
+          hint: overdueDebtClients.length > 0
+            ? `${overdueDebtClients.length} ${formatCountLabel(overdueDebtClients.length, 'клиент', 'клиента', 'клиентов')} с долгом`
+            : 'Просроченной дебиторки нет',
+          href: '/payments',
+          cta: 'Проверить долги',
+          tone: totalDebt > 0 ? 'danger' : 'success',
+          icon: ShieldAlert,
+        },
+        canViewRentals && {
+          id: 'admin-upd',
+          title: 'Аренды без закрывающих',
+          value: String(officePendingUpdRentals.length),
+          hint: officePendingUpdRentals.length > 0
+            ? `${officePendingUpdClientCount} ${formatCountLabel(officePendingUpdClientCount, 'клиент', 'клиента', 'клиентов')} ждут УПД`
+            : 'Закрывающие по завершённым арендам в порядке',
+          href: '/rentals',
+          cta: 'Закрыть УПД',
+          onClick: () => setShowOfficeUpdModal(true),
+          tone: officePendingUpdRentals.length > 0 ? 'warning' : 'success',
+          icon: FileText,
+        },
+        canViewTasksCenter && {
+          id: 'admin-actions',
+          title: 'Требуют внимания',
+          value: String(topAttentionActions.length),
+          hint: topAttentionActions.length > 0
+            ? topAttentionActions[0]?.title || 'Есть управленческие действия'
+            : 'Критичных офисных действий нет',
+          href: '/tasks',
+          cta: 'Открыть задачи',
+          tone: topAttentionActions.length > 0 ? 'warning' : 'success',
+          icon: ListChecks,
+        },
+      ].filter(Boolean) as RoleFocusCard[];
     }
 
     if (user?.role === 'Менеджер по аренде') {
@@ -1396,6 +1433,9 @@ export default function Dashboard() {
     myReturnsTomorrow.length,
     myUnsignedDocuments.length,
     myWaitingPartsTickets.length,
+    canViewMoney,
+    canViewRentals,
+    canViewTasksCenter,
     officeCompletedRentals.length,
     officePendingUpdClientCount,
     officePendingUpdRentals.length,
@@ -1403,6 +1443,7 @@ export default function Dashboard() {
     officeUnsignedDocuments.length,
     officeUpcomingPayments.length,
     overdueDebtClients.length,
+    topAttentionActions,
     totalDebt,
     unassignedServiceTickets.length,
     user?.role,
@@ -2365,6 +2406,9 @@ export default function Dashboard() {
         ? 'rentals'
         : 'overview';
   const showRoleDashboardCards = activeDashboardTab === 'overview' && roleDashboardMeta && roleDashboardCards.length > 0;
+  const roleDashboardRiskCount = roleDashboardCards.filter(item => item.tone === 'warning' || item.tone === 'danger').length;
+  const roleDashboardPrimaryCard = roleDashboardCards[0];
+  const roleDashboardHasOnlyOneCard = roleDashboardCards.length === 1;
   const canToggleOfficeUpd = isAdminRole;
 
   useEffect(() => {
@@ -2815,30 +2859,62 @@ export default function Dashboard() {
       </div>
 
       {showRoleDashboardCards && (
-        <Card className={dashboardCardClass}>
-          <CardHeader className="pb-4">
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-              <div className="space-y-2">
-                <Badge variant="default" className="bg-primary/12 text-primary dark:bg-primary/12 dark:text-primary">{roleDashboardMeta.badge}</Badge>
-                <CardTitle className="app-shell-title text-xl font-extrabold">{roleDashboardMeta.title}</CardTitle>
-                <CardDescription className="max-w-3xl text-sm text-muted-foreground">
-                  {roleDashboardMeta.description}
-                </CardDescription>
+        <Card className="overflow-hidden border-border/80 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.18),transparent_34%),linear-gradient(135deg,hsl(var(--card)),hsl(var(--secondary)/0.72))] shadow-[0_24px_70px_-48px_rgba(15,23,42,0.55)] dark:bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.22),transparent_34%),linear-gradient(135deg,rgba(8,18,24,0.98),rgba(12,22,31,0.94))]">
+          <CardHeader className="relative border-b border-border/60 pb-5">
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,340px)] lg:items-start">
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="default" className="bg-primary/12 text-primary dark:bg-primary/12 dark:text-primary">{roleDashboardMeta.badge}</Badge>
+                  <Badge
+                    variant="outline"
+                    className={
+                      roleDashboardRiskCount > 0
+                        ? 'border-amber-400/45 bg-amber-400/10 text-amber-700 dark:text-amber-200'
+                        : 'border-emerald-400/45 bg-emerald-400/10 text-emerald-700 dark:text-emerald-200'
+                    }
+                  >
+                    {roleDashboardRiskCount > 0
+                      ? `${roleDashboardRiskCount} ${formatCountLabel(roleDashboardRiskCount, 'риск', 'риска', 'рисков')}`
+                      : 'Операционных рисков нет'}
+                  </Badge>
+                </div>
+                <div>
+                  <CardTitle className="app-shell-title text-2xl font-extrabold text-foreground sm:text-3xl">{roleDashboardMeta.title}</CardTitle>
+                  <CardDescription className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                    {roleDashboardMeta.description}
+                  </CardDescription>
+                </div>
               </div>
+
+              {roleDashboardPrimaryCard && (
+                <div className="rounded-2xl border border-primary/20 bg-card/78 p-4 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.55)] backdrop-blur dark:bg-white/[0.045]">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/12 text-primary ring-1 ring-primary/20">
+                      <roleDashboardPrimaryCard.icon className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Главный сигнал</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground">{roleDashboardPrimaryCard.title}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{roleDashboardPrimaryCard.hint}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 lg:grid-cols-4">
+          <CardContent className="p-5">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(240px,300px)]">
+              <div className={`grid gap-3 ${roleDashboardHasOnlyOneCard ? 'md:grid-cols-1' : 'md:grid-cols-2 xl:grid-cols-2'}`}>
               {roleDashboardCards.map(item => {
                 const Icon = item.icon;
                 const toneClass =
                   item.tone === 'danger'
-                    ? 'border-red-500/20 bg-red-500/8'
+                    ? 'border-red-500/25 bg-red-500/8 hover:border-red-500/40 dark:bg-red-500/10'
                     : item.tone === 'warning'
-                    ? 'border-orange-400/20 bg-orange-400/8'
+                    ? 'border-orange-400/25 bg-orange-400/8 hover:border-orange-400/45 dark:bg-orange-400/10'
                     : item.tone === 'success'
-                    ? 'border-emerald-400/20 bg-emerald-400/8'
-                    : 'border-border bg-secondary/70';
+                    ? 'border-emerald-400/25 bg-emerald-400/8 hover:border-emerald-400/45 dark:bg-emerald-400/10'
+                    : 'border-border bg-card/70 hover:border-primary/30 dark:bg-white/[0.035]';
 
                 const iconClass =
                   item.tone === 'danger'
@@ -2851,14 +2927,20 @@ export default function Dashboard() {
 
                 const content = (
                   <>
-                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${iconClass}`}>
-                      <Icon className="h-5 w-5" />
+                    <div className="flex items-start justify-between gap-3">
+                      <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ring-1 ring-inset ring-white/10 ${iconClass}`}>
+                        <Icon className="h-5 w-5" />
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
                     </div>
-                    <div className="mt-4">
-                      <p className="text-sm font-medium text-muted-foreground">{item.title}</p>
-                      <p className="mt-1 text-2xl font-bold text-foreground">{item.value}</p>
-                      <p className="mt-2 text-sm text-muted-foreground">{item.hint}</p>
-                      <p className="mt-4 text-sm font-semibold text-primary">{item.cta}</p>
+                    <div className={roleDashboardHasOnlyOneCard ? 'mt-5 max-w-3xl' : 'mt-4'}>
+                      <p className="text-sm font-semibold text-muted-foreground">{item.title}</p>
+                      <p className={`${roleDashboardHasOnlyOneCard ? 'mt-2 text-4xl sm:text-5xl' : 'mt-1 text-3xl'} font-extrabold tracking-tight text-foreground`}>{item.value}</p>
+                      <p className="mt-2 min-h-10 text-sm leading-5 text-muted-foreground">{item.hint}</p>
+                      <p className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-primary">
+                        {item.cta}
+                        <ArrowRight className="h-4 w-4" />
+                      </p>
                     </div>
                   </>
                 );
@@ -2869,7 +2951,7 @@ export default function Dashboard() {
                       key={item.id}
                       type="button"
                       onClick={item.onClick}
-                      className={`rounded-2xl border p-4 text-left transition hover:shadow-md ${toneClass}`}
+                      className={`group rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${roleDashboardHasOnlyOneCard ? 'min-h-[220px] p-5' : 'min-h-[178px]'} ${toneClass}`}
                     >
                       {content}
                     </button>
@@ -2877,11 +2959,67 @@ export default function Dashboard() {
                 }
 
                 return (
-                  <Link key={item.id} to={item.href} className={`rounded-2xl border p-4 transition hover:shadow-md ${toneClass}`}>
+                  <Link key={item.id} to={item.href} className={`group rounded-2xl border p-4 transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${roleDashboardHasOnlyOneCard ? 'min-h-[220px] p-5' : 'min-h-[178px]'} ${toneClass}`}>
                     {content}
                   </Link>
                 );
               })}
+              </div>
+
+              <div className="rounded-2xl border border-border/70 bg-card/70 p-4 dark:bg-white/[0.035]">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Что сделать сейчас</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Быстрые переходы по доступным метрикам</p>
+                  </div>
+                  <ListChecks className="h-5 w-5 text-primary" />
+                </div>
+                <div className="mt-4 space-y-2">
+                  {roleDashboardCards.slice(0, 4).map(item => {
+                    const actionTone =
+                      item.tone === 'danger'
+                        ? 'text-red-600 dark:text-red-300'
+                        : item.tone === 'warning'
+                          ? 'text-amber-600 dark:text-amber-300'
+                          : item.tone === 'success'
+                            ? 'text-emerald-600 dark:text-emerald-300'
+                            : 'text-primary';
+                    const actionContent = (
+                      <>
+                        <span className={`h-2 w-2 rounded-full ${item.tone === 'danger' ? 'bg-red-500' : item.tone === 'warning' ? 'bg-amber-400' : item.tone === 'success' ? 'bg-emerald-400' : 'bg-primary'}`} />
+                        <span className="min-w-0 flex-1 truncate">{item.cta}</span>
+                        <span className={`font-semibold ${actionTone}`}>{item.value}</span>
+                      </>
+                    );
+                    if (item.onClick) {
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={item.onClick}
+                          className="flex w-full items-center gap-3 rounded-xl border border-transparent bg-secondary/55 px-3 py-2.5 text-left text-sm transition hover:border-primary/25 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                        >
+                          {actionContent}
+                        </button>
+                      );
+                    }
+                    return (
+                      <Link
+                        key={item.id}
+                        to={item.href}
+                        className="flex items-center gap-3 rounded-xl border border-transparent bg-secondary/55 px-3 py-2.5 text-sm transition hover:border-primary/25 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                      >
+                        {actionContent}
+                      </Link>
+                    );
+                  })}
+                </div>
+                {roleDashboardRiskCount === 0 && (
+                  <div className="mt-4 rounded-xl border border-emerald-400/25 bg-emerald-400/8 px-3 py-3 text-sm text-emerald-700 dark:text-emerald-200">
+                    Операционных рисков нет. Можно перейти к плановым задачам дня.
+                  </div>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>

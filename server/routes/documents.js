@@ -608,7 +608,7 @@ function registerDocumentRoutes(router, deps) {
       if (wantsPaginatedResponse(req.query)) {
         return res.json(buildDocumentsPaginatedResponse(documents, req.query));
       }
-      return res.json(documents);
+      return res.json(filterDocumentsForList(documents, req.query));
     } catch (error) {
       return sendAccessError(res, error);
     }

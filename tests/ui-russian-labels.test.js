@@ -30,6 +30,24 @@ test('admin backup controls avoid English visible action labels', () => {
   assert.doesNotMatch(settings, /Failed to fetch/);
 });
 
+test('admin users screen does not expose default password value', () => {
+  const settings = fs.readFileSync(new URL('../src/app/pages/Settings.tsx', import.meta.url), 'utf8');
+
+  assert.match(settings, /первичный пароль/);
+  assert.doesNotMatch(settings, /Пароль по умолчанию[^\\n]*<strong>1234<\/strong>/);
+});
+
+test('wide finance and reports tabs stay inside horizontal scrollers', () => {
+  const finance = fs.readFileSync(new URL('../src/app/pages/Finance.tsx', import.meta.url), 'utf8');
+  const reports = fs.readFileSync(new URL('../src/app/pages/Reports.tsx', import.meta.url), 'utf8');
+
+  assert.match(finance, /<Tabs defaultValue="overview" className="min-w-0 gap-4">/);
+  assert.match(finance, /max-w-full min-w-0 overflow-x-auto pb-1/);
+  assert.match(finance, /className="min-w-0 space-y-4/);
+  assert.match(reports, /className="min-w-0 space-y-6"/);
+  assert.match(reports, /max-w-full min-w-0 overflow-x-auto/);
+});
+
 test('admin user modal select fields keep readable light and dark theme styles', () => {
   const settings = fs.readFileSync(new URL('../src/app/pages/Settings.tsx', import.meta.url), 'utf8');
 

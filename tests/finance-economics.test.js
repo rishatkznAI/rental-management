@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
@@ -8,6 +11,7 @@ const express = serverRequire('express');
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { registerFinanceRoutes } = require('../server/routes/finance.js');
 const financeCore = require('../server/lib/finance-core.js');
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 function createApp() {
   const state = {
@@ -144,6 +148,12 @@ test('finance and admin can access company economics endpoint', async () => {
     assert.equal((await request(baseUrl, 'office')).response.status, 200);
     assert.equal((await request(baseUrl, 'admin')).response.status, 200);
   });
+});
+
+test('server wiring passes company economics builder into finance routes', () => {
+  const serverSource = readFileSync(join(__dirname, '../server/server.js'), 'utf8');
+  assert.match(serverSource, /buildCompanyEconomics,/);
+  assert.match(serverSource, /registerFinanceRoutes\(apiRouter,[\s\S]*buildCompanyEconomics,/);
 });
 
 test('company economics endpoint rejects forbidden and unauthenticated roles', async () => {

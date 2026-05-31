@@ -34,6 +34,13 @@ const rental = {
   comments: '',
 };
 
+function dateKeyFromToday(daysFromToday) {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysFromToday))
+    .toISOString()
+    .slice(0, 10);
+}
+
 test('classifyRentalFieldChange applies conflict-free extension immediately', () => {
   const result = classifyRentalFieldChange({
     previousRental: rental,
@@ -903,18 +910,23 @@ function setupClientAWithTwoRentals(state, options = {}) {
 
 test('approved conflicting rental extension is rechecked and rejected while conflict remains', async () => {
   const { app, state } = createApprovalApp();
-  state.rentals.find(item => item.id === 'R-1').startDate = '2026-06-10';
-  state.rentals.find(item => item.id === 'R-1').plannedReturnDate = '2026-06-20';
-  state.rentals.find(item => item.id === 'R-2').startDate = '2026-06-23';
-  state.rentals.find(item => item.id === 'R-2').plannedReturnDate = '2026-06-25';
-  state.gantt_rentals.find(item => item.id === 'GR-1').startDate = '2026-06-10';
-  state.gantt_rentals.find(item => item.id === 'GR-1').endDate = '2026-06-20';
-  state.gantt_rentals.find(item => item.id === 'GR-2').startDate = '2026-06-23';
-  state.gantt_rentals.find(item => item.id === 'GR-2').endDate = '2026-06-25';
+  const firstStart = dateKeyFromToday(10);
+  const firstEnd = dateKeyFromToday(20);
+  const conflictStart = dateKeyFromToday(23);
+  const conflictEnd = dateKeyFromToday(25);
+  const extensionEnd = dateKeyFromToday(24);
+  state.rentals.find(item => item.id === 'R-1').startDate = firstStart;
+  state.rentals.find(item => item.id === 'R-1').plannedReturnDate = firstEnd;
+  state.rentals.find(item => item.id === 'R-2').startDate = conflictStart;
+  state.rentals.find(item => item.id === 'R-2').plannedReturnDate = conflictEnd;
+  state.gantt_rentals.find(item => item.id === 'GR-1').startDate = firstStart;
+  state.gantt_rentals.find(item => item.id === 'GR-1').endDate = firstEnd;
+  state.gantt_rentals.find(item => item.id === 'GR-2').startDate = conflictStart;
+  state.gantt_rentals.find(item => item.id === 'GR-2').endDate = conflictEnd;
 
   await withServer(app, async (baseUrl) => {
     const update = await request(baseUrl, 'POST', '/api/rentals/R-1/extend', 'manager-token', {
-      newEndDate: '2026-06-24',
+      newEndDate: extensionEnd,
       reason: 'Клиент просит продлить аренду',
       confirmedByClient: true,
       invoiceSentToClient: true,
@@ -922,19 +934,19 @@ test('approved conflicting rental extension is rechecked and rejected while conf
 
     assert.equal(update.status, 202);
     assert.equal(update.body.approval.created, true);
-    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-06-20');
+    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, firstEnd);
     assert.equal(state.rental_change_requests.length, 1);
 
     const changeRequest = state.rental_change_requests[0];
     assert.equal(changeRequest.field, 'plannedReturnDate');
-    assert.equal(changeRequest.newValue, '2026-06-24');
+    assert.equal(changeRequest.newValue, extensionEnd);
 
     const approved = await request(baseUrl, 'POST', `/api/rental_change_requests/${changeRequest.id}/approve`, 'admin-token', {});
 
     assert.equal(approved.status, 409);
     assert.match(approved.body.error, /конфликт|занята|пересекается/i);
-    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, '2026-06-20');
-    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').endDate, '2026-06-20');
+    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, firstEnd);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').endDate, firstEnd);
     assert.equal(state.rental_change_requests[0].status, 'pending');
   });
 });
@@ -1872,27 +1884,30 @@ test('conflict-free extension applies immediately and does not create approval',
   const { app, state } = createApprovalApp();
   const rental = state.rentals.find(item => item.id === 'R-2');
   const ganttRental = state.gantt_rentals.find(item => item.id === 'GR-2');
-  rental.startDate = '2026-05-23';
-  rental.plannedReturnDate = '2026-05-25';
+  const startDate = dateKeyFromToday(10);
+  const currentEnd = dateKeyFromToday(12);
+  const extensionEnd = dateKeyFromToday(17);
+  rental.startDate = startDate;
+  rental.plannedReturnDate = currentEnd;
   rental.price = 3000;
   rental.rate = '1000';
-  ganttRental.startDate = '2026-05-23';
-  ganttRental.endDate = '2026-05-25';
+  ganttRental.startDate = startDate;
+  ganttRental.endDate = currentEnd;
   ganttRental.amount = 3000;
 
   await withServer(app, async (baseUrl) => {
     const update = await request(baseUrl, 'POST', '/api/rentals/R-2/extend', 'manager-token', {
-      newEndDate: '2026-05-30',
+      newEndDate: extensionEnd,
       reason: 'Клиент продлил аренду',
       confirmedByClient: true,
       invoiceSentToClient: true,
     });
 
     assert.equal(update.status, 200);
-    assert.equal(update.body.rental.plannedReturnDate, '2026-05-30');
+    assert.equal(update.body.rental.plannedReturnDate, extensionEnd);
     assert.equal(update.body.approval.created, false);
     assert.equal(state.rental_change_requests.length, 0);
-    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').endDate, '2026-05-30');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').endDate, extensionEnd);
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').equipmentId, 'EQ-1');
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-2').equipmentInv, '083');
   });

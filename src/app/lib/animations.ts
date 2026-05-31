@@ -4,14 +4,28 @@ import { cn } from './utils';
 export const animationDurations = {
   instant: 1,
   fast: 160,
+  normal: 220,
+  slow: 320,
   base: 220,
   relaxed: 260,
 } as const;
 
 export const animationEasings = {
+  smooth: 'cubic-bezier(0.2, 0, 0, 1)',
+  emphasized: 'cubic-bezier(0.16, 1, 0.3, 1)',
   standard: 'cubic-bezier(0.2, 0, 0, 1)',
   entrance: 'cubic-bezier(0.16, 1, 0.3, 1)',
   exit: 'cubic-bezier(0.4, 0, 1, 1)',
+} as const;
+
+export const animationDistance = {
+  subtleY: '10px',
+  subtleX: '12px',
+} as const;
+
+export const animationScale = {
+  subtleFrom: 0.98,
+  none: 1,
 } as const;
 
 export const animationSpring = {
@@ -40,6 +54,10 @@ export const animationClasses = {
   popover: 'app-animate-popover',
   tabsContent: 'app-animate-tabs flex-1 outline-none',
   toast: 'app-animate-toast',
+  page: 'app-page-transition app-page-motion-scope',
+  cardReveal: 'app-animate-card-reveal',
+  listReveal: 'app-animate-list-reveal',
+  demoHighlight: 'app-demo-highlight',
 } as const;
 
 export function animatedModalClassName(className?: string) {
@@ -52,6 +70,19 @@ export function animatedOverlayClassName(className?: string) {
 
 export function animatedDrawerClassName(className?: string) {
   return cn(animationClasses.drawerBase, className);
+}
+
+export function animatedPageClassName(className?: string) {
+  return cn(animationClasses.page, className);
+}
+
+export function isDemoPresentationMotionEnabled(search = typeof window === 'undefined' ? '' : window.location.search) {
+  if (typeof window === 'undefined') return false;
+  const globalSearch = new URLSearchParams(window.location.search);
+  const routeSearch = new URLSearchParams(search);
+  return globalSearch.get('presentationMotion') === '1' ||
+    routeSearch.get('presentationMotion') === '1' ||
+    window.localStorage.getItem('skytech:demo-presentation-motion') === 'true';
 }
 
 function getPresenceExitDelay(durationMs: number) {

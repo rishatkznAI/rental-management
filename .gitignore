@@ -37,6 +37,7 @@ diagnostics/*.json
 
 # Local helper scripts
 *.command
+scripts/demo-media/
 
 # Playwright
 playwright-report/
@@ -56,4 +57,8 @@ server/data/backups/*.sqlite-wal
 server/data/backups/*.zip
 server/data/smoke/
 production-smoke-artifacts/
+artifacts/
+**/demo-storage-state.json
+**/storage-state.json
+**/.auth/
 !server/data/.gitkeep

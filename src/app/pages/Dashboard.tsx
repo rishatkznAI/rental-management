@@ -1169,7 +1169,8 @@ export default function Dashboard() {
   const unassignedServiceTickets = openServiceTickets.filter(
     t => !t.assignedMechanicId && !t.assignedMechanicName && !t.assignedTo,
   );
-  const officeUnsignedDocuments = documents.filter(isUnsignedDocument);
+  const unsignedDocumentsCount = documentControl.kpi.unsignedDocuments;
+  const unsignedDocumentsHref = '/documents?signature=unsigned';
   const officeUpcomingPayments = rentalDebtRows.filter(row => {
     if (!row.outstanding) return false;
     const compareDate = row.expectedPaymentDate || row.endDate;
@@ -1213,13 +1214,13 @@ export default function Dashboard() {
         {
           id: 'admin-docs',
           title: 'Документы без подписи',
-          value: String(officeUnsignedDocuments.length),
-          hint: officeUnsignedDocuments.length > 0
+          value: String(unsignedDocumentsCount),
+          hint: unsignedDocumentsCount > 0
             ? 'Есть договоры и акты, которые нужно довести до подписания'
             : 'Все ключевые документы подписаны',
-          href: '/documents?signature=unsigned',
+          href: unsignedDocumentsHref,
           cta: 'Открыть документы',
-          tone: officeUnsignedDocuments.length > 0 ? 'warning' : 'success',
+          tone: unsignedDocumentsCount > 0 ? 'warning' : 'success',
           icon: ClipboardX,
         },
         canViewMoney && {
@@ -1305,7 +1306,7 @@ export default function Dashboard() {
           hint: myUnsignedDocuments.length > 0
             ? 'Есть договоры и УПД без подписи'
             : 'Все ключевые документы подписаны',
-          href: '/documents?signature=unsigned',
+          href: unsignedDocumentsHref,
           cta: 'Проверить документы',
           tone: myUnsignedDocuments.length > 0 ? 'warning' : 'success',
           icon: FileText,
@@ -1371,13 +1372,13 @@ export default function Dashboard() {
         {
           id: 'office-docs',
           title: 'Документы без подписи',
-          value: String(officeUnsignedDocuments.length),
-          hint: officeUnsignedDocuments.length > 0
+          value: String(unsignedDocumentsCount),
+          hint: unsignedDocumentsCount > 0
             ? 'Нужно дожать подписание договоров и актов'
             : 'Все ключевые документы подписаны',
-          href: '/documents?signature=unsigned',
+          href: unsignedDocumentsHref,
           cta: 'Открыть документы',
-          tone: officeUnsignedDocuments.length > 0 ? 'warning' : 'success',
+          tone: unsignedDocumentsCount > 0 ? 'warning' : 'success',
           icon: ClipboardX,
         },
         {
@@ -1440,12 +1441,13 @@ export default function Dashboard() {
     officePendingUpdClientCount,
     officePendingUpdRentals.length,
     officeReturnsQueue,
-    officeUnsignedDocuments.length,
     officeUpcomingPayments.length,
     overdueDebtClients.length,
     topAttentionActions,
     totalDebt,
     unassignedServiceTickets.length,
+    unsignedDocumentsCount,
+    unsignedDocumentsHref,
     user?.role,
   ]);
   const roleDashboardMeta = useMemo(() => {
@@ -1877,13 +1879,13 @@ export default function Dashboard() {
     canViewDocuments && {
       id: 'unsigned-docs',
       label: 'Документы без подписи',
-      value: String(officeUnsignedDocuments.length),
+      value: String(unsignedDocumentsCount),
       hint: documentControl.kpi.closedRentalsWithoutClosingDocs > 0
         ? `${documentControl.kpi.closedRentalsWithoutClosingDocs} завершённых без УПД`
         : 'Контроль подписей',
       icon: FileText,
-      tone: officeUnsignedDocuments.length > 0 ? 'warning' : 'success',
-      href: '/documents?signature=unsigned',
+      tone: unsignedDocumentsCount > 0 ? 'warning' : 'success',
+      href: unsignedDocumentsHref,
     },
     canViewService && {
       id: 'service-blockers',
@@ -2328,12 +2330,12 @@ export default function Dashboard() {
       href: '/documents',
       tone: 'danger',
     },
-    documentControl.kpi.unsignedDocuments > 0 && {
+    unsignedDocumentsCount > 0 && {
       id: 'doc-unsigned',
       title: 'Неподписанные',
       detail: 'Документы ждут подписи или закрытия',
-      value: String(documentControl.kpi.unsignedDocuments),
-      href: '/documents?signature=unsigned',
+      value: String(unsignedDocumentsCount),
+      href: unsignedDocumentsHref,
       tone: 'warning',
     },
     documentsWithoutFile > 0 && {
@@ -2407,8 +2409,9 @@ export default function Dashboard() {
         : 'overview';
   const showRoleDashboardCards = activeDashboardTab === 'overview' && roleDashboardMeta && roleDashboardCards.length > 0;
   const roleDashboardRiskCount = roleDashboardCards.filter(item => item.tone === 'warning' || item.tone === 'danger').length;
-  const roleDashboardPrimaryCard = roleDashboardCards[0];
-  const roleDashboardHasOnlyOneCard = roleDashboardCards.length === 1;
+  const roleDashboardPrimaryCard = roleDashboardCards.find(item => item.title === 'Просроченная дебиторка') ?? roleDashboardCards[0];
+  const roleDashboardSignalCard = roleDashboardCards.find(item => item.title === 'Документы без подписи') ?? roleDashboardCards[0];
+  const roleDashboardSecondaryCards = roleDashboardCards.filter(item => item.id !== roleDashboardPrimaryCard?.id);
   const canToggleOfficeUpd = isAdminRole;
 
   useEffect(() => {
@@ -2859,18 +2862,19 @@ export default function Dashboard() {
       </div>
 
       {showRoleDashboardCards && (
-        <Card className="overflow-hidden border-border/80 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.18),transparent_34%),linear-gradient(135deg,hsl(var(--card)),hsl(var(--secondary)/0.72))] shadow-[0_24px_70px_-48px_rgba(15,23,42,0.55)] dark:bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.22),transparent_34%),linear-gradient(135deg,rgba(8,18,24,0.98),rgba(12,22,31,0.94))]">
-          <CardHeader className="relative border-b border-border/60 pb-5">
-            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,340px)] lg:items-start">
-              <div className="space-y-3">
+        <Card className="overflow-hidden border-slate-800/80 bg-[radial-gradient(circle_at_8%_0%,rgba(16,185,129,0.18),transparent_30%),linear-gradient(135deg,rgba(7,16,23,0.98),rgba(10,19,30,0.96)_48%,rgba(16,20,30,0.98))] text-white shadow-[0_28px_90px_-54px_rgba(0,0,0,0.78)]">
+          <CardHeader className="relative border-b border-white/10 px-5 py-5 sm:px-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-3xl space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="default" className="bg-primary/12 text-primary dark:bg-primary/12 dark:text-primary">{roleDashboardMeta.badge}</Badge>
+                  <Badge variant="default" className="bg-emerald-400/12 text-emerald-200 ring-1 ring-emerald-300/20">{roleDashboardMeta.badge}</Badge>
+                  <Badge variant="outline" className="border-white/10 bg-white/[0.04] text-slate-300">Рабочее пространство</Badge>
                   <Badge
                     variant="outline"
                     className={
                       roleDashboardRiskCount > 0
-                        ? 'border-amber-400/45 bg-amber-400/10 text-amber-700 dark:text-amber-200'
-                        : 'border-emerald-400/45 bg-emerald-400/10 text-emerald-700 dark:text-emerald-200'
+                        ? 'border-amber-300/35 bg-amber-400/10 text-amber-100'
+                        : 'border-emerald-300/35 bg-emerald-400/10 text-emerald-100'
                     }
                   >
                     {roleDashboardRiskCount > 0
@@ -2879,146 +2883,304 @@ export default function Dashboard() {
                   </Badge>
                 </div>
                 <div>
-                  <CardTitle className="app-shell-title text-2xl font-extrabold text-foreground sm:text-3xl">{roleDashboardMeta.title}</CardTitle>
-                  <CardDescription className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                  <CardTitle className="app-shell-title text-2xl font-extrabold text-white sm:text-3xl">{roleDashboardMeta.title}</CardTitle>
+                  <CardDescription className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
                     {roleDashboardMeta.description}
                   </CardDescription>
                 </div>
               </div>
-
-              {roleDashboardPrimaryCard && (
-                <div className="rounded-2xl border border-primary/20 bg-card/78 p-4 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.55)] backdrop-blur dark:bg-white/[0.045]">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/12 text-primary ring-1 ring-primary/20">
-                      <roleDashboardPrimaryCard.icon className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Главный сигнал</p>
-                      <p className="mt-1 text-sm font-semibold text-foreground">{roleDashboardPrimaryCard.title}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">{roleDashboardPrimaryCard.hint}</p>
-                    </div>
-                  </div>
+              <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-3">
+                <div className="h-2.5 w-2.5 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.75)]" />
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Статус</p>
+                  <p className="text-sm font-semibold text-slate-200">Операционный контроль</p>
                 </div>
-              )}
+              </div>
             </div>
           </CardHeader>
-          <CardContent className="p-5">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(240px,300px)]">
-              <div className={`grid gap-3 ${roleDashboardHasOnlyOneCard ? 'md:grid-cols-1' : 'md:grid-cols-2 xl:grid-cols-2'}`}>
-              {roleDashboardCards.map(item => {
-                const Icon = item.icon;
-                const toneClass =
-                  item.tone === 'danger'
-                    ? 'border-red-500/25 bg-red-500/8 hover:border-red-500/40 dark:bg-red-500/10'
-                    : item.tone === 'warning'
-                    ? 'border-orange-400/25 bg-orange-400/8 hover:border-orange-400/45 dark:bg-orange-400/10'
-                    : item.tone === 'success'
-                    ? 'border-emerald-400/25 bg-emerald-400/8 hover:border-emerald-400/45 dark:bg-emerald-400/10'
-                    : 'border-border bg-card/70 hover:border-primary/30 dark:bg-white/[0.035]';
-
-                const iconClass =
-                  item.tone === 'danger'
-                    ? 'bg-red-500/12 text-red-400'
-                    : item.tone === 'warning'
-                    ? 'bg-orange-400/12 text-orange-300'
-                    : item.tone === 'success'
-                    ? 'bg-emerald-400/12 text-emerald-300'
-                    : 'bg-primary/12 text-primary';
-
-                const content = (
-                  <>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ring-1 ring-inset ring-white/10 ${iconClass}`}>
-                        <Icon className="h-5 w-5" />
+          <CardContent className="p-5 sm:p-6">
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
+              <div className="space-y-4">
+                {roleDashboardPrimaryCard && (() => {
+                  const Icon = roleDashboardPrimaryCard.icon;
+                  const primaryContent = (
+                    <>
+                      <div className="relative z-10 grid min-h-[270px] gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(240px,0.75fr)] lg:items-stretch">
+                        <div className="flex min-w-0 flex-col justify-between gap-6">
+                          <div className="space-y-3">
+                            <Badge variant="outline" className="w-fit border-red-300/30 bg-red-400/12 text-red-100">Главный риск</Badge>
+                            <div>
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-400/12 text-red-200 ring-1 ring-red-300/20">
+                                  <Icon className="h-6 w-6" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-semibold text-red-100/80">Финансовый контур</p>
+                                  <h3 className="mt-1 text-xl font-extrabold text-white sm:text-2xl">{roleDashboardPrimaryCard.title}</h3>
+                                </div>
+                              </div>
+                              <p className="mt-5 text-4xl font-extrabold tracking-tight text-white sm:text-5xl">{roleDashboardPrimaryCard.value}</p>
+                              <p className="mt-2 text-sm font-medium text-red-100/80">{roleDashboardPrimaryCard.hint}</p>
+                            </div>
+                          </div>
+                          <span className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white ring-1 ring-white/10">
+                            {roleDashboardPrimaryCard.cta}
+                            <ArrowRight className="h-4 w-4" />
+                          </span>
+                        </div>
+                        <div className="relative min-h-[150px] overflow-hidden rounded-3xl border border-red-200/10 bg-slate-950/28 p-4 ring-1 ring-white/[0.03] lg:min-h-full">
+                          <div className="relative z-10 flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-red-100/55">Долг к контролю</p>
+                              <p className="mt-1 text-sm text-red-50/70">Финансовый риск сейчас</p>
+                            </div>
+                            <span className="shrink-0 rounded-xl bg-red-300/12 px-3 py-2 text-right text-sm font-extrabold text-red-50 ring-1 ring-red-200/15">
+                              {roleDashboardPrimaryCard.value}
+                            </span>
+                          </div>
+                          <svg aria-hidden="true" viewBox="0 0 280 150" className="absolute inset-x-3 bottom-2 h-[130px] w-[calc(100%-24px)] text-red-200/80 sm:h-[145px]">
+                            <defs>
+                              <linearGradient id="roleDebtTrend" x1="0" x2="1" y1="0" y2="0">
+                                <stop offset="0%" stopColor="#7f1d1d" stopOpacity="0.22" />
+                                <stop offset="54%" stopColor="#be123c" stopOpacity="0.95" />
+                                <stop offset="100%" stopColor="#fecdd3" stopOpacity="0.98" />
+                              </linearGradient>
+                              <linearGradient id="roleDebtFill" x1="0" x2="0" y1="0" y2="1">
+                                <stop offset="0%" stopColor="#be123c" stopOpacity="0.38" />
+                                <stop offset="100%" stopColor="#be123c" stopOpacity="0" />
+                              </linearGradient>
+                            </defs>
+                            <path d="M8 128 C 42 118, 52 120, 78 102 S 118 64, 150 75 S 195 94, 220 48 S 254 18, 272 16 L272 150 L8 150 Z" fill="url(#roleDebtFill)" />
+                            <path d="M8 128 C 42 118, 52 120, 78 102 S 118 64, 150 75 S 195 94, 220 48 S 254 18, 272 16" fill="none" stroke="url(#roleDebtTrend)" strokeWidth="6" strokeLinecap="round" />
+                            <g fill="none" stroke="currentColor" strokeOpacity="0.16" strokeWidth="1">
+                              <path d="M10 42 H270" />
+                              <path d="M10 82 H270" />
+                              <path d="M10 122 H270" />
+                            </g>
+                            <g fill="currentColor">
+                              <circle cx="78" cy="102" r="4.5" />
+                              <circle cx="150" cy="75" r="4.5" />
+                              <circle cx="220" cy="48" r="5" />
+                              <circle cx="272" cy="16" r="6" />
+                            </g>
+                          </svg>
+                        </div>
                       </div>
-                      <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
-                    </div>
-                    <div className={roleDashboardHasOnlyOneCard ? 'mt-5 max-w-3xl' : 'mt-4'}>
-                      <p className="text-sm font-semibold text-muted-foreground">{item.title}</p>
-                      <p className={`${roleDashboardHasOnlyOneCard ? 'mt-2 text-4xl sm:text-5xl' : 'mt-1 text-3xl'} font-extrabold tracking-tight text-foreground`}>{item.value}</p>
-                      <p className="mt-2 min-h-10 text-sm leading-5 text-muted-foreground">{item.hint}</p>
-                      <p className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-primary">
-                        {item.cta}
-                        <ArrowRight className="h-4 w-4" />
-                      </p>
-                    </div>
-                  </>
-                );
-
-                if (item.onClick) {
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={item.onClick}
-                      className={`group rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${roleDashboardHasOnlyOneCard ? 'min-h-[220px] p-5' : 'min-h-[178px]'} ${toneClass}`}
-                    >
-                      {content}
-                    </button>
+                    </>
                   );
-                }
 
-                return (
-                  <Link key={item.id} to={item.href} className={`group rounded-2xl border p-4 transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${roleDashboardHasOnlyOneCard ? 'min-h-[220px] p-5' : 'min-h-[178px]'} ${toneClass}`}>
-                    {content}
-                  </Link>
-                );
-              })}
+                  if (roleDashboardPrimaryCard.onClick) {
+                    return (
+                      <button
+                        type="button"
+                        onClick={roleDashboardPrimaryCard.onClick}
+                        className="group relative w-full overflow-hidden rounded-3xl border border-red-300/20 bg-[radial-gradient(circle_at_74%_4%,rgba(244,63,94,0.36),transparent_34%),linear-gradient(135deg,rgba(127,29,29,0.68),rgba(35,13,22,0.96)_55%,rgba(15,23,42,0.98))] text-left shadow-[0_24px_70px_-44px_rgba(244,63,94,0.9)] transition hover:-translate-y-0.5 hover:border-red-200/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/45"
+                      >
+                        {primaryContent}
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <Link
+                      to={roleDashboardPrimaryCard.href}
+                      className="group relative block overflow-hidden rounded-3xl border border-red-300/20 bg-[radial-gradient(circle_at_74%_4%,rgba(244,63,94,0.36),transparent_34%),linear-gradient(135deg,rgba(127,29,29,0.68),rgba(35,13,22,0.96)_55%,rgba(15,23,42,0.98))] shadow-[0_24px_70px_-44px_rgba(244,63,94,0.9)] transition hover:-translate-y-0.5 hover:border-red-200/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/45"
+                    >
+                      {primaryContent}
+                    </Link>
+                  );
+                })()}
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.045] p-3 backdrop-blur">
+                  <div className="flex flex-col gap-1 px-2 py-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Все операционные риски</p>
+                      <h3 className="mt-1 text-lg font-extrabold text-white">Список для контроля</h3>
+                    </div>
+                    <p className="text-sm text-slate-400">{roleDashboardSecondaryCards.length} активных направления</p>
+                  </div>
+                  <div className="mt-2 divide-y divide-white/10">
+                    {roleDashboardSecondaryCards.map(item => {
+                      const Icon = item.icon;
+                      const rowTone =
+                        item.tone === 'danger'
+                          ? 'bg-red-300 text-red-950'
+                          : item.tone === 'warning'
+                            ? 'bg-amber-300 text-amber-950'
+                            : item.tone === 'success'
+                              ? 'bg-emerald-300 text-emerald-950'
+                              : 'bg-sky-300 text-sky-950';
+                      const indicatorClass =
+                        item.tone === 'danger'
+                          ? 'bg-red-400'
+                          : item.tone === 'warning'
+                            ? 'bg-amber-300'
+                            : item.tone === 'success'
+                              ? 'bg-emerald-300'
+                              : 'bg-sky-300';
+                      const unitLabel = item.title.includes('Документ')
+                        ? formatCountLabel(Number(item.value) || 0, 'документ', 'документа', 'документов')
+                        : item.title.includes('Аренд') || item.title.includes('УПД')
+                          ? formatCountLabel(Number(item.value) || 0, 'аренда', 'аренды', 'аренд')
+                          : item.title.includes('внимания') || item.title.includes('задач')
+                            ? formatCountLabel(Number(item.value) || 0, 'задача', 'задачи', 'задач')
+                            : '';
+                      const rowContent = (
+                        <>
+                          <span className={`absolute left-0 top-3 h-[calc(100%-24px)] w-1 rounded-full ${indicatorClass}`} />
+                          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${rowTone}`}>
+                            <Icon className="h-5 w-5" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-semibold text-white">{item.title}</span>
+                            <span className="mt-1 block text-sm leading-5 text-slate-400">{item.hint}</span>
+                          </span>
+                          <span className="flex shrink-0 flex-col items-end text-right">
+                            <span className="flex items-baseline gap-2">
+                              <span className="text-2xl font-extrabold tracking-tight text-white">{item.value}</span>
+                              {unitLabel && <span className="hidden text-xs font-semibold text-slate-500 sm:inline">{unitLabel}</span>}
+                            </span>
+                            <span className="hidden text-xs font-semibold text-emerald-200/80 sm:block">{item.cta}</span>
+                          </span>
+                          <ArrowRight className="h-4 w-4 shrink-0 text-slate-500 transition group-hover:translate-x-1 group-hover:text-emerald-200 group-focus-visible:translate-x-1 group-focus-visible:text-emerald-200" />
+                        </>
+                      );
+                      if (item.onClick) {
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={item.onClick}
+                            className="group relative flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35"
+                          >
+                            {rowContent}
+                          </button>
+                        );
+                      }
+                      return (
+                        <Link
+                          key={item.id}
+                          to={item.href}
+                          className="group relative flex items-center gap-3 rounded-2xl px-4 py-3 transition hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35"
+                        >
+                          {rowContent}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
-              <div className="rounded-2xl border border-border/70 bg-card/70 p-4 dark:bg-white/[0.035]">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">Что сделать сейчас</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Быстрые переходы по доступным метрикам</p>
-                  </div>
-                  <ListChecks className="h-5 w-5 text-primary" />
-                </div>
-                <div className="mt-4 space-y-2">
-                  {roleDashboardCards.slice(0, 4).map(item => {
-                    const actionTone =
-                      item.tone === 'danger'
-                        ? 'text-red-600 dark:text-red-300'
-                        : item.tone === 'warning'
-                          ? 'text-amber-600 dark:text-amber-300'
-                          : item.tone === 'success'
-                            ? 'text-emerald-600 dark:text-emerald-300'
-                            : 'text-primary';
-                    const actionContent = (
-                      <>
-                        <span className={`h-2 w-2 rounded-full ${item.tone === 'danger' ? 'bg-red-500' : item.tone === 'warning' ? 'bg-amber-400' : item.tone === 'success' ? 'bg-emerald-400' : 'bg-primary'}`} />
-                        <span className="min-w-0 flex-1 truncate">{item.cta}</span>
-                        <span className={`font-semibold ${actionTone}`}>{item.value}</span>
-                      </>
+              <div className="space-y-4 xl:sticky xl:top-5 xl:self-start">
+                {roleDashboardSignalCard && (() => {
+                  const Icon = roleDashboardSignalCard.icon;
+                  const signalContent = (
+                    <>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-300/14 text-amber-100 ring-1 ring-amber-200/20">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <ArrowRight className="h-4 w-4 text-slate-500 transition group-hover:translate-x-1 group-hover:text-amber-100 group-focus-visible:translate-x-1 group-focus-visible:text-amber-100" />
+                      </div>
+                      <div className="mt-5">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Главный сигнал</p>
+                        <h3 className="mt-2 text-lg font-extrabold text-white">{roleDashboardSignalCard.title}</h3>
+                        <div className="mt-3 inline-flex items-baseline gap-2 rounded-2xl bg-amber-300/10 px-3 py-2 ring-1 ring-amber-200/15">
+                          <span className="text-2xl font-extrabold tracking-tight text-amber-50">{roleDashboardSignalCard.value}</span>
+                          <span className="text-xs font-semibold text-amber-100/65">
+                            {roleDashboardSignalCard.title.includes('Документ')
+                              ? formatCountLabel(Number(roleDashboardSignalCard.value) || 0, 'документ', 'документа', 'документов')
+                              : 'в работе'}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm leading-5 text-slate-400">{roleDashboardSignalCard.hint}</p>
+                      </div>
+                    </>
+                  );
+                  if (roleDashboardSignalCard.onClick) {
+                    return (
+                      <button
+                        type="button"
+                        onClick={roleDashboardSignalCard.onClick}
+                        className="group w-full rounded-3xl border border-white/10 bg-white/[0.045] p-4 text-left transition hover:border-amber-200/25 hover:bg-white/[0.065] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/35"
+                      >
+                        {signalContent}
+                      </button>
                     );
-                    if (item.onClick) {
+                  }
+                  return (
+                    <Link
+                      to={roleDashboardSignalCard.href}
+                      className="group block rounded-3xl border border-white/10 bg-white/[0.045] p-4 transition hover:border-amber-200/25 hover:bg-white/[0.065] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/35"
+                    >
+                      {signalContent}
+                    </Link>
+                  );
+                })()}
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.045] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Что сделать сейчас</p>
+                      <p className="mt-1 text-xs text-slate-500">Быстрые переходы по рискам</p>
+                    </div>
+                    <ListChecks className="h-5 w-5 text-emerald-300" />
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    {roleDashboardCards.slice(0, 4).map(item => {
+                      const actionTone =
+                        item.tone === 'danger'
+                          ? 'text-red-200'
+                          : item.tone === 'warning'
+                            ? 'text-amber-100'
+                            : item.tone === 'success'
+                              ? 'text-emerald-100'
+                              : 'text-sky-100';
+                      const actionDot =
+                        item.tone === 'danger'
+                          ? 'bg-red-400'
+                          : item.tone === 'warning'
+                            ? 'bg-amber-300'
+                            : item.tone === 'success'
+                              ? 'bg-emerald-300'
+                              : 'bg-sky-300';
+                      const actionContent = (
+                        <>
+                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${actionDot}`} />
+                          <span className="min-w-0 flex-1 truncate text-slate-200">{item.cta}</span>
+                          <span className={`shrink-0 text-sm font-bold ${actionTone}`}>{item.value}</span>
+                          <ArrowRight className="h-4 w-4 shrink-0 text-slate-500 transition group-hover:translate-x-1 group-hover:text-emerald-200 group-focus-visible:translate-x-1 group-focus-visible:text-emerald-200" />
+                        </>
+                      );
+                      if (item.onClick) {
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={item.onClick}
+                            className="group flex w-full items-center gap-3 rounded-2xl border border-transparent bg-slate-950/38 px-3 py-3 text-left text-sm transition hover:border-emerald-200/20 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35"
+                          >
+                            {actionContent}
+                          </button>
+                        );
+                      }
                       return (
-                        <button
+                        <Link
                           key={item.id}
-                          type="button"
-                          onClick={item.onClick}
-                          className="flex w-full items-center gap-3 rounded-xl border border-transparent bg-secondary/55 px-3 py-2.5 text-left text-sm transition hover:border-primary/25 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                          to={item.href}
+                          className="group flex items-center gap-3 rounded-2xl border border-transparent bg-slate-950/38 px-3 py-3 text-sm transition hover:border-emerald-200/20 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35"
                         >
                           {actionContent}
-                        </button>
+                        </Link>
                       );
-                    }
-                    return (
-                      <Link
-                        key={item.id}
-                        to={item.href}
-                        className="flex items-center gap-3 rounded-xl border border-transparent bg-secondary/55 px-3 py-2.5 text-sm transition hover:border-primary/25 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                      >
-                        {actionContent}
-                      </Link>
-                    );
-                  })}
-                </div>
-                {roleDashboardRiskCount === 0 && (
-                  <div className="mt-4 rounded-xl border border-emerald-400/25 bg-emerald-400/8 px-3 py-3 text-sm text-emerald-700 dark:text-emerald-200">
-                    Операционных рисков нет. Можно перейти к плановым задачам дня.
+                    })}
                   </div>
-                )}
+                  {roleDashboardRiskCount === 0 && (
+                    <div className="mt-4 rounded-2xl border border-emerald-300/25 bg-emerald-400/10 px-3 py-3 text-sm text-emerald-100">
+                      Операционных рисков нет. Можно перейти к плановым задачам дня.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </CardContent>
@@ -3597,7 +3759,7 @@ export default function Dashboard() {
           <DashboardKpiGrid cards={[
             { id: 'doc-month', label: 'Создано за месяц', value: String(documentsCreatedThisMonth.length), hint: monthPeriodLabel, icon: FileText, tone: 'default', href: '/documents' },
             { id: 'doc-signed-month', label: 'Подписано за месяц', value: String(documentsSignedThisMonth.length), hint: 'По дате подписи или документа', icon: CheckCircle, tone: 'success' },
-            { id: 'doc-unsigned', label: 'Неподписанные сейчас', value: String(documentControl.kpi.unsignedDocuments), hint: `${documentControl.kpi.overdueSignature} просрочено`, icon: Clock, tone: documentControl.kpi.unsignedDocuments > 0 ? 'warning' : 'success' },
+            { id: 'doc-unsigned', label: 'Неподписанные сейчас', value: String(unsignedDocumentsCount), hint: `${documentControl.kpi.overdueSignature} просрочено`, icon: Clock, tone: unsignedDocumentsCount > 0 ? 'warning' : 'success' },
             { id: 'doc-number', label: 'Без номера сейчас', value: String(documentsWithoutNumber), hint: 'Требуют аккуратной нумерации', icon: ClipboardX, tone: documentsWithoutNumber > 0 ? 'warning' : 'success' },
             { id: 'doc-duplicates', label: 'Дубли номеров сейчас', value: String(duplicateDocumentNumbers), hint: 'Нужно проверить реестр', icon: ShieldAlert, tone: duplicateDocumentNumbers > 0 ? 'danger' : 'success' },
             { id: 'doc-acts', label: 'Акты/УПД за месяц', value: String(documentsCreatedThisMonth.filter(document => document.type === 'act' || document.type === 'upd' || document.documentType === 'act' || document.documentType === 'upd').length), hint: 'Закрывающие документы', icon: Calendar, tone: 'violet' },
@@ -3859,12 +4021,12 @@ export default function Dashboard() {
                 </div>
 
                 {canViewDocuments && (
-                <div className={`rounded-xl border p-4 ${documentControl.kpi.unsignedDocuments + documentControl.kpi.closedRentalsWithoutClosingDocs + documentControl.kpi.overdueSignature > 0 ? 'border-amber-300 bg-amber-50/60 dark:border-amber-900/70 dark:bg-amber-950/20' : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/70 dark:bg-emerald-950/20'}`}>
+                <div className={`rounded-xl border p-4 ${unsignedDocumentsCount + documentControl.kpi.closedRentalsWithoutClosingDocs + documentControl.kpi.overdueSignature > 0 ? 'border-amber-300 bg-amber-50/60 dark:border-amber-900/70 dark:bg-amber-950/20' : 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/70 dark:bg-emerald-950/20'}`}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-gray-900 dark:text-white">Контроль документов</p>
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        Без подписи: {documentControl.kpi.unsignedDocuments} · закрытые без акта/УПД: {documentControl.kpi.closedRentalsWithoutClosingDocs}
+                        Без подписи: {unsignedDocumentsCount} · закрытые без акта/УПД: {documentControl.kpi.closedRentalsWithoutClosingDocs}
                       </p>
                     </div>
                     <FileText className="h-5 w-5 text-amber-500" />
@@ -4653,7 +4815,7 @@ export default function Dashboard() {
             <Card className={dashboardCardClass}>
               <CardHeader className={dashboardCardHeaderClass}>
                 <CardDescription>Без подписи</CardDescription>
-                <CardTitle className="text-3xl font-bold">{documentControl.kpi.unsignedDocuments}</CardTitle>
+                <CardTitle className="text-3xl font-bold">{unsignedDocumentsCount}</CardTitle>
               </CardHeader>
             </Card>
             <Card className={dashboardCardClass}>

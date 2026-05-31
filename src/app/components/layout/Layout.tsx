@@ -10,6 +10,7 @@ import { traceAuth } from '../../lib/authDebug';
 import { AppLoadingState } from '../ui/AppLoadingState';
 import { AppErrorState } from '../ui/AppErrorState';
 import { LiftLogo } from './LiftLogo';
+import { animatedPageClassName, isDemoPresentationMotionEnabled } from '../../lib/animations';
 
 const SIDEBAR_STATE_STORAGE_KEY = 'rental-management:desktop-sidebar-state';
 
@@ -39,6 +40,7 @@ export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
+  const [demoPresentationMotion, setDemoPresentationMotion] = useState(false);
 
   const { isAuthenticated, isLoading, user, logout } = useAuth();
   const { can, canView, defaultPath } = usePermissions();
@@ -106,6 +108,17 @@ export function Layout() {
       return next;
     });
   };
+
+  useEffect(() => {
+    const enabled = isDemoPresentationMotionEnabled(location.search);
+    setDemoPresentationMotion(enabled);
+    document.documentElement.dataset.demoPresentationMotion = String(enabled);
+    document.body.classList.toggle('app-demo-presentation-motion', enabled);
+    return () => {
+      document.documentElement.removeAttribute('data-demo-presentation-motion');
+      document.body.classList.remove('app-demo-presentation-motion');
+    };
+  }, [location.search]);
 
   // Auth + permission guard via useEffect — avoids render-time <Navigate> which
   // conflicts with React 18 concurrent rendering and breaks Outlet updates.
@@ -373,8 +386,11 @@ export function Layout() {
         desktopSidebarMarginClass,
         'pt-14 pb-16 sm:pt-16 sm:pb-0',
         'relative',
+        demoPresentationMotion && 'app-demo-presentation-motion',
       )}>
-        <Outlet key={location.pathname} />
+        <div key={location.pathname} className={animatedPageClassName()}>
+          <Outlet />
+        </div>
         {navigation.state !== 'idle' && (
           <div className={cn(
             'pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm transition-[left] duration-300',

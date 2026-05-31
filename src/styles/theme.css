@@ -42,16 +42,23 @@
   --sidebar-ring: rgba(96, 165, 250, 0.45);
   --motion-duration-instant: 1ms;
   --motion-duration-fast: 160ms;
-  --motion-duration-base: 220ms;
+  --motion-duration-normal: 220ms;
+  --motion-duration-slow: 320ms;
+  --motion-duration-base: var(--motion-duration-normal);
   --motion-duration-relaxed: 260ms;
   --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-smooth: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
-  --motion-modal-scale-from: 0.94;
+  --motion-distance-y-subtle: 10px;
+  --motion-distance-x-subtle: 12px;
+  --motion-scale-subtle-from: 0.98;
+  --motion-modal-scale-from: 0.98;
   --motion-modal-y: 8px;
-  --motion-modal-exit-scale: 0.96;
+  --motion-modal-exit-scale: 0.98;
   --motion-modal-exit-y: 6px;
-  --motion-section-y: 10px;
+  --motion-section-y: var(--motion-distance-y-subtle);
   --motion-drawer-offset: 100%;
 }
 
@@ -463,6 +470,65 @@
     animation: app-toast-in var(--motion-duration-relaxed) var(--motion-ease-entrance) both;
     will-change: opacity, transform;
   }
+
+  .app-page-transition {
+    animation: app-page-in var(--motion-duration-slow) var(--motion-ease-emphasized) both;
+    min-width: 0;
+    will-change: opacity, transform;
+  }
+
+  .app-page-motion-scope [data-slot="card"],
+  .app-animate-card-reveal {
+    animation-name: app-card-reveal;
+    animation-duration: var(--motion-duration-slow);
+    animation-timing-function: var(--motion-ease-emphasized);
+    animation-fill-mode: both;
+    will-change: opacity, transform;
+  }
+
+  .app-page-motion-scope [data-slot="card"]:nth-of-type(2),
+  .app-page-motion-scope [data-slot="table-container"]:nth-of-type(2) {
+    animation-delay: 35ms;
+  }
+
+  .app-page-motion-scope [data-slot="card"]:nth-of-type(3),
+  .app-page-motion-scope [data-slot="table-container"]:nth-of-type(3) {
+    animation-delay: 70ms;
+  }
+
+  .app-page-motion-scope [data-slot="card"]:nth-of-type(4),
+  .app-page-motion-scope [data-slot="table-container"]:nth-of-type(4) {
+    animation-delay: 105ms;
+  }
+
+  .app-page-motion-scope [data-slot="table-container"],
+  .app-animate-list-reveal {
+    animation: app-list-reveal var(--motion-duration-normal) var(--motion-ease-smooth) both;
+  }
+
+  .app-demo-highlight {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .app-demo-highlight::after {
+    border: 1px solid color-mix(in srgb, var(--primary) 54%, white 24%);
+    border-radius: inherit;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--primary) 16%, transparent),
+      0 18px 52px -36px color-mix(in srgb, var(--primary) 70%, transparent);
+    content: "";
+    inset: -1px;
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+    z-index: 1;
+  }
+
+  .app-demo-presentation-motion .app-demo-highlight::after,
+  [data-demo-presentation-motion="true"] .app-demo-highlight::after {
+    animation: app-demo-highlight-pulse 1800ms var(--motion-ease-smooth) 1 both;
+  }
 }
 
 @keyframes app-overlay-in {
@@ -548,6 +614,39 @@
   }
 }
 
+@keyframes app-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-distance-y-subtle));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes app-card-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-distance-y-subtle)) scale(var(--motion-scale-subtle-from));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes app-list-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes app-tabs-in {
   from {
     opacity: 0;
@@ -556,6 +655,30 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes app-demo-highlight-pulse {
+  0% {
+    opacity: 0;
+    box-shadow:
+      0 0 0 0 color-mix(in srgb, var(--primary) 0%, transparent),
+      0 18px 52px -36px color-mix(in srgb, var(--primary) 40%, transparent);
+  }
+  22% {
+    opacity: 1;
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--primary) 13%, transparent),
+      0 20px 58px -32px color-mix(in srgb, var(--primary) 72%, transparent);
+  }
+  72% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0;
+    box-shadow:
+      0 0 0 10px color-mix(in srgb, var(--primary) 0%, transparent),
+      0 18px 52px -36px color-mix(in srgb, var(--primary) 0%, transparent);
   }
 }
 
@@ -606,8 +729,15 @@
   .app-animate-collapse,
   .app-animate-tabs,
   .app-animate-popover,
-  .app-animate-toast {
+  .app-animate-toast,
+  .app-page-transition,
+  .app-page-motion-scope [data-slot="card"],
+  .app-page-motion-scope [data-slot="table-container"],
+  .app-animate-card-reveal,
+  .app-animate-list-reveal,
+  .app-demo-highlight::after {
     animation-duration: var(--motion-duration-instant) !important;
     animation-timing-function: linear !important;
+    animation-delay: 0ms !important;
   }
 }

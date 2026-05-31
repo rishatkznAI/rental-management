@@ -136,3 +136,10 @@ test('dashboard document links open the unsigned documents list', () => {
   assert.match(documentsRouteSource, /isUnsignedDocumentForList/);
   assert.match(documentsRouteSource, /return res\.json\(filterDocumentsForList\(documents, req\.query\)\)/);
 });
+
+test('dashboard unsigned document counters use the document control KPI source', () => {
+  assert.match(dashboardSource, /const unsignedDocumentsCount = documentControl\.kpi\.unsignedDocuments/);
+  assert.match(dashboardSource, /value: String\(unsignedDocumentsCount\)/);
+  assert.match(dashboardSource, /tone: unsignedDocumentsCount > 0 \? 'warning' : 'success'/);
+  assert.doesNotMatch(dashboardSource, /const officeUnsignedDocuments = documents\.filter\(isUnsignedDocument\)/);
+});

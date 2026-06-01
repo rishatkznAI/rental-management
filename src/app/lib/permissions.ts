@@ -15,6 +15,7 @@
 
 import { useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { isCrmEnabled } from './features';
 import { MECHANIC_ROLES, WARRANTY_MECHANIC_ROLE, normalizeUserRole } from './userStorage';
 
 // ── Типы ─────────────────────────────────────────────────────────────────────
@@ -307,6 +308,7 @@ export function usePermissions() {
 
   /** Проверяет, разрешено ли конкретное действие в разделе */
   const can = useCallback((action: Action, section: Section): boolean => {
+    if (section === 'crm' && !isCrmEnabled) return false;
     return perms[section]?.includes(action) ?? false;
   }, [perms]);
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import { useAuth } from '../contexts/AuthContext';
+import { isCrmEnabled } from '../lib/features';
 import { usePermissions } from '../lib/permissions';
 import { staffService } from '../services/staff.service';
 import { useClientsList } from '../hooks/useClients';
@@ -365,6 +366,10 @@ function getCrmKpiRange(period: 'today' | 'week' | 'month' = 'today') {
 }
 
 export default function CRM() {
+  if (!isCrmEnabled) {
+    return <Navigate to="/sales" replace />;
+  }
+
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const { can } = usePermissions();

@@ -319,17 +319,25 @@ test('equipment detail editor saves the card through PATCH and keeps modal state
   assert.doesNotMatch(fieldSelectSource, /<SelectContent/);
 });
 
-test('sale deal quick action renders only with a safe configured route', () => {
+test('sale deal quick action is hidden by default and renders only when CRM is enabled with a safe route', () => {
   const withoutRoute = buildEquipmentQuickActions({
     equipment: { id: 'EQ-sale', inventoryNumber: 'INV-sale', status: 'available', saleMode: true },
     can: allowAll,
   });
   assert.equal(withoutRoute.some(action => action.id === 'equipment-sale-deal'), false);
 
+  const disabledCrm = buildEquipmentQuickActions({
+    equipment: { id: 'EQ-sale', inventoryNumber: 'INV-sale', status: 'available', saleMode: true },
+    can: allowAll,
+    crmDealsRoute: '/crm',
+  });
+  assert.equal(disabledCrm.some(action => action.id === 'equipment-sale-deal'), false);
+
   const withRoute = buildEquipmentQuickActions({
     equipment: { id: 'EQ-sale', inventoryNumber: 'INV-sale', status: 'available', saleMode: true },
     can: allowAll,
     crmDealsRoute: '/crm',
+    crmEnabled: true,
   });
   const dealAction = withRoute.find(action => action.id === 'equipment-sale-deal');
   assert.equal(dealAction?.label, 'Создать сделку');

@@ -112,8 +112,8 @@ const KNOWLEDGE_BASE_SECTIONS: KnowledgeSectionMeta[] = [
   {
     id: 'scripts_standards',
     title: 'Скрипты и стандарты',
-    subtitle: 'Скрипты переговоров, CRM-дисциплина, стандарты работы и коммерческих предложений.',
-    helper: 'Скрипты, CRM и стандарты',
+    subtitle: 'Скрипты переговоров, стандарты работы и коммерческих предложений.',
+    helper: 'Скрипты и стандарты',
     icon: FileText,
     iconClassName: 'bg-orange-400/12 text-orange-300',
     activeCardClassName: 'border-orange-300/50 bg-orange-400/5',
@@ -250,7 +250,7 @@ function getModuleSectionId(module: KnowledgeBaseModule): KnowledgeBaseSectionId
     return 'equipment_review';
   }
 
-  if (/(скрипт|стандарт|переговор|возраж|crm|дисциплин|кп|коммерч)/.test(text)) {
+  if (/(скрипт|стандарт|переговор|возраж|дисциплин|кп|коммерч)/.test(text)) {
     return 'scripts_standards';
   }
 
@@ -1361,7 +1361,7 @@ export default function KnowledgeBase() {
                         <Input
                           value={editorState.category}
                           onChange={event => setEditorState(current => ({ ...current, category: event.target.value }))}
-                          placeholder="Аренда, Продажи, CRM, Общее"
+                          placeholder="Аренда, Продажи, Общее"
                           autoComplete="off"
                         />
                       </div>
@@ -1530,7 +1530,7 @@ export default function KnowledgeBase() {
                               ...current,
                               question: event.target.value,
                             }))}
-                            placeholder="Например, когда менеджер должен фиксировать следующий шаг в CRM?"
+                            placeholder="Например, когда менеджер должен фиксировать следующий рабочий шаг?"
                             autoComplete="off"
                           />
                         </div>

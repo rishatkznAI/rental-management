@@ -84,7 +84,7 @@ export function buildClientQuickActions({ client, can, role } = {}) {
   return actions;
 }
 
-export function buildEquipmentQuickActions({ equipment, can, currentRental, crmDealsRoute } = {}) {
+export function buildEquipmentQuickActions({ equipment, can, currentRental, crmDealsRoute, crmEnabled = false } = {}) {
   const equipmentId = safeText(equipment?.id);
   const equipmentInv = safeText(equipment?.inventoryNumber);
   const context = { equipmentId, equipmentInv };
@@ -114,7 +114,7 @@ export function buildEquipmentQuickActions({ equipment, can, currentRental, crmD
       });
     }
     actions.push({ id: 'equipment-sale-photo', label: 'Добавить фото' });
-    if (safeCrmDealsRoute && canDo(can, 'view', 'crm')) {
+    if (crmEnabled && safeCrmDealsRoute && canDo(can, 'view', 'crm')) {
       actions.push({ id: 'equipment-sale-deal', label: 'Создать сделку', to: withQuery(safeCrmDealsRoute, context) });
     }
     if (canDo(can, 'edit', 'equipment')) {

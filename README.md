@@ -3,6 +3,10 @@
 
 Frontend on React/Vite and backend on Node/Express for an equipment rental management system.
 
+## Product modules
+
+The CRM module remains in the codebase and data model for compatibility and future development. In the current product version it is fully disabled by default (`VITE_CRM_ENABLED` is not enabled): CRM sections, CRM deals, CRM activities, calls, and CRM visits are not shown in the user interface or used in day-to-day workflows. Service field trips for mechanics are part of the Service module and continue to work separately from CRM.
+
 ## Project structure
 
 - `src/` — frontend application

@@ -65,6 +65,7 @@ import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { api, API_BASE_URL, ApiError, getToken } from '../lib/api';
 import { frontendBuildInfo } from '../lib/build-info';
+import { isCrmEnabled } from '../lib/features';
 import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import {
@@ -192,6 +193,11 @@ export default function Settings() {
   React.useEffect(() => {
     setSidebarGroups(normalizeSidebarGroups(sidebarGroupSetting?.value));
   }, [sidebarGroupSetting]);
+
+  const visibleSidebarOrder = React.useMemo(
+    () => isCrmEnabled ? sidebarOrder : sidebarOrder.filter(section => section !== 'crm'),
+    [sidebarOrder],
+  );
 
   const moveSidebarSection = React.useCallback((section: (typeof DEFAULT_SIDEBAR_ORDER)[number], direction: -1 | 1) => {
     setSidebarOrder(current => {
@@ -523,7 +529,7 @@ export default function Settings() {
               <CardContent className="space-y-6">
                 <div className="grid gap-6 lg:grid-cols-2">
                   {SIDEBAR_NAV_GROUPS.map(group => {
-                    const items = sidebarOrder.filter(section =>
+                    const items = visibleSidebarOrder.filter(section =>
                       sidebarGroups[section] === group.id,
                     );
                     if (!items.length) return null;

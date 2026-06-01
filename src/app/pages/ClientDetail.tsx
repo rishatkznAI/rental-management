@@ -32,6 +32,7 @@ import { useCrmActivities } from '../hooks/useCrmActivities';
 import { useClientContractsList, useClientObjectsList, useCreateClientContract, useCreateClientObject, useUpdateClientObject } from '../hooks/useClientRelations';
 import type { Client, ClientStatus } from '../types';
 import { ApiError } from '../lib/api';
+import { isCrmEnabled } from '../lib/features';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { appendAuditHistory, buildFieldDiffHistory } from '../lib/entity-history';
@@ -446,7 +447,7 @@ export default function ClientDetail() {
   const updateClientObject = useUpdateClientObject();
   const createClientContract = useCreateClientContract();
   const { data: debtPlanResponse } = useDebtCollectionPlans();
-  const { data: crmActivities = [] } = useCrmActivities(client ? { clientId: client.id } : undefined, Boolean(client && can('view', 'crm')));
+  const { data: crmActivities = [] } = useCrmActivities(client ? { clientId: client.id } : undefined, Boolean(isCrmEnabled && client && can('view', 'crm')));
   const debtCollectionPlans = debtPlanResponse?.plans ?? [];
   const clientNameKey = normalizeClientName(client?.company);
   const clientRentals = ganttRentals.filter(r =>
@@ -573,13 +574,15 @@ export default function ClientDetail() {
     return files.slice(0, 3);
   }, [client, client360.documents.latest]);
   const recentActivity = useMemo(() => {
-    const crmRows = crmActivities.slice(0, 3).map(activity => ({
-      id: activity.id,
-      title: `${activity.type === 'call' ? 'Звонок' : activity.type === 'visit' ? 'Выезд' : activity.type === 'commercial_offer' ? 'КП' : 'CRM'}: ${activity.result || 'без результата'}`,
-      meta: [activity.managerName, formatDateTime(activity.occurredAt), activity.nextAction ? `следующий шаг: ${activity.nextAction}` : ''].filter(Boolean).join(' · '),
-      icon: activity.type === 'visit' ? MapPinned : Phone,
-      tone: activity.weakNextStep ? 'amber' : 'blue',
-    }));
+    const crmRows = isCrmEnabled
+      ? crmActivities.slice(0, 3).map(activity => ({
+        id: activity.id,
+        title: `${activity.type === 'call' ? 'Звонок' : activity.type === 'visit' ? 'Выезд' : activity.type === 'commercial_offer' ? 'КП' : 'CRM'}: ${activity.result || 'без результата'}`,
+        meta: [activity.managerName, formatDateTime(activity.occurredAt), activity.nextAction ? `следующий шаг: ${activity.nextAction}` : ''].filter(Boolean).join(' · '),
+        icon: activity.type === 'visit' ? MapPinned : Phone,
+        tone: activity.weakNextStep ? 'amber' : 'blue',
+      }))
+      : [];
     if (crmRows.length > 0) return crmRows;
     const history = [...(client?.history || [])]
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
@@ -1096,7 +1099,7 @@ export default function ClientDetail() {
                   </Button>
                 </Link>
               )}
-              {can('create', 'crm') && (
+              {isCrmEnabled && can('create', 'crm') && (
                 <>
                   <Link to={`/crm?activity=call&clientId=${encodeURIComponent(client.id)}`}>
                     <Button variant="secondary">

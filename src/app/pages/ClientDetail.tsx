@@ -28,6 +28,7 @@ import { usePaymentAllocationsList, usePaymentsList } from '../hooks/usePayments
 import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
+import { useCrmActivities } from '../hooks/useCrmActivities';
 import { useClientContractsList, useClientObjectsList, useCreateClientContract, useCreateClientObject, useUpdateClientObject } from '../hooks/useClientRelations';
 import type { Client, ClientStatus } from '../types';
 import { ApiError } from '../lib/api';
@@ -445,6 +446,7 @@ export default function ClientDetail() {
   const updateClientObject = useUpdateClientObject();
   const createClientContract = useCreateClientContract();
   const { data: debtPlanResponse } = useDebtCollectionPlans();
+  const { data: crmActivities = [] } = useCrmActivities(client ? { clientId: client.id } : undefined, Boolean(client && can('view', 'crm')));
   const debtCollectionPlans = debtPlanResponse?.plans ?? [];
   const clientNameKey = normalizeClientName(client?.company);
   const clientRentals = ganttRentals.filter(r =>
@@ -571,6 +573,14 @@ export default function ClientDetail() {
     return files.slice(0, 3);
   }, [client, client360.documents.latest]);
   const recentActivity = useMemo(() => {
+    const crmRows = crmActivities.slice(0, 3).map(activity => ({
+      id: activity.id,
+      title: `${activity.type === 'call' ? 'Звонок' : activity.type === 'visit' ? 'Выезд' : activity.type === 'commercial_offer' ? 'КП' : 'CRM'}: ${activity.result || 'без результата'}`,
+      meta: [activity.managerName, formatDateTime(activity.occurredAt), activity.nextAction ? `следующий шаг: ${activity.nextAction}` : ''].filter(Boolean).join(' · '),
+      icon: activity.type === 'visit' ? MapPinned : Phone,
+      tone: activity.weakNextStep ? 'amber' : 'blue',
+    }));
+    if (crmRows.length > 0) return crmRows;
     const history = [...(client?.history || [])]
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 3)
@@ -589,7 +599,7 @@ export default function ClientDetail() {
       icon: TrendingUp,
       tone: 'green',
     }));
-  }, [client?.history, client360.rentals.latest]);
+  }, [client?.history, client360.rentals.latest, crmActivities]);
 
   // Persist changes — optimistic + server PATCH
   const persist = useCallback((updated: Client) => {
@@ -1085,6 +1095,22 @@ export default function ClientDetail() {
                     Новая аренда
                   </Button>
                 </Link>
+              )}
+              {can('create', 'crm') && (
+                <>
+                  <Link to={`/crm?activity=call&clientId=${encodeURIComponent(client.id)}`}>
+                    <Button variant="secondary">
+                      <Phone className="h-4 w-4" />
+                      Добавить звонок
+                    </Button>
+                  </Link>
+                  <Link to={`/crm?activity=visit&clientId=${encodeURIComponent(client.id)}`}>
+                    <Button variant="secondary">
+                      <MapPinned className="h-4 w-4" />
+                      Добавить выезд
+                    </Button>
+                  </Link>
+                </>
               )}
               <Button variant="secondary" size="icon" onClick={() => window.print()} title="Печать">
                 <Printer className="h-4 w-4" />

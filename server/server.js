@@ -134,6 +134,7 @@ const {
   shouldProcessWebhookUpdate,
 } = require('./routes/bot');
 const { registerCrudRoutes } = require('./routes/crud');
+const { registerCrmActivityRoutes } = require('./routes/crm-activities');
 const { registerDebtCollectionPlanRoutes } = require('./routes/debt-collection-plans');
 const { registerDeliveryRoutes } = require('./routes/deliveries');
 const { registerDocumentRoutes } = require('./routes/documents');
@@ -543,6 +544,7 @@ const WRITE_PERMISSIONS = {
   payroll_adjustments: ['Администратор'],
   payroll_audit_events: ['Администратор'],
   crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  crm_activities: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   users:          ['Администратор'],
   shipping_photos:['Администратор', ...MECHANIC_ROLES, 'Менеджер по аренде'],
   owners:         ['Администратор'],
@@ -598,6 +600,7 @@ const READ_PERMISSIONS = {
   payroll_adjustments: ['Администратор'],
   payroll_audit_events: ['Администратор'],
   crm_deals:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  crm_activities: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер', HEAD_ROLE],
   users:          ['Администратор'],
   shipping_photos:['Администратор', 'Менеджер по аренде', 'Офис-менеджер', HEAD_ROLE, ...MECHANIC_ROLES],
   owners:         ['Администратор', 'Инвестор'],
@@ -979,6 +982,7 @@ const ID_PREFIXES = {
   payroll_adjustments: 'PADJ',
   payroll_audit_events: 'PAE',
   crm_deals:      'CRM',
+  crm_activities: 'CA',
   deliveries:     'DL',
   delivery_carriers: 'DC',
   users:          'U',
@@ -1310,6 +1314,14 @@ apiRouter.use(registerManagerMyPlanRoutes({
   writeData,
   requireAuth,
   getRoleAccessSummary: roleAccessSummary,
+  generateId,
+  nowIso,
+}));
+
+apiRouter.use(registerCrmActivityRoutes({
+  readData,
+  writeData,
+  requireAuth,
   generateId,
   nowIso,
 }));

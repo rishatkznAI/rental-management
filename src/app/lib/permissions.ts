@@ -249,6 +249,7 @@ export function pathToSection(pathname: string): Section | null {
   if (pathname.startsWith('/equipment'))      return 'equipment';
   if (pathname.startsWith('/gsm'))            return 'gsm';
   if (pathname.startsWith('/knowledge-base')) return 'knowledge_base';
+  if (pathname.startsWith('/crm'))            return 'crm';
   if (pathname.startsWith('/sales'))          return 'sales';
   if (pathname.startsWith('/deliveries'))     return 'deliveries';
   if (pathname.startsWith('/rentals'))        return 'rentals';
@@ -277,6 +278,7 @@ const SECTION_PATHS: Array<[Section, string]> = [
   ['equipment',  '/equipment'],
   ['gsm',        '/gsm'],
   ['knowledge_base', '/knowledge-base'],
+  ['crm',        '/crm'],
   ['sales',      '/sales'],
   ['deliveries', '/deliveries'],
   ['rentals',    '/rentals'],

@@ -57,6 +57,7 @@ const JSON_COLLECTIONS = [
   'payroll_adjustments',
   'payroll_audit_events',
   'crm_deals',
+  'crm_activities',
   'deliveries',
   'delivery_carriers',
   'users',

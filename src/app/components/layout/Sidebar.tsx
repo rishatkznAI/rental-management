@@ -27,6 +27,7 @@ import {
   WalletCards,
   ListChecks,
   Banknote,
+  BriefcaseBusiness,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -61,6 +62,7 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Техника',      href: '/equipment', icon: Truck,           section: 'equipment'  },
   { name: 'GSM',          href: '/gsm',       icon: MapPinned,       section: 'gsm'        },
   { name: 'База знаний',  href: '/knowledge-base', icon: GraduationCap, section: 'knowledge_base' },
+  { name: 'CRM',          href: '/crm',       icon: BriefcaseBusiness, section: 'crm'        },
   { name: 'Продажи',      href: '/sales',     icon: BadgeDollarSign, section: 'sales'      },
   { name: 'Доставка',     href: '/deliveries',icon: Route,           section: 'deliveries' },
   { name: 'Аренды',       href: '/rentals',   icon: FileText,        section: 'rentals'    },

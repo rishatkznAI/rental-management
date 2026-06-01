@@ -1,4 +1,5 @@
 import React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -7,6 +8,8 @@ import {
   Building2,
   CircleDollarSign,
   Clock3,
+  FileText,
+  MapPin,
   Pencil,
   Phone,
   Plus,
@@ -46,7 +49,8 @@ import {
   useDeleteCrmDeal,
   useUpdateCrmDeal,
 } from '../hooks/useCrmDeals';
-import type { AuditEntry, Client, CrmDeal, CrmDealPriority, CrmDealStage, CrmPipelineType } from '../types';
+import { useCreateCrmActivity, useCrmActivities, useCrmManagerKpi } from '../hooks/useCrmActivities';
+import type { AuditEntry, Client, CrmActivityType, CrmDeal, CrmDealPriority, CrmDealStage, CrmPipelineType } from '../types';
 
 type ManagerOption = {
   id: string;
@@ -78,6 +82,17 @@ type DealFormState = {
 };
 
 type CrmViewFilter = 'all' | 'open' | 'won' | 'lost';
+type ActivityFormState = {
+  type: CrmActivityType;
+  clientId: string;
+  dealId: string;
+  result: string;
+  comment: string;
+  nextAction: string;
+  nextActionAt: string;
+  occurredAt: string;
+  address: string;
+};
 
 type StageDefinition = {
   id: CrmDealStage;
@@ -88,6 +103,23 @@ type StageDefinition = {
 
 const NONE_VALUE = '__none__';
 const ALL_VALUE = '__all__';
+const ACTIVITY_TYPE_LABELS: Record<CrmActivityType, string> = {
+  call: 'Звонок',
+  visit: 'Выезд',
+  meeting: 'Встреча',
+  message: 'Сообщение',
+  email: 'Email',
+  commercial_offer: 'КП',
+  task: 'Задача',
+};
+
+const ACTIVITY_RESULT_OPTIONS = [
+  { value: 'completed', label: 'Успешно' },
+  { value: 'no_answer', label: 'Не дозвонились' },
+  { value: 'scheduled', label: 'Запланировано' },
+  { value: 'sent', label: 'Отправлено' },
+  { value: 'other', label: 'Другое' },
+];
 
 const PIPELINE_CONFIG: Record<CrmPipelineType, {
   label: string;
@@ -257,6 +289,20 @@ function makeEmptyForm(pipeline: CrmPipelineType, userId?: string) {
   };
 }
 
+function makeActivityForm(type: CrmActivityType = 'call', deal?: CrmDeal | null): ActivityFormState {
+  return {
+    type,
+    clientId: deal?.clientId || NONE_VALUE,
+    dealId: deal?.id || NONE_VALUE,
+    result: type === 'task' ? 'scheduled' : 'completed',
+    comment: '',
+    nextAction: deal?.nextAction || '',
+    nextActionAt: deal?.nextActionDate || '',
+    occurredAt: new Date().toISOString().slice(0, 16),
+    address: deal?.location || '',
+  };
+}
+
 function buildFormFromDeal(deal: CrmDeal): DealFormState {
   return {
     pipeline: deal.pipeline,
@@ -295,9 +341,12 @@ function isOverdueNextAction(deal: CrmDeal) {
 
 export default function CRM() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { can } = usePermissions();
   const { data: deals = [], isLoading } = useCrmDealsList();
   const { data: clients = [] } = useClientsList();
+  const { data: activities = [] } = useCrmActivities(undefined, can('view', 'crm'));
+  const { data: managerKpi } = useCrmManagerKpi(undefined, can('view', 'crm'));
   const { data: managers = [] } = useQuery<ManagerOption[]>({
     queryKey: ['crm-managers'],
     queryFn: staffService.getManagerOptions,
@@ -306,8 +355,10 @@ export default function CRM() {
   const createDeal = useCreateCrmDeal();
   const updateDeal = useUpdateCrmDeal();
   const deleteDeal = useDeleteCrmDeal();
+  const createActivity = useCreateCrmActivity();
 
   const canCreateDeal = can('create', 'crm');
+  const canCreateActivity = can('create', 'crm');
   const canEditDeal = can('edit', 'crm');
   const canDeleteDeal = can('delete', 'crm');
   const allowedPipelines = getAllowedPipelines(user?.role);
@@ -317,8 +368,11 @@ export default function CRM() {
   const [managerFilter, setManagerFilter] = React.useState(ALL_VALUE);
   const [viewFilter, setViewFilter] = React.useState<CrmViewFilter>('all');
   const [sheetOpen, setSheetOpen] = React.useState(false);
+  const [activitySheetOpen, setActivitySheetOpen] = React.useState(false);
   const [editingDeal, setEditingDeal] = React.useState<CrmDeal | null>(null);
   const [form, setForm] = React.useState<DealFormState>(makeEmptyForm(pipeline, user?.id));
+  const [activityForm, setActivityForm] = React.useState<ActivityFormState>(makeActivityForm('call'));
+  const [activityError, setActivityError] = React.useState('');
   const [formError, setFormError] = React.useState('');
   const [draggedDealId, setDraggedDealId] = React.useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = React.useState<CrmDealStage | null>(null);
@@ -329,6 +383,17 @@ export default function CRM() {
       setPipeline(nextAllowed[0] || 'rental');
     }
   }, [pipeline, user?.role]);
+
+  React.useEffect(() => {
+    const activity = searchParams.get('activity') as CrmActivityType | null;
+    if (!activity || !(activity in ACTIVITY_TYPE_LABELS)) return;
+    const clientId = searchParams.get('clientId') || NONE_VALUE;
+    const dealId = searchParams.get('dealId') || NONE_VALUE;
+    setActivityForm({ ...makeActivityForm(activity), clientId, dealId });
+    setActivityError('');
+    setActivitySheetOpen(true);
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const managerOptions = managers
     .filter((item) => item.status !== 'Неактивен')
@@ -344,6 +409,12 @@ export default function CRM() {
       }
       return true;
     });
+  const recentActivities = activities
+    .filter((item) => !item.dealId || scopedDeals.some((deal) => deal.id === item.dealId))
+    .slice()
+    .sort((left, right) => String(right.occurredAt || right.createdAt).localeCompare(String(left.occurredAt || left.createdAt)))
+    .slice(0, 8);
+  const managerKpiRows = managerKpi?.rows ?? [];
 
   function resetForm(nextPipeline = pipeline) {
     setForm(makeEmptyForm(nextPipeline, user?.id));
@@ -356,6 +427,12 @@ export default function CRM() {
     setSheetOpen(true);
   }
 
+  function openCreateActivity(type: CrmActivityType, deal?: CrmDeal | null) {
+    setActivityForm(makeActivityForm(type, deal || null));
+    setActivityError('');
+    setActivitySheetOpen(true);
+  }
+
   function openEditDeal(deal: CrmDeal) {
     setEditingDeal(deal);
     setForm(buildFormFromDeal(deal));
@@ -366,6 +443,34 @@ export default function CRM() {
   function closeSheet() {
     setSheetOpen(false);
     resetForm(pipeline);
+  }
+
+  async function handleSaveActivity() {
+    if ((activityForm.type === 'call' || activityForm.type === 'visit') && activityForm.clientId === NONE_VALUE) {
+      setActivityError('Для звонка или выезда выберите клиента.');
+      return;
+    }
+    if ((activityForm.type === 'call' || activityForm.type === 'visit') && !activityForm.result.trim()) {
+      setActivityError('Укажите результат.');
+      return;
+    }
+    if (activityForm.type === 'call' && !activityForm.comment.trim() && !activityForm.nextAction.trim()) {
+      setActivityError('Для звонка нужен комментарий или следующий шаг.');
+      return;
+    }
+    await createActivity.mutateAsync({
+      type: activityForm.type,
+      clientId: activityForm.clientId === NONE_VALUE ? undefined : activityForm.clientId,
+      dealId: activityForm.dealId === NONE_VALUE ? undefined : activityForm.dealId,
+      result: activityForm.result,
+      comment: activityForm.comment,
+      nextAction: activityForm.nextAction,
+      nextActionAt: activityForm.nextActionAt || undefined,
+      occurredAt: activityForm.occurredAt ? new Date(activityForm.occurredAt).toISOString() : undefined,
+      address: activityForm.address || undefined,
+    });
+    toast.success('Активность сохранена');
+    setActivitySheetOpen(false);
   }
 
   function handleClientChange(value: string) {
@@ -594,6 +699,97 @@ export default function CRM() {
             {PIPELINE_CONFIG[pipeline].createLabel}
           </Button>
         )}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Card>
+          <CardHeader className="border-b">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle>Активность менеджеров</CardTitle>
+                <CardDescription>
+                  Звонки, выезды, КП и просроченные следующие шаги без доступа к финансам.
+                </CardDescription>
+              </div>
+              {canCreateActivity && (
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" data-testid="crm-add-call" onClick={() => openCreateActivity('call')}>
+                    <Phone className="h-4 w-4" />
+                    Звонок
+                  </Button>
+                  <Button variant="secondary" data-testid="crm-add-visit" onClick={() => openCreateActivity('visit')}>
+                    <MapPin className="h-4 w-4" />
+                    Выезд
+                  </Button>
+                  <Button variant="secondary" onClick={() => openCreateActivity('task')}>
+                    <Clock3 className="h-4 w-4" />
+                    Задача
+                  </Button>
+                  <Button variant="secondary" onClick={() => openCreateActivity('commercial_offer')}>
+                    <FileText className="h-4 w-4" />
+                    КП
+                  </Button>
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {managerKpiRows.slice(0, 4).map((row) => (
+                <div key={row.managerId} className="rounded-xl border bg-background p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 truncate text-sm font-semibold">{row.managerName}</div>
+                    <Badge variant={row.activityRequired ? 'warning' : 'success'}>
+                      {row.activityRequired ? 'Норма активна' : 'Без давления'}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <div><div className="text-muted-foreground">Звонки</div><div className="font-bold">{row.qualifiedCalls} / {row.callsTarget || '—'}</div></div>
+                    <div><div className="text-muted-foreground">Клиенты</div><div className="font-bold">{row.uniqueCallClients}</div></div>
+                    <div><div className="text-muted-foreground">Выезды</div><div className="font-bold">{row.visits} / {row.visitsTarget || '—'}</div></div>
+                    <div><div className="text-muted-foreground">КП</div><div className="font-bold">{row.commercialOffers}</div></div>
+                  </div>
+                  {(row.overdueNextActions > 0 || row.warning) && (
+                    <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                      {row.warning || `Просрочено следующих шагов: ${row.overdueNextActions}`}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {managerKpiRows.length === 0 && (
+                <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground md:col-span-2 xl:col-span-4">
+                  KPI появятся после первых звонков, выездов или КП.
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="border-b">
+            <CardTitle>Последние касания</CardTitle>
+            <CardDescription>Слабые действия подсвечиваются, если нет следующего шага.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-4">
+            {recentActivities.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">Пока нет CRM-активностей.</div>
+            ) : recentActivities.map((item) => (
+              <div key={item.id} className="rounded-xl border bg-background px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">{ACTIVITY_TYPE_LABELS[item.type]}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {[item.clientName, item.dealTitle, formatDateTime(item.occurredAt)].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                  <Badge variant={item.weakNextStep ? 'warning' : 'default'}>{item.result || '—'}</Badge>
+                </div>
+                {item.comment && <div className="mt-2 line-clamp-2 text-sm text-muted-foreground">{item.comment}</div>}
+                {item.nextAction && <div className="mt-2 text-xs font-medium text-foreground">Следующий шаг: {item.nextAction}</div>}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       </div>
 
       <Tabs value={pipeline} onValueChange={(value) => setPipeline(value as CrmPipelineType)} className="space-y-4">
@@ -864,6 +1060,47 @@ export default function CRM() {
                                   </div>
 
                                 </div>
+
+                                {canCreateActivity && (
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
+                                      className="h-8 px-2"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openCreateActivity('call', deal);
+                                      }}
+                                    >
+                                      <Phone className="h-3.5 w-3.5" />
+                                      Звонок
+                                    </Button>
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
+                                      className="h-8 px-2"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openCreateActivity('visit', deal);
+                                      }}
+                                    >
+                                      <MapPin className="h-3.5 w-3.5" />
+                                      Выезд
+                                    </Button>
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
+                                      className="h-8 px-2"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openCreateActivity('commercial_offer', deal);
+                                      }}
+                                    >
+                                      <FileText className="h-3.5 w-3.5" />
+                                      КП
+                                    </Button>
+                                  </div>
+                                )}
 
                                 {canDeleteDeal && (
                                   <div className="mt-2 flex justify-end">
@@ -1181,6 +1418,122 @@ export default function CRM() {
             </Button>
             <Button onClick={handleSaveDeal} disabled={createDeal.isPending || updateDeal.isPending}>
               {editingDeal ? 'Сохранить сделку' : 'Создать сделку'}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={activitySheetOpen} onOpenChange={setActivitySheetOpen}>
+        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
+          <SheetHeader>
+            <SheetTitle>{ACTIVITY_TYPE_LABELS[activityForm.type]}</SheetTitle>
+            <SheetDescription>Зафиксируйте результат контакта и следующий шаг.</SheetDescription>
+          </SheetHeader>
+          <div className="space-y-4 px-4 pb-4">
+            {activityError && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
+                {activityError}
+              </div>
+            )}
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Тип</label>
+                <Select value={activityForm.type} onValueChange={(value) => setActivityForm((current) => ({ ...makeActivityForm(value as CrmActivityType), clientId: current.clientId, dealId: current.dealId }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(ACTIVITY_TYPE_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Когда</label>
+                <Input
+                  type="datetime-local"
+                  value={activityForm.occurredAt}
+                  onChange={(event) => setActivityForm((current) => ({ ...current, occurredAt: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Клиент</label>
+                <Select value={activityForm.clientId} onValueChange={(value) => setActivityForm((current) => ({ ...current, clientId: value }))}>
+                  <SelectTrigger data-testid="crm-activity-client-trigger"><SelectValue placeholder="Выберите клиента" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE_VALUE}>Не выбран</SelectItem>
+                    {clients.map((client: Client) => (
+                      <SelectItem key={client.id} value={client.id}>{client.company}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Сделка</label>
+                <Select value={activityForm.dealId} onValueChange={(value) => setActivityForm((current) => ({ ...current, dealId: value }))}>
+                  <SelectTrigger><SelectValue placeholder="Без сделки" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE_VALUE}>Без сделки</SelectItem>
+                    {scopedDeals.map((deal) => (
+                      <SelectItem key={deal.id} value={deal.id}>{deal.title}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Результат</label>
+                <Select value={activityForm.result} onValueChange={(value) => setActivityForm((current) => ({ ...current, result: value }))}>
+                  <SelectTrigger data-testid="crm-activity-result-trigger"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {ACTIVITY_RESULT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Следующий шаг до</label>
+                <Input
+                  type="date"
+                  value={activityForm.nextActionAt}
+                  onChange={(event) => setActivityForm((current) => ({ ...current, nextActionAt: event.target.value }))}
+                />
+              </div>
+              {activityForm.type === 'visit' && (
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-sm font-medium">Адрес / объект</label>
+                  <Input
+                    data-testid="crm-activity-address"
+                    value={activityForm.address}
+                    onChange={(event) => setActivityForm((current) => ({ ...current, address: event.target.value }))}
+                    placeholder="Адрес стройки или объект клиента"
+                  />
+                </div>
+              )}
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium">Комментарий</label>
+                <Textarea
+                  data-testid="crm-activity-comment"
+                  className="min-h-24"
+                  value={activityForm.comment}
+                  onChange={(event) => setActivityForm((current) => ({ ...current, comment: event.target.value }))}
+                  placeholder="Итог разговора, выезда или КП"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium">Следующий шаг</label>
+                <Input
+                  data-testid="crm-activity-next-action"
+                  value={activityForm.nextAction}
+                  onChange={(event) => setActivityForm((current) => ({ ...current, nextAction: event.target.value }))}
+                  placeholder="Позвонить, отправить КП, согласовать выезд"
+                />
+              </div>
+            </div>
+          </div>
+          <SheetFooter className="border-t">
+            <Button variant="outline" onClick={() => setActivitySheetOpen(false)}>Отмена</Button>
+            <Button data-testid="crm-activity-save" onClick={handleSaveActivity} disabled={createActivity.isPending}>
+              {createActivity.isPending ? 'Сохраняем...' : 'Сохранить активность'}
             </Button>
           </SheetFooter>
         </SheetContent>

@@ -2104,6 +2104,50 @@ export interface CrmDeal {
   history?: AuditEntry[];
 }
 
+export type CrmActivityType =
+  | 'call'
+  | 'visit'
+  | 'meeting'
+  | 'message'
+  | 'email'
+  | 'commercial_offer'
+  | 'task';
+
+export interface CrmActivity {
+  id: string;
+  type: CrmActivityType;
+  managerId: string;
+  managerName?: string;
+  clientId: string;
+  clientName?: string;
+  contactId?: string;
+  dealId?: string;
+  dealTitle?: string;
+  rentalId?: string;
+  rentalLabel?: string;
+  objectId?: string;
+  address?: string;
+  occurredAt: string;
+  result: string;
+  comment: string;
+  nextAction: string;
+  nextActionAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+  updatedBy?: string;
+  incomplete?: boolean;
+  weakNextStep?: boolean;
+}
+
+export type CrmActivityInput = Partial<Omit<CrmActivity, 'id' | 'createdAt' | 'updatedAt'>> & {
+  type: CrmActivityType;
+  clientId?: string;
+  result?: string;
+  comment?: string;
+  nextAction?: string;
+};
+
 // ── База знаний ──────────────────────────────────────────────────────────────
 
 export type KnowledgeBaseAudience = 'rental' | 'sales' | 'all';

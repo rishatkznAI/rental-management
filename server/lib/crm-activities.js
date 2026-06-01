@@ -20,13 +20,40 @@ function number(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function dateKey(value) {
+function timestampMs(value) {
   const raw = text(value);
-  if (!raw) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (!raw) return NaN;
   const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return '';
-  return parsed.toISOString().slice(0, 10);
+  return parsed.getTime();
+}
+
+function rangeBoundaryMs(value) {
+  const raw = text(value);
+  if (!raw) return NaN;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return Date.parse(`${raw}T00:00:00.000Z`);
+  return timestampMs(raw);
+}
+
+function activityTimeMs(item) {
+  return timestampMs(item?.occurredAt || item?.createdAt);
+}
+
+function activitySortKey(item) {
+  const occurred = activityTimeMs(item);
+  const created = timestampMs(item?.createdAt);
+  return {
+    occurred: Number.isFinite(occurred) ? occurred : Number.MAX_SAFE_INTEGER,
+    created: Number.isFinite(created) ? created : Number.MAX_SAFE_INTEGER,
+    id: text(item?.id),
+  };
+}
+
+function compareActivitiesAsc(left, right) {
+  const a = activitySortKey(left);
+  const b = activitySortKey(right);
+  return a.occurred - b.occurred
+    || a.created - b.created
+    || a.id.localeCompare(b.id);
 }
 
 function isoOrNow(value, fallback) {
@@ -217,8 +244,8 @@ function normalizeActivity(input, { existing = null, user, nowIso, generateId, l
 }
 
 function filterActivities(items, query = {}) {
-  const dateFrom = dateKey(query.dateFrom);
-  const dateTo = dateKey(query.dateTo);
+  const dateFrom = rangeBoundaryMs(query.dateFrom);
+  const dateTo = rangeBoundaryMs(query.dateTo);
   return items.filter(item => {
     if (item.deletedAt) return false;
     if (query.managerId && text(item.managerId) !== text(query.managerId)) return false;
@@ -226,21 +253,40 @@ function filterActivities(items, query = {}) {
     if (query.dealId && text(item.dealId) !== text(query.dealId)) return false;
     if (query.type && text(item.type) !== text(query.type)) return false;
     if (query.result && text(item.result) !== text(query.result)) return false;
-    const key = dateKey(item.occurredAt || item.createdAt);
-    if (dateFrom && key < dateFrom) return false;
-    if (dateTo && key > dateTo) return false;
+    const occurredAt = activityTimeMs(item);
+    if (Number.isFinite(dateFrom) && (!Number.isFinite(occurredAt) || occurredAt < dateFrom)) return false;
+    if (Number.isFinite(dateTo) && (!Number.isFinite(occurredAt) || occurredAt >= dateTo)) return false;
     return true;
   });
 }
 
-function isDuplicateCall(activity, previous) {
-  if (activity.type !== 'call' || !activity.clientId || !previous) return false;
-  const delta = Math.abs(Date.parse(activity.occurredAt) - Date.parse(previous.occurredAt));
-  return previous.type === 'call'
-    && previous.managerId === activity.managerId
-    && previous.clientId === activity.clientId
+function callDedupKey(activity) {
+  const managerId = text(activity?.managerId);
+  const clientId = text(activity?.clientId);
+  return managerId && clientId ? `${managerId}\u0000${clientId}` : '';
+}
+
+function inHalfOpenRange(value, query = {}) {
+  const current = timestampMs(value);
+  if (!Number.isFinite(current)) return false;
+  const dateFrom = rangeBoundaryMs(query.dateFrom);
+  const dateTo = rangeBoundaryMs(query.dateTo);
+  if (Number.isFinite(dateFrom) && current < dateFrom) return false;
+  if (Number.isFinite(dateTo) && current >= dateTo) return false;
+  return true;
+}
+
+function isDuplicateCall(activity, previousCall) {
+  if (activity.type !== 'call' || !activity.clientId || !previousCall) return false;
+  const currentAt = activityTimeMs(activity);
+  const previousAt = activityTimeMs(previousCall);
+  const delta = currentAt - previousAt;
+  return previousCall.type === 'call'
+    && previousCall.managerId === activity.managerId
+    && previousCall.clientId === activity.clientId
     && Number.isFinite(delta)
-    && delta < 30 * 60 * 1000;
+    && delta >= 0
+    && delta <= 30 * 60 * 1000;
 }
 
 function fleetUtilization(readData) {
@@ -262,7 +308,7 @@ function fleetUtilization(readData) {
 }
 
 function buildManagerKpi({ activities = [], deals = [], rentals = [], managers = [], query = {}, readData }) {
-  const filtered = filterActivities(activities, query).sort((a, b) => text(a.occurredAt).localeCompare(text(b.occurredAt)));
+  const filtered = filterActivities(activities, query).sort(compareActivitiesAsc);
   const byManager = new Map();
   function row(managerId, managerName) {
     const key = text(managerId) || 'unknown';
@@ -292,7 +338,7 @@ function buildManagerKpi({ activities = [], deals = [], rentals = [], managers =
   }
 
   const seenCallClients = new Map();
-  let previous = null;
+  const previousCalls = new Map();
   filtered.forEach(activity => {
     const current = row(activity.managerId, activity.managerName);
     current.actionsTotal += 1;
@@ -300,8 +346,11 @@ function buildManagerKpi({ activities = [], deals = [], rentals = [], managers =
     if (activity.nextActionAt && Date.parse(activity.nextActionAt) < Date.now()) current.overdueNextActions += 1;
     if (activity.type === 'call') {
       current.callsTotal += 1;
-      if (isDuplicateCall(activity, previous)) current.duplicateCalls += 1;
+      const dedupKey = callDedupKey(activity);
+      const previousCall = dedupKey ? previousCalls.get(dedupKey) : null;
+      if (isDuplicateCall(activity, previousCall)) current.duplicateCalls += 1;
       else current.qualifiedCalls += 1;
+      if (dedupKey) previousCalls.set(dedupKey, activity);
       if (SUCCESS_RESULTS.has(lower(activity.result))) current.successfulCalls += 1;
       if (activity.clientId) {
         const set = seenCallClients.get(current.managerId) || new Set();
@@ -315,17 +364,10 @@ function buildManagerKpi({ activities = [], deals = [], rentals = [], managers =
       if (!activity.result) current.incompleteVisits += 1;
     }
     if (activity.type === 'commercial_offer') current.commercialOffers += 1;
-    previous = activity;
   });
 
-  const dateFrom = dateKey(query.dateFrom);
-  const dateTo = dateKey(query.dateTo);
   function inPeriod(value) {
-    const key = dateKey(value);
-    if (!key) return false;
-    if (dateFrom && key < dateFrom) return false;
-    if (dateTo && key > dateTo) return false;
-    return true;
+    return inHalfOpenRange(value, query);
   }
   deals.forEach(deal => {
     if (query.managerId && text(deal.responsibleUserId || deal.managerId) !== text(query.managerId)) return;

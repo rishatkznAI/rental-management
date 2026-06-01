@@ -4,15 +4,30 @@ import { loginAsAdmin, navigateInApp } from './helpers/auth';
 
 function collectPageIssues(page: Page) {
   const issues: string[] = [];
+  function isKnownViteReactRefreshAbort(url: string, errorText = '') {
+    return errorText === 'net::ERR_ABORTED'
+      && (url.includes('@react-refresh') || url.includes('/@vite/client') || url.includes('env.mjs'));
+  }
   page.on('console', (message) => {
     if (message.type() === 'error') issues.push(`console: ${message.text()}`);
   });
   page.on('response', (response) => {
     if (response.status() >= 500) issues.push(`response: ${response.status()} ${response.url()}`);
+    if (response.status() === 401 || response.status() === 403) {
+      const url = response.url();
+      if (!url.includes('/api/auth/login') && !url.includes('/api/auth/me')) {
+        issues.push(`response: ${response.status()} ${url}`);
+      }
+    }
   });
   page.on('requestfailed', (request) => {
     if (request.url().includes('fonts.gstatic.com')) return;
-    issues.push(`requestfailed: ${request.url()} ${request.failure()?.errorText || ''}`);
+    const errorText = request.failure()?.errorText || '';
+    if (isKnownViteReactRefreshAbort(request.url(), errorText)) return;
+    issues.push(`requestfailed: ${request.url()} ${errorText}`);
+  });
+  page.on('pageerror', (error) => {
+    issues.push(`pageerror: ${error.message}`);
   });
   return issues;
 }

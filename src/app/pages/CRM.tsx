@@ -339,6 +339,31 @@ function isOverdueNextAction(deal: CrmDeal) {
   return deal.nextActionDate < new Date().toISOString().slice(0, 10);
 }
 
+function startOfLocalDay(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addLocalDays(date: Date, days: number) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+}
+
+function getCrmKpiRange(period: 'today' | 'week' | 'month' = 'today') {
+  const today = startOfLocalDay();
+  const day = today.getDay();
+  const weekStartsOnMondayOffset = day === 0 ? -6 : 1 - day;
+  const start = period === 'week'
+    ? addLocalDays(today, weekStartsOnMondayOffset)
+    : period === 'month'
+      ? new Date(today.getFullYear(), today.getMonth(), 1)
+      : today;
+  const end = period === 'week'
+    ? addLocalDays(start, 7)
+    : period === 'month'
+      ? new Date(today.getFullYear(), today.getMonth() + 1, 1)
+      : addLocalDays(start, 1);
+  return { dateFrom: start.toISOString(), dateTo: end.toISOString() };
+}
+
 export default function CRM() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -346,7 +371,8 @@ export default function CRM() {
   const { data: deals = [], isLoading } = useCrmDealsList();
   const { data: clients = [] } = useClientsList();
   const { data: activities = [] } = useCrmActivities(undefined, can('view', 'crm'));
-  const { data: managerKpi } = useCrmManagerKpi(undefined, can('view', 'crm'));
+  const kpiRange = React.useMemo(() => getCrmKpiRange('today'), []);
+  const { data: managerKpi } = useCrmManagerKpi(kpiRange, can('view', 'crm'));
   const { data: managers = [] } = useQuery<ManagerOption[]>({
     queryKey: ['crm-managers'],
     queryFn: staffService.getManagerOptions,

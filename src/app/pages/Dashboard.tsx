@@ -338,11 +338,13 @@ function ManagerMyPlanBlock({
   isLoading,
   isError,
   canAddActivity,
+  isAdminView,
 }: {
   plan?: ManagerMyPlanResponse;
   isLoading: boolean;
   isError: boolean;
   canAddActivity: boolean;
+  isAdminView?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [activityDraft, setActivityDraft] = useState<ManagerActivityInput>({
@@ -374,6 +376,10 @@ function ManagerMyPlanBlock({
   const completionPercent = activityTarget?.completionPercent ?? summary?.completionPercent ?? 0;
   const recentActivity = plan?.recentActivity ?? [];
   const activityUiEnabled = isCrmEnabled;
+  const updatedLabel = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const scopeDescription = isAdminView
+    ? 'Личный план пользователя; не показатели компании. Показатели компании находятся выше в активной вкладке.'
+    : 'Личный план менеджера по аренде: фокус дня, задачи и активность по моим сделкам.';
   const kpis = [
     { label: 'Загрузка парка', value: summary ? `${summary.fleetUtilizationPercent}%` : '—', hint: activityTarget?.message || 'Ждем данные', badge: summary?.planStatus === 'done' ? 'Норма' : 'Фокус', icon: Target },
     { label: 'Активные аренды', value: String(summary?.activeRentals ?? 0), hint: 'В работе сейчас', badge: 'Парк', icon: Calendar },
@@ -395,11 +401,16 @@ function ManagerMyPlanBlock({
     <Card className="app-panel overflow-hidden border-border/80 bg-card/95" data-testid="manager-my-plan">
       <CardHeader className="border-b border-border/70 bg-muted/20 pb-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <Badge variant="info" className="bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-200">Мой план</Badge>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="info" className="bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-200">Личный план</Badge>
+              <Badge variant="outline" className="border-border bg-background/70 text-muted-foreground">По моим сделкам</Badge>
+              <Badge variant="outline" className="border-border bg-background/70 text-muted-foreground">Период: сегодня / неделя</Badge>
+              <Badge variant="outline" className="border-border bg-background/70 text-muted-foreground">Обновлено: {updatedLabel}</Badge>
+            </div>
             <CardTitle className="app-shell-title mt-2 text-xl font-extrabold">Мой план</CardTitle>
             <CardDescription>
-              Фокус дня, операционные задачи и приоритеты менеджера по аренде.
+              {scopeDescription}
             </CardDescription>
           </div>
           {summary ? (
@@ -537,7 +548,7 @@ function ManagerMyPlanBlock({
               </div>
             )}
 
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(280px,0.65fr)]">
               <div className="rounded-xl border border-border bg-background/75 shadow-sm">
                 <div className="border-b border-border/80 px-4 py-3">
                   <p className="text-base font-extrabold text-foreground">Задачи</p>
@@ -550,17 +561,17 @@ function ManagerMyPlanBlock({
                 ) : (
                   <div className="divide-y divide-border/80">
                     {plan.tasks.slice(0, 10).map((item, index) => (
-                      <div key={`${item.type}-${item.link.id}-${index}`} className="grid gap-3 px-4 py-3 text-sm lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,0.85fr)_auto] lg:items-center">
-                        <Badge variant="default" className={managerPlanTaskTone(item.level)}>
+                      <div key={`${item.type}-${item.link.id}-${index}`} className="grid gap-3 px-4 py-3 text-sm lg:grid-cols-[auto_minmax(0,1.4fr)_minmax(180px,0.75fr)_auto] lg:items-center">
+                        <Badge variant="default" className={`${managerPlanTaskTone(item.level)} w-fit shrink-0`}>
                           {item.level === 'risk' ? 'Есть риск' : item.level === 'warning' ? 'Нужно действие' : 'Инфо'}
                         </Badge>
                         <div className="min-w-0">
-                          <p className="truncate font-semibold text-foreground">{item.title}</p>
-                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.description}</p>
+                          <p className="break-words font-semibold leading-snug text-foreground">{item.title}</p>
+                          <p className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{item.description}</p>
                         </div>
-                        <p className="text-xs font-medium text-muted-foreground">Рекомендуемое действие: {item.action}</p>
+                        <p className="min-w-0 break-words text-xs font-medium text-muted-foreground">Рекомендуемое действие: {item.action}</p>
                         <Button asChild variant="ghost" size="sm">
-                          <Link to={managerPlanLinkHref(item.link)}>{item.link.label || 'Открыть'}</Link>
+                          <Link className="max-w-full whitespace-normal text-left" to={managerPlanLinkHref(item.link)}>{item.link.label || 'Открыть'}</Link>
                         </Button>
                       </div>
                     ))}
@@ -757,6 +768,34 @@ function DashboardRiskPanel({
         })}
       </CardContent>
     </Card>
+  );
+}
+
+function DashboardScopeHeader({
+  title,
+  description,
+  scopeLabel,
+  periodLabel,
+  updatedLabel,
+}: {
+  title: string;
+  description: string;
+  scopeLabel: string;
+  periodLabel: string;
+  updatedLabel: string;
+}) {
+  return (
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+      <div className="min-w-0">
+        <p className="text-xs font-semibold uppercase text-muted-foreground">{scopeLabel}</p>
+        <h2 className="app-shell-title mt-1 text-xl font-extrabold text-foreground sm:text-2xl">{title}</h2>
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex flex-wrap gap-2 lg:justify-end">
+        <Badge variant="outline" className="border-border bg-card/80 text-muted-foreground">Период: {periodLabel}</Badge>
+        <Badge variant="outline" className="border-border bg-card/80 text-muted-foreground">Обновлено: {updatedLabel}</Badge>
+      </div>
+    </div>
   );
 }
 
@@ -2421,6 +2460,20 @@ export default function Dashboard() {
   const roleDashboardSignalCard = roleDashboardCards.find(item => item.title === 'Документы без подписи') ?? roleDashboardCards[0];
   const roleDashboardSecondaryCards = roleDashboardCards.filter(item => item.id !== roleDashboardPrimaryCard?.id);
   const canToggleOfficeUpd = isAdminRole;
+  const dashboardUpdatedLabel = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const rentalsScopeLabel = isManagerRole ? 'По моим сделкам' : 'Показатели компании';
+  const moneyScopeLabel = canViewFinance ? 'По компании' : 'По доступным данным';
+  const shouldEmbedManagerPlanInRentals = canViewManagerMyPlan && isManagerRole && activeDashboardTab === 'rentals';
+  const shouldShowSecondaryManagerPlan = canViewManagerMyPlan && !shouldEmbedManagerPlanInRentals;
+  const renderManagerPlanBlock = () => (
+    <ManagerMyPlanBlock
+      plan={managerMyPlanQuery.data}
+      isLoading={managerMyPlanQuery.isLoading}
+      isError={managerMyPlanQuery.isError}
+      canAddActivity={isCrmEnabled && (user?.role === 'Менеджер по аренде' || user?.role === 'Администратор')}
+      isAdminView={isAdminRole}
+    />
+  );
 
   useEffect(() => {
     if (!dashboardTabs.some(tab => tab.id === activeDashboardTab)) {
@@ -2833,50 +2886,31 @@ export default function Dashboard() {
   // ── render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-5 p-4 sm:space-y-6 sm:p-6 md:p-8">
+    <div className="space-y-4 p-3 sm:space-y-6 sm:p-6 md:p-8">
 
       <div className="app-panel overflow-hidden">
-        <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6">
+        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Главное</div>
-            <h1 className="app-shell-title mt-1 text-3xl font-extrabold text-foreground sm:text-4xl">Дашборд</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Обновлено: {new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} · {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            <div className="text-[10px] font-semibold uppercase text-muted-foreground">Главное</div>
+            <h1 className="app-shell-title mt-1 text-2xl font-extrabold text-foreground sm:text-3xl">Дашборд</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Обновлено: {dashboardUpdatedLabel} · {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </p>
-            <p className="mt-1 text-sm font-semibold text-primary dark:text-primary">
-              Текущий месяц: {monthPeriodLabel} · {monthRangeLabel}
+            <p className="mt-0.5 text-sm font-semibold text-primary dark:text-primary">
+              Период: {monthPeriodLabel} · {monthRangeLabel}
             </p>
           </div>
         </div>
       </div>
 
-      <div className="overflow-x-auto pb-1">
-        <div className="inline-flex min-w-max gap-2 rounded-2xl border border-border/80 bg-card/80 p-1">
-          {dashboardTabs.map(tab => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveDashboardTab(tab.id)}
-              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-                activeDashboardTab === tab.id
-                  ? 'bg-primary text-primary-foreground shadow-sm dark:bg-emerald-500/18 dark:text-emerald-200 dark:ring-1 dark:ring-emerald-400/30'
-                  : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {showRoleDashboardCards && (
         <Card className="overflow-hidden border-slate-800/80 bg-[radial-gradient(circle_at_8%_0%,rgba(16,185,129,0.18),transparent_30%),linear-gradient(135deg,rgba(7,16,23,0.98),rgba(10,19,30,0.96)_48%,rgba(16,20,30,0.98))] text-white shadow-[0_28px_90px_-54px_rgba(0,0,0,0.78)]">
-          <CardHeader className="relative border-b border-white/10 px-5 py-5 sm:px-6">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="max-w-3xl space-y-3">
+          <CardHeader className="relative border-b border-white/10 px-4 py-3 sm:px-6 sm:py-5">
+            <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-3xl space-y-1 sm:space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="default" className="bg-emerald-400/12 text-emerald-200 ring-1 ring-emerald-300/20">{roleDashboardMeta.badge}</Badge>
-                  <Badge variant="outline" className="border-white/10 bg-white/[0.04] text-slate-300">Рабочее пространство</Badge>
+                  <Badge variant="outline" className="border-white/10 bg-white/[0.04] text-slate-300">Показатели компании</Badge>
                   <Badge
                     variant="outline"
                     className={
@@ -2891,13 +2925,13 @@ export default function Dashboard() {
                   </Badge>
                 </div>
                 <div>
-                  <CardTitle className="app-shell-title text-2xl font-extrabold text-white sm:text-3xl">{roleDashboardMeta.title}</CardTitle>
-                  <CardDescription className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                  <CardTitle className="app-shell-title text-lg font-extrabold text-white sm:text-3xl">{roleDashboardMeta.title}</CardTitle>
+                  <CardDescription className="mt-1 hidden max-w-3xl text-sm leading-6 text-slate-400 sm:mt-2 sm:block">
                     {roleDashboardMeta.description}
                   </CardDescription>
                 </div>
               </div>
-              <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-3">
+              <div className="hidden items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-3 sm:flex">
                 <div className="h-2.5 w-2.5 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.75)]" />
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Статус</p>
@@ -2906,37 +2940,37 @@ export default function Dashboard() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="p-5 sm:p-6">
-            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
+          <CardContent className="p-3 sm:p-6">
+            <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
               <div className="space-y-4">
                 {roleDashboardPrimaryCard && (() => {
                   const Icon = roleDashboardPrimaryCard.icon;
                   const primaryContent = (
                     <>
-                      <div className="relative z-10 grid min-h-[270px] gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(240px,0.75fr)] lg:items-stretch">
-                        <div className="flex min-w-0 flex-col justify-between gap-6">
-                          <div className="space-y-3">
+                      <div className="relative z-10 grid min-h-[150px] gap-3 p-3 sm:min-h-[220px] sm:gap-4 sm:p-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(240px,0.75fr)] lg:items-stretch">
+                        <div className="flex min-w-0 flex-col justify-between gap-4 sm:gap-6">
+                          <div className="space-y-1.5 sm:space-y-3">
                             <Badge variant="outline" className="w-fit border-red-300/30 bg-red-400/12 text-red-100">Главный риск</Badge>
                             <div>
                               <div className="flex items-center gap-3">
-                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-400/12 text-red-200 ring-1 ring-red-300/20">
-                                  <Icon className="h-6 w-6" />
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-400/12 text-red-200 ring-1 ring-red-300/20 sm:h-12 sm:w-12 sm:rounded-2xl">
+                                  <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
                                 </div>
                                 <div>
                                   <p className="text-sm font-semibold text-red-100/80">Финансовый контур</p>
-                                  <h3 className="mt-1 text-xl font-extrabold text-white sm:text-2xl">{roleDashboardPrimaryCard.title}</h3>
+                                  <h3 className="mt-0.5 text-lg font-extrabold text-white sm:mt-1 sm:text-2xl">{roleDashboardPrimaryCard.title}</h3>
                                 </div>
                               </div>
-                              <p className="mt-5 text-4xl font-extrabold tracking-tight text-white sm:text-5xl">{roleDashboardPrimaryCard.value}</p>
-                              <p className="mt-2 text-sm font-medium text-red-100/80">{roleDashboardPrimaryCard.hint}</p>
+                              <p className="mt-3 text-2xl font-extrabold tracking-tight text-white sm:mt-5 sm:text-4xl">{roleDashboardPrimaryCard.value}</p>
+                              <p className="mt-1 text-sm font-medium text-red-100/80 sm:mt-2">{roleDashboardPrimaryCard.hint}</p>
                             </div>
                           </div>
-                          <span className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white ring-1 ring-white/10">
+                          <span className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-1.5 text-sm font-semibold text-white ring-1 ring-white/10 sm:py-2.5">
                             {roleDashboardPrimaryCard.cta}
                             <ArrowRight className="h-4 w-4" />
                           </span>
                         </div>
-                        <div className="relative min-h-[150px] overflow-hidden rounded-3xl border border-red-200/10 bg-slate-950/28 p-4 ring-1 ring-white/[0.03] lg:min-h-full">
+                        <div className="relative hidden min-h-[150px] overflow-hidden rounded-3xl border border-red-200/10 bg-slate-950/28 p-4 ring-1 ring-white/[0.03] lg:block lg:min-h-full">
                           <div className="relative z-10 flex items-start justify-between gap-3">
                             <div>
                               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-red-100/55">Долг к контролю</p>
@@ -2999,7 +3033,7 @@ export default function Dashboard() {
                   );
                 })()}
 
-                <div className="rounded-3xl border border-white/10 bg-white/[0.045] p-3 backdrop-blur">
+                <div className="hidden rounded-3xl border border-white/10 bg-white/[0.045] p-3 backdrop-blur 2xl:block">
                   <div className="flex flex-col gap-1 px-2 py-2 sm:flex-row sm:items-end sm:justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Все операционные риски</p>
@@ -3079,7 +3113,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className="space-y-4 xl:sticky xl:top-5 xl:self-start">
+              <div className="hidden space-y-4 2xl:block 2xl:sticky 2xl:top-5 2xl:self-start">
                 {roleDashboardSignalCard && (() => {
                   const Icon = roleDashboardSignalCard.icon;
                   const signalContent = (
@@ -3195,34 +3229,38 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {canViewManagerMyPlan && (
-        <ManagerMyPlanBlock
-          plan={managerMyPlanQuery.data}
-          isLoading={managerMyPlanQuery.isLoading}
-          isError={managerMyPlanQuery.isError}
-          canAddActivity={isCrmEnabled && (user?.role === 'Менеджер по аренде' || user?.role === 'Администратор')}
-        />
-      )}
+      <div className="relative -mx-1 px-1">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-1 z-10 w-5 bg-gradient-to-r from-background to-transparent" />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-1 z-10 w-8 bg-gradient-to-l from-background to-transparent" />
+        <div className="max-w-full min-w-0 overflow-x-auto pb-1" data-testid="dashboard-tabs-scroll">
+          <div className="inline-flex min-w-max gap-2 rounded-2xl border border-border/80 bg-card/80 p-1 pr-5">
+            {dashboardTabs.map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveDashboardTab(tab.id)}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                  activeDashboardTab === tab.id
+                    ? 'bg-primary text-primary-foreground shadow-sm dark:bg-emerald-500/18 dark:text-emerald-200 dark:ring-1 dark:ring-emerald-400/30'
+                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {activeDashboardTab === 'overview' && (
         <section className="space-y-5">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Executive overview</p>
-              <h2 className="app-shell-title mt-1 text-2xl font-extrabold text-foreground sm:text-3xl">
-                Операционная сводка компании
-              </h2>
-              <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-                Аренда, техника, сервис, документы и деньги за текущий календарный месяц.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-border bg-card px-4 py-3 text-sm shadow-[0_18px_44px_-36px_rgba(15,23,42,0.38)] dark:shadow-none">
-              <span className="text-muted-foreground">Период</span>
-              <span className="ml-3 font-semibold text-foreground">
-                {monthPeriodLabel}
-              </span>
-            </div>
-          </div>
+          <DashboardScopeHeader
+            title="Операционная сводка"
+            description="Аренда, техника, сервис, документы и деньги за текущий календарный месяц."
+            scopeLabel="Показатели компании"
+            periodLabel={monthPeriodLabel}
+            updatedLabel={dashboardUpdatedLabel}
+          />
 
           {canViewAttentionBlock && canViewEquipment && (
             <Card className={dashboardCardClass} data-testid="dashboard-attention-block">
@@ -3554,6 +3592,13 @@ export default function Dashboard() {
 
       {activeDashboardTab === 'rentals' && (
         <section className="space-y-5">
+          <DashboardScopeHeader
+            title="Аренда"
+            description="Старт аренд, возвраты, просрочки и менеджерская нагрузка без изменения расчётов."
+            scopeLabel={rentalsScopeLabel}
+            periodLabel={monthPeriodLabel}
+            updatedLabel={dashboardUpdatedLabel}
+          />
           <DashboardKpiGrid cards={[
             { id: 'rentals-month-started', label: 'Стартовало за месяц', value: String(rentalsStartedThisMonth.length), hint: `Период: ${monthPeriodLabel}`, icon: Calendar, tone: 'default', href: '/rentals' },
             { id: 'rentals-active', label: 'Активные сейчас', value: String(activeRentalsList.length), hint: `${rentalsIntersectingThisMonth.length} пересекают месяц`, icon: Activity, tone: 'info', onClick: () => setSelectedKPI('activeRentals') },
@@ -3563,6 +3608,7 @@ export default function Dashboard() {
             { id: 'rentals-overdue', label: 'Просроченные возвраты', value: String(overdueRentalsList.length), hint: maxOverdueDays > 0 ? `Макс. ${maxOverdueDays} дн.` : 'Просрочек нет', icon: AlertTriangle, tone: overdueRentalsList.length > 0 ? 'danger' : 'success', onClick: () => setSelectedKPI('overdueReturns') },
             { id: 'rentals-debt', label: 'Долг по арендам месяца', value: String(rentalsWithDebtThisMonth.length), hint: canViewMoney ? formatCurrency(monthlyDebtAmount) : 'Сумма скрыта правами', icon: DollarSign, tone: rentalsWithDebtThisMonth.length > 0 ? 'warning' : 'success', href: '/finance' },
           ]} />
+          {shouldEmbedManagerPlanInRentals && renderManagerPlanBlock()}
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
             <DashboardChartCard title="Аренды по дням текущего месяца" description="Старт аренд по дням месяца." empty={!rentalDaysChartData.some(item => item.value > 0)} emptyText="Нет аренд, стартовавших за текущий месяц." className="xl:col-span-4">
               <ResponsiveContainer width="100%" height="100%">
@@ -3604,6 +3650,13 @@ export default function Dashboard() {
 
       {activeDashboardTab === 'fleet' && (
         <section className="space-y-5">
+          <DashboardScopeHeader
+            title="Техника"
+            description="Состояние парка, доступность, сервис и простой на текущий момент."
+            scopeLabel="Показатели компании"
+            periodLabel={monthPeriodLabel}
+            updatedLabel={dashboardUpdatedLabel}
+          />
           <DashboardKpiGrid cards={[
             { id: 'fleet-total', label: 'Всего техники', value: String(totalEquipment), hint: `${activeEquipment} ед. активного парка`, icon: Truck, tone: 'default' },
             { id: 'fleet-rented', label: 'В аренде сейчас', value: String(rentedEquipment), hint: activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован', icon: TrendingUp, tone: 'info', onClick: () => setSelectedKPI('utilization') },
@@ -3659,6 +3712,13 @@ export default function Dashboard() {
 
       {activeDashboardTab === 'service' && (
         <section className="space-y-5">
+          <DashboardScopeHeader
+            title="Сервис"
+            description="Сервисная очередь, критичные заявки, запчасти и нагрузка механиков."
+            scopeLabel="Показатели компании"
+            periodLabel={monthPeriodLabel}
+            updatedLabel={dashboardUpdatedLabel}
+          />
           <DashboardKpiGrid cards={[
             { id: 'service-created-month', label: 'Создано за месяц', value: String(serviceCreatedThisMonth.length), hint: `Период: ${monthPeriodLabel}`, icon: Wrench, tone: 'default', href: '/service' },
             { id: 'service-closed-month', label: 'Закрыто за месяц', value: String(serviceClosedThisMonth.length), hint: 'По дате закрытия', icon: CheckCircle, tone: 'success' },
@@ -3709,6 +3769,13 @@ export default function Dashboard() {
 
       {activeDashboardTab === 'money' && canViewMoney && (
         <section className="space-y-5">
+          <DashboardScopeHeader
+            title="Деньги"
+            description="Начисления, оплаты, дебиторка и планы взыскания в доступном финансовом контуре."
+            scopeLabel={moneyScopeLabel}
+            periodLabel={monthPeriodLabel}
+            updatedLabel={dashboardUpdatedLabel}
+          />
           <DashboardKpiGrid cards={[
             { id: 'money-accrued-month', label: 'Начислено за месяц', value: monthlyRevenue > 0 ? formatCurrency(monthlyRevenue) : '0 ₽', hint: `${rentalsStartedThisMonth.length} аренд`, icon: TrendingUp, tone: monthlyRevenue > 0 ? 'success' : 'default', href: '/rentals' },
             { id: 'money-payments', label: 'Оплачено за месяц', value: monthlyPaidAmount > 0 ? formatCurrency(monthlyPaidAmount) : '0 ₽', hint: `${monthlyPayments.length} платежей`, icon: CreditCard, tone: 'success', href: '/payments' },
@@ -3764,6 +3831,13 @@ export default function Dashboard() {
 
       {activeDashboardTab === 'documents' && (
         <section className="space-y-5">
+          <DashboardScopeHeader
+            title="Документы"
+            description="Создание, подписи, номера и документные риски по реестру."
+            scopeLabel="Показатели компании"
+            periodLabel={monthPeriodLabel}
+            updatedLabel={dashboardUpdatedLabel}
+          />
           <DashboardKpiGrid cards={[
             { id: 'doc-month', label: 'Создано за месяц', value: String(documentsCreatedThisMonth.length), hint: monthPeriodLabel, icon: FileText, tone: 'default', href: '/documents' },
             { id: 'doc-signed-month', label: 'Подписано за месяц', value: String(documentsSignedThisMonth.length), hint: 'По дате подписи или документа', icon: CheckCircle, tone: 'success' },
@@ -3818,6 +3892,13 @@ export default function Dashboard() {
 
       {activeDashboardTab === 'deliveries' && (
         <section className="space-y-5">
+          <DashboardScopeHeader
+            title="Доставка"
+            description="Активные перевозки, просрочки, назначение перевозчиков и месячная нагрузка."
+            scopeLabel="Показатели компании"
+            periodLabel={monthPeriodLabel}
+            updatedLabel={dashboardUpdatedLabel}
+          />
           <DashboardKpiGrid cards={[
             { id: 'delivery-month', label: 'Доставок за месяц', value: String(deliveriesThisMonth.length), hint: monthPeriodLabel, icon: Truck, tone: 'default', href: '/deliveries' },
             { id: 'delivery-done', label: 'Выполнено за месяц', value: String(completedDeliveriesThisMonth.length), hint: 'Закрытые перевозки', icon: CheckCircle, tone: 'success' },
@@ -3863,6 +3944,12 @@ export default function Dashboard() {
               </BarChart>
             </ResponsiveContainer>
           </DashboardChartCard>
+        </section>
+      )}
+
+      {shouldShowSecondaryManagerPlan && (
+        <section className="space-y-3">
+          {renderManagerPlanBlock()}
         </section>
       )}
 

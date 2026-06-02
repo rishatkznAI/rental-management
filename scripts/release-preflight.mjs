@@ -5,7 +5,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 const ENVIRONMENTS = new Set(['staging', 'production']);
-const RELEASE_TYPES = new Set(['frontend-only', 'backend', 'full-stack']);
+const RELEASE_TYPE_OPTIONS = ['frontend-only', 'backend', 'full-stack', 'deploy-tooling'];
+const RELEASE_TYPES = new Set(RELEASE_TYPE_OPTIONS);
 const FRONTEND_ONLY_FORBIDDEN_FILE_PATTERNS = [
   /^(server|backend|api)(\/|$)/,
   /^(routes|lib|db|storage|migrations)(\/|$)/,
@@ -21,6 +22,16 @@ const FRONTEND_ONLY_FORBIDDEN_FILE_PATTERNS = [
   /(^|\/)\.env(?:$|[.-])/,
   /^(config|configs)(\/|$)/,
   /^(server|api|backend)\.(config|env)\./,
+];
+const DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
+  /^\.github\/workflows\/.+/,
+  /^scripts\/release-preflight\.mjs$/,
+  /^e2e\/helpers\/releaseSmoke\.ts$/,
+  /^e2e\/production-smoke\.spec\.ts$/,
+  /^tests\/release-preflight\.test\.js$/,
+  /^tests\/release-smoke-conservation\.test\.js$/,
+  /^docs\/(?:release-runbook|deploy-checklist|production-smoke-checklist)\.md$/,
+  /^docs\/.*(?:release|deploy|smoke|preflight).*\.md$/,
 ];
 
 export function normalizeReleaseType(value = '') {
@@ -66,7 +77,7 @@ Required env by mode:
 Optional:
   EXPECTED_RELEASE_COMMIT or GITHUB_SHA
   RELEASE_PREFLIGHT_OLD_COMMIT
-  RELEASE_TYPE or --release-type frontend-only|backend|full-stack
+  RELEASE_TYPE or --release-type ${RELEASE_TYPE_OPTIONS.join('|')}
   RELEASE_PREFLIGHT_CHANGED_FILES or --changed-files <newline-or-comma-separated paths>
   RELEASE_PREFLIGHT_CHANGED_FILES_FILE or --changed-files-file <path>`);
 }
@@ -98,11 +109,16 @@ export function backendCommitMatchesExpected(backendBuild = {}, expectedCommit =
 }
 
 export function allowsBackendCommitDrift({ env = '', releaseType = '' } = {}) {
-  return env === 'production' && normalizeReleaseType(releaseType) === 'frontend-only';
+  const normalizedReleaseType = normalizeReleaseType(releaseType);
+  return env === 'production' && (normalizedReleaseType === 'frontend-only' || normalizedReleaseType === 'deploy-tooling');
 }
 
-export function backendDriftMessage({ expectedCommit = '', backendCommit = '' } = {}) {
-  return `Backend commit differs from frontend commit: expected for frontend-only release. expected=${shortCommit(expectedCommit)} actual=${backendCommit}`;
+function backendDriftReleaseType(releaseType = '') {
+  return normalizeReleaseType(releaseType) === 'deploy-tooling' ? 'deploy-tooling' : 'frontend-only';
+}
+
+export function backendDriftMessage({ expectedCommit = '', backendCommit = '', releaseType = '' } = {}) {
+  return `Backend commit differs from frontend commit: expected for ${backendDriftReleaseType(releaseType)} release. expected=${shortCommit(expectedCommit)} actual=${backendCommit}`;
 }
 
 function normalizeChangedFilePath(value = '') {
@@ -186,12 +202,16 @@ export function frontendOnlyUnsafeChangedFiles(changedFiles = []) {
   return files.map(normalizeChangedFilePath).filter(isFrontendOnlyUnsafeChangedFile);
 }
 
+function normalizedChangedFiles(changedFiles = []) {
+  return Array.isArray(changedFiles) ? changedFiles.map(normalizeChangedFilePath).filter(Boolean) : parseChangedFiles(changedFiles);
+}
+
 export function assertFrontendOnlyReleaseScope({ releaseType = '', changedFiles = [] } = {}) {
   if (normalizeReleaseType(releaseType) !== 'frontend-only') {
     return { checked: false, changedFiles: [], unsafeChangedFiles: [] };
   }
 
-  const files = Array.isArray(changedFiles) ? changedFiles.map(normalizeChangedFilePath).filter(Boolean) : parseChangedFiles(changedFiles);
+  const files = normalizedChangedFiles(changedFiles);
   assertOk(
     files.length > 0,
     'release_type=frontend-only requires changed file scope via RELEASE_PREFLIGHT_CHANGED_FILES, --changed-files, or git history',
@@ -206,6 +226,36 @@ export function assertFrontendOnlyReleaseScope({ releaseType = '', changedFiles 
   return { checked: true, changedFiles: files, unsafeChangedFiles };
 }
 
+export function isDeployToolingAllowedChangedFile(file = '') {
+  const normalized = normalizeChangedFilePath(file);
+  if (!normalized) return false;
+  return DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS.some(pattern => pattern.test(normalized));
+}
+
+export function deployToolingDisallowedChangedFiles(changedFiles = []) {
+  return normalizedChangedFiles(changedFiles).filter(file => !isDeployToolingAllowedChangedFile(file));
+}
+
+export function assertDeployToolingReleaseScope({ releaseType = '', changedFiles = [] } = {}) {
+  if (normalizeReleaseType(releaseType) !== 'deploy-tooling') {
+    return { checked: false, changedFiles: [], disallowedChangedFiles: [] };
+  }
+
+  const files = normalizedChangedFiles(changedFiles);
+  assertOk(
+    files.length > 0,
+    'release_type=deploy-tooling requires changed file scope via RELEASE_PREFLIGHT_CHANGED_FILES, --changed-files, or git history',
+  );
+
+  const disallowedChangedFiles = deployToolingDisallowedChangedFiles(files);
+  assertOk(
+    disallowedChangedFiles.length === 0,
+    `release_type=deploy-tooling is allowed only for deploy/preflight/smoke tooling files. Disallowed files: ${disallowedChangedFiles.join(', ')}`,
+  );
+
+  return { checked: true, changedFiles: files, disallowedChangedFiles };
+}
+
 export function backendCommitGateResult({ env = '', releaseType = '', backendBuild = {}, expectedCommit = '' } = {}) {
   const backendCommit = backendCommitFromBuild(backendBuild);
   if (backendCommitMatchesExpected(backendBuild, expectedCommit)) {
@@ -215,7 +265,7 @@ export function backendCommitGateResult({ env = '', releaseType = '', backendBui
     return {
       status: 'warn',
       backendCommit,
-      message: backendDriftMessage({ expectedCommit, backendCommit }),
+      message: backendDriftMessage({ expectedCommit, backendCommit, releaseType }),
     };
   }
   return {
@@ -353,7 +403,7 @@ async function main() {
   }
   if (!RELEASE_TYPES.has(args.releaseType)) {
     printUsage();
-    throw new Error('--release-type must be frontend-only, backend, or full-stack');
+    throw new Error(`--release-type must be ${RELEASE_TYPE_OPTIONS.join(', ')}`);
   }
 
   const prefix = args.env === 'staging' ? 'STAGING' : 'PRODUCTION';
@@ -369,6 +419,12 @@ async function main() {
     const fileScope = assertFrontendOnlyReleaseScope({ releaseType: args.releaseType, changedFiles });
     console.log(`[release-preflight] frontend-only changed files=${fileScope.changedFiles.join(', ')}`);
     console.log(`[release-preflight] frontend-only file scope OK (${fileScope.changedFiles.length} file(s))`);
+  }
+  if (args.releaseType === 'deploy-tooling') {
+    const changedFiles = resolveChangedFiles(args);
+    const fileScope = assertDeployToolingReleaseScope({ releaseType: args.releaseType, changedFiles });
+    console.log(`[release-preflight] deploy-tooling changed files=${fileScope.changedFiles.join(', ')}`);
+    console.log(`[release-preflight] deploy-tooling file scope OK (${fileScope.changedFiles.length} file(s))`);
   }
 
   const frontendUrl = requiredEnv(`${prefix}_FRONTEND_URL`);

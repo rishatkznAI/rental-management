@@ -24,6 +24,8 @@ type UiIssue = {
   text?: string;
 };
 
+type ReleaseType = 'frontend-only' | 'backend' | 'full-stack';
+
 export type ReleaseSmokeConfig = {
   environmentName: 'staging' | 'production';
   frontendUrl: string;
@@ -31,6 +33,7 @@ export type ReleaseSmokeConfig = {
   adminEmail: string;
   adminPassword: string;
   expectedCommit?: string;
+  releaseType?: ReleaseType | string;
   readOnlySections?: Array<{ label: string; route: string; nav: RegExp }>;
 };
 
@@ -74,6 +77,26 @@ function commitsMatch(left = '', right = '') {
   const normalizedRight = right.trim();
   if (!normalizedLeft || !normalizedRight) return false;
   return normalizedLeft.startsWith(normalizedRight) || normalizedRight.startsWith(normalizedLeft);
+}
+
+function normalizeReleaseType(value = ''): ReleaseType {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'frontend-only' || normalized === 'backend' || normalized === 'full-stack') return normalized;
+  return 'full-stack';
+}
+
+function backendCommitFromBuild(backendBuild?: BuildInfo | null) {
+  return backendBuild?.commitFull || backendBuild?.commit || '';
+}
+
+function allowsBackendCommitDrift(config: Pick<ReleaseSmokeConfig, 'environmentName' | 'releaseType'>) {
+  return config.environmentName === 'production' && normalizeReleaseType(String(config.releaseType || '')) === 'frontend-only';
+}
+
+function frontendOnlyBackendDriftMessage(details: { expectedCommit?: string; frontendCommit?: string; backendCommit: string }) {
+  const expected = details.expectedCommit ? ` expected=${shortCommit(details.expectedCommit)}` : '';
+  const frontend = details.frontendCommit ? ` frontend=${details.frontendCommit}` : '';
+  return `Backend commit differs from frontend commit: expected for frontend-only release.${expected}${frontend} backend=${details.backendCommit}`;
 }
 
 function sanitize(text: string, limit = 1200) {
@@ -300,6 +323,7 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
     ...config,
     frontendUrl: config.frontendUrl.replace(/\/$/, ''),
     apiUrl: config.apiUrl.replace(/\/$/, ''),
+    releaseType: normalizeReleaseType(String(config.releaseType || '')),
     readOnlySections: config.readOnlySections || DEFAULT_READ_ONLY_SECTIONS,
   };
 
@@ -335,11 +359,20 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
   }
 
   if (normalizedConfig.expectedCommit) {
-    const backendCommit = backendBuild.commitFull || backendBuild.commit || '';
-    expect(
-      commitsMatch(backendCommit, normalizedConfig.expectedCommit) || commitsMatch(backendBuild.commit || '', shortCommit(normalizedConfig.expectedCommit)),
-      `backend commit should match expected release commit: expected=${shortCommit(normalizedConfig.expectedCommit)}, backend=${backendCommit}`,
-    ).toBeTruthy();
+    const backendCommit = backendCommitFromBuild(backendBuild);
+    const backendCommitMatchesExpected = commitsMatch(backendCommit, normalizedConfig.expectedCommit)
+      || commitsMatch(backendBuild.commit || '', shortCommit(normalizedConfig.expectedCommit));
+    if (!backendCommitMatchesExpected && allowsBackendCommitDrift(normalizedConfig)) {
+      console.log(frontendOnlyBackendDriftMessage({
+        expectedCommit: normalizedConfig.expectedCommit,
+        backendCommit,
+      }));
+    } else {
+      expect(
+        backendCommitMatchesExpected,
+        `backend commit should match expected release commit: expected=${shortCommit(normalizedConfig.expectedCommit)}, backend=${backendCommit}`,
+      ).toBeTruthy();
+    }
   }
 
   if (normalizedConfig.environmentName === 'production' && versionJson?.app?.disabled === true) {
@@ -359,6 +392,22 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
         commitsMatch(frontendBuild?.commit || '', shortCommit(normalizedConfig.expectedCommit)),
         `frontend commit should match expected release commit: expected=${shortCommit(normalizedConfig.expectedCommit)}, frontend=${frontendBuild?.commit || 'missing'}`,
       ).toBeTruthy();
+    }
+
+    const backendCommit = backendCommitFromBuild(backendBuild);
+    if (frontendBuild?.commit && backendCommit) {
+      const frontendBackendMatch = commitsMatch(frontendBuild.commit, backendCommit);
+      if (!frontendBackendMatch && allowsBackendCommitDrift(normalizedConfig)) {
+        console.log(frontendOnlyBackendDriftMessage({
+          frontendCommit: frontendBuild.commit,
+          backendCommit,
+        }));
+      } else {
+        expect(
+          frontendBackendMatch,
+          `frontend/backend commits should match unless release owner approved drift: frontend=${frontendBuild.commit}, backend=${backendCommit}`,
+        ).toBeTruthy();
+      }
     }
 
     await expectMaintenanceUiVisible(page, normalizedConfig, versionJson.app.message, frontendBuild, backendBuild, loginStatus);
@@ -421,12 +470,17 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
 
   action = 'commit match';
   const frontendCommit = frontendBuild?.commit || '';
-  const backendCommit = backendBuild?.commit || backendBuild?.commitFull || '';
+  const backendCommit = backendCommitFromBuild(backendBuild);
   if (frontendCommit && backendCommit) {
-    expect(
-      commitsMatch(frontendCommit, backendCommit),
-      `frontend/backend commits should match unless release owner approved drift: frontend=${frontendCommit}, backend=${backendCommit}`,
-    ).toBeTruthy();
+    const frontendBackendMatch = commitsMatch(frontendCommit, backendCommit);
+    if (!frontendBackendMatch && allowsBackendCommitDrift(normalizedConfig)) {
+      console.log(frontendOnlyBackendDriftMessage({ frontendCommit, backendCommit }));
+    } else {
+      expect(
+        frontendBackendMatch,
+        `frontend/backend commits should match unless release owner approved drift: frontend=${frontendCommit}, backend=${backendCommit}`,
+      ).toBeTruthy();
+    }
   }
 
   expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);

@@ -46,6 +46,13 @@ test('non-conserved release smoke keeps strict login behavior', () => {
   assert.match(releaseSmokeSource, /expectAdminLoginSucceeded/);
 });
 
+test('production release smoke allows backend drift only for frontend-only releases', () => {
+  assert.match(releaseSmokeSource, /releaseType\?: ReleaseType \| string/);
+  assert.match(releaseSmokeSource, /environmentName === 'production' && normalizeReleaseType\(String\(config\.releaseType \|\| ''\)\) === 'frontend-only'/);
+  assert.match(releaseSmokeSource, /Backend commit differs from frontend commit: expected for frontend-only release\./);
+  assert.match(releaseSmokeSource, /releaseType: normalizeReleaseType\(String\(config\.releaseType \|\| ''\)\)/);
+});
+
 test('release smoke diagnostics do not print smoke credentials or auth tokens', () => {
   const diagnosticHeader = releaseSmokeSource.match(/function diagnosticHeader[\s\S]*?\n}\n/)?.[0] || '';
   const thrownErrors = [...releaseSmokeSource.matchAll(/throw new Error\(`[\s\S]*?`\);/g)].map(match => match[0]).join('\n');

@@ -1,11 +1,16 @@
 import { expect, request as playwrightRequest, test, type Locator, type Page } from '@playwright/test';
 import { requiredEnv, runReleaseSmoke } from './helpers/releaseSmoke';
+import { findUnsafePayloadViolations } from '../scripts/release-targeted-smoke.mjs';
 
 const EXPECTED_EXECUTION_LABELS = new Set(['Открыто', 'В работе', 'Отложено', 'Решено', 'Игнорировано']);
 const SAFE_ASSIGNEE_FIELDS = ['userId', 'name', 'role', 'active'] as const;
 const UNSAFE_ASSIGNEE_FIELDS = ['email', 'password', 'passwordHash', 'token', 'secret'] as const;
-const UNSAFE_TEXT_PATTERN = /password|token|secret|Bearer\s+|undefined|\[object Object\]/i;
 const UNSAFE_VISIBLE_TEXT_PATTERN = /\bundefined\b|\bnull\b|\[object Object\]/i;
+const CRM_ACTIVITY_CONTROL_SELECTOR = [
+  '[data-testid="crm-add-call"]',
+  '[data-testid="crm-add-visit"]',
+  '[data-testid^="crm-activity"]',
+].join(', ');
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
@@ -68,6 +73,13 @@ function safeSmokeLog(label: string, fields: Record<string, unknown>) {
   console.log(`[production-ui-selector-smoke] ${label} ${JSON.stringify(fields)}`);
 }
 
+function expectSafeApiPayload(payload: unknown, label: string) {
+  expect(
+    findUnsafePayloadViolations(payload),
+    `${label} should not expose unsafe keys or raw placeholder string values`,
+  ).toEqual([]);
+}
+
 function installSafeAggregateMonitor(page: Page, apiUrl: string) {
   const counts = {
     consoleErrors: 0,
@@ -100,6 +112,83 @@ function installSafeAggregateMonitor(page: Page, apiUrl: string) {
 
 async function expectColumnHeader(section: Locator, label: string | RegExp) {
   await expect(section.getByRole('columnheader', { name: label, exact: typeof label === 'string' })).toBeVisible();
+}
+
+async function expectHealthyMain(page: Page, label: string) {
+  const main = page.locator('main');
+  await expect(main, `${label}: main should be visible`).toBeVisible();
+  expect((await main.innerText()).trim().length, `${label}: main should not be blank`).toBeGreaterThan(10);
+}
+
+async function expectCrmHiddenFromNavigation(page: Page) {
+  const nav = page.getByRole('navigation').first();
+  await expect(nav, 'main navigation should be visible before CRM hidden checks').toBeVisible();
+  await expect(nav.getByRole('button', { name: /^CRM$/ }), 'CRM nav item should be hidden while VITE_CRM_ENABLED is disabled').toHaveCount(0);
+  await expect(nav.getByRole('link', { name: /^CRM$/ }), 'CRM nav link should be hidden while VITE_CRM_ENABLED is disabled').toHaveCount(0);
+}
+
+async function expectNoCrmActivityControls(scope: Locator, label: string) {
+  await expect(scope.locator(CRM_ACTIVITY_CONTROL_SELECTOR), `${label}: CRM activity controls should not be mounted`).toHaveCount(0);
+  await expect(scope.getByRole('button', { name: /^Звонок$/ }), `${label}: CRM call button should be hidden`).toHaveCount(0);
+  await expect(scope.getByRole('button', { name: /^Выезд$/ }), `${label}: CRM visit button should be hidden`).toHaveCount(0);
+  await expect(scope.getByRole('button', { name: /Добавить звонок/i }), `${label}: add CRM call action should be hidden`).toHaveCount(0);
+  await expect(scope.getByRole('button', { name: /Добавить выезд/i }), `${label}: add CRM visit action should be hidden`).toHaveCount(0);
+  await expect(scope.getByRole('link', { name: /Добавить звонок/i }), `${label}: add CRM call link should be hidden`).toHaveCount(0);
+  await expect(scope.getByRole('link', { name: /Добавить выезд/i }), `${label}: add CRM visit link should be hidden`).toHaveCount(0);
+}
+
+async function firstHrefMatching(page: Page, patternSource: string) {
+  return page.locator('main a').evaluateAll((links, source) => {
+    const pattern = new RegExp(source);
+    const match = links.find(link => pattern.test((link as HTMLAnchorElement).href));
+    return match ? (match as HTMLAnchorElement).href : '';
+  }, patternSource);
+}
+
+async function waitForHrefMatching(page: Page, patternSource: string, label: string) {
+  await expect.poll(
+    () => firstHrefMatching(page, patternSource),
+    {
+      message: label,
+      timeout: 15_000,
+      intervals: [250, 500, 1000],
+    },
+  ).not.toBe('');
+  return firstHrefMatching(page, patternSource);
+}
+
+async function expectCrmDisabledUiHidden(page: Page, frontendUrl: string) {
+  await expectCrmHiddenFromNavigation(page);
+  await expectNoCrmActivityControls(page.locator('main'), 'dashboard/equipment shell');
+
+  await page.goto(productionAppUrl(frontendUrl, '/clients'), { waitUntil: 'domcontentloaded' });
+  await expectHealthyMain(page, 'clients');
+  await expectNoCrmActivityControls(page.locator('main'), 'clients list');
+
+  const firstClientHref = await waitForHrefMatching(
+    page,
+    String.raw`/clients/(?!new(?:$|[?#]))[^/?#]+`,
+    'production CRM hidden smoke needs at least one loaded client card link',
+  );
+  await page.goto(firstClientHref, { waitUntil: 'domcontentloaded' });
+  await expectHealthyMain(page, 'client card');
+  await expectNoCrmActivityControls(page.locator('main'), 'client card');
+
+  await page.goto(productionAppUrl(frontendUrl, '/sales'), { waitUntil: 'domcontentloaded' });
+  const salesMain = page.locator('main');
+  await expectHealthyMain(page, 'sales');
+  await expectNoCrmActivityControls(salesMain, 'sales');
+  expect(await salesMain.innerText(), 'sales page should not expose CRM blocks while CRM is disabled').not.toMatch(/\bCRM\b|Открыть CRM|лид|сделк|воронк/i);
+
+  await page.goto(productionAppUrl(frontendUrl, '/service'), { waitUntil: 'domcontentloaded' });
+  const serviceMain = page.locator('main');
+  await expectHealthyMain(page, 'service');
+  await expect(serviceMain.getByRole('button', { name: 'Выезд механика' }), 'service field mechanic action should stay visible').toBeVisible();
+  await serviceMain.getByRole('button', { name: 'Выезд механика' }).click();
+  await expectHealthyMain(page, 'service field mechanic action');
+
+  await page.goto(productionAppUrl(frontendUrl, '/deliveries'), { waitUntil: 'domcontentloaded' });
+  await expectHealthyMain(page, 'delivery');
 }
 
 test('production focused UI selector smoke stays read-only', async ({ page }) => {
@@ -161,7 +250,7 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
       database?: { dbPathKind?: string };
       storage?: { classification?: string; signalPresent?: boolean };
     };
-    expect(JSON.stringify(scc), 'system control center should not expose unsafe text').not.toMatch(UNSAFE_TEXT_PATTERN);
+    expectSafeApiPayload(scc, 'system control center');
     const storageClassification = scc.storage?.classification || scc.database?.dbPathKind || 'unknown';
     safeSmokeLog('scc', {
       status: sccResponse.status(),
@@ -180,6 +269,7 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
       items?: Array<{ executionLabel?: string; executionStatus?: string; executionOverdue?: boolean }>;
       summary?: Record<string, unknown>;
     };
+    expectSafeApiPayload(queue, 'management action queue');
     const items = Array.isArray(queue.items) ? queue.items : [];
     const executionStatusPresent = items.every(item => hasOwnField(item, 'executionStatus'));
     const executionLabelPresent = items.every(item => hasOwnField(item, 'executionLabel'));
@@ -212,7 +302,7 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
       groups?: Record<string, unknown>;
       summary?: Record<string, unknown>;
     };
-    expect(JSON.stringify(attention), 'attention API should not expose unsafe text').not.toMatch(UNSAFE_TEXT_PATTERN);
+    expectSafeApiPayload(attention, 'attention action queue');
     safeSmokeLog('attention', {
       status: attentionResponse.status(),
       durationMs: attentionDurationMs,
@@ -231,6 +321,7 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
     const assigneesResponse = await api.get('/api/management/action-queue/assignees');
     expect(assigneesResponse.ok(), 'management action queue assignees GET should succeed').toBeTruthy();
     const assignees = await assigneesResponse.json() as { items?: Array<Record<string, unknown>> };
+    expectSafeApiPayload(assignees, 'management action queue assignees');
     const assigneeItems = Array.isArray(assignees.items) ? assignees.items : [];
     const safeFieldsPresent = SAFE_ASSIGNEE_FIELDS.every(field => assigneeItems.every(item => hasOwnField(item, field)));
     const unsafeFieldsAbsent = UNSAFE_ASSIGNEE_FIELDS.every(field => !objectGraphHasKey(assignees, field));
@@ -245,6 +336,8 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
   } finally {
     await api.dispose();
   }
+
+  await expectCrmDisabledUiHidden(page, frontendUrl);
 
   await page.goto(productionAppUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'Дашборд', exact: true })).toBeVisible();

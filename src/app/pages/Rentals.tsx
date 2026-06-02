@@ -3847,16 +3847,16 @@ export default function Rentals() {
       />
       {/* ===== Toolbar ===== */}
       <div className="relative z-10 border-b border-border/80 bg-card/80 shadow-[0_18px_40px_-32px_rgba(15,23,42,0.65)] backdrop-blur-xl">
-        <div className="space-y-4 px-4 py-3">
+        <div className="space-y-3 px-3 py-2.5 sm:space-y-4 sm:px-4 sm:py-3">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                 Рабочий раздел
               </p>
-              <h1 className="app-shell-title mt-1 text-3xl font-extrabold tracking-tight text-foreground">
+              <h1 className="app-shell-title mt-1 text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
                 Аренды
               </h1>
-              <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+              <p className="mt-1 hidden max-w-3xl text-sm text-muted-foreground sm:block">
                 {activeWorkspaceMeta.description}
               </p>
             </div>
@@ -3871,7 +3871,7 @@ export default function Rentals() {
             </div>
           </div>
 
-          <div className="flex max-w-full gap-5 overflow-x-auto border-t border-border/70 pt-3">
+          <div className="app-scroll-fade-x flex max-w-full gap-4 overflow-x-auto border-t border-border/70 pt-2 sm:gap-5 sm:pt-3">
             {workspaceTabs.map(tab => {
               const active = activeWorkspaceTab === tab.id;
               return (
@@ -3904,7 +3904,7 @@ export default function Rentals() {
             })}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card/80 p-2">
+          <div className="app-scroll-fade-x rentals-action-strip">
             {activeWorkspaceTab === 'list' && (
               <>
                 {canCreateDeliveries && (
@@ -4046,7 +4046,7 @@ export default function Rentals() {
             )}
 
             {activeWorkspaceTab === 'list' && (
-              <div className="ml-auto flex max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto whitespace-nowrap text-xs">
+              <div className="flex max-w-full shrink-0 flex-nowrap items-center gap-1.5 overflow-x-auto whitespace-nowrap text-xs sm:ml-auto">
                 <button
                   type="button"
                   onClick={() => toggleRentalPreset('unpaid')}
@@ -5011,12 +5011,12 @@ export default function Rentals() {
               </section>
             )}
             {activeWorkspaceTab !== 'movement' && (
-            <section className="rounded-2xl border border-border bg-card/85 p-4 shadow-sm">
-              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <section className="rounded-xl border border-border bg-card/85 p-3 shadow-sm sm:rounded-2xl sm:p-4">
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-2 sm:mb-4 sm:gap-3">
 	                <div>
 	                  <h2 className="text-lg font-bold text-foreground">{activeWorkspaceTab === 'list' ? 'Аренды' : activeWorkspaceMeta.label}</h2>
 	                </div>
-                <Button type="button" variant="secondary" className="h-9 rounded-xl" onClick={resetFilters}>
+                <Button type="button" variant="secondary" className="h-8 rounded-xl px-2 text-xs sm:h-9 sm:px-3 sm:text-sm" onClick={resetFilters}>
                   <RotateCcw className="h-4 w-4" />
                   Сбросить фильтры
                 </Button>
@@ -5024,7 +5024,7 @@ export default function Rentals() {
 
               {activeWorkspaceTab === 'list' && (
                 <>
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr_1fr]">
+                  <div className="grid gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr_1fr]">
                     <label className="flex flex-col gap-1.5">
                       <span className="text-xs font-semibold text-muted-foreground">Поиск</span>
                       <div className="relative">

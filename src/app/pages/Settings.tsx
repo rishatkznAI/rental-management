@@ -396,7 +396,7 @@ export default function Settings() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="flex h-auto w-full justify-start gap-4 overflow-x-auto rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700">
+        <TabsList className="app-scroll-fade-x flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700 sm:gap-4">
           {[
             { value: 'users',         label: 'Пользователи и роли' },
             { value: 'menu',          label: 'Левое меню' },
@@ -422,12 +422,12 @@ export default function Settings() {
         <TabsContent value="users">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
                   <CardTitle>Пользователи системы</CardTitle>
-                  <CardDescription>Управление доступом сотрудников. Вход — по логину и паролю; логин берётся из части email до @.</CardDescription>
+                  <CardDescription className="max-w-3xl">Управление доступом сотрудников. Вход — по логину и паролю; логин берётся из части email до @.</CardDescription>
                 </div>
-                <Button onClick={openAdd}>
+                <Button className="w-full sm:w-auto" onClick={openAdd}>
                   <Plus className="h-4 w-4" />
                   Добавить пользователя
                 </Button>
@@ -439,7 +439,7 @@ export default function Settings() {
                   Нет пользователей. Нажмите «Добавить пользователя».
                 </p>
               ) : (
-                <Table>
+                <Table className="min-w-[760px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Имя</TableHead>
@@ -454,7 +454,7 @@ export default function Settings() {
                     {users.map(user => (
                       <TableRow key={user.id}>
                         <TableCell><p className="font-medium">{user.name}</p></TableCell>
-                        <TableCell><p className="text-sm">{user.email}</p></TableCell>
+                        <TableCell><p className="max-w-[220px] break-all text-sm">{user.email}</p></TableCell>
                         <TableCell>
                           <Badge variant={roleBadgeVariant(user.role)}>{user.role}</Badge>
                         </TableCell>

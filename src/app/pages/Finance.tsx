@@ -625,13 +625,13 @@ function FinanceKpiCard({
     warning: 'bg-amber-100 text-amber-700 dark:bg-amber-900/35 dark:text-amber-300',
   }[tone];
   return (
-    <Card className="min-w-0">
-      <CardContent className="p-4">
+    <Card className="h-full min-w-0">
+      <CardContent className="h-full p-4">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
-            <p className="mt-2 truncate text-2xl font-semibold text-gray-900 dark:text-white">{value}</p>
-            {hint && <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{hint}</p>}
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium leading-snug text-gray-500 dark:text-gray-400">{title}</p>
+            <p className="mt-2 break-words text-xl font-semibold leading-tight text-gray-900 dark:text-white sm:text-2xl xl:text-xl 2xl:text-2xl">{value}</p>
+            {hint && <p className="mt-2 text-xs leading-snug text-gray-500 dark:text-gray-400">{hint}</p>}
           </div>
           <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${toneClass}`}>
             <Icon className="h-5 w-5" />
@@ -1412,7 +1412,7 @@ export default function Finance() {
       </div>
 
       <Tabs defaultValue="overview" className="min-w-0 gap-4">
-        <div className="max-w-full min-w-0 overflow-x-auto pb-1">
+        <div className="app-scroll-fade-x max-w-full min-w-0 overflow-x-auto pb-1">
           <TabsList className="w-max min-w-full justify-start sm:min-w-0">
             <TabsTrigger value="overview">Обзор</TabsTrigger>
             <TabsTrigger value="cash-flow">Cash Flow</TabsTrigger>
@@ -1427,7 +1427,7 @@ export default function Finance() {
         </div>
 
         <TabsContent value="overview" className="min-w-0 space-y-4 [&_[data-slot=card-content]]:min-w-0 [&_[data-slot=card]]:min-w-0">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
             <FinanceKpiCard
               title="Доходы"
               value={incomeTotal > 0 ? formatCurrency(incomeTotal) : '—'}

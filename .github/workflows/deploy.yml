@@ -9,9 +9,10 @@ on:
         type: choice
         default: full-stack
         options:
-          - full-stack
           - frontend-only
           - backend
+          - full-stack
+          - deploy-tooling
 
 permissions:
   contents: read

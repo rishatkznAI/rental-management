@@ -1,9 +1,27 @@
 #!/usr/bin/env node
 
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const ENVIRONMENTS = new Set(['staging', 'production']);
 const RELEASE_TYPES = new Set(['frontend-only', 'backend', 'full-stack']);
+const FRONTEND_ONLY_FORBIDDEN_FILE_PATTERNS = [
+  /^(server|backend|api)(\/|$)/,
+  /^(routes|lib|db|storage|migrations)(\/|$)/,
+  /^scripts\//,
+  /^\.github\/workflows\//,
+  /^e2e\/helpers\/releaseSmoke\.ts$/,
+  /^e2e\/production-smoke\.spec\.ts$/,
+  /^playwright\.production\.config\.ts$/,
+  /(^|\/)package\.json$/,
+  /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.lock)$/,
+  /(^|\/)(railway\.json|railway\.toml|nixpacks\.toml|Procfile|Dockerfile(?:\.[^/]*)?|docker-compose\.ya?ml|render\.ya?ml|fly\.toml)$/,
+  /^\.railway(\/|$)/,
+  /(^|\/)\.env(?:$|[.-])/,
+  /^(config|configs)(\/|$)/,
+  /^(server|api|backend)\.(config|env)\./,
+];
 
 export function normalizeReleaseType(value = '') {
   return String(value || '').trim().toLowerCase() || 'full-stack';
@@ -15,6 +33,8 @@ export function parseArgs(argv) {
     expectedCommit: process.env.EXPECTED_RELEASE_COMMIT || process.env.GITHUB_SHA || '',
     oldCommit: process.env.RELEASE_PREFLIGHT_OLD_COMMIT || '',
     releaseType: normalizeReleaseType(process.env.RELEASE_TYPE || process.env.RELEASE_PREFLIGHT_RELEASE_TYPE || ''),
+    changedFiles: process.env.RELEASE_PREFLIGHT_CHANGED_FILES || '',
+    changedFilesFile: process.env.RELEASE_PREFLIGHT_CHANGED_FILES_FILE || '',
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -22,6 +42,8 @@ export function parseArgs(argv) {
     else if (arg === '--expected-commit') args.expectedCommit = argv[++index] || '';
     else if (arg === '--old-commit') args.oldCommit = argv[++index] || '';
     else if (arg === '--release-type') args.releaseType = normalizeReleaseType(argv[++index] || '');
+    else if (arg === '--changed-files') args.changedFiles = argv[++index] || '';
+    else if (arg === '--changed-files-file') args.changedFilesFile = argv[++index] || '';
     else if (arg === '--help' || arg === '-h') {
       printUsage();
       process.exit(0);
@@ -44,7 +66,9 @@ Required env by mode:
 Optional:
   EXPECTED_RELEASE_COMMIT or GITHUB_SHA
   RELEASE_PREFLIGHT_OLD_COMMIT
-  RELEASE_TYPE or --release-type frontend-only|backend|full-stack`);
+  RELEASE_TYPE or --release-type frontend-only|backend|full-stack
+  RELEASE_PREFLIGHT_CHANGED_FILES or --changed-files <newline-or-comma-separated paths>
+  RELEASE_PREFLIGHT_CHANGED_FILES_FILE or --changed-files-file <path>`);
 }
 
 function requiredEnv(name) {
@@ -79,6 +103,108 @@ export function allowsBackendCommitDrift({ env = '', releaseType = '' } = {}) {
 
 export function backendDriftMessage({ expectedCommit = '', backendCommit = '' } = {}) {
   return `Backend commit differs from frontend commit: expected for frontend-only release. expected=${shortCommit(expectedCommit)} actual=${backendCommit}`;
+}
+
+function normalizeChangedFilePath(value = '') {
+  return String(value || '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '');
+}
+
+export function parseChangedFiles(value = '') {
+  return unique(String(value || '').split(/\r?\n|,/).map(normalizeChangedFilePath));
+}
+
+function gitChangedFiles({ expectedCommit = '', oldCommit = '' } = {}) {
+  const commit = String(expectedCommit || 'HEAD').trim() || 'HEAD';
+  const rangeCommands = [];
+  if (oldCommit) {
+    rangeCommands.push(['diff', '--name-only', String(oldCommit).trim(), commit]);
+  } else {
+    rangeCommands.push(['diff', '--name-only', `${commit}^1`, commit]);
+    rangeCommands.push(['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', commit]);
+  }
+
+  for (const args of rangeCommands) {
+    try {
+      const output = execFileSync('git', args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const files = parseChangedFiles(output);
+      if (files.length > 0) return files;
+    } catch {
+      // Try the next strategy. The frontend-only gate below fails closed if none work.
+    }
+  }
+  return [];
+}
+
+export function resolveChangedFiles(args = {}) {
+  const explicitFiles = parseChangedFiles(args.changedFiles || '');
+  if (explicitFiles.length > 0) return explicitFiles;
+
+  if (args.changedFilesFile) {
+    try {
+      return parseChangedFiles(readFileSync(args.changedFilesFile, 'utf8'));
+    } catch (error) {
+      throw new Error(`could not read changed files file ${args.changedFilesFile}: ${error.message}`);
+    }
+  }
+
+  return gitChangedFiles(args);
+}
+
+export function isFrontendOnlyUnsafeChangedFile(file = '') {
+  const normalized = normalizeChangedFilePath(file);
+  if (!normalized) return false;
+  return FRONTEND_ONLY_FORBIDDEN_FILE_PATTERNS.some(pattern => pattern.test(normalized));
+}
+
+export function frontendOnlyUnsafeChangedFiles(changedFiles = []) {
+  const files = Array.isArray(changedFiles) ? changedFiles : parseChangedFiles(changedFiles);
+  return files.map(normalizeChangedFilePath).filter(isFrontendOnlyUnsafeChangedFile);
+}
+
+export function assertFrontendOnlyReleaseScope({ releaseType = '', changedFiles = [] } = {}) {
+  if (normalizeReleaseType(releaseType) !== 'frontend-only') {
+    return { checked: false, changedFiles: [], unsafeChangedFiles: [] };
+  }
+
+  const files = Array.isArray(changedFiles) ? changedFiles.map(normalizeChangedFilePath).filter(Boolean) : parseChangedFiles(changedFiles);
+  assertOk(
+    files.length > 0,
+    'release_type=frontend-only requires changed file scope via RELEASE_PREFLIGHT_CHANGED_FILES, --changed-files, or git history',
+  );
+
+  const unsafeChangedFiles = frontendOnlyUnsafeChangedFiles(files);
+  assertOk(
+    unsafeChangedFiles.length === 0,
+    `release_type=frontend-only is not allowed because backend/deploy-critical files changed: ${unsafeChangedFiles.join(', ')}`,
+  );
+
+  return { checked: true, changedFiles: files, unsafeChangedFiles };
+}
+
+export function backendCommitGateResult({ env = '', releaseType = '', backendBuild = {}, expectedCommit = '' } = {}) {
+  const backendCommit = backendCommitFromBuild(backendBuild);
+  if (backendCommitMatchesExpected(backendBuild, expectedCommit)) {
+    return { status: 'pass', backendCommit, message: '' };
+  }
+  if (allowsBackendCommitDrift({ env, releaseType })) {
+    return {
+      status: 'warn',
+      backendCommit,
+      message: backendDriftMessage({ expectedCommit, backendCommit }),
+    };
+  }
+  return {
+    status: 'fail',
+    backendCommit,
+    message: `backend commit mismatch. expected=${shortCommit(expectedCommit)} actual=${backendCommit}`,
+  };
 }
 
 async function fetchText(url, options = {}) {
@@ -213,17 +339,25 @@ async function main() {
   }
 
   const prefix = args.env === 'staging' ? 'STAGING' : 'PRODUCTION';
-  const frontendUrl = requiredEnv(`${prefix}_FRONTEND_URL`);
-  const apiUrl = requiredEnv(`${prefix}_API_URL`);
   const expectedCommit = String(args.expectedCommit || '').trim();
   assertOk(expectedCommit, 'expected commit is required via --expected-commit, EXPECTED_RELEASE_COMMIT, or GITHUB_SHA');
 
   console.log(`[release-preflight] environment=${args.env}`);
+  console.log(`[release-preflight] expectedCommit=${shortCommit(expectedCommit)}`);
+  console.log(`[release-preflight] releaseType=${args.releaseType}`);
+
+  if (args.releaseType === 'frontend-only') {
+    const changedFiles = resolveChangedFiles(args);
+    const fileScope = assertFrontendOnlyReleaseScope({ releaseType: args.releaseType, changedFiles });
+    console.log(`[release-preflight] frontend-only changed files=${fileScope.changedFiles.join(', ')}`);
+    console.log(`[release-preflight] frontend-only file scope OK (${fileScope.changedFiles.length} file(s))`);
+  }
+
+  const frontendUrl = requiredEnv(`${prefix}_FRONTEND_URL`);
+  const apiUrl = requiredEnv(`${prefix}_API_URL`);
   console.log(`[release-preflight] frontend=${frontendUrl}`);
   console.log(`[release-preflight] frontend host type=${classifyHost(frontendUrl)}`);
   console.log(`[release-preflight] api=${apiUrl}`);
-  console.log(`[release-preflight] expectedCommit=${shortCommit(expectedCommit)}`);
-  console.log(`[release-preflight] releaseType=${args.releaseType}`);
 
   const healthUrl = `${apiUrl}/health`;
   const health = await fetchJson(healthUrl);
@@ -238,14 +372,16 @@ async function main() {
   const backendBuild = version.json?.build || {};
   const backendCommit = backendCommitFromBuild(backendBuild);
   assertOk(backendCommit, '/api/version must expose backend build commit');
-  const backendCommitMatches = backendCommitMatchesExpected(backendBuild, expectedCommit);
-  if (!backendCommitMatches && allowsBackendCommitDrift({ env: args.env, releaseType: args.releaseType })) {
-    console.warn(`[release-preflight] WARN: ${backendDriftMessage({ expectedCommit, backendCommit })}`);
+  const backendGate = backendCommitGateResult({
+    env: args.env,
+    releaseType: args.releaseType,
+    backendBuild,
+    expectedCommit,
+  });
+  if (backendGate.status === 'warn') {
+    console.warn(`[release-preflight] WARN: ${backendGate.message}`);
   } else {
-    assertOk(
-      backendCommitMatches,
-      `backend commit mismatch. expected=${shortCommit(expectedCommit)} actual=${backendCommit}`,
-    );
+    assertOk(backendGate.status === 'pass', backendGate.message);
     console.log(`[release-preflight] backend commit OK (${shortCommit(backendCommit)})`);
   }
 

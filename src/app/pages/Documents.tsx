@@ -1918,7 +1918,7 @@ export default function Documents() {
             ))}
           </div>
 
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          <div className="app-scroll-fade-x flex max-w-full gap-2 overflow-x-auto pb-1">
             {[
               ['all', 'Все'],
               ['rental_contract', 'Договоры'],
@@ -2143,7 +2143,7 @@ export default function Documents() {
           />
 
           <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-            <Table>
+            <Table className="min-w-[1120px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10">

@@ -2,6 +2,16 @@ name: Deploy to GitHub Pages
 
 on:
   workflow_dispatch:
+    inputs:
+      release_type:
+        description: Type of release being deployed
+        required: true
+        type: choice
+        default: full-stack
+        options:
+          - full-stack
+          - frontend-only
+          - backend
 
 permissions:
   contents: read
@@ -145,11 +155,12 @@ jobs:
         run: sleep 30
 
       - name: Run production release preflight
-        run: npm run release:preflight -- --env production --expected-commit "$EXPECTED_RELEASE_COMMIT"
+        run: npm run release:preflight -- --env production --expected-commit "$EXPECTED_RELEASE_COMMIT" --release-type "$RELEASE_TYPE"
         env:
           PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
           PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
           EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_TYPE: ${{ inputs.release_type || 'full-stack' }}
 
       - name: Run production targeted GET smoke
         run: npm run release:targeted-smoke -- --env production
@@ -166,6 +177,7 @@ jobs:
           PRODUCTION_ADMIN_EMAIL: ${{ secrets.PRODUCTION_ADMIN_EMAIL }}
           PRODUCTION_ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
           EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_TYPE: ${{ inputs.release_type || 'full-stack' }}
 
       - name: Upload production Playwright report
         if: failure()

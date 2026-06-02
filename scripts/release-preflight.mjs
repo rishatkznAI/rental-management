@@ -1,18 +1,27 @@
 #!/usr/bin/env node
 
-const ENVIRONMENTS = new Set(['staging', 'production']);
+import { fileURLToPath } from 'node:url';
 
-function parseArgs(argv) {
+const ENVIRONMENTS = new Set(['staging', 'production']);
+const RELEASE_TYPES = new Set(['frontend-only', 'backend', 'full-stack']);
+
+export function normalizeReleaseType(value = '') {
+  return String(value || '').trim().toLowerCase() || 'full-stack';
+}
+
+export function parseArgs(argv) {
   const args = {
     env: '',
     expectedCommit: process.env.EXPECTED_RELEASE_COMMIT || process.env.GITHUB_SHA || '',
     oldCommit: process.env.RELEASE_PREFLIGHT_OLD_COMMIT || '',
+    releaseType: normalizeReleaseType(process.env.RELEASE_TYPE || process.env.RELEASE_PREFLIGHT_RELEASE_TYPE || ''),
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--env') args.env = argv[++index] || '';
     else if (arg === '--expected-commit') args.expectedCommit = argv[++index] || '';
     else if (arg === '--old-commit') args.oldCommit = argv[++index] || '';
+    else if (arg === '--release-type') args.releaseType = normalizeReleaseType(argv[++index] || '');
     else if (arg === '--help' || arg === '-h') {
       printUsage();
       process.exit(0);
@@ -34,7 +43,8 @@ Required env by mode:
 
 Optional:
   EXPECTED_RELEASE_COMMIT or GITHUB_SHA
-  RELEASE_PREFLIGHT_OLD_COMMIT`);
+  RELEASE_PREFLIGHT_OLD_COMMIT
+  RELEASE_TYPE or --release-type frontend-only|backend|full-stack`);
 }
 
 function requiredEnv(name) {
@@ -43,15 +53,32 @@ function requiredEnv(name) {
   return value.replace(/\/$/, '');
 }
 
-function shortCommit(value = '') {
+export function shortCommit(value = '') {
   return String(value || '').trim().slice(0, 12);
 }
 
-function commitsMatch(actual = '', expected = '') {
+export function commitsMatch(actual = '', expected = '') {
   const left = String(actual || '').trim();
   const right = String(expected || '').trim();
   if (!left || !right) return false;
   return left.startsWith(right) || right.startsWith(left);
+}
+
+function backendCommitFromBuild(build = {}) {
+  return build.commitFull || build.commit || '';
+}
+
+export function backendCommitMatchesExpected(backendBuild = {}, expectedCommit = '') {
+  const backendCommit = backendCommitFromBuild(backendBuild);
+  return commitsMatch(backendCommit, expectedCommit) || commitsMatch(backendBuild.commit, shortCommit(expectedCommit));
+}
+
+export function allowsBackendCommitDrift({ env = '', releaseType = '' } = {}) {
+  return env === 'production' && normalizeReleaseType(releaseType) === 'frontend-only';
+}
+
+export function backendDriftMessage({ expectedCommit = '', backendCommit = '' } = {}) {
+  return `Backend commit differs from frontend commit: expected for frontend-only release. expected=${shortCommit(expectedCommit)} actual=${backendCommit}`;
 }
 
 async function fetchText(url, options = {}) {
@@ -112,7 +139,7 @@ async function readFrontendBundle(frontendUrl) {
   const { response, text: html } = await fetchText(`${frontendUrl}${separator}${cacheBust}`, {
     headers: { Accept: 'text/html' },
   });
-  assertOk(response.ok, `frontend URL must return 2xx. HTTP ${response.status}: ${frontendUrl}`);
+  assertOk(response.status === 200, `frontend URL must return 200. HTTP ${response.status}: ${frontendUrl}`);
 
   const scriptUrls = extractScriptUrls(html);
   assertOk(scriptUrls.length > 0, 'frontend HTML did not include any script assets');
@@ -121,7 +148,7 @@ async function readFrontendBundle(frontendUrl) {
   for (const scriptUrl of scriptUrls) {
     const assetUrl = resolveAssetUrl(frontendUrl, scriptUrl);
     const asset = await fetchText(assetUrl);
-    assertOk(asset.response.ok, `frontend asset must return 2xx. HTTP ${asset.response.status}: ${assetUrl}`);
+    assertOk(asset.response.status === 200, `frontend asset must return 200. HTTP ${asset.response.status}: ${assetUrl}`);
     assets.push({ url: assetUrl, text: asset.text });
   }
 
@@ -180,6 +207,10 @@ async function main() {
     printUsage();
     throw new Error('--env must be staging or production');
   }
+  if (!RELEASE_TYPES.has(args.releaseType)) {
+    printUsage();
+    throw new Error('--release-type must be frontend-only, backend, or full-stack');
+  }
 
   const prefix = args.env === 'staging' ? 'STAGING' : 'PRODUCTION';
   const frontendUrl = requiredEnv(`${prefix}_FRONTEND_URL`);
@@ -192,6 +223,7 @@ async function main() {
   console.log(`[release-preflight] frontend host type=${classifyHost(frontendUrl)}`);
   console.log(`[release-preflight] api=${apiUrl}`);
   console.log(`[release-preflight] expectedCommit=${shortCommit(expectedCommit)}`);
+  console.log(`[release-preflight] releaseType=${args.releaseType}`);
 
   const healthUrl = `${apiUrl}/health`;
   const health = await fetchJson(healthUrl);
@@ -204,13 +236,18 @@ async function main() {
   assertOk(version.response.status === 200, `/api/version must return 200. HTTP ${version.response.status}`);
   assertOk(version.json?.ok === true, '/api/version JSON must include ok=true');
   const backendBuild = version.json?.build || {};
-  const backendCommit = backendBuild.commitFull || backendBuild.commit || '';
+  const backendCommit = backendCommitFromBuild(backendBuild);
   assertOk(backendCommit, '/api/version must expose backend build commit');
-  assertOk(
-    commitsMatch(backendCommit, expectedCommit) || commitsMatch(backendBuild.commit, shortCommit(expectedCommit)),
-    `backend commit mismatch. expected=${shortCommit(expectedCommit)} actual=${backendCommit}`,
-  );
-  console.log(`[release-preflight] backend commit OK (${shortCommit(backendCommit)})`);
+  const backendCommitMatches = backendCommitMatchesExpected(backendBuild, expectedCommit);
+  if (!backendCommitMatches && allowsBackendCommitDrift({ env: args.env, releaseType: args.releaseType })) {
+    console.warn(`[release-preflight] WARN: ${backendDriftMessage({ expectedCommit, backendCommit })}`);
+  } else {
+    assertOk(
+      backendCommitMatches,
+      `backend commit mismatch. expected=${shortCommit(expectedCommit)} actual=${backendCommit}`,
+    );
+    console.log(`[release-preflight] backend commit OK (${shortCommit(backendCommit)})`);
+  }
 
   const frontend = await readFrontendBundle(frontendUrl);
   const expectedShort = shortCommit(expectedCommit);
@@ -259,7 +296,9 @@ async function main() {
   console.log('[release-preflight] PASS');
 }
 
-main().catch(error => {
-  console.error(`[release-preflight] FAIL: ${error.message}`);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    console.error(`[release-preflight] FAIL: ${error.message}`);
+    process.exit(1);
+  });
+}

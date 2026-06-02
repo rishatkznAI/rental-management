@@ -120,19 +120,37 @@ export function parseChangedFiles(value = '') {
 function gitChangedFiles({ expectedCommit = '', oldCommit = '' } = {}) {
   const commit = String(expectedCommit || 'HEAD').trim() || 'HEAD';
   const rangeCommands = [];
+  const gitOutput = args => execFileSync('git', args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+
   if (oldCommit) {
     rangeCommands.push(['diff', '--name-only', String(oldCommit).trim(), commit]);
   } else {
+    try {
+      const commitSha = gitOutput(['rev-parse', commit]);
+      for (const baseRef of ['origin/main', 'origin/master']) {
+        try {
+          const mergeBase = gitOutput(['merge-base', commit, baseRef]);
+          if (mergeBase && mergeBase !== commitSha) {
+            rangeCommands.push(['diff', '--name-only', mergeBase, commit]);
+          }
+          break;
+        } catch {
+          // Try the next likely default branch ref.
+        }
+      }
+    } catch {
+      // Fall back to the single-commit checks below.
+    }
     rangeCommands.push(['diff', '--name-only', `${commit}^1`, commit]);
     rangeCommands.push(['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', commit]);
   }
 
   for (const args of rangeCommands) {
     try {
-      const output = execFileSync('git', args, {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
+      const output = gitOutput(args);
       const files = parseChangedFiles(output);
       if (files.length > 0) return files;
     } catch {

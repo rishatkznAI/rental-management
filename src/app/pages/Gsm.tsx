@@ -342,6 +342,46 @@ function formatGatewayState(status: GsmGatewayStatus) {
   return 'Ошибка';
 }
 
+function getGatewayOperationalState(
+  status: GsmGatewayStatus,
+  recentPackets: GsmGatewayPacket[],
+  devices: GsmGatewayDevice[],
+) {
+  if (status.startError) {
+    return {
+      label: 'Ошибка подключения',
+      badge: 'danger' as const,
+      hint: status.startError,
+    };
+  }
+  if (status.disabled || status.gatewayEnabled === false) {
+    return {
+      label: 'Отключено',
+      badge: 'default' as const,
+      hint: 'GPRS-шлюз выключен в настройках или не запущен.',
+    };
+  }
+  if (recentPackets.length > 0 || status.packetsToday > 0 || status.packetsReceivedTotal > 0) {
+    return {
+      label: 'Подключено',
+      badge: 'success' as const,
+      hint: 'Пакеты поступают и сохраняются в журнале.',
+    };
+  }
+  if (status.connectionsActive > 0 || status.onlineConnections > 0 || devices.some(device => device.status === 'online')) {
+    return {
+      label: 'Ожидает пакеты',
+      badge: 'warning' as const,
+      hint: 'Соединение есть, но свежих пакетов ещё нет.',
+    };
+  }
+  return {
+    label: 'Нет данных',
+    badge: 'default' as const,
+    hint: 'Карта и телеметрия будут отображаться после подключения трекеров.',
+  };
+}
+
 function getParseStatusBadge(status?: string | null): 'success' | 'warning' | 'danger' | 'default' {
   if (status === 'parsed') return 'success';
   if (status === 'failed') return 'danger';
@@ -1015,6 +1055,35 @@ export default function Gsm() {
     sendCommandMutation,
   ]);
 
+  const gatewayOperationalState = getGatewayOperationalState(gatewayStatus, recentGatewayPackets, gsmDevices);
+  const hasLiveTelemetry = mapMarkers.length > 0 || recentGatewayPackets.length > 0 || gsmDevices.length > 0;
+  const emptyStateCounters = [
+    {
+      label: 'Статус шлюза',
+      value: gatewayOperationalState.label,
+      detail: `${gatewayStatus.host || '0.0.0.0'}:${gatewayStatus.port || gatewayStatus.tcpPort}`,
+      icon: Server,
+    },
+    {
+      label: 'Последние пакеты',
+      value: String(recentGatewayPackets.length),
+      detail: gatewayStatus.lastPacketAt ? formatDateTime(gatewayStatus.lastPacketAt) : 'Пакетов пока нет',
+      icon: ArrowDownToLine,
+    },
+    {
+      label: 'Активные устройства',
+      value: String(gsmDevices.filter(device => device.status === 'online').length),
+      detail: `${gsmDevices.length} трекеров в списке`,
+      icon: Cpu,
+    },
+    {
+      label: 'Очередь команд',
+      value: String(gatewayStatus.queuedCommands),
+      detail: `${gatewayStatus.failedCommands} ошибок доставки`,
+      icon: ArrowUpToLine,
+    },
+  ];
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.08),transparent_28%),radial-gradient(circle_at_top_right,rgba(163,230,53,0.08),transparent_24%),linear-gradient(180deg,#050816_0%,#09101f_100%)] px-4 py-8 text-slate-900 dark:text-white sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
@@ -1030,6 +1099,10 @@ export default function Gsm() {
                 Раздел показывает текущее положение техники, выезд со склада, прибытие на объект, пропажу сигнала, маршрут за день или неделю,
                 а также телеметрию по моточасам, зажиганию и АКБ. Привязка идёт к активной аренде и адресу объекта клиента.
               </p>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Badge variant={gatewayOperationalState.badge}>{gatewayOperationalState.label}</Badge>
+                <span className="break-words text-sm text-slate-600 dark:text-slate-400">{gatewayOperationalState.hint}</span>
+              </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
@@ -1056,6 +1129,54 @@ export default function Gsm() {
             </div>
           </div>
         </section>
+
+        {!hasLiveTelemetry ? (
+          <section className="rounded-3xl border border-dashed border-slate-300 bg-white p-5 dark:border-white/10 dark:bg-slate-950/70">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex min-w-0 gap-3">
+                <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-400/20 dark:bg-cyan-400/10 dark:text-cyan-200">
+                  <MapPinned className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="break-words text-lg font-bold text-slate-900 dark:text-white">Карта и телеметрия будут отображаться после подключения трекеров</h2>
+                  <p className="mt-1 break-words text-sm text-slate-600 dark:text-slate-400">
+                    Пока доступны состояние GPRS-шлюза, последние пакеты, активные устройства и очередь команд без имитации данных.
+                  </p>
+                </div>
+              </div>
+              {canBindGsmEquipment ? (
+                <Button
+                  type="button"
+                  onClick={() => openGsmBinding()}
+                  className="shrink-0 rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                >
+                  <Plus className="h-4 w-4" />
+                  Привязать трекер
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {emptyStateCounters.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.label} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{item.label}</p>
+                        <p className="mt-2 break-words text-2xl font-black text-slate-900 dark:text-white">{item.value}</p>
+                      </div>
+                      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-cyan-700 dark:border-white/10 dark:bg-slate-950/60 dark:text-cyan-300">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                    </div>
+                    <p className="mt-2 break-words text-sm text-slate-600 dark:text-slate-400">{item.detail}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
 
         <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
           <CardHeader className="gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -1123,8 +1244,8 @@ export default function Gsm() {
           </CardContent>
         </Card>
 
-        <Tabs value={tab} onValueChange={(value) => setTab(value as GsmTab)} className="space-y-4">
-          <TabsList className="h-auto rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 p-1">
+        <Tabs value={tab} onValueChange={(value) => setTab(value as GsmTab)} className="min-w-0 space-y-4">
+          <TabsList className="h-auto w-full justify-start rounded-2xl border border-slate-200 bg-white p-1 dark:border-white/10 dark:bg-slate-950/70">
             <TabsTrigger value="overview" className="rounded-xl px-4 py-2 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-50 dark:data-[state=active]:bg-white dark:data-[state=active]:text-slate-950">
               Обзор
             </TabsTrigger>
@@ -1148,8 +1269,8 @@ export default function Gsm() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview">
-            <div className="space-y-6">
+          <TabsContent value="overview" className="min-w-0">
+            <div className="min-w-0 space-y-6">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardContent className="p-5">
@@ -1217,21 +1338,21 @@ export default function Gsm() {
                 </div>
               )}
 
-              <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
-                  <CardHeader>
+              <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+                <Card className="min-w-0 border-slate-200 bg-white text-slate-900 dark:border-white/10 dark:bg-slate-950/70 dark:text-white">
+                  <CardHeader className="min-w-0">
                     <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Последние входящие пакеты</CardTitle>
                     <CardDescription className="text-slate-600 dark:text-slate-400">
                       Сырые пакеты сохраняются до добавления конкретных парсеров протоколов.
                     </CardDescription>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="min-w-0">
                     {recentGatewayPackets.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-8 text-center text-sm text-slate-600 dark:text-slate-400">
                         Пакетов пока нет.
                       </div>
                     ) : (
-                      <div className="overflow-x-auto">
+                      <div className="max-w-full overflow-x-auto">
                         <table className="w-full min-w-[980px] text-left text-sm">
                           <thead className="text-xs uppercase tracking-[0.14em] text-slate-500">
                             <tr>
@@ -1289,14 +1410,14 @@ export default function Gsm() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
-                  <CardHeader>
+                <Card className="min-w-0 border-slate-200 bg-white text-slate-900 dark:border-white/10 dark:bg-slate-950/70 dark:text-white">
+                  <CardHeader className="min-w-0">
                     <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Состояние парка</CardTitle>
                     <CardDescription className="text-slate-600 dark:text-slate-400">
                       Учитываются единицы техники с IMEI или Device ID.
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-3">
+                  <CardContent className="min-w-0 space-y-3">
                     {(['online', 'offline', 'unknown'] as const).map(status => (
                       <div key={status} className="flex items-center justify-between rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-3">
                         <span className="text-sm text-slate-700 dark:text-slate-300">{formatGsmStatus(status)}</span>
@@ -1637,13 +1758,50 @@ export default function Gsm() {
                       Координаты выглядят тестовыми или некорректными: {suspiciousMapMarkers.map(marker => marker.title).join(', ')}. Маркеры показаны и карта центрируется по фактическим точкам.
                     </div>
                   ) : null}
-                  <GsmLeafletMap
-                    markers={mapMarkers}
-                    selectedId={selectedSnapshot?.equipment.id || null}
-                    onSelect={setSelectedId}
-                    routePoints={selectedRoutePoints}
-                    zones={selectedSnapshot?.zones || []}
-                  />
+                  {mapMarkers.length === 0 ? (
+                    <div className="min-h-[520px] rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-slate-950/40">
+                      <div className="flex min-h-[470px] flex-col justify-center">
+                        <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
+                          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-400/20 dark:bg-cyan-400/10 dark:text-cyan-200">
+                            <MapPinned className="h-5 w-5" />
+                          </span>
+                          <h3 className="mt-4 text-lg font-bold text-slate-900 dark:text-white">Карта и телеметрия будут отображаться после подключения трекеров</h3>
+                          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                            Координат для карты пока нет. Ниже остаются доступными шлюз, последние пакеты, устройства и очередь команд.
+                          </p>
+                          <Badge className="mt-3" variant={gatewayOperationalState.badge}>{gatewayOperationalState.label}</Badge>
+                        </div>
+
+                        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                          {emptyStateCounters.map((item) => {
+                            const Icon = item.icon;
+                            return (
+                              <div key={item.label} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 text-left dark:border-white/10 dark:bg-white/5">
+                                <div className="flex items-start gap-3">
+                                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-cyan-700 dark:border-white/10 dark:bg-slate-950/60 dark:text-cyan-300">
+                                    <Icon className="h-4 w-4" />
+                                  </span>
+                                  <div className="min-w-0">
+                                    <p className="break-words text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{item.label}</p>
+                                    <p className="mt-1 break-words text-lg font-bold text-slate-900 dark:text-white">{item.value}</p>
+                                    <p className="mt-1 break-words text-xs text-slate-600 dark:text-slate-400">{item.detail}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <GsmLeafletMap
+                      markers={mapMarkers}
+                      selectedId={selectedSnapshot?.equipment.id || null}
+                      onSelect={setSelectedId}
+                      routePoints={selectedRoutePoints}
+                      zones={selectedSnapshot?.zones || []}
+                    />
+                  )}
                 </CardContent>
               </Card>
 

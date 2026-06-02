@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ChevronRight, Plus, Search, Tag } from 'lucide-react';
+import { BadgeDollarSign, CheckCircle2, ChevronRight, ClipboardCheck, FileSignature, Plus, Search, ShieldAlert, Tag, Wrench } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -70,6 +70,10 @@ function getSaleReceiptBadge(status?: EquipmentSaleReceiptStatus) {
     cancelled: 'default',
   };
   return <Badge variant={variants[status]}>{EQUIPMENT_SALE_RECEIPT_LABELS[status]}</Badge>;
+}
+
+function formatOptionalSaleMoney(value: number) {
+  return value > 0 ? formatCurrency(value) : 'Нет данных';
 }
 
 function isPhysicallyAvailableForSale(equipment: Equipment) {
@@ -416,6 +420,75 @@ export default function Sales() {
   const waitingAcceptanceCount = saleEquipment.filter((equipment) => equipment.saleReceiptStatus === 'arrived_waiting_acceptance').length;
   const acceptedReceiptCount = saleEquipment.filter((equipment) => equipment.saleReceiptStatus === 'accepted').length;
   const rejectedReceiptCount = saleEquipment.filter((equipment) => equipment.saleReceiptStatus === 'acceptance_rejected').length;
+  const activeSaleEquipment = saleEquipment.filter((equipment) => !['sold', 'removed'].includes(saleStatusKind(equipment)));
+  const commercialReadyCount = activeSaleEquipment.filter((equipment) => equipment.salePdiStatus === 'ready').length;
+  const commercialInProgressCount = activeSaleEquipment.filter((equipment) => equipment.salePdiStatus === 'in_progress').length;
+  const commercialIssuesCount = activeSaleEquipment.filter((equipment) => equipment.salePdiStatus === 'issues').length;
+  const commercialNoPriceCount = activeSaleEquipment.filter((equipment) => !equipment.salePrice1 && !equipment.salePrice2 && !equipment.salePrice3).length;
+  const commercialAvailableCount = activeSaleEquipment.filter((equipment) => equipment.status === 'available' && isPhysicallyAvailableForSale(equipment)).length;
+  const commercialRejectedReceiptCount = activeSaleEquipment.filter((equipment) => equipment.saleReceiptStatus === 'acceptance_rejected').length;
+  const requiresPdiCount = activeSaleEquipment.filter((equipment) => (equipment.salePdiStatus ?? 'not_started') !== 'ready').length;
+  const blockerCount = activeSaleEquipment.filter((equipment) => {
+    const hasNoPrices = !equipment.salePrice1 && !equipment.salePrice2 && !equipment.salePrice3;
+    const pdiBlocked = equipment.salePdiStatus === 'issues' || (equipment.salePdiStatus ?? 'not_started') === 'not_started';
+    const receiptBlocked = !isPhysicallyAvailableForSale(equipment) || equipment.saleReceiptStatus === 'acceptance_rejected';
+    return hasNoPrices || pdiBlocked || receiptBlocked;
+  }).length;
+  const potentialSaleValue = activeSaleEquipment.reduce((sum, equipment) => sum + (Number(equipment.salePrice1) || 0), 0);
+  const marginRecords = activeSaleEquipment.filter((equipment) => (Number(equipment.salePrice1) || 0) > 0 && (Number(equipment.salePrice3) || 0) > 0);
+  const potentialMarginValue = marginRecords.reduce((sum, equipment) => (
+    sum + ((Number(equipment.salePrice1) || 0) - (Number(equipment.salePrice3) || 0))
+  ), 0);
+  const commercialSummary = [
+    {
+      label: 'Техника на продаже',
+      value: String(saleEquipment.length),
+      detail: 'Единицы в коммерческой витрине',
+      icon: BadgeDollarSign,
+      tone: 'border-blue-200 bg-blue-50/70 text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200',
+    },
+    {
+      label: 'Готово к продаже',
+      value: String(commercialReadyCount),
+      detail: `${commercialAvailableCount} физически доступны`,
+      icon: CheckCircle2,
+      tone: 'border-emerald-200 bg-emerald-50/70 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200',
+    },
+    {
+      label: 'Требует PDI',
+      value: String(requiresPdiCount),
+      detail: `${commercialInProgressCount} в работе, ${commercialIssuesCount} с замечаниями`,
+      icon: Wrench,
+      tone: 'border-amber-200 bg-amber-50/75 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100',
+    },
+    {
+      label: 'Есть блокеры',
+      value: String(blockerCount),
+      detail: `${commercialNoPriceCount} без цены, ${commercialRejectedReceiptCount} с отказом приёмки`,
+      icon: ShieldAlert,
+      tone: 'border-rose-200 bg-rose-50/70 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-200',
+    },
+  ];
+  const workflowSummary = [
+    {
+      label: 'КП',
+      value: formatOptionalSaleMoney(potentialSaleValue),
+      detail: potentialSaleValue > 0 ? 'Потенциальная сумма по цене 1' : 'Заполните цену 1, чтобы видеть сумму',
+      icon: FileSignature,
+    },
+    {
+      label: 'Маржа',
+      value: marginRecords.length > 0 ? formatCurrency(potentialMarginValue) : 'Нет данных',
+      detail: marginRecords.length > 0 ? `${marginRecords.length} записей с ценой и себестоимостью` : 'Появится после заполнения цены и себестоимости',
+      icon: BadgeDollarSign,
+    },
+    {
+      label: 'PDI',
+      value: activeSaleEquipment.length > 0 ? `${commercialReadyCount}/${activeSaleEquipment.length}` : 'Нет данных',
+      detail: activeSaleEquipment.length > 0 ? 'Готовность к показу клиенту' : 'Нет активной техники в продаже',
+      icon: ClipboardCheck,
+    },
+  ];
   const activeFilterCount = [
     search.trim() !== '',
     pdiFilter !== 'all',
@@ -915,70 +988,77 @@ export default function Sales() {
         </TabsList>
 
         <TabsContent value="showcase" className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">На продаже</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-semibold text-gray-900 dark:text-white">{saleEquipment.length}</p>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Актуальные единицы в продаже</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">PDI готов</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-semibold text-green-600 dark:text-green-400">{readyCount}</p>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Можно передавать в коммерческую работу</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">PDI в работе</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-semibold text-amber-600 dark:text-amber-400">{inProgressCount}</p>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Единицы, которые нужно довести до готовности</p>
-          </CardContent>
-        </Card>
-      </div>
+      <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800 sm:p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[--color-primary]">Коммерческая сводка</p>
+            <h2 className="mt-1 text-xl font-bold text-gray-900 dark:text-white">Готовность техники к продаже</h2>
+            <p className="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
+              КП, PDI, блокеры и готовность к показу клиенту собраны перед рабочим реестром.
+            </p>
+          </div>
+          {saleEquipment.length === 0 ? (
+            <span className="rounded-full border border-dashed border-gray-300 px-3 py-1 text-xs font-medium text-gray-500 dark:border-gray-600 dark:text-gray-400">
+              Продажная витрина пока пустая
+            </span>
+          ) : null}
+        </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Планируется поступление</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold text-amber-600 dark:text-amber-300">{plannedArrivalCount}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Ожидает приёмки</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold text-amber-600 dark:text-amber-300">{waitingAcceptanceCount}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">Принято</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold text-green-600 dark:text-green-300">{acceptedReceiptCount}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500 dark:text-gray-400">С замечаниями</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold text-red-600 dark:text-red-300">{rejectedReceiptCount}</p>
-          </CardContent>
-        </Card>
-      </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {commercialSummary.map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.label} className={`min-w-0 rounded-xl border p-4 ${item.tone}`}>
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] opacity-80">{item.label}</p>
+                    <p className="mt-2 break-words text-3xl font-bold leading-none">{item.value}</p>
+                  </div>
+                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/70 text-current dark:bg-gray-950/30">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                </div>
+                <p className="mt-3 break-words text-sm opacity-85">{item.detail}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {workflowSummary.map((item) => {
+              const Icon = item.icon;
+              return (
+                <div key={item.label} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">
+                    <Icon className="h-4 w-4" />
+                    {item.label}
+                  </div>
+                  <p className="mt-2 break-words text-xl font-bold text-gray-900 dark:text-white">{item.value}</p>
+                  <p className="mt-1 break-words text-sm text-gray-500 dark:text-gray-400">{item.detail}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">Поступление и приёмка</p>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+              {[
+                ['Планируется', plannedArrivalCount],
+                ['Ожидает приёмки', waitingAcceptanceCount],
+                ['Принято', acceptedReceiptCount],
+                ['С замечаниями', rejectedReceiptCount],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="min-w-0 rounded-lg border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-800">
+                  <p className="break-words text-xs text-gray-500 dark:text-gray-400">{label}</p>
+                  <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">{value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div className="flex justify-end">
         <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
@@ -1069,7 +1149,11 @@ export default function Sales() {
         {filteredEquipment.length === 0 ? (
           <div className="rounded-lg border border-gray-200 bg-white px-4 py-10 text-center dark:border-gray-700 dark:bg-gray-800">
             <Tag className="mx-auto h-8 w-8 text-gray-400 dark:text-gray-500" />
-            <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">Под выбранные фильтры техника на продажу не найдена.</p>
+            <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+              {saleEquipment.length === 0
+                ? 'Продажная витрина пока пустая. Добавьте технику в режиме продажи, чтобы видеть КП, PDI и готовность к показу.'
+                : 'Под выбранные фильтры техника на продажу не найдена.'}
+            </p>
           </div>
         ) : filteredEquipment.map((equipment) => {
           const conditionKind = saleConditionKind(equipment);
@@ -1263,7 +1347,11 @@ export default function Sales() {
         {filteredEquipment.length === 0 ? (
           <div className="px-4 py-10 text-center">
             <Tag className="mx-auto h-8 w-8 text-gray-400 dark:text-gray-500" />
-            <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">Под выбранные фильтры техника на продажу не найдена.</p>
+            <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+              {saleEquipment.length === 0
+                ? 'Продажная витрина пока пустая. Добавьте технику в режиме продажи, чтобы видеть КП, PDI и готовность к показу.'
+                : 'Под выбранные фильтры техника на продажу не найдена.'}
+            </p>
           </div>
         ) : null}
       </div>

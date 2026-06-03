@@ -53,6 +53,7 @@ import { paymentsService } from '../../services/payments.service';
 import { deliveriesService } from '../../services/deliveries.service';
 import { debtCollectionPlansService } from '../../services/debt-collection-plans.service';
 import { appSettingsService } from '../../services/app-settings.service';
+import { APP_BRAND_NAME } from '../../lib/appBrand';
 import type { Equipment, Rental } from '../../types';
 import { LiftLogo } from './LiftLogo';
 
@@ -417,7 +418,7 @@ export function Sidebar({
         )}>
           <LiftLogo className="h-9 w-9" />
           <div className={cn('min-w-0', desktopCollapsed && 'sm:hidden')}>
-            <div className="app-shell-title text-[15px] font-extrabold text-sidebar-foreground">Скайтех</div>
+            <div className="app-shell-title truncate text-[15px] font-extrabold text-sidebar-foreground">{APP_BRAND_NAME}</div>
           </div>
           <div className={cn('ml-auto flex items-center gap-1', desktopCollapsed && 'sm:ml-0 sm:flex-col')}>
             <button

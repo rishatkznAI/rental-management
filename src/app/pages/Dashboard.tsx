@@ -2904,19 +2904,19 @@ export default function Dashboard() {
       </div>
 
       {showRoleDashboardCards && (
-        <Card className="overflow-hidden border-slate-800/80 bg-[radial-gradient(circle_at_8%_0%,rgba(16,185,129,0.18),transparent_30%),linear-gradient(135deg,rgba(7,16,23,0.98),rgba(10,19,30,0.96)_48%,rgba(16,20,30,0.98))] text-white shadow-[0_28px_90px_-54px_rgba(0,0,0,0.78)]">
-          <CardHeader className="relative border-b border-white/10 px-4 py-3 sm:px-6 sm:py-5">
+        <Card className="overflow-hidden border-red-100/90 bg-[radial-gradient(circle_at_8%_0%,rgba(239,68,68,0.10),transparent_30%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,247,247,0.96)_48%,rgba(248,250,252,0.98))] text-slate-950 shadow-[0_28px_90px_-62px_rgba(148,27,27,0.38)] dark:border-slate-800/80 dark:bg-[radial-gradient(circle_at_8%_0%,rgba(16,185,129,0.18),transparent_30%),linear-gradient(135deg,rgba(7,16,23,0.98),rgba(10,19,30,0.96)_48%,rgba(16,20,30,0.98))] dark:text-white dark:shadow-[0_28px_90px_-54px_rgba(0,0,0,0.78)]">
+          <CardHeader className="relative border-b border-red-100/80 px-4 py-3 dark:border-white/10 sm:px-6 sm:py-5">
             <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div className="max-w-3xl space-y-1 sm:space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="default" className="bg-emerald-400/12 text-emerald-200 ring-1 ring-emerald-300/20">{roleDashboardMeta.badge}</Badge>
-                  <Badge variant="outline" className="border-white/10 bg-white/[0.04] text-slate-300">Показатели компании</Badge>
+                  <Badge variant="default" className="bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200 dark:bg-emerald-400/12 dark:text-emerald-200 dark:ring-emerald-300/20">{roleDashboardMeta.badge}</Badge>
+                  <Badge variant="outline" className="border-slate-200 bg-white/70 text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300">Показатели компании</Badge>
                   <Badge
                     variant="outline"
                     className={
                       roleDashboardRiskCount > 0
-                        ? 'border-amber-300/35 bg-amber-400/10 text-amber-100'
-                        : 'border-emerald-300/35 bg-emerald-400/10 text-emerald-100'
+                        ? 'border-amber-300/70 bg-amber-50 text-amber-800 dark:border-amber-300/35 dark:bg-amber-400/10 dark:text-amber-100'
+                        : 'border-emerald-300/70 bg-emerald-50 text-emerald-800 dark:border-emerald-300/35 dark:bg-emerald-400/10 dark:text-emerald-100'
                     }
                   >
                     {roleDashboardRiskCount > 0
@@ -2925,17 +2925,17 @@ export default function Dashboard() {
                   </Badge>
                 </div>
                 <div>
-                  <CardTitle className="app-shell-title text-lg font-extrabold text-white sm:text-3xl">{roleDashboardMeta.title}</CardTitle>
-                  <CardDescription className="mt-1 hidden max-w-3xl text-sm leading-6 text-slate-400 sm:mt-2 sm:block">
+                  <CardTitle className="app-shell-title text-lg font-extrabold text-slate-950 dark:text-white sm:text-3xl">{roleDashboardMeta.title}</CardTitle>
+                  <CardDescription className="mt-1 hidden max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-400 sm:mt-2 sm:block">
                     {roleDashboardMeta.description}
                   </CardDescription>
                 </div>
               </div>
-              <div className="hidden items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-3 sm:flex">
-                <div className="h-2.5 w-2.5 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.75)]" />
+              <div className="hidden items-center gap-3 rounded-2xl border border-emerald-200/80 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-white/[0.045] sm:flex">
+                <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_18px_rgba(16,185,129,0.42)] dark:bg-emerald-300 dark:shadow-[0_0_18px_rgba(52,211,153,0.75)]" />
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Статус</p>
-                  <p className="text-sm font-semibold text-slate-200">Операционный контроль</p>
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Операционный контроль</p>
                 </div>
               </div>
             </div>
@@ -2950,37 +2950,37 @@ export default function Dashboard() {
                       <div className="relative z-10 grid min-h-[150px] gap-3 p-3 sm:min-h-[220px] sm:gap-4 sm:p-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(240px,0.75fr)] lg:items-stretch">
                         <div className="flex min-w-0 flex-col justify-between gap-4 sm:gap-6">
                           <div className="space-y-1.5 sm:space-y-3">
-                            <Badge variant="outline" className="w-fit border-red-300/30 bg-red-400/12 text-red-100">Главный риск</Badge>
+                            <Badge variant="outline" className="w-fit border-red-300/70 bg-red-50 text-red-700 dark:border-red-300/30 dark:bg-red-400/12 dark:text-red-100">Главный риск</Badge>
                             <div>
                               <div className="flex items-center gap-3">
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-400/12 text-red-200 ring-1 ring-red-300/20 sm:h-12 sm:w-12 sm:rounded-2xl">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-700 ring-1 ring-red-200 dark:bg-red-400/12 dark:text-red-200 dark:ring-red-300/20 sm:h-12 sm:w-12 sm:rounded-2xl">
                                   <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
                                 </div>
                                 <div>
-                                  <p className="text-sm font-semibold text-red-100/80">Финансовый контур</p>
-                                  <h3 className="mt-0.5 text-lg font-extrabold text-white sm:mt-1 sm:text-2xl">{roleDashboardPrimaryCard.title}</h3>
+                                  <p className="text-sm font-semibold text-red-700 dark:text-red-100/80">Финансовый контур</p>
+                                  <h3 className="mt-0.5 text-lg font-extrabold text-slate-950 dark:text-white sm:mt-1 sm:text-2xl">{roleDashboardPrimaryCard.title}</h3>
                                 </div>
                               </div>
-                              <p className="mt-3 text-2xl font-extrabold tracking-tight text-white sm:mt-5 sm:text-4xl">{roleDashboardPrimaryCard.value}</p>
-                              <p className="mt-1 text-sm font-medium text-red-100/80 sm:mt-2">{roleDashboardPrimaryCard.hint}</p>
+                              <p className="mt-3 text-2xl font-extrabold tracking-tight text-slate-950 dark:text-white sm:mt-5 sm:text-4xl">{roleDashboardPrimaryCard.value}</p>
+                              <p className="mt-1 text-sm font-medium text-red-700 dark:text-red-100/80 sm:mt-2">{roleDashboardPrimaryCard.hint}</p>
                             </div>
                           </div>
-                          <span className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-1.5 text-sm font-semibold text-white ring-1 ring-white/10 sm:py-2.5">
+                          <span className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-1.5 text-sm font-semibold text-white ring-1 ring-red-500/20 dark:bg-white/10 dark:ring-white/10 sm:py-2.5">
                             {roleDashboardPrimaryCard.cta}
                             <ArrowRight className="h-4 w-4" />
                           </span>
                         </div>
-                        <div className="relative hidden min-h-[150px] overflow-hidden rounded-3xl border border-red-200/10 bg-slate-950/28 p-4 ring-1 ring-white/[0.03] lg:block lg:min-h-full">
+                        <div className="relative hidden min-h-[150px] overflow-hidden rounded-3xl border border-red-200/80 bg-red-50/70 p-4 ring-1 ring-red-100/80 dark:border-red-200/10 dark:bg-slate-950/28 dark:ring-white/[0.03] lg:block lg:min-h-full">
                           <div className="relative z-10 flex items-start justify-between gap-3">
                             <div>
-                              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-red-100/55">Долг к контролю</p>
-                              <p className="mt-1 text-sm text-red-50/70">Финансовый риск сейчас</p>
+                              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-red-500 dark:text-red-100/55">Долг к контролю</p>
+                              <p className="mt-1 text-sm text-red-700 dark:text-red-50/70">Финансовый риск сейчас</p>
                             </div>
-                            <span className="shrink-0 rounded-xl bg-red-300/12 px-3 py-2 text-right text-sm font-extrabold text-red-50 ring-1 ring-red-200/15">
+                            <span className="shrink-0 rounded-xl bg-white px-3 py-2 text-right text-sm font-extrabold text-red-700 ring-1 ring-red-200/80 dark:bg-red-300/12 dark:text-red-50 dark:ring-red-200/15">
                               {roleDashboardPrimaryCard.value}
                             </span>
                           </div>
-                          <svg aria-hidden="true" viewBox="0 0 280 150" className="absolute inset-x-3 bottom-2 h-[130px] w-[calc(100%-24px)] text-red-200/80 sm:h-[145px]">
+                          <svg aria-hidden="true" viewBox="0 0 280 150" className="absolute inset-x-3 bottom-2 h-[130px] w-[calc(100%-24px)] text-red-300/80 dark:text-red-200/80 sm:h-[145px]">
                             <defs>
                               <linearGradient id="roleDebtTrend" x1="0" x2="1" y1="0" y2="0">
                                 <stop offset="0%" stopColor="#7f1d1d" stopOpacity="0.22" />
@@ -3016,7 +3016,7 @@ export default function Dashboard() {
                       <button
                         type="button"
                         onClick={roleDashboardPrimaryCard.onClick}
-                        className="group relative w-full overflow-hidden rounded-3xl border border-red-300/20 bg-[radial-gradient(circle_at_74%_4%,rgba(244,63,94,0.36),transparent_34%),linear-gradient(135deg,rgba(127,29,29,0.68),rgba(35,13,22,0.96)_55%,rgba(15,23,42,0.98))] text-left shadow-[0_24px_70px_-44px_rgba(244,63,94,0.9)] transition hover:-translate-y-0.5 hover:border-red-200/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/45"
+                        className="group relative w-full overflow-hidden rounded-3xl border border-red-200/90 bg-[radial-gradient(circle_at_74%_4%,rgba(244,63,94,0.16),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,241,242,0.98)_55%,rgba(248,250,252,0.98))] text-left shadow-[0_24px_70px_-52px_rgba(244,63,94,0.45)] transition hover:-translate-y-0.5 hover:border-red-300/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/45 dark:border-red-300/20 dark:bg-[radial-gradient(circle_at_74%_4%,rgba(244,63,94,0.36),transparent_34%),linear-gradient(135deg,rgba(127,29,29,0.68),rgba(35,13,22,0.96)_55%,rgba(15,23,42,0.98))] dark:shadow-[0_24px_70px_-44px_rgba(244,63,94,0.9)] dark:hover:border-red-200/35"
                       >
                         {primaryContent}
                       </button>
@@ -3026,22 +3026,22 @@ export default function Dashboard() {
                   return (
                     <Link
                       to={roleDashboardPrimaryCard.href}
-                      className="group relative block overflow-hidden rounded-3xl border border-red-300/20 bg-[radial-gradient(circle_at_74%_4%,rgba(244,63,94,0.36),transparent_34%),linear-gradient(135deg,rgba(127,29,29,0.68),rgba(35,13,22,0.96)_55%,rgba(15,23,42,0.98))] shadow-[0_24px_70px_-44px_rgba(244,63,94,0.9)] transition hover:-translate-y-0.5 hover:border-red-200/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/45"
+                      className="group relative block overflow-hidden rounded-3xl border border-red-200/90 bg-[radial-gradient(circle_at_74%_4%,rgba(244,63,94,0.16),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,241,242,0.98)_55%,rgba(248,250,252,0.98))] shadow-[0_24px_70px_-52px_rgba(244,63,94,0.45)] transition hover:-translate-y-0.5 hover:border-red-300/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/45 dark:border-red-300/20 dark:bg-[radial-gradient(circle_at_74%_4%,rgba(244,63,94,0.36),transparent_34%),linear-gradient(135deg,rgba(127,29,29,0.68),rgba(35,13,22,0.96)_55%,rgba(15,23,42,0.98))] dark:shadow-[0_24px_70px_-44px_rgba(244,63,94,0.9)] dark:hover:border-red-200/35"
                     >
                       {primaryContent}
                     </Link>
                   );
                 })()}
 
-                <div className="hidden rounded-3xl border border-white/10 bg-white/[0.045] p-3 backdrop-blur 2xl:block">
+                <div className="hidden rounded-3xl border border-slate-200/90 bg-white/70 p-3 backdrop-blur dark:border-white/10 dark:bg-white/[0.045] 2xl:block">
                   <div className="flex flex-col gap-1 px-2 py-2 sm:flex-row sm:items-end sm:justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Все операционные риски</p>
-                      <h3 className="mt-1 text-lg font-extrabold text-white">Список для контроля</h3>
+                      <h3 className="mt-1 text-lg font-extrabold text-slate-950 dark:text-white">Список для контроля</h3>
                     </div>
-                    <p className="text-sm text-slate-400">{roleDashboardSecondaryCards.length} активных направления</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">{roleDashboardSecondaryCards.length} активных направления</p>
                   </div>
-                  <div className="mt-2 divide-y divide-white/10">
+                  <div className="mt-2 divide-y divide-slate-200/80 dark:divide-white/10">
                     {roleDashboardSecondaryCards.map(item => {
                       const Icon = item.icon;
                       const rowTone =
@@ -3074,17 +3074,17 @@ export default function Dashboard() {
                             <Icon className="h-5 w-5" />
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-semibold text-white">{item.title}</span>
-                            <span className="mt-1 block text-sm leading-5 text-slate-400">{item.hint}</span>
+                            <span className="block text-sm font-semibold text-slate-900 dark:text-white">{item.title}</span>
+                            <span className="mt-1 block text-sm leading-5 text-slate-600 dark:text-slate-400">{item.hint}</span>
                           </span>
                           <span className="flex shrink-0 flex-col items-end text-right">
                             <span className="flex items-baseline gap-2">
-                              <span className="text-2xl font-extrabold tracking-tight text-white">{item.value}</span>
+                              <span className="text-2xl font-extrabold tracking-tight text-slate-950 dark:text-white">{item.value}</span>
                               {unitLabel && <span className="hidden text-xs font-semibold text-slate-500 sm:inline">{unitLabel}</span>}
                             </span>
-                            <span className="hidden text-xs font-semibold text-emerald-200/80 sm:block">{item.cta}</span>
+                            <span className="hidden text-xs font-semibold text-emerald-700 dark:text-emerald-200/80 sm:block">{item.cta}</span>
                           </span>
-                          <ArrowRight className="h-4 w-4 shrink-0 text-slate-500 transition group-hover:translate-x-1 group-hover:text-emerald-200 group-focus-visible:translate-x-1 group-focus-visible:text-emerald-200" />
+                          <ArrowRight className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:translate-x-1 group-hover:text-emerald-700 group-focus-visible:translate-x-1 group-focus-visible:text-emerald-700 dark:text-slate-500 dark:group-hover:text-emerald-200 dark:group-focus-visible:text-emerald-200" />
                         </>
                       );
                       if (item.onClick) {
@@ -3093,7 +3093,7 @@ export default function Dashboard() {
                             key={item.id}
                             type="button"
                             onClick={item.onClick}
-                            className="group relative flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35"
+                            className="group relative flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition hover:bg-slate-100/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35 dark:hover:bg-white/[0.06]"
                           >
                             {rowContent}
                           </button>
@@ -3103,7 +3103,7 @@ export default function Dashboard() {
                         <Link
                           key={item.id}
                           to={item.href}
-                          className="group relative flex items-center gap-3 rounded-2xl px-4 py-3 transition hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35"
+                          className="group relative flex items-center gap-3 rounded-2xl px-4 py-3 transition hover:bg-slate-100/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35 dark:hover:bg-white/[0.06]"
                         >
                           {rowContent}
                         </Link>
@@ -3119,23 +3119,23 @@ export default function Dashboard() {
                   const signalContent = (
                     <>
                       <div className="flex items-start justify-between gap-4">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-300/14 text-amber-100 ring-1 ring-amber-200/20">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-300/14 dark:text-amber-100 dark:ring-amber-200/20">
                           <Icon className="h-5 w-5" />
                         </div>
-                        <ArrowRight className="h-4 w-4 text-slate-500 transition group-hover:translate-x-1 group-hover:text-amber-100 group-focus-visible:translate-x-1 group-focus-visible:text-amber-100" />
+                        <ArrowRight className="h-4 w-4 text-slate-400 transition group-hover:translate-x-1 group-hover:text-amber-700 group-focus-visible:translate-x-1 group-focus-visible:text-amber-700 dark:text-slate-500 dark:group-hover:text-amber-100 dark:group-focus-visible:text-amber-100" />
                       </div>
                       <div className="mt-5">
                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Главный сигнал</p>
-                        <h3 className="mt-2 text-lg font-extrabold text-white">{roleDashboardSignalCard.title}</h3>
-                        <div className="mt-3 inline-flex items-baseline gap-2 rounded-2xl bg-amber-300/10 px-3 py-2 ring-1 ring-amber-200/15">
-                          <span className="text-2xl font-extrabold tracking-tight text-amber-50">{roleDashboardSignalCard.value}</span>
-                          <span className="text-xs font-semibold text-amber-100/65">
+                        <h3 className="mt-2 text-lg font-extrabold text-slate-950 dark:text-white">{roleDashboardSignalCard.title}</h3>
+                        <div className="mt-3 inline-flex items-baseline gap-2 rounded-2xl bg-amber-50 px-3 py-2 ring-1 ring-amber-200/80 dark:bg-amber-300/10 dark:ring-amber-200/15">
+                          <span className="text-2xl font-extrabold tracking-tight text-amber-800 dark:text-amber-50">{roleDashboardSignalCard.value}</span>
+                          <span className="text-xs font-semibold text-amber-700 dark:text-amber-100/65">
                             {roleDashboardSignalCard.title.includes('Документ')
                               ? formatCountLabel(Number(roleDashboardSignalCard.value) || 0, 'документ', 'документа', 'документов')
                               : 'в работе'}
                           </span>
                         </div>
-                        <p className="mt-2 text-sm leading-5 text-slate-400">{roleDashboardSignalCard.hint}</p>
+                        <p className="mt-2 text-sm leading-5 text-slate-600 dark:text-slate-400">{roleDashboardSignalCard.hint}</p>
                       </div>
                     </>
                   );
@@ -3144,7 +3144,7 @@ export default function Dashboard() {
                       <button
                         type="button"
                         onClick={roleDashboardSignalCard.onClick}
-                        className="group w-full rounded-3xl border border-white/10 bg-white/[0.045] p-4 text-left transition hover:border-amber-200/25 hover:bg-white/[0.065] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/35"
+                        className="group w-full rounded-3xl border border-slate-200/90 bg-white/70 p-4 text-left transition hover:border-amber-300/70 hover:bg-amber-50/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/35 dark:border-white/10 dark:bg-white/[0.045] dark:hover:border-amber-200/25 dark:hover:bg-white/[0.065]"
                       >
                         {signalContent}
                       </button>
@@ -3153,17 +3153,17 @@ export default function Dashboard() {
                   return (
                     <Link
                       to={roleDashboardSignalCard.href}
-                      className="group block rounded-3xl border border-white/10 bg-white/[0.045] p-4 transition hover:border-amber-200/25 hover:bg-white/[0.065] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/35"
+                      className="group block rounded-3xl border border-slate-200/90 bg-white/70 p-4 transition hover:border-amber-300/70 hover:bg-amber-50/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/35 dark:border-white/10 dark:bg-white/[0.045] dark:hover:border-amber-200/25 dark:hover:bg-white/[0.065]"
                     >
                       {signalContent}
                     </Link>
                   );
                 })()}
 
-                <div className="rounded-3xl border border-white/10 bg-white/[0.045] p-4">
+                <div className="rounded-3xl border border-slate-200/90 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.045]">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-white">Что сделать сейчас</p>
+                      <p className="text-sm font-semibold text-slate-950 dark:text-white">Что сделать сейчас</p>
                       <p className="mt-1 text-xs text-slate-500">Быстрые переходы по рискам</p>
                     </div>
                     <ListChecks className="h-5 w-5 text-emerald-300" />
@@ -3172,12 +3172,12 @@ export default function Dashboard() {
                     {roleDashboardCards.slice(0, 4).map(item => {
                       const actionTone =
                         item.tone === 'danger'
-                          ? 'text-red-200'
+                          ? 'text-red-700 dark:text-red-200'
                           : item.tone === 'warning'
-                            ? 'text-amber-100'
+                            ? 'text-amber-700 dark:text-amber-100'
                             : item.tone === 'success'
-                              ? 'text-emerald-100'
-                              : 'text-sky-100';
+                              ? 'text-emerald-700 dark:text-emerald-100'
+                              : 'text-sky-700 dark:text-sky-100';
                       const actionDot =
                         item.tone === 'danger'
                           ? 'bg-red-400'
@@ -3189,9 +3189,9 @@ export default function Dashboard() {
                       const actionContent = (
                         <>
                           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${actionDot}`} />
-                          <span className="min-w-0 flex-1 truncate text-slate-200">{item.cta}</span>
+                          <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">{item.cta}</span>
                           <span className={`shrink-0 text-sm font-bold ${actionTone}`}>{item.value}</span>
-                          <ArrowRight className="h-4 w-4 shrink-0 text-slate-500 transition group-hover:translate-x-1 group-hover:text-emerald-200 group-focus-visible:translate-x-1 group-focus-visible:text-emerald-200" />
+                          <ArrowRight className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:translate-x-1 group-hover:text-emerald-700 group-focus-visible:translate-x-1 group-focus-visible:text-emerald-700 dark:text-slate-500 dark:group-hover:text-emerald-200 dark:group-focus-visible:text-emerald-200" />
                         </>
                       );
                       if (item.onClick) {
@@ -3200,7 +3200,7 @@ export default function Dashboard() {
                             key={item.id}
                             type="button"
                             onClick={item.onClick}
-                            className="group flex w-full items-center gap-3 rounded-2xl border border-transparent bg-slate-950/38 px-3 py-3 text-left text-sm transition hover:border-emerald-200/20 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35"
+                            className="group flex w-full items-center gap-3 rounded-2xl border border-transparent bg-slate-100/70 px-3 py-3 text-left text-sm transition hover:border-emerald-300/45 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35 dark:bg-slate-950/38 dark:hover:border-emerald-200/20 dark:hover:bg-white/[0.06]"
                           >
                             {actionContent}
                           </button>
@@ -3210,7 +3210,7 @@ export default function Dashboard() {
                         <Link
                           key={item.id}
                           to={item.href}
-                          className="group flex items-center gap-3 rounded-2xl border border-transparent bg-slate-950/38 px-3 py-3 text-sm transition hover:border-emerald-200/20 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35"
+                          className="group flex items-center gap-3 rounded-2xl border border-transparent bg-slate-100/70 px-3 py-3 text-sm transition hover:border-emerald-300/45 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35 dark:bg-slate-950/38 dark:hover:border-emerald-200/20 dark:hover:bg-white/[0.06]"
                         >
                           {actionContent}
                         </Link>
@@ -3218,7 +3218,7 @@ export default function Dashboard() {
                     })}
                   </div>
                   {roleDashboardRiskCount === 0 && (
-                    <div className="mt-4 rounded-2xl border border-emerald-300/25 bg-emerald-400/10 px-3 py-3 text-sm text-emerald-100">
+                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800 dark:border-emerald-300/25 dark:bg-emerald-400/10 dark:text-emerald-100">
                       Операционных рисков нет. Можно перейти к плановым задачам дня.
                     </div>
                   )}

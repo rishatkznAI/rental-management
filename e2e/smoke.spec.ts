@@ -31,6 +31,10 @@ async function selectEquipment(page: Page, query: string) {
   await page.locator('li[data-eq-item]').first().click();
 }
 
+const visibleDocumentRegistryEntry = (page: Page, text: string) => page
+  .locator('main article:visible, main table:visible tbody tr:visible')
+  .filter({ hasText: text });
+
 test.describe('production smoke', () => {
   test('admin can sign in and see core sidebar sections', async ({ page }) => {
     await loginAsAdmin(page);
@@ -282,10 +286,11 @@ test.describe('production smoke', () => {
     await loginAsAdmin(page);
     await navigateInApp(page, '/documents');
     await expect(page.getByRole('heading', { name: 'Документы', exact: true })).toBeVisible();
-    await expect(page.getByText(seed.unsigned.number)).toBeVisible();
-    await expect(page.getByText(seed.client.company).first()).toBeVisible();
-    await expect(page.getByText(seed.rental.id).first()).toBeVisible();
-    await expect(page.getByText(seed.equipment.inventoryNumber).first()).toBeVisible();
+    const unsignedRegistryEntry = visibleDocumentRegistryEntry(page, seed.unsigned.number);
+    await expect(unsignedRegistryEntry).toBeVisible();
+    await expect(unsignedRegistryEntry).toContainText(seed.client.company);
+    await expect(unsignedRegistryEntry).toContainText(seed.rental.id);
+    await expect(unsignedRegistryEntry).toContainText(seed.equipment.inventoryNumber);
 
     await page.getByRole('button', { name: /Контроль/ }).click();
     await expect(page.getByText('Контроль документов').first()).toBeVisible();
@@ -305,8 +310,8 @@ test.describe('production smoke', () => {
     await expect(filterDialog.locator('.app-filter-label', { hasText: 'Ответственный менеджер' })).toBeVisible();
     await page.getByRole('button', { name: 'Без подписи' }).click();
     await page.keyboard.press('Escape');
-    await expect(page.getByText(seed.unsigned.number)).toBeVisible();
-    await expect(page.getByText(seed.signed.number)).toBeHidden();
+    await expect(visibleDocumentRegistryEntry(page, seed.unsigned.number)).toBeVisible();
+    await expect(visibleDocumentRegistryEntry(page, seed.signed.number)).toHaveCount(0);
 
     await navigateInApp(page, `/rentals/${seed.rental.id}`);
     await expect(page.getByRole('heading', { name: seed.rental.id })).toBeVisible();

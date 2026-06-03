@@ -258,6 +258,7 @@ type DashboardKpi = {
   tone?: DashboardTone;
   onClick?: () => void;
   href?: string;
+  cta?: string;
 };
 
 type DashboardRisk = {
@@ -829,6 +830,216 @@ function groupCountChart<T>(
       fill: colors[index % colors.length],
     }))
     .sort((a, b) => b.value - a.value);
+}
+
+type MiniChartPoint = {
+  label: string;
+  value: number;
+};
+
+type StatusBarRow = {
+  label: string;
+  value: number;
+  color: string;
+};
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+}
+
+function miniChartPoints(data: MiniChartPoint[], width: number, height: number, padding: number) {
+  const values = data.map(item => Number.isFinite(item.value) ? item.value : 0);
+  if (values.length === 0) return [];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  const innerWidth = width - padding * 2;
+  const innerHeight = height - padding * 2;
+
+  return values.map((value, index) => {
+    const x = values.length === 1 ? width / 2 : padding + (index * innerWidth) / (values.length - 1);
+    const y = range === 0 ? height * 0.55 : height - padding - ((value - min) / range) * innerHeight;
+    return { x, y };
+  });
+}
+
+function MiniSparkline({
+  data,
+  stroke = '#34d399',
+  className = '',
+}: {
+  data: MiniChartPoint[];
+  stroke?: string;
+  className?: string;
+}) {
+  const width = 220;
+  const height = 48;
+  const points = miniChartPoints(data, width, height, 5);
+  const path = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
+
+  return (
+    <svg aria-hidden="true" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className={`h-9 w-full ${className}`}>
+      <path d="M 0 42 H 220" fill="none" stroke="currentColor" strokeOpacity="0.10" strokeWidth="1" />
+      {path ? (
+        <>
+          <path d={path} fill="none" stroke={stroke} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" opacity="0.95" />
+          {points.map((point, index) => index === points.length - 1 ? (
+            <circle key={`${point.x}-${point.y}`} cx={point.x} cy={point.y} r="4" fill={stroke} />
+          ) : null)}
+        </>
+      ) : null}
+    </svg>
+  );
+}
+
+function MiniAreaChart({
+  data,
+  stroke = '#fb7185',
+  fill = '#fb7185',
+  className = '',
+}: {
+  data: MiniChartPoint[];
+  stroke?: string;
+  fill?: string;
+  className?: string;
+}) {
+  const rawId = React.useId();
+  const gradientId = `mini-area-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  const width = 280;
+  const height = 118;
+  const padding = 8;
+  const points = miniChartPoints(data, width, height, padding);
+  const linePath = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
+  const baseline = height - padding;
+  const areaPath = points.length > 0
+    ? `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${baseline} L ${points[0].x.toFixed(1)} ${baseline} Z`
+    : '';
+
+  return (
+    <svg aria-hidden="true" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className={`h-28 w-full ${className}`}>
+      <defs>
+        <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={fill} stopOpacity="0.42" />
+          <stop offset="68%" stopColor={fill} stopOpacity="0.10" />
+          <stop offset="100%" stopColor={fill} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <g fill="none" stroke="currentColor" strokeOpacity="0.12" strokeWidth="1">
+        <path d="M 8 28 H 272" />
+        <path d="M 8 62 H 272" />
+        <path d="M 8 96 H 272" />
+      </g>
+      {areaPath ? <path d={areaPath} fill={`url(#${gradientId})`} /> : null}
+      {linePath ? <path d={linePath} fill="none" stroke={stroke} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" /> : null}
+      {points.slice(-3).map((point, index) => (
+        <circle key={`${point.x}-${point.y}-${index}`} cx={point.x} cy={point.y} r={index === 2 ? 5 : 3.5} fill={stroke} opacity={index === 2 ? 1 : 0.68} />
+      ))}
+    </svg>
+  );
+}
+
+function UtilizationGauge({
+  value,
+  rented,
+  available,
+  active,
+  trend,
+}: {
+  value: number;
+  rented: number;
+  available: number;
+  active: number;
+  trend: MiniChartPoint[];
+}) {
+  const percent = clampPercent(value);
+
+  return (
+    <div className="mt-4 grid gap-4 sm:grid-cols-[92px_minmax(0,1fr)] sm:items-center">
+      <div className="relative h-[92px] w-[92px] justify-self-start text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.24)]" aria-label="Donut gauge утилизации парка">
+        <svg viewBox="0 0 120 120" role="img" className="h-full w-full">
+          <circle cx="60" cy="60" r="45" fill="none" stroke="currentColor" strokeOpacity="0.15" strokeWidth="14" />
+          <circle
+            cx="60"
+            cy="60"
+            r="45"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="14"
+            strokeLinecap="round"
+            pathLength={100}
+            strokeDasharray={`${percent} 100`}
+            transform="rotate(-90 60 60)"
+          />
+          <circle cx="60" cy="60" r="31" fill="currentColor" opacity="0.08" />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center text-base font-extrabold text-foreground">
+          {percent}%
+        </div>
+      </div>
+      <div className="min-w-0">
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          {[
+            { label: 'в аренде', value: rented, color: 'bg-emerald-400' },
+            { label: 'доступно', value: available, color: 'bg-cyan-400' },
+            { label: 'активный парк', value: active, color: 'bg-slate-400' },
+          ].map(item => (
+            <div key={item.label} className="rounded-xl border border-white/45 bg-white/55 px-2.5 py-2 shadow-sm dark:border-white/10 dark:bg-white/[0.055]">
+              <span className={`mb-1 block h-1.5 w-6 rounded-full ${item.color}`} />
+              <span className="block text-base font-extrabold text-foreground">{item.value}</span>
+              <span className="block truncate text-[11px] text-muted-foreground">{item.label}</span>
+            </div>
+          ))}
+        </div>
+        <MiniSparkline data={trend} stroke="#34d399" className="mt-2 h-7" />
+      </div>
+    </div>
+  );
+}
+
+function StatusBars({
+  rows,
+  total,
+  showPercent = true,
+}: {
+  rows: StatusBarRow[];
+  total: number;
+  showPercent?: boolean;
+}) {
+  const rowsTotal = rows.reduce((sum, row) => sum + row.value, 0);
+  const denominator = Math.max(total, rowsTotal, 1);
+  const stackRows = rows.filter(row => row.value > 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex h-3 overflow-hidden rounded-full bg-slate-950/10 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10" aria-hidden="true">
+        {stackRows.length > 0 ? stackRows.map(row => (
+          <div
+            key={row.label}
+            className="h-full"
+            style={{ width: `${(row.value / denominator) * 100}%`, minWidth: row.value > 0 ? 4 : undefined, backgroundColor: row.color }}
+          />
+        )) : <div className="h-full w-full bg-muted" />}
+      </div>
+      <div className="space-y-2">
+        {rows.map(row => {
+          const percent = Math.round((row.value / denominator) * 100);
+          return (
+            <div key={row.label} className="space-y-1">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: row.color }} />
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">{row.label}</span>
+                <span className="font-semibold text-foreground">{row.value}</span>
+                {showPercent ? <span className="w-8 text-right text-[11px] text-muted-foreground">{percent}%</span> : null}
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-950/10 dark:bg-white/10">
+                <div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: row.color }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ─── main component ────────────────────────────────────────────────────────────
@@ -2465,50 +2676,53 @@ export default function Dashboard() {
       : isManagerRole
         ? 'rentals'
         : 'overview';
-  const showRoleDashboardCards = activeDashboardTab === 'overview' && roleDashboardMeta && roleDashboardCards.length > 0;
+  const showRoleDashboardCards = false;
   const roleDashboardRiskCount = roleDashboardCards.filter(item => item.tone === 'warning' || item.tone === 'danger').length;
   const roleDashboardPrimaryCard = roleDashboardCards.find(item => item.title === 'Просроченная дебиторка') ?? roleDashboardCards[0];
   const roleDashboardSecondaryCards = roleDashboardCards.filter(item => item.id !== roleDashboardPrimaryCard?.id);
-  const roleDashboardUtilizationPercent = activeEquipment > 0 ? utilization : 62;
-  const diagnosticServiceTicketIds = new Set(
-    openServiceTickets.filter(isDiagnosticServiceTicket).map(ticket => ticket.id),
-  );
-  const liveServiceLoadRows = [
+  const roleDashboardUtilizationPercent = utilization;
+  const serviceLoadGroups = openServiceTickets.reduce((groups, ticket) => {
+    if (isDiagnosticServiceTicket(ticket)) groups.diagnostics += 1;
+    else if (ticket.status === 'in_progress') groups.inProgress += 1;
+    else if (ticket.status === 'waiting_parts') groups.waitingParts += 1;
+    else if (ticket.status === 'ready') groups.ready += 1;
+    else groups.other += 1;
+    return groups;
+  }, {
+    inProgress: 0,
+    waitingParts: 0,
+    diagnostics: 0,
+    ready: 0,
+    other: 0,
+  });
+  const serviceLoadRows = [
     {
       label: 'В работе',
-      value: openServiceTickets.filter(ticket => ticket.status === 'in_progress' && !diagnosticServiceTicketIds.has(ticket.id)).length,
+      value: serviceLoadGroups.inProgress,
       color: '#14b8a6',
     },
     {
       label: 'Ожидают запчасти',
-      value: openServiceTickets.filter(ticket => ticket.status === 'waiting_parts').length,
+      value: serviceLoadGroups.waitingParts,
       color: '#f59e0b',
     },
     {
       label: 'Диагностика',
-      value: diagnosticServiceTicketIds.size,
+      value: serviceLoadGroups.diagnostics,
       color: '#38bdf8',
     },
     {
       label: 'Готовы к закрытию',
-      value: openServiceTickets.filter(ticket => ticket.status === 'ready').length,
+      value: serviceLoadGroups.ready,
       color: '#22c55e',
     },
+    ...(serviceLoadGroups.other > 0 ? [{ label: 'Прочие', value: serviceLoadGroups.other, color: '#94a3b8' }] : []),
   ];
-  const liveServiceLoadTotal = liveServiceLoadRows.reduce((sum, row) => sum + row.value, 0);
-  const serviceLoadUsesLiveData = openServiceTickets.length > 0 && liveServiceLoadTotal > 0;
-  const serviceLoadRows = serviceLoadUsesLiveData
-    ? liveServiceLoadRows
-    : [
-        { label: 'В работе', value: 28, color: '#14b8a6' },
-        { label: 'Ожидают запчасти', value: 14, color: '#f59e0b' },
-        { label: 'Диагностика', value: 11, color: '#38bdf8' },
-        { label: 'Готовы к закрытию', value: 10, color: '#22c55e' },
-      ];
-  const serviceLoadTotal = serviceLoadUsesLiveData ? openServiceTickets.length : 63;
+  const serviceLoadTotal = openServiceTickets.length;
+  const serviceLoadRowsTotal = serviceLoadRows.reduce((sum, row) => sum + row.value, 0);
   const serviceLoadChartTotal = Math.max(
     serviceLoadTotal,
-    serviceLoadRows.reduce((sum, row) => sum + row.value, 0),
+    serviceLoadRowsTotal,
     1,
   );
   const canToggleOfficeUpd = isAdminRole;
@@ -2755,6 +2969,113 @@ export default function Dashboard() {
   const criticalCount = alertItems.filter(a => a.priority === 'critical').length;
   const highCount = alertItems.filter(a => a.priority === 'high').length;
   const mediumCount = alertItems.filter(a => a.priority === 'medium').length;
+  const overdueReceivablesAmount = overduePayments.reduce((sum, row) => sum + row.outstanding, 0);
+  const overdueReceivablesTrendData = useMemo(() => Array.from({ length: 14 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (13 - index));
+    const key = toDateKey(date);
+    return {
+      label: date.toLocaleDateString('ru-RU', { day: '2-digit' }),
+      value: overduePayments.reduce((sum, row) => {
+        const dueKey = toDateKey(row.expectedPaymentDate || row.endDate);
+        return dueKey && dueKey <= key ? sum + Number(row.outstanding || 0) : sum;
+      }, 0),
+    };
+  }), [overduePayments, today]);
+  const utilizationTrendData = useMemo(() => Array.from({ length: 8 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (7 - index));
+    const dayStart = startOfDay(date);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setHours(23, 59, 59, 999);
+    const busyKeys = new Set(
+      viewPlannerRentals
+        .filter(rental => rental.status !== 'cancelled' && overlapsRange(rental.startDate, rental.endDate, dayStart, dayEnd))
+        .map(rental => getRentalEquipmentKey(rental, activeRentalFleetLookup))
+        .filter(Boolean),
+    );
+    return {
+      label: date.toLocaleDateString('ru-RU', { day: '2-digit' }),
+      value: activeEquipment > 0 ? Math.round((busyKeys.size / activeEquipment) * 100) : 0,
+    };
+  }), [activeEquipment, activeRentalFleetLookup, today, viewPlannerRentals]);
+  const overdueReceivablesClients = new Set(
+    overduePayments
+      .map(row => row.clientId || row.client)
+      .filter(Boolean),
+  ).size;
+  const documentsWithoutClosingDocs = canViewDocuments ? documentControl.kpi.closedRentalsWithoutClosingDocs : 0;
+  const documentsAttentionTasksCount = canViewTasksCenter ? tasksWithoutResponsible.length : topAttentionActions.length;
+  const documentIssueCount = (canViewDocuments ? unsignedDocumentsCount : 0) + documentsWithoutClosingDocs;
+  const documentsTasksRows: StatusBarRow[] = [
+    { label: 'Без подписи', value: canViewDocuments ? unsignedDocumentsCount : 0, color: '#f59e0b' },
+    { label: 'Без УПД', value: documentsWithoutClosingDocs, color: '#38bdf8' },
+    { label: 'Задачи внимания', value: documentsAttentionTasksCount, color: '#a78bfa' },
+  ];
+  const documentsTasksCount = documentsTasksRows.reduce((sum, row) => sum + row.value, 0);
+  const documentsTasksUnit = formatCountLabel(documentsTasksCount, 'сигнал', 'сигнала', 'сигналов');
+  const documentsTasksHref = canViewDocuments && (documentIssueCount > 0 || !canViewTasksCenter)
+    ? unsignedDocumentsHref
+    : '/tasks';
+  const executiveSummaryCards = [
+    canViewMoney && {
+      id: 'executive-overdue-receivables',
+      label: 'Просроченная дебиторка',
+      value: overdueReceivablesAmount > 0 ? formatCurrency(overdueReceivablesAmount) : '0 ₽',
+      hint: `${overdueReceivablesClients} ${formatCountLabel(overdueReceivablesClients, 'клиент', 'клиента', 'клиентов')} с долгом`,
+      icon: ShieldAlert,
+      tone: overdueReceivablesAmount > 0 ? 'danger' : 'success',
+      href: '/payments',
+      cta: 'Проверить долги',
+    },
+    canViewEquipment && {
+      id: 'executive-fleet-utilization',
+      label: 'Утилизация парка',
+      value: activeEquipment > 0 ? `${utilization}%` : '0%',
+      hint: `Средняя загрузка за период · ${rentedEquipment} из ${activeEquipment} ед.`,
+      icon: Activity,
+      tone: utilization >= UTILIZATION_TARGET ? 'success' : utilization >= 60 ? 'warning' : 'danger',
+      href: '/planner',
+      cta: 'Открыть планировщик',
+    },
+    canViewService && {
+      id: 'executive-service-load',
+      label: 'Загрузка сервиса',
+      value: `${serviceLoadTotal} ${formatCountLabel(serviceLoadTotal, 'заявка', 'заявки', 'заявок')}`,
+      hint: `${unassignedServiceTickets.length} без механика · ${ticketsWaitingParts.length} ждут запчасти`,
+      icon: Wrench,
+      tone: serviceLoadTotal > 0 ? 'warning' : 'success',
+      href: '/service',
+      cta: 'Открыть сервис',
+    },
+    (canViewDocuments || canViewTasksCenter) && {
+      id: 'executive-documents-tasks',
+      label: 'Документы / задачи',
+      value: String(documentsTasksCount),
+      hint: `${documentsTasksUnit} · ${canViewDocuments ? unsignedDocumentsCount : 0} без подписи · ${documentsWithoutClosingDocs} без УПД · ${documentsAttentionTasksCount} задач`,
+      icon: FileText,
+      tone: documentsTasksCount > 0 ? 'warning' : 'success',
+      href: documentsTasksHref,
+      cta: documentsTasksHref === '/tasks' ? 'Открыть задачи' : 'Открыть документы',
+    },
+  ].filter(Boolean) as DashboardKpi[];
+  const executiveControlRows = visibleAlerts.length > 0
+    ? visibleAlerts.slice(0, 6).map(alert => ({
+        id: alert.id,
+        title: alert.category,
+        detail: [alert.title, alert.entity, alert.detail].filter(Boolean).join(' · '),
+        value: alert.priority === 'critical' ? 'Критично' : alert.priority === 'high' ? 'Высокий' : 'Средний',
+        href: alert.link,
+        tone: alert.priority === 'critical' ? 'danger' : alert.priority === 'high' ? 'warning' : 'info',
+      }))
+    : todayWorkRows.slice(0, 6).map(row => ({
+        id: row.id,
+        title: row.label,
+        detail: row.detail,
+        value: row.value,
+        href: row.href,
+        tone: row.tone === 'default' ? 'info' : row.tone,
+      }));
 
   // ── KPI data objects for modal ──────────────────────────────────────────────
   const kpiData = {
@@ -2954,6 +3275,144 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {executiveSummaryCards.length > 0 && (
+        <section className="space-y-3" data-testid="dashboard-executive-summary">
+          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-5">
+            {executiveSummaryCards.map(card => {
+              const Icon = card.icon;
+              const tone = toneStyles[card.tone ?? 'default'];
+              const isDebtCard = card.id === 'executive-overdue-receivables';
+              const isFleetCard = card.id === 'executive-fleet-utilization';
+              const isServiceCard = card.id === 'executive-service-load';
+              const isDocumentsCard = card.id === 'executive-documents-tasks';
+              const surfaceClass = isDebtCard
+                ? 'border-rose-300/55 bg-[radial-gradient(circle_at_12%_0%,rgba(244,63,94,0.20),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,241,242,0.96)_48%,rgba(255,255,255,0.94))] shadow-[0_24px_62px_-42px_rgba(190,18,60,0.55)] dark:border-rose-300/22 dark:bg-[radial-gradient(circle_at_12%_0%,rgba(244,63,94,0.32),transparent_36%),linear-gradient(135deg,rgba(76,5,25,0.82),rgba(24,24,37,0.96)_54%,rgba(15,23,42,0.98))] dark:shadow-[0_22px_70px_-44px_rgba(244,63,94,0.85)]'
+                : isFleetCard
+                  ? 'border-emerald-300/45 bg-[radial-gradient(circle_at_88%_4%,rgba(16,185,129,0.18),transparent_36%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(236,253,245,0.82)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(16,185,129,0.45)] dark:border-emerald-300/18 dark:bg-[radial-gradient(circle_at_88%_4%,rgba(16,185,129,0.28),transparent_36%),linear-gradient(135deg,rgba(10,35,32,0.82),rgba(15,23,42,0.97))]'
+                  : isServiceCard
+                    ? 'border-cyan-300/45 bg-[radial-gradient(circle_at_86%_0%,rgba(14,165,233,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(240,249,255,0.84)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(14,165,233,0.45)] dark:border-cyan-300/18 dark:bg-[radial-gradient(circle_at_86%_0%,rgba(14,165,233,0.28),transparent_34%),linear-gradient(135deg,rgba(8,31,42,0.88),rgba(15,23,42,0.97))]'
+                    : 'border-amber-300/45 bg-[radial-gradient(circle_at_84%_0%,rgba(245,158,11,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,251,235,0.84)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(245,158,11,0.43)] dark:border-amber-300/18 dark:bg-[radial-gradient(circle_at_84%_0%,rgba(245,158,11,0.24),transparent_34%),linear-gradient(135deg,rgba(45,32,12,0.86),rgba(15,23,42,0.97))]';
+              const content = (
+                <div className="relative z-10 flex h-full flex-col">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-muted-foreground">{card.label}</p>
+                      <p className="mt-2 break-words text-2xl font-extrabold text-foreground sm:text-3xl">{card.value}</p>
+                    </div>
+                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1 ring-black/5 dark:ring-white/10 ${tone.bubble}`}>
+                      <Icon className="h-5 w-5" />
+                    </div>
+                  </div>
+                  <p className={`mt-3 text-sm font-medium ${tone.accent}`}>{card.hint}</p>
+
+                  {isDebtCard && (
+                    <div className="mt-4 rounded-2xl border border-rose-300/45 bg-white/55 p-3 text-xs shadow-inner dark:border-rose-200/10 dark:bg-white/[0.045]">
+                      <MiniAreaChart data={overdueReceivablesTrendData} stroke="#fb7185" fill="#fb7185" />
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <div className="rounded-xl border border-rose-200/70 bg-white/60 px-3 py-2 dark:border-rose-200/10 dark:bg-white/[0.055]">
+                          <span className="block text-muted-foreground">Клиенты</span>
+                          <span className="mt-1 block text-base font-extrabold text-foreground">{overdueReceivablesClients}</span>
+                        </div>
+                        <div className="rounded-xl border border-rose-200/70 bg-white/60 px-3 py-2 dark:border-rose-200/10 dark:bg-white/[0.055]">
+                          <span className="block text-muted-foreground">Строки</span>
+                          <span className="mt-1 block text-base font-extrabold text-foreground">{overduePayments.length}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {isFleetCard && (
+                    <UtilizationGauge
+                      value={utilization}
+                      rented={rentedEquipment}
+                      available={availableEquipment}
+                      active={activeEquipment}
+                      trend={utilizationTrendData}
+                    />
+                  )}
+
+                  {isServiceCard && (
+                    <div className="mt-4 rounded-2xl border border-cyan-200/70 bg-white/55 p-3 dark:border-cyan-200/10 dark:bg-white/[0.045]">
+                      <StatusBars rows={serviceLoadRows} total={serviceLoadChartTotal} />
+                      {serviceLoadRowsTotal !== serviceLoadTotal ? (
+                        <p className="mt-2 text-xs font-semibold text-amber-600 dark:text-amber-300">
+                          Показаны ключевые статусы: {serviceLoadRowsTotal} из {serviceLoadTotal}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+
+                  {isDocumentsCard && (
+                    <div className="mt-4 rounded-2xl border border-amber-200/70 bg-white/55 p-3 dark:border-amber-200/10 dark:bg-white/[0.045]">
+                      <StatusBars rows={documentsTasksRows} total={Math.max(documentsTasksCount, 1)} showPercent={false} />
+                    </div>
+                  )}
+
+                  {card.cta && (
+                    <span className="mt-auto inline-flex items-center gap-2 pt-4 text-sm font-semibold text-primary transition group-hover:gap-3">
+                      {card.cta}
+                      <ArrowRight className="h-4 w-4" />
+                    </span>
+                  )}
+                </div>
+              );
+              const className = `group relative min-h-[248px] overflow-hidden rounded-2xl border p-5 text-left transition hover:-translate-y-0.5 hover:border-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${surfaceClass} ${isDebtCard ? '2xl:col-span-2' : ''}`;
+
+              if (card.href) {
+                return <Link key={card.id} to={card.href} className={className}>{content}</Link>;
+              }
+              if (card.onClick) {
+                return <button key={card.id} type="button" onClick={card.onClick} className={className}>{content}</button>;
+              }
+              return <div key={card.id} className={className}>{content}</div>;
+            })}
+          </div>
+
+          <Card className="app-panel border-border/80 bg-card/95">
+            <CardHeader className="pb-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <CardTitle className="app-shell-title text-xl font-extrabold">Список для контроля</CardTitle>
+                  <CardDescription>Приоритетные сигналы по долгам, возвратам, сервису, документам и задачам.</CardDescription>
+                </div>
+                <Badge variant={criticalCount + highCount > 0 ? 'warning' : 'success'} className="w-fit">
+                  {criticalCount + highCount > 0
+                    ? `${criticalCount + highCount} ${formatCountLabel(criticalCount + highCount, 'сигнал', 'сигнала', 'сигналов')}`
+                    : 'Без срочных сигналов'}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {executiveControlRows.length === 0 ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-5 text-sm font-semibold text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200">
+                  На текущий период нет задач для контроля.
+                </div>
+              ) : (
+                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
+                  {executiveControlRows.map(row => {
+                    const tone = toneStyles[row.tone as DashboardTone];
+                    return (
+                      <Link
+                        key={row.id}
+                        to={row.href}
+                        className="flex items-start gap-3 bg-background/60 px-4 py-3 text-sm transition hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                      >
+                        <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${tone.dot}`} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block break-words font-semibold text-foreground">{row.title}</span>
+                          <span className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{row.detail}</span>
+                        </span>
+                        <span className={`shrink-0 text-sm font-semibold ${tone.accent}`}>{row.value}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </section>
+      )}
 
       {showRoleDashboardCards && (
         <Card className="overflow-hidden border-red-100/90 bg-[radial-gradient(circle_at_8%_0%,rgba(239,68,68,0.10),transparent_30%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,247,247,0.96)_48%,rgba(248,250,252,0.98))] text-slate-950 shadow-[0_28px_90px_-62px_rgba(148,27,27,0.38)] dark:border-slate-800/80 dark:bg-[radial-gradient(circle_at_8%_0%,rgba(16,185,129,0.18),transparent_30%),linear-gradient(135deg,rgba(7,16,23,0.98),rgba(10,19,30,0.96)_48%,rgba(16,20,30,0.98))] dark:text-white dark:shadow-[0_28px_90px_-54px_rgba(0,0,0,0.78)]">

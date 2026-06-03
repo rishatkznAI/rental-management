@@ -128,23 +128,36 @@ test('dashboard attention block renders KPIs, rows, empty and error states', () 
   assert.doesNotMatch(dashboardSource, />\\[object Object\\]</);
 });
 
-test('dashboard role risk right column renders fleet and service analytics', () => {
+test('dashboard cockpit renders executive KPI grid with fleet and service analytics', () => {
   for (const label of [
+    'data-testid="dashboard-executive-summary"',
+    'MiniAreaChart',
+    'UtilizationGauge',
+    'StatusBars',
     'Утилизация парка',
     'Средняя загрузка за период',
     'Открыть планировщик',
     'Загрузка сервиса',
-    'Активные заявки в работе',
     'Ожидают запчасти',
     'Готовы к закрытию',
     'Открыть сервис',
+    'Документы / задачи',
+    'Задачи внимания',
+    'Проверить долги',
   ]) {
     assert.match(dashboardSource, new RegExp(label));
   }
-  assert.match(dashboardSource, /Мини-график утилизации парка/);
+  assert.match(dashboardSource, /Donut gauge утилизации парка/);
   assert.match(dashboardSource, /to="\/planner"/);
   assert.match(dashboardSource, /to="\/service"/);
-  assert.match(dashboardSource, /serviceLoadRows\.map/);
+  assert.match(dashboardSource, /const serviceLoadGroups = openServiceTickets\.reduce/);
+  assert.match(dashboardSource, /<StatusBars rows=\{serviceLoadRows\}/);
+  assert.match(dashboardSource, /const documentsTasksRows: StatusBarRow\[\]/);
+  assert.match(dashboardSource, /label: 'Прочие'/);
+  assert.match(dashboardSource, /const serviceLoadTotal = openServiceTickets\.length/);
+  assert.doesNotMatch(dashboardSource, /serviceLoadUsesLiveData/);
+  assert.doesNotMatch(dashboardSource, /roleDashboardUtilizationPercent = activeEquipment > 0 \? utilization : 62/);
+  assert.doesNotMatch(dashboardSource, /serviceLoadTotal = serviceLoadUsesLiveData \? openServiceTickets\.length : 63/);
   assert.doesNotMatch(dashboardSource, /Что сделать сейчас/);
   assert.doesNotMatch(dashboardSource, /roleDashboardSignalCard/);
 });

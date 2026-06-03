@@ -70,6 +70,7 @@ jobs:
         run: npm run build
         env:
           VITE_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          VITE_APP_BRAND_NAME: ${{ vars.VITE_APP_BRAND_NAME || 'RentCore' }}
           VITE_GIT_COMMIT_SHA: ${{ github.sha }}
 
       - name: Upload artifact

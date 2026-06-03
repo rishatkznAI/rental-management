@@ -1176,6 +1176,52 @@ export default function Documents() {
     if (sortKey === 'createdAt') return String(right.createdAt || '').localeCompare(String(left.createdAt || ''));
     return getDocumentDate(right).localeCompare(getDocumentDate(left));
   });
+  const documentRows = filteredDocuments.map((doc, index) => {
+    const rentalId = getDocumentRentalId(doc);
+    const equipmentId = getDocumentEquipmentId(doc);
+    const equipmentInv = getDocumentEquipmentInv(doc);
+    const rental = rentalId ? rentalsById.get(rentalId) : undefined;
+    const gantt = rentalId ? ganttByRentalId.get(rentalId) : undefined;
+    const equipmentItem = equipmentId
+      ? equipmentById.get(equipmentId)
+      : (equipmentInv ? equipmentByInventory.get(equipmentInv) : undefined);
+    const clientName = doc.client || rental?.client || clientsById.get(doc.clientId || '')?.company;
+    const managerName = doc.manager || rental?.manager || gantt?.manager;
+    const docNumber = getDocumentNumber(doc);
+    const serviceTicket = getDocumentServiceTicket(doc);
+    const linkedEntity = [
+      rentalId ? `Аренда ${rentalId}` : '',
+      serviceTicket ? `Сервис ${serviceTicket}` : '',
+      doc.deliveryId ? `Доставка ${doc.deliveryId}` : '',
+      doc.parentDocumentId ? `Осн. ${doc.parentDocumentId}` : '',
+    ].filter(Boolean).join(' · ') || '—';
+    const equipmentModel = equipmentItem
+      ? displayText(`${equipmentItem.manufacturer || ''} ${equipmentItem.model || ''}`.trim())
+      : '';
+
+    return {
+      doc,
+      index,
+      key: doc.id || doc.number || index,
+      rentalId,
+      equipmentInv,
+      equipmentItem,
+      clientName,
+      managerName,
+      docNumber,
+      linkedEntity,
+      equipmentLabel: displayText(equipmentInv || equipmentItem?.inventoryNumber),
+      equipmentModel,
+      documentDateLabel: formatDate(getDocumentDate(doc)),
+      amountLabel: doc.amount ? formatCurrency(doc.amount) : '—',
+      createdLabel: doc.createdAt ? formatDateTime(doc.createdAt) : '—',
+      sentLabel: doc.sentAt ? formatDateTime(doc.sentAt) : '—',
+      signedLabel: doc.signedAt ? formatDateTime(doc.signedAt) : '',
+      isDuplicate: duplicateDocumentIds.has(doc.id),
+      canOpen: Boolean(doc.contentHtml || doc.printHtml || doc.generatedContent || doc.signedScanDataUrl),
+      canDownload: Boolean(doc.contentHtml || doc.signedScanDataUrl),
+    };
+  });
 
   const documentControl = React.useMemo(() => buildDocumentControl({
     rentals: rentals as Rental[],
@@ -2142,7 +2188,146 @@ export default function Documents() {
             onChange={handleSignedScanUpload}
           />
 
-          <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+          <div className="space-y-3 sm:hidden">
+            {documentRows.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-lg border border-gray-200 bg-white px-4 py-10 text-center dark:border-gray-700 dark:bg-gray-800">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
+                  <Search className="h-7 w-7 text-gray-400 dark:text-gray-500" />
+                </div>
+                <h3 className="text-base font-medium text-gray-900 dark:text-white">
+                  {hasQuickClientContext ? 'Документы по клиенту не найдены' : 'Документы не найдены'}
+                </h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  {hasQuickClientContext
+                    ? `Для ${contextFilterLabel(quickActionContext)} нет документов по выбранным фильтрам`
+                    : 'Созданные документы появятся здесь карточками с типом, номером, связью, суммой и статусом'}
+                </p>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  {canManageDocuments ? (
+                    <Button onClick={() => openDocumentWizard()}>
+                      <Plus className="h-4 w-4" />
+                      Создать документ
+                    </Button>
+                  ) : null}
+                  {activeFilterCount > 0 ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setSearch('');
+                        setUnsignedOnly(false);
+                        setWithoutNumberOnly(false);
+                        setDuplicatesOnly(false);
+                        setClientFilter('all');
+                        setRentalFilter('all');
+                        setTypeFilter('all');
+                        setStatusFilter('all');
+                        setManagerFilter('all');
+                        setQuickTypeFilter('all');
+                      }}
+                    >
+                      Сбросить фильтры
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : documentRows.map((row) => (
+              <article key={row.key} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{getDocumentTypeLabel(row.doc)}</p>
+                    <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">
+                      {row.doc.contractKind ? (row.doc.contractKind === 'rental' ? 'Реестр аренды' : 'Реестр поставки') : 'Документ'}
+                    </p>
+                  </div>
+                  <div className="shrink-0">{getDocumentStatusBadge(getSafeDocumentStatus(row.doc.status))}</div>
+                </div>
+
+                <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Номер</p>
+                      <p className="mt-1 break-words text-base font-semibold text-gray-900 dark:text-white">{row.docNumber || 'Без номера'}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Дата</p>
+                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{row.documentDateLabel}</p>
+                    </div>
+                  </div>
+                  {row.isDuplicate || row.doc.signedScanFileName ? (
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                      {row.isDuplicate ? <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">Дубль номера</span> : null}
+                      {row.doc.signedScanFileName ? <span className="rounded-full bg-green-100 px-2 py-1 text-green-700 dark:bg-green-950/40 dark:text-green-300">Скан загружен</span> : null}
+                    </div>
+                  ) : null}
+                </div>
+
+                <dl className="mt-3 grid gap-2 text-sm">
+                  <div className="min-w-0">
+                    <dt className="text-xs text-gray-500 dark:text-gray-400">Клиент</dt>
+                    <dd className="mt-0.5 break-words text-gray-900 dark:text-white">{displayText(row.clientName)}</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs text-gray-500 dark:text-gray-400">Аренда / техника</dt>
+                    <dd className="mt-0.5 break-words text-gray-900 dark:text-white">{row.linkedEntity}</dd>
+                    <dd className="mt-0.5 break-words text-xs text-gray-500 dark:text-gray-400">
+                      {[row.equipmentLabel, row.equipmentModel].filter(Boolean).join(' · ') || 'Техника не указана'}
+                    </dd>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="min-w-0">
+                      <dt className="text-xs text-gray-500 dark:text-gray-400">Сумма</dt>
+                      <dd className="mt-0.5 break-words font-medium text-gray-900 dark:text-white">{row.amountLabel}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-xs text-gray-500 dark:text-gray-400">Ответственный</dt>
+                      <dd className="mt-0.5 break-words text-gray-900 dark:text-white">{displayText(row.managerName || row.doc.createdBy)}</dd>
+                    </div>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs text-gray-500 dark:text-gray-400">Создан / отправлен</dt>
+                    <dd className="mt-0.5 break-words text-gray-900 dark:text-white">
+                      {row.createdLabel} · {row.sentLabel}{row.signedLabel ? ` · подп. ${row.signedLabel}` : ''}
+                    </dd>
+                  </div>
+                </dl>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedDocument(row.doc)}>
+                    <Eye className="h-4 w-4" />
+                    Детали
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => openDocument(row.doc)}
+                    disabled={!row.canOpen}
+                  >
+                    <Eye className="h-4 w-4" />
+                    Открыть
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => downloadDocument(row.doc)}
+                    disabled={!row.canDownload}
+                  >
+                    <Download className="h-4 w-4" />
+                    Скачать
+                  </Button>
+                  {!row.docNumber && canManageDocuments ? (
+                    <Button type="button" variant="secondary" size="sm" onClick={() => void handleAssignNumber(row.doc)}>
+                      <FileSignature className="h-4 w-4" />
+                      Номер
+                    </Button>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 sm:block">
             <Table className="min-w-[1120px]">
               <TableHeader>
                 <TableRow>

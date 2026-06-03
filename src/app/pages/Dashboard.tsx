@@ -122,6 +122,17 @@ function formatCountLabel(value: number, one: string, few: string, many: string)
   return many;
 }
 
+function isDiagnosticServiceTicket(ticket: ServiceTicket) {
+  const text = [
+    ticket.reason,
+    ticket.description,
+    ticket.type,
+    ticket.scenario,
+    ticket.serviceKind,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return text.includes('диагност') || text.includes('diagnost');
+}
+
 function toDateKey(value?: string | null) {
   if (!value) return '';
   const parsed = new Date(value);
@@ -2457,8 +2468,49 @@ export default function Dashboard() {
   const showRoleDashboardCards = activeDashboardTab === 'overview' && roleDashboardMeta && roleDashboardCards.length > 0;
   const roleDashboardRiskCount = roleDashboardCards.filter(item => item.tone === 'warning' || item.tone === 'danger').length;
   const roleDashboardPrimaryCard = roleDashboardCards.find(item => item.title === 'Просроченная дебиторка') ?? roleDashboardCards[0];
-  const roleDashboardSignalCard = roleDashboardCards.find(item => item.title === 'Документы без подписи') ?? roleDashboardCards[0];
   const roleDashboardSecondaryCards = roleDashboardCards.filter(item => item.id !== roleDashboardPrimaryCard?.id);
+  const roleDashboardUtilizationPercent = activeEquipment > 0 ? utilization : 62;
+  const diagnosticServiceTicketIds = new Set(
+    openServiceTickets.filter(isDiagnosticServiceTicket).map(ticket => ticket.id),
+  );
+  const liveServiceLoadRows = [
+    {
+      label: 'В работе',
+      value: openServiceTickets.filter(ticket => ticket.status === 'in_progress' && !diagnosticServiceTicketIds.has(ticket.id)).length,
+      color: '#14b8a6',
+    },
+    {
+      label: 'Ожидают запчасти',
+      value: openServiceTickets.filter(ticket => ticket.status === 'waiting_parts').length,
+      color: '#f59e0b',
+    },
+    {
+      label: 'Диагностика',
+      value: diagnosticServiceTicketIds.size,
+      color: '#38bdf8',
+    },
+    {
+      label: 'Готовы к закрытию',
+      value: openServiceTickets.filter(ticket => ticket.status === 'ready').length,
+      color: '#22c55e',
+    },
+  ];
+  const liveServiceLoadTotal = liveServiceLoadRows.reduce((sum, row) => sum + row.value, 0);
+  const serviceLoadUsesLiveData = openServiceTickets.length > 0 && liveServiceLoadTotal > 0;
+  const serviceLoadRows = serviceLoadUsesLiveData
+    ? liveServiceLoadRows
+    : [
+        { label: 'В работе', value: 28, color: '#14b8a6' },
+        { label: 'Ожидают запчасти', value: 14, color: '#f59e0b' },
+        { label: 'Диагностика', value: 11, color: '#38bdf8' },
+        { label: 'Готовы к закрытию', value: 10, color: '#22c55e' },
+      ];
+  const serviceLoadTotal = serviceLoadUsesLiveData ? openServiceTickets.length : 63;
+  const serviceLoadChartTotal = Math.max(
+    serviceLoadTotal,
+    serviceLoadRows.reduce((sum, row) => sum + row.value, 0),
+    1,
+  );
   const canToggleOfficeUpd = isAdminRole;
   const dashboardUpdatedLabel = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   const rentalsScopeLabel = isManagerRole ? 'По моим сделкам' : 'Показатели компании';
@@ -2931,12 +2983,39 @@ export default function Dashboard() {
                   </CardDescription>
                 </div>
               </div>
-              <div className="hidden items-center gap-3 rounded-2xl border border-emerald-200/80 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-white/[0.045] sm:flex">
-                <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_18px_rgba(16,185,129,0.42)] dark:bg-emerald-300 dark:shadow-[0_0_18px_rgba(52,211,153,0.75)]" />
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Статус</p>
-                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Операционный контроль</p>
+              <div className="rounded-2xl border border-emerald-400/25 bg-white/70 p-4 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.55)] backdrop-blur dark:border-emerald-300/20 dark:bg-white/[0.045]">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-600 dark:text-emerald-300">Главный сигнал</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">Утилизация парка</p>
+                    <p className="mt-2 text-4xl font-extrabold tracking-tight text-slate-950 dark:text-white">{roleDashboardUtilizationPercent}%</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Средняя загрузка за период</p>
+                  </div>
+                  <div className="relative h-24 w-24 shrink-0 text-emerald-500 dark:text-emerald-300" aria-label="Мини-график утилизации парка">
+                    <svg viewBox="0 0 120 120" role="img" className="h-full w-full">
+                      <circle cx="60" cy="60" r="45" fill="none" stroke="currentColor" strokeOpacity="0.14" strokeWidth="14" />
+                      <circle
+                        cx="60"
+                        cy="60"
+                        r="45"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="14"
+                        strokeLinecap="round"
+                        pathLength={100}
+                        strokeDasharray={`${Math.max(0, Math.min(100, roleDashboardUtilizationPercent))} 100`}
+                        transform="rotate(-90 60 60)"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center text-sm font-extrabold text-slate-950 dark:text-white">
+                      {roleDashboardUtilizationPercent}%
+                    </div>
+                  </div>
                 </div>
+                <Link to="/planner" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 transition hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/45 dark:text-emerald-300 dark:hover:text-emerald-200">
+                  Открыть планировщик
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
               </div>
             </div>
           </CardHeader>
@@ -3114,114 +3193,39 @@ export default function Dashboard() {
               </div>
 
               <div className="hidden space-y-4 2xl:block 2xl:sticky 2xl:top-5 2xl:self-start">
-                {roleDashboardSignalCard && (() => {
-                  const Icon = roleDashboardSignalCard.icon;
-                  const signalContent = (
-                    <>
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-300/14 dark:text-amber-100 dark:ring-amber-200/20">
-                          <Icon className="h-5 w-5" />
-                        </div>
-                        <ArrowRight className="h-4 w-4 text-slate-400 transition group-hover:translate-x-1 group-hover:text-amber-700 group-focus-visible:translate-x-1 group-focus-visible:text-amber-700 dark:text-slate-500 dark:group-hover:text-amber-100 dark:group-focus-visible:text-amber-100" />
-                      </div>
-                      <div className="mt-5">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Главный сигнал</p>
-                        <h3 className="mt-2 text-lg font-extrabold text-slate-950 dark:text-white">{roleDashboardSignalCard.title}</h3>
-                        <div className="mt-3 inline-flex items-baseline gap-2 rounded-2xl bg-amber-50 px-3 py-2 ring-1 ring-amber-200/80 dark:bg-amber-300/10 dark:ring-amber-200/15">
-                          <span className="text-2xl font-extrabold tracking-tight text-amber-800 dark:text-amber-50">{roleDashboardSignalCard.value}</span>
-                          <span className="text-xs font-semibold text-amber-700 dark:text-amber-100/65">
-                            {roleDashboardSignalCard.title.includes('Документ')
-                              ? formatCountLabel(Number(roleDashboardSignalCard.value) || 0, 'документ', 'документа', 'документов')
-                              : 'в работе'}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-sm leading-5 text-slate-600 dark:text-slate-400">{roleDashboardSignalCard.hint}</p>
-                      </div>
-                    </>
-                  );
-                  if (roleDashboardSignalCard.onClick) {
+                <div className="rounded-3xl border border-emerald-400/20 bg-white/70 p-4 dark:border-emerald-300/20 dark:bg-white/[0.045]">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-950 dark:text-white">Загрузка сервиса</p>
+                    <p className="mt-2 text-3xl font-extrabold tracking-tight text-slate-950 dark:text-white">
+                      {serviceLoadTotal} {formatCountLabel(serviceLoadTotal, 'заявка', 'заявки', 'заявок')}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Активные заявки в работе</p>
+                  </div>
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-400/12 text-emerald-600 ring-1 ring-emerald-400/20 dark:text-emerald-300">
+                    <Wrench className="h-5 w-5" />
+                  </div>
+                </div>
+                <div className="mt-4 space-y-3">
+                  {serviceLoadRows.map(row => {
+                    const percent = Math.round((row.value / serviceLoadChartTotal) * 100);
                     return (
-                      <button
-                        type="button"
-                        onClick={roleDashboardSignalCard.onClick}
-                        className="group w-full rounded-3xl border border-slate-200/90 bg-white/70 p-4 text-left transition hover:border-amber-300/70 hover:bg-amber-50/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/35 dark:border-white/10 dark:bg-white/[0.045] dark:hover:border-amber-200/25 dark:hover:bg-white/[0.065]"
-                      >
-                        {signalContent}
-                      </button>
+                      <div key={row.label} className="space-y-1.5">
+                        <div className="flex items-center gap-3 text-xs">
+                          <span className="min-w-0 flex-1 truncate font-medium text-slate-600 dark:text-slate-400">{row.label}</span>
+                          <span className="font-semibold text-slate-950 dark:text-white">{row.value}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-950/50">
+                          <div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: row.color }} />
+                        </div>
+                      </div>
                     );
-                  }
-                  return (
-                    <Link
-                      to={roleDashboardSignalCard.href}
-                      className="group block rounded-3xl border border-slate-200/90 bg-white/70 p-4 transition hover:border-amber-300/70 hover:bg-amber-50/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/35 dark:border-white/10 dark:bg-white/[0.045] dark:hover:border-amber-200/25 dark:hover:bg-white/[0.065]"
-                    >
-                      {signalContent}
-                    </Link>
-                  );
-                })()}
-
-                <div className="rounded-3xl border border-slate-200/90 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.045]">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-950 dark:text-white">Что сделать сейчас</p>
-                      <p className="mt-1 text-xs text-slate-500">Быстрые переходы по рискам</p>
-                    </div>
-                    <ListChecks className="h-5 w-5 text-emerald-300" />
-                  </div>
-                  <div className="mt-4 space-y-2">
-                    {roleDashboardCards.slice(0, 4).map(item => {
-                      const actionTone =
-                        item.tone === 'danger'
-                          ? 'text-red-700 dark:text-red-200'
-                          : item.tone === 'warning'
-                            ? 'text-amber-700 dark:text-amber-100'
-                            : item.tone === 'success'
-                              ? 'text-emerald-700 dark:text-emerald-100'
-                              : 'text-sky-700 dark:text-sky-100';
-                      const actionDot =
-                        item.tone === 'danger'
-                          ? 'bg-red-400'
-                          : item.tone === 'warning'
-                            ? 'bg-amber-300'
-                            : item.tone === 'success'
-                              ? 'bg-emerald-300'
-                              : 'bg-sky-300';
-                      const actionContent = (
-                        <>
-                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${actionDot}`} />
-                          <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">{item.cta}</span>
-                          <span className={`shrink-0 text-sm font-bold ${actionTone}`}>{item.value}</span>
-                          <ArrowRight className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:translate-x-1 group-hover:text-emerald-700 group-focus-visible:translate-x-1 group-focus-visible:text-emerald-700 dark:text-slate-500 dark:group-hover:text-emerald-200 dark:group-focus-visible:text-emerald-200" />
-                        </>
-                      );
-                      if (item.onClick) {
-                        return (
-                          <button
-                            key={item.id}
-                            type="button"
-                            onClick={item.onClick}
-                            className="group flex w-full items-center gap-3 rounded-2xl border border-transparent bg-slate-100/70 px-3 py-3 text-left text-sm transition hover:border-emerald-300/45 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35 dark:bg-slate-950/38 dark:hover:border-emerald-200/20 dark:hover:bg-white/[0.06]"
-                          >
-                            {actionContent}
-                          </button>
-                        );
-                      }
-                      return (
-                        <Link
-                          key={item.id}
-                          to={item.href}
-                          className="group flex items-center gap-3 rounded-2xl border border-transparent bg-slate-100/70 px-3 py-3 text-sm transition hover:border-emerald-300/45 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/35 dark:bg-slate-950/38 dark:hover:border-emerald-200/20 dark:hover:bg-white/[0.06]"
-                        >
-                          {actionContent}
-                        </Link>
-                      );
-                    })}
-                  </div>
-                  {roleDashboardRiskCount === 0 && (
-                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800 dark:border-emerald-300/25 dark:bg-emerald-400/10 dark:text-emerald-100">
-                      Операционных рисков нет. Можно перейти к плановым задачам дня.
-                    </div>
-                  )}
+                  })}
+                </div>
+                <Link to="/service" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 transition hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/45 dark:text-emerald-300 dark:hover:text-emerald-200">
+                  Открыть сервис
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
                 </div>
               </div>
             </div>

@@ -253,6 +253,16 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
     rentalBase('005', '005', '010', 'created', 7, 20, 245000, 0),
     rentalBase('006', '001', '002', 'closed', -28, -12, 210000, 210000, { actualReturnDate: dateOnly(addDays(now, -12)) }),
     rentalBase('007', '002', '016', 'closed', -40, -22, 300000, 260000, { actualReturnDate: dateOnly(addDays(now, -22)) }),
+    rentalBase('008', '003', '001', 'active', -2, 9, 236000, 118000),
+    rentalBase('009', '004', '005', 'active', -4, 11, 288000, 144000),
+    rentalBase('010', '005', '006', 'active', -3, 15, 342000, 171000),
+    rentalBase('011', '001', '008', 'active', -6, 7, 301000, 301000),
+    rentalBase('012', '002', '011', 'active', -1, 16, 374000, 120000),
+    rentalBase('013', '003', '012', 'active', -5, 10, 328000, 164000),
+    rentalBase('014', '004', '014', 'active', -2, 13, 352000, 176000),
+    rentalBase('015', '005', '017', 'active', 0, 17, 396000, 198000),
+    rentalBase('016', '001', '018', 'active', -7, 6, 299000, 299000),
+    rentalBase('017', '002', '019', 'active', -1, 19, 418000, 209000),
   ];
 
   const gantt_rentals = rentals.map(item => ({
@@ -311,14 +321,96 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
     createdAt: nowIso,
   }));
 
-  const service = [
-    ['001', '003', 'in_progress', 'Диагностика гидростанции', -5, 'Падение скорости подъема платформы.'],
-    ['002', '009', 'waiting_parts', 'Ожидание датчика наклона', -4, 'Повторная ошибка датчика после прошлого ремонта.'],
-    ['003', '015', 'in_progress', 'Проверка стрелы после возврата', -2, 'Контроль люфтов и гидролиний.'],
-    ['004', '009', 'closed', 'Повторная диагностика датчика', -18, 'Закрыто после калибровки, повтор проявился через 14 дней.'],
-    ['005', '009', 'closed', 'Первичная замена разъема датчика', -32, 'Закрыто, заявка участвует в контроле качества ремонта.'],
-    ['006', '001', 'closed', 'Плановое ТО перед демо-показом', -10, 'Закрыто без замечаний.'],
-  ].map(([suffix, equipmentSuffix, status, title, createdOffset, description]) => {
+  const serviceOpenPlans = [
+    ...Array.from({ length: 28 }, (_, index) => ({
+      status: 'in_progress',
+      title: [
+        'Ремонт гидростанции',
+        'Настройка клапана подъёма',
+        'Проверка зарядной цепи',
+        'Замена роликов платформы',
+        'Регулировка концевиков',
+        'Контроль люфтов стрелы',
+        'Восстановление проводки пульта',
+      ][index % 7],
+      description: [
+        'Механик ведёт ремонт после осмотра на базе.',
+        'Заявка пришла после возврата с объекта, работы уже начаты.',
+        'Техника в сервисной зоне, проверяются узлы безопасности.',
+        'После первичного осмотра подтверждён план ремонта.',
+      ][index % 4],
+      assigned: true,
+      priority: index % 9 === 0 ? 'high' : 'medium',
+      serviceKind: 'repair',
+    })),
+    ...Array.from({ length: 14 }, (_, index) => ({
+      status: 'waiting_parts',
+      title: [
+        'Ожидание датчика наклона',
+        'Ожидание гидравлического фильтра',
+        'Ожидание комплекта уплотнений',
+        'Ожидание зарядного разъёма',
+      ][index % 4],
+      description: [
+        'Запчасть заказана у поставщика, ремонт продолжится после поступления.',
+        'Согласована замена узла, техника временно удерживается в сервисе.',
+        'Нужна поставка расходников для завершения ремонта.',
+      ][index % 3],
+      assigned: true,
+      priority: index % 3 === 0 ? 'high' : 'medium',
+      serviceKind: 'repair',
+    })),
+    ...Array.from({ length: 11 }, (_, index) => ({
+      status: 'new',
+      title: [
+        'Диагностика без назначенного механика',
+        'Диагностический осмотр после возврата',
+        'Диагностика ошибки на панели',
+        'Диагностика шумов гидравлики',
+      ][index % 4],
+      description: [
+        'Нужно назначить механика и подтвердить причину обращения.',
+        'Заявка ожидает распределения в сервисной очереди.',
+        'Первичный осмотр ещё не начат, требуется ответственный.',
+      ][index % 3],
+      assigned: false,
+      priority: index % 4 === 0 ? 'high' : 'medium',
+      serviceKind: 'diagnostic',
+    })),
+    ...Array.from({ length: 10 }, (_, index) => ({
+      status: 'ready',
+      title: [
+        'Готово к закрытию после ремонта',
+        'Ожидает финального акта сервиса',
+        'Контрольная проверка завершена',
+        'Готово к выдаче на склад',
+      ][index % 4],
+      description: [
+        'Работы завершены, нужен административный контроль закрытия.',
+        'Механик отметил результат, заявка ожидает закрывающие документы.',
+        'Техника прошла проверку и готова вернуться в оборот.',
+      ][index % 3],
+      assigned: true,
+      priority: 'low',
+      serviceKind: 'repair',
+    })),
+  ];
+  const serviceClosedPlans = [
+    { title: 'Повторная диагностика датчика', equipmentSuffix: '009', createdOffset: -18, description: 'Закрыто после калибровки, повтор проявился через 14 дней.' },
+    { title: 'Первичная замена разъема датчика', equipmentSuffix: '009', createdOffset: -32, description: 'Закрыто, заявка участвует в контроле качества ремонта.' },
+    { title: 'Плановое ТО перед демо-показом', equipmentSuffix: '001', createdOffset: -10, description: 'Закрыто без замечаний.' },
+  ].map(item => ({ ...item, status: 'closed', assigned: true, priority: 'medium', serviceKind: 'repair' }));
+  const servicePlans = [
+    ...serviceOpenPlans.map((plan, index) => ({
+      ...plan,
+      equipmentSuffix: equipmentSpecs[index % equipmentSpecs.length][0],
+      createdOffset: -((index % 12) + 1),
+    })),
+    ...serviceClosedPlans,
+  ];
+  const service = servicePlans.map((plan, index) => {
+    const suffix = String(index + 1).padStart(3, '0');
+    const { equipmentSuffix, status, title, createdOffset, description, assigned, priority, serviceKind } = plan;
     const eq = equipment.find(item => item.id === `DEMO-EQ-${equipmentSuffix}`);
     return {
       id: `DEMO-SERVICE-${suffix}`,
@@ -329,11 +421,11 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
       equipmentModel: eq.model,
       inventoryNumber: eq.inventoryNumber,
       equipmentInventoryNumber: eq.inventoryNumber,
-      assignedMechanicId: 'DEMO-USER-SERVICE',
-      assignedMechanicName: 'Demo Service Mechanic',
+      assignedMechanicId: assigned ? 'DEMO-USER-SERVICE' : '',
+      assignedMechanicName: assigned ? 'Demo Service Mechanic' : '',
       status,
-      serviceKind: 'repair',
-      priority: status === 'waiting_parts' ? 'high' : 'medium',
+      serviceKind,
+      priority,
       reason: title,
       problemDescription: `DEMO DATA: ${description}`,
       description: `DEMO DATA: ${description}`,

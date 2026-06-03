@@ -128,6 +128,27 @@ test('dashboard attention block renders KPIs, rows, empty and error states', () 
   assert.doesNotMatch(dashboardSource, />\\[object Object\\]</);
 });
 
+test('dashboard role risk right column renders fleet and service analytics', () => {
+  for (const label of [
+    'Утилизация парка',
+    'Средняя загрузка за период',
+    'Открыть планировщик',
+    'Загрузка сервиса',
+    'Активные заявки в работе',
+    'Ожидают запчасти',
+    'Готовы к закрытию',
+    'Открыть сервис',
+  ]) {
+    assert.match(dashboardSource, new RegExp(label));
+  }
+  assert.match(dashboardSource, /Мини-график утилизации парка/);
+  assert.match(dashboardSource, /to="\/planner"/);
+  assert.match(dashboardSource, /to="\/service"/);
+  assert.match(dashboardSource, /serviceLoadRows\.map/);
+  assert.doesNotMatch(dashboardSource, /Что сделать сейчас/);
+  assert.doesNotMatch(dashboardSource, /roleDashboardSignalCard/);
+});
+
 test('dashboard document links open the unsigned documents list', () => {
   assert.match(dashboardSource, /\/documents\?signature=unsigned/);
   assert.match(documentsSource, /searchParams\.get\('signature'\)/);

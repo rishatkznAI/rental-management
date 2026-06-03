@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
+import { calculateCurrentFleetUtilization } from '../src/app/lib/fleetUtilization.js';
 
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
@@ -131,6 +132,45 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
     assert.ok(collection.every(item => item.fixtureTag === DEMO_PREFIX));
   }
 }));
+
+test('demo seed produces presentation-grade dashboard KPI source data', () => {
+  const data = buildDemoData({
+    now: new Date('2026-06-03T09:00:00.000Z'),
+    env: { DEMO_DEFAULT_PASSWORD: 'unit-test-demo-password' },
+  });
+
+  const utilization = calculateCurrentFleetUtilization(
+    data.equipment,
+    data.gantt_rentals.filter(rental => rental.status === 'active'),
+  );
+  const openServiceTickets = data.service.filter(ticket => ticket.status !== 'closed');
+  const diagnosticTicketIds = new Set(
+    openServiceTickets
+      .filter(ticket => [
+        ticket.reason,
+        ticket.description,
+        ticket.type,
+        ticket.scenario,
+        ticket.serviceKind,
+      ].filter(Boolean).join(' ').toLowerCase().includes('диагност'))
+      .map(ticket => ticket.id),
+  );
+  const unassignedDiagnostics = openServiceTickets.filter(ticket =>
+    diagnosticTicketIds.has(ticket.id)
+    && !ticket.assignedMechanicId
+    && !ticket.assignedMechanicName
+    && !ticket.assignedTo
+  );
+
+  assert.equal(utilization.activeEquipment, 20);
+  assert.equal(utilization.rentedEquipment, 13);
+  assert.equal(utilization.utilization, 65);
+  assert.equal(openServiceTickets.length, 63);
+  assert.equal(openServiceTickets.filter(ticket => ticket.status === 'in_progress' && !diagnosticTicketIds.has(ticket.id)).length, 28);
+  assert.equal(openServiceTickets.filter(ticket => ticket.status === 'waiting_parts').length, 14);
+  assert.equal(unassignedDiagnostics.length, 11);
+  assert.equal(openServiceTickets.filter(ticket => ticket.status === 'ready').length, 10);
+});
 
 test('demo seed is idempotent and does not touch non-demo records', () => withDemoDb((dbPath) => {
   writeCollection(dbPath, 'clients', [

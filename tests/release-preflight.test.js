@@ -57,6 +57,9 @@ test('release preflight allows frontend-only safe file scope and reports backend
     'src/app/pages/dashboard/DashboardPage.tsx',
     'src/app/components/dashboard/KpiCard.tsx',
     'public/favicon.svg',
+    'package.json',
+    'package-lock.json',
+    'scripts/vite-build.mjs',
     'tests/dashboard-overdue-status.test.js',
     'docs/release-notes.md',
   ];
@@ -145,6 +148,16 @@ test('release preflight blocks frontend-only when release gate scripts changed',
       changedFiles: ['scripts/release-preflight.mjs'],
     }),
     /release_type=frontend-only is not allowed because backend\/deploy-critical files changed: scripts\/release-preflight\.mjs/,
+  );
+});
+
+test('release preflight blocks frontend-only when non-build scripts changed', () => {
+  assert.throws(
+    () => assertFrontendOnlyReleaseScope({
+      releaseType: 'frontend-only',
+      changedFiles: ['scripts/backup-sqlite.cjs'],
+    }),
+    /release_type=frontend-only is not allowed because backend\/deploy-critical files changed: scripts\/backup-sqlite\.cjs/,
   );
 });
 

@@ -105,7 +105,26 @@ Production GitHub Pages is not a staging frontend. A local `vite preview` is als
 
 ## Production Gate
 
-The GitHub Pages deploy workflow now requires:
+Release status words are strict:
+
+- `MERGED` means the code is in `main`.
+- `DEPLOYED` means the public frontend marker and backend `/api/version` show the intended production commit, except an explicitly scoped `frontend-only` or `deploy-tooling` release may allow backend commit drift.
+- `DEMO_READY` means `DEPLOYED` plus the required read-only UI smoke passed.
+
+Do not say the demo can be shown while the public frontend marker is missing or still points at an older commit.
+
+The GitHub Pages deploy workflow runs in two ways:
+
+- automatically on `push` to `main` when frontend/build-relevant files change;
+- manually through `workflow_dispatch` with an explicit `release_type`.
+
+Automatic `main` deploys classify the changed files before publishing:
+
+- `frontend-only`: `src/**`, `public/**`, `index.html`, `vite.config.*`, `postcss.config.*`, `tsconfig*.json`, root `package.json`, root `package-lock.json`, `scripts/vite-build.mjs`, frontend tests, and docs.
+- `deploy-tooling`: `.github/workflows/deploy.yml`, release preflight/marker scripts, production smoke helper/spec files, release smoke tests, and release/deploy/smoke/preflight docs.
+- Backend or deploy-critical files, including `server/**`, non-build `scripts/**`, most workflow changes, Railway/Docker/env files, and server package files, block the automatic Pages deploy with a workflow summary explaining which files require a backend or full-stack release.
+
+The production GitHub Pages deploy workflow requires:
 
 - successful install/test/build;
 - `git diff --check`;
@@ -118,6 +137,11 @@ The GitHub Pages deploy workflow now requires:
   - backend `/api/version`;
   - frontend commit marker;
   - frontend API URL;
+- public frontend marker verification from `window.__SKYTECH_BUILD_INFO__`:
+  - expected commit;
+  - actual FE marker;
+  - build time;
+  - API URL;
 - production read-only Playwright smoke login and section checks.
 
 If the post-deploy gate fails, the workflow is failed and the release is not considered successful.

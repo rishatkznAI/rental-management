@@ -1,6 +1,34 @@
 name: Deploy to GitHub Pages
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'vite.config.*'
+      - 'postcss.config.*'
+      - 'tsconfig*.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/vite-build.mjs'
+      - '.github/workflows/deploy.yml'
+      - 'scripts/release-preflight.mjs'
+      - 'scripts/frontend-build-marker.mjs'
+      - 'e2e/helpers/releaseSmoke.ts'
+      - 'e2e/production-smoke.spec.ts'
+      - 'tests/release-preflight.test.js'
+      - 'tests/release-smoke-conservation.test.js'
+      - 'docs/*release*.md'
+      - 'docs/**/*release*.md'
+      - 'docs/*deploy*.md'
+      - 'docs/**/*deploy*.md'
+      - 'docs/*smoke*.md'
+      - 'docs/**/*smoke*.md'
+      - 'docs/*preflight*.md'
+      - 'docs/**/*preflight*.md'
   workflow_dispatch:
     inputs:
       release_type:
@@ -24,9 +52,120 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  classify-release:
+    name: Classify release
+    runs-on: ubuntu-latest
+    outputs:
+      release_type: ${{ steps.classify.outputs.release_type }}
+      changed_files: ${{ steps.classify.outputs.changed_files }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed files
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            base="${{ github.event.before }}"
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              base="$(git rev-list --max-parents=0 HEAD)"
+            fi
+            mapfile -t files < <(git diff --name-only "$base" "${GITHUB_SHA}" | sed '/^$/d')
+          else
+            if git rev-parse HEAD^ >/dev/null 2>&1; then
+              mapfile -t files < <(git diff --name-only HEAD^ HEAD | sed '/^$/d')
+            else
+              mapfile -t files < <(git diff-tree --no-commit-id --name-only -r --root HEAD | sed '/^$/d')
+            fi
+          fi
+
+          changed_files="$(IFS=,; echo "${files[*]}")"
+          echo "changed_files=$changed_files" >> "$GITHUB_OUTPUT"
+
+          requested_release_type="${{ inputs.release_type || '' }}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            release_type="${requested_release_type:-full-stack}"
+            echo "release_type=$release_type" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Release classification"
+              echo
+              echo "- event: workflow_dispatch"
+              echo "- release_type: \`$release_type\`"
+              echo "- changed files:"
+              printf '  - `%s`\n' "${files[@]}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          frontend_allowed='^(src/|public/|tests/.*\.test\.js$|docs/.*\.md$|index\.html$|vite\.config\.[^/]+$|postcss\.config\.[^/]+$|tsconfig[^/]*\.json$|package\.json$|package-lock\.json$|scripts/vite-build\.mjs$)'
+          deploy_tooling_allowed='^(\.github/workflows/deploy\.yml|scripts/release-preflight\.mjs|scripts/frontend-build-marker\.mjs|e2e/helpers/releaseSmoke\.ts|e2e/production-smoke\.spec\.ts|tests/release-preflight\.test\.js|tests/release-smoke-conservation\.test\.js|docs/.*(release|deploy|smoke|preflight).*\.md)$'
+
+          has_frontend_runtime=0
+          has_deploy_tooling=0
+          blocked=()
+
+          for file in "${files[@]}"; do
+            if [[ "$file" =~ $deploy_tooling_allowed ]]; then
+              has_deploy_tooling=1
+              continue
+            fi
+            if [[ "$file" =~ $frontend_allowed ]]; then
+              [[ "$file" =~ ^(src/|public/|index\.html$|vite\.config\.|postcss\.config\.|tsconfig|package\.json$|package-lock\.json$|scripts/vite-build\.mjs$) ]] && has_frontend_runtime=1
+              continue
+            fi
+            blocked+=("$file")
+          done
+
+          if (( ${#blocked[@]} > 0 )); then
+            {
+              echo "### Production deploy blocked"
+              echo
+              echo "Automatic GitHub Pages deploy did not run because this push changed backend or deploy-critical files."
+              echo "Run the appropriate \`backend\` or \`full-stack\` release after the backend deployment is verified."
+              echo
+              echo "Blocked files:"
+              printf -- "- \`%s\`\n" "${blocked[@]}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            printf 'Backend/deploy-critical files changed:\n'
+            printf ' - %s\n' "${blocked[@]}"
+            exit 1
+          fi
+
+          if (( has_deploy_tooling == 1 && has_frontend_runtime == 1 )); then
+            {
+              echo "### Production deploy blocked"
+              echo
+              echo "This push mixes deploy tooling changes with frontend runtime changes."
+              echo "Split the deploy tooling change or run a manual release with an explicit release_type after review."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          if (( has_deploy_tooling == 1 )); then
+            release_type="deploy-tooling"
+          else
+            release_type="frontend-only"
+          fi
+
+          echo "release_type=$release_type" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release classification"
+            echo
+            echo "- event: push"
+            echo "- release_type: \`$release_type\`"
+            echo "- expected commit: \`${GITHUB_SHA}\`"
+            echo "- changed files:"
+            printf '  - `%s`\n' "${files[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   basic-ci:
     name: Basic CI
     runs-on: ubuntu-latest
+    needs: classify-release
     steps:
       - uses: actions/checkout@v6
 
@@ -125,6 +264,7 @@ jobs:
   deploy:
     name: Deploy and production gate
     needs:
+      - classify-release
       - basic-ci
       - playwright-smoke
     runs-on: ubuntu-latest
@@ -158,13 +298,29 @@ jobs:
       - name: Wait for GitHub Pages propagation
         run: sleep 30
 
+      - name: Write release changed file scope
+        run: printf '%s\n' "$RELEASE_PREFLIGHT_CHANGED_FILES" > "$CHANGED_FILES_FILE"
+        env:
+          RELEASE_PREFLIGHT_CHANGED_FILES: ${{ needs.classify-release.outputs.changed_files }}
+          CHANGED_FILES_FILE: ${{ runner.temp }}/release-changed-files.txt
+
       - name: Run production release preflight
-        run: npm run release:preflight -- --env production --expected-commit "$EXPECTED_RELEASE_COMMIT" --release-type "$RELEASE_TYPE"
+        run: npm run release:preflight -- --env production --expected-commit "$EXPECTED_RELEASE_COMMIT" --release-type "$RELEASE_TYPE" --changed-files-file "$CHANGED_FILES_FILE"
         env:
           PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
           PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
           EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
-          RELEASE_TYPE: ${{ inputs.release_type || 'full-stack' }}
+          RELEASE_TYPE: ${{ needs.classify-release.outputs.release_type }}
+          RELEASE_PREFLIGHT_CHANGED_FILES: ${{ needs.classify-release.outputs.changed_files }}
+          CHANGED_FILES_FILE: ${{ runner.temp }}/release-changed-files.txt
+
+      - name: Verify public frontend build marker
+        run: node scripts/frontend-build-marker.mjs --frontend-url "$PRODUCTION_FRONTEND_URL" --expected-commit "$EXPECTED_RELEASE_COMMIT" --api-url "$PRODUCTION_API_URL"
+        env:
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+          EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_TYPE: ${{ needs.classify-release.outputs.release_type }}
 
       - name: Run production targeted GET smoke
         run: npm run release:targeted-smoke -- --env production
@@ -181,7 +337,7 @@ jobs:
           PRODUCTION_ADMIN_EMAIL: ${{ secrets.PRODUCTION_ADMIN_EMAIL }}
           PRODUCTION_ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
           EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
-          RELEASE_TYPE: ${{ inputs.release_type || 'full-stack' }}
+          RELEASE_TYPE: ${{ needs.classify-release.outputs.release_type }}
 
       - name: Upload production Playwright report
         if: failure()

@@ -17,7 +17,8 @@ Production deployment is allowed while the product is conserved. Conservation is
 
 ## 1. Before coding
 
-- [ ] Production auto-deploy отключён или явно принят как риск.
+- [ ] Если меняется frontend/build-relevant код, учтён автоматический GitHub Pages deploy после merge в `main`.
+- [ ] Если меняются backend/deploy-critical файлы, запланирован backend или full-stack release; automatic Pages deploy должен заблокироваться с понятной причиной.
 - [ ] Working tree clean: `git status --short`.
 - [ ] `exports/` ignored and not committed.
 - [ ] `service-history` stash не трогался.
@@ -35,8 +36,8 @@ Production deployment is allowed while the product is conserved. Conservation is
 ## 3. Commit and push
 
 - [ ] Commit message понятный, например `docs(release): add staging to production checklist`.
-- [ ] Push только если production auto-deploy безопасен.
-- [ ] После push проверить, что production не задеплоился случайно.
+- [ ] Push в `main` после merge должен либо запустить frontend Pages deploy для frontend/build-relevant changes, либо явно заблокировать backend/deploy-critical release.
+- [ ] После auto deploy проверить public frontend marker, API URL и workflow production gate.
 
 ## 4. Staging deploy
 

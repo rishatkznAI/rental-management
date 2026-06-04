@@ -10,13 +10,13 @@ const RELEASE_TYPES = new Set(RELEASE_TYPE_OPTIONS);
 const FRONTEND_ONLY_FORBIDDEN_FILE_PATTERNS = [
   /^(server|backend|api)(\/|$)/,
   /^(routes|lib|db|storage|migrations)(\/|$)/,
-  /^scripts\//,
+  /^scripts\/(?!vite-build\.mjs$)/,
   /^\.github\/workflows\//,
   /^e2e\/helpers\/releaseSmoke\.ts$/,
   /^e2e\/production-smoke\.spec\.ts$/,
   /^playwright\.production\.config\.ts$/,
-  /(^|\/)package\.json$/,
-  /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.lock)$/,
+  /^(?!package\.json$)(^|\/)package\.json$/,
+  /^(?!package-lock\.json$)(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.lock)$/,
   /(^|\/)(railway\.json|railway\.toml|nixpacks\.toml|Procfile|Dockerfile(?:\.[^/]*)?|docker-compose\.ya?ml|render\.ya?ml|fly\.toml)$/,
   /^\.railway(\/|$)/,
   /(^|\/)\.env(?:$|[.-])/,
@@ -26,6 +26,7 @@ const FRONTEND_ONLY_FORBIDDEN_FILE_PATTERNS = [
 const DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
   /^\.github\/workflows\/.+/,
   /^scripts\/release-preflight\.mjs$/,
+  /^scripts\/frontend-build-marker\.mjs$/,
   /^e2e\/helpers\/releaseSmoke\.ts$/,
   /^e2e\/production-smoke\.spec\.ts$/,
   /^tests\/release-preflight\.test\.js$/,
@@ -385,9 +386,9 @@ function classifyHost(url) {
   return 'external-static';
 }
 
-function classifyApiTarget(url, expectedApiUrl) {
+function classifyApiTarget(url, expectedApiUrl, env = '') {
   const normalized = normalizeUrl(url);
-  if (normalized === normalizeUrl(expectedApiUrl)) return 'staging';
+  if (normalized === normalizeUrl(expectedApiUrl)) return env || 'expected';
   if (/rental-management-production|production-[a-z0-9-]*\.up\.railway\.app/i.test(normalized)) return 'prod';
   if (/staging|stage/i.test(normalized)) return 'staging-like';
   if (/railway\.app/i.test(normalized)) return 'railway-unknown';
@@ -465,7 +466,7 @@ async function main() {
   const productionLikeBackendUrls = detectProductionLikeBackendUrls(detectedApiUrls, apiUrl);
   const markerFound = frontend.combinedText.includes(expectedShort) || frontend.combinedText.includes(expectedCommit);
   const expectedApiFound = frontend.combinedText.includes(apiUrl);
-  const apiTargetClasses = unique(detectedApiUrls.map(url => classifyApiTarget(url, apiUrl)));
+  const apiTargetClasses = unique(detectedApiUrls.map(url => classifyApiTarget(url, apiUrl, args.env)));
 
   console.log(`[release-preflight] frontend marker expected=${expectedShort} found=${markerFound ? 'yes' : 'no'}`);
   if (!markerFound) {

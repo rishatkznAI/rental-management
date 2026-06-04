@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 const ENVIRONMENTS = new Set(['staging', 'production']);
-const RELEASE_TYPE_OPTIONS = ['frontend-only', 'backend', 'full-stack', 'deploy-tooling'];
+const RELEASE_TYPE_OPTIONS = ['frontend-only', 'backend', 'full-stack', 'deploy-tooling', 'frontend-deploy-tooling'];
 const RELEASE_TYPES = new Set(RELEASE_TYPE_OPTIONS);
 const FRONTEND_ONLY_FORBIDDEN_FILE_PATTERNS = [
   /^(server|backend|api)(\/|$)/,
@@ -33,6 +33,43 @@ const DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
   /^tests\/release-smoke-conservation\.test\.js$/,
   /^docs\/(?:release-runbook|deploy-checklist|production-smoke-checklist)\.md$/,
   /^docs\/.*(?:release|deploy|smoke|preflight).*\.md$/,
+];
+const FRONTEND_DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
+  /^src\//,
+  /^public\//,
+  /^tests\/.*\.test\.js$/,
+  /^docs\/.*\.md$/,
+  /^index\.html$/,
+  /^vite\.config\.[^/]+$/,
+  /^postcss\.config\.[^/]+$/,
+  /^tsconfig[^/]*\.json$/,
+  /^package\.json$/,
+  /^package-lock\.json$/,
+  /^scripts\/vite-build\.mjs$/,
+  ...DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS,
+];
+const FRONTEND_RUNTIME_FILE_PATTERNS = [
+  /^src\//,
+  /^public\//,
+  /^index\.html$/,
+  /^vite\.config\.[^/]+$/,
+  /^postcss\.config\.[^/]+$/,
+  /^tsconfig[^/]*\.json$/,
+  /^package\.json$/,
+  /^package-lock\.json$/,
+  /^scripts\/vite-build\.mjs$/,
+];
+const RELEASE_CRITICAL_FILE_PATTERNS = [
+  /^(server|backend|api)(\/|$)/,
+  /^(routes|lib|db|storage|migrations)(\/|$)/,
+  /^server\/data\//,
+  /(^|\/)(app\.sqlite|.*\.sqlite(?:3)?|.*\.db)$/,
+  /(^|\/)(railway\.json|railway\.toml|nixpacks\.toml|Procfile|Dockerfile(?:\.[^/]*)?|docker-compose\.ya?ml|render\.ya?ml|fly\.toml)$/,
+  /^\.railway(\/|$)/,
+  /(^|\/)\.env(?:$|[.-])/,
+  /(^|\/)(?:[^/]*secret[^/]*|[^/]*token[^/]*|[^/]*credential[^/]*)(?:\.[^/]*)?$/i,
+  /^(config|configs)(\/|$)/,
+  /^(server|api|backend)\.(config|env)\./,
 ];
 
 export function normalizeReleaseType(value = '') {
@@ -111,11 +148,17 @@ export function backendCommitMatchesExpected(backendBuild = {}, expectedCommit =
 
 export function allowsBackendCommitDrift({ env = '', releaseType = '' } = {}) {
   const normalizedReleaseType = normalizeReleaseType(releaseType);
-  return env === 'production' && (normalizedReleaseType === 'frontend-only' || normalizedReleaseType === 'deploy-tooling');
+  return env === 'production' && (
+    normalizedReleaseType === 'frontend-only' ||
+    normalizedReleaseType === 'deploy-tooling' ||
+    normalizedReleaseType === 'frontend-deploy-tooling'
+  );
 }
 
 function backendDriftReleaseType(releaseType = '') {
-  return normalizeReleaseType(releaseType) === 'deploy-tooling' ? 'deploy-tooling' : 'frontend-only';
+  const normalizedReleaseType = normalizeReleaseType(releaseType);
+  if (normalizedReleaseType === 'deploy-tooling' || normalizedReleaseType === 'frontend-deploy-tooling') return normalizedReleaseType;
+  return 'frontend-only';
 }
 
 export function backendDriftMessage({ expectedCommit = '', backendCommit = '', releaseType = '' } = {}) {
@@ -255,6 +298,75 @@ export function assertDeployToolingReleaseScope({ releaseType = '', changedFiles
   );
 
   return { checked: true, changedFiles: files, disallowedChangedFiles };
+}
+
+function matchesAnyPattern(file = '', patterns = []) {
+  const normalized = normalizeChangedFilePath(file);
+  return normalized && patterns.some(pattern => pattern.test(normalized));
+}
+
+export function isReleaseCriticalChangedFile(file = '') {
+  return matchesAnyPattern(file, RELEASE_CRITICAL_FILE_PATTERNS);
+}
+
+export function isFrontendDeployToolingAllowedChangedFile(file = '') {
+  return matchesAnyPattern(file, FRONTEND_DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS);
+}
+
+export function isFrontendRuntimeChangedFile(file = '') {
+  return matchesAnyPattern(file, FRONTEND_RUNTIME_FILE_PATTERNS);
+}
+
+export function frontendDeployToolingDisallowedChangedFiles(changedFiles = []) {
+  return normalizedChangedFiles(changedFiles).filter(file =>
+    isReleaseCriticalChangedFile(file) || !isFrontendDeployToolingAllowedChangedFile(file),
+  );
+}
+
+export function assertFrontendDeployToolingReleaseScope({ releaseType = '', changedFiles = [] } = {}) {
+  if (normalizeReleaseType(releaseType) !== 'frontend-deploy-tooling') {
+    return { checked: false, changedFiles: [], disallowedChangedFiles: [] };
+  }
+
+  const files = normalizedChangedFiles(changedFiles);
+  assertOk(
+    files.length > 0,
+    'release_type=frontend-deploy-tooling requires changed file scope via RELEASE_PREFLIGHT_CHANGED_FILES, --changed-files, or git history',
+  );
+
+  const disallowedChangedFiles = frontendDeployToolingDisallowedChangedFiles(files);
+  assertOk(
+    disallowedChangedFiles.length === 0,
+    `release_type=frontend-deploy-tooling is allowed only for frontend runtime plus deploy/preflight/smoke tooling files. Disallowed files: ${disallowedChangedFiles.join(', ')}`,
+  );
+
+  assertOk(
+    files.some(isFrontendRuntimeChangedFile) && files.some(isDeployToolingAllowedChangedFile),
+    'release_type=frontend-deploy-tooling requires both frontend runtime and deploy/preflight/smoke tooling changes',
+  );
+
+  return { checked: true, changedFiles: files, disallowedChangedFiles };
+}
+
+export function classifyReleaseChangedFiles(changedFiles = []) {
+  const files = normalizedChangedFiles(changedFiles);
+  const blocked = files.filter(file => isReleaseCriticalChangedFile(file) || !isFrontendDeployToolingAllowedChangedFile(file));
+  const hasFrontendRuntime = files.some(isFrontendRuntimeChangedFile);
+  const hasDeployTooling = files.some(isDeployToolingAllowedChangedFile);
+
+  if (blocked.length > 0) {
+    return { allowed: false, releaseType: '', changedFiles: files, blockedFiles: blocked, hasFrontendRuntime, hasDeployTooling };
+  }
+  if (hasFrontendRuntime && hasDeployTooling) {
+    return { allowed: true, releaseType: 'frontend-deploy-tooling', changedFiles: files, blockedFiles: [], hasFrontendRuntime, hasDeployTooling };
+  }
+  if (hasDeployTooling) {
+    return { allowed: true, releaseType: 'deploy-tooling', changedFiles: files, blockedFiles: [], hasFrontendRuntime, hasDeployTooling };
+  }
+  if (hasFrontendRuntime) {
+    return { allowed: true, releaseType: 'frontend-only', changedFiles: files, blockedFiles: [], hasFrontendRuntime, hasDeployTooling };
+  }
+  return { allowed: true, releaseType: 'docs-only', changedFiles: files, blockedFiles: [], hasFrontendRuntime, hasDeployTooling };
 }
 
 export function backendCommitGateResult({ env = '', releaseType = '', backendBuild = {}, expectedCommit = '' } = {}) {
@@ -426,6 +538,12 @@ async function main() {
     const fileScope = assertDeployToolingReleaseScope({ releaseType: args.releaseType, changedFiles });
     console.log(`[release-preflight] deploy-tooling changed files=${fileScope.changedFiles.join(', ')}`);
     console.log(`[release-preflight] deploy-tooling file scope OK (${fileScope.changedFiles.length} file(s))`);
+  }
+  if (args.releaseType === 'frontend-deploy-tooling') {
+    const changedFiles = resolveChangedFiles(args);
+    const fileScope = assertFrontendDeployToolingReleaseScope({ releaseType: args.releaseType, changedFiles });
+    console.log(`[release-preflight] frontend-deploy-tooling changed files=${fileScope.changedFiles.join(', ')}`);
+    console.log(`[release-preflight] frontend-deploy-tooling file scope OK (${fileScope.changedFiles.length} file(s))`);
   }
 
   const frontendUrl = requiredEnv(`${prefix}_FRONTEND_URL`);

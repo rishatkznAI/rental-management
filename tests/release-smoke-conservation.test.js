@@ -71,9 +71,9 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
 });
 
 test('production release smoke allows backend drift only for frontend-only and deploy-tooling releases', () => {
-  assert.match(releaseSmokeSource, /type ReleaseType = 'frontend-only' \| 'backend' \| 'full-stack' \| 'deploy-tooling'/);
+  assert.match(releaseSmokeSource, /type ReleaseType = 'frontend-only' \| 'backend' \| 'full-stack' \| 'deploy-tooling' \| 'frontend-deploy-tooling'/);
   assert.match(releaseSmokeSource, /releaseType\?: ReleaseType \| string/);
-  assert.match(releaseSmokeSource, /releaseType === 'frontend-only' \|\| releaseType === 'deploy-tooling'/);
+  assert.match(releaseSmokeSource, /releaseType === 'frontend-only' \|\|[\s\S]*releaseType === 'deploy-tooling' \|\|[\s\S]*releaseType === 'frontend-deploy-tooling'/);
   assert.match(releaseSmokeSource, /expectedDriftReleaseType\(details\.releaseType\)/);
   assert.match(releaseSmokeSource, /releaseType: normalizeReleaseType\(String\(config\.releaseType \|\| ''\)\)/);
   assert.match(releaseSmokeSource, /releaseType: normalizedConfig\.releaseType/);

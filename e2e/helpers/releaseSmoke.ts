@@ -1,4 +1,4 @@
-import { expect, request as playwrightRequest, type APIResponse, type Page, type TestInfo } from '@playwright/test';
+import { expect, request as playwrightRequest, type APIResponse, type Locator, type Page, type TestInfo } from '@playwright/test';
 
 type BuildInfo = {
   commit?: string;
@@ -294,9 +294,16 @@ async function expectAdminLoginSucceeded(
 }
 
 async function expectExecutiveCockpitVisible(page: Page) {
+  await page.setViewportSize({ width: 1440, height: 900 });
   const summary = page.getByTestId('dashboard-executive-summary');
+  const topCockpit = page.getByTestId('dashboard-top-cockpit').or(summary);
   const cockpit = page.getByTestId('dashboard-executive-cockpit');
+  const keySignals = page.getByTestId('dashboard-key-signals');
+  const legacyAttentionList = page.getByTestId('dashboard-legacy-attention-list');
+  const monthDynamics = page.getByTestId('dashboard-month-dynamics');
+  const companyHealth = page.getByTestId('dashboard-company-health');
   await expect(summary, 'executive cockpit summary should be visible after login').toBeVisible();
+  await expect(topCockpit, 'dashboard top cockpit should be visible after login').toBeVisible();
   await expect(cockpit, 'executive cockpit KPI grid should be visible after login').toBeVisible();
 
   const kpiChecks = [
@@ -312,9 +319,11 @@ async function expectExecutiveCockpitVisible(page: Page) {
     await expect(card.getByText(item.label, { exact: true }), `executive cockpit KPI label ${item.label} should be visible`).toBeVisible();
   }
 
-  await expect(page.getByRole('heading', { name: 'Главные сигналы сегодня' }), 'dashboard signal strip should be visible').toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Динамика месяца' }), 'dashboard cash flow card should be visible').toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Здоровье компании' }), 'dashboard company health card should be visible').toBeVisible();
+  await expect(keySignals, 'dashboard key signals should be visible').toBeVisible();
+  await expect(keySignals.getByRole('heading', { name: 'Главные сигналы сегодня' }), 'dashboard signal strip should be visible').toBeVisible();
+  await expect(monthDynamics.getByRole('heading', { name: 'Динамика месяца' }), 'dashboard cash flow card should be visible').toBeVisible();
+  await expect(companyHealth.getByRole('heading', { name: 'Здоровье компании' }), 'dashboard company health card should be visible').toBeVisible();
+  await expect(legacyAttentionList, 'legacy attention list should remain secondary').toBeVisible();
 
   const fleetUtilizationCard = page.getByTestId('dashboard-kpi-fleet-utilization');
   const serviceLoadCard = page.getByTestId('dashboard-kpi-service-load');
@@ -324,6 +333,55 @@ async function expectExecutiveCockpitVisible(page: Page) {
     .toHaveAttribute('href', /#\/planner$/);
   await expect(serviceLoadCard, 'service CTA should target #/service')
     .toHaveAttribute('href', /#\/service$/);
+
+  const viewport = page.viewportSize() ?? { width: 1440, height: 900 };
+  const rects = {
+    keySignals: await elementRect(keySignals),
+    legacyAttentionList: await elementRect(legacyAttentionList),
+    monthDynamics: await elementRect(monthDynamics),
+    companyHealth: await elementRect(companyHealth),
+  };
+  const legacyCollapsed = await legacyAttentionList.evaluate(element => element.tagName.toLowerCase() === 'details' && !(element as HTMLDetailsElement).open);
+  const monthOrHealthStartsInViewport =
+    (rects.monthDynamics?.top ?? Number.POSITIVE_INFINITY) < viewport.height
+    || (rects.companyHealth?.top ?? Number.POSITIVE_INFINITY) < viewport.height;
+
+  console.log('[release-smoke] dashboard visual acceptance', JSON.stringify({
+    viewport,
+    visibleCockpitBlocks: {
+      executiveSummary: true,
+      executiveCockpit: true,
+      keySignals: true,
+      monthDynamics: Boolean(rects.monthDynamics),
+      companyHealth: Boolean(rects.companyHealth),
+    },
+    blockRects: rects,
+    legacyAttentionList: {
+      collapsed: legacyCollapsed,
+      belowFold: (rects.legacyAttentionList?.top ?? 0) >= viewport.height,
+    },
+  }));
+
+  expect(rects.keySignals?.top ?? Number.POSITIVE_INFINITY, 'Главные сигналы сегодня should be above the desktop fold').toBeLessThan(viewport.height);
+  expect(monthOrHealthStartsInViewport, 'Динамика месяца or Здоровье компании should start inside the desktop viewport').toBeTruthy();
+  expect(
+    legacyCollapsed || (rects.legacyAttentionList?.top ?? 0) >= viewport.height,
+    'Список для контроля should be collapsed or below the desktop fold',
+  ).toBeTruthy();
+}
+
+async function elementRect(locator: Locator) {
+  return locator.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return {
+      top: Math.round(rect.top),
+      bottom: Math.round(rect.bottom),
+      left: Math.round(rect.left),
+      right: Math.round(rect.right),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  }).catch(() => null);
 }
 
 async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: string, testInfo?: TestInfo) {

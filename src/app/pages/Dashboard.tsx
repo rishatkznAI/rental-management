@@ -958,18 +958,27 @@ function UtilizationGauge({
   available,
   active,
   trend,
+  tone = 'success',
 }: {
   value: number;
   rented: number;
   available: number;
   active: number;
   trend: MiniChartPoint[];
+  tone?: DashboardTone;
 }) {
   const percent = clampPercent(value);
+  const gaugeTone =
+    tone === 'danger'
+      ? 'text-red-500 drop-shadow-[0_0_20px_rgba(239,68,68,0.26)]'
+      : tone === 'warning'
+        ? 'text-amber-500 drop-shadow-[0_0_20px_rgba(245,158,11,0.24)]'
+        : 'text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.24)]';
+  const trendColor = tone === 'danger' ? '#ef4444' : tone === 'warning' ? '#f59e0b' : '#34d399';
 
   return (
-    <div className="mt-4 grid gap-4 sm:grid-cols-[92px_minmax(0,1fr)] sm:items-center">
-      <div className="relative h-[92px] w-[92px] justify-self-start text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.24)]" aria-label="Donut gauge утилизации парка">
+    <div className="mt-3 grid gap-3 sm:grid-cols-[76px_minmax(0,1fr)] sm:items-center">
+      <div className={`relative h-[76px] w-[76px] justify-self-start ${gaugeTone}`} aria-label="Donut gauge утилизации парка">
         <svg viewBox="0 0 120 120" role="img" className="h-full w-full">
           <circle cx="60" cy="60" r="45" fill="none" stroke="currentColor" strokeOpacity="0.15" strokeWidth="14" />
           <circle
@@ -1004,7 +1013,7 @@ function UtilizationGauge({
             </div>
           ))}
         </div>
-        <MiniSparkline data={trend} stroke="#34d399" className="mt-2 h-7" />
+        <MiniSparkline data={trend} stroke={trendColor} className="mt-2 h-6" />
       </div>
     </div>
   );
@@ -1024,7 +1033,7 @@ function StatusBars({
   const stackRows = rows.filter(row => row.value > 0);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="flex h-3 overflow-hidden rounded-full bg-slate-950/10 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10" aria-hidden="true">
         {stackRows.length > 0 ? stackRows.map(row => (
           <div
@@ -1034,7 +1043,7 @@ function StatusBars({
           />
         )) : <div className="h-full w-full bg-muted" />}
       </div>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {rows.map(row => {
           const percent = Math.round((row.value / denominator) * 100);
           return (
@@ -1069,8 +1078,8 @@ function OperationalLoadGauge({
   const angle = -112 + (percent / 100) * 224;
 
   return (
-    <div className="mt-4 grid gap-4 sm:grid-cols-[118px_minmax(0,1fr)] sm:items-center">
-      <div className="relative h-[104px] w-[118px] justify-self-start" aria-label="Индекс нагрузки компании">
+    <div className="mt-3 grid gap-3 sm:grid-cols-[96px_minmax(0,1fr)] sm:items-center">
+      <div className="relative h-[86px] w-[96px] justify-self-start" aria-label="Индекс нагрузки компании">
         <svg viewBox="0 0 140 112" role="img" className="h-full w-full overflow-visible">
           <path d="M 24 88 A 46 46 0 0 1 116 88" fill="none" stroke="currentColor" strokeOpacity="0.14" strokeWidth="16" strokeLinecap="round" />
           <path
@@ -1095,7 +1104,7 @@ function OperationalLoadGauge({
           <circle cx="70" cy="88" r="7" fill={color} />
         </svg>
         <div className="absolute inset-x-0 bottom-0 text-center">
-          <div className="text-2xl font-extrabold text-foreground">{percent}</div>
+          <div className="text-xl font-extrabold text-foreground">{percent}</div>
           <div className="text-[11px] font-semibold text-muted-foreground">из 100</div>
         </div>
       </div>
@@ -1142,11 +1151,11 @@ function RiskSignalStrip({
   lossPerDay: string;
 }) {
   return (
+    <div data-testid="dashboard-attention-block">
     <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none" data-testid="dashboard-risk-signal-strip">
-      <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-start sm:justify-between">
+      <CardHeader className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <CardTitle className="app-shell-title text-xl font-extrabold">Главные сигналы сегодня</CardTitle>
-          <CardDescription>Компактная сводка Action Queue без длинной операционной простыни.</CardDescription>
+          <CardTitle className="app-shell-title text-lg font-extrabold">Главные сигналы сегодня</CardTitle>
         </div>
         <div className="grid grid-cols-3 gap-2 text-center text-xs">
           {[
@@ -1164,22 +1173,7 @@ function RiskSignalStrip({
           })}
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-2 text-xs sm:grid-cols-4">
-          {[
-            { label: 'Просрочено', value: String(topAttentionActions.filter(item => item.isOverdue).length) },
-            { label: 'Сегодня', value: String(topAttentionActions.filter(item => item.isDueToday).length) },
-            { label: 'Без ответственного', value: String(topAttentionActions.filter(item => item.isUnassigned).length) },
-            { label: 'Потери сейчас', value: lossNow },
-            { label: 'Потеря в день', value: lossPerDay },
-          ].map(item => (
-            <div key={item.label} className="rounded-xl border border-border bg-secondary/40 px-3 py-2">
-              <p className="font-semibold text-muted-foreground">{item.label}</p>
-              <p className="mt-1 text-base font-extrabold text-foreground">{item.value}</p>
-            </div>
-          ))}
-        </div>
-
+      <CardContent className="space-y-3">
         {isLoading ? (
           <div className="rounded-xl border border-border bg-secondary/40 px-4 py-5 text-sm text-muted-foreground">Загружаем очередь внимания...</div>
         ) : topAttentionActions.length === 0 ? (
@@ -1187,11 +1181,11 @@ function RiskSignalStrip({
             Критичных действий на сегодня нет.
           </div>
         ) : (
-          <div className="grid gap-2 lg:grid-cols-3">
+          <div className="grid gap-2 xl:grid-cols-3">
             {topAttentionActions.map(item => {
               const tone = item.priority === 'critical' ? toneStyles.danger : item.priority === 'high' ? toneStyles.warning : toneStyles.info;
               return (
-                <Link key={item.actionId} to={item.links.equipment || '/equipment'} className="rounded-xl border border-border bg-background/60 px-3 py-3 text-sm transition hover:border-primary/40 hover:bg-secondary/50">
+                <Link key={item.actionId} to={item.links.equipment || '/equipment'} className="rounded-lg border border-border bg-background/60 px-2.5 py-2 text-sm transition hover:border-primary/40 hover:bg-secondary/50">
                   <div className="flex items-center gap-2">
                     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${tone.dot}`} />
                     <span className={`font-semibold ${tone.accent}`}>{ATTENTION_PRIORITY_LABELS[item.priority] || 'Средний'}</span>
@@ -1199,20 +1193,22 @@ function RiskSignalStrip({
                     {item.isUnassigned ? <Badge variant="warning">Без ответственного</Badge> : null}
                   </div>
                   <p className="mt-2 line-clamp-1 font-semibold text-foreground">{item.title}</p>
-                  <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{ATTENTION_AREA_LABELS[item.responsibleArea] || ATTENTION_AREA_LABELS.unknown} · {attentionDueLabel(item)}</p>
                 </Link>
               );
             })}
           </div>
         )}
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className="border-border bg-secondary/40 text-muted-foreground">Потери сейчас: {lossNow}</Badge>
+          <Badge variant="outline" className="border-border bg-secondary/40 text-muted-foreground">Потеря в день: {lossPerDay}</Badge>
           <Button asChild variant="secondary" size="sm"><Link to="/equipment">Открыть очередь</Link></Button>
           <Button asChild variant="outline" size="sm"><Link to="/equipment?actionQueueFilter=unassigned">Показать без ответственного</Link></Button>
           <Button asChild variant="outline" size="sm"><Link to="/equipment?actionQueueFilter=overdue">Показать просроченные</Link></Button>
         </div>
       </CardContent>
     </Card>
+    </div>
   );
 }
 
@@ -1428,7 +1424,7 @@ export default function Dashboard() {
         || Number(right.isDueToday) - Number(left.isDueToday)
         || (priorityRank[right.priority] || 0) - (priorityRank[left.priority] || 0)
       )
-      .slice(0, 7);
+      .slice(0, 3);
   }, [actionAttention]);
   const documentControl = useMemo(
     () => buildDocumentControl({
@@ -3192,14 +3188,14 @@ export default function Dashboard() {
       : 'warning';
   const utilizationTone: DashboardTone = activeEquipment === 0
     ? 'warning'
-    : utilization < 60
+    : utilization < 40
       ? 'danger'
-      : utilization < UTILIZATION_TARGET || utilization > 90
+      : utilization < 60 || utilization > UTILIZATION_TARGET
         ? 'warning'
         : 'success';
   const serviceBlockersCount = criticalTickets.length + unassignedServiceTickets.length + ticketsWaitingParts.length + overdueServiceTickets.length;
   const serviceTone: DashboardTone = serviceBlockersCount > 0
-    ? serviceBlockersCount >= Math.max(8, Math.round(openServiceTickets.length * 0.35))
+    ? serviceBlockersCount >= Math.max(5, Math.round(openServiceTickets.length * 0.25))
       ? 'danger'
       : 'warning'
     : 'success';
@@ -3225,30 +3221,25 @@ export default function Dashboard() {
     + unassignedServiceTickets.length
     + (actionAttention?.summary?.critical ?? 0);
   const operationalLoadTone: DashboardTone = criticalOperationalIssues > 0
-    ? 'warning'
-    : operationalLoadScore >= 78
+    ? (operationalLoadScore > 85 || criticalOperationalIssues >= 5 ? 'danger' : 'warning')
+    : operationalLoadScore > 85
       ? 'danger'
-      : operationalLoadScore >= 45
+      : operationalLoadScore >= 70
         ? 'warning'
-        : 'success';
-  const operationalLoadLabel = operationalLoadScore >= 78
+        : operationalLoadScore >= 40
+          ? 'default'
+          : 'success';
+  const operationalLoadLabel = operationalLoadScore > 85
+    ? 'Критично'
+    : operationalLoadScore >= 70
     ? 'Высокая'
-    : operationalLoadScore >= 45
+    : operationalLoadScore >= 40
       ? 'Нормальная'
       : 'Низкая';
-  const operationalLoadBars: StatusBarRow[] = [
-    { label: 'Аренды', value: operationalLoadInputs[0], color: '#2563eb' },
-    { label: 'Сервис', value: operationalLoadInputs[1], color: '#06b6d4' },
-    { label: 'Возвраты', value: operationalLoadInputs[2], color: '#8b5cf6' },
-    { label: 'Доставки', value: operationalLoadInputs[3], color: '#f59e0b' },
-    { label: 'Документы', value: operationalLoadInputs[4], color: '#10b981' },
-    { label: 'Задачи', value: operationalLoadInputs[5], color: '#ef4444' },
-  ];
-  const operationalLoadTotal = operationalLoadBars.reduce((sum, row) => sum + row.value, 0);
   const companyHealthBars: CompanyHealthBar[] = [
     { label: 'Деньги', value: receivablesTone === 'success' ? 92 : receivablesTone === 'warning' ? 62 : 34, hint: overdueReceivablesAmount > 0 ? formatCurrency(overdueReceivablesAmount) : 'чисто', color: '#fb7185' },
     { label: 'Парк', value: activeEquipment > 0 ? utilization : 0, hint: activeEquipment > 0 ? `${utilization}%` : 'нет активного парка', color: '#34d399' },
-    { label: 'Сервис', value: serviceTone === 'success' ? 88 : serviceTone === 'warning' ? 58 : 28, hint: `${serviceBlockersCount} блокеров`, color: '#38bdf8' },
+    { label: 'Сервис', value: serviceTone === 'success' ? 88 : serviceTone === 'warning' ? 58 : 28, hint: `${serviceBlockersCount} блокеров`, color: serviceTone === 'danger' ? '#ef4444' : '#f59e0b' },
     { label: 'Возвраты', value: overdueRentalsList.length > 0 ? 35 : rentalsEndingToday.length > 0 ? 68 : 90, hint: overdueRentalsList.length > 0 ? `${overdueRentalsList.length} просрочено` : `${rentalsEndingToday.length} сегодня`, color: '#a78bfa' },
     { label: 'Документы', value: unsignedDocumentsCount > 0 ? 58 : 90, hint: `${unsignedDocumentsCount} без подписи`, color: '#f59e0b' },
   ];
@@ -3517,8 +3508,9 @@ export default function Dashboard() {
       </div>
 
       {executiveSummaryCards.length > 0 && (
-        <section className="space-y-3" data-testid="dashboard-executive-summary">
-          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-5" data-testid="dashboard-executive-cockpit">
+        <section className="space-y-3" data-testid="dashboard-top-cockpit">
+          <div className="space-y-3" data-testid="dashboard-executive-summary">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="dashboard-executive-cockpit">
             {executiveSummaryCards.map(card => {
               const Icon = card.icon;
               const tone = toneStyles[card.tone ?? 'default'];
@@ -3527,20 +3519,15 @@ export default function Dashboard() {
               const isFleetCard = card.id === 'executive-fleet-utilization';
               const isServiceCard = card.id === 'executive-service-load';
               const isOperationalLoadCard = card.id === 'executive-operational-load';
-              const surfaceClass = isDebtCard
-                ? 'border-rose-300/55 bg-[radial-gradient(circle_at_12%_0%,rgba(244,63,94,0.20),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,241,242,0.96)_48%,rgba(255,255,255,0.94))] shadow-[0_24px_62px_-42px_rgba(190,18,60,0.55)] dark:border-rose-300/22 dark:bg-[radial-gradient(circle_at_12%_0%,rgba(244,63,94,0.32),transparent_36%),linear-gradient(135deg,rgba(76,5,25,0.82),rgba(24,24,37,0.96)_54%,rgba(15,23,42,0.98))] dark:shadow-[0_22px_70px_-44px_rgba(244,63,94,0.85)]'
-                : isFleetCard
-                  ? 'border-emerald-300/45 bg-[radial-gradient(circle_at_88%_4%,rgba(16,185,129,0.18),transparent_36%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(236,253,245,0.82)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(16,185,129,0.45)] dark:border-emerald-300/18 dark:bg-[radial-gradient(circle_at_88%_4%,rgba(16,185,129,0.28),transparent_36%),linear-gradient(135deg,rgba(10,35,32,0.82),rgba(15,23,42,0.97))]'
-                  : isServiceCard
-                    ? 'border-cyan-300/45 bg-[radial-gradient(circle_at_86%_0%,rgba(14,165,233,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(240,249,255,0.84)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(14,165,233,0.45)] dark:border-cyan-300/18 dark:bg-[radial-gradient(circle_at_86%_0%,rgba(14,165,233,0.28),transparent_34%),linear-gradient(135deg,rgba(8,31,42,0.88),rgba(15,23,42,0.97))]'
-                    : 'border-amber-300/45 bg-[radial-gradient(circle_at_84%_0%,rgba(245,158,11,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,251,235,0.84)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(245,158,11,0.43)] dark:border-amber-300/18 dark:bg-[radial-gradient(circle_at_84%_0%,rgba(245,158,11,0.24),transparent_34%),linear-gradient(135deg,rgba(45,32,12,0.86),rgba(15,23,42,0.97))]';
-              const meterColor = card.tone === 'danger'
-                ? '#ef4444'
-                : card.tone === 'warning'
-                  ? '#f59e0b'
-                  : card.tone === 'success'
-                    ? '#10b981'
-                    : '#38bdf8';
+              const surfaceByTone: Record<DashboardTone, string> = {
+                danger: 'border-red-400/65 bg-[radial-gradient(circle_at_12%_0%,rgba(239,68,68,0.24),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(254,226,226,0.96)_48%,rgba(255,255,255,0.94))] shadow-[0_24px_62px_-42px_rgba(185,28,28,0.62)] dark:border-red-300/28 dark:bg-[radial-gradient(circle_at_12%_0%,rgba(239,68,68,0.38),transparent_36%),linear-gradient(135deg,rgba(88,10,10,0.88),rgba(24,24,37,0.96)_54%,rgba(15,23,42,0.98))] dark:shadow-[0_22px_70px_-44px_rgba(239,68,68,0.9)]',
+                warning: 'border-amber-300/55 bg-[radial-gradient(circle_at_84%_0%,rgba(245,158,11,0.20),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,251,235,0.86)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(245,158,11,0.46)] dark:border-amber-300/22 dark:bg-[radial-gradient(circle_at_84%_0%,rgba(245,158,11,0.26),transparent_34%),linear-gradient(135deg,rgba(45,32,12,0.88),rgba(15,23,42,0.97))]',
+                success: 'border-emerald-300/48 bg-[radial-gradient(circle_at_88%_4%,rgba(16,185,129,0.18),transparent_36%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(236,253,245,0.82)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(16,185,129,0.45)] dark:border-emerald-300/18 dark:bg-[radial-gradient(circle_at_88%_4%,rgba(16,185,129,0.28),transparent_36%),linear-gradient(135deg,rgba(10,35,32,0.82),rgba(15,23,42,0.97))]',
+                info: 'border-sky-300/45 bg-[radial-gradient(circle_at_86%_0%,rgba(14,165,233,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(240,249,255,0.84)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(14,165,233,0.45)] dark:border-sky-300/18 dark:bg-[radial-gradient(circle_at_86%_0%,rgba(14,165,233,0.28),transparent_34%),linear-gradient(135deg,rgba(8,31,42,0.88),rgba(15,23,42,0.97))]',
+                violet: 'border-violet-300/45 bg-[radial-gradient(circle_at_86%_0%,rgba(139,92,246,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(245,243,255,0.84)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(139,92,246,0.45)] dark:border-violet-300/18 dark:bg-[radial-gradient(circle_at_86%_0%,rgba(139,92,246,0.28),transparent_34%),linear-gradient(135deg,rgba(35,20,70,0.88),rgba(15,23,42,0.97))]',
+                default: 'border-slate-300/45 bg-[linear-gradient(135deg,rgba(255,255,255,0.98),rgba(248,250,252,0.90)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(15,23,42,0.36)] dark:border-slate-300/16 dark:bg-[linear-gradient(135deg,rgba(30,41,59,0.78),rgba(15,23,42,0.97))]',
+              };
+              const surfaceClass = surfaceByTone[card.tone ?? 'default'];
               const content = (
                 <div className="relative z-10 flex h-full flex-col">
                   <div className="flex items-start justify-between gap-3">
@@ -3552,19 +3539,18 @@ export default function Dashboard() {
                       <Icon className="h-5 w-5" />
                     </div>
                   </div>
-                  <p className={`mt-3 text-sm font-medium ${tone.accent}`}>{card.hint}</p>
+                  <p className={`mt-2 text-sm font-medium ${tone.accent}`}>{card.hint}</p>
 
                   {isDebtCard && (
-                    <div className="mt-4 rounded-2xl border border-rose-300/45 bg-white/55 p-3 text-xs shadow-inner dark:border-rose-200/10 dark:bg-white/[0.045]">
-                      <MiniAreaChart data={overdueReceivablesTrendData} stroke="#fb7185" fill="#fb7185" />
-                      <div className="mt-2 grid grid-cols-2 gap-2">
-                        <div className="rounded-xl border border-rose-200/70 bg-white/60 px-3 py-2 dark:border-rose-200/10 dark:bg-white/[0.055]">
+                    <div className="mt-3 rounded-xl border border-rose-300/45 bg-white/55 p-2 text-xs shadow-inner dark:border-rose-200/10 dark:bg-white/[0.045]">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-lg border border-rose-200/70 bg-white/60 px-2.5 py-1.5 dark:border-rose-200/10 dark:bg-white/[0.055]">
                           <span className="block text-muted-foreground">Клиенты</span>
-                          <span className="mt-1 block text-base font-extrabold text-foreground">{overdueReceivablesClients}</span>
+                          <span className="block text-base font-extrabold text-foreground">{overdueReceivablesClients}</span>
                         </div>
-                        <div className="rounded-xl border border-rose-200/70 bg-white/60 px-3 py-2 dark:border-rose-200/10 dark:bg-white/[0.055]">
+                        <div className="rounded-lg border border-rose-200/70 bg-white/60 px-2.5 py-1.5 dark:border-rose-200/10 dark:bg-white/[0.055]">
                           <span className="block text-muted-foreground">Строки</span>
-                          <span className="mt-1 block text-base font-extrabold text-foreground">{overduePayments.length}</span>
+                          <span className="block text-base font-extrabold text-foreground">{overduePayments.length}</span>
                         </div>
                       </div>
                     </div>
@@ -3577,38 +3563,62 @@ export default function Dashboard() {
                       available={availableEquipment}
                       active={activeEquipment}
                       trend={utilizationTrendData}
+                      tone={card.tone}
                     />
                   )}
 
                   {isServiceCard && (
-                    <div className="mt-4 rounded-2xl border border-cyan-200/70 bg-white/55 p-3 dark:border-cyan-200/10 dark:bg-white/[0.045]">
-                      <StatusBars rows={serviceLoadRows} total={serviceLoadChartTotal} />
-                      {serviceLoadRowsTotal !== serviceLoadTotal ? (
-                        <p className="mt-2 text-xs font-semibold text-amber-600 dark:text-amber-300">
-                          Показаны ключевые статусы: {serviceLoadRowsTotal} из {serviceLoadTotal}
-                        </p>
-                      ) : null}
+                    <div className="mt-3 rounded-xl border border-cyan-200/70 bg-white/55 p-2.5 dark:border-cyan-200/10 dark:bg-white/[0.045]">
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        {[
+                          { label: 'без механика', value: unassignedServiceTickets.length },
+                          { label: 'запчасти', value: ticketsWaitingParts.length },
+                          { label: 'просрочено', value: overdueServiceTickets.length },
+                        ].map(item => (
+                          <div key={item.label} className="rounded-lg border border-white/45 bg-white/55 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.055]">
+                            <span className="block text-muted-foreground">{item.label}</span>
+                            <span className="block text-base font-extrabold text-foreground">{item.value}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
                   {isOperationalLoadCard && (
-                    <div className="mt-4 rounded-2xl border border-amber-200/70 bg-white/55 p-3 dark:border-amber-200/10 dark:bg-white/[0.045]">
-                      <OperationalLoadGauge value={operationalLoadScore} label={operationalLoadLabel} color={meterColor} />
-                      <div className="mt-3">
-                        <StatusBars rows={operationalLoadBars} total={Math.max(operationalLoadTotal, 1)} showPercent={false} />
+                    <div className="mt-3 rounded-xl border border-amber-200/70 bg-white/55 p-2.5 dark:border-amber-200/10 dark:bg-white/[0.045]">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xl font-extrabold text-foreground">{operationalLoadScore} / 100</p>
+                          <p className={`text-xs font-semibold ${tone.accent}`}>{criticalOperationalIssues} критичных факторов</p>
+                        </div>
+                        <Badge variant={card.tone === 'danger' ? 'destructive' : card.tone === 'warning' ? 'warning' : 'default'}>
+                          {operationalLoadLabel}
+                        </Badge>
+                      </div>
+                      <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                        {[
+                          { label: 'сервис', value: openServiceTickets.length },
+                          { label: 'возвраты', value: rentalsEndingToday.length + rentalsEndingTomorrow.length + overdueRentalsList.length },
+                          { label: 'задачи', value: tasksWithoutResponsible.length + topAttentionActions.length },
+                        ].map(item => (
+                          <div key={item.label} className="rounded-lg border border-white/45 bg-white/55 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.055]">
+                            <span className="block text-muted-foreground">{item.label}</span>
+                            <span className="block text-base font-extrabold text-foreground">{item.value}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )}
 
                   {card.cta && (
-                    <span className="mt-auto inline-flex items-center gap-2 pt-4 text-sm font-semibold text-primary transition group-hover:gap-3">
+                    <span className="mt-auto inline-flex items-center gap-2 pt-3 text-sm font-semibold text-primary transition group-hover:gap-3">
                       {card.cta}
                       <ArrowRight className="h-4 w-4" />
                     </span>
                   )}
                 </div>
               );
-              const className = `group relative min-h-[248px] overflow-hidden rounded-2xl border p-5 text-left transition hover:-translate-y-0.5 hover:border-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${surfaceClass} ${isDebtCard ? '2xl:col-span-2' : ''}`;
+              const className = `group relative min-h-[190px] overflow-hidden rounded-xl border p-4 text-left transition hover:-translate-y-0.5 hover:border-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${surfaceClass}`;
 
               if (card.href) {
                 return <Link key={card.id} to={card.href} data-testid={testId} className={className}>{content}</Link>;
@@ -3620,48 +3630,56 @@ export default function Dashboard() {
             })}
           </div>
 
-          <Card className="app-panel border-border/80 bg-card/95">
-            <CardHeader className="pb-3">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <CardTitle className="app-shell-title text-xl font-extrabold">Список для контроля</CardTitle>
-                  <CardDescription>Приоритетные сигналы по долгам, возвратам, сервису, документам и задачам.</CardDescription>
-                </div>
-                <Badge variant={criticalCount + highCount > 0 ? 'warning' : 'success'} className="w-fit">
-                  {criticalCount + highCount > 0
-                    ? `${criticalCount + highCount} ${formatCountLabel(criticalCount + highCount, 'сигнал', 'сигнала', 'сигналов')}`
-                    : 'Без срочных сигналов'}
-                </Badge>
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+            {canViewAttentionBlock && canViewEquipment && (
+              <div className="xl:col-span-8" data-testid="dashboard-key-signals">
+                <RiskSignalStrip
+                  isLoading={actionAttentionQuery.isLoading}
+                  topAttentionActions={topAttentionActions}
+                  counts={riskSignalCounts}
+                  lossNow={attentionLossLabel(actionAttention?.summary?.totalEstimatedLoss ?? 0)}
+                  lossPerDay={attentionLossLabel(actionAttention?.summary?.totalDailyLoss ?? 0)}
+                />
               </div>
-            </CardHeader>
-            <CardContent>
-              {executiveControlRows.length === 0 ? (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-5 text-sm font-semibold text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200">
-                  На текущий период нет задач для контроля.
-                </div>
-              ) : (
-                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
-                  {executiveControlRows.map(row => {
-                    const tone = toneStyles[row.tone as DashboardTone];
-                    return (
-                      <Link
-                        key={row.id}
-                        to={row.href}
-                        className="flex items-start gap-3 bg-background/60 px-4 py-3 text-sm transition hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-                      >
-                        <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${tone.dot}`} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block break-words font-semibold text-foreground">{row.title}</span>
-                          <span className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{row.detail}</span>
-                        </span>
-                        <span className={`shrink-0 text-sm font-semibold ${tone.accent}`}>{row.value}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            )}
+            <div className="grid gap-3 xl:col-span-4">
+              <Card className="overflow-hidden border-border bg-card shadow-[0_18px_46px_-38px_rgba(15,23,42,0.45)] dark:shadow-none" data-testid="dashboard-month-dynamics">
+                <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
+                  <div>
+                    <CardTitle className="app-shell-title text-lg font-extrabold">Динамика месяца</CardTitle>
+                    <CardDescription>Начисления / оплаты.</CardDescription>
+                  </div>
+                  <Badge variant="info" className="w-fit bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                    {hasMonthCashflow ? `${formatCurrency(monthlyRevenue)} / ${formatCurrency(monthlyPaidAmount)}` : 'Нет данных'}
+                  </Badge>
+                </CardHeader>
+                <CardContent className="h-[78px] px-4 pb-3 pt-0">
+                  {hasMonthCashflow ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={monthCashflowData} margin={{ top: 3, right: 4, left: 0, bottom: 0 }}>
+                        <Area type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={2} fill="#2563eb" fillOpacity={0.08} dot={false} />
+                        <Area type="monotone" dataKey="payments" stroke="#10b981" strokeWidth={2} fill="#10b981" fillOpacity={0.08} dot={false} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border bg-muted/35 text-center text-xs text-muted-foreground">
+                      Нет данных за месяц.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="border-border bg-card shadow-[0_18px_46px_-38px_rgba(15,23,42,0.45)] dark:shadow-none" data-testid="dashboard-company-health">
+                <CardHeader className="pb-2">
+                  <CardTitle className="app-shell-title text-lg font-extrabold">Здоровье компании</CardTitle>
+                </CardHeader>
+                <CardContent className="pb-4">
+                  <CompanyHealthBars items={companyHealthBars.slice(0, 3)} />
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+          </div>
         </section>
       )}
 
@@ -3982,16 +4000,6 @@ export default function Dashboard() {
             </div>
           ) : null}
 
-          {canViewAttentionBlock && canViewEquipment && (
-            <RiskSignalStrip
-              isLoading={actionAttentionQuery.isLoading}
-              topAttentionActions={topAttentionActions}
-              counts={riskSignalCounts}
-              lossNow={attentionLossLabel(actionAttention?.summary?.totalEstimatedLoss ?? 0)}
-              lossPerDay={attentionLossLabel(actionAttention?.summary?.totalDailyLoss ?? 0)}
-            />
-          )}
-
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
             <Card className="overflow-hidden border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-8">
               <CardHeader className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
@@ -4036,7 +4044,7 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4" data-testid="dashboard-company-health">
+            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">
               <CardHeader className="pb-2">
                 <CardTitle className="app-shell-title text-xl font-extrabold">Здоровье компании</CardTitle>
                 <CardDescription>Деньги, парк, сервис, возвраты и документы в одном читаемом срезе.</CardDescription>
@@ -4067,6 +4075,47 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </div>
+
+          <details
+            className="rounded-xl border border-border/80 bg-card/80 px-4 py-3 shadow-[0_16px_44px_-36px_rgba(15,23,42,0.42)] dark:shadow-none"
+            data-testid="dashboard-legacy-attention-list"
+          >
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-foreground marker:hidden">
+              <span>Список для контроля</span>
+              <Badge variant={criticalCount + highCount > 0 ? 'warning' : 'success'} className="w-fit">
+                {criticalCount + highCount > 0
+                  ? `${criticalCount + highCount} ${formatCountLabel(criticalCount + highCount, 'сигнал', 'сигнала', 'сигналов')}`
+                  : 'Без срочных сигналов'}
+              </Badge>
+            </summary>
+            <div className="mt-4">
+              {executiveControlRows.length === 0 ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-5 text-sm font-semibold text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200">
+                  На текущий период нет задач для контроля.
+                </div>
+              ) : (
+                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
+                  {executiveControlRows.map(row => {
+                    const tone = toneStyles[row.tone as DashboardTone];
+                    return (
+                      <Link
+                        key={row.id}
+                        to={row.href}
+                        className="flex items-start gap-3 bg-background/60 px-4 py-3 text-sm transition hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                      >
+                        <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${tone.dot}`} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block break-words font-semibold text-foreground">{row.title}</span>
+                          <span className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{row.detail}</span>
+                        </span>
+                        <span className={`shrink-0 text-sm font-semibold ${tone.accent}`}>{row.value}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </details>
 
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
             <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">

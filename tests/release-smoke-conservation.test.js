@@ -49,8 +49,13 @@ test('non-conserved release smoke keeps strict login behavior', () => {
 test('non-conserved production smoke proves dashboard executive cockpit and screenshots', () => {
   for (const marker of [
     'expectExecutiveCockpitVisible',
+    'dashboard-top-cockpit',
     'dashboard-executive-summary',
     'dashboard-executive-cockpit',
+    'dashboard-key-signals',
+    'dashboard-legacy-attention-list',
+    'dashboard-month-dynamics',
+    'dashboard-company-health',
     'dashboard-kpi-overdue-debt',
     'dashboard-kpi-fleet-utilization',
     'dashboard-kpi-service-load',
@@ -60,6 +65,9 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
     'Открыть сервис',
     'Динамика месяца',
     'Здоровье компании',
+    'dashboard visual acceptance',
+    'above the desktop fold',
+    'collapsed or below the desktop fold',
     'production-dashboard-cockpit-desktop.png',
     'production-dashboard-cockpit-mobile.png',
   ]) {

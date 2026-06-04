@@ -117,6 +117,10 @@ test('dashboard executive cockpit renders adaptive KPI cards and compact risk si
     assert.match(dashboardSource, new RegExp(helper));
   }
   assert.match(dashboardSource, /data-testid="dashboard-executive-cockpit"/);
+  assert.match(dashboardSource, /data-testid="dashboard-top-cockpit"/);
+  assert.match(dashboardSource, /data-testid="dashboard-key-signals"/);
+  assert.match(dashboardSource, /data-testid="dashboard-legacy-attention-list"/);
+  assert.match(dashboardSource, /data-testid="dashboard-month-dynamics"/);
   assert.match(dashboardSource, /operationalLoadScore/);
   assert.match(dashboardSource, /operationalLoadTone/);
   assert.match(dashboardSource, /receivablesTone/);
@@ -173,9 +177,11 @@ test('dashboard cockpit renders executive KPI grid with fleet and service analyt
   assert.match(dashboardSource, /to="\/planner"/);
   assert.match(dashboardSource, /to="\/service"/);
   assert.match(dashboardSource, /const serviceLoadGroups = openServiceTickets\.reduce/);
-  assert.match(dashboardSource, /<StatusBars rows=\{serviceLoadRows\}/);
-  assert.match(dashboardSource, /const operationalLoadBars: StatusBarRow\[\]/);
+  assert.match(dashboardSource, /без механика/);
+  assert.match(dashboardSource, /запчасти/);
+  assert.match(dashboardSource, /просрочено/);
   assert.match(dashboardSource, /operationalLoadScore/);
+  assert.match(dashboardSource, /criticalOperationalIssues/);
   assert.match(dashboardSource, /label: 'Прочие'/);
   assert.match(dashboardSource, /const serviceLoadTotal = openServiceTickets\.length/);
   assert.doesNotMatch(dashboardSource, /Документы \/ задачи/);

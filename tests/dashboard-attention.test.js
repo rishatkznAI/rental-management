@@ -101,16 +101,32 @@ test('dashboard normalizes legacy rental equipment before mapping refs', () => {
   assert.doesNotMatch(dashboardSource, /\(r\.equipment \|\| \[\]\)\s*\.map/);
 });
 
-test('dashboard renders management attention block from compact action queue API', () => {
-  assert.match(dashboardSource, /Что требует внимания сегодня/);
-  assert.match(dashboardSource, /data-testid="dashboard-attention-block"/);
+test('dashboard renders executive signal strip from compact action queue API', () => {
+  assert.match(dashboardSource, /Главные сигналы сегодня/);
+  assert.match(dashboardSource, /data-testid="dashboard-risk-signal-strip"/);
   assert.match(equipmentServiceSource, /getManagementActionAttention: \(\): Promise<ManagementActionAttentionResponse> =>\s*api\.get<ManagementActionAttentionResponse>\('\/api\/management\/action-queue\?view=attention'\)/);
   assert.match(equipmentHooksSource, /useManagementActionAttention/);
   assert.match(dashboardSource, /useManagementActionAttention\(\{\s*enabled: canViewAttentionBlock && canViewEquipment/);
 });
 
-test('dashboard attention block renders KPIs, rows, empty and error states', () => {
-  for (const label of ['Критично', 'Просрочено', 'Сегодня', 'Без ответственного', 'Потери сейчас', 'Потеря в день']) {
+test('dashboard executive cockpit renders adaptive KPI cards and compact risk signals', () => {
+  for (const label of ['Операционная нагрузка', 'Индекс нагрузки компании', 'Открыть обзор', 'Утилизация парка', 'Загрузка сервиса', 'Здоровье компании']) {
+    assert.match(dashboardSource, new RegExp(label));
+  }
+  for (const helper of ['OperationalLoadGauge', 'UtilizationGauge', 'StatusBars', 'CompanyHealthBars', 'RiskSignalStrip']) {
+    assert.match(dashboardSource, new RegExp(helper));
+  }
+  assert.match(dashboardSource, /data-testid="dashboard-executive-cockpit"/);
+  assert.match(dashboardSource, /operationalLoadScore/);
+  assert.match(dashboardSource, /operationalLoadTone/);
+  assert.match(dashboardSource, /receivablesTone/);
+  assert.match(dashboardSource, /utilizationTone/);
+  assert.match(dashboardSource, /serviceTone/);
+  assert.match(dashboardSource, /Прочие/);
+});
+
+test('dashboard signal strip renders counters, rows, empty and error states', () => {
+  for (const label of ['критично', 'высоко', 'средне', 'Просрочено', 'Сегодня', 'Без ответственного', 'Потери сейчас', 'Потеря в день']) {
     assert.match(dashboardSource, new RegExp(label));
   }
   assert.match(dashboardSource, /topAttentionActions\.map/);
@@ -123,6 +139,7 @@ test('dashboard attention block renders KPIs, rows, empty and error states', () 
   assert.match(dashboardSource, /\/equipment\?actionQueueFilter=overdue/);
   assert.doesNotMatch(dashboardSource, /\/equipment\?actionQueue=unassigned/);
   assert.doesNotMatch(dashboardSource, /\/equipment\?actionQueue=overdue/);
+  assert.doesNotMatch(dashboardSource, /title: 'Документы \/ задачи'/);
   assert.doesNotMatch(dashboardSource, />undefined</);
   assert.doesNotMatch(dashboardSource, />null</);
   assert.doesNotMatch(dashboardSource, />\\[object Object\\]</);
@@ -141,8 +158,9 @@ test('dashboard cockpit renders executive KPI grid with fleet and service analyt
     'Ожидают запчасти',
     'Готовы к закрытию',
     'Открыть сервис',
-    'Документы / задачи',
-    'Задачи внимания',
+    'Операционная нагрузка',
+    'Индекс нагрузки компании',
+    'Открыть обзор',
     'Проверить долги',
   ]) {
     assert.match(dashboardSource, new RegExp(label));
@@ -152,9 +170,11 @@ test('dashboard cockpit renders executive KPI grid with fleet and service analyt
   assert.match(dashboardSource, /to="\/service"/);
   assert.match(dashboardSource, /const serviceLoadGroups = openServiceTickets\.reduce/);
   assert.match(dashboardSource, /<StatusBars rows=\{serviceLoadRows\}/);
-  assert.match(dashboardSource, /const documentsTasksRows: StatusBarRow\[\]/);
+  assert.match(dashboardSource, /const operationalLoadBars: StatusBarRow\[\]/);
+  assert.match(dashboardSource, /operationalLoadScore/);
   assert.match(dashboardSource, /label: 'Прочие'/);
   assert.match(dashboardSource, /const serviceLoadTotal = openServiceTickets\.length/);
+  assert.doesNotMatch(dashboardSource, /Документы \/ задачи/);
   assert.doesNotMatch(dashboardSource, /serviceLoadUsesLiveData/);
   assert.doesNotMatch(dashboardSource, /roleDashboardUtilizationPercent = activeEquipment > 0 \? utilization : 62/);
   assert.doesNotMatch(dashboardSource, /serviceLoadTotal = serviceLoadUsesLiveData \? openServiceTickets\.length : 63/);

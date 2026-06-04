@@ -342,15 +342,55 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
   await page.goto(productionAppUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'Дашборд', exact: true })).toBeVisible();
 
+  await expect(page.getByTestId('dashboard-top-cockpit')).toBeVisible();
+  await expect(page.getByTestId('dashboard-key-signals')).toBeVisible();
+  await expect(page.getByTestId('dashboard-month-dynamics')).toBeVisible();
+  await expect(page.getByTestId('dashboard-company-health')).toBeVisible();
+  const viewport = page.viewportSize() ?? { width: 1440, height: 900 };
+  const visualRects = await page.evaluate(() => {
+    const rectFor = (testId: string) => {
+      const element = document.querySelector(`[data-testid="${testId}"]`);
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return {
+        top: Math.round(rect.top),
+        bottom: Math.round(rect.bottom),
+        height: Math.round(rect.height),
+      };
+    };
+    const legacy = document.querySelector('[data-testid="dashboard-legacy-attention-list"]');
+    return {
+      keySignals: rectFor('dashboard-key-signals'),
+      legacyAttentionList: rectFor('dashboard-legacy-attention-list'),
+      monthDynamics: rectFor('dashboard-month-dynamics'),
+      companyHealth: rectFor('dashboard-company-health'),
+      legacyCollapsed: legacy?.tagName.toLowerCase() === 'details' && !(legacy as HTMLDetailsElement).open,
+    };
+  });
+  expect(visualRects.keySignals?.top ?? Number.POSITIVE_INFINITY, 'key signals should be above fold').toBeLessThan(viewport.height);
+  expect(
+    (visualRects.monthDynamics?.top ?? Number.POSITIVE_INFINITY) < viewport.height
+      || (visualRects.companyHealth?.top ?? Number.POSITIVE_INFINITY) < viewport.height,
+    'month dynamics or company health should start inside desktop viewport',
+  ).toBeTruthy();
+  expect(
+    visualRects.legacyCollapsed || (visualRects.legacyAttentionList?.top ?? 0) >= viewport.height,
+    'legacy attention list should be collapsed or below fold',
+  ).toBeTruthy();
+
   const attentionBlock = page.getByTestId('dashboard-attention-block');
   await expect(attentionBlock).toBeVisible();
-  await expect(attentionBlock.getByRole('heading', { name: 'Что требует внимания сегодня' })).toBeVisible();
-  for (const label of ['Критично', 'Просрочено', 'Сегодня', 'Без ответственного', 'Потери сейчас', 'Потеря в день']) {
+  await expect(attentionBlock.getByRole('heading', { name: 'Главные сигналы сегодня' })).toBeVisible();
+  for (const label of ['критично', 'высоко', 'средне', 'Без ответственного', 'Потери сейчас', 'Потеря в день']) {
     await expect(attentionBlock.getByText(label, { exact: true }).first(), `dashboard attention KPI ${label} should be visible`).toBeVisible();
   }
   await expect(attentionBlock.getByText('Загружаем очередь внимания...', { exact: true })).toBeHidden();
   const topActionRowCount = await attentionBlock.locator('a').evaluateAll(links =>
-    links.filter(link => link.textContent?.trim() === 'Открыть').length,
+    links.filter(link => {
+      const text = link.textContent?.replace(/\s+/g, ' ').trim() || '';
+      return text
+        && !['Открыть очередь', 'Показать без ответственного', 'Показать просроченные'].includes(text);
+    }).length,
   );
   const hasEmptyState = await attentionBlock.getByText('Критичных действий на сегодня нет.', { exact: true }).count();
   expect(topActionRowCount + hasEmptyState, 'dashboard attention should render top actions or an empty state').toBeGreaterThan(0);
@@ -365,6 +405,8 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
     openQueueLink: true,
     unassignedFilterLink: true,
     overdueFilterLink: true,
+    viewport,
+    visualRects,
   });
 
   await attentionBlock.getByRole('link', { name: 'Открыть очередь' }).click();

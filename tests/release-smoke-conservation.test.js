@@ -58,7 +58,7 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
     'Главные сигналы сегодня',
     'Открыть планировщик',
     'Открыть сервис',
-    'Денежный поток',
+    'Динамика месяца',
     'Здоровье компании',
     'production-dashboard-cockpit-desktop.png',
     'production-dashboard-cockpit-mobile.png',

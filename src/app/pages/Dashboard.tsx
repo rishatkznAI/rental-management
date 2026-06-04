@@ -3996,7 +3996,7 @@ export default function Dashboard() {
             <Card className="overflow-hidden border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-8">
               <CardHeader className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle className="app-shell-title text-xl font-extrabold">Денежный поток</CardTitle>
+                  <CardTitle className="app-shell-title text-xl font-extrabold">Динамика месяца</CardTitle>
                   <CardDescription>Начисления и поступления по дням текущего месяца.</CardDescription>
                 </div>
                 <Badge variant="info" className="w-fit bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">

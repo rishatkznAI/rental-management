@@ -301,7 +301,7 @@ async function expectExecutiveCockpitVisible(page: Page) {
   }
 
   await expect(page.getByRole('heading', { name: 'Главные сигналы сегодня' }), 'dashboard signal strip should be visible').toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Денежный поток' }), 'dashboard cash flow card should be visible').toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Динамика месяца' }), 'dashboard cash flow card should be visible').toBeVisible();
   await expect(page.getByRole('heading', { name: 'Здоровье компании' }), 'dashboard company health card should be visible').toBeVisible();
 
   const fleetUtilizationCard = page.getByTestId('dashboard-kpi-fleet-utilization');

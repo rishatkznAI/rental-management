@@ -270,6 +270,13 @@ type DashboardRisk = {
   tone?: DashboardTone;
 };
 
+type CompanyHealthBar = {
+  label: string;
+  value: number;
+  hint: string;
+  color: string;
+};
+
 function managerPlanLinkHref(link?: { type: string; id: string }) {
   if (!link?.id) return '/';
   const encoded = encodeURIComponent(link.id);
@@ -1039,6 +1046,166 @@ function StatusBars({
         })}
       </div>
     </div>
+  );
+}
+
+function OperationalLoadGauge({
+  value,
+  label,
+  color,
+}: {
+  value: number;
+  label: string;
+  color: string;
+}) {
+  const percent = clampPercent(value);
+  const angle = -112 + (percent / 100) * 224;
+
+  return (
+    <div className="mt-4 grid gap-4 sm:grid-cols-[118px_minmax(0,1fr)] sm:items-center">
+      <div className="relative h-[104px] w-[118px] justify-self-start" aria-label="Индекс нагрузки компании">
+        <svg viewBox="0 0 140 112" role="img" className="h-full w-full overflow-visible">
+          <path d="M 24 88 A 46 46 0 0 1 116 88" fill="none" stroke="currentColor" strokeOpacity="0.14" strokeWidth="16" strokeLinecap="round" />
+          <path
+            d="M 24 88 A 46 46 0 0 1 116 88"
+            fill="none"
+            stroke={color}
+            strokeWidth="16"
+            strokeLinecap="round"
+            pathLength={100}
+            strokeDasharray={`${percent} 100`}
+          />
+          <line
+            x1="70"
+            y1="88"
+            x2="70"
+            y2="42"
+            stroke="currentColor"
+            strokeWidth="5"
+            strokeLinecap="round"
+            transform={`rotate(${angle} 70 88)`}
+          />
+          <circle cx="70" cy="88" r="7" fill={color} />
+        </svg>
+        <div className="absolute inset-x-0 bottom-0 text-center">
+          <div className="text-2xl font-extrabold text-foreground">{percent}</div>
+          <div className="text-[11px] font-semibold text-muted-foreground">из 100</div>
+        </div>
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-extrabold text-foreground">{label}</p>
+        <p className="mt-1 text-xs text-muted-foreground">Аренды, сервис, возвраты, доставки, документы и задачи.</p>
+      </div>
+    </div>
+  );
+}
+
+function CompanyHealthBars({ items }: { items: CompanyHealthBar[] }) {
+  return (
+    <div className="space-y-3">
+      {items.map(item => {
+        const percent = clampPercent(item.value);
+        return (
+          <div key={item.label} className="space-y-1.5">
+            <div className="flex items-center gap-3 text-xs">
+              <span className="min-w-0 flex-1 truncate font-semibold text-foreground">{item.label}</span>
+              <span className="text-muted-foreground">{item.hint}</span>
+            </div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-slate-950/10 dark:bg-white/10">
+              <div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: item.color }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RiskSignalStrip({
+  isLoading,
+  topAttentionActions,
+  counts,
+  lossNow,
+  lossPerDay,
+}: {
+  isLoading: boolean;
+  topAttentionActions: ManagementActionAttentionItem[];
+  counts: { critical: number; high: number; medium: number };
+  lossNow: string;
+  lossPerDay: string;
+}) {
+  return (
+    <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none" data-testid="dashboard-risk-signal-strip">
+      <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <CardTitle className="app-shell-title text-xl font-extrabold">Главные сигналы сегодня</CardTitle>
+          <CardDescription>Компактная сводка Action Queue без длинной операционной простыни.</CardDescription>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+          {[
+            { label: 'критично', value: counts.critical, tone: 'danger' as const },
+            { label: 'высоко', value: counts.high, tone: 'warning' as const },
+            { label: 'средне', value: counts.medium, tone: 'info' as const },
+          ].map(item => {
+            const tone = toneStyles[item.tone];
+            return (
+              <div key={item.label} className="rounded-xl border border-border bg-background/60 px-3 py-2">
+                <div className={`text-lg font-extrabold ${tone.accent}`}>{item.value}</div>
+                <div className="font-semibold text-muted-foreground">{item.label}</div>
+              </div>
+            );
+          })}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-2 text-xs sm:grid-cols-4">
+          {[
+            { label: 'Просрочено', value: String(topAttentionActions.filter(item => item.isOverdue).length) },
+            { label: 'Сегодня', value: String(topAttentionActions.filter(item => item.isDueToday).length) },
+            { label: 'Без ответственного', value: String(topAttentionActions.filter(item => item.isUnassigned).length) },
+            { label: 'Потери сейчас', value: lossNow },
+            { label: 'Потеря в день', value: lossPerDay },
+          ].map(item => (
+            <div key={item.label} className="rounded-xl border border-border bg-secondary/40 px-3 py-2">
+              <p className="font-semibold text-muted-foreground">{item.label}</p>
+              <p className="mt-1 text-base font-extrabold text-foreground">{item.value}</p>
+            </div>
+          ))}
+        </div>
+
+        {isLoading ? (
+          <div className="rounded-xl border border-border bg-secondary/40 px-4 py-5 text-sm text-muted-foreground">Загружаем очередь внимания...</div>
+        ) : topAttentionActions.length === 0 ? (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-5 text-sm font-semibold text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200">
+            Критичных действий на сегодня нет.
+          </div>
+        ) : (
+          <div className="grid gap-2 lg:grid-cols-3">
+            {topAttentionActions.map(item => {
+              const tone = item.priority === 'critical' ? toneStyles.danger : item.priority === 'high' ? toneStyles.warning : toneStyles.info;
+              return (
+                <Link key={item.actionId} to={item.links.equipment || '/equipment'} className="rounded-xl border border-border bg-background/60 px-3 py-3 text-sm transition hover:border-primary/40 hover:bg-secondary/50">
+                  <div className="flex items-center gap-2">
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${tone.dot}`} />
+                    <span className={`font-semibold ${tone.accent}`}>{ATTENTION_PRIORITY_LABELS[item.priority] || 'Средний'}</span>
+                    {item.isOverdue ? <Badge variant="danger">Просрочено</Badge> : null}
+                    {item.isUnassigned ? <Badge variant="warning">Без ответственного</Badge> : null}
+                  </div>
+                  <p className="mt-2 line-clamp-1 font-semibold text-foreground">{item.title}</p>
+                  <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{ATTENTION_AREA_LABELS[item.responsibleArea] || ATTENTION_AREA_LABELS.unknown} · {attentionDueLabel(item)}</p>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="secondary" size="sm"><Link to="/equipment">Открыть очередь</Link></Button>
+          <Button asChild variant="outline" size="sm"><Link to="/equipment?actionQueueFilter=unassigned">Показать без ответственного</Link></Button>
+          <Button asChild variant="outline" size="sm"><Link to="/equipment?actionQueueFilter=overdue">Показать просроченные</Link></Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2249,14 +2416,6 @@ export default function Dashboard() {
     canViewPlanner && { id: 'planner', label: 'Планировщик', href: '/planner', icon: Target },
   ].filter(Boolean) as Array<{ id: string; label: string; href: string; icon: React.ElementType }>;
 
-  const overviewKpiCards = [
-    canViewRentals && { id: 'month-revenue', label: 'Начислено за месяц', value: monthlyRevenue > 0 ? formatCurrency(monthlyRevenue) : '0 ₽', hint: `${rentalsStartedThisMonth.length} аренд стартовало`, icon: TrendingUp, tone: monthlyRevenue > 0 ? 'success' : 'default' },
-    canViewMoney && { id: 'month-paid', label: 'Оплачено за месяц', value: monthlyPaidAmount > 0 ? formatCurrency(monthlyPaidAmount) : '0 ₽', hint: `${monthlyPayments.length} платежей за период`, icon: CreditCard, tone: monthlyPaidAmount > 0 ? 'success' : 'default', href: '/payments' },
-    canViewMoney && { id: 'debt-today', label: 'Дебиторка на сегодня', value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽', hint: `${clientDebtAgingRows.length} клиентов в aging`, icon: DollarSign, tone: totalDebt > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('totalDebt') },
-    canViewMoney && { id: 'overdue-today', label: 'Просрочка на сегодня', value: formatCurrency(overduePayments.reduce((sum, row) => sum + row.outstanding, 0)), hint: `${overduePayments.length} строк просрочки`, icon: AlertTriangle, tone: overduePayments.length > 0 ? 'danger' : 'success' },
-    canViewRentals && { id: 'active-now', label: 'Активные сейчас', value: String(activeRentalsList.length), hint: `${rentalsIntersectingThisMonth.length} пересекают месяц`, icon: Calendar, tone: 'default', onClick: () => setSelectedKPI('activeRentals') },
-    canViewService && { id: 'service-now', label: 'Техника в сервисе', value: String(equipmentInServiceList.length), hint: 'Текущее состояние парка', icon: Wrench, tone: equipmentInServiceList.length > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('serviceInDays') },
-  ].filter(Boolean) as DashboardKpi[];
   const monthCashflowData = useMemo(() => {
     const map = new Map(monthDayBuckets.map(bucket => [bucket.key, { ...bucket, revenue: 0, payments: 0 }]));
     rentalsStartedThisMonth.forEach(rental => {
@@ -2285,13 +2444,25 @@ export default function Dashboard() {
     { label: '60+', value: clientDebtAgingRows.filter(row => row.ageBucket === '60_plus').reduce((sum, row) => sum + row.debt, 0), fill: '#ef4444' },
   ]), [clientDebtAgingRows]);
   const hasReceivablesAging = receivablesAgingData.some(item => item.value > 0);
+  const serviceStatusNewCount = openServiceTickets.filter(ticket => ticket.status === 'new').length;
+  const serviceStatusInProgressCount = openServiceTickets.filter(ticket => ticket.status === 'in_progress').length;
+  const serviceStatusWaitingPartsCount = ticketsWaitingParts.length;
+  const serviceStatusReadyCount = readyServiceTickets.length;
+  const serviceStatusOtherCount = Math.max(
+    0,
+    openServiceTickets.length
+      - serviceStatusNewCount
+      - serviceStatusInProgressCount
+      - serviceStatusWaitingPartsCount
+      - serviceStatusReadyCount,
+  );
   const serviceStatusChartData = [
-    { label: 'Новые', value: openServiceTickets.filter(ticket => ticket.status === 'new').length, fill: '#60a5fa' },
-    { label: 'В работе', value: openServiceTickets.filter(ticket => ticket.status === 'in_progress').length, fill: '#6366f1' },
-    { label: 'Запчасти', value: ticketsWaitingParts.length, fill: '#f59e0b' },
-    { label: 'Готово', value: readyServiceTickets.length, fill: '#10b981' },
-    { label: 'Критич.', value: criticalTickets.length, fill: '#ef4444' },
-  ];
+    { label: 'Новые', value: serviceStatusNewCount, fill: '#60a5fa' },
+    { label: 'В работе', value: serviceStatusInProgressCount, fill: '#6366f1' },
+    { label: 'Запчасти', value: serviceStatusWaitingPartsCount, fill: '#f59e0b' },
+    { label: 'Готово', value: serviceStatusReadyCount, fill: '#10b981' },
+    { label: 'Прочие', value: serviceStatusOtherCount, fill: '#64748b' },
+  ].filter(item => item.value > 0);
   const hasServiceStatusData = serviceStatusChartData.some(item => item.value > 0);
   const fleetDonutData = [
     { label: 'Заняты', value: rentedEquipment, fill: '#2563eb' },
@@ -3004,19 +3175,81 @@ export default function Dashboard() {
       .map(row => row.clientId || row.client)
       .filter(Boolean),
   ).size;
-  const documentsWithoutClosingDocs = canViewDocuments ? documentControl.kpi.closedRentalsWithoutClosingDocs : 0;
-  const documentsAttentionTasksCount = canViewTasksCenter ? tasksWithoutResponsible.length : topAttentionActions.length;
-  const documentIssueCount = (canViewDocuments ? unsignedDocumentsCount : 0) + documentsWithoutClosingDocs;
-  const documentsTasksRows: StatusBarRow[] = [
-    { label: 'Без подписи', value: canViewDocuments ? unsignedDocumentsCount : 0, color: '#f59e0b' },
-    { label: 'Без УПД', value: documentsWithoutClosingDocs, color: '#38bdf8' },
-    { label: 'Задачи внимания', value: documentsAttentionTasksCount, color: '#a78bfa' },
+  const debt60PlusAmount = clientDebtAgingRows
+    .filter(row => row.ageBucket === '60_plus')
+    .reduce((sum, row) => sum + row.debt, 0);
+  const receivablesTone: DashboardTone = overdueReceivablesAmount <= 0
+    ? 'success'
+    : debt60PlusAmount > 0 || overduePayments.length >= 2
+      ? 'danger'
+      : 'warning';
+  const utilizationTone: DashboardTone = activeEquipment === 0
+    ? 'warning'
+    : utilization < 60
+      ? 'danger'
+      : utilization < UTILIZATION_TARGET || utilization > 90
+        ? 'warning'
+        : 'success';
+  const serviceBlockersCount = criticalTickets.length + unassignedServiceTickets.length + ticketsWaitingParts.length + overdueServiceTickets.length;
+  const serviceTone: DashboardTone = serviceBlockersCount > 0
+    ? serviceBlockersCount >= Math.max(8, Math.round(openServiceTickets.length * 0.35))
+      ? 'danger'
+      : 'warning'
+    : 'success';
+  const operationalLoadInputs = [
+    activeRentalsList.length,
+    openServiceTickets.length,
+    rentalsEndingToday.length + rentalsEndingTomorrow.length + overdueRentalsList.length,
+    todayDeliveries.length + overdueDeliveries.length + unassignedDeliveries.length,
+    unsignedDocumentsCount + documentControl.kpi.closedRentalsWithoutClosingDocs,
+    tasksWithoutResponsible.length + topAttentionActions.length,
   ];
-  const documentsTasksCount = documentsTasksRows.reduce((sum, row) => sum + row.value, 0);
-  const documentsTasksUnit = formatCountLabel(documentsTasksCount, 'сигнал', 'сигнала', 'сигналов');
-  const documentsTasksHref = canViewDocuments && (documentIssueCount > 0 || !canViewTasksCenter)
-    ? unsignedDocumentsHref
-    : '/tasks';
+  const operationalLoadScore = clampPercent(Math.round(
+    Math.min(activeRentalsList.length, 35) * 0.7
+    + Math.min(openServiceTickets.length, 70) * 0.35
+    + Math.min(rentalsEndingToday.length + rentalsEndingTomorrow.length + overdueRentalsList.length, 24) * 1.1
+    + Math.min(todayDeliveries.length + overdueDeliveries.length + unassignedDeliveries.length, 24) * 0.9
+    + Math.min(unsignedDocumentsCount + documentControl.kpi.closedRentalsWithoutClosingDocs, 28) * 0.7
+    + Math.min(tasksWithoutResponsible.length + topAttentionActions.length, 40) * 0.55,
+  ));
+  const criticalOperationalIssues = overdueRentalsList.length
+    + overdueDeliveries.length
+    + overdueServiceTickets.length
+    + unassignedServiceTickets.length
+    + (actionAttention?.summary?.critical ?? 0);
+  const operationalLoadTone: DashboardTone = criticalOperationalIssues > 0
+    ? 'warning'
+    : operationalLoadScore >= 78
+      ? 'danger'
+      : operationalLoadScore >= 45
+        ? 'warning'
+        : 'success';
+  const operationalLoadLabel = operationalLoadScore >= 78
+    ? 'Высокая'
+    : operationalLoadScore >= 45
+      ? 'Нормальная'
+      : 'Низкая';
+  const operationalLoadBars: StatusBarRow[] = [
+    { label: 'Аренды', value: operationalLoadInputs[0], color: '#2563eb' },
+    { label: 'Сервис', value: operationalLoadInputs[1], color: '#06b6d4' },
+    { label: 'Возвраты', value: operationalLoadInputs[2], color: '#8b5cf6' },
+    { label: 'Доставки', value: operationalLoadInputs[3], color: '#f59e0b' },
+    { label: 'Документы', value: operationalLoadInputs[4], color: '#10b981' },
+    { label: 'Задачи', value: operationalLoadInputs[5], color: '#ef4444' },
+  ];
+  const operationalLoadTotal = operationalLoadBars.reduce((sum, row) => sum + row.value, 0);
+  const companyHealthBars: CompanyHealthBar[] = [
+    { label: 'Деньги', value: receivablesTone === 'success' ? 92 : receivablesTone === 'warning' ? 62 : 34, hint: overdueReceivablesAmount > 0 ? formatCurrency(overdueReceivablesAmount) : 'чисто', color: '#fb7185' },
+    { label: 'Парк', value: activeEquipment > 0 ? utilization : 0, hint: activeEquipment > 0 ? `${utilization}%` : 'нет активного парка', color: '#34d399' },
+    { label: 'Сервис', value: serviceTone === 'success' ? 88 : serviceTone === 'warning' ? 58 : 28, hint: `${serviceBlockersCount} блокеров`, color: '#38bdf8' },
+    { label: 'Возвраты', value: overdueRentalsList.length > 0 ? 35 : rentalsEndingToday.length > 0 ? 68 : 90, hint: overdueRentalsList.length > 0 ? `${overdueRentalsList.length} просрочено` : `${rentalsEndingToday.length} сегодня`, color: '#a78bfa' },
+    { label: 'Документы', value: unsignedDocumentsCount > 0 ? 58 : 90, hint: `${unsignedDocumentsCount} без подписи`, color: '#f59e0b' },
+  ];
+  const riskSignalCounts = {
+    critical: actionAttention?.summary?.critical ?? criticalCount,
+    high: actionAttention?.summary?.high ?? highCount,
+    medium: actionAttention?.summary?.medium ?? mediumCount,
+  };
   const executiveSummaryCards = [
     canViewMoney && {
       id: 'executive-overdue-receivables',
@@ -3024,7 +3257,7 @@ export default function Dashboard() {
       value: overdueReceivablesAmount > 0 ? formatCurrency(overdueReceivablesAmount) : '0 ₽',
       hint: `${overdueReceivablesClients} ${formatCountLabel(overdueReceivablesClients, 'клиент', 'клиента', 'клиентов')} с долгом`,
       icon: ShieldAlert,
-      tone: overdueReceivablesAmount > 0 ? 'danger' : 'success',
+      tone: receivablesTone,
       href: '/payments',
       cta: 'Проверить долги',
     },
@@ -3034,7 +3267,7 @@ export default function Dashboard() {
       value: activeEquipment > 0 ? `${utilization}%` : '0%',
       hint: `Средняя загрузка за период · ${rentedEquipment} из ${activeEquipment} ед.`,
       icon: Activity,
-      tone: utilization >= UTILIZATION_TARGET ? 'success' : utilization >= 60 ? 'warning' : 'danger',
+      tone: utilizationTone,
       href: '/planner',
       cta: 'Открыть планировщик',
     },
@@ -3044,19 +3277,19 @@ export default function Dashboard() {
       value: `${serviceLoadTotal} ${formatCountLabel(serviceLoadTotal, 'заявка', 'заявки', 'заявок')}`,
       hint: `${unassignedServiceTickets.length} без механика · ${ticketsWaitingParts.length} ждут запчасти`,
       icon: Wrench,
-      tone: serviceLoadTotal > 0 ? 'warning' : 'success',
+      tone: serviceTone,
       href: '/service',
       cta: 'Открыть сервис',
     },
     (canViewDocuments || canViewTasksCenter) && {
-      id: 'executive-documents-tasks',
-      label: 'Документы / задачи',
-      value: String(documentsTasksCount),
-      hint: `${documentsTasksUnit} · ${canViewDocuments ? unsignedDocumentsCount : 0} без подписи · ${documentsWithoutClosingDocs} без УПД · ${documentsAttentionTasksCount} задач`,
-      icon: FileText,
-      tone: documentsTasksCount > 0 ? 'warning' : 'success',
-      href: documentsTasksHref,
-      cta: documentsTasksHref === '/tasks' ? 'Открыть задачи' : 'Открыть документы',
+      id: 'executive-operational-load',
+      label: 'Операционная нагрузка',
+      value: operationalLoadLabel,
+      hint: `${operationalLoadScore} / 100 · ${criticalOperationalIssues} критичных факторов`,
+      icon: ListChecks,
+      tone: operationalLoadTone,
+      href: '/planner',
+      cta: 'Открыть обзор',
     },
   ].filter(Boolean) as DashboardKpi[];
   const executiveControlRows = visibleAlerts.length > 0
@@ -3278,14 +3511,14 @@ export default function Dashboard() {
 
       {executiveSummaryCards.length > 0 && (
         <section className="space-y-3" data-testid="dashboard-executive-summary">
-          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-5">
+          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-5" data-testid="dashboard-executive-cockpit">
             {executiveSummaryCards.map(card => {
               const Icon = card.icon;
               const tone = toneStyles[card.tone ?? 'default'];
               const isDebtCard = card.id === 'executive-overdue-receivables';
               const isFleetCard = card.id === 'executive-fleet-utilization';
               const isServiceCard = card.id === 'executive-service-load';
-              const isDocumentsCard = card.id === 'executive-documents-tasks';
+              const isOperationalLoadCard = card.id === 'executive-operational-load';
               const surfaceClass = isDebtCard
                 ? 'border-rose-300/55 bg-[radial-gradient(circle_at_12%_0%,rgba(244,63,94,0.20),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,241,242,0.96)_48%,rgba(255,255,255,0.94))] shadow-[0_24px_62px_-42px_rgba(190,18,60,0.55)] dark:border-rose-300/22 dark:bg-[radial-gradient(circle_at_12%_0%,rgba(244,63,94,0.32),transparent_36%),linear-gradient(135deg,rgba(76,5,25,0.82),rgba(24,24,37,0.96)_54%,rgba(15,23,42,0.98))] dark:shadow-[0_22px_70px_-44px_rgba(244,63,94,0.85)]'
                 : isFleetCard
@@ -3293,6 +3526,13 @@ export default function Dashboard() {
                   : isServiceCard
                     ? 'border-cyan-300/45 bg-[radial-gradient(circle_at_86%_0%,rgba(14,165,233,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(240,249,255,0.84)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(14,165,233,0.45)] dark:border-cyan-300/18 dark:bg-[radial-gradient(circle_at_86%_0%,rgba(14,165,233,0.28),transparent_34%),linear-gradient(135deg,rgba(8,31,42,0.88),rgba(15,23,42,0.97))]'
                     : 'border-amber-300/45 bg-[radial-gradient(circle_at_84%_0%,rgba(245,158,11,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,251,235,0.84)_52%,rgba(255,255,255,0.94))] shadow-[0_22px_58px_-44px_rgba(245,158,11,0.43)] dark:border-amber-300/18 dark:bg-[radial-gradient(circle_at_84%_0%,rgba(245,158,11,0.24),transparent_34%),linear-gradient(135deg,rgba(45,32,12,0.86),rgba(15,23,42,0.97))]';
+              const meterColor = card.tone === 'danger'
+                ? '#ef4444'
+                : card.tone === 'warning'
+                  ? '#f59e0b'
+                  : card.tone === 'success'
+                    ? '#10b981'
+                    : '#38bdf8';
               const content = (
                 <div className="relative z-10 flex h-full flex-col">
                   <div className="flex items-start justify-between gap-3">
@@ -3343,9 +3583,12 @@ export default function Dashboard() {
                     </div>
                   )}
 
-                  {isDocumentsCard && (
+                  {isOperationalLoadCard && (
                     <div className="mt-4 rounded-2xl border border-amber-200/70 bg-white/55 p-3 dark:border-amber-200/10 dark:bg-white/[0.045]">
-                      <StatusBars rows={documentsTasksRows} total={Math.max(documentsTasksCount, 1)} showPercent={false} />
+                      <OperationalLoadGauge value={operationalLoadScore} label={operationalLoadLabel} color={meterColor} />
+                      <div className="mt-3">
+                        <StatusBars rows={operationalLoadBars} total={Math.max(operationalLoadTotal, 1)} showPercent={false} />
+                      </div>
                     </div>
                   )}
 
@@ -3725,150 +3968,21 @@ export default function Dashboard() {
             updatedLabel={dashboardUpdatedLabel}
           />
 
+          {actionAttentionQuery.isError && canViewAttentionBlock && canViewEquipment ? (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200">
+              Не удалось загрузить блок внимания. {apiErrorMessage(actionAttentionQuery.error, 'Проверьте доступ к /api/management/action-queue?view=attention.')}
+            </div>
+          ) : null}
+
           {canViewAttentionBlock && canViewEquipment && (
-            <Card className={dashboardCardClass} data-testid="dashboard-attention-block">
-              <CardHeader className="pb-3">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Управленческий контроль</p>
-                    <CardTitle className="app-shell-title mt-1 text-xl font-extrabold">Что требует внимания сегодня</CardTitle>
-                    <CardDescription>Короткая сводка по Action Queue, простоям и блокерам возврата техники в аренду.</CardDescription>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button asChild variant="secondary" size="sm"><Link to="/equipment">Открыть очередь</Link></Button>
-                    <Button asChild variant="outline" size="sm"><Link to="/equipment?actionQueueFilter=unassigned">Показать без ответственного</Link></Button>
-                    <Button asChild variant="outline" size="sm"><Link to="/equipment?actionQueueFilter=overdue">Показать просроченные</Link></Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {actionAttentionQuery.isError ? (
-                  <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200">
-                    Не удалось загрузить блок внимания. {apiErrorMessage(actionAttentionQuery.error, 'Проверьте доступ к /api/management/action-queue?view=attention.')}
-                  </div>
-                ) : (
-                  <>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-                      {[
-                        { label: 'Критично', value: actionAttention?.summary?.critical ?? 0, tone: (actionAttention?.summary?.critical ?? 0) > 0 ? 'danger' : 'success' },
-                        { label: 'Просрочено', value: actionAttention?.summary?.overdue ?? 0, tone: (actionAttention?.summary?.overdue ?? 0) > 0 ? 'danger' : 'success' },
-                        { label: 'Сегодня', value: actionAttention?.summary?.dueToday ?? 0, tone: (actionAttention?.summary?.dueToday ?? 0) > 0 ? 'warning' : 'default' },
-                        { label: 'Без ответственного', value: actionAttention?.summary?.unassigned ?? 0, tone: (actionAttention?.summary?.unassigned ?? 0) > 0 ? 'warning' : 'success' },
-                        { label: 'Потери сейчас', value: attentionLossLabel(actionAttention?.summary?.totalEstimatedLoss ?? 0), tone: (actionAttention?.summary?.totalEstimatedLoss ?? 0) > 0 ? 'danger' : 'success' },
-                        { label: 'Потеря в день', value: attentionLossLabel(actionAttention?.summary?.totalDailyLoss ?? 0), tone: (actionAttention?.summary?.totalDailyLoss ?? 0) > 0 ? 'warning' : 'success' },
-                      ].map(item => (
-                        <div key={item.label} className={`rounded-xl border px-3 py-3 ${
-                          item.tone === 'danger'
-                            ? 'border-red-300 bg-red-50/70 dark:border-red-900/70 dark:bg-red-950/20'
-                            : item.tone === 'warning'
-                              ? 'border-amber-300 bg-amber-50/70 dark:border-amber-900/70 dark:bg-amber-950/20'
-                              : item.tone === 'success'
-                                ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/70 dark:bg-emerald-950/20'
-                                : 'border-border bg-secondary/50'
-                        }`}>
-                          <p className="text-xs font-semibold text-muted-foreground">{item.label}</p>
-                          <p className="mt-1 text-xl font-extrabold text-foreground">{item.value}</p>
-                        </div>
-                      ))}
-                    </div>
-
-                    {actionAttentionQuery.isLoading ? (
-                      <div className="rounded-xl border border-border bg-secondary/40 px-4 py-5 text-sm text-muted-foreground">Загружаем очередь внимания...</div>
-                    ) : topAttentionActions.length === 0 ? (
-                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-5 text-sm font-semibold text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200">
-                        Критичных действий на сегодня нет.
-                      </div>
-                    ) : (
-                      <div className="overflow-hidden rounded-xl border border-border">
-                        <div className="divide-y divide-border">
-                          {topAttentionActions.map(item => (
-                            <div key={item.actionId} className="grid gap-3 px-4 py-3 text-sm md:grid-cols-[minmax(0,1.25fr)_minmax(0,0.9fr)_minmax(0,0.75fr)_minmax(0,0.75fr)_auto] md:items-center">
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Badge variant={item.priority === 'critical' ? 'danger' : item.priority === 'high' ? 'warning' : 'default'}>
-                                    {ATTENTION_PRIORITY_LABELS[item.priority] || 'Средний'}
-                                  </Badge>
-                                  {item.isOverdue ? <Badge variant="danger">Просрочено</Badge> : null}
-                                  {item.isUnassigned ? <Badge variant="warning">Без ответственного</Badge> : null}
-                                </div>
-                                <p className="mt-2 truncate font-semibold text-foreground">{item.title}</p>
-                              </div>
-                              <div className="min-w-0 text-muted-foreground">
-                                <p className="truncate">Техника: {item.equipmentId || 'не указана'}</p>
-                                <p className="truncate">{ATTENTION_AREA_LABELS[item.responsibleArea] || ATTENTION_AREA_LABELS.unknown}</p>
-                              </div>
-                              <div className="text-muted-foreground">{attentionAssigneeLabel(item)}</div>
-                              <div className="text-muted-foreground">{attentionDueLabel(item)}</div>
-                              <div className="flex items-center gap-3 md:justify-end">
-                                <span className="font-semibold text-foreground">{attentionLossLabel(item.estimatedLoss)}</span>
-                                <Button asChild variant="ghost" size="sm">
-                                  <Link to={item.links.equipment || '/equipment'}>Открыть</Link>
-                                </Button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
+            <RiskSignalStrip
+              isLoading={actionAttentionQuery.isLoading}
+              topAttentionActions={topAttentionActions}
+              counts={riskSignalCounts}
+              lossNow={attentionLossLabel(actionAttention?.summary?.totalEstimatedLoss ?? 0)}
+              lossPerDay={attentionLossLabel(actionAttention?.summary?.totalDailyLoss ?? 0)}
+            />
           )}
-
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-            {overviewKpiCards.map(item => {
-              const Icon = item.icon;
-              const tone = item.tone === 'danger'
-                ? {
-                    card: 'border-red-200/80 bg-white hover:border-red-300 dark:border-red-900/50 dark:bg-card',
-                    bubble: 'bg-red-50 text-red-500 dark:bg-red-900/25 dark:text-red-300',
-                    accent: 'text-red-600 dark:text-red-300',
-                  }
-                : item.tone === 'warning'
-                  ? {
-                      card: 'border-amber-200/80 bg-white hover:border-amber-300 dark:border-amber-900/50 dark:bg-card',
-                      bubble: 'bg-amber-50 text-amber-500 dark:bg-amber-900/25 dark:text-amber-300',
-                      accent: 'text-amber-600 dark:text-amber-300',
-                    }
-                  : item.tone === 'success'
-                    ? {
-                        card: 'border-emerald-200/80 bg-white hover:border-emerald-300 dark:border-emerald-900/50 dark:bg-card',
-                        bubble: 'bg-emerald-50 text-emerald-500 dark:bg-emerald-900/25 dark:text-emerald-300',
-                        accent: 'text-emerald-600 dark:text-emerald-300',
-                      }
-                    : {
-                        card: 'border-border bg-white hover:border-blue-300 dark:bg-card',
-                        bubble: 'bg-blue-50 text-blue-600 dark:bg-primary/12 dark:text-primary',
-                        accent: 'text-blue-600 dark:text-primary',
-                      };
-              const content = (
-                <>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-muted-foreground">{item.label}</p>
-                      <p className="mt-2 text-2xl font-extrabold text-foreground">{item.value}</p>
-                    </div>
-                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${tone.bubble}`}>
-                      <Icon className="h-5 w-5" />
-                    </div>
-                  </div>
-                  <p className={`mt-4 line-clamp-2 text-sm ${tone.accent}`}>{item.hint}</p>
-                </>
-              );
-              const className = `rounded-2xl border p-4 text-left shadow-[0_18px_44px_-36px_rgba(15,23,42,0.38)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_54px_-38px_rgba(15,23,42,0.45)] dark:shadow-none ${tone.card}`;
-
-              return item.href ? (
-                <Link key={item.id} to={item.href} className={className}>
-                  {content}
-                </Link>
-              ) : (
-                <button key={item.id} type="button" onClick={item.onClick} className={className}>
-                  {content}
-                </button>
-              );
-            })}
-          </div>
 
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
             <Card className="overflow-hidden border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-8">
@@ -3914,41 +4028,19 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">
+            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4" data-testid="dashboard-company-health">
               <CardHeader className="pb-2">
-                <CardTitle className="app-shell-title text-xl font-extrabold">Сегодня</CardTitle>
-                <CardDescription>Задачи, риски и быстрые переходы.</CardDescription>
+                <CardTitle className="app-shell-title text-xl font-extrabold">Здоровье компании</CardTitle>
+                <CardDescription>Деньги, парк, сервис, возвраты и документы в одном читаемом срезе.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
-                {todayWorkRows.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-                    Для текущей роли нет дневных задач на дашборде.
-                  </div>
-                ) : todayWorkRows.map(item => {
-                  const marker = item.tone === 'danger'
-                    ? 'bg-red-500'
-                    : item.tone === 'warning'
-                      ? 'bg-amber-500'
-                      : item.tone === 'success'
-                        ? 'bg-emerald-500'
-                        : 'bg-blue-500';
-                  return (
-                    <Link key={item.id} to={item.href} className="flex items-center gap-3 rounded-2xl border border-border bg-white px-3 py-3 transition hover:border-blue-300 hover:bg-blue-50/45 dark:bg-background/30 dark:hover:bg-accent/40">
-                      <span className={`h-9 w-1 rounded-full ${marker}`} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-foreground">{item.label}</p>
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.detail}</p>
-                      </div>
-                      <span className="text-lg font-extrabold text-foreground">{item.value}</span>
-                    </Link>
-                  );
-                })}
+              <CardContent className="space-y-5">
+                <CompanyHealthBars items={companyHealthBars} />
 
                 {quickActions.length > 0 && (
                   <div className="border-t border-border pt-4">
                     <p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Быстрые действия</p>
                     <div className="grid grid-cols-2 gap-2">
-                      {quickActions.slice(0, 6).map(action => {
+                      {quickActions.slice(0, 4).map(action => {
                         const Icon = action.icon;
                         return (
                           <Link

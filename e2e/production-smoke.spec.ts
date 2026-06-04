@@ -1,7 +1,7 @@
 import { test } from '@playwright/test';
 import { optionalEnv, requiredEnv, runReleaseSmoke } from './helpers/releaseSmoke';
 
-test('production read-only smoke', async ({ page }) => {
+test('production read-only smoke', async ({ page }, testInfo) => {
   test.setTimeout(180_000);
   await runReleaseSmoke(page, {
     environmentName: 'production',
@@ -11,5 +11,5 @@ test('production read-only smoke', async ({ page }) => {
     adminPassword: requiredEnv('PRODUCTION_ADMIN_PASSWORD', 'production smoke'),
     expectedCommit: optionalEnv('EXPECTED_RELEASE_COMMIT') || optionalEnv('GITHUB_SHA'),
     releaseType: optionalEnv('RELEASE_TYPE') || 'full-stack',
-  });
+  }, testInfo);
 });

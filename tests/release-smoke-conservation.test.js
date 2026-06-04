@@ -46,6 +46,30 @@ test('non-conserved release smoke keeps strict login behavior', () => {
   assert.match(releaseSmokeSource, /expectAdminLoginSucceeded/);
 });
 
+test('non-conserved production smoke proves dashboard executive cockpit and screenshots', () => {
+  for (const marker of [
+    'expectExecutiveCockpitVisible',
+    'dashboard-executive-summary',
+    'dashboard-executive-cockpit',
+    'dashboard-kpi-overdue-debt',
+    'dashboard-kpi-fleet-utilization',
+    'dashboard-kpi-service-load',
+    'dashboard-kpi-operational-load',
+    'Главные сигналы сегодня',
+    'Открыть планировщик',
+    'Открыть сервис',
+    'Денежный поток',
+    'Здоровье компании',
+    'production-dashboard-cockpit-desktop.png',
+    'production-dashboard-cockpit-mobile.png',
+  ]) {
+    assert.match(releaseSmokeSource, new RegExp(marker));
+  }
+  assert.match(releaseSmokeSource, /toHaveAttribute\('href', \/#\\\/planner\$\//);
+  assert.match(releaseSmokeSource, /toHaveAttribute\('href', \/#\\\/service\$\//);
+  assert.match(releaseSmokeSource, /captureExecutiveCockpitScreenshots\(page, normalizedConfig\.frontendUrl, testInfo\)/);
+});
+
 test('production release smoke allows backend drift only for frontend-only and deploy-tooling releases', () => {
   assert.match(releaseSmokeSource, /type ReleaseType = 'frontend-only' \| 'backend' \| 'full-stack' \| 'deploy-tooling'/);
   assert.match(releaseSmokeSource, /releaseType\?: ReleaseType \| string/);

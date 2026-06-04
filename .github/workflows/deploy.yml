@@ -339,6 +339,14 @@ jobs:
           EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
           RELEASE_TYPE: ${{ needs.classify-release.outputs.release_type }}
 
+      - name: Upload production dashboard cockpit screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-dashboard-cockpit-screenshots
+          path: test-results/**/production-dashboard-cockpit-*.png
+          if-no-files-found: ignore
+
       - name: Upload production Playwright report
         if: failure()
         uses: actions/upload-artifact@v4

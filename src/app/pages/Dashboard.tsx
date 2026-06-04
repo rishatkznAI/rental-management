@@ -261,6 +261,13 @@ type DashboardKpi = {
   cta?: string;
 };
 
+const EXECUTIVE_KPI_TEST_IDS: Record<string, string> = {
+  'executive-overdue-receivables': 'dashboard-kpi-overdue-debt',
+  'executive-fleet-utilization': 'dashboard-kpi-fleet-utilization',
+  'executive-service-load': 'dashboard-kpi-service-load',
+  'executive-operational-load': 'dashboard-kpi-operational-load',
+};
+
 type DashboardRisk = {
   id: string;
   title: string;
@@ -3515,6 +3522,7 @@ export default function Dashboard() {
             {executiveSummaryCards.map(card => {
               const Icon = card.icon;
               const tone = toneStyles[card.tone ?? 'default'];
+              const testId = EXECUTIVE_KPI_TEST_IDS[card.id];
               const isDebtCard = card.id === 'executive-overdue-receivables';
               const isFleetCard = card.id === 'executive-fleet-utilization';
               const isServiceCard = card.id === 'executive-service-load';
@@ -3603,12 +3611,12 @@ export default function Dashboard() {
               const className = `group relative min-h-[248px] overflow-hidden rounded-2xl border p-5 text-left transition hover:-translate-y-0.5 hover:border-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${surfaceClass} ${isDebtCard ? '2xl:col-span-2' : ''}`;
 
               if (card.href) {
-                return <Link key={card.id} to={card.href} className={className}>{content}</Link>;
+                return <Link key={card.id} to={card.href} data-testid={testId} className={className}>{content}</Link>;
               }
               if (card.onClick) {
-                return <button key={card.id} type="button" onClick={card.onClick} className={className}>{content}</button>;
+                return <button key={card.id} type="button" onClick={card.onClick} data-testid={testId} className={className}>{content}</button>;
               }
-              return <div key={card.id} className={className}>{content}</div>;
+              return <div key={card.id} data-testid={testId} className={className}>{content}</div>;
             })}
           </div>
 
@@ -3988,7 +3996,7 @@ export default function Dashboard() {
             <Card className="overflow-hidden border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-8">
               <CardHeader className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle className="app-shell-title text-xl font-extrabold">Динамика месяца</CardTitle>
+                  <CardTitle className="app-shell-title text-xl font-extrabold">Денежный поток</CardTitle>
                   <CardDescription>Начисления и поступления по дням текущего месяца.</CardDescription>
                 </div>
                 <Badge variant="info" className="w-fit bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">

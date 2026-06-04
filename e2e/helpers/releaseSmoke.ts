@@ -24,7 +24,7 @@ type UiIssue = {
   text?: string;
 };
 
-type ReleaseType = 'frontend-only' | 'backend' | 'full-stack' | 'deploy-tooling';
+type ReleaseType = 'frontend-only' | 'backend' | 'full-stack' | 'deploy-tooling' | 'frontend-deploy-tooling';
 
 export type ReleaseSmokeConfig = {
   environmentName: 'staging' | 'production';
@@ -81,7 +81,13 @@ function commitsMatch(left = '', right = '') {
 
 function normalizeReleaseType(value = ''): ReleaseType {
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'frontend-only' || normalized === 'backend' || normalized === 'full-stack' || normalized === 'deploy-tooling') return normalized;
+  if (
+    normalized === 'frontend-only' ||
+    normalized === 'backend' ||
+    normalized === 'full-stack' ||
+    normalized === 'deploy-tooling' ||
+    normalized === 'frontend-deploy-tooling'
+  ) return normalized;
   return 'full-stack';
 }
 
@@ -91,11 +97,17 @@ function backendCommitFromBuild(backendBuild?: BuildInfo | null) {
 
 function allowsBackendCommitDrift(config: Pick<ReleaseSmokeConfig, 'environmentName' | 'releaseType'>) {
   const releaseType = normalizeReleaseType(String(config.releaseType || ''));
-  return config.environmentName === 'production' && (releaseType === 'frontend-only' || releaseType === 'deploy-tooling');
+  return config.environmentName === 'production' && (
+    releaseType === 'frontend-only' ||
+    releaseType === 'deploy-tooling' ||
+    releaseType === 'frontend-deploy-tooling'
+  );
 }
 
 function expectedDriftReleaseType(releaseType?: ReleaseType | string) {
-  return normalizeReleaseType(String(releaseType || '')) === 'deploy-tooling' ? 'deploy-tooling' : 'frontend-only';
+  const normalizedReleaseType = normalizeReleaseType(String(releaseType || ''));
+  if (normalizedReleaseType === 'deploy-tooling' || normalizedReleaseType === 'frontend-deploy-tooling') return normalizedReleaseType;
+  return 'frontend-only';
 }
 
 function frontendOnlyBackendDriftMessage(details: { expectedCommit?: string; frontendCommit?: string; backendCommit: string; releaseType?: ReleaseType | string }) {

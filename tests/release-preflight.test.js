@@ -102,6 +102,7 @@ test('release preflight allows deploy-tooling safe file scope and reports backen
     'scripts/release-preflight.mjs',
     'e2e/helpers/releaseSmoke.ts',
     'e2e/production-smoke.spec.ts',
+    'e2e/production-ui-selector-smoke.spec.ts',
     'tests/release-preflight.test.js',
     'tests/release-smoke-conservation.test.js',
     'docs/release-runbook.md',
@@ -131,6 +132,7 @@ test('release preflight allows frontend-deploy-tooling safe file scope and repor
     '.github/workflows/deploy.yml',
     'e2e/helpers/releaseSmoke.ts',
     'e2e/production-smoke.spec.ts',
+    'e2e/production-ui-selector-smoke.spec.ts',
     'tests/release-smoke-conservation.test.js',
     'src/app/pages/Dashboard.tsx',
   ];
@@ -213,6 +215,7 @@ test('release classifier allows deploy-tooling only', () => {
   const result = classifyReleaseChangedFiles([
     '.github/workflows/deploy.yml',
     'scripts/release-preflight.mjs',
+    'e2e/production-ui-selector-smoke.spec.ts',
     'tests/release-preflight.test.js',
   ]);
 
@@ -234,6 +237,7 @@ test('release classifier allows frontend runtime with deploy tooling as GitHub P
     '.github/workflows/deploy.yml',
     'e2e/helpers/releaseSmoke.ts',
     'e2e/production-smoke.spec.ts',
+    'e2e/production-ui-selector-smoke.spec.ts',
     'tests/release-smoke-conservation.test.js',
     'src/app/pages/Dashboard.tsx',
   ]);

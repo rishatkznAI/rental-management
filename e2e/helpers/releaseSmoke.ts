@@ -1,4 +1,4 @@
-import { expect, request as playwrightRequest, type APIResponse, type Page } from '@playwright/test';
+import { expect, request as playwrightRequest, type APIResponse, type Page, type TestInfo } from '@playwright/test';
 
 type BuildInfo = {
   commit?: string;
@@ -281,6 +281,59 @@ async function expectAdminLoginSucceeded(
   await expect(nav, 'main navigation should be visible after login').toBeVisible();
 }
 
+async function expectExecutiveCockpitVisible(page: Page) {
+  const summary = page.getByTestId('dashboard-executive-summary');
+  const cockpit = page.getByTestId('dashboard-executive-cockpit');
+  await expect(summary, 'executive cockpit summary should be visible after login').toBeVisible();
+  await expect(cockpit, 'executive cockpit KPI grid should be visible after login').toBeVisible();
+
+  const kpiChecks = [
+    { testId: 'dashboard-kpi-overdue-debt', label: 'Просроченная дебиторка' },
+    { testId: 'dashboard-kpi-fleet-utilization', label: 'Утилизация парка' },
+    { testId: 'dashboard-kpi-service-load', label: 'Загрузка сервиса' },
+    { testId: 'dashboard-kpi-operational-load', label: 'Операционная нагрузка' },
+  ];
+
+  for (const item of kpiChecks) {
+    const card = page.getByTestId(item.testId);
+    await expect(card, `executive cockpit KPI ${item.testId} should be visible`).toBeVisible();
+    await expect(card.getByText(item.label, { exact: true }), `executive cockpit KPI label ${item.label} should be visible`).toBeVisible();
+  }
+
+  await expect(page.getByRole('heading', { name: 'Главные сигналы сегодня' }), 'dashboard signal strip should be visible').toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Динамика месяца' }), 'dashboard cash flow card should be visible').toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Здоровье компании' }), 'dashboard company health card should be visible').toBeVisible();
+
+  const fleetUtilizationCard = page.getByTestId('dashboard-kpi-fleet-utilization');
+  const serviceLoadCard = page.getByTestId('dashboard-kpi-service-load');
+  await expect(fleetUtilizationCard.getByText('Открыть планировщик', { exact: true }), 'planner CTA should be visible').toBeVisible();
+  await expect(serviceLoadCard.getByText('Открыть сервис', { exact: true }), 'service CTA should be visible').toBeVisible();
+  await expect(fleetUtilizationCard, 'planner CTA should target #/planner')
+    .toHaveAttribute('href', /#\/planner$/);
+  await expect(serviceLoadCard, 'service CTA should target #/service')
+    .toHaveAttribute('href', /#\/service$/);
+}
+
+async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: string, testInfo?: TestInfo) {
+  if (!testInfo) return;
+
+  await page.screenshot({
+    path: testInfo.outputPath('production-dashboard-cockpit-desktop.png'),
+    fullPage: true,
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
+  await expectExecutiveCockpitVisible(page);
+  await page.screenshot({
+    path: testInfo.outputPath('production-dashboard-cockpit-mobile.png'),
+    fullPage: true,
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
+}
+
 async function directLoginSmoke(config: ReleaseSmokeConfig) {
   const api = await playwrightRequest.newContext({ baseURL: config.apiUrl });
   try {
@@ -323,7 +376,7 @@ async function directConservedLoginSmoke(config: ReleaseSmokeConfig) {
   }
 }
 
-export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
+export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig, testInfo?: TestInfo) {
   const normalizedConfig = {
     ...config,
     frontendUrl: config.frontendUrl.replace(/\/$/, ''),
@@ -452,6 +505,9 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig) {
   await page.getByRole('button', { name: 'Войти' }).click();
   await expectAdminLoginSucceeded(page, normalizedConfig, frontendBuild, backendBuild, () => loginStatus);
   await expectHealthyMain(page, 'dashboard');
+  action = 'dashboard executive cockpit';
+  await expectExecutiveCockpitVisible(page);
+  await captureExecutiveCockpitScreenshots(page, normalizedConfig.frontendUrl, testInfo);
 
   const token = await page.evaluate(() => window.localStorage.getItem('app_auth_token'));
   expect(token, 'admin login should store auth token').toBeTruthy();

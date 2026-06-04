@@ -148,6 +148,10 @@ test('dashboard signal strip renders counters, rows, empty and error states', ()
 test('dashboard cockpit renders executive KPI grid with fleet and service analytics', () => {
   for (const label of [
     'data-testid="dashboard-executive-summary"',
+    'dashboard-kpi-overdue-debt',
+    'dashboard-kpi-fleet-utilization',
+    'dashboard-kpi-service-load',
+    'dashboard-kpi-operational-load',
     'MiniAreaChart',
     'UtilizationGauge',
     'StatusBars',

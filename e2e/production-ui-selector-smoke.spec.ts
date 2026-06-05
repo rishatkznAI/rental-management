@@ -344,6 +344,7 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
 
   await expect(page.getByTestId('dashboard-top-cockpit')).toBeVisible();
   await expect(page.getByTestId('dashboard-key-signals')).toBeVisible();
+  await expect(page.getByTestId('dashboard-operational-summary')).toBeVisible();
   await expect(page.getByTestId('dashboard-month-dynamics')).toBeVisible();
   await expect(page.getByTestId('dashboard-company-health')).toBeVisible();
   const viewport = page.viewportSize() ?? { width: 1440, height: 900 };
@@ -359,23 +360,38 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
       };
     };
     const legacy = document.querySelector('[data-testid="dashboard-legacy-attention-list"]');
+    const countVisibleHeadingsInViewport = (expectedText: string) => Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).filter(heading => {
+      const normalizedText = (heading.textContent || '').replace(/\s+/g, ' ').trim();
+      const rect = heading.getBoundingClientRect();
+      const style = window.getComputedStyle(heading);
+      return normalizedText === expectedText
+        && style.visibility !== 'hidden'
+        && style.display !== 'none'
+        && rect.width > 0
+        && rect.height > 0
+        && rect.bottom > 0
+        && rect.top < window.innerHeight;
+    }).length;
     return {
       keySignals: rectFor('dashboard-key-signals'),
       legacyAttentionList: rectFor('dashboard-legacy-attention-list'),
+      operationalSummary: rectFor('dashboard-operational-summary'),
       monthDynamics: rectFor('dashboard-month-dynamics'),
       companyHealth: rectFor('dashboard-company-health'),
       legacyCollapsed: legacy?.tagName.toLowerCase() === 'details' && !(legacy as HTMLDetailsElement).open,
+      firstViewportHeadingCounts: {
+        monthDynamics: countVisibleHeadingsInViewport('Динамика месяца'),
+        companyHealth: countVisibleHeadingsInViewport('Здоровье компании'),
+      },
     };
   });
   expect(visualRects.keySignals?.top ?? Number.POSITIVE_INFINITY, 'key signals should be above fold').toBeLessThan(viewport.height);
+  expect(visualRects.legacyAttentionList?.top ?? 0, 'legacy attention list should be below key signals').toBeGreaterThan(visualRects.keySignals?.top ?? 0);
+  expect(visualRects.firstViewportHeadingCounts.monthDynamics, 'first viewport should not contain duplicate month dynamics headings').toBeLessThanOrEqual(1);
+  expect(visualRects.firstViewportHeadingCounts.companyHealth, 'first viewport should not contain duplicate company health headings').toBeLessThanOrEqual(1);
   expect(
-    (visualRects.monthDynamics?.top ?? Number.POSITIVE_INFINITY) < viewport.height
-      || (visualRects.companyHealth?.top ?? Number.POSITIVE_INFINITY) < viewport.height,
-    'month dynamics or company health should start inside desktop viewport',
-  ).toBeTruthy();
-  expect(
-    visualRects.legacyCollapsed || (visualRects.legacyAttentionList?.top ?? 0) >= viewport.height,
-    'legacy attention list should be collapsed or below fold',
+    (visualRects.legacyAttentionList?.top ?? 0) >= viewport.height,
+    'legacy attention list should be below fold',
   ).toBeTruthy();
 
   const attentionBlock = page.getByTestId('dashboard-attention-block');

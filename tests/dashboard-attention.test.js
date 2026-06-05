@@ -121,6 +121,12 @@ test('dashboard executive cockpit renders adaptive KPI cards and compact risk si
   assert.match(dashboardSource, /data-testid="dashboard-key-signals"/);
   assert.match(dashboardSource, /data-testid="dashboard-legacy-attention-list"/);
   assert.match(dashboardSource, /data-testid="dashboard-month-dynamics"/);
+  assert.match(dashboardSource, /data-testid="dashboard-company-health"/);
+  assert.match(dashboardSource, /data-testid="dashboard-operational-summary"/);
+  assert.equal(dashboardSource.match(/data-testid="dashboard-month-dynamics"/g)?.length, 1);
+  assert.equal(dashboardSource.match(/data-testid="dashboard-company-health"/g)?.length, 1);
+  assert.equal(dashboardSource.match(/<CardTitle className="app-shell-title text-xl font-extrabold">Динамика месяца<\/CardTitle>/g)?.length, 1);
+  assert.equal(dashboardSource.match(/<CardTitle className="app-shell-title text-xl font-extrabold">Здоровье компании<\/CardTitle>/g)?.length, 1);
   assert.match(dashboardSource, /operationalLoadScore/);
   assert.match(dashboardSource, /operationalLoadTone/);
   assert.match(dashboardSource, /receivablesTone/);

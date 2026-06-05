@@ -3630,9 +3630,9 @@ export default function Dashboard() {
             })}
           </div>
 
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+          <div className="grid grid-cols-1 gap-3">
             {canViewAttentionBlock && canViewEquipment && (
-              <div className="xl:col-span-8" data-testid="dashboard-key-signals">
+              <div data-testid="dashboard-key-signals">
                 <RiskSignalStrip
                   isLoading={actionAttentionQuery.isLoading}
                   topAttentionActions={topAttentionActions}
@@ -3642,42 +3642,6 @@ export default function Dashboard() {
                 />
               </div>
             )}
-            <div className="grid gap-3 xl:col-span-4">
-              <Card className="overflow-hidden border-border bg-card shadow-[0_18px_46px_-38px_rgba(15,23,42,0.45)] dark:shadow-none" data-testid="dashboard-month-dynamics">
-                <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
-                  <div>
-                    <CardTitle className="app-shell-title text-lg font-extrabold">Динамика месяца</CardTitle>
-                    <CardDescription>Начисления / оплаты.</CardDescription>
-                  </div>
-                  <Badge variant="info" className="w-fit bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
-                    {hasMonthCashflow ? `${formatCurrency(monthlyRevenue)} / ${formatCurrency(monthlyPaidAmount)}` : 'Нет данных'}
-                  </Badge>
-                </CardHeader>
-                <CardContent className="h-[78px] px-4 pb-3 pt-0">
-                  {hasMonthCashflow ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={monthCashflowData} margin={{ top: 3, right: 4, left: 0, bottom: 0 }}>
-                        <Area type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={2} fill="#2563eb" fillOpacity={0.08} dot={false} />
-                        <Area type="monotone" dataKey="payments" stroke="#10b981" strokeWidth={2} fill="#10b981" fillOpacity={0.08} dot={false} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border bg-muted/35 text-center text-xs text-muted-foreground">
-                      Нет данных за месяц.
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card className="border-border bg-card shadow-[0_18px_46px_-38px_rgba(15,23,42,0.45)] dark:shadow-none" data-testid="dashboard-company-health">
-                <CardHeader className="pb-2">
-                  <CardTitle className="app-shell-title text-lg font-extrabold">Здоровье компании</CardTitle>
-                </CardHeader>
-                <CardContent className="pb-4">
-                  <CompanyHealthBars items={companyHealthBars.slice(0, 3)} />
-                </CardContent>
-              </Card>
-            </div>
           </div>
           </div>
         </section>
@@ -3985,7 +3949,7 @@ export default function Dashboard() {
       </div>
 
       {activeDashboardTab === 'overview' && (
-        <section className="space-y-5">
+        <section className="space-y-5" data-testid="dashboard-operational-summary">
           <DashboardScopeHeader
             title="Операционная сводка"
             description="Аренда, техника, сервис, документы и деньги за текущий календарный месяц."
@@ -4001,7 +3965,7 @@ export default function Dashboard() {
           ) : null}
 
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-            <Card className="overflow-hidden border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-8">
+            <Card className="overflow-hidden border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-8" data-testid="dashboard-month-dynamics">
               <CardHeader className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <CardTitle className="app-shell-title text-xl font-extrabold">Динамика месяца</CardTitle>
@@ -4044,7 +4008,7 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">
+            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4" data-testid="dashboard-company-health">
               <CardHeader className="pb-2">
                 <CardTitle className="app-shell-title text-xl font-extrabold">Здоровье компании</CardTitle>
                 <CardDescription>Деньги, парк, сервис, возвраты и документы в одном читаемом срезе.</CardDescription>

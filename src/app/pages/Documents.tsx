@@ -21,15 +21,17 @@ import {
 } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Textarea } from '../components/ui/textarea';
-import { getDocumentStatusBadge } from '../components/ui/badge';
 import { ClientCombobox, clientLabel } from '../components/ui/ClientCombobox';
 import {
   AlertTriangle,
+  CalendarDays,
   CheckCircle2,
   ClipboardList,
   Download,
   Eye,
   FileSignature,
+  FileText,
+  Layers3,
   MoreHorizontal,
   Plus,
   Printer,
@@ -37,6 +39,7 @@ import {
   Search,
   Send,
   Settings2,
+  SlidersHorizontal,
   Trash2,
   Upload,
   Wrench,
@@ -412,6 +415,47 @@ function getDocumentStatusLabel(status: unknown) {
   if (safe === 'expired') return 'Просрочен';
   if (safe === 'cancelled') return 'Отменён';
   return 'Черновик';
+}
+
+function getDocumentTypeVisual(doc: Partial<Doc> | null | undefined) {
+  const type = doc?.type;
+  if (type === 'rental_contract' || type === 'contract') {
+    return { Icon: FileSignature, className: 'bg-blue-500/15 text-blue-300 ring-blue-400/25' };
+  }
+  if (type === 'rental_specification') {
+    return { Icon: ClipboardList, className: 'bg-emerald-500/15 text-emerald-300 ring-emerald-400/25' };
+  }
+  if (type === 'transfer_act_to_client') {
+    return { Icon: Send, className: 'bg-indigo-500/15 text-indigo-300 ring-indigo-400/25' };
+  }
+  if (type === 'return_act_from_client') {
+    return { Icon: Printer, className: 'bg-orange-500/15 text-orange-300 ring-orange-400/25' };
+  }
+  if (type === 'trip_ticket') {
+    return { Icon: Route, className: 'bg-cyan-500/15 text-cyan-300 ring-cyan-400/25' };
+  }
+  if (type === 'work_order' || type === 'service_act') {
+    return { Icon: Wrench, className: 'bg-violet-500/15 text-violet-300 ring-violet-400/25' };
+  }
+  return { Icon: FileText, className: 'bg-slate-500/20 text-slate-300 ring-white/10' };
+}
+
+function getDocumentStatusPill(status: unknown) {
+  const safe = getSafeDocumentStatus(status);
+  const map: Record<DocumentStatus, { label: string; className: string }> = {
+    draft: { label: 'Черновик', className: 'bg-sky-400/12 text-sky-200 ring-sky-300/20' },
+    signed: { label: 'Подписано', className: 'bg-emerald-400/12 text-emerald-200 ring-emerald-300/25' },
+    sent: { label: 'Отправлено', className: 'bg-blue-400/12 text-blue-200 ring-blue-300/20' },
+    pending_signature: { label: 'На подписи', className: 'bg-amber-300/15 text-amber-100 ring-amber-200/25' },
+    expired: { label: 'Просрочено', className: 'bg-rose-400/15 text-rose-100 ring-rose-300/25' },
+    cancelled: { label: 'Отменено', className: 'bg-slate-400/12 text-slate-300 ring-white/10' },
+  };
+  const meta = map[safe];
+  return (
+    <span className={`inline-flex h-7 items-center rounded-full px-2.5 text-xs font-semibold ring-1 ${meta.className}`}>
+      {meta.label}
+    </span>
+  );
 }
 
 function getDocumentRentalId(doc: Partial<Doc> | null | undefined) {
@@ -795,6 +839,8 @@ export default function Documents() {
   const [unsignedOnly, setUnsignedOnly] = React.useState(false);
   const [withoutNumberOnly, setWithoutNumberOnly] = React.useState(false);
   const [duplicatesOnly, setDuplicatesOnly] = React.useState(false);
+  const [periodFrom, setPeriodFrom] = React.useState('');
+  const [periodTo, setPeriodTo] = React.useState('');
   const clientFilter = documentPagination.filters.clientId;
   const rentalFilter = documentPagination.filters.rentalId;
   const typeFilter = documentPagination.filters.type;
@@ -1130,6 +1176,7 @@ export default function Documents() {
     const normalizedClientId = doc.clientId || rental?.clientId || '';
     const normalizedClient = doc.client || rental?.client || clientsById.get(normalizedClientId)?.company || '';
     const normalizedManager = doc.manager || rental?.manager || gantt?.manager || '';
+    const documentDate = getDocumentDate(doc).slice(0, 10);
     const matchesSearch = q === ''
       || searchText(docNumber).includes(q)
       || searchText(doc.number).includes(q)
@@ -1159,6 +1206,10 @@ export default function Documents() {
     }, quickActionContext);
     const matchesRental = rentalFilter === 'all' || rentalId === rentalFilter;
     const matchesManager = managerFilter === 'all' || normalizedManager === managerFilter;
+    const matchesPeriod = (!periodFrom && !periodTo)
+      || (Boolean(documentDate)
+        && (!periodFrom || documentDate >= periodFrom)
+        && (!periodTo || documentDate <= periodTo));
     const isOverdue = safeStatus === 'expired' || Boolean(doc.dueDate && doc.dueDate < new Date().toISOString().slice(0, 10) && docIsUnsigned);
     const matchesQuickType = quickTypeFilter === 'all'
       || (quickTypeFilter === 'unsigned' && docIsUnsigned)
@@ -1166,7 +1217,7 @@ export default function Documents() {
       || (quickTypeFilter === 'draft' && safeStatus === 'draft')
       || doc.type === quickTypeFilter;
 
-    return matchesSearch && matchesType && matchesStatus && matchesUnsigned && matchesWithoutNumber && matchesDuplicates && matchesClient && matchesQuickClient && matchesRental && matchesManager && matchesQuickType;
+    return matchesSearch && matchesType && matchesStatus && matchesUnsigned && matchesWithoutNumber && matchesDuplicates && matchesClient && matchesQuickClient && matchesRental && matchesManager && matchesPeriod && matchesQuickType;
   }).sort((left, right) => {
     const leftClient = left.client || clientsById.get(left.clientId || '')?.company || '';
     const rightClient = right.client || clientsById.get(right.clientId || '')?.company || '';
@@ -1264,6 +1315,8 @@ export default function Documents() {
     signatureFilter !== 'all',
     managerFilter !== 'all',
     quickTypeFilter !== 'all',
+    periodFrom !== '',
+    periodTo !== '',
   ].filter(Boolean).length;
   const controlActiveFilterCount = [
     controlRiskFilter !== 'all',
@@ -1893,48 +1946,94 @@ export default function Documents() {
     }
   }
 
+  const kpiCards = [
+    { label: 'Всего документов', value: registrySummary?.total ?? documents.length, Icon: FileText },
+    { label: 'Черновики', value: registrySummary?.draft ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'draft').length, Icon: ClipboardList },
+    { label: 'На подписи', value: registrySummary?.pendingSignature ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'pending_signature').length, Icon: FileSignature },
+    { label: 'Подписано', value: registrySummary?.signed ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'signed').length, Icon: CheckCircle2 },
+    { label: 'Просрочено', value: registrySummary?.expired ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'expired').length, Icon: AlertTriangle },
+    { label: 'За месяц', value: registrySummary?.currentMonth ?? documents.filter(doc => getDocumentDate(doc).slice(0, 7) === new Date().toISOString().slice(0, 7)).length, Icon: CalendarDays },
+  ];
+  const quickFilters: Array<[DocumentQuickFilter, string]> = [
+    ['all', 'Все'],
+    ['rental_contract', 'Договоры'],
+    ['rental_specification', 'Спецификации'],
+    ['transfer_act_to_client', 'Акты передачи'],
+    ['return_act_from_client', 'Акты возврата'],
+    ['work_order', 'Заказ-наряды'],
+    ['trip_ticket', 'Путевые листы'],
+    ['unsigned', 'Без подписи'],
+    ['overdue', 'Просроченные'],
+    ['draft', 'Черновики'],
+  ];
+  const resetDocumentFilters = () => {
+    setSearch('');
+    setUnsignedOnly(false);
+    setWithoutNumberOnly(false);
+    setDuplicatesOnly(false);
+    setPeriodFrom('');
+    setPeriodTo('');
+    setClientFilter('all');
+    setRentalFilter('all');
+    setTypeFilter('all');
+    setStatusFilter('all');
+    setSignatureFilter('all');
+    setManagerFilter('all');
+    setQuickTypeFilter('all');
+    setSortKey('date');
+  };
+
   return (
-    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="min-h-full space-y-4 bg-slate-950 p-4 text-slate-100 sm:space-y-6 sm:p-6 md:p-8">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Документы</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Генерация и контроль договоров, актов, заказ-нарядов и путевых листов
+          <h1 className="text-2xl font-bold text-white sm:text-3xl">Документы</h1>
+          <p className="mt-1 max-w-2xl text-sm text-slate-400">
+            Генерация и контроль договоров, актов, заказ-нарядов и путевых листов.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canManageDocuments ? (
-            <Button onClick={() => openDocumentWizard()}>
+            <Button onClick={() => openDocumentWizard()} className="bg-lime-300 text-slate-950 hover:bg-lime-200">
               <Plus className="h-4 w-4" />
               Создать документ
             </Button>
           ) : null}
-          <Button variant="secondary" onClick={() => setView('general')}>
+          <Button variant="secondary" onClick={() => setView('general')} className="border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]">
             <ClipboardList className="h-4 w-4" />
             Шаблоны
           </Button>
           <Button
-            variant={view === 'general' ? 'default' : 'secondary'}
+            variant="secondary"
             onClick={() => setView('general')}
+            className={view === 'general'
+              ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
+              : 'border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'}
           >
             Документы
           </Button>
           <Button
-            variant={view === 'control' ? 'default' : 'secondary'}
+            variant="secondary"
             onClick={() => setView('control')}
+            className={view === 'control'
+              ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
+              : 'border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'}
           >
             <AlertTriangle className="h-4 w-4" />
             Контроль
           </Button>
           {isAdmin ? (
-            <Button variant="secondary">
+            <Button variant="secondary" className="border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]">
               <Settings2 className="h-4 w-4" />
               Настройки полей
             </Button>
           ) : null}
           <Button
-            variant={view === 'mechanics' ? 'default' : 'secondary'}
+            variant="secondary"
             onClick={() => setView('mechanics')}
+            className={view === 'mechanics'
+              ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
+              : 'border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'}
           >
             <UserRound className="h-4 w-4" />
             Механики
@@ -1945,42 +2044,27 @@ export default function Documents() {
       {view === 'general' ? (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            {[
-              ['Всего документов', registrySummary?.total ?? documents.length],
-              ['Черновики', registrySummary?.draft ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'draft').length],
-              ['На подписи', registrySummary?.pendingSignature ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'pending_signature').length],
-              ['Подписано', registrySummary?.signed ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'signed').length],
-              ['Просрочено', registrySummary?.expired ?? documents.filter(doc => getSafeDocumentStatus(doc.status) === 'expired').length],
-              ['За месяц', registrySummary?.currentMonth ?? documents.filter(doc => getDocumentDate(doc).slice(0, 7) === new Date().toISOString().slice(0, 7)).length],
-            ].map(([label, value]) => (
-              <div key={String(label)} className={`rounded-lg border p-4 ${
-                Number(value) > 0 && ['Просрочено'].includes(String(label))
-                  ? 'border-amber-300 bg-amber-50/70 dark:border-amber-900/70 dark:bg-amber-950/20'
-                  : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
-              }`}>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
-                <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
+            {kpiCards.map(({ label, value, Icon }) => (
+              <div key={label} className="relative overflow-hidden rounded-lg border border-white/10 bg-white/[0.055] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(190,242,100,0.12),transparent_36%)]" />
+                <div className="relative flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium text-slate-400">{label}</p>
+                    <p className="mt-1 text-3xl font-bold text-white">{value}</p>
+                  </div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-slate-900/70 text-lime-200">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                </div>
               </div>
             ))}
           </div>
 
           <div className="app-scroll-fade-x flex max-w-full gap-2 overflow-x-auto pb-1">
-            {[
-              ['all', 'Все'],
-              ['rental_contract', 'Договоры'],
-              ['rental_specification', 'Спецификации'],
-              ['transfer_act_to_client', 'Акты передачи'],
-              ['return_act_from_client', 'Акты возврата'],
-              ['work_order', 'Заказ-наряды'],
-              ['trip_ticket', 'Путевые листы'],
-              ['unsigned', 'Без подписи'],
-              ['overdue', 'Просроченные'],
-              ['draft', 'Черновики'],
-            ].map(([key, label]) => (
-              <Button
+            {quickFilters.map(([key, label]) => (
+              <button
                 key={key}
                 type="button"
-                variant={quickTypeFilter === key ? 'default' : 'secondary'}
                 onClick={() => {
                   setQuickTypeFilter(key as DocumentQuickFilter);
                   setSignatureFilter(key === 'unsigned' ? 'unsigned' : 'all');
@@ -1990,27 +2074,114 @@ export default function Documents() {
                     setUnsignedOnly(false);
                   }
                 }}
-                className="shrink-0"
+                className={`h-9 shrink-0 rounded-full px-4 text-sm font-semibold transition ${
+                  quickTypeFilter === key
+                    ? 'bg-lime-300 text-slate-950 shadow-[0_0_22px_rgba(190,242,100,0.18)]'
+                    : 'border border-white/10 bg-white/[0.05] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+                }`}
               >
                 {label}
-              </Button>
+              </button>
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {canManageDocuments ? (
-              <>
-                <Button variant="secondary" onClick={() => openContractCreate('rental')}>
-                  <Plus className="h-4 w-4" />
-                  Договор аренды
-                </Button>
-                <Button variant="secondary" onClick={() => openContractCreate('supply')}>
-                  <Plus className="h-4 w-4" />
-                  Договор поставки
-                </Button>
-              </>
-            ) : null}
-            <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
+          <div className="rounded-lg border border-white/10 bg-white/[0.055] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] sm:p-4">
+            <div className="grid gap-3 lg:grid-cols-[minmax(240px,1.4fr)_repeat(4,minmax(150px,1fr))_auto]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <Input
+                  placeholder="Поиск по номеру, клиенту, технике, примечанию"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-10 border-white/10 bg-slate-950/70 pl-10 text-slate-100 placeholder:text-slate-500"
+                />
+              </div>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="h-10 border-white/10 bg-slate-950/70 text-slate-100">
+                  <SelectValue placeholder="Тип документа" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Тип документа</SelectItem>
+                  {DOCUMENT_WORKSPACE_TYPES.map(item => (
+                    <SelectItem key={item.type} value={item.type}>{item.label}</SelectItem>
+                  ))}
+                  <SelectItem value="contract">Договоры</SelectItem>
+                  <SelectItem value="commercial_offer">КП</SelectItem>
+                  <SelectItem value="act">Акты</SelectItem>
+                  <SelectItem value="upd">УПД</SelectItem>
+                  <SelectItem value="invoice">Счета</SelectItem>
+                  <SelectItem value="service_act">Сервисные акты</SelectItem>
+                  <SelectItem value="work_order">Заказ-наряды</SelectItem>
+                  <SelectItem value="other">Прочие</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="h-10 border-white/10 bg-slate-950/70 text-slate-100">
+                  <SelectValue placeholder="Статус" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Статус</SelectItem>
+                  <SelectItem value="draft">Черновик</SelectItem>
+                  <SelectItem value="sent">Отправлен</SelectItem>
+                  <SelectItem value="pending_signature">На подписи</SelectItem>
+                  <SelectItem value="signed">Подписан</SelectItem>
+                  <SelectItem value="expired">Просрочен</SelectItem>
+                  <SelectItem value="cancelled">Отменён</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={clientFilter} onValueChange={setClientFilter}>
+                <SelectTrigger className="h-10 border-white/10 bg-slate-950/70 text-slate-100">
+                  <SelectValue placeholder="Клиент" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Клиент</SelectItem>
+                  {(clients as Client[]).map(client => (
+                    <SelectItem key={client.id} value={client.id}>{client.company}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  type="date"
+                  value={periodFrom}
+                  onChange={(event) => setPeriodFrom(event.target.value)}
+                  className="h-10 border-white/10 bg-slate-950/70 text-slate-100"
+                />
+                <Input
+                  type="date"
+                  value={periodTo}
+                  onChange={(event) => setPeriodTo(event.target.value)}
+                  className="h-10 border-white/10 bg-slate-950/70 text-slate-100"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowFilters(true)}
+                className="h-10 border border-white/10 bg-white/[0.07] px-3 text-slate-200 hover:bg-white/[0.12]"
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Фильтры{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
+              </Button>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+              {canManageDocuments ? (
+                <>
+                  <Button variant="secondary" onClick={() => openContractCreate('rental')} className="border border-lime-300/20 bg-lime-300/10 text-lime-100 hover:bg-lime-300/15">
+                    <Plus className="h-4 w-4" />
+                    Договор аренды
+                  </Button>
+                  <Button variant="secondary" onClick={() => openContractCreate('supply')} className="border border-lime-300/20 bg-lime-300/10 text-lime-100 hover:bg-lime-300/15">
+                    <Plus className="h-4 w-4" />
+                    Договор поставки
+                  </Button>
+                </>
+              ) : null}
+              <Button variant="secondary" onClick={resetDocumentFilters} className="border border-white/10 bg-white/[0.05] px-3 text-slate-300 hover:bg-white/[0.1]">
+                <Settings2 className="h-4 w-4" />
+              </Button>
+              <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
+            </div>
           </div>
 
           <FilterDialog
@@ -2018,21 +2189,7 @@ export default function Documents() {
             onOpenChange={setShowFilters}
             title="Фильтры документов"
             description="Отбери документы по подписи, связям, типу, статусу и менеджеру."
-            onReset={() => {
-              setSearch('');
-              setUnsignedOnly(false);
-              setWithoutNumberOnly(false);
-              setDuplicatesOnly(false);
-              setClientFilter('all');
-              setRentalFilter('all');
-              setTypeFilter('all');
-              setStatusFilter('all');
-              setSignatureFilter('all');
-              setManagerFilter('all');
-              setQuickTypeFilter('all');
-              setUnsignedOnly(false);
-              setSortKey('date');
-            }}
+            onReset={resetDocumentFilters}
           >
             <div className="grid gap-4 md:grid-cols-2">
               <FilterField label="Поиск" className="md:col-span-2">
@@ -2190,14 +2347,14 @@ export default function Documents() {
 
           <div className="space-y-3 sm:hidden">
             {documentRows.length === 0 ? (
-              <div className="flex flex-col items-center justify-center rounded-lg border border-gray-200 bg-white px-4 py-10 text-center dark:border-gray-700 dark:bg-gray-800">
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
-                  <Search className="h-7 w-7 text-gray-400 dark:text-gray-500" />
+              <div className="flex flex-col items-center justify-center rounded-lg border border-white/10 bg-white/[0.055] px-4 py-10 text-center">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-white/[0.08]">
+                  <Search className="h-7 w-7 text-slate-500" />
                 </div>
-                <h3 className="text-base font-medium text-gray-900 dark:text-white">
+                <h3 className="text-base font-medium text-white">
                   {hasQuickClientContext ? 'Документы по клиенту не найдены' : 'Документы не найдены'}
                 </h3>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                <p className="mt-1 text-sm text-slate-400">
                   {hasQuickClientContext
                     ? `Для ${contextFilterLabel(quickActionContext)} нет документов по выбранным фильтрам`
                     : 'Созданные документы появятся здесь карточками с типом, номером, связью, суммой и статусом'}
@@ -2212,80 +2369,77 @@ export default function Documents() {
                   {activeFilterCount > 0 ? (
                     <Button
                       variant="secondary"
-                      onClick={() => {
-                        setSearch('');
-                        setUnsignedOnly(false);
-                        setWithoutNumberOnly(false);
-                        setDuplicatesOnly(false);
-                        setClientFilter('all');
-                        setRentalFilter('all');
-                        setTypeFilter('all');
-                        setStatusFilter('all');
-                        setManagerFilter('all');
-                        setQuickTypeFilter('all');
-                      }}
+                      onClick={resetDocumentFilters}
                     >
                       Сбросить фильтры
                     </Button>
                   ) : null}
                 </div>
               </div>
-            ) : documentRows.map((row) => (
-              <article key={row.key} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+            ) : documentRows.map((row) => {
+              const typeVisual = getDocumentTypeVisual(row.doc);
+              const TypeIcon = typeVisual.Icon;
+              return (
+              <article key={row.key} className="rounded-lg border border-white/10 bg-white/[0.055] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                 <div className="flex min-w-0 items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{getDocumentTypeLabel(row.doc)}</p>
-                    <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">
-                      {row.doc.contractKind ? (row.doc.contractKind === 'rental' ? 'Реестр аренды' : 'Реестр поставки') : 'Документ'}
-                    </p>
+                  <div className="flex min-w-0 flex-1 gap-3">
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ${typeVisual.className}`}>
+                      <TypeIcon className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-semibold text-white">{getDocumentTypeLabel(row.doc)}</p>
+                      <p className="mt-1 break-words text-xs text-slate-400">
+                        {row.doc.contractKind ? (row.doc.contractKind === 'rental' ? 'Реестр аренды' : 'Реестр поставки') : 'Документ'}
+                      </p>
+                    </div>
                   </div>
-                  <div className="shrink-0">{getDocumentStatusBadge(getSafeDocumentStatus(row.doc.status))}</div>
+                  <div className="shrink-0">{getDocumentStatusPill(row.doc.status)}</div>
                 </div>
 
-                <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/60 p-3">
                   <div className="flex min-w-0 items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Номер</p>
-                      <p className="mt-1 break-words text-base font-semibold text-gray-900 dark:text-white">{row.docNumber || 'Без номера'}</p>
+                      <p className="text-xs text-slate-500">Номер</p>
+                      <p className="mt-1 break-words text-base font-semibold text-white">{row.docNumber || 'Без номера'}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Дата</p>
-                      <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{row.documentDateLabel}</p>
+                      <p className="text-xs text-slate-500">Дата</p>
+                      <p className="mt-1 text-sm font-medium text-white">{row.documentDateLabel}</p>
                     </div>
                   </div>
                   {row.isDuplicate || row.doc.signedScanFileName ? (
                     <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                      {row.isDuplicate ? <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">Дубль номера</span> : null}
-                      {row.doc.signedScanFileName ? <span className="rounded-full bg-green-100 px-2 py-1 text-green-700 dark:bg-green-950/40 dark:text-green-300">Скан загружен</span> : null}
+                      {row.isDuplicate ? <span className="rounded-full bg-amber-300/15 px-2 py-1 text-amber-100">Дубль номера</span> : null}
+                      {row.doc.signedScanFileName ? <span className="rounded-full bg-emerald-300/15 px-2 py-1 text-emerald-100">Скан загружен</span> : null}
                     </div>
                   ) : null}
                 </div>
 
                 <dl className="mt-3 grid gap-2 text-sm">
                   <div className="min-w-0">
-                    <dt className="text-xs text-gray-500 dark:text-gray-400">Клиент</dt>
-                    <dd className="mt-0.5 break-words text-gray-900 dark:text-white">{displayText(row.clientName)}</dd>
+                    <dt className="text-xs text-slate-500">Клиент</dt>
+                    <dd className="mt-0.5 break-words text-slate-100">{displayText(row.clientName)}</dd>
                   </div>
                   <div className="min-w-0">
-                    <dt className="text-xs text-gray-500 dark:text-gray-400">Аренда / техника</dt>
-                    <dd className="mt-0.5 break-words text-gray-900 dark:text-white">{row.linkedEntity}</dd>
-                    <dd className="mt-0.5 break-words text-xs text-gray-500 dark:text-gray-400">
+                    <dt className="text-xs text-slate-500">Аренда / техника</dt>
+                    <dd className="mt-0.5 break-words text-slate-100">{row.linkedEntity}</dd>
+                    <dd className="mt-0.5 break-words text-xs text-slate-400">
                       {[row.equipmentLabel, row.equipmentModel].filter(Boolean).join(' · ') || 'Техника не указана'}
                     </dd>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="min-w-0">
-                      <dt className="text-xs text-gray-500 dark:text-gray-400">Сумма</dt>
-                      <dd className="mt-0.5 break-words font-medium text-gray-900 dark:text-white">{row.amountLabel}</dd>
+                      <dt className="text-xs text-slate-500">Сумма</dt>
+                      <dd className="mt-0.5 break-words font-medium text-slate-100">{row.amountLabel}</dd>
                     </div>
                     <div className="min-w-0">
-                      <dt className="text-xs text-gray-500 dark:text-gray-400">Ответственный</dt>
-                      <dd className="mt-0.5 break-words text-gray-900 dark:text-white">{displayText(row.managerName || row.doc.createdBy)}</dd>
+                      <dt className="text-xs text-slate-500">Ответственный</dt>
+                      <dd className="mt-0.5 break-words text-slate-100">{displayText(row.managerName || row.doc.createdBy)}</dd>
                     </div>
                   </div>
                   <div className="min-w-0">
-                    <dt className="text-xs text-gray-500 dark:text-gray-400">Создан / отправлен</dt>
-                    <dd className="mt-0.5 break-words text-gray-900 dark:text-white">
+                    <dt className="text-xs text-slate-500">Создан / отправлен</dt>
+                    <dd className="mt-0.5 break-words text-slate-100">
                       {row.createdLabel} · {row.sentLabel}{row.signedLabel ? ` · подп. ${row.signedLabel}` : ''}
                     </dd>
                   </div>
@@ -2324,221 +2478,143 @@ export default function Documents() {
                   ) : null}
                 </div>
               </article>
-            ))}
+              );
+            })}
           </div>
 
-          <div className="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 sm:block">
-            <Table className="min-w-[1120px]">
+          <div className="hidden overflow-hidden rounded-lg border border-white/10 bg-slate-900/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] [&_[data-slot=table-container]]:bg-none sm:block">
+            <Table className="min-w-[1080px]">
               <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10">
-                    <input type="checkbox" aria-label="Выбрать все документы" disabled />
-                  </TableHead>
-                  <TableHead>Тип</TableHead>
-                  <TableHead>Номер</TableHead>
-                  <TableHead>Дата документа</TableHead>
-                  <TableHead>Клиент</TableHead>
-                  <TableHead>Техника / объект</TableHead>
-                  <TableHead>Связанная сущность</TableHead>
-                  <TableHead>Сумма</TableHead>
-                  <TableHead>Ответственный</TableHead>
-                  <TableHead>Статус</TableHead>
-                  <TableHead>Создан</TableHead>
-                  <TableHead>Отправлен/подписан</TableHead>
-                  <TableHead className="w-[190px]">Действия</TableHead>
+                <TableRow className="border-white/12 bg-slate-800/70 hover:bg-slate-800/70">
+                  <TableHead className="text-slate-300">Тип</TableHead>
+                  <TableHead className="text-slate-300">Номер</TableHead>
+                  <TableHead className="text-slate-300">Дата документа</TableHead>
+                  <TableHead className="text-slate-300">Клиент</TableHead>
+                  <TableHead className="text-slate-300">Техника / Объект</TableHead>
+                  <TableHead className="text-slate-300">Статус</TableHead>
+                  <TableHead className="text-slate-300">Связанная сущность</TableHead>
+                  <TableHead className="w-20 text-right text-slate-300">Действия</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredDocuments.map((doc, index) => {
-                  const rentalId = getDocumentRentalId(doc);
-                  const equipmentId = getDocumentEquipmentId(doc);
-                  const equipmentInv = getDocumentEquipmentInv(doc);
-                  const rental = rentalId ? rentalsById.get(rentalId) : undefined;
-                  const gantt = rentalId ? ganttByRentalId.get(rentalId) : undefined;
-                  const equipmentItem = equipmentId
-                    ? equipmentById.get(equipmentId)
-                    : (equipmentInv ? equipmentByInventory.get(equipmentInv) : undefined);
-                  const clientName = doc.client || rental?.client || clientsById.get(doc.clientId || '')?.company;
-                  const managerName = doc.manager || rental?.manager || gantt?.manager;
-                  const docNumber = getDocumentNumber(doc);
-                  const serviceTicket = getDocumentServiceTicket(doc);
-                  const linkedEntity = [
-                    rentalId ? `Аренда ${rentalId}` : '',
-                    serviceTicket ? `Сервис ${serviceTicket}` : '',
-                    doc.deliveryId ? `Доставка ${doc.deliveryId}` : '',
-                    doc.parentDocumentId ? `Осн. ${doc.parentDocumentId}` : '',
-                  ].filter(Boolean).join(' · ') || '—';
+                {documentRows.map((row) => {
+                  const doc = row.doc;
+                  const typeVisual = getDocumentTypeVisual(doc);
+                  const TypeIcon = typeVisual.Icon;
                   return (
-                  <TableRow key={doc.id || doc.number || index} className="cursor-pointer" onClick={() => setSelectedDocument(doc)}>
-                    <TableCell>
-                      <input type="checkbox" aria-label={`Выбрать ${docNumber || doc.id}`} onClick={(event) => event.stopPropagation()} />
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm font-medium">{getDocumentTypeLabel(doc)}</p>
-                        {doc.contractKind ? (
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            {doc.contractKind === 'rental' ? 'Реестр аренды' : 'Реестр поставки'}
+                  <TableRow key={row.key} className="cursor-pointer border-white/10 bg-slate-900/35 hover:bg-lime-300/[0.07]" onClick={() => setSelectedDocument(doc)}>
+                    <TableCell className="max-w-[260px] py-3">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ${typeVisual.className}`}>
+                          <TypeIcon className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-100">{getDocumentTypeLabel(doc)}</p>
+                          <p className="truncate text-xs text-slate-500">
+                            {doc.contractKind ? (doc.contractKind === 'rental' ? 'Реестр аренды' : 'Реестр поставки') : 'Документ'}
                           </p>
-                        ) : null}
+                        </div>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="max-w-[160px]">
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{docNumber || 'Без номера'}</p>
-                        {duplicateDocumentIds.has(doc.id) ? (
-                          <p className="text-xs text-amber-600 dark:text-amber-400">Дубль номера</p>
-                        ) : null}
-                        {doc.signedScanFileName ? (
-                          <p className="text-xs text-green-600 dark:text-green-400">Скан загружен</p>
-                        ) : null}
+                        <p className="truncate font-semibold text-white">{row.docNumber || 'Без номера'}</p>
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {row.isDuplicate ? <span className="rounded-full bg-amber-300/15 px-2 py-0.5 text-[11px] text-amber-100">Дубль</span> : null}
+                          {doc.signedScanFileName ? <span className="rounded-full bg-emerald-300/15 px-2 py-0.5 text-[11px] text-emerald-100">Скан</span> : null}
+                        </div>
                       </div>
                     </TableCell>
-                    <TableCell>{formatDate(getDocumentDate(doc))}</TableCell>
-                    <TableCell>
-                      <p className="text-sm">{displayText(clientName)}</p>
+                    <TableCell className="text-slate-300">{row.documentDateLabel}</TableCell>
+                    <TableCell className="max-w-[210px]">
+                      <p className="truncate text-sm text-slate-100">{displayText(row.clientName)}</p>
                     </TableCell>
-                    <TableCell>
-                      <p className="text-sm">{displayText(equipmentInv || equipmentItem?.inventoryNumber)}</p>
-                      {equipmentItem ? (
-                        <p className="text-xs text-gray-500 dark:text-gray-400">{displayText(`${equipmentItem.manufacturer || ''} ${equipmentItem.model || ''}`.trim())}</p>
+                    <TableCell className="max-w-[220px]">
+                      <p className="truncate text-sm text-slate-100">{row.equipmentLabel}</p>
+                      {row.equipmentModel ? (
+                        <p className="truncate text-xs text-slate-500">{row.equipmentModel}</p>
                       ) : null}
                       {doc.objectId ? (
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Объект {doc.objectId}</p>
+                        <p className="truncate text-xs text-slate-500">Объект {doc.objectId}</p>
                       ) : null}
                     </TableCell>
-                    <TableCell>
-                      <p className="text-sm">{linkedEntity}</p>
-                      {rental?.startDate ? (
-                        <p className="text-xs text-gray-500 dark:text-gray-400">{formatDate(rental.startDate)}</p>
+                    <TableCell>{getDocumentStatusPill(doc.status)}</TableCell>
+                    <TableCell className="max-w-[240px]">
+                      <p className="truncate text-sm text-slate-100">{row.linkedEntity}</p>
+                      {row.rentalId ? (
+                        <p className="truncate text-xs text-slate-500">Аренда: {row.rentalId}</p>
                       ) : null}
                     </TableCell>
-                    <TableCell>{doc.amount ? formatCurrency(doc.amount) : '—'}</TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm">{displayText(managerName || doc.createdBy)}</p>
-                        {doc.updatedBy ? (
-                          <p className="text-xs text-gray-500 dark:text-gray-400">изм. {doc.updatedBy}</p>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell>{getDocumentStatusBadge(getSafeDocumentStatus(doc.status))}</TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm">{doc.createdAt ? formatDateTime(doc.createdAt) : '—'}</p>
-                        {doc.createdBy ? (
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{doc.createdBy}</p>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm">{doc.sentAt ? formatDateTime(doc.sentAt) : '—'}</p>
-                        {doc.signedAt ? (
-                          <p className="text-xs text-gray-500 dark:text-gray-400">подп. {formatDateTime(doc.signedAt)}</p>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2" onClick={(event) => event.stopPropagation()}>
-                        {!docNumber && canManageDocuments ? (
-                          <button
-                            onClick={() => void handleAssignNumber(doc)}
-                            className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                            title="Присвоить номер"
-                          >
-                            <FileSignature className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                    <TableCell className="text-right">
+                      <details className="relative inline-block" onClick={(event) => event.stopPropagation()}>
+                        <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-white/10 bg-white/[0.06] text-slate-300 transition hover:bg-white/[0.12] [&::-webkit-details-marker]:hidden">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </summary>
+                        <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-lg border border-white/10 bg-slate-900 py-1 text-left shadow-xl">
+                          <button type="button" onClick={() => setSelectedDocument(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                            <Eye className="h-4 w-4" />
+                            Детали
                           </button>
-                        ) : null}
-                        <button
-                          onClick={() => openDocument(doc)}
-                          disabled={!doc.contentHtml && !doc.printHtml && !doc.generatedContent && !doc.signedScanDataUrl}
-                          className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          title={doc.contentHtml || doc.printHtml || doc.generatedContent || doc.signedScanDataUrl ? 'Открыть' : 'Просмотр недоступен'}
-                        >
-                          <Eye className={`h-4 w-4 ${doc.contentHtml || doc.printHtml || doc.generatedContent || doc.signedScanDataUrl ? 'text-gray-500 dark:text-gray-400' : 'text-gray-300 dark:text-gray-600'}`} />
-                        </button>
-                        <button
-                          onClick={() => downloadDocument(doc)}
-                          disabled={!doc.contentHtml && !doc.signedScanDataUrl}
-                          className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          title={doc.contentHtml || doc.signedScanDataUrl ? 'Скачать' : 'Скачать недоступно'}
-                        >
-                          <Download className={`h-4 w-4 ${doc.contentHtml || doc.signedScanDataUrl ? 'text-gray-500 dark:text-gray-400' : 'text-gray-300 dark:text-gray-600'}`} />
-                        </button>
-                        {canManageDocuments && doc.type === 'contract' ? (
-                          <button
-                            onClick={() => startMarkAsSigned(doc)}
-                            className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                            title={doc.signedScanDataUrl ? 'Заменить скан подписанного договора' : 'Загрузить скан и отметить как подписанный'}
-                          >
-                            {doc.status === 'signed' ? (
-                              <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
-                            ) : (
-                              <Upload className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-                            )}
+                          <button type="button" onClick={() => openDocument(doc)} disabled={!row.canOpen} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08] disabled:text-slate-600">
+                            <Eye className="h-4 w-4" />
+                            Открыть
                           </button>
-                        ) : null}
-                        {canManageDocuments ? (
-                          <>
-                            {doc.type === 'rental_contract' ? (
-                              <>
-                                <button
-                                  onClick={() => openDocumentChainAction(doc, 'rental_specification')}
-                                  className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                                  title="Создать спецификацию"
-                                >
-                                  <ClipboardList className="h-4 w-4 text-indigo-500" />
-                                </button>
-                                <button
-                                  onClick={() => openDocumentChainAction(doc, 'transfer_act_to_client')}
-                                  className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                                  title="Создать акт передачи"
-                                >
-                                  <Send className="h-4 w-4 text-emerald-500" />
-                                </button>
-                                <button
-                                  onClick={() => openDocumentChainAction(doc, 'return_act_from_client')}
-                                  className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                                  title="Создать акт возврата"
-                                >
-                                  <Printer className="h-4 w-4 text-amber-500" />
-                                </button>
-                              </>
-                            ) : null}
-                            <button
-                              onClick={() => void handleMarkSent(doc, 'pending_signature')}
-                              className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                              title="Отметить на подписи"
-                            >
-                              <Send className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                          <button type="button" onClick={() => downloadDocument(doc)} disabled={!row.canDownload} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08] disabled:text-slate-600">
+                            <Download className="h-4 w-4" />
+                            Скачать
+                          </button>
+                          {!row.docNumber && canManageDocuments ? (
+                            <button type="button" onClick={() => void handleAssignNumber(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                              <FileSignature className="h-4 w-4" />
+                              Присвоить номер
                             </button>
-                            <button
-                              onClick={() => void handleMarkSigned(doc)}
-                              className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                              title="Отметить подписанным"
-                            >
-                              <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+                          ) : null}
+                          {canManageDocuments && doc.type === 'contract' ? (
+                            <button type="button" onClick={() => startMarkAsSigned(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                              {doc.status === 'signed' ? <CheckCircle2 className="h-4 w-4" /> : <Upload className="h-4 w-4" />}
+                              {doc.signedScanDataUrl ? 'Заменить скан' : 'Загрузить скан'}
                             </button>
-                            <button
-                              onClick={() => void handleDuplicateDocument(doc)}
-                              className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                              title="Дублировать"
-                            >
-                              <MoreHorizontal className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-                            </button>
-                            {isAdmin ? (
-                              <button
-                                onClick={() => void handleDeleteDocument(doc)}
-                                className="rounded p-1 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                                title="Удалить"
-                              >
-                                <Trash2 className="h-4 w-4 text-red-500" />
+                          ) : null}
+                          {canManageDocuments && doc.type === 'rental_contract' ? (
+                            <>
+                              <button type="button" onClick={() => openDocumentChainAction(doc, 'rental_specification')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                                <ClipboardList className="h-4 w-4" />
+                                Создать спецификацию
                               </button>
-                            ) : null}
-                          </>
-                        ) : null}
-                      </div>
+                              <button type="button" onClick={() => openDocumentChainAction(doc, 'transfer_act_to_client')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                                <Send className="h-4 w-4" />
+                                Создать акт передачи
+                              </button>
+                              <button type="button" onClick={() => openDocumentChainAction(doc, 'return_act_from_client')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                                <Printer className="h-4 w-4" />
+                                Создать акт возврата
+                              </button>
+                            </>
+                          ) : null}
+                          {canManageDocuments ? (
+                            <>
+                              <button type="button" onClick={() => void handleMarkSent(doc, 'pending_signature')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                                <Send className="h-4 w-4" />
+                                Отметить на подписи
+                              </button>
+                              <button type="button" onClick={() => void handleMarkSigned(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                                <CheckCircle2 className="h-4 w-4" />
+                                Отметить подписанным
+                              </button>
+                              <button type="button" onClick={() => void handleDuplicateDocument(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                                <Layers3 className="h-4 w-4" />
+                                Дублировать
+                              </button>
+                              {isAdmin ? (
+                                <button type="button" onClick={() => void handleDeleteDocument(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-rose-200 hover:bg-rose-500/10">
+                                  <Trash2 className="h-4 w-4" />
+                                  Удалить
+                                </button>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </div>
+                      </details>
                     </TableCell>
                   </TableRow>
                   );
@@ -2548,40 +2624,26 @@ export default function Documents() {
 
             {filteredDocuments.length === 0 && (
               <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
-                  <Search className="h-8 w-8 text-gray-400 dark:text-gray-500" />
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/[0.08]">
+                  <Search className="h-8 w-8 text-slate-500" />
                 </div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                <h3 className="text-lg font-medium text-white">
                   {hasQuickClientContext ? 'Документы по клиенту не найдены' : 'Документы не найдены'}
                 </h3>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                <p className="mt-1 text-sm text-slate-400">
                   {hasQuickClientContext
                     ? `Для ${contextFilterLabel(quickActionContext)} нет документов по выбранным фильтрам`
                     : 'Попробуйте изменить параметры поиска или фильтры'}
                 </p>
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
                   {canManageDocuments ? (
-                    <Button onClick={() => openDocumentWizard()}>
+                    <Button onClick={() => openDocumentWizard()} className="bg-lime-300 text-slate-950 hover:bg-lime-200">
                       <Plus className="h-4 w-4" />
                       Создать документ
                     </Button>
                   ) : null}
                   {activeFilterCount > 0 ? (
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setSearch('');
-                        setUnsignedOnly(false);
-                        setWithoutNumberOnly(false);
-                        setDuplicatesOnly(false);
-                        setClientFilter('all');
-                        setRentalFilter('all');
-                        setTypeFilter('all');
-                        setStatusFilter('all');
-                        setManagerFilter('all');
-                        setQuickTypeFilter('all');
-                      }}
-                    >
+                    <Button variant="secondary" onClick={resetDocumentFilters}>
                       Сбросить фильтры
                     </Button>
                   ) : null}

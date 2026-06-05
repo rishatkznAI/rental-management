@@ -2,8 +2,6 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import {
   Building2,
-  ChevronLeft,
-  ChevronRight,
   Download,
   Grid2X2,
   List,
@@ -23,12 +21,11 @@ import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { usePermissions } from '../lib/permissions';
 import { usePaginatedClients } from '../hooks/useClients';
-import { usePaymentsList } from '../hooks/usePayments';
-import { useRentalsList } from '../hooks/useRentals';
 import { formatCurrency } from '../lib/utils';
 import { useServerPagination } from '../hooks/useServerPagination';
+import { PaginationControls } from '../components/common/PaginationControls';
 import { cn } from '../components/ui/utils';
-import type { Client, Payment, Rental } from '../types';
+import type { Client } from '../types';
 
 type ClientKind = 'rental' | 'sale';
 
@@ -54,13 +51,6 @@ function compactCurrency(value: number) {
   return formatCurrency(value).replace(/\u00a0/g, ' ');
 }
 
-function getPaymentAmount(payment: Payment) {
-  const paid = Number(payment.paidAmount);
-  const amount = Number(payment.amount);
-  if (Number.isFinite(paid) && paid > 0) return paid;
-  return Number.isFinite(amount) && amount > 0 ? amount : 0;
-}
-
 function isThisMonth(dateValue?: string) {
   if (!dateValue) return false;
   const date = new Date(dateValue);
@@ -79,19 +69,16 @@ function isThisWeek(dateValue?: string) {
   return date >= weekAgo && date <= now;
 }
 
-function clientKey(client: Client) {
-  return String(client.id || client.company || '').trim();
+function clientNumber(client: Client, fields: string[]) {
+  const record = client as Client & Record<string, unknown>;
+  for (const field of fields) {
+    const value = Number(record[field]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return 0;
 }
 
-function rentalClientKey(rental: Rental) {
-  return String(rental.clientId || rental.client || '').trim();
-}
-
-function paymentClientKey(payment: Payment) {
-  return String(payment.clientId || payment.client || '').trim();
-}
-
-function resolveClientKind(client: Client, rentalClientIds: Set<string>, paymentClientIds: Set<string>): ClientKind {
+function resolveClientKind(client: Client): ClientKind {
   const explicit = String((client as Client & { businessType?: string; segment?: string; clientKind?: string }).businessType
     || (client as Client & { businessType?: string; segment?: string; clientKind?: string }).segment
     || (client as Client & { businessType?: string; segment?: string; clientKind?: string }).clientKind
@@ -99,9 +86,6 @@ function resolveClientKind(client: Client, rentalClientIds: Set<string>, payment
   if (explicit.includes('sale') || explicit.includes('прод')) return 'sale';
   if (explicit.includes('rent') || explicit.includes('аренд')) return 'rental';
 
-  const key = clientKey(client);
-  if (key && rentalClientIds.has(key)) return 'rental';
-  if (key && paymentClientIds.has(key) && !rentalClientIds.has(key)) return 'sale';
   return (client.totalRentals || 0) > 0 ? 'rental' : 'sale';
 }
 
@@ -131,13 +115,6 @@ function statusClassName(status?: string) {
   if (normalized === 'inactive') return 'border-slate-400/20 bg-slate-400/10 text-slate-300';
   if (normalized === 'new') return 'border-lime-300/25 bg-lime-300/10 text-lime-200';
   return 'border-emerald-300/25 bg-emerald-300/10 text-emerald-200';
-}
-
-function paginationPages(current: number, total: number) {
-  if (total <= 6) return Array.from({ length: total }, (_, index) => index + 1);
-  const pages = [1, 2, 3, 4, 5, 'ellipsis', total] as const;
-  if (current > 5 && current < total) return [1, 'ellipsis', current - 1, current, current + 1, 'ellipsis-end', total] as const;
-  return pages;
 }
 
 function FilterSelect({
@@ -251,7 +228,7 @@ function ClientMobileCard({
 }
 
 export default function Clients() {
-  const { can, canReadCollection } = usePermissions();
+  const { can } = usePermissions();
   const pagination = useServerPagination({
     initialSortBy: 'company',
     initialSortDir: 'asc',
@@ -268,43 +245,15 @@ export default function Clients() {
     sortDir: pagination.sortDir,
     filters: pagination.filters,
   });
-  const canReadRentals = canReadCollection('rentals');
-  const canReadPayments = canReadCollection('payments');
-  const rentalsQuery = useRentalsList({ enabled: canReadRentals });
-  const paymentsQuery = usePaymentsList({ enabled: canReadPayments });
-
   const computedClients = clientsQuery.data?.items ?? [];
   const paginationMeta = clientsQuery.data?.pagination;
   const totalClients = paginationMeta?.total ?? computedClients.length;
-  const rentals = rentalsQuery.data ?? [];
-  const payments = paymentsQuery.data ?? [];
-
-  const rentalClientIds = React.useMemo(() => {
-    const ids = new Set<string>();
-    rentals.forEach(rental => {
-      const id = rentalClientKey(rental);
-      if (id) ids.add(id);
-    });
-    computedClients.forEach(client => {
-      if ((client.totalRentals || 0) > 0) ids.add(clientKey(client));
-    });
-    return ids;
-  }, [computedClients, rentals]);
-
-  const paymentClientIds = React.useMemo(() => {
-    const ids = new Set<string>();
-    payments.forEach(payment => {
-      const id = paymentClientKey(payment);
-      if (id) ids.add(id);
-    });
-    return ids;
-  }, [payments]);
 
   const clientsWithMeta = React.useMemo(() => computedClients.map((client, index) => ({
     client,
-    kind: resolveClientKind(client, rentalClientIds, paymentClientIds),
+    kind: resolveClientKind(client),
     manager: managerName(client, index),
-  })), [computedClients, paymentClientIds, rentalClientIds]);
+  })), [computedClients]);
 
   const managerOptions = React.useMemo(() => {
     const values = Array.from(new Set(clientsWithMeta.map(item => item.manager).filter(Boolean)));
@@ -322,16 +271,17 @@ export default function Clients() {
 
   const rentalClientCount = clientsWithMeta.filter(item => item.kind === 'rental').length;
   const saleClientCount = clientsWithMeta.filter(item => item.kind === 'sale').length;
-  const turnover = payments.reduce((sum, payment) => sum + getPaymentAmount(payment), 0);
+  const turnover = computedClients.reduce(
+    (sum, client) => sum + clientNumber(client, ['turnover', 'totalTurnover', 'revenue', 'totalRevenue', 'paidTotal', 'totalPaid']),
+    0,
+  );
   const newThisMonth = computedClients.filter(client => isThisMonth(client.createdAt)).length;
   const newThisWeek = computedClients.filter(client => isThisWeek(client.createdAt)).length;
   const displayTotal = totalClients || DEMO_TOTAL_CLIENTS;
   const displayRental = totalClients ? rentalClientCount : DEMO_RENTAL_CLIENTS;
   const displaySale = totalClients ? saleClientCount : DEMO_SALE_CLIENTS;
-  const displayTurnover = turnover || DEMO_TURNOVER;
+  const displayTurnover = turnover || computedClients.reduce((sum, client) => sum + Math.max(0, Number(client.debt) || 0), 0) || DEMO_TURNOVER;
   const displayNew = newThisMonth || (totalClients ? Math.min(DEMO_NEW_CLIENTS, totalClients) : DEMO_NEW_CLIENTS);
-  const totalPages = Math.max(1, paginationMeta?.totalPages ?? 1);
-  const currentPage = paginationMeta?.page ?? pagination.page;
 
   const resetFilters = () => {
     pagination.reset();
@@ -545,57 +495,13 @@ export default function Clients() {
           </div>
         )}
 
-        <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-4 md:flex-row md:items-center md:justify-between">
-          <label className="flex items-center gap-2 text-sm text-slate-500">
-            <span>Показывать по:</span>
-            <select
-              value={pagination.pageSize}
-              onChange={(event) => pagination.setPageSize(Number(event.target.value))}
-              className="h-9 rounded-lg border border-white/10 bg-[#111827] px-3 text-sm font-semibold text-slate-100 outline-none"
-            >
-              {[25, 50, 100].map(option => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </label>
-          <div className="flex flex-wrap items-center gap-1">
-            <button
-              type="button"
-              disabled={!paginationMeta?.hasPrevPage || clientsQuery.isFetching}
-              onClick={() => pagination.setPage(Math.max(1, currentPage - 1))}
-              className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-[#111827] text-slate-400 transition-colors hover:text-lime-200 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="Предыдущая страница"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            {paginationPages(currentPage, totalPages).map(page => page === 'ellipsis' || page === 'ellipsis-end' ? (
-              <span key={page} className="flex h-9 w-9 items-center justify-center text-slate-600">...</span>
-            ) : (
-              <button
-                key={page}
-                type="button"
-                onClick={() => pagination.setPage(page)}
-                className={cn(
-                  'flex h-9 min-w-9 items-center justify-center rounded-lg border px-3 text-sm font-semibold transition-colors',
-                  page === currentPage
-                    ? 'border-lime-300 bg-lime-300 text-slate-950 shadow-[0_0_18px_rgba(190,242,100,0.24)]'
-                    : 'border-white/10 bg-[#111827] text-slate-400 hover:text-lime-200',
-                )}
-              >
-                {page}
-              </button>
-            ))}
-            <button
-              type="button"
-              disabled={!paginationMeta?.hasNextPage || clientsQuery.isFetching}
-              onClick={() => pagination.setPage(currentPage + 1)}
-              className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-[#111827] text-slate-400 transition-colors hover:text-lime-200 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="Следующая страница"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
+        <PaginationControls
+          pagination={paginationMeta}
+          loading={clientsQuery.isFetching}
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+          className="border-white/10 bg-[#0d1524]/95 px-4 py-4 text-slate-500 dark:border-white/10 dark:text-slate-400 [&_button]:rounded-lg [&_button]:border-white/10 [&_button]:bg-[#111827] [&_button]:text-slate-300 [&_button:hover]:text-lime-200 [&_select]:border-white/10 [&_select]:bg-[#111827] [&_select]:text-slate-100 [&_span.font-medium]:text-slate-300"
+        />
       </section>
     </div>
   );

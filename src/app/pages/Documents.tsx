@@ -2180,7 +2180,6 @@ export default function Documents() {
               <Button variant="secondary" onClick={resetDocumentFilters} className="border border-white/10 bg-white/[0.05] px-3 text-slate-300 hover:bg-white/[0.1]">
                 <Settings2 className="h-4 w-4" />
               </Button>
-              <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
             </div>
           </div>
 

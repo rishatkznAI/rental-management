@@ -27,6 +27,18 @@ test('Payments page exposes allocation management UI and auto-allocation flow', 
   assert.match(source, /applyPaymentAllocationPreview\(payment\.id, preview\)/);
 });
 
+test('Payments page links client names to existing client detail route', () => {
+  const source = readSource('src/app/pages/Payments.tsx');
+
+  assert.match(source, /import \{ Link, useSearchParams \} from 'react-router-dom'/);
+  assert.match(source, /function resolveClientProfileId/);
+  assert.match(source, /const stableClientId = text\(clientId\)/);
+  assert.match(source, /matches\.length === 1/);
+  assert.match(source, /to=\{`\/clients\/\$\{clientProfileId\}`\}/);
+  assert.match(source, /Открыть карточку клиента/);
+  assert.match(source, /onClick=\{\(\) => setSelectedPaymentId\(payment\.id\)\}/);
+});
+
 test('Client and rental details show allocation-aware finance state', () => {
   const clientDetail = readSource('src/app/pages/ClientDetail.tsx');
   const rentalDetail = readSource('src/app/pages/RentalDetail.tsx');

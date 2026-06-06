@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -72,6 +72,31 @@ function paymentCountLabel(value: number) {
 
 function clientInitial(name: string) {
   return (name.trim()[0] || 'К').toUpperCase();
+}
+
+function normalizedClientName(value: unknown) {
+  return text(value).toLowerCase();
+}
+
+function resolveClientProfileId({
+  clients,
+  clientsById,
+  clientId,
+  clientName,
+}: {
+  clients: Client[];
+  clientsById: Map<string, Client>;
+  clientId?: unknown;
+  clientName?: unknown;
+}) {
+  const stableClientId = text(clientId);
+  if (stableClientId) return stableClientId;
+
+  const name = normalizedClientName(clientName);
+  if (!name) return '';
+
+  const matches = clients.filter(client => normalizedClientName(client.company) === name);
+  return matches.length === 1 && clientsById.has(matches[0].id) ? matches[0].id : '';
 }
 
 function avatarTone(index: number) {
@@ -1040,39 +1065,57 @@ export default function Payments() {
                 <span />
               </div>
               <div className="divide-y divide-slate-100 dark:divide-border">
-              {visibleClientReceivables.map((row, index) => (
-                <div
-                  key={row.client}
-                  className="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_120px_190px_28px] md:items-center md:gap-4"
-                >
-                  <div className="flex min-w-0 items-start gap-3">
-                    <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-semibold', avatarTone(index))}>
-                      {clientInitial(row.client)}
+              {visibleClientReceivables.map((row, index) => {
+                const clientProfileId = resolveClientProfileId({
+                  clients,
+                  clientsById,
+                  clientId: row.clientId,
+                  clientName: row.client,
+                });
+                const rowClassName = cn(
+                  'grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_120px_190px_28px] md:items-center md:gap-4',
+                  clientProfileId && 'cursor-pointer rounded-2xl px-2 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 dark:hover:bg-muted/45',
+                );
+                const rowContent = (
+                  <>
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-semibold', avatarTone(index))}>
+                        {clientInitial(row.client)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className={cn('truncate font-semibold text-slate-950 dark:text-white', clientProfileId && 'group-hover:text-[--color-primary]')}>{row.client}</p>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">
+                          Неоплаченных аренд: {row.unpaidRentals}
+                          {' · '}
+                          Просроченных: {row.overdueRentals}
+                        </p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold text-slate-950 dark:text-white">{row.client}</p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">
-                        Неоплаченных аренд: {row.unpaidRentals}
-                        {' · '}
-                        Просроченных: {row.overdueRentals}
-                      </p>
+                    <div className="hidden text-center text-sm font-semibold text-slate-700 dark:text-foreground md:block">{row.unpaidRentals}</div>
+                    <div className="flex items-end justify-between gap-3 md:block md:text-right">
+                      <span className="text-xs font-medium uppercase tracking-wide text-slate-400 md:hidden">Задолженность</span>
+                      <div>
+                        <p className={cn('text-lg font-semibold', row.exceededLimit ? 'text-red-600 dark:text-red-300' : 'text-slate-950 dark:text-white')}>
+                          {formatCurrency(row.currentDebt)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-400 dark:text-muted-foreground">
+                          Лимит: {row.creditLimit > 0 ? formatCurrency(row.creditLimit) : 'не задан'}
+                        </p>
+                      </div>
                     </div>
+                    <ChevronRight className={cn('hidden h-5 w-5 text-slate-300 dark:text-muted-foreground md:block', clientProfileId && 'transition group-hover:text-[--color-primary]')} />
+                  </>
+                );
+                return clientProfileId ? (
+                  <Link key={row.clientId || row.client} to={`/clients/${clientProfileId}`} className={cn('group', rowClassName)} aria-label={`Открыть карточку клиента ${row.client}`}>
+                    {rowContent}
+                  </Link>
+                ) : (
+                  <div key={row.clientId || row.client} className={rowClassName}>
+                    {rowContent}
                   </div>
-                  <div className="hidden text-center text-sm font-semibold text-slate-700 dark:text-foreground md:block">{row.unpaidRentals}</div>
-                  <div className="flex items-end justify-between gap-3 md:block md:text-right">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-400 md:hidden">Задолженность</span>
-                    <div>
-                      <p className={cn('text-lg font-semibold', row.exceededLimit ? 'text-red-600 dark:text-red-300' : 'text-slate-950 dark:text-white')}>
-                        {formatCurrency(row.currentDebt)}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-400 dark:text-muted-foreground">
-                        Лимит: {row.creditLimit > 0 ? formatCurrency(row.creditLimit) : 'не задан'}
-                      </p>
-                    </div>
-                  </div>
-                  <ChevronRight className="hidden h-5 w-5 text-slate-300 dark:text-muted-foreground md:block" />
-                </div>
-              ))}
+                );
+              })}
               </div>
               {clientReceivables.length > 8 && (
                 <button
@@ -1107,16 +1150,21 @@ export default function Payments() {
             <div className="space-y-3">
               {visibleRentalDebtRows.map(row => {
                 const isOverdue = overdueDebtRentals.some(item => item.rentalId === row.rentalId);
-                return (
-                  <div
-                    key={row.rentalId}
-                    className={cn(
-                      'grid gap-3 rounded-2xl border bg-white py-4 pl-4 pr-3 shadow-[0_12px_30px_rgba(15,23,42,0.04)] dark:bg-card/70 dark:shadow-none sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4',
-                      isOverdue ? 'border-red-200 border-l-4 border-l-red-400 bg-red-50/45 dark:border-red-900/50 dark:border-l-red-500 dark:bg-red-950/20' : 'border-slate-200 border-l-4 border-l-slate-200 dark:border-border dark:border-l-border',
-                    )}
-                  >
+                const clientProfileId = resolveClientProfileId({
+                  clients,
+                  clientsById,
+                  clientId: row.clientId,
+                  clientName: row.client,
+                });
+                const cardClassName = cn(
+                  'grid gap-3 rounded-2xl border bg-white py-4 pl-4 pr-3 shadow-[0_12px_30px_rgba(15,23,42,0.04)] dark:bg-card/70 dark:shadow-none sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4',
+                  isOverdue ? 'border-red-200 border-l-4 border-l-red-400 bg-red-50/45 dark:border-red-900/50 dark:border-l-red-500 dark:bg-red-950/20' : 'border-slate-200 border-l-4 border-l-slate-200 dark:border-border dark:border-l-border',
+                  clientProfileId && 'cursor-pointer transition hover:border-lime-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 dark:hover:bg-muted/45',
+                );
+                const cardContent = (
+                  <>
                     <div className="min-w-0">
-                      <p className="truncate font-semibold text-slate-950 dark:text-white">{row.client}</p>
+                      <p className={cn('truncate font-semibold text-slate-950 dark:text-white', clientProfileId && 'group-hover:text-[--color-primary]')}>{row.client}</p>
                       <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">
                         {row.rentalId} · {row.startDate} — {row.endDate}
                       </p>
@@ -1135,8 +1183,17 @@ export default function Payments() {
                           Оплачено: {formatCurrency(row.paidAmount)}
                         </p>
                       </div>
-                      <ChevronRight className="mt-1 h-5 w-5 text-slate-300 dark:text-muted-foreground" />
+                      <ChevronRight className={cn('mt-1 h-5 w-5 text-slate-300 dark:text-muted-foreground', clientProfileId && 'transition group-hover:text-[--color-primary]')} />
                     </div>
+                  </>
+                );
+                return clientProfileId ? (
+                  <Link key={row.rentalId} to={`/clients/${clientProfileId}`} className={cn('group', cardClassName)} aria-label={`Открыть карточку клиента ${row.client}`}>
+                    {cardContent}
+                  </Link>
+                ) : (
+                  <div key={row.rentalId} className={cardClassName}>
+                    {cardContent}
                   </div>
                 );
               })}
@@ -1253,6 +1310,12 @@ export default function Payments() {
             {paymentList.map((payment) => {
               const paid = payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0);
               const remaining = payment.amount - paid;
+              const clientProfileId = resolveClientProfileId({
+                clients,
+                clientsById,
+                clientId: payment.clientId,
+                clientName: payment.client,
+              });
               return (
                 <tr
                   key={payment.id}
@@ -1274,7 +1337,17 @@ export default function Payments() {
                     )}
                   </td>
                   <td className="max-w-[220px] px-4 py-3 align-middle">
-                    <p className="truncate text-sm font-medium text-slate-700 dark:text-foreground">{payment.client}</p>
+                    {clientProfileId ? (
+                      <Link
+                        to={`/clients/${clientProfileId}`}
+                        className="block truncate rounded-md text-sm font-medium text-slate-700 transition hover:text-[--color-primary] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 dark:text-foreground"
+                        aria-label={`Открыть карточку клиента ${payment.client}`}
+                      >
+                        {payment.client}
+                      </Link>
+                    ) : (
+                      <p className="truncate text-sm font-medium text-slate-700 dark:text-foreground">{payment.client}</p>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 align-middle">
                     <p className="font-semibold text-slate-950 dark:text-white">{formatCurrency(payment.amount)}</p>

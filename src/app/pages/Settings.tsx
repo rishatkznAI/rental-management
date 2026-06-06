@@ -1091,7 +1091,7 @@ export default function Settings() {
         </TabsList>
 
         {/* ── Пользователи ─────────────────────────────────────────────────── */}
-        <TabsContent value="users">
+        <TabsContent value="users" data-testid="admin-users-roles-section">
           <Card>
             <CardHeader>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1111,7 +1111,7 @@ export default function Settings() {
                   Нет пользователей. Нажмите «Добавить пользователя».
                 </p>
               ) : (
-                <Table className="min-w-[760px]">
+                <Table className="min-w-[760px]" data-testid="admin-users-table">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Имя</TableHead>

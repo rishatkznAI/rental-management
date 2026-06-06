@@ -219,7 +219,8 @@ test.describe('production smoke', () => {
     await navigateInApp(page, '/admin');
     await expect(page.getByRole('heading', { name: 'Панель администратора' })).toBeVisible();
 
-    const row = page.getByRole('row', { name: new RegExp(email) });
+    const detailedUsers = page.getByTestId('admin-users-table');
+    const row = detailedUsers.getByRole('row', { name: new RegExp(email) });
     await expect(row).toBeVisible();
 
     await row.locator('button[title="Удалить"]').click();

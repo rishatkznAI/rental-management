@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate, useNavigation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
-import { CalendarDays, ChevronDown, LayoutDashboard, LogOut, Menu, Plus, Search, Settings, Truck, FileText, Wrench, Users } from 'lucide-react';
+import { CalendarDays, ChevronDown, LayoutDashboard, LogOut, Menu, Moon, Plus, Search, Settings, Sun, Truck, FileText, Wrench, Users } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { NotificationCenter } from './NotificationCenter';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { usePermissions, pathToSection, pathToRequiredAction } from '../../lib/permissions';
 import { traceAuth } from '../../lib/authDebug';
 import { AppLoadingState } from '../ui/AppLoadingState';
@@ -44,6 +45,7 @@ export function Layout() {
   const [demoPresentationMotion, setDemoPresentationMotion] = useState(false);
 
   const { isAuthenticated, isLoading, user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const { can, canView, defaultPath } = usePermissions();
   const firstAllowedPath = defaultPath();
   const hasAccessibleSection = firstAllowedPath !== '/login';
@@ -110,6 +112,26 @@ export function Layout() {
       return next;
     });
   };
+
+  const themeToggleLabel = theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему';
+  const ThemeIcon = theme === 'dark' ? Sun : Moon;
+  const renderThemeToggleButton = () => (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      aria-pressed={theme === 'dark'}
+      aria-label={themeToggleLabel}
+      title={themeToggleLabel}
+      className={cn(
+        'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition',
+        isAdminReferenceMode
+          ? 'border-[#e3e8ef] bg-white text-[#5f6b7a] hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600'
+          : 'border-border bg-white text-muted-foreground hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:bg-input/30 dark:text-primary dark:hover:bg-accent/50',
+      )}
+    >
+      <ThemeIcon className="h-5 w-5" />
+    </button>
+  );
 
   useEffect(() => {
     const enabled = isDemoPresentationMotionEnabled(location.search);
@@ -243,6 +265,7 @@ export function Layout() {
           <span className="app-shell-title text-base font-extrabold text-sidebar-foreground">Скайтех</span>
         </div>
         <div className="flex items-center gap-2">
+          {renderThemeToggleButton()}
           <NotificationCenter />
           <div className="relative">
             <button
@@ -359,6 +382,7 @@ export function Layout() {
               <CalendarDays className="h-5 w-5" />
             </button>
           ) : null}
+          {renderThemeToggleButton()}
           <NotificationCenter />
           <div className="relative">
             <button

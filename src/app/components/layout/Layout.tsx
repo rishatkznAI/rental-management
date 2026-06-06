@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Outlet, useLocation, useNavigate, useNavigation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { CalendarDays, ChevronDown, LayoutDashboard, LogOut, Menu, Moon, Plus, Settings, Sun, Truck, FileText, Wrench, Users } from 'lucide-react';
@@ -6,8 +7,14 @@ import { cn } from '../../lib/utils';
 import { NotificationCenter } from './NotificationCenter';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
-import { usePermissions, pathToSection, pathToRequiredAction } from '../../lib/permissions';
+import { usePermissions, pathToSection, pathToRequiredAction, SECTION_PATHS } from '../../lib/permissions';
+import {
+  SIDEBAR_NAV_VISIBILITY_SETTING_KEY,
+  isSidebarSectionEnabled,
+  normalizeSidebarVisibility,
+} from '../../lib/navigation';
 import { traceAuth } from '../../lib/authDebug';
+import { appSettingsService } from '../../services/app-settings.service';
 import { AppLoadingState } from '../ui/AppLoadingState';
 import { AppErrorState } from '../ui/AppErrorState';
 import { LiftLogo } from './LiftLogo';
@@ -46,12 +53,34 @@ export function Layout() {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { can, canView, defaultPath } = usePermissions();
-  const firstAllowedPath = defaultPath();
+  const canReadAppSettings = canView('admin_panel');
+  const { data: shellSettings = [] } = useQuery({
+    queryKey: ['app-settings', canReadAppSettings ? 'private' : 'public'],
+    queryFn: canReadAppSettings ? appSettingsService.getAll : appSettingsService.getPublic,
+    enabled: isAuthenticated,
+    staleTime: 1000 * 60 * 5,
+  });
+  const sidebarVisibility = useMemo(() => {
+    const visibilitySetting = shellSettings.find(item => item.key === SIDEBAR_NAV_VISIBILITY_SETTING_KEY);
+    return normalizeSidebarVisibility(visibilitySetting?.value);
+  }, [shellSettings]);
+  const firstAllowedPath = useMemo(() => {
+    for (const [candidateSection, path] of SECTION_PATHS) {
+      if (canView(candidateSection) && isSidebarSectionEnabled(sidebarVisibility, candidateSection)) {
+        return path;
+      }
+    }
+    return defaultPath();
+  }, [canView, defaultPath, sidebarVisibility]);
   const hasAccessibleSection = firstAllowedPath !== '/login';
-  const visibleBottomNav = BOTTOM_NAV.filter(item => canView(pathToSection(item.href) || 'dashboard'));
+  const visibleBottomNav = BOTTOM_NAV.filter(item => {
+    const bottomSection = pathToSection(item.href) || 'dashboard';
+    return canView(bottomSection) && isSidebarSectionEnabled(sidebarVisibility, bottomSection);
+  });
   const section = useMemo(() => pathToSection(location.pathname), [location.pathname]);
   const requiredAction = useMemo(() => pathToRequiredAction(location.pathname), [location.pathname]);
-  const shouldRedirectBySection = Boolean(section && !canView(section));
+  const isCurrentMenuSectionEnabled = !section || isSidebarSectionEnabled(sidebarVisibility, section);
+  const shouldRedirectBySection = Boolean(section && (!canView(section) || !isCurrentMenuSectionEnabled));
   const shouldRedirectByAction = Boolean(
     requiredAction && !can(requiredAction.action, requiredAction.section),
   );
@@ -117,6 +146,7 @@ export function Layout() {
     <button
       type="button"
       onClick={toggleTheme}
+      data-testid="theme-toggle"
       aria-pressed={theme === 'dark'}
       aria-label={themeToggleLabel}
       title={themeToggleLabel}
@@ -151,6 +181,7 @@ export function Layout() {
       firstAllowedPath,
       hasAccessibleSection,
       section,
+      isCurrentMenuSectionEnabled,
       shouldRedirectBySection,
       shouldRedirectByAction,
     });
@@ -201,7 +232,7 @@ export function Layout() {
     }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firstAllowedPath, hasAccessibleSection, isAuthenticated, isLoading, location.pathname, navigate, requiredAction, section, shouldRedirectByAction, shouldRedirectBySection, user]);
+  }, [firstAllowedPath, hasAccessibleSection, isAuthenticated, isCurrentMenuSectionEnabled, isLoading, location.pathname, navigate, requiredAction, section, shouldRedirectByAction, shouldRedirectBySection, user]);
 
   // While checking auth, show the same calm loading state as route transitions.
   if (isLoading) {

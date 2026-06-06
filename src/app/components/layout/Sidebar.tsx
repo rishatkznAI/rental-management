@@ -33,9 +33,12 @@ import { usePermissions, type Section } from '../../lib/permissions';
 import {
   DEFAULT_SIDEBAR_ORDER,
   SIDEBAR_NAV_GROUP_SETTING_KEY,
+  SIDEBAR_NAV_VISIBILITY_SETTING_KEY,
   SIDEBAR_NAV_GROUPS,
+  isSidebarSectionEnabled,
   normalizeSidebarGroups,
   normalizeSidebarOrder,
+  normalizeSidebarVisibility,
 } from '../../lib/navigation';
 import { getInvestorBinding, isInvestorUser } from '../../lib/userStorage';
 import { buildGlobalSearchGroups, normalizeGlobalSearchQuery } from '../../lib/globalSearch.js';
@@ -213,9 +216,9 @@ export function Sidebar({
   });
   const canReadAppSettings = canView('admin_panel');
   const { data: appSettings = [] } = useQuery({
-    queryKey: ['app-settings'],
-    queryFn: appSettingsService.getAll,
-    enabled: canReadAppSettings,
+    queryKey: ['app-settings', canReadAppSettings ? 'private' : 'public'],
+    queryFn: canReadAppSettings ? appSettingsService.getAll : appSettingsService.getPublic,
+    enabled: Boolean(user),
     staleTime: 1000 * 60 * 5,
   });
   const normalizedSearch = normalizeGlobalSearchQuery(deferredSearch);
@@ -377,6 +380,10 @@ export function Sidebar({
     const groupSetting = appSettings.find(item => item.key === SIDEBAR_NAV_GROUP_SETTING_KEY);
     return normalizeSidebarGroups(groupSetting?.value);
   }, [appSettings]);
+  const sidebarVisibility = useMemo(() => {
+    const visibilitySetting = appSettings.find(item => item.key === SIDEBAR_NAV_VISIBILITY_SETTING_KEY);
+    return normalizeSidebarVisibility(visibilitySetting?.value);
+  }, [appSettings]);
   const orderIndex = useMemo(() => {
     const next = new Map<Section, number>();
     sidebarOrder.forEach((section, index) => next.set(section, index));
@@ -391,6 +398,7 @@ export function Sidebar({
     items: navigation
       .filter(item =>
         canView(item.section)
+        && isSidebarSectionEnabled(sidebarVisibility, item.section)
         && sidebarGroups[item.section] === group.id
       )
       .sort((a, b) => {

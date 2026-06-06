@@ -995,12 +995,18 @@ function registerSystemRoutes(app, deps) {
   }
 
   function getSafePublicSettings() {
+    const requiredShellKeys = [
+      'sidebar_navigation_groups',
+      'sidebar_navigation_order',
+      'sidebar_navigation_visibility',
+    ];
     const allowedKeys = new Set(
       String(process.env.PUBLIC_APP_SETTING_KEYS || 'crm_archive_state,equipment_type_settings,theme,sales_section_settings')
         .split(',')
         .map(key => key.trim())
         .filter(Boolean),
     );
+    requiredShellKeys.forEach(key => allowedKeys.add(key));
     return (readData('app_settings') || [])
       .filter(item => allowedKeys.has(String(item?.key || '').trim()))
       .map(item => ({ key: item.key, value: item.value }));

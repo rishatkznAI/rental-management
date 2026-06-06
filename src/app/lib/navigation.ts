@@ -9,6 +9,7 @@ export interface SidebarNavGroup {
 }
 
 export const SIDEBAR_NAV_GROUP_SETTING_KEY = 'sidebar_navigation_groups';
+export const SIDEBAR_NAV_VISIBILITY_SETTING_KEY = 'sidebar_navigation_visibility';
 
 export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   { id: 'main', title: 'Главное', items: ['dashboard', 'tasks_center', 'equipment', 'gsm', 'knowledge_base', 'crm', 'sales', 'deliveries', 'rentals'] },
@@ -27,8 +28,14 @@ export const DEFAULT_SIDEBAR_GROUPS = SIDEBAR_NAV_GROUPS.reduce((acc, group) => 
   return acc;
 }, {} as Record<Section, SidebarNavGroupId>);
 
+export const DEFAULT_SIDEBAR_VISIBILITY = DEFAULT_SIDEBAR_ORDER.reduce((acc, section) => {
+  acc[section] = true;
+  return acc;
+}, {} as Record<Section, boolean>);
+
 const SIDEBAR_SECTION_SET = new Set(DEFAULT_SIDEBAR_ORDER);
 const SIDEBAR_GROUP_SET = new Set(SIDEBAR_NAV_GROUPS.map(group => group.id));
+const REQUIRED_VISIBLE_SECTIONS = new Set<Section>(['dashboard', 'admin_panel']);
 
 export function normalizeSidebarOrder(value: unknown): Section[] {
   const storedOrder = Array.isArray(value)
@@ -53,6 +60,33 @@ export function normalizeSidebarGroups(value: unknown): Record<Section, SidebarN
   });
 
   return next;
+}
+
+export function normalizeSidebarVisibility(value: unknown): Record<Section, boolean> {
+  const next = { ...DEFAULT_SIDEBAR_VISIBILITY };
+  const entries = value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.entries(value as Record<string, unknown>)
+    : [];
+
+  entries.forEach(([section, enabled]) => {
+    if (!SIDEBAR_SECTION_SET.has(section as Section)) return;
+    if (typeof enabled !== 'boolean') return;
+    next[section as Section] = enabled;
+  });
+
+  REQUIRED_VISIBLE_SECTIONS.forEach(section => {
+    next[section] = true;
+  });
+
+  return next;
+}
+
+export function isSidebarSectionVisibilityConfigurable(section: Section): boolean {
+  return SIDEBAR_SECTION_SET.has(section) && !REQUIRED_VISIBLE_SECTIONS.has(section);
+}
+
+export function isSidebarSectionEnabled(visibility: Record<Section, boolean>, section: Section): boolean {
+  return visibility[section] !== false;
 }
 
 export const SIDEBAR_SECTION_LABELS: Record<Section, string> = {

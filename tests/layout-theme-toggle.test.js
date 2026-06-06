@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const layoutSource = readFileSync(new URL('../src/app/components/layout/Layout.tsx', import.meta.url), 'utf8');
 const sidebarSource = readFileSync(new URL('../src/app/components/layout/Sidebar.tsx', import.meta.url), 'utf8');
+const settingsSource = readFileSync(new URL('../src/app/pages/Settings.tsx', import.meta.url), 'utf8');
 const themeContextSource = readFileSync(new URL('../src/app/contexts/ThemeContext.tsx', import.meta.url), 'utf8');
 
 test('app layout exposes the persisted theme toggle in the topbar', () => {
@@ -26,4 +27,20 @@ test('theme state keeps the original localStorage key and html dark class', () =
 test('sidebar no longer owns the only visible theme control', () => {
   assert.doesNotMatch(sidebarSource, /useTheme\(\)/);
   assert.doesNotMatch(sidebarSource, /aria-label="Переключить тему"/);
+});
+
+test('admin route keeps the common app shell around dashboard content', () => {
+  assert.equal(layoutSource.match(/<Sidebar\b/g)?.length, 1);
+  assert.doesNotMatch(layoutSource, /isAdminReferenceMode/);
+  assert.doesNotMatch(layoutSource, /topbarSearch/);
+  assert.match(layoutSource, /renderThemeToggleButton\(\)[\s\S]*<NotificationCenter \/>/);
+
+  assert.doesNotMatch(sidebarSource, /isAdminReferenceMode/);
+  assert.doesNotMatch(sidebarSource, /ADMIN_REFERENCE_SECTIONS/);
+  assert.match(sidebarSource, /name:\s+'Панель администратора'[\s\S]*href:\s+'\/admin'[\s\S]*section:\s+'admin_panel'/);
+  assert.match(sidebarSource, /sidebarGroups\[item\.section\] === group\.id/);
+
+  assert.match(settingsSource, /data-testid="admin-reference-dashboard"/);
+  assert.match(settingsSource, /Детальные настройки/);
+  assert.doesNotMatch(settingsSource, /<aside\b/);
 });

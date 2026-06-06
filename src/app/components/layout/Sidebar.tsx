@@ -77,27 +77,6 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Панель администратора', href: '/admin', icon: Shield,     section: 'admin_panel' },
 ];
 
-const ADMIN_REFERENCE_SECTIONS = new Set<Section>([
-  'dashboard',
-  'equipment',
-  'gsm',
-  'knowledge_base',
-  'sales',
-  'deliveries',
-  'rentals',
-  'planner',
-  'service',
-  'service_vehicles',
-  'clients',
-  'documents',
-  'payments',
-  'finance',
-  'bots',
-  'reports',
-  'admin_panel',
-  'profile_settings',
-]);
-
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
@@ -189,7 +168,6 @@ export function Sidebar({
   const navigate = useNavigate();
   const { user } = useAuth();
   const { can, canView } = usePermissions();
-  const isAdminReferenceMode = location.pathname === '/admin' || location.pathname.startsWith('/admin/');
   const canSearchEquipment = canView('equipment');
   const canSearchClients = canView('clients');
   const canSearchRentals = canView('rentals');
@@ -413,16 +391,9 @@ export function Sidebar({
     items: navigation
       .filter(item =>
         canView(item.section)
-        && (
-          isAdminReferenceMode
-            ? group.items.includes(item.section) && ADMIN_REFERENCE_SECTIONS.has(item.section)
-            : sidebarGroups[item.section] === group.id
-        )
+        && sidebarGroups[item.section] === group.id
       )
       .sort((a, b) => {
-        if (isAdminReferenceMode) {
-          return group.items.indexOf(a.section) - group.items.indexOf(b.section);
-        }
         return (orderIndex.get(a.section) ?? 999) - (orderIndex.get(b.section) ?? 999);
       }),
   })).filter(group => group.items.length > 0);
@@ -431,9 +402,7 @@ export function Sidebar({
     <aside
       className={cn(
         'fixed left-0 top-0 z-40 h-screen w-64',
-        isAdminReferenceMode
-          ? 'border-r border-[#e6ebf2] bg-white text-[#172033] shadow-none backdrop-blur-xl dark:bg-white dark:text-[#172033]'
-          : 'border-r border-sidebar-border bg-[linear-gradient(180deg,#081225_0%,#0b1730_54%,#101b3f_100%)] text-sidebar-foreground shadow-[0_36px_60px_-34px_rgba(0,0,0,0.7)] backdrop-blur-xl dark:bg-none dark:bg-sidebar',
+        'border-r border-sidebar-border bg-[linear-gradient(180deg,#081225_0%,#0b1730_54%,#101b3f_100%)] text-sidebar-foreground shadow-[0_36px_60px_-34px_rgba(0,0,0,0.7)] backdrop-blur-xl dark:bg-none dark:bg-sidebar',
         'transition-[transform,width] duration-300 ease-in-out',
         desktopCollapsed ? 'sm:w-20' : 'sm:w-64',
         isOpen ? 'translate-x-0' : '-translate-x-full',
@@ -443,26 +412,18 @@ export function Sidebar({
       <div className="flex h-full flex-col">
         <div className={cn(
           'flex items-center gap-3 border-b px-4 py-4',
-          isAdminReferenceMode ? 'border-[#e6ebf2]' : 'border-sidebar-border',
+          'border-sidebar-border',
           desktopCollapsed && 'sm:justify-center sm:px-3',
         )}>
           <LiftLogo className="h-9 w-9" />
           <div className={cn('min-w-0', desktopCollapsed && 'sm:hidden')}>
-            <div className={cn(
-              'app-shell-title truncate text-[15px] font-extrabold',
-              isAdminReferenceMode ? 'text-[#172033]' : 'text-sidebar-foreground',
-            )}>{isAdminReferenceMode ? APP_BRAND_NAME.toUpperCase() : APP_BRAND_NAME}</div>
+            <div className="app-shell-title truncate text-[15px] font-extrabold text-sidebar-foreground">{APP_BRAND_NAME}</div>
           </div>
           <div className={cn('ml-auto flex items-center gap-1', desktopCollapsed && 'sm:ml-0 sm:flex-col')}>
             <button
               type="button"
               onClick={onToggleDesktopCollapse}
-              className={cn(
-                'hidden rounded-lg p-2 transition-colors sm:inline-flex',
-                isAdminReferenceMode
-                  ? 'text-[#7a869a] hover:bg-blue-50 hover:text-blue-600'
-                  : 'text-white/68 hover:bg-sidebar-accent hover:text-sidebar-foreground',
-              )}
+              className="hidden rounded-lg p-2 text-white/68 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground sm:inline-flex"
               aria-label={desktopCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
               title={desktopCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
             >
@@ -470,12 +431,7 @@ export function Sidebar({
             </button>
             <button
               onClick={onClose}
-              className={cn(
-                'rounded-lg p-2 transition-colors sm:hidden',
-                isAdminReferenceMode
-                  ? 'text-[#7a869a] hover:bg-blue-50 hover:text-blue-600'
-                  : 'text-white/68 hover:bg-sidebar-accent hover:text-sidebar-foreground',
-              )}
+              className="rounded-lg p-2 text-white/68 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground sm:hidden"
               aria-label="Закрыть меню"
             >
               <X className="h-4 w-4" />
@@ -483,7 +439,6 @@ export function Sidebar({
           </div>
         </div>
 
-        {!isAdminReferenceMode && (
         <div className={cn('px-3 py-3', desktopCollapsed && 'sm:px-2')} ref={searchRef}>
           {desktopCollapsed ? (
             <button
@@ -556,14 +511,13 @@ export function Sidebar({
             </div>
           )}
         </div>
-        )}
 
         <nav className={cn('flex-1 overflow-y-auto px-2 pb-2', desktopCollapsed && 'sm:px-2')}>
           {groupedNav.map(group => (
             <div key={group.title} className="mb-2">
               <div className={cn(
                 'px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.18em]',
-                isAdminReferenceMode ? 'font-bold text-[#9aa6b2]' : 'text-white/45',
+                'text-white/45',
                 desktopCollapsed && 'sm:hidden',
               )}>
                 {group.title}
@@ -575,9 +529,7 @@ export function Sidebar({
                     location.pathname === item.href ||
                     (item.href !== '/' && location.pathname.startsWith(item.href + '/'));
                   const badgeValue = navBadges[item.section as keyof typeof navBadges];
-                  const displayName = isAdminReferenceMode && item.section === 'service_vehicles'
-                    ? 'Служебные машины'
-                    : item.name;
+                  const displayName = item.name;
 
                   return (
                     <button
@@ -591,13 +543,9 @@ export function Sidebar({
                       className={cn(
                         'relative flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[13px] transition-colors',
                         desktopCollapsed && 'sm:h-11 sm:justify-center sm:gap-0 sm:px-0',
-                        isAdminReferenceMode
-                          ? isActive
-                            ? 'bg-blue-50 text-blue-700 shadow-none'
-                            : 'text-[#3f4a5a] hover:bg-[#f5f8fc] hover:text-[#172033]'
-                          : isActive
-                            ? 'bg-[linear-gradient(135deg,#2563eb_0%,#6366f1_100%)] text-white shadow-[0_16px_30px_-22px_rgba(59,130,246,0.95)] dark:bg-none dark:bg-primary dark:text-primary-foreground dark:shadow-[0_16px_30px_-22px_rgba(212,247,74,0.95)]'
-                            : 'text-white/68 hover:bg-white/8 hover:text-sidebar-foreground',
+                        isActive
+                          ? 'bg-[linear-gradient(135deg,#2563eb_0%,#6366f1_100%)] text-white shadow-[0_16px_30px_-22px_rgba(59,130,246,0.95)] dark:bg-none dark:bg-primary dark:text-primary-foreground dark:shadow-[0_16px_30px_-22px_rgba(212,247,74,0.95)]'
+                          : 'text-white/68 hover:bg-white/8 hover:text-sidebar-foreground',
                       )}
                     >
                       <Icon className="h-4 w-4 shrink-0" />
@@ -606,15 +554,11 @@ export function Sidebar({
                         <span className={cn(
                           'rounded-full px-2 py-0.5 text-[10px] font-medium',
                           desktopCollapsed && 'sm:absolute sm:right-1 sm:top-1 sm:min-w-4 sm:px-1 sm:text-[9px]',
-                          isAdminReferenceMode
-                            ? isActive
-                              ? 'bg-white text-blue-700'
-                              : 'bg-slate-100 text-slate-500'
-                            : isActive
-                              ? 'bg-black/15 text-primary-foreground'
-                              : item.section === 'service'
-                                ? 'bg-orange-500/12 text-orange-400'
-                                : 'bg-emerald-500/12 text-emerald-400',
+                          isActive
+                            ? 'bg-black/15 text-primary-foreground'
+                            : item.section === 'service'
+                              ? 'bg-orange-500/12 text-orange-400'
+                              : 'bg-emerald-500/12 text-emerald-400',
                         )}>
                           {badgeValue > 99 ? '99+' : badgeValue}
                         </span>

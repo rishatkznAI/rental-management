@@ -6,7 +6,7 @@ import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { ClientCombobox } from '../components/ui/ClientCombobox';
 import { getPaymentStatusBadge } from '../components/ui/badge';
-import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock, TrendingDown, Wand2, Trash2, Edit2, ListChecks } from 'lucide-react';
+import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock, TrendingDown, Wand2, Trash2, Edit2, ListChecks, ChevronDown, ChevronRight } from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { usePermissions } from '../lib/permissions';
 import {
@@ -37,6 +37,7 @@ import {
 import { animationDurations, useAnimatedPresence } from '../lib/animations';
 import { useServerPagination } from '../hooks/useServerPagination';
 import { PaginationControls } from '../components/common/PaginationControls';
+import { cn } from '../components/ui/utils';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,60 @@ function paidAmount(payment: Payment) {
 function allocationCap(payment: Payment) {
   const paid = paidAmount(payment);
   return payment.amount > 0 ? Math.min(paid, payment.amount) : paid;
+}
+
+function paymentCountLabel(value: number) {
+  const abs = Math.abs(value) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return 'платежей';
+  if (last > 1 && last < 5) return 'платежа';
+  if (last === 1) return 'платёж';
+  return 'платежей';
+}
+
+function clientInitial(name: string) {
+  return (name.trim()[0] || 'К').toUpperCase();
+}
+
+function avatarTone(index: number) {
+  const tones = [
+    'bg-violet-100 text-violet-700',
+    'bg-emerald-100 text-emerald-700',
+    'bg-sky-100 text-sky-700',
+    'bg-amber-100 text-amber-700',
+    'bg-rose-100 text-rose-700',
+    'bg-cyan-100 text-cyan-700',
+  ];
+  return tones[index % tones.length];
+}
+
+function PaymentKpiCard({
+  icon: Icon,
+  title,
+  value,
+  caption,
+  tone,
+  valueClassName,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  value: string;
+  caption: string;
+  tone: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="flex min-h-[116px] items-center gap-4 rounded-[18px] border border-slate-900/[0.08] bg-white p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
+      <div className={cn('flex h-12 w-12 shrink-0 items-center justify-center rounded-full', tone)}>
+        <Icon className="h-5 w-5" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-slate-500">{title}</p>
+        <p className={cn('mt-1 truncate text-xl font-semibold text-slate-950 sm:text-2xl', valueClassName)}>{value}</p>
+        <p className="mt-1 text-sm text-slate-400">{caption}</p>
+      </div>
+    </div>
+  );
 }
 
 // ─── AddPaymentModal ─────────────────────────────────────────────────────────
@@ -783,6 +838,8 @@ export default function Payments() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedPaymentId, setSelectedPaymentId] = useState('');
+  const [showAllClientDebts, setShowAllClientDebts] = useState(false);
+  const [showAllRentalDebts, setShowAllRentalDebts] = useState(false);
   const { data: documents = [] } = useDocumentsList({
     enabled: Boolean(selectedPaymentId),
   });
@@ -849,13 +906,19 @@ export default function Payments() {
   const totalPaid = paymentSummary?.paidAmount ?? 0;
   const totalOverdue = paymentSummary?.overdueAmount ?? 0;
   const totalPartial = paymentSummary?.partialAmount ?? 0;
+  const pendingPaymentsCount = paymentList.filter(payment => ['pending', 'partial'].includes(String(payment.status || '').toLowerCase())).length;
+  const paidPaymentsCount = paymentList.filter(payment => ['paid', 'partial'].includes(String(payment.status || '').toLowerCase())).length;
+  const overduePaymentsCount = paymentList.filter(payment => String(payment.status || '').toLowerCase() === 'overdue').length;
   const rentalDebtRows = useMemo(() => (
     receivablesQuery.data?.rows.flatMap(row => row.rentals.map(rental => ({
       ...rental,
       client: row.client,
       clientId: row.clientId,
       expectedPaymentDate: rental.dueDate,
-    }))) ?? []
+    }))).sort((a, b) => {
+      if (b.overdueDays !== a.overdueDays) return b.overdueDays - a.overdueDays;
+      return b.outstanding - a.outstanding;
+    }) ?? []
   ), [receivablesQuery.data]);
   const clientReceivables = useMemo(() => (
     receivablesQuery.data?.rows.map(row => ({
@@ -866,7 +929,7 @@ export default function Payments() {
       exceededLimit: Boolean((clientsById.get(row.clientId || '')?.creditLimit ?? 0) > 0 && row.totalDebt > (clientsById.get(row.clientId || '')?.creditLimit ?? 0)),
       unpaidRentals: row.rentals.length,
       overdueRentals: row.rentals.filter(rental => rental.overdueDays > 0).length,
-    })) ?? []
+    })).sort((a, b) => b.currentDebt - a.currentDebt) ?? []
   ), [clientsById, receivablesQuery.data]);
   const selectedPayment = useMemo(
     () => paymentList.find(payment => payment.id === selectedPaymentId),
@@ -884,9 +947,11 @@ export default function Payments() {
     pagination.filters.clientId !== 'all' || hasQuickClientContext,
     pagination.filters.status !== 'all',
   ].filter(Boolean).length;
+  const visibleClientReceivables = showAllClientDebts ? clientReceivables : clientReceivables.slice(0, 8);
+  const visibleRentalDebtRows = showAllRentalDebts ? rentalDebtRows : rentalDebtRows.slice(0, 8);
 
   return (
-    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
+    <div className="min-h-screen space-y-6 bg-[#f7f9fc] p-4 text-slate-950 sm:p-6 md:p-8">
       <AddPaymentModal
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
@@ -898,13 +963,18 @@ export default function Payments() {
       />
 
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Платежи</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Управление платежами и задолженностями</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Рабочее пространство</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950 sm:text-4xl">Платежи</h1>
+          <p className="mt-2 text-sm text-slate-500">Управление платежами и задолженностями</p>
         </div>
         {can('create', 'payments') && (
-          <Button size="sm" onClick={() => setShowAddModal(true)}>
+          <Button
+            size="lg"
+            onClick={() => setShowAddModal(true)}
+            className="h-11 rounded-xl bg-lime-300 px-5 font-semibold text-slate-950 shadow-[0_16px_32px_rgba(132,204,22,0.22)] hover:bg-lime-200"
+          >
             <Plus className="h-4 w-4" />
             Добавить платёж
           </Button>
@@ -912,147 +982,174 @@ export default function Payments() {
       </div>
 
       {/* KPI summary */}
-      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-        <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-yellow-100 dark:bg-yellow-900/30">
-            <Clock className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Ожидает оплаты</p>
-            <p className="text-lg font-bold text-gray-900 dark:text-white">{formatCurrency(totalPending)}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
-            <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Оплачено</p>
-            <p className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(totalPaid + totalPartial)}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
-            <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Просрочено</p>
-            <p className="text-lg font-bold text-red-600 dark:text-red-400">{formatCurrency(totalOverdue)}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30">
-            <DollarSign className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Всего платежей</p>
-            <p className="text-lg font-bold text-gray-900 dark:text-white">{paymentSummary?.count ?? paymentsQuery.data?.pagination.total ?? 0}</p>
-          </div>
-        </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <PaymentKpiCard
+          icon={Clock}
+          title="Ожидает оплаты"
+          value={formatCurrency(totalPending)}
+          caption={`${pendingPaymentsCount} ${paymentCountLabel(pendingPaymentsCount)}`}
+          tone="bg-violet-100 text-violet-600"
+        />
+        <PaymentKpiCard
+          icon={CheckCircle}
+          title="Оплачено"
+          value={formatCurrency(totalPaid + totalPartial)}
+          caption={`${paidPaymentsCount} ${paymentCountLabel(paidPaymentsCount)}`}
+          tone="bg-emerald-100 text-emerald-600"
+          valueClassName="text-emerald-600"
+        />
+        <PaymentKpiCard
+          icon={AlertTriangle}
+          title="Просрочено"
+          value={formatCurrency(totalOverdue)}
+          caption={`${overduePaymentsCount} ${paymentCountLabel(overduePaymentsCount)}`}
+          tone="bg-red-100 text-red-500"
+          valueClassName="text-red-600"
+        />
+        <PaymentKpiCard
+          icon={DollarSign}
+          title="Всего платежей"
+          value={String(paymentSummary?.count ?? paymentsQuery.data?.pagination.total ?? 0)}
+          caption="За всё время"
+          tone="bg-sky-100 text-sky-600"
+        />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
-        <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.12fr)_minmax(380px,0.88fr)]">
+        <div className="rounded-[20px] border border-slate-900/[0.08] bg-white p-5 shadow-[0_22px_60px_rgba(15,23,42,0.07)] sm:p-6">
+          <div className="mb-5 flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Дебиторка по клиентам</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Клиенты с текущей задолженностью по арендам</p>
+              <h2 className="text-lg font-semibold text-slate-950">Дебиторка по клиентам</h2>
+              <p className="mt-1 text-sm text-slate-500">Клиенты с текущей задолженностью по арендам</p>
             </div>
             <div className="text-right">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Всего должников</p>
-              <p className="text-lg font-bold text-gray-900 dark:text-white">{clientReceivables.length}</p>
+              <p className="text-xs font-medium text-slate-400">Всего должников</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950">{clientReceivables.length}</p>
             </div>
           </div>
           {clientReceivables.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-gray-300 px-4 py-6 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
+            <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-sm text-slate-500">
               Сейчас активной дебиторки нет
             </div>
           ) : (
-            <div className="space-y-3">
-              {clientReceivables.slice(0, 8).map(row => (
+            <div>
+              <div className="hidden grid-cols-[minmax(0,1fr)_120px_190px_28px] gap-4 border-b border-slate-100 px-2 pb-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
+                <span>Клиент</span>
+                <span className="text-center">Неоплаченные аренды</span>
+                <span className="text-right">Задолженность</span>
+                <span />
+              </div>
+              <div className="divide-y divide-slate-100">
+              {visibleClientReceivables.map((row, index) => (
                 <div
                   key={row.client}
-                  className={`rounded-lg border px-4 py-3 ${
-                    row.exceededLimit
-                      ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
-                      : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40'
-                  }`}
+                  className="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_120px_190px_28px] md:items-center md:gap-4"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-semibold', avatarTone(index))}>
+                      {clientInitial(row.client)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-slate-950">{row.client}</p>
+                      <p className="mt-1 text-xs text-slate-500">
                         Неоплаченных аренд: {row.unpaidRentals}
-                        {row.overdueRentals > 0 && ` · просроченных: ${row.overdueRentals}`}
+                        {' · '}
+                        Просроченных: {row.overdueRentals}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className={`font-semibold ${row.exceededLimit ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                  </div>
+                  <div className="hidden text-center text-sm font-semibold text-slate-700 md:block">{row.unpaidRentals}</div>
+                  <div className="flex items-end justify-between gap-3 md:block md:text-right">
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-400 md:hidden">Задолженность</span>
+                    <div>
+                      <p className={cn('text-lg font-semibold', row.exceededLimit ? 'text-red-600' : 'text-slate-950')}>
                         {formatCurrency(row.currentDebt)}
                       </p>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      <p className="mt-1 text-xs text-slate-400">
                         Лимит: {row.creditLimit > 0 ? formatCurrency(row.creditLimit) : 'не задан'}
                       </p>
                     </div>
                   </div>
+                  <ChevronRight className="hidden h-5 w-5 text-slate-300 md:block" />
                 </div>
               ))}
+              </div>
+              {clientReceivables.length > 8 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllClientDebts(value => !value)}
+                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
+                >
+                  {showAllClientDebts ? 'Свернуть список клиентов' : 'Показать всех клиентов'}
+                  <ChevronDown className={cn('h-4 w-4 transition-transform', showAllClientDebts && 'rotate-180')} />
+                </button>
+              )}
             </div>
           )}
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="rounded-[20px] border border-slate-900/[0.08] bg-white p-5 shadow-[0_22px_60px_rgba(15,23,42,0.07)] sm:p-6">
+          <div className="mb-5 flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Неоплаченные аренды</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Самые рискованные аренды по дебиторке</p>
+              <h2 className="text-lg font-semibold text-slate-950">Неоплаченные аренды</h2>
+              <p className="mt-1 text-sm text-slate-500">Самые рискованные аренды по дебиторке</p>
             </div>
             <div className="text-right">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Всего</p>
-              <p className="text-lg font-bold text-gray-900 dark:text-white">{rentalDebtRows.length}</p>
+              <p className="text-xs font-medium text-slate-400">Всего</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950">{rentalDebtRows.length}</p>
             </div>
           </div>
           {rentalDebtRows.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-gray-300 px-4 py-6 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
+            <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-sm text-slate-500">
               Все аренды закрыты по оплате
             </div>
           ) : (
             <div className="space-y-3">
-              {rentalDebtRows.slice(0, 8).map(row => {
+              {visibleRentalDebtRows.map(row => {
                 const isOverdue = overdueDebtRentals.some(item => item.rentalId === row.rentalId);
                 return (
                   <div
                     key={row.rentalId}
-                    className={`rounded-lg border px-4 py-3 ${
-                      isOverdue
-                        ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
-                        : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40'
-                    }`}
+                    className={cn(
+                      'grid gap-3 rounded-2xl border bg-white py-4 pl-4 pr-3 shadow-[0_12px_30px_rgba(15,23,42,0.04)] sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4',
+                      isOverdue ? 'border-red-200 border-l-4 border-l-red-400 bg-red-50/45' : 'border-slate-200 border-l-4 border-l-slate-200',
+                    )}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{row.client}</p>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                          {row.equipmentInv} · {row.startDate} — {row.endDate}
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-slate-950">{row.client}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {row.rentalId} · {row.startDate} — {row.endDate}
+                      </p>
+                      {row.expectedPaymentDate && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Ожидаемая оплата: {formatDate(row.expectedPaymentDate)}
                         </p>
-                        {row.expectedPaymentDate && (
-                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            Ожидаемая оплата: {formatDate(row.expectedPaymentDate)}
-                          </p>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <p className={`font-semibold ${isOverdue ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                      )}
+                    </div>
+                    <div className="flex items-start justify-between gap-2 text-left sm:justify-start sm:text-right">
+                      <div>
+                        <p className={cn('whitespace-nowrap text-lg font-semibold', isOverdue ? 'text-red-600' : 'text-slate-950')}>
                           {formatCurrency(row.outstanding)}
                         </p>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <p className="mt-1 whitespace-nowrap text-xs text-slate-400">
                           Оплачено: {formatCurrency(row.paidAmount)}
                         </p>
                       </div>
+                      <ChevronRight className="mt-1 h-5 w-5 text-slate-300" />
                     </div>
                   </div>
                 );
               })}
+              {rentalDebtRows.length > 8 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllRentalDebts(value => !value)}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
+                >
+                  {showAllRentalDebts ? 'Свернуть список аренд' : 'Показать все просроченные аренды'}
+                  <ChevronDown className={cn('h-4 w-4 transition-transform', showAllRentalDebts && 'rotate-180')} />
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1126,99 +1223,121 @@ export default function Payments() {
       </FilterDialog>
 
       {/* Table */}
-      <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Счёт</TableHead>
-              <TableHead>Аренда</TableHead>
-              <TableHead>Клиент</TableHead>
-              <TableHead>Сумма</TableHead>
-              <TableHead>Оплачено</TableHead>
-              <TableHead>Срок оплаты</TableHead>
-              <TableHead>Дата оплаты</TableHead>
-              <TableHead>Статус</TableHead>
-              <TableHead>Комментарий</TableHead>
-              <TableHead>Распределение</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+      <div className="overflow-hidden rounded-[20px] border border-slate-900/[0.08] bg-white shadow-[0_22px_60px_rgba(15,23,42,0.06)]">
+        <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950">Регистр платежей</h2>
+            <p className="mt-1 text-sm text-slate-500">История счетов, оплат и распределений</p>
+          </div>
+          <div className="text-sm font-medium text-slate-400">
+            {paymentSummary?.count ?? paymentsQuery.data?.pagination.total ?? 0} записей
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+        <table className="min-w-[1040px] w-full border-collapse text-sm">
+          <thead className="bg-slate-50 text-slate-500">
+            <tr className="border-b border-slate-200">
+              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Счёт</th>
+              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Аренда</th>
+              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Клиент</th>
+              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Сумма</th>
+              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Оплачено</th>
+              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Срок оплаты</th>
+              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Дата оплаты</th>
+              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Статус</th>
+              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Комментарий</th>
+              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Распределение</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
             {paymentList.map((payment) => {
               const paid = payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0);
               const remaining = payment.amount - paid;
               return (
-                <TableRow
+                <tr
                   key={payment.id}
-                  className={payment.status === 'overdue' ? 'bg-red-50 dark:bg-red-900/10' : ''}
+                  className={cn(
+                    'transition-colors hover:bg-slate-50/80',
+                    payment.status === 'overdue' && 'bg-red-50/60 hover:bg-red-50',
+                  )}
                 >
-                  <TableCell>
-                    <p className="font-medium text-[--color-primary]">{payment.invoiceNumber}</p>
-                  </TableCell>
-                  <TableCell>
+                  <td className="whitespace-nowrap px-4 py-3 align-middle">
+                    <p className="font-semibold text-slate-950">{payment.invoiceNumber}</p>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-middle">
                     {payment.rentalId ? (
-                      <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-700 dark:bg-gray-700 dark:text-gray-300">
+                      <span className="rounded-lg bg-slate-100 px-2 py-1 font-mono text-xs font-medium text-slate-600">
                         {payment.rentalId}
                       </span>
                     ) : (
-                      <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
+                      <span className="text-sm text-slate-400">—</span>
                     )}
-                  </TableCell>
-                  <TableCell>
-                    <p className="text-sm text-gray-700 dark:text-gray-300">{payment.client}</p>
-                  </TableCell>
-                  <TableCell>
-                    <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(payment.amount)}</p>
-                  </TableCell>
-                  <TableCell>
+                  </td>
+                  <td className="max-w-[220px] px-4 py-3 align-middle">
+                    <p className="truncate text-sm font-medium text-slate-700">{payment.client}</p>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-middle">
+                    <p className="font-semibold text-slate-950">{formatCurrency(payment.amount)}</p>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-middle">
                     <div>
-                      <p className="text-sm font-medium text-green-600 dark:text-green-400">{formatCurrency(paid)}</p>
+                      <p className="text-sm font-semibold text-emerald-600">{formatCurrency(paid)}</p>
                       {remaining > 0 && (
-                        <p className="text-xs text-gray-400 dark:text-gray-500">Остаток: {formatCurrency(remaining)}</p>
+                        <p className="mt-0.5 text-xs text-slate-400">Остаток: {formatCurrency(remaining)}</p>
                       )}
                     </div>
-                  </TableCell>
-                  <TableCell>
-                    <p className="text-sm text-gray-700 dark:text-gray-300">{formatDate(payment.dueDate)}</p>
-                  </TableCell>
-                  <TableCell>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-middle">
+                    <p className="text-sm text-slate-600">{formatDate(payment.dueDate)}</p>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-middle">
                     {payment.paidDate ? (
-                      <p className="text-sm text-gray-700 dark:text-gray-300">{formatDate(payment.paidDate)}</p>
+                      <p className="text-sm text-slate-600">{formatDate(payment.paidDate)}</p>
                     ) : (
-                      <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
+                      <span className="text-sm text-slate-400">—</span>
                     )}
-                  </TableCell>
-                  <TableCell>{getPaymentStatusBadge(payment.status)}</TableCell>
-                  <TableCell>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-middle">{getPaymentStatusBadge(payment.status)}</td>
+                  <td className="max-w-[180px] px-4 py-3 align-middle">
                     {payment.comment ? (
-                      <p className="max-w-[160px] truncate text-sm text-gray-500 dark:text-gray-400">{payment.comment}</p>
+                      <p className="truncate text-sm text-slate-500">{payment.comment}</p>
                     ) : (
-                      <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
+                      <span className="text-sm text-slate-400">—</span>
                     )}
-                  </TableCell>
-                  <TableCell>
-                    <Button size="sm" variant={selectedPayment?.id === payment.id ? 'default' : 'secondary'} onClick={() => setSelectedPaymentId(payment.id)}>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-middle">
+                    <Button
+                      size="sm"
+                      variant={selectedPayment?.id === payment.id ? 'default' : 'secondary'}
+                      onClick={() => setSelectedPaymentId(payment.id)}
+                      className={cn(
+                        'rounded-xl',
+                        selectedPayment?.id !== payment.id && 'bg-slate-100 text-slate-700 hover:bg-slate-200',
+                      )}
+                    >
                       Открыть
                     </Button>
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               );
             })}
-          </TableBody>
-        </Table>
+          </tbody>
+        </table>
+        </div>
 
         {paymentList.length === 0 && (
           <div className="flex flex-col items-center justify-center py-14 text-center">
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-700">
-              <DollarSign className="h-8 w-8 text-gray-400 dark:text-gray-500" />
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+              <DollarSign className="h-8 w-8 text-slate-400" />
             </div>
-            <h3 className="text-base font-medium text-gray-900 dark:text-white">
+            <h3 className="text-base font-semibold text-slate-950">
               {(paymentsQuery.data?.pagination.total ?? 0) === 0
                 ? 'Платежей ещё нет'
                 : hasQuickClientContext || pagination.filters.clientId !== 'all'
                   ? 'Платежи по клиенту не найдены'
                   : 'Платежи не найдены'}
             </h3>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            <p className="mt-1 text-sm text-slate-500">
               {(paymentsQuery.data?.pagination.total ?? 0) === 0
                 ? 'Добавьте первый платёж по аренде'
                 : hasQuickClientContext || pagination.filters.clientId !== 'all'

@@ -12,8 +12,6 @@ import {
   BarChart3,
   PanelLeftClose,
   PanelLeftOpen,
-  Moon,
-  Sun,
   X,
   CalendarClock,
   Car,
@@ -30,7 +28,6 @@ import {
   BriefcaseBusiness,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions, type Section } from '../../lib/permissions';
 import {
@@ -190,7 +187,6 @@ export function Sidebar({
 }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
   const { can, canView } = usePermissions();
   const isAdminReferenceMode = location.pathname === '/admin' || location.pathname.startsWith('/admin/');
@@ -630,54 +626,6 @@ export function Sidebar({
             </div>
           ))}
         </nav>
-
-        {!isAdminReferenceMode && (
-        <div className={cn('border-t border-sidebar-border px-3 pb-3 pt-2', desktopCollapsed && 'sm:px-2')}>
-          <div className={cn(
-            'flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors',
-            desktopCollapsed && 'sm:justify-center sm:px-0',
-            theme === 'dark'
-              ? 'border-sidebar-border bg-sidebar-accent text-sidebar-foreground'
-              : 'border-sidebar-border bg-white/8 text-white/70',
-          )}>
-            {theme === 'dark' ? (
-              <Moon className={cn('h-4 w-4 text-sidebar-foreground', desktopCollapsed && 'sm:hidden')} />
-            ) : (
-              <Sun className={cn('h-4 w-4 text-white/70', desktopCollapsed && 'sm:hidden')} />
-            )}
-            <span className={cn(desktopCollapsed && 'sm:hidden')}>{theme === 'dark' ? 'Тёмный режим' : 'Светлый режим'}</span>
-            <button
-              type="button"
-              onClick={toggleTheme}
-              aria-pressed={theme === 'dark'}
-              aria-label="Переключить тему"
-              title={theme === 'dark' ? 'Тёмный режим' : 'Светлый режим'}
-              className={cn(
-                'ml-auto inline-flex h-6 w-12 items-center rounded-full border p-1 transition-all',
-                desktopCollapsed && 'sm:ml-0 sm:h-8 sm:w-8 sm:justify-center sm:p-0',
-                theme === 'dark'
-                  ? 'justify-end border-primary/30 bg-primary/90 text-primary-foreground shadow-[0_10px_24px_-18px_rgba(212,247,74,0.95)]'
-                  : 'justify-start border-sidebar-border bg-white/10 text-white/70 hover:border-blue-300/40',
-              )}
-            >
-              <span className={cn(
-                'inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none transition-colors',
-                desktopCollapsed && 'sm:h-5 sm:min-w-5 sm:px-0',
-                theme === 'dark'
-                  ? 'bg-black/20 text-primary-foreground'
-                  : 'bg-white/85 text-slate-700',
-              )}>
-                <span className={cn(desktopCollapsed && 'sm:hidden')}>{theme === 'dark' ? 'On' : 'Off'}</span>
-                {theme === 'dark' ? (
-                  <Moon className={cn('hidden h-3.5 w-3.5', desktopCollapsed && 'sm:block')} />
-                ) : (
-                  <Sun className={cn('hidden h-3.5 w-3.5', desktopCollapsed && 'sm:block')} />
-                )}
-              </span>
-            </button>
-          </div>
-        </div>
-        )}
       </div>
     </aside>
   );

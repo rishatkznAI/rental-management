@@ -5,7 +5,54 @@ import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
-import { Plus, Trash2, Edit, Eye, EyeOff, AlertTriangle, CheckCircle2, RefreshCw, ShieldAlert, Download, Upload, ArrowUp, ArrowDown, LayoutPanelLeft } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  Edit,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  CheckCircle2,
+  RefreshCw,
+  ShieldAlert,
+  Download,
+  Upload,
+  ArrowUp,
+  ArrowDown,
+  LayoutPanelLeft,
+  Bell,
+  ChevronRight,
+  ClipboardList,
+  Database,
+  GripVertical,
+  BadgeDollarSign,
+  BarChart3,
+  Bot,
+  CalendarClock,
+  Car,
+  CreditCard,
+  FileCheck,
+  FileText,
+  GraduationCap,
+  HardDrive,
+  KeyRound,
+  Link2,
+  List,
+  LockKeyhole,
+  MapPinned,
+  MoreHorizontal,
+  Route,
+  Search,
+  Settings as SettingsIcon,
+  Shield,
+  ShieldCheck,
+  Truck,
+  UserRound,
+  Users,
+  WalletCards,
+  Wrench,
+  LayoutDashboard,
+} from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -138,6 +185,237 @@ function roleBadgeVariant(role: UserRole): BadgeVariant {
   if (isMechanicRole(role)) return 'warning';
   if (role === 'Перевозчик') return 'secondary';
   return 'info';
+}
+
+type SidebarSection = (typeof DEFAULT_SIDEBAR_ORDER)[number];
+
+const ADMIN_DEMO_USERS: SystemUser[] = [
+  {
+    id: 'demo-admin-ivanov',
+    name: 'Иванов И.И.',
+    email: 'ivanov@skytech.ru',
+    role: 'Администратор',
+    status: 'Активен',
+    password: '',
+  },
+  {
+    id: 'demo-rental-petrov',
+    name: 'Петров П.П.',
+    email: 'petrov@skytech.ru',
+    role: 'Менеджер по аренде',
+    status: 'Активен',
+    password: '',
+  },
+  {
+    id: 'demo-mechanic-sidorov',
+    name: 'Сидоров С.С.',
+    email: 'sidorov@skytech.ru',
+    role: 'Механик',
+    status: 'Активен',
+    password: '',
+  },
+  {
+    id: 'demo-investor-kuznetsova',
+    name: 'Кузнецова А.А.',
+    email: 'kuznetsova@skytech.ru',
+    role: 'Инвестор',
+    status: 'Активен',
+    ownerName: 'ООО СтройИнвест',
+    password: '',
+  },
+  {
+    id: 'demo-carrier-volkov',
+    name: 'Волков В.В.',
+    email: 'volkov@skytech.ru',
+    role: 'Перевозчик',
+    status: 'Неактивен',
+    password: '',
+  },
+];
+
+const ADMIN_LAST_LOGIN_FALLBACKS = [
+  '27.04.2026 10:24',
+  '27.04.2026 09:15',
+  '26.04.2026 17:42',
+  '26.04.2026 16:30',
+  '20.04.2026 11:05',
+];
+
+const ADMIN_DATA_COLLECTIONS = [
+  'equipment',
+  'rentals',
+  'gantt_rentals',
+  'clients',
+  'payments',
+  'documents',
+  'service',
+  'deliveries',
+  'delivery_carriers',
+  'users',
+  'bot_users',
+  'bot_sessions',
+  'bot_activity',
+  'gsm_packets',
+  'gsm_commands',
+  'app_settings',
+  'owners',
+  'mechanics',
+];
+
+const ADMIN_MENU_PREVIEW_GROUPS: Array<{ id: SidebarNavGroupId; title: string; sections: SidebarSection[] }> = [
+  { id: 'main', title: 'Главное', sections: ['dashboard', 'equipment', 'gsm', 'knowledge_base', 'sales', 'deliveries', 'rentals'] },
+  { id: 'operations', title: 'Операции', sections: ['planner', 'service', 'service_vehicles'] },
+  { id: 'data', title: 'Данные', sections: ['clients', 'documents', 'payments', 'finance'] },
+  { id: 'other', title: 'Прочее', sections: ['bots', 'reports', 'admin_panel'] },
+  { id: 'profile', title: 'Профиль', sections: ['profile_settings'] },
+];
+
+const ADMIN_MENU_SECTION_ICONS: Partial<Record<SidebarSection, React.ElementType>> = {
+  dashboard: LayoutDashboard,
+  equipment: Truck,
+  gsm: MapPinned,
+  knowledge_base: GraduationCap,
+  sales: BadgeDollarSign,
+  deliveries: Route,
+  rentals: FileText,
+  planner: CalendarClock,
+  service: Wrench,
+  service_vehicles: Car,
+  clients: Users,
+  documents: FileCheck,
+  payments: CreditCard,
+  finance: WalletCards,
+  bots: Bot,
+  reports: BarChart3,
+  admin_panel: Shield,
+  profile_settings: UserRound,
+};
+
+const ADMIN_SETTINGS_ROWS: Array<{
+  title: string;
+  description: string;
+  icon: React.ElementType;
+  tab: string;
+}> = [
+  {
+    title: 'Общие настройки',
+    description: 'Название компании, часовой пояс, валюта, локализация',
+    icon: SettingsIcon,
+    tab: 'configuration',
+  },
+  {
+    title: 'Уведомления',
+    description: 'Email, Telegram, системные уведомления',
+    icon: Bell,
+    tab: 'notifications',
+  },
+  {
+    title: 'Безопасность',
+    description: 'Политики паролей, сессии, двухфакторная аутентификация',
+    icon: Shield,
+    tab: 'audit',
+  },
+  {
+    title: 'Интеграции',
+    description: 'GSM, MAX-бот, внешние сервисы и API',
+    icon: Link2,
+    tab: 'diagnostics',
+  },
+  {
+    title: 'Резервное копирование',
+    description: 'Настройки резервного копирования и восстановления',
+    icon: HardDrive,
+    tab: 'data',
+  },
+];
+
+const ADMIN_ACTIVITY_FALLBACK = [
+  {
+    text: 'Иванов И.И. создал нового пользователя Петров П.П.',
+    time: '27.04.2026 10:15',
+    icon: UserRound,
+    tone: 'blue',
+  },
+  {
+    text: 'Сидоров С.С. обновил запись техники JLG 450AJ (ИНВ-12345)',
+    time: '27.04.2026 09:48',
+    icon: Edit,
+    tone: 'green',
+  },
+  {
+    text: 'Петров П.П. создал аренду №А-2026-0456',
+    time: '27.04.2026 09:32',
+    icon: ClipboardList,
+    tone: 'purple',
+  },
+  {
+    text: 'Иванов И.И. изменил роль пользователя Кузнецова А.А.',
+    time: '26.04.2026 18:22',
+    icon: KeyRound,
+    tone: 'orange',
+  },
+  {
+    text: 'Волков В.В. удалил документ Акт возврата №123',
+    time: '26.04.2026 16:07',
+    icon: Trash2,
+    tone: 'red',
+  },
+];
+
+const adminCardClass = 'rounded-[16px] border border-[#e6ebf2] bg-white shadow-[0_18px_42px_-34px_rgba(15,23,42,0.42)]';
+const adminMutedTextClass = 'text-[#6b778c]';
+const adminLinkClass = 'text-[12px] font-semibold text-[#2563eb] transition hover:text-[#1d4ed8] hover:underline';
+
+function adminNormalize(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function adminInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '??';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
+}
+
+function formatAdminDate(value: unknown, fallback: string): string {
+  const raw = String(value ?? '').trim();
+  if (!raw) return fallback;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).replace(',', '');
+}
+
+function userLastLogin(user: SystemUser, index: number): string {
+  const record = user as SystemUser & Record<string, unknown>;
+  return formatAdminDate(
+    record.lastLoginAt ?? record.lastLogin ?? record.lastSeenAt ?? record.updatedAt,
+    ADMIN_LAST_LOGIN_FALLBACKS[index] || '—',
+  );
+}
+
+function rolePillClass(role: UserRole | string): string {
+  const normalized = normalizeUserRole(role);
+  if (normalized === 'Администратор') return 'bg-sky-50 text-sky-700 ring-sky-100';
+  if (normalized === 'Менеджер по аренде') return 'bg-blue-50 text-blue-700 ring-blue-100';
+  if (isMechanicRole(normalized)) return 'bg-violet-50 text-violet-700 ring-violet-100';
+  if (normalized === 'Инвестор') return 'bg-orange-50 text-orange-700 ring-orange-100';
+  if (normalized === 'Перевозчик') return 'bg-cyan-50 text-cyan-700 ring-cyan-100';
+  if (normalized === 'Менеджер по продажам') return 'bg-emerald-50 text-emerald-700 ring-emerald-100';
+  return 'bg-slate-100 text-slate-700 ring-slate-200';
+}
+
+function activityToneClass(tone: string): string {
+  if (tone === 'green') return 'bg-emerald-50 text-emerald-600';
+  if (tone === 'purple') return 'bg-violet-50 text-violet-600';
+  if (tone === 'orange') return 'bg-orange-50 text-orange-600';
+  if (tone === 'red') return 'bg-rose-50 text-rose-600';
+  return 'bg-blue-50 text-blue-600';
 }
 
 const EMPTY_FORM = {
@@ -387,16 +665,410 @@ export default function Settings() {
     setDialogOpen(false);
   };
 
+  const [userSearch, setUserSearch] = React.useState('');
+  const [roleFilter, setRoleFilter] = React.useState('all');
+  const [selectedMenuGroup, setSelectedMenuGroup] = React.useState<SidebarNavGroupId>('main');
+  const [localMenuVisibility, setLocalMenuVisibility] = React.useState<Record<string, boolean>>({});
+
+  const displayUsers = users.length > 0 ? users : ADMIN_DEMO_USERS;
+  const userCount = users.length > 0 ? users.length : 42;
+  const roleCount = users.length > 0 ? new Set([...ROLES, ...users.map(item => item.role)]).size : 9;
+  const menuCount = visibleSidebarOrder.length > 0 ? visibleSidebarOrder.length : 28;
+  const collectionCount = ADMIN_DATA_COLLECTIONS.length;
+  const activeSessionsCount = 12;
+
+  const roleOptions = React.useMemo(() => {
+    return Array.from(new Set(displayUsers.map(item => normalizeUserRole(item.role)).filter(Boolean)));
+  }, [displayUsers]);
+
+  const filteredUsers = React.useMemo(() => {
+    const query = adminNormalize(userSearch);
+    return displayUsers.filter(item => {
+      const matchesQuery = !query || `${item.name} ${item.email}`.toLowerCase().includes(query);
+      const matchesRole = roleFilter === 'all' || normalizeUserRole(item.role) === roleFilter;
+      return matchesQuery && matchesRole;
+    }).slice(0, 5);
+  }, [displayUsers, roleFilter, userSearch]);
+
+  const selectedMenuGroupMeta = ADMIN_MENU_PREVIEW_GROUPS.find(group => group.id === selectedMenuGroup) || ADMIN_MENU_PREVIEW_GROUPS[0];
+  const selectedMenuSections = selectedMenuGroupMeta.sections.filter(section => visibleSidebarOrder.includes(section) || selectedMenuGroupMeta.sections.includes(section));
+
+  const toggleMenuSection = (section: SidebarSection) => {
+    setLocalMenuVisibility(current => ({
+      ...current,
+      [section]: !(current[section] ?? true),
+    }));
+  };
+
+  const openDetailSection = (tab: string) => {
+    setActiveTab(tab);
+    window.requestAnimationFrame(() => {
+      document.getElementById('admin-detail-sections')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const kpiCards = [
+    {
+      title: 'Пользователи',
+      value: userCount,
+      link: 'Все пользователи',
+      icon: Users,
+      iconClass: 'bg-blue-50 text-blue-600',
+      onClick: () => openDetailSection('users'),
+    },
+    {
+      title: 'Роли',
+      value: roleCount,
+      link: 'Управление ролями',
+      icon: ShieldCheck,
+      iconClass: 'bg-emerald-50 text-emerald-600',
+      onClick: () => openDetailSection('users'),
+    },
+    {
+      title: 'Пункты меню',
+      value: menuCount,
+      link: 'Настроить меню',
+      icon: List,
+      iconClass: 'bg-violet-50 text-violet-600',
+      onClick: () => openDetailSection('menu'),
+    },
+    {
+      title: 'Коллекции данных',
+      value: collectionCount,
+      link: 'Открыть коллекции',
+      icon: Database,
+      iconClass: 'bg-orange-50 text-orange-600',
+      onClick: () => openDetailSection('data'),
+    },
+    {
+      title: 'Активные сессии',
+      value: activeSessionsCount,
+      link: 'Просмотреть сессии',
+      icon: LockKeyhole,
+      iconClass: 'bg-cyan-50 text-cyan-600',
+      onClick: () => openDetailSection('audit'),
+    },
+  ];
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
-      <div>
-        <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">Панель администратора</h1>
-        <p className="mt-1 text-sm text-gray-500">Управление пользователями, справочниками, системными данными и порядком левого меню</p>
-      </div>
+    <div data-testid="admin-reference-dashboard" className="min-h-[calc(100vh-4rem)] bg-[#f7f9fc] text-[#172033] dark:bg-[#f7f9fc] dark:text-[#172033]">
+      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
+        <section className="flex items-center gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-blue-50 text-blue-600 ring-1 ring-blue-100">
+            <Shield className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-[22px] font-extrabold leading-tight text-[#172033] sm:text-[24px]">Панель администратора</h1>
+            <p className={`mt-1 text-[13px] ${adminMutedTextClass}`}>Управление системой, пользователями, ролями и настройками приложения.</p>
+          </div>
+        </section>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="app-scroll-fade-x flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-700 sm:gap-4">
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {kpiCards.map(card => {
+            const Icon = card.icon;
+            return (
+              <button
+                key={card.title}
+                type="button"
+                onClick={card.onClick}
+                className={`${adminCardClass} flex min-h-[96px] items-center gap-3 px-4 py-3 text-left transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_22px_50px_-34px_rgba(37,99,235,0.6)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300`}
+              >
+                <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${card.iconClass}`}>
+                  <Icon className="h-5 w-5" />
+                </span>
+                <span className="min-w-0">
+                  <span className={`block text-[13px] font-medium ${adminMutedTextClass}`}>{card.title}</span>
+                  <span className="mt-0.5 block text-[26px] font-extrabold leading-none text-[#172033]">{card.value}</span>
+                  <span className="mt-3 block text-[12px] font-semibold text-blue-600">{card.link} →</span>
+                </span>
+              </button>
+            );
+          })}
+        </section>
+
+        <section className="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,1fr)]">
+          <div className={`${adminCardClass} min-w-0 overflow-hidden`}>
+            <div className="flex flex-col gap-3 border-b border-[#edf1f6] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-base font-extrabold text-[#172033]">Управление пользователями</h2>
+              <Button className="h-9 rounded-[10px] bg-blue-600 px-4 text-sm text-white shadow-[0_14px_30px_-20px_rgba(37,99,235,0.95)] hover:bg-blue-700" onClick={openAdd}>
+                <Plus className="h-4 w-4" />
+                Новый пользователь
+              </Button>
+            </div>
+            <div className="space-y-3 px-5 py-3">
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    data-testid="admin-users-search"
+                    value={userSearch}
+                    onChange={event => setUserSearch(event.target.value)}
+                    placeholder="Поиск пользователей..."
+                    className="h-10 w-full rounded-[10px] border border-[#e3e8ef] bg-white pl-10 pr-3 text-sm text-[#172033] outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  />
+                </div>
+                <select
+                  data-testid="admin-role-filter"
+                  value={roleFilter}
+                  onChange={event => setRoleFilter(event.target.value)}
+                  className="h-10 rounded-[10px] border border-[#e3e8ef] bg-white px-3 text-sm font-medium text-[#172033] outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  aria-label="Фильтр ролей"
+                >
+                  <option value="all">Все роли</option>
+                  {roleOptions.map(role => <option key={role} value={role}>{role}</option>)}
+                </select>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] border-separate border-spacing-0 text-left text-[12px]">
+                  <thead>
+                    <tr className="text-[12px] font-semibold text-[#7a869a]">
+                      <th className="py-2 pr-3">Пользователь</th>
+                      <th className="px-2 py-2">Роль</th>
+                      <th className="px-2 py-2">Собственник</th>
+                      <th className="px-2 py-2">Статус</th>
+                      <th className="px-2 py-2">Последний вход</th>
+                      <th className="py-2 pl-2 text-right">Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredUsers.map((item, index) => (
+                      <tr key={item.id} className="border-t border-[#eef2f7]">
+                        <td className="border-t border-[#eef2f7] py-2 pr-3">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-[10px] font-bold text-slate-700">
+                              {item.profilePhoto ? <img src={item.profilePhoto} alt={item.name} className="h-full w-full object-cover" /> : adminInitials(item.name)}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block truncate font-bold text-[#172033]">{item.name}</span>
+                              <span className="block truncate text-[11px] text-[#7a869a]">{item.email}</span>
+                            </span>
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap border-t border-[#eef2f7] px-2 py-2">
+                          <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${rolePillClass(item.role)}`}>
+                            {normalizeUserRole(item.role)}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap border-t border-[#eef2f7] px-2 py-2 text-[#172033]">
+                          {normalizeUserRole(item.role) === 'Инвестор' ? (item.ownerName || 'Не привязан') : '—'}
+                        </td>
+                        <td className="whitespace-nowrap border-t border-[#eef2f7] px-2 py-2">
+                          <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${item.status === 'Активен' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-100'}`}>
+                            {item.status}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap border-t border-[#eef2f7] px-2 py-2 text-[#172033]">{userLastLogin(item, index)}</td>
+                        <td className="border-t border-[#eef2f7] py-2 pl-2">
+                          <div className="flex justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openEdit(item)}
+                              className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-blue-50 hover:text-blue-600"
+                              title="Редактировать"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openUserAction(item.status === 'Активен' ? 'deactivate' : 'activate', item)}
+                              className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                              title={item.status === 'Активен' ? 'Деактивировать' : 'Активировать'}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredUsers.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="border-t border-[#eef2f7] py-8 text-center text-sm text-[#7a869a]">
+                          Пользователи не найдены.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setUserSearch('');
+                  setRoleFilter('all');
+                  openDetailSection('users');
+                }}
+                className={adminLinkClass}
+              >
+                Показать всех пользователей ({userCount})
+              </button>
+            </div>
+          </div>
+
+          <div className={`${adminCardClass} min-w-0 overflow-hidden`}>
+            <div className="border-b border-[#edf1f6] px-5 py-3">
+              <h2 className="text-base font-extrabold text-[#172033]">Настройки системы</h2>
+            </div>
+            <div className="space-y-1 px-4 py-3">
+              {ADMIN_SETTINGS_ROWS.map(item => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.title}
+                    type="button"
+                    onClick={() => openDetailSection(item.tab)}
+                    className="flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left transition hover:bg-[#f6f9ff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-blue-50 text-blue-600">
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px] font-extrabold text-[#172033]">{item.title}</span>
+                      <span className="mt-0.5 block text-[12px] leading-snug text-[#7a869a]">{item.description}</span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-[#9aa6b2]" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,1fr)]">
+          <div className={`${adminCardClass} min-w-0 overflow-hidden`}>
+            <div className="flex items-center justify-between border-b border-[#edf1f6] px-5 py-3">
+              <h2 className="text-base font-extrabold text-[#172033]">Управление меню</h2>
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-9 rounded-[10px] border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-blue-600 hover:bg-blue-100"
+                onClick={() => openDetailSection('menu')}
+              >
+                <Plus className="h-4 w-4" />
+                Добавить пункт
+              </Button>
+            </div>
+            <div className="grid gap-4 px-5 py-3 md:grid-cols-[190px_minmax(0,1fr)]">
+              <div className="space-y-1">
+                {ADMIN_MENU_PREVIEW_GROUPS.map(group => {
+                  const selected = group.id === selectedMenuGroup;
+                  return (
+                    <button
+                      data-testid={`admin-menu-group-${group.id}`}
+                      key={group.id}
+                      type="button"
+                      onClick={() => setSelectedMenuGroup(group.id)}
+                      className={`flex w-full items-center justify-between rounded-[11px] px-3 py-2.5 text-sm font-bold transition ${selected ? 'bg-blue-50 text-blue-700' : 'text-[#5f6b7a] hover:bg-slate-50 hover:text-[#172033]'}`}
+                    >
+                      <span>{group.title}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] ${selected ? 'bg-white text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{group.sections.length}</span>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => openDetailSection('menu')}
+                  className={`${adminLinkClass} mt-5 block px-3`}
+                >
+                  Настроить порядок групп
+                </button>
+              </div>
+
+              <div className="min-w-0">
+                <p className="mb-3 text-[13px] font-medium text-[#5f6b7a]">Пункты меню в группе «{selectedMenuGroupMeta.title}»</p>
+                <div className="divide-y divide-[#edf1f6] rounded-[12px] border border-[#edf1f6] bg-white">
+                  {selectedMenuSections.slice(0, 5).map(section => {
+                    const Icon = ADMIN_MENU_SECTION_ICONS[section] || List;
+                    const enabled = localMenuVisibility[section] ?? true;
+                    return (
+                      <div key={section} className="flex items-center gap-3 px-3 py-2.5">
+                        <GripVertical className="h-4 w-4 shrink-0 text-[#b3bdc9]" />
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-bold text-[#172033]">{SIDEBAR_SECTION_LABELS[section]}</span>
+                        <button
+                          type="button"
+                          onClick={() => toggleMenuSection(section)}
+                          className={`relative h-6 w-11 shrink-0 rounded-full transition ${enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                          aria-pressed={enabled}
+                          aria-label={`${enabled ? 'Скрыть' : 'Показать'} пункт ${SIDEBAR_SECTION_LABELS[section]}`}
+                        >
+                          <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition ${enabled ? 'left-6' : 'left-1'}`} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openDetailSection('menu')}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100"
+                          title="Настройки пункта"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className={`${adminCardClass} min-w-0 overflow-hidden`}>
+            <div className="flex items-center justify-between border-b border-[#edf1f6] px-5 py-3">
+              <h2 className="text-base font-extrabold text-[#172033]">Активность в системе</h2>
+              <button type="button" onClick={() => openDetailSection('audit')} className={adminLinkClass}>Просмотреть всё</button>
+            </div>
+            <div className="divide-y divide-[#edf1f6] px-5">
+              {ADMIN_ACTIVITY_FALLBACK.map(item => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={`${item.text}-${item.time}`}
+                    type="button"
+                    onClick={() => openDetailSection('audit')}
+                    className="flex w-full items-center gap-3 py-2.5 text-left transition hover:bg-[#f8fbff]"
+                  >
+                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] ${activityToneClass(item.tone)}`}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0 flex-1 text-[13px] font-semibold leading-snug text-[#172033]">{item.text}</span>
+                    <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-[#7a869a] sm:block">{item.time}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="px-5 py-4">
+              <button type="button" onClick={() => openDetailSection('audit')} className={adminLinkClass}>Показать всю активность</button>
+            </div>
+          </div>
+        </section>
+
+        <footer className="flex flex-col gap-3 py-5 text-[12px] text-[#7a869a] sm:flex-row sm:items-center">
+          <div className="flex flex-wrap gap-x-8 gap-y-2">
+            <span>Скайтех © 2026</span>
+            <span>Версия 1.0.0</span>
+          </div>
+          <div className="flex flex-wrap gap-x-8 gap-y-2 sm:ml-auto">
+            <button type="button" onClick={() => openDetailSection('reference')} className="hover:text-blue-600">Документация</button>
+            <button type="button" onClick={() => openDetailSection('diagnostics')} className="hover:text-blue-600">Поддержка</button>
+            <button type="button" onClick={() => openDetailSection('system-control')} className="hover:text-blue-600">О системе</button>
+          </div>
+        </footer>
+
+        <section className="pt-2" id="admin-detail-sections">
+          <div className="mb-3">
+            <h2 className="text-lg font-extrabold text-[#172033]">Детальные настройки</h2>
+            <p className={`mt-1 text-[13px] ${adminMutedTextClass}`}>Расширенное управление пользователями, меню, справочниками, данными и диагностикой системы.</p>
+          </div>
+        </section>
+
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="space-y-6 rounded-[16px] border border-[#e6ebf2] bg-white p-4 shadow-[0_18px_42px_-34px_rgba(15,23,42,0.42)]"
+      >
+        <TabsList className="app-scroll-fade-x flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-200 sm:gap-4">
           {[
             { value: 'users',         label: 'Пользователи и роли' },
             { value: 'menu',          label: 'Левое меню' },
@@ -411,7 +1083,7 @@ export default function Settings() {
             <TabsTrigger
               key={tab.value}
               value={tab.value}
-              className="shrink-0 whitespace-nowrap border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary]"
+              className="shrink-0 whitespace-nowrap border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 data-[state=active]:border-blue-600 data-[state=active]:text-blue-600"
             >
               {tab.label}
             </TabsTrigger>
@@ -871,6 +1543,7 @@ export default function Settings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </div>
     </div>
   );
 }

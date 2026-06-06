@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate, useNavigation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
-import { CalendarDays, ChevronDown, LayoutDashboard, LogOut, Menu, Plus, Settings, Truck, FileText, Wrench, Users } from 'lucide-react';
+import { CalendarDays, ChevronDown, LayoutDashboard, LogOut, Menu, Plus, Search, Settings, Truck, FileText, Wrench, Users } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { NotificationCenter } from './NotificationCenter';
 import { useAuth } from '../../contexts/AuthContext';
@@ -33,6 +33,7 @@ function getInitials(name: string): string {
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [topbarSearch, setTopbarSearch] = useState('');
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(SIDEBAR_STATE_STORAGE_KEY) === 'collapsed';
@@ -63,6 +64,7 @@ export function Layout() {
   const canOpenPlanner = canView('planner');
   const desktopSidebarOffsetClass = desktopSidebarCollapsed ? 'sm:left-20' : 'sm:left-64';
   const desktopSidebarMarginClass = desktopSidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64';
+  const isAdminReferenceMode = location.pathname === '/admin' || location.pathname.startsWith('/admin/');
   const pageTitle = useMemo(() => {
     if (location.pathname === '/') return 'Дашборд';
     const segment = location.pathname.split('/').filter(Boolean)[0] || '';
@@ -294,16 +296,48 @@ export function Layout() {
 
       {/* Desktop top bar */}
       <header className={cn(
-        'fixed right-0 top-0 z-20 hidden h-16 items-center justify-between border-b border-border/80 bg-white/88 px-6 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)] backdrop-blur-xl transition-[left] duration-300 dark:bg-background/80 sm:flex',
+        'fixed right-0 top-0 z-20 hidden items-center justify-between border-b px-6 backdrop-blur-xl transition-[left] duration-300 sm:flex',
+        isAdminReferenceMode ? 'h-12' : 'h-16',
+        isAdminReferenceMode
+          ? 'border-[#e6ebf2] bg-white/95 shadow-none dark:bg-white/95'
+          : 'border-border/80 bg-white/88 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)] dark:bg-background/80',
         desktopSidebarOffsetClass,
       )}>
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Рабочее пространство</p>
-          <div className="app-shell-title truncate text-lg font-extrabold text-foreground">{pageTitle}</div>
-        </div>
+        {isAdminReferenceMode ? (
+          <button
+            type="button"
+            onClick={handleToggleDesktopSidebar}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-[#5f6b7a] transition hover:bg-blue-50 hover:text-blue-600"
+            aria-label={desktopSidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
+            title={desktopSidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        ) : (
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Рабочее пространство</p>
+            <div className="app-shell-title truncate text-lg font-extrabold text-foreground">{pageTitle}</div>
+          </div>
+        )}
 
         <div className="flex items-center gap-3">
-          {primaryCreatePath ? (
+          {isAdminReferenceMode ? (
+            <div className="relative hidden w-[320px] lg:block">
+              <input
+                value={topbarSearch}
+                onChange={event => setTopbarSearch(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' && topbarSearch.trim()) {
+                    navigate(`/admin?search=${encodeURIComponent(topbarSearch.trim())}`, { replace: true });
+                  }
+                }}
+                placeholder="Поиск по системе..."
+                className="h-10 w-full rounded-[10px] border border-[#e3e8ef] bg-white pl-4 pr-10 text-sm text-[#172033] outline-none transition placeholder:text-[#9aa6b2] focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                aria-label="Поиск по системе"
+              />
+              <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9aa6b2]" />
+            </div>
+          ) : primaryCreatePath ? (
             <button
               type="button"
               onClick={() => navigate(primaryCreatePath)}
@@ -314,7 +348,7 @@ export function Layout() {
               <Plus className="h-5 w-5" />
             </button>
           ) : null}
-          {canOpenPlanner ? (
+          {!isAdminReferenceMode && canOpenPlanner ? (
             <button
               type="button"
               onClick={() => navigate('/planner')}
@@ -330,11 +364,16 @@ export function Layout() {
             <button
               type="button"
               onClick={() => setProfileOpen((value) => !value)}
-              className="flex min-w-0 items-center gap-3 rounded-2xl border border-border bg-card px-3 py-2 text-left shadow-[0_14px_36px_-30px_rgba(15,23,42,0.5)] transition hover:border-primary/35 hover:bg-accent/45 dark:hover:bg-accent/50"
+              className={cn(
+                'flex min-w-0 items-center gap-3 text-left transition',
+                isAdminReferenceMode
+                  ? 'rounded-xl border border-transparent bg-transparent px-1 py-1 hover:bg-[#f5f8fc]'
+                  : 'rounded-2xl border border-border bg-card px-3 py-2 shadow-[0_14px_36px_-30px_rgba(15,23,42,0.5)] hover:border-primary/35 hover:bg-accent/45 dark:hover:bg-accent/50',
+              )}
               aria-expanded={profileOpen}
               aria-haspopup="menu"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[linear-gradient(135deg,#2563eb,#6366f1)] text-sm font-bold text-white dark:bg-primary dark:text-primary-foreground">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[linear-gradient(135deg,#2563eb,#6366f1)] text-sm font-bold text-white">
                 {user?.profilePhoto ? (
                   <img src={user.profilePhoto} alt={user.name} className="h-full w-full object-cover" />
                 ) : (
@@ -342,10 +381,10 @@ export function Layout() {
                 )}
               </span>
               <span className="min-w-0">
-                <span className="block max-w-44 truncate text-sm font-semibold text-foreground">{user?.name ?? '—'}</span>
-                <span className="block max-w-44 truncate text-xs text-muted-foreground">{user?.role ?? 'Пользователь'}</span>
+                <span className={cn('block max-w-44 truncate text-sm font-semibold', isAdminReferenceMode ? 'text-[#172033]' : 'text-foreground')}>{user?.name ?? '—'}</span>
+                <span className={cn('block max-w-44 truncate text-xs', isAdminReferenceMode ? 'text-[#6b778c]' : 'text-muted-foreground')}>{user?.role ?? 'Пользователь'}</span>
               </span>
-              <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', profileOpen && 'rotate-180')} />
+              <ChevronDown className={cn('h-4 w-4 shrink-0 transition-transform', isAdminReferenceMode ? 'text-[#9aa6b2]' : 'text-muted-foreground', profileOpen && 'rotate-180')} />
             </button>
 
             {profileOpen && (
@@ -384,7 +423,7 @@ export function Layout() {
         'min-h-screen',
         'transition-[margin] duration-300',
         desktopSidebarMarginClass,
-        'pt-14 pb-16 sm:pt-16 sm:pb-0',
+        isAdminReferenceMode ? 'pt-14 pb-16 sm:pt-12 sm:pb-0' : 'pt-14 pb-16 sm:pt-16 sm:pb-0',
         'relative',
         demoPresentationMotion && 'app-demo-presentation-motion',
       )}>

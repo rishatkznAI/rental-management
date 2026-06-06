@@ -118,10 +118,13 @@ import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import {
   DEFAULT_SIDEBAR_ORDER,
   SIDEBAR_NAV_GROUP_SETTING_KEY,
+  SIDEBAR_NAV_VISIBILITY_SETTING_KEY,
   SIDEBAR_NAV_GROUPS,
   SIDEBAR_SECTION_LABELS,
+  isSidebarSectionVisibilityConfigurable,
   normalizeSidebarGroups,
   normalizeSidebarOrder,
+  normalizeSidebarVisibility,
   type SidebarNavGroupId,
 } from '../lib/navigation';
 import {
@@ -461,8 +464,13 @@ export default function Settings() {
     () => appSettings.find(item => item.key === SIDEBAR_NAV_GROUP_SETTING_KEY) || null,
     [appSettings],
   );
+  const sidebarVisibilitySetting = React.useMemo(
+    () => appSettings.find(item => item.key === SIDEBAR_NAV_VISIBILITY_SETTING_KEY) || null,
+    [appSettings],
+  );
   const [sidebarOrder, setSidebarOrder] = React.useState(DEFAULT_SIDEBAR_ORDER);
   const [sidebarGroups, setSidebarGroups] = React.useState(() => normalizeSidebarGroups(null));
+  const [sidebarVisibility, setSidebarVisibility] = React.useState(() => normalizeSidebarVisibility(null));
 
   React.useEffect(() => {
     setSidebarOrder(normalizeSidebarOrder(sidebarOrderSetting?.value));
@@ -471,6 +479,10 @@ export default function Settings() {
   React.useEffect(() => {
     setSidebarGroups(normalizeSidebarGroups(sidebarGroupSetting?.value));
   }, [sidebarGroupSetting]);
+
+  React.useEffect(() => {
+    setSidebarVisibility(normalizeSidebarVisibility(sidebarVisibilitySetting?.value));
+  }, [sidebarVisibilitySetting]);
 
   const visibleSidebarOrder = React.useMemo(
     () => isCrmEnabled ? sidebarOrder : sidebarOrder.filter(section => section !== 'crm'),
@@ -507,32 +519,67 @@ export default function Settings() {
     });
   }, [sidebarGroups]);
 
+  const saveSidebarVisibility = React.useCallback(async (nextVisibility: typeof sidebarVisibility) => {
+    const now = new Date().toISOString();
+    const visibilityPayload = {
+      key: SIDEBAR_NAV_VISIBILITY_SETTING_KEY,
+      value: normalizeSidebarVisibility(nextVisibility),
+    };
+
+    if (sidebarVisibilitySetting) {
+      await appSettingsService.update(sidebarVisibilitySetting.id, visibilityPayload);
+    } else {
+      await appSettingsService.create({
+        ...visibilityPayload,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
+  }, [queryClient, sidebarVisibilitySetting]);
+
+  const toggleSidebarSectionVisibility = React.useCallback((section: (typeof DEFAULT_SIDEBAR_ORDER)[number]) => {
+    if (!isSidebarSectionVisibilityConfigurable(section)) return;
+    setSidebarVisibility(current => {
+      const next = normalizeSidebarVisibility({
+        ...current,
+        [section]: current[section] === false,
+      });
+      void saveSidebarVisibility(next);
+      return next;
+    });
+  }, [saveSidebarVisibility]);
+
   const handleSaveSidebarOrder = React.useCallback(async () => {
     const now = new Date().toISOString();
     const orderPayload = {
       key: 'sidebar_navigation_order',
       value: sidebarOrder,
-      createdAt: sidebarOrderSetting?.createdAt || now,
-      updatedAt: now,
     };
     const groupPayload = {
       key: SIDEBAR_NAV_GROUP_SETTING_KEY,
       value: sidebarGroups,
-      createdAt: sidebarGroupSetting?.createdAt || now,
-      updatedAt: now,
+    };
+    const visibilityPayload = {
+      key: SIDEBAR_NAV_VISIBILITY_SETTING_KEY,
+      value: normalizeSidebarVisibility(sidebarVisibility),
     };
 
     await Promise.all([
       sidebarOrderSetting
         ? appSettingsService.update(sidebarOrderSetting.id, orderPayload)
-        : appSettingsService.create(orderPayload),
+        : appSettingsService.create({ ...orderPayload, createdAt: now, updatedAt: now }),
       sidebarGroupSetting
         ? appSettingsService.update(sidebarGroupSetting.id, groupPayload)
-        : appSettingsService.create(groupPayload),
+        : appSettingsService.create({ ...groupPayload, createdAt: now, updatedAt: now }),
+      sidebarVisibilitySetting
+        ? appSettingsService.update(sidebarVisibilitySetting.id, visibilityPayload)
+        : appSettingsService.create({ ...visibilityPayload, createdAt: now, updatedAt: now }),
     ]);
 
     await queryClient.invalidateQueries({ queryKey: ['app-settings'] });
-  }, [queryClient, sidebarGroupSetting, sidebarGroups, sidebarOrder, sidebarOrderSetting]);
+  }, [queryClient, sidebarGroupSetting, sidebarGroups, sidebarOrder, sidebarOrderSetting, sidebarVisibility, sidebarVisibilitySetting]);
 
   // ── Диалог ──────────────────────────────────────────────────────────────────
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -668,12 +715,12 @@ export default function Settings() {
   const [userSearch, setUserSearch] = React.useState('');
   const [roleFilter, setRoleFilter] = React.useState('all');
   const [selectedMenuGroup, setSelectedMenuGroup] = React.useState<SidebarNavGroupId>('main');
-  const [localMenuVisibility, setLocalMenuVisibility] = React.useState<Record<string, boolean>>({});
 
   const displayUsers = users.length > 0 ? users : ADMIN_DEMO_USERS;
   const userCount = users.length > 0 ? users.length : 42;
   const roleCount = users.length > 0 ? new Set([...ROLES, ...users.map(item => item.role)]).size : 9;
-  const menuCount = visibleSidebarOrder.length > 0 ? visibleSidebarOrder.length : 28;
+  const enabledMenuCount = visibleSidebarOrder.filter(section => sidebarVisibility[section] !== false).length;
+  const menuCount = enabledMenuCount > 0 ? enabledMenuCount : 28;
   const collectionCount = ADMIN_DATA_COLLECTIONS.length;
   const activeSessionsCount = 12;
 
@@ -694,10 +741,7 @@ export default function Settings() {
   const selectedMenuSections = selectedMenuGroupMeta.sections.filter(section => visibleSidebarOrder.includes(section) || selectedMenuGroupMeta.sections.includes(section));
 
   const toggleMenuSection = (section: SidebarSection) => {
-    setLocalMenuVisibility(current => ({
-      ...current,
-      [section]: !(current[section] ?? true),
-    }));
+    toggleSidebarSectionVisibility(section);
   };
 
   const openDetailSection = (tab: string) => {
@@ -981,7 +1025,8 @@ export default function Settings() {
                 <div className="divide-y divide-[#edf1f6] rounded-[12px] border border-[#edf1f6] bg-white">
                   {selectedMenuSections.slice(0, 5).map(section => {
                     const Icon = ADMIN_MENU_SECTION_ICONS[section] || List;
-                    const enabled = localMenuVisibility[section] ?? true;
+                    const enabled = sidebarVisibility[section] !== false;
+                    const canToggleVisibility = isSidebarSectionVisibilityConfigurable(section);
                     return (
                       <div key={section} className="flex items-center gap-3 px-3 py-2.5">
                         <GripVertical className="h-4 w-4 shrink-0 text-[#b3bdc9]" />
@@ -992,9 +1037,11 @@ export default function Settings() {
                         <button
                           type="button"
                           onClick={() => toggleMenuSection(section)}
-                          className={`relative h-6 w-11 shrink-0 rounded-full transition ${enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                          disabled={!canToggleVisibility}
+                          className={`relative h-6 w-11 shrink-0 rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}
                           aria-pressed={enabled}
                           aria-label={`${enabled ? 'Скрыть' : 'Показать'} пункт ${SIDEBAR_SECTION_LABELS[section]}`}
+                          title={canToggleVisibility ? undefined : 'Обязательный пункт меню'}
                         >
                           <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition ${enabled ? 'left-6' : 'left-1'}`} />
                         </button>
@@ -1192,10 +1239,10 @@ export default function Settings() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <LayoutPanelLeft className="h-5 w-5" />
-                  Порядок левого меню
+                  Настройки левого меню
                 </CardTitle>
                 <CardDescription>
-                  Администратор может менять порядок пунктов боковой навигации. Изменения применяются для всех пользователей системы.
+                  Администратор может менять видимость, порядок и блоки боковой навигации. Изменения применяются для всех пользователей системы.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -1210,15 +1257,39 @@ export default function Settings() {
                         <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{group.title}</div>
                         <div className="space-y-2">
                           {items.map((section, index) => {
+                            const enabled = sidebarVisibility[section] !== false;
+                            const canToggleVisibility = isSidebarSectionVisibilityConfigurable(section);
+                            const sectionLabel = SIDEBAR_SECTION_LABELS[section];
                             return (
-                              <div key={section} className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3 dark:border-gray-700 dark:bg-gray-900 xl:flex-row xl:items-center">
+                              <div
+                                key={section}
+                                className={`flex flex-col gap-3 rounded-xl border px-3 py-3 xl:flex-row xl:items-center ${
+                                  enabled
+                                    ? 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
+                                    : 'border-dashed border-gray-300 bg-gray-50 text-gray-500 dark:border-gray-700 dark:bg-gray-950/70 dark:text-gray-400'
+                                }`}
+                              >
                                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">
                                   {index + 1}
                                 </div>
                                 <div className="flex-1">
-                                  <div className="font-medium text-gray-900 dark:text-white">{SIDEBAR_SECTION_LABELS[section]}</div>
+                                  <div className={`font-medium ${enabled ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>{sectionLabel}</div>
                                   <div className="text-xs text-gray-500">{section}</div>
                                 </div>
+                                <Button
+                                  type="button"
+                                  variant={enabled ? 'outline' : 'secondary'}
+                                  size="sm"
+                                  onClick={() => toggleSidebarSectionVisibility(section)}
+                                  disabled={!canToggleVisibility}
+                                  aria-pressed={enabled}
+                                  aria-label={enabled ? `Скрыть ${sectionLabel} в левом меню` : `Показать ${sectionLabel} в левом меню`}
+                                  title={canToggleVisibility ? undefined : 'Обязательный пункт меню'}
+                                  className="w-full justify-start xl:w-32 xl:justify-center"
+                                >
+                                  {enabled ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                                  {enabled ? 'В меню' : 'Скрыт'}
+                                </Button>
                                 <select
                                   value={sidebarGroups[section]}
                                   onChange={event => moveSidebarSectionToGroup(section, event.target.value as SidebarNavGroupId)}
@@ -1259,7 +1330,7 @@ export default function Settings() {
                 </div>
                 <div className="flex justify-end">
                   <Button onClick={() => void handleSaveSidebarOrder()}>
-                    Сохранить порядок меню
+                    Сохранить настройки меню
                   </Button>
                 </div>
               </CardContent>

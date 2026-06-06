@@ -273,7 +273,7 @@ export function pathToSection(pathname: string): Section | null {
 
 // ── Первый доступный раздел для редиректа ─────────────────────────────────────
 
-const SECTION_PATHS: Array<[Section, string]> = [
+export const SECTION_PATHS: Array<[Section, string]> = [
   ['dashboard',  '/'],
   ['tasks_center', '/tasks'],
   ['equipment',  '/equipment'],

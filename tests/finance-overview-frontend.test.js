@@ -151,7 +151,7 @@ test('finance page keeps permission guard for roles without finance access', () 
   assert.match(source, /financeService\.getOperations[\s\S]*enabled: canViewFinance/);
   assert.match(source, /<Navigate to="\/" replace \/>/);
   assert.match(sidebarSource, /name: 'Финансы'.+section: 'finance'/);
-  assert.match(sidebarSource, /&& canView\(item\.section\)/);
+  assert.match(sidebarSource, /items: navigation[\s\S]*\.filter\(item =>[\s\S]*canView\(item\.section\)[\s\S]*\)/);
   assert.match(sidebarSource, /enabled: hasSearchInput && canView\('finance'\)/);
   assert.match(roleBlock('Администратор'), /finance:\s+ALL/);
   assert.match(roleBlock('Офис-менеджер'), /finance:\s+VIEW_CREATE_EDIT/);

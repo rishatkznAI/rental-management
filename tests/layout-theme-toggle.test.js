@@ -28,9 +28,17 @@ test('theme state keeps the original localStorage key and html dark class', () =
   assert.match(themeContextSource, /root\.classList\.remove\('dark'\)/);
 });
 
-test('sidebar no longer owns the only visible theme control', () => {
-  assert.doesNotMatch(sidebarSource, /useTheme\(\)/);
-  assert.doesNotMatch(sidebarSource, /aria-label="Переключить тему"/);
+test('sidebar exposes theme control outside configurable navigation', () => {
+  assert.match(sidebarSource, /useTheme\(\)/);
+  assert.match(sidebarSource, /const \{ theme, toggleTheme \} = useTheme\(\)/);
+  assert.match(sidebarSource, /data-testid="sidebar-theme-toggle"/);
+  assert.match(sidebarSource, /aria-pressed=\{isDarkTheme\}/);
+  assert.match(sidebarSource, /aria-label=\{themeToggleLabel\}/);
+  assert.match(sidebarSource, /Тема/);
+  assert.match(sidebarSource, /Тёмная/);
+  assert.match(sidebarSource, /Светлая/);
+  assert.match(sidebarSource, /<\/nav>[\s\S]*data-testid="sidebar-theme-toggle"/);
+  assert.doesNotMatch(sidebarSource, /section:\s*'theme'/);
 });
 
 test('admin route keeps the common app shell around dashboard content', () => {

@@ -14,7 +14,7 @@ const RELEASE_TYPES = new Set([
 function parseArgs(argv) {
   const args = {
     commit: process.env.GITHUB_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || '',
-    releaseType: process.env.RELEASE_TYPE || process.env.RELEASE_PREFLIGHT_RELEASE_TYPE || '',
+    releaseType: process.env.RELEASE_TYPE || process.env.RELEASE_PREFLIGHT_RELEASE_TYPE || process.env.RAILWAY_RELEASE_TYPE || '',
     buildTime: process.env.BUILD_TIME || new Date().toISOString(),
     out: 'server/release-marker.json',
   };

@@ -257,7 +257,7 @@ test('/api/admin/production-diagnostics is admin-only', async () => {
   });
 });
 
-test('/health and /api/version read backend marker releaseType before env fallback', async () => {
+test('/health and /api/version expose RELEASE_TYPE before backend marker fallback', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rentCore-release-marker-'));
   const markerFile = path.join(tempDir, 'release-marker.json');
   fs.writeFileSync(markerFile, JSON.stringify({
@@ -271,6 +271,35 @@ test('/health and /api/version read backend marker releaseType before env fallba
   await withBuildInfoEnv({
     BACKEND_RELEASE_MARKER_FILE: markerFile,
     RELEASE_TYPE: 'frontend-only',
+  }, async () => {
+    const { app } = createSystemApp({ getBuildInfo });
+    await withServer(app, async baseUrl => {
+      const health = await getJson(baseUrl, '/health');
+      assert.equal(health.status, 200);
+      assert.equal(health.body.build.releaseType, 'frontend-only');
+      assert.deepEqual(health.body.build.release, { type: 'frontend-only' });
+
+      const version = await getJson(baseUrl, '/api/version');
+      assert.equal(version.status, 200);
+      assert.equal(version.body.build.releaseType, 'frontend-only');
+      assert.deepEqual(version.body.build.release, { type: 'frontend-only' });
+    });
+  });
+});
+
+test('/health and /api/version read backend marker releaseType when env metadata is absent', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rentCore-release-marker-'));
+  const markerFile = path.join(tempDir, 'release-marker.json');
+  fs.writeFileSync(markerFile, JSON.stringify({
+    commit: '1117ad74e905',
+    commitFull: '1117ad74e905f9553dd46b7d3a6cf007723844cc',
+    buildTime: '2026-06-07T00:00:00.000Z',
+    deployTime: '2026-06-07T00:00:00.000Z',
+    releaseType: 'full-stack',
+  }), 'utf8');
+
+  await withBuildInfoEnv({
+    BACKEND_RELEASE_MARKER_FILE: markerFile,
   }, async () => {
     const { app } = createSystemApp({ getBuildInfo });
     await withServer(app, async baseUrl => {
@@ -303,6 +332,31 @@ test('build info still falls back to env releaseType when marker is absent', asy
     RELEASE_TYPE: 'backend',
   }, async () => {
     const build = getBuildInfo();
+    assert.equal(build.releaseType, 'backend');
+    assert.deepEqual(build.release, { type: 'backend' });
+  });
+});
+
+test('build info reads RELEASE_PREFLIGHT_RELEASE_TYPE when RELEASE_TYPE is absent', async () => {
+  await withBuildInfoEnv({
+    BACKEND_RELEASE_MARKER_FILE: path.join(os.tmpdir(), 'missing-rentCore-release-marker.json'),
+    RELEASE_PREFLIGHT_RELEASE_TYPE: 'full-stack',
+  }, async () => {
+    const build = getBuildInfo();
+    assert.equal(build.releaseType, 'full-stack');
+    assert.deepEqual(build.release, { type: 'full-stack' });
+  });
+});
+
+test('build info preserves Railway commit SHA while reading release type metadata', async () => {
+  await withBuildInfoEnv({
+    BACKEND_RELEASE_MARKER_FILE: path.join(os.tmpdir(), 'missing-rentCore-release-marker.json'),
+    RAILWAY_GIT_COMMIT_SHA: '7050d37628f5e7469b59ec3f30741049b1c3aa94',
+    RELEASE_PREFLIGHT_RELEASE_TYPE: 'backend',
+  }, async () => {
+    const build = getBuildInfo();
+    assert.equal(build.commit, '7050d37628f5');
+    assert.equal(build.commitFull, '7050d37628f5e7469b59ec3f30741049b1c3aa94');
     assert.equal(build.releaseType, 'backend');
     assert.deepEqual(build.release, { type: 'backend' });
   });

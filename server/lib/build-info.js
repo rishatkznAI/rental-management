@@ -55,12 +55,12 @@ function getBuildInfo() {
     readGitCommit(),
   );
   const releaseType = normalizeReleaseType(firstNonEmpty(
-    marker.releaseType,
-    marker.release_type,
-    marker.release?.type,
     process.env.RELEASE_TYPE,
     process.env.RELEASE_PREFLIGHT_RELEASE_TYPE,
     process.env.RAILWAY_RELEASE_TYPE,
+    marker.releaseType,
+    marker.release_type,
+    marker.release?.type,
   ));
 
   return {

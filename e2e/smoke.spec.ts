@@ -219,7 +219,11 @@ test.describe('production smoke', () => {
     await navigateInApp(page, '/admin');
     await expect(page.getByRole('heading', { name: 'Панель администратора' })).toBeVisible();
 
-    const detailedUsers = page.getByTestId('admin-users-table');
+    await page.getByRole('button', { name: /Показать всех пользователей/ }).click();
+    const usersDialog = page.getByRole('dialog', { name: 'Пользователи' });
+    await expect(usersDialog).toBeVisible();
+
+    const detailedUsers = usersDialog.getByTestId('admin-users-table');
     const row = detailedUsers.getByRole('row', { name: new RegExp(email) });
     await expect(row).toBeVisible();
 

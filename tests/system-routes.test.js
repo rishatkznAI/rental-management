@@ -13,6 +13,7 @@ const {
   buildSystemControlCenterStatus,
   registerSystemRoutes,
 } = require('../server/routes/system.js');
+const { getBuildInfo } = require('../server/lib/build-info.js');
 
 function createSystemApp(overrides = {}) {
   const app = express();
@@ -109,6 +110,34 @@ function listZipEntries(buffer) {
     offset = dataStart + compressedSize;
   }
   return entries;
+}
+
+async function withBuildInfoEnv(env, fn) {
+  const keys = [
+    'BACKEND_RELEASE_MARKER_FILE',
+    'RELEASE_TYPE',
+    'RELEASE_PREFLIGHT_RELEASE_TYPE',
+    'RAILWAY_RELEASE_TYPE',
+    'RAILWAY_GIT_COMMIT_SHA',
+    'GIT_COMMIT_SHA',
+    'COMMIT_SHA',
+    'SOURCE_VERSION',
+    'BUILD_TIME',
+    'RAILWAY_DEPLOYMENT_CREATED_AT',
+  ];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+  Object.entries(env).forEach(([key, value]) => {
+    if (value !== undefined) process.env[key] = value;
+  });
+  try {
+    return await fn();
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
 }
 
 async function postJson(baseUrl, path, body) {
@@ -225,6 +254,57 @@ test('/api/admin/production-diagnostics is admin-only', async () => {
   await withServer(app, async (baseUrl) => {
     const response = await getJson(baseUrl, '/api/admin/production-diagnostics');
     assert.equal(response.status, 403);
+  });
+});
+
+test('/health and /api/version read backend marker releaseType before env fallback', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rentCore-release-marker-'));
+  const markerFile = path.join(tempDir, 'release-marker.json');
+  fs.writeFileSync(markerFile, JSON.stringify({
+    commit: '1117ad74e905',
+    commitFull: '1117ad74e905f9553dd46b7d3a6cf007723844cc',
+    buildTime: '2026-06-07T00:00:00.000Z',
+    deployTime: '2026-06-07T00:00:00.000Z',
+    releaseType: 'full-stack',
+  }), 'utf8');
+
+  await withBuildInfoEnv({
+    BACKEND_RELEASE_MARKER_FILE: markerFile,
+    RELEASE_TYPE: 'frontend-only',
+  }, async () => {
+    const { app } = createSystemApp({ getBuildInfo });
+    await withServer(app, async baseUrl => {
+      const health = await getJson(baseUrl, '/health');
+      assert.equal(health.status, 200);
+      assert.equal(health.body.build.releaseType, 'full-stack');
+      assert.deepEqual(health.body.build.release, { type: 'full-stack' });
+
+      const version = await getJson(baseUrl, '/api/version');
+      assert.equal(version.status, 200);
+      assert.equal(version.body.build.releaseType, 'full-stack');
+      assert.deepEqual(version.body.build.release, { type: 'full-stack' });
+    });
+  });
+});
+
+test('build info keeps unknown releaseType when marker and env metadata are absent', async () => {
+  await withBuildInfoEnv({
+    BACKEND_RELEASE_MARKER_FILE: path.join(os.tmpdir(), 'missing-rentCore-release-marker.json'),
+  }, async () => {
+    const build = getBuildInfo();
+    assert.equal(build.releaseType, 'unknown');
+    assert.deepEqual(build.release, { type: 'unknown' });
+  });
+});
+
+test('build info still falls back to env releaseType when marker is absent', async () => {
+  await withBuildInfoEnv({
+    BACKEND_RELEASE_MARKER_FILE: path.join(os.tmpdir(), 'missing-rentCore-release-marker.json'),
+    RELEASE_TYPE: 'backend',
+  }, async () => {
+    const build = getBuildInfo();
+    assert.equal(build.releaseType, 'backend');
+    assert.deepEqual(build.release, { type: 'backend' });
   });
 });
 

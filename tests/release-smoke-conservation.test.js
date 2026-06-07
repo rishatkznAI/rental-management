@@ -99,6 +99,12 @@ test('deploy workflow embeds release_type into frontend build metadata', () => {
   assert.match(deployWorkflowSource, /VITE_RELEASE_TYPE: \$\{\{ needs\.classify-release\.outputs\.release_type \}\}/);
 });
 
+test('deploy workflow writes backend release marker metadata', () => {
+  assert.match(deployWorkflowSource, /scripts\/backend-release-marker\.mjs/);
+  assert.match(deployWorkflowSource, /node scripts\/backend-release-marker\.mjs --commit "\$GITHUB_SHA" --release-type "\$RELEASE_TYPE"/);
+  assert.match(deployWorkflowSource, /RELEASE_TYPE: \$\{\{ needs\.classify-release\.outputs\.release_type \}\}/);
+});
+
 test('release smoke diagnostics do not print smoke credentials or auth tokens', () => {
   const diagnosticHeader = releaseSmokeSource.match(/function diagnosticHeader[\s\S]*?\n}\n/)?.[0] || '';
   const thrownErrors = [...releaseSmokeSource.matchAll(/throw new Error\(`[\s\S]*?`\);/g)].map(match => match[0]).join('\n');

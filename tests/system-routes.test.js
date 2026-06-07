@@ -369,6 +369,182 @@ test('system control center interprets conservation flags and unknown DB isolati
   assert.ok(status.checks.some(item => item.id === 'production_conserved' && item.status === 'ok'));
 });
 
+test('system control center marks matching frontend/backend commits as OK', () => {
+  const status = buildSystemControlCenterStatus({
+    dbPath: '/data/app.sqlite',
+    buildInfo: {
+      commit: 'd2146e7eaea9',
+      commitFull: 'd2146e7eaea9b4f8d7b5e8f1f9f6c6a0c7e3b2d1',
+      buildTime: '2026-06-07T00:00:00.000Z',
+      releaseType: 'full-stack',
+    },
+    getAppDisabledConfig: () => ({ disabled: true, message: 'paused' }),
+    requestFrontendCommit: 'd2146e7eaea9',
+    requestFrontendBuildTime: '2026-06-07T00:00:00.000Z',
+    requestFrontendReleaseType: 'full-stack',
+    env: {
+      NODE_ENV: 'production',
+      RAILWAY_ENVIRONMENT_NAME: 'production',
+      RAILWAY_SERVICE_NAME: 'rental-management',
+      RAILWAY_VOLUME_MOUNT_PATH: '/data',
+      APP_DISABLED: 'true',
+      BOT_DISABLED: 'true',
+      GSM_DISABLED: 'true',
+      DB_PATH: '/data/app.sqlite',
+    },
+    inspectStorage: () => ({
+      mountPath: '/data',
+      available: true,
+      signalPresent: true,
+      device: '/dev/zd1232',
+      statDevice: 1232,
+      totalKb: 899836,
+      usedKb: 447072,
+      freeKb: 452764,
+      capacity: '50%',
+      error: '',
+    }),
+  });
+
+  assert.equal(status.version.versionMatch, true);
+  assert.equal(status.version.releaseStatus, 'ok');
+  assert.equal(status.version.releaseType, 'full-stack');
+  assert.equal(status.status, 'ok');
+});
+
+test('system control center treats production frontend-only commit drift as WARN', () => {
+  const status = buildSystemControlCenterStatus({
+    dbPath: '/data/app.sqlite',
+    buildInfo: {
+      commit: 'd9b3c24f014d',
+      commitFull: 'd9b3c24f014d9f75f6174f44ea018c6b7a9f7c31',
+      buildTime: '2026-06-06T00:00:00.000Z',
+      releaseType: 'unknown',
+    },
+    getAppDisabledConfig: () => ({ disabled: true, message: 'paused' }),
+    requestFrontendCommit: 'd2146e7eaea9',
+    requestFrontendBuildTime: '2026-06-07T00:00:00.000Z',
+    requestFrontendReleaseType: 'frontend-only',
+    env: {
+      NODE_ENV: 'production',
+      RAILWAY_ENVIRONMENT_NAME: 'production',
+      RAILWAY_SERVICE_NAME: 'rental-management',
+      RAILWAY_VOLUME_MOUNT_PATH: '/data',
+      APP_DISABLED: 'true',
+      BOT_DISABLED: 'true',
+      GSM_DISABLED: 'true',
+      DB_PATH: '/data/app.sqlite',
+    },
+    inspectStorage: () => ({
+      mountPath: '/data',
+      available: true,
+      signalPresent: true,
+      device: '/dev/zd1232',
+      statDevice: 1232,
+      totalKb: 899836,
+      usedKb: 447072,
+      freeKb: 452764,
+      capacity: '50%',
+      error: '',
+    }),
+  });
+
+  assert.equal(status.version.versionMatch, false);
+  assert.equal(status.version.releaseStatus, 'warning');
+  assert.equal(status.version.releaseType, 'frontend-only');
+  assert.equal(status.version.releaseBuildOrder, 'frontend-newer');
+  assert.match(status.version.releaseMessage, /Frontend обновлён отдельно от backend/);
+  assert.equal(status.status, 'warning');
+  assert.ok(status.recommendations.some(item => item.level === 'warning' && /Frontend-only release drift/.test(item.title)));
+});
+
+test('system control center treats backend-newer drift as RISK even with stale frontend-only marker', () => {
+  const status = buildSystemControlCenterStatus({
+    dbPath: '/data/app.sqlite',
+    buildInfo: {
+      commit: 'd2146e7eaea9',
+      commitFull: 'd2146e7eaea9b4f8d7b5e8f1f9f6c6a0c7e3b2d1',
+      buildTime: '2026-06-08T00:00:00.000Z',
+      releaseType: 'backend',
+    },
+    getAppDisabledConfig: () => ({ disabled: true, message: 'paused' }),
+    requestFrontendCommit: 'd9b3c24f014d',
+    requestFrontendBuildTime: '2026-06-07T00:00:00.000Z',
+    requestFrontendReleaseType: 'frontend-only',
+    env: {
+      NODE_ENV: 'production',
+      RAILWAY_ENVIRONMENT_NAME: 'production',
+      RAILWAY_SERVICE_NAME: 'rental-management',
+      RAILWAY_VOLUME_MOUNT_PATH: '/data',
+      APP_DISABLED: 'true',
+      BOT_DISABLED: 'true',
+      GSM_DISABLED: 'true',
+      DB_PATH: '/data/app.sqlite',
+    },
+    inspectStorage: () => ({
+      mountPath: '/data',
+      available: true,
+      signalPresent: true,
+      device: '/dev/zd1232',
+      statDevice: 1232,
+      totalKb: 899836,
+      usedKb: 447072,
+      freeKb: 452764,
+      capacity: '50%',
+      error: '',
+    }),
+  });
+
+  assert.equal(status.version.versionMatch, false);
+  assert.equal(status.version.releaseStatus, 'risk');
+  assert.equal(status.version.releaseBuildOrder, 'backend-newer');
+  assert.match(status.version.releaseMessage, /несовместимых release/);
+  assert.equal(status.status, 'risk');
+});
+
+test('system control center treats unknown release_type commit drift as RISK', () => {
+  const status = buildSystemControlCenterStatus({
+    dbPath: '/data/app.sqlite',
+    buildInfo: {
+      commit: 'd9b3c24f014d',
+      commitFull: 'd9b3c24f014d9f75f6174f44ea018c6b7a9f7c31',
+      buildTime: '2026-06-06T00:00:00.000Z',
+      releaseType: 'unknown',
+    },
+    getAppDisabledConfig: () => ({ disabled: true, message: 'paused' }),
+    requestFrontendCommit: 'd2146e7eaea9',
+    env: {
+      NODE_ENV: 'production',
+      RAILWAY_ENVIRONMENT_NAME: 'production',
+      RAILWAY_SERVICE_NAME: 'rental-management',
+      RAILWAY_VOLUME_MOUNT_PATH: '/data',
+      APP_DISABLED: 'true',
+      BOT_DISABLED: 'true',
+      GSM_DISABLED: 'true',
+      DB_PATH: '/data/app.sqlite',
+    },
+    inspectStorage: () => ({
+      mountPath: '/data',
+      available: true,
+      signalPresent: true,
+      device: '/dev/zd1232',
+      statDevice: 1232,
+      totalKb: 899836,
+      usedKb: 447072,
+      freeKb: 452764,
+      capacity: '50%',
+      error: '',
+    }),
+  });
+
+  assert.equal(status.version.versionMatch, false);
+  assert.equal(status.version.releaseStatus, 'risk');
+  assert.equal(status.version.releaseType, 'unknown');
+  assert.match(status.version.releaseMessage, /несовместимых release/);
+  assert.equal(status.status, 'risk');
+  assert.ok(status.recommendations.some(item => item.level === 'risk' && /Риск несовместимого release/.test(item.title)));
+});
+
 test('system control center classifies /data DB path as Railway production volume when production env is present', () => {
   const status = buildSystemControlCenterStatus({
     dbPath: '/data/app.sqlite',

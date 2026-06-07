@@ -71,11 +71,14 @@ test('auth flight recorder traces logout causes without full bearer tokens', () 
 
 test('frontend build info exposes the active auth patch marker only through debug UI', () => {
   assert.match(buildInfoSource, /authPatch: string/);
+  assert.match(buildInfoSource, /releaseType: string/);
+  assert.match(buildInfoSource, /__APP_RELEASE_TYPE__/);
   assert.match(buildInfoSource, /token-scoped-unauthorized-v2-flight-recorder/);
   assert.match(buildInfoSource, /if \(!isAuthDebugEnabled\(\)\) return;[\s\S]*window\.__SKYTECH_BUILD_INFO__ = frontendBuildInfo;[\s\S]*console\.info\('\[Skytech build\]'/);
   assert.match(buildInfoSource, /params\.get\('debugVersion'\) === '1'/);
   assert.match(buildInfoSource, /AUTH_DEBUG_STORAGE_KEY/);
   assert.match(buildDebugBadgeSource, /setVisible\(shouldShowBuildDebug\(\)\)/);
+  assert.match(buildDebugBadgeSource, /frontendBuildInfo\.releaseType/);
   assert.match(buildDebugBadgeSource, /frontendBuildInfo\.authPatch/);
 });
 

@@ -80,12 +80,14 @@ async function main() {
     const actualCommit = marker?.commit || '';
     const actualApiUrl = marker?.apiBaseUrl || '';
     const buildTime = marker?.buildTime || 'missing';
+    const releaseType = marker?.releaseType || 'unknown';
     const expectedShort = shortCommit(expectedCommit);
 
     console.log(`[frontend-build-marker] frontend=${frontendUrl}`);
     console.log(`[frontend-build-marker] expectedCommit=${expectedShort}`);
     console.log(`[frontend-build-marker] actualCommit=${actualCommit || 'missing'}`);
     console.log(`[frontend-build-marker] buildTime=${buildTime}`);
+    console.log(`[frontend-build-marker] releaseType=${releaseType}`);
     console.log(`[frontend-build-marker] apiUrl=${actualApiUrl || 'missing'}`);
 
     await appendSummary([
@@ -95,6 +97,7 @@ async function main() {
       `- expected commit: \`${expectedShort}\``,
       `- actual FE marker: \`${actualCommit || 'missing'}\``,
       `- build time: \`${buildTime}\``,
+      `- release type: \`${releaseType}\``,
       `- API URL: \`${actualApiUrl || 'missing'}\``,
     ]);
 

@@ -312,6 +312,123 @@ function safeFrontendCommit({ requestCommit = '', env = process.env } = {}) {
   );
 }
 
+const KNOWN_RELEASE_TYPES = new Set([
+  'frontend-only',
+  'backend',
+  'full-stack',
+  'deploy-tooling',
+  'frontend-deploy-tooling',
+]);
+const FRONTEND_DRIFT_RELEASE_TYPES = new Set([
+  'frontend-only',
+  'deploy-tooling',
+  'frontend-deploy-tooling',
+]);
+
+function normalizeReleaseType(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return KNOWN_RELEASE_TYPES.has(normalized) ? normalized : 'unknown';
+}
+
+function releaseTypeFromBuild(build = {}) {
+  return normalizeReleaseType(
+    build.releaseType
+    || build.release_type
+    || build.release?.type
+    || build.release?.releaseType,
+  );
+}
+
+function safeFrontendReleaseType({ requestReleaseType = '', env = process.env } = {}) {
+  return normalizeReleaseType(
+    requestReleaseType
+    || env.FRONTEND_RELEASE_TYPE
+    || env.VITE_RELEASE_TYPE,
+  );
+}
+
+function commitsMatch(left = '', right = '') {
+  const normalizedLeft = String(left || '').trim();
+  const normalizedRight = String(right || '').trim();
+  if (!normalizedLeft || !normalizedRight) return false;
+  return normalizedLeft.startsWith(normalizedRight) || normalizedRight.startsWith(normalizedLeft);
+}
+
+function compareBuildTimes({ backendBuildTime = '', frontendBuildTime = '' } = {}) {
+  const backendTime = Date.parse(String(backendBuildTime || ''));
+  const frontendTime = Date.parse(String(frontendBuildTime || ''));
+  if (!Number.isFinite(backendTime) || !Number.isFinite(frontendTime)) return 'unknown';
+  if (Math.abs(backendTime - frontendTime) < 1000) return 'same';
+  return backendTime > frontendTime ? 'backend-newer' : 'frontend-newer';
+}
+
+function classifyVersionRelease({
+  backendCommit = '',
+  frontendCommit = '',
+  backendBuildTime = '',
+  frontendBuildTime = '',
+  backendReleaseType = 'unknown',
+  frontendReleaseType = 'unknown',
+  versionMatch = 'unknown',
+} = {}) {
+  const normalizedBackendType = normalizeReleaseType(backendReleaseType);
+  const normalizedFrontendType = normalizeReleaseType(frontendReleaseType);
+  const effectiveReleaseType = normalizedFrontendType !== 'unknown'
+    ? normalizedFrontendType
+    : normalizedBackendType;
+  const buildOrder = compareBuildTimes({ backendBuildTime, frontendBuildTime });
+
+  if (versionMatch === true) {
+    return {
+      status: 'ok',
+      releaseType: effectiveReleaseType,
+      backendReleaseType: normalizedBackendType,
+      frontendReleaseType: normalizedFrontendType,
+      buildOrder,
+      compatible: true,
+      message: 'Backend и frontend показывают один release commit.',
+      action: 'Можно продолжать штатную работу.',
+    };
+  }
+
+  if (versionMatch === 'unknown' || !backendCommit || !frontendCommit || backendCommit === 'unknown' || frontendCommit === 'unknown') {
+    return {
+      status: 'warning',
+      releaseType: effectiveReleaseType,
+      backendReleaseType: normalizedBackendType,
+      frontendReleaseType: normalizedFrontendType,
+      buildOrder,
+      compatible: 'unknown',
+      message: 'Commit backend или frontend не определён.',
+      action: 'Проверить build metadata перед production-действиями.',
+    };
+  }
+
+  if (FRONTEND_DRIFT_RELEASE_TYPES.has(effectiveReleaseType) && buildOrder !== 'backend-newer') {
+    return {
+      status: 'warning',
+      releaseType: effectiveReleaseType,
+      backendReleaseType: normalizedBackendType,
+      frontendReleaseType: normalizedFrontendType,
+      buildOrder,
+      compatible: true,
+      message: 'Frontend обновлён отдельно от backend. Это допустимо, если backend API не менялся.',
+      action: 'Проверить, что release scope был frontend-only и backend API совместим.',
+    };
+  }
+
+  return {
+    status: 'risk',
+    releaseType: effectiveReleaseType,
+    backendReleaseType: normalizedBackendType,
+    frontendReleaseType: normalizedFrontendType,
+    buildOrder,
+    compatible: false,
+    message: 'Backend и frontend собраны из разных несовместимых release. Проверьте release перед production-действиями.',
+    action: 'Остановить production-действия и выполнить корректный full-stack/backend deploy или подтвердить release_type.',
+  };
+}
+
 function safeDbSizeBytes(dbPath) {
   const text = String(dbPath || '').trim();
   if (!text || text === ':memory:') return 0;
@@ -454,6 +571,8 @@ function buildSystemControlCenterStatus({
   getAppDisabledConfig,
   readData = () => [],
   requestFrontendCommit = '',
+  requestFrontendBuildTime = '',
+  requestFrontendReleaseType = '',
   env = process.env,
   inspectStorage = inspectStorageSignal,
 } = {}) {
@@ -559,10 +678,23 @@ function buildSystemControlCenterStatus({
 
   const build = buildInfo && typeof buildInfo === 'object' ? buildInfo : {};
   const backendCommit = safeText(build.commit || build.commitFull, 'unknown');
+  const backendBuildTime = safeText(build.buildTime || build.startedAt, 'unknown');
+  const frontendBuildTime = safeText(requestFrontendBuildTime, 'unknown');
   const frontendCommit = safeFrontendCommit({ requestCommit: requestFrontendCommit, env });
+  const backendReleaseType = releaseTypeFromBuild(build);
+  const frontendReleaseType = safeFrontendReleaseType({ requestReleaseType: requestFrontendReleaseType, env });
   const versionMatch = backendCommit === 'unknown' || frontendCommit === 'unknown'
     ? 'unknown'
-    : backendCommit === frontendCommit;
+    : commitsMatch(backendCommit, frontendCommit);
+  const releaseStatus = classifyVersionRelease({
+    backendCommit,
+    frontendCommit,
+    backendBuildTime,
+    frontendBuildTime,
+    backendReleaseType,
+    frontendReleaseType,
+    versionMatch,
+  });
   const dataRisks = buildDataRisks(readData);
   const serviceQuality = buildServiceQualitySummary(readData);
   const hasDataRisk = Object.values(dataRisks).some(value => Number(value) > 0);
@@ -571,11 +703,16 @@ function buildSystemControlCenterStatus({
   const dataRiskStatus = hasDataRisk ? 'warning' : 'ok';
   const serviceStatus = serviceQuality.critical > 0 ? 'risk' : serviceQuality.high > 0 ? 'warning' : 'ok';
   const storageStatus = isolationUnknown || !storageSignal.signalPresent ? 'warning' : 'ok';
-  const versionStatus = versionMatch === false ? 'warning' : 'ok';
+  const versionStatus = releaseStatus.status === 'risk' ? 'risk' : releaseStatus.status === 'warning' ? 'warning' : 'ok';
   const topStatus = highestStatus([runtimeRisk, dataRiskStatus, serviceStatus, storageStatus, versionStatus]);
 
   if (versionMatch === false) {
-    recommendations.push(recommendation('warning', 'Версии backend/frontend отличаются', 'Commit backend и frontend не совпадают.', 'Проверить, что фронтенд собран из ожидаемого commit.'));
+    recommendations.push(recommendation(
+      releaseStatus.status === 'risk' ? 'risk' : 'warning',
+      releaseStatus.status === 'risk' ? 'Риск несовместимого release' : 'Frontend-only release drift',
+      releaseStatus.message,
+      releaseStatus.action,
+    ));
   }
   if (hasDataRisk) {
     recommendations.push(recommendation('warning', 'Есть признаки грязных данных', 'Найдены placeholder-значения или битые ссылки.', 'Проверить записи точечно перед любыми исправлениями.'));
@@ -616,11 +753,20 @@ function buildSystemControlCenterStatus({
     },
     version: {
       backendCommit,
-      backendBuildTime: safeText(build.buildTime || build.startedAt, 'unknown'),
+      backendBuildTime,
       nodeEnv: environmentLabel,
       frontendCommitFromRequestOrConfig: frontendCommit,
       versionMatch,
-      buildTime: safeText(build.buildTime || build.startedAt, 'unknown'),
+      releaseStatus: releaseStatus.status,
+      releaseType: releaseStatus.releaseType,
+      backendReleaseType: releaseStatus.backendReleaseType,
+      frontendReleaseType: releaseStatus.frontendReleaseType,
+      releaseBuildOrder: releaseStatus.buildOrder,
+      releaseCompatible: releaseStatus.compatible,
+      releaseMessage: releaseStatus.message,
+      releaseAction: releaseStatus.action,
+      buildTime: backendBuildTime,
+      frontendBuildTime,
       frontendCommit,
     },
     database: {
@@ -1314,6 +1460,8 @@ function registerSystemRoutes(app, deps) {
       getAppDisabledConfig,
       readData,
       requestFrontendCommit: req.headers['x-frontend-commit'],
+      requestFrontendBuildTime: req.headers['x-frontend-build-time'],
+      requestFrontendReleaseType: req.headers['x-frontend-release-type'],
     }));
   });
 

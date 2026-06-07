@@ -33,6 +33,8 @@ test('System Control Center UI contains safe Russian labels', () => {
   for (const label of [
     'Контроль системы',
     'Версии',
+    'Release type',
+    'Статус версий',
     'Режим работы',
     'Хранилище',
     'Риски данных',
@@ -43,11 +45,24 @@ test('System Control Center UI contains safe Russian labels', () => {
   ]) {
     assert.match(source, new RegExp(label));
   }
+  assert.match(settingsSource, /Frontend обновлён отдельно от backend/);
+  assert.match(settingsSource, /Backend и frontend собраны из разных несовместимых release/);
 });
 
 test('System Control Center UI does not render secret-like labels', () => {
   const source = systemControlSource();
   assert.doesNotMatch(source, /password|token|secret|cookie|private key|raw env|authorization header|DATABASE_URL/i);
+});
+
+test('System Control Center UI classifies frontend-only drift without hard RISK', () => {
+  assert.match(settingsSource, /FRONTEND_DRIFT_RELEASE_TYPES/);
+  assert.match(settingsSource, /frontend-only', 'deploy-tooling', 'frontend-deploy-tooling/);
+  assert.match(settingsSource, /<Badge variant="warning">WARN<\/Badge>/);
+  assert.match(settingsSource, /<Badge variant="danger">RISK<\/Badge>/);
+  assert.match(settingsSource, /x-frontend-commit/);
+  assert.match(settingsSource, /x-frontend-build-time/);
+  assert.match(settingsSource, /x-frontend-release-type/);
+  assert.match(settingsSource, /releaseBuildOrder !== 'backend-newer'/);
 });
 
 test('System Control Center UI is read-only and has no destructive buttons', () => {

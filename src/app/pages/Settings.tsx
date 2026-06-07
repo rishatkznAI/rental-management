@@ -2148,6 +2148,7 @@ type DataIntegrityDiagnostics = {
 };
 
 type SystemControlStatusLevel = 'ok' | 'warning' | 'risk' | 'danger' | 'unknown';
+type SystemControlVersionReleaseStatus = 'ok' | 'warning' | 'risk' | 'unknown';
 
 type SystemControlCenterStatus = {
   status: 'ok' | 'warning' | 'risk';
@@ -2201,7 +2202,16 @@ type SystemControlCenterStatus = {
     nodeEnv: string;
     frontendCommitFromRequestOrConfig: string;
     versionMatch: boolean | 'unknown';
+    releaseStatus?: SystemControlVersionReleaseStatus;
+    releaseType?: string;
+    backendReleaseType?: string;
+    frontendReleaseType?: string;
+    releaseBuildOrder?: 'backend-newer' | 'frontend-newer' | 'same' | 'unknown';
+    releaseCompatible?: boolean | 'unknown';
+    releaseMessage?: string;
+    releaseAction?: string;
     buildTime: string;
+    frontendBuildTime?: string;
     frontendCommit: string;
   };
   database: {
@@ -2249,6 +2259,7 @@ type VersionProbeResponse = {
   build?: {
     commit?: string;
     buildTime?: string;
+    releaseType?: string;
   };
   app?: {
     disabled?: boolean;
@@ -2502,9 +2513,109 @@ function statusBadgeVariant(status: SystemControlStatusLevel): 'success' | 'warn
 
 function statusBadgeLabel(status: SystemControlStatusLevel) {
   if (status === 'ok') return 'OK';
-  if (status === 'warning') return 'WARNING';
+  if (status === 'warning') return 'WARN';
   if (status === 'risk' || status === 'danger') return 'RISK';
   return 'UNKNOWN';
+}
+
+const FRONTEND_DRIFT_RELEASE_TYPES = new Set(['frontend-only', 'deploy-tooling', 'frontend-deploy-tooling']);
+
+function normalizeReleaseType(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (
+    normalized === 'frontend-only' ||
+    normalized === 'backend' ||
+    normalized === 'full-stack' ||
+    normalized === 'deploy-tooling' ||
+    normalized === 'frontend-deploy-tooling'
+  ) return normalized;
+  return 'unknown';
+}
+
+function commitsMatch(left = '', right = '') {
+  const normalizedLeft = String(left || '').trim();
+  const normalizedRight = String(right || '').trim();
+  if (!normalizedLeft || !normalizedRight || normalizedLeft === 'unknown' || normalizedRight === 'unknown') return false;
+  return normalizedLeft.startsWith(normalizedRight) || normalizedRight.startsWith(normalizedLeft);
+}
+
+function compareBuildTimes(backendBuildTime = '', frontendBuildTime = '') {
+  const backendTime = Date.parse(String(backendBuildTime || ''));
+  const frontendTime = Date.parse(String(frontendBuildTime || ''));
+  if (!Number.isFinite(backendTime) || !Number.isFinite(frontendTime)) return 'unknown';
+  if (Math.abs(backendTime - frontendTime) < 1000) return 'same';
+  return backendTime > frontendTime ? 'backend-newer' : 'frontend-newer';
+}
+
+function highestSystemControlStatus(statuses: SystemControlStatusLevel[]): SystemControlStatusLevel {
+  if (statuses.some(status => status === 'risk' || status === 'danger')) return 'risk';
+  if (statuses.some(status => status === 'warning')) return 'warning';
+  if (statuses.some(status => status === 'unknown')) return 'unknown';
+  return 'ok';
+}
+
+function frontendBuildHeaders() {
+  const headers: Record<string, string> = {};
+  if (frontendBuildInfo.commit) headers['x-frontend-commit'] = frontendBuildInfo.commit;
+  if (frontendBuildInfo.buildTime) headers['x-frontend-build-time'] = frontendBuildInfo.buildTime;
+  if (frontendBuildInfo.releaseType) headers['x-frontend-release-type'] = frontendBuildInfo.releaseType;
+  return headers;
+}
+
+function systemControlVersionView(status?: SystemControlCenterStatus) {
+  const version = status?.version;
+  const backendCommit = version?.backendCommit || '';
+  const frontendCommit = frontendBuildInfo.commit || version?.frontendCommit || version?.frontendCommitFromRequestOrConfig || '';
+  const versionMatch = version?.versionMatch === true || commitsMatch(backendCommit, frontendCommit)
+    ? true
+    : version?.versionMatch;
+  const backendReleaseType = normalizeReleaseType(version?.backendReleaseType);
+  const frontendReleaseType = normalizeReleaseType(frontendBuildInfo.releaseType || version?.frontendReleaseType);
+  const releaseType = frontendReleaseType !== 'unknown'
+    ? frontendReleaseType
+    : normalizeReleaseType(version?.releaseType || backendReleaseType);
+  const releaseBuildOrder = version?.releaseBuildOrder || compareBuildTimes(
+    version?.backendBuildTime || version?.buildTime || '',
+    frontendBuildInfo.buildTime || version?.frontendBuildTime || '',
+  );
+
+  if (versionMatch === true) {
+    return {
+      status: 'ok' as SystemControlStatusLevel,
+      badge: <Badge variant="success">OK</Badge>,
+      releaseType,
+      message: version?.releaseMessage || 'Backend и frontend показывают один release commit.',
+      action: version?.releaseAction || 'Можно продолжать штатную работу.',
+    };
+  }
+
+  if (versionMatch === false && FRONTEND_DRIFT_RELEASE_TYPES.has(releaseType) && releaseBuildOrder !== 'backend-newer') {
+    return {
+      status: 'warning' as SystemControlStatusLevel,
+      badge: <Badge variant="warning">WARN</Badge>,
+      releaseType,
+      message: 'Frontend обновлён отдельно от backend. Это допустимо, если backend API не менялся.',
+      action: 'Проверьте, что release scope был frontend-only и backend API не менялся.',
+    };
+  }
+
+  if (versionMatch === false) {
+    return {
+      status: 'risk' as SystemControlStatusLevel,
+      badge: <Badge variant="danger">RISK</Badge>,
+      releaseType,
+      message: 'Backend и frontend собраны из разных несовместимых release. Проверьте release перед production-действиями.',
+      action: 'Выполните корректный full-stack/backend deploy или подтвердите release_type перед изменениями.',
+    };
+  }
+
+  return {
+    status: 'unknown' as SystemControlStatusLevel,
+    badge: <Badge variant="secondary">UNKNOWN</Badge>,
+    releaseType,
+    message: version?.releaseMessage || 'Commit backend или frontend не определён.',
+    action: version?.releaseAction || 'Проверьте build metadata перед production-действиями.',
+  };
 }
 
 function formatKb(value: number | null | undefined) {
@@ -2974,7 +3085,7 @@ function GanttRentalCleanupPreviewSection({
 function SystemControlCenterSection() {
   const statusQuery = useQuery<SystemControlCenterStatus>({
     queryKey: ['admin-system-control-center'],
-    queryFn: () => api.get<SystemControlCenterStatus>('/api/admin/system-control-center'),
+    queryFn: () => api.get<SystemControlCenterStatus>('/api/admin/system-control-center', { headers: frontendBuildHeaders() }),
     retry: 1,
   });
   const healthQuery = useQuery<HealthProbeResponse>({
@@ -2990,7 +3101,8 @@ function SystemControlCenterSection() {
 
   const status = statusQuery.data;
   const forbidden = statusQuery.error && typeof statusQuery.error === 'object' && 'status' in statusQuery.error && Number((statusQuery.error as { status?: number }).status) === 403;
-  const highestRisk: SystemControlStatusLevel = status?.status || 'unknown';
+  const versionView = systemControlVersionView(status);
+  const highestRisk: SystemControlStatusLevel = highestSystemControlStatus([status?.status || 'unknown', versionView.status]);
   const dataRiskTotal = status
     ? status.dataRisks.undefinedLikeCount
       + status.dataRisks.nullLikeCount
@@ -3066,10 +3178,16 @@ function SystemControlCenterSection() {
           <DiagnosticsField label="Среда" value={environmentLabel(status)} />
           <DiagnosticsField label="Backend commit" value={<span className="font-mono">{formatValue(status?.version.backendCommit)}</span>} />
           <DiagnosticsField label="Frontend commit" value={<span className="font-mono">{formatValue(frontendBuildInfo.commit || status?.version.frontendCommitFromRequestOrConfig)}</span>} />
-          <DiagnosticsField label="Совпадение версий" value={status?.version.versionMatch === true ? <Badge variant="success">совпадают</Badge> : status?.version.versionMatch === false ? <Badge variant="warning">отличаются</Badge> : <Badge variant="secondary">неизвестно</Badge>} />
-          {status?.version.versionMatch === false ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 xl:col-span-4">
-              Backend и frontend собраны из разных commit. Проверьте release перед изменениями.
+          <DiagnosticsField label="Статус версий" value={versionView.badge} />
+          <DiagnosticsField label="Release type" value={<Badge variant={versionView.releaseType === 'unknown' ? 'warning' : 'secondary'}>{versionView.releaseType}</Badge>} />
+          {versionView.status !== 'ok' ? (
+            <div className={`rounded-lg px-4 py-3 text-sm xl:col-span-4 ${
+              versionView.status === 'risk'
+                ? 'border border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300'
+                : 'border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200'
+            }`}>
+              <div className="font-medium">{versionView.message}</div>
+              <div className="mt-1 text-xs opacity-90">{versionView.action}</div>
             </div>
           ) : null}
         </CardContent>

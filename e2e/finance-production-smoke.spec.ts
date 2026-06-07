@@ -15,6 +15,7 @@ type BuildInfo = {
   commit?: string;
   commitFull?: string;
   apiBaseUrl?: string;
+  releaseType?: string;
 };
 
 type EquipmentRecord = {

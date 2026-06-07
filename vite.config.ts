@@ -28,16 +28,22 @@ const commitHash = process.env.VITE_GIT_COMMIT_SHA ||
   readGitCommit()
 const buildTime = process.env.VITE_BUILD_TIME || process.env.BUILD_TIME || new Date().toISOString()
 const buildId = process.env.VITE_APP_BUILD_ID || `${commitHash || 'dev'}-${buildTime}`
+const releaseType = process.env.VITE_RELEASE_TYPE ||
+  process.env.RELEASE_TYPE ||
+  process.env.RELEASE_PREFLIGHT_RELEASE_TYPE ||
+  ''
 const basePath = process.env.VITE_BASE_PATH || '/rental-management/'
 
 process.env.VITE_BUILD_TIME = buildTime
 process.env.VITE_APP_BUILD_ID = buildId
+process.env.VITE_RELEASE_TYPE = releaseType
 
 export default defineConfig({
   base: basePath,
   define: {
     __APP_COMMIT_HASH__: JSON.stringify(commitHash ? commitHash.slice(0, 12) : ''),
     __APP_BUILD_TIME__: JSON.stringify(buildTime),
+    __APP_RELEASE_TYPE__: JSON.stringify(releaseType),
   },
   plugins: [
     react(),

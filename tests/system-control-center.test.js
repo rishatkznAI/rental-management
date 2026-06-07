@@ -72,7 +72,12 @@ function createApp({ role = 'Администратор', authenticated = true, 
         ? next()
         : res.status(403).json({ ok: false, error: 'Forbidden' })
     ),
-    getBuildInfo: () => ({ commit: '74b614626f0c06b157ad166944f506d432c7257e', buildTime: '2026-05-22T00:00:00.000Z' }),
+    getBuildInfo: () => ({
+      commit: '74b614626f0c06b157ad166944f506d432c7257e',
+      buildTime: '2026-05-22T00:00:00.000Z',
+      releaseType: 'frontend-only',
+      release: { type: 'frontend-only' },
+    }),
     getAppDisabledConfig: () => ({ disabled: false }),
     dbPath: ':memory:',
   });
@@ -144,6 +149,22 @@ test('system control center response contains expected safe sections', async () 
     assert.equal(typeof response.body.dataRisks.brokenEquipmentLinks, 'number');
     assert.equal(typeof response.body.serviceQuality.totalRepeats, 'number');
     assert.ok(Array.isArray(response.body.recommendations));
+  });
+});
+
+test('/health and /api/version expose safe release metadata', async () => {
+  await withServer(createApp(), async baseUrl => {
+    const health = await fetch(`${baseUrl}/health`);
+    const healthBody = await health.json();
+    assert.equal(health.status, 200);
+    assert.equal(healthBody.build.releaseType, 'frontend-only');
+    assert.deepEqual(healthBody.build.release, { type: 'frontend-only' });
+
+    const version = await fetch(`${baseUrl}/api/version`);
+    const versionBody = await version.json();
+    assert.equal(version.status, 200);
+    assert.equal(versionBody.build.releaseType, 'frontend-only');
+    assert.deepEqual(versionBody.build.release, { type: 'frontend-only' });
   });
 });
 

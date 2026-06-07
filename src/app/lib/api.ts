@@ -112,6 +112,10 @@ export type PaginatedQueryParams = {
   filters?: Record<string, string | number | boolean | null | undefined>;
 };
 
+export type ApiRequestOptions = {
+  headers?: Record<string, string>;
+};
+
 export function buildPaginatedQuery(params: PaginatedQueryParams = {}): string {
   const searchParams = new URLSearchParams();
   searchParams.set('paginated', 'true');
@@ -235,6 +239,7 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  options: ApiRequestOptions = {},
 ): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -243,6 +248,7 @@ async function request<T>(
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
+  Object.assign(headers, options.headers || {});
 
   traceAuth('api request start', {
     method,
@@ -318,9 +324,9 @@ async function request<T>(
 }
 
 export const api = {
-  get:    <T>(path: string)              => request<T>('GET',    path),
-  post:   <T>(path: string, body: unknown) => request<T>('POST',   path, body),
-  patch:  <T>(path: string, body: unknown) => request<T>('PATCH',  path, body),
-  put:    <T>(path: string, body: unknown) => request<T>('PUT',    path, body),
-  del:    <T>(path: string, body?: unknown) => request<T>('DELETE', path, body),
+  get:    <T>(path: string, options?: ApiRequestOptions)              => request<T>('GET',    path, undefined, options),
+  post:   <T>(path: string, body: unknown, options?: ApiRequestOptions) => request<T>('POST',   path, body, options),
+  patch:  <T>(path: string, body: unknown, options?: ApiRequestOptions) => request<T>('PATCH',  path, body, options),
+  put:    <T>(path: string, body: unknown, options?: ApiRequestOptions) => request<T>('PUT',    path, body, options),
+  del:    <T>(path: string, body?: unknown, options?: ApiRequestOptions) => request<T>('DELETE', path, body, options),
 };

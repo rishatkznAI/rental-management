@@ -3,11 +3,13 @@ import { AUTH_DEBUG_STORAGE_KEY, isAuthDebugEnabled } from './authDebug';
 
 declare const __APP_COMMIT_HASH__: string;
 declare const __APP_BUILD_TIME__: string;
+declare const __APP_RELEASE_TYPE__: string;
 
 export type FrontendBuildInfo = {
   service: 'frontend';
   commit: string;
   buildTime: string;
+  releaseType: string;
   apiBaseUrl: string;
   mode: string;
   authPatch: string;
@@ -17,6 +19,7 @@ export const frontendBuildInfo: FrontendBuildInfo = {
   service: 'frontend',
   commit: typeof __APP_COMMIT_HASH__ === 'string' ? __APP_COMMIT_HASH__ : '',
   buildTime: typeof __APP_BUILD_TIME__ === 'string' ? __APP_BUILD_TIME__ : '',
+  releaseType: typeof __APP_RELEASE_TYPE__ === 'string' ? __APP_RELEASE_TYPE__ : '',
   apiBaseUrl: API_BASE_URL || window.location.origin,
   mode: import.meta.env.MODE,
   authPatch: 'token-scoped-unauthorized-v2-flight-recorder',

@@ -5,6 +5,7 @@ type BuildInfo = {
   commitFull?: string;
   buildTime?: string;
   apiBaseUrl?: string;
+  releaseType?: string;
 };
 
 type VersionInfo = {
@@ -43,6 +44,7 @@ declare global {
       commit?: string;
       buildTime?: string;
       apiBaseUrl?: string;
+      releaseType?: string;
     };
   }
 }

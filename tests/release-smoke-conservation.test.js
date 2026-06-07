@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const releaseSmokeSource = readFileSync(new URL('../e2e/helpers/releaseSmoke.ts', import.meta.url), 'utf8');
+const deployWorkflowSource = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
 
 test('production release smoke checks app.disabled before authenticated smoke', () => {
   assert.match(releaseSmokeSource, /type VersionInfo = \{/);
@@ -90,6 +91,12 @@ test('production release smoke allows backend drift only for frontend-only and d
   assert.match(releaseSmokeSource, /expectedDriftReleaseType\(details\.releaseType\)/);
   assert.match(releaseSmokeSource, /releaseType: normalizeReleaseType\(String\(config\.releaseType \|\| ''\)\)/);
   assert.match(releaseSmokeSource, /releaseType: normalizedConfig\.releaseType/);
+});
+
+test('deploy workflow embeds release_type into frontend build metadata', () => {
+  assert.match(deployWorkflowSource, /release_type: \$\{\{ steps\.classify\.outputs\.release_type \}\}/);
+  assert.match(deployWorkflowSource, /VITE_GIT_COMMIT_SHA: \$\{\{ github\.sha \}\}/);
+  assert.match(deployWorkflowSource, /VITE_RELEASE_TYPE: \$\{\{ needs\.classify-release\.outputs\.release_type \}\}/);
 });
 
 test('release smoke diagnostics do not print smoke credentials or auth tokens', () => {

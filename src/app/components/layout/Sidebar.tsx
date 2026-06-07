@@ -26,9 +26,12 @@ import {
   ListChecks,
   Banknote,
   BriefcaseBusiness,
+  Moon,
+  Sun,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { usePermissions, type Section } from '../../lib/permissions';
 import {
   DEFAULT_SIDEBAR_ORDER,
@@ -170,6 +173,7 @@ export function Sidebar({
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const { can, canView } = usePermissions();
   const canSearchEquipment = canView('equipment');
   const canSearchClients = canView('clients');
@@ -405,6 +409,10 @@ export function Sidebar({
         return (orderIndex.get(a.section) ?? 999) - (orderIndex.get(b.section) ?? 999);
       }),
   })).filter(group => group.items.length > 0);
+  const isDarkTheme = theme === 'dark';
+  const CurrentThemeIcon = isDarkTheme ? Moon : Sun;
+  const themeName = isDarkTheme ? 'Тёмная' : 'Светлая';
+  const themeToggleLabel = isDarkTheme ? 'Включить светлую тему' : 'Включить тёмную тему';
 
   return (
     <aside
@@ -578,6 +586,29 @@ export function Sidebar({
             </div>
           ))}
         </nav>
+
+        <div className={cn('border-t border-sidebar-border px-3 py-3', desktopCollapsed && 'sm:px-2')}>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            data-testid="sidebar-theme-toggle"
+            aria-pressed={isDarkTheme}
+            aria-label={themeToggleLabel}
+            title={desktopCollapsed ? themeToggleLabel : undefined}
+            className={cn(
+              'flex min-h-11 w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/8 px-3 py-2 text-left text-white/74 transition hover:border-blue-300/40 hover:bg-white/12 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+              desktopCollapsed && 'sm:justify-center sm:px-0',
+            )}
+          >
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/10 text-sidebar-primary">
+              <CurrentThemeIcon className="h-4 w-4" />
+            </span>
+            <span className={cn('min-w-0 flex-1', desktopCollapsed && 'sm:hidden')}>
+              <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">Тема</span>
+              <span className="block truncate text-[13px] font-medium text-sidebar-foreground">{themeName}</span>
+            </span>
+          </button>
+        </div>
       </div>
     </aside>
   );

@@ -28,6 +28,7 @@ const DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
   /^\.github\/workflows\/.+/,
   /^scripts\/release-preflight\.mjs$/,
   /^scripts\/frontend-build-marker\.mjs$/,
+  /^scripts\/backend-release-marker\.mjs$/,
   /^e2e\/helpers\/releaseSmoke\.ts$/,
   /^e2e\/production-smoke\.spec\.ts$/,
   /^e2e\/production-ui-selector-smoke\.spec\.ts$/,

@@ -17,6 +17,7 @@ on:
       - '.github/workflows/deploy.yml'
       - 'scripts/release-preflight.mjs'
       - 'scripts/frontend-build-marker.mjs'
+      - 'scripts/backend-release-marker.mjs'
       - 'e2e/helpers/releaseSmoke.ts'
       - 'e2e/production-smoke.spec.ts'
       - 'e2e/production-ui-selector-smoke.spec.ts'
@@ -104,7 +105,7 @@ jobs:
           fi
 
           frontend_allowed='^(src/|public/|tests/.*\.test\.js$|docs/.*\.md$|index\.html$|vite\.config\.[^/]+$|postcss\.config\.[^/]+$|tsconfig[^/]*\.json$|package\.json$|package-lock\.json$|scripts/vite-build\.mjs$)'
-          deploy_tooling_allowed='^(\.github/workflows/deploy\.yml|scripts/release-preflight\.mjs|scripts/frontend-build-marker\.mjs|e2e/helpers/releaseSmoke\.ts|e2e/production-smoke\.spec\.ts|e2e/production-ui-selector-smoke\.spec\.ts|tests/release-preflight\.test\.js|tests/release-smoke-conservation\.test\.js|docs/.*(release|deploy|smoke|preflight).*\.md)$'
+          deploy_tooling_allowed='^(\.github/workflows/deploy\.yml|scripts/release-preflight\.mjs|scripts/frontend-build-marker\.mjs|scripts/backend-release-marker\.mjs|e2e/helpers/releaseSmoke\.ts|e2e/production-smoke\.spec\.ts|e2e/production-ui-selector-smoke\.spec\.ts|tests/release-preflight\.test\.js|tests/release-smoke-conservation\.test\.js|docs/.*(release|deploy|smoke|preflight).*\.md)$'
           release_critical='^((server|backend|api|routes|lib|db|storage|migrations)/|server/data/|.*(^|/)(app\.sqlite|.*\.sqlite3?|.*\.db)$|.*(^|/)(railway\.json|railway\.toml|nixpacks\.toml|Procfile|Dockerfile(\.[^/]*)?|docker-compose\.ya?ml|render\.ya?ml|fly\.toml)$|\.railway/|.*(^|/)\.env($|[.-])|.*(^|/)[^/]*(secret|token|credential)[^/]*($|\.)|(config|configs)/|(server|api|backend)\.(config|env)\.)'
 
           has_frontend_runtime=0
@@ -188,6 +189,13 @@ jobs:
 
       - name: Check whitespace
         run: git diff --check
+
+      - name: Write backend release marker
+        run: |
+          build_time="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          node scripts/backend-release-marker.mjs --commit "$GITHUB_SHA" --release-type "$RELEASE_TYPE" --build-time "$build_time"
+        env:
+          RELEASE_TYPE: ${{ needs.classify-release.outputs.release_type }}
 
       - name: Validate production release secrets
         run: |

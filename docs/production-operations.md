@@ -28,7 +28,7 @@ The backend runs as a separate Railway service from the frontend.
 Required Railway service settings:
 
 - Root Directory: `/server`
-- Start Command: `npm start`
+- Start Command: controlled by `server/railway.toml` as `node scripts/start-with-release-type.cjs`
 - Healthcheck Path: `/health`
 - Persistent volume mount: `/data`
 - SQLite path env: `DB_PATH=/data/app.sqlite`
@@ -38,10 +38,13 @@ Required or recommended Railway variables:
 - `DB_PATH`
 - `NODE_ENV`
 - `PORT`
+- `RELEASE_TYPE` or `RELEASE_PREFLIGHT_RELEASE_TYPE` for backend/full-stack releases (`backend` or `full-stack`)
 - `CORS_ORIGIN` when the frontend origin is not already allowlisted
 - `BOT_TOKEN` when MAX bot is enabled
 - `WEBHOOK_URL` when MAX webhook transport is enabled
 - `MAX_WEBHOOK_SECRET`
+
+Railway provides `RAILWAY_GIT_COMMIT_SHA`, but it does not classify the release scope. The repository-controlled Railway start command runs `server/scripts/start-with-release-type.cjs`, which sets `RAILWAY_RELEASE_TYPE=backend` for Railway Git deploys when no explicit release type is present. Full-stack releases should still pass `RELEASE_TYPE=full-stack` or `RELEASE_PREFLIGHT_RELEASE_TYPE=full-stack` when the backend deploy flow knows the release is full-stack. The backend reads release metadata in this order: `RELEASE_TYPE`, `RELEASE_PREFLIGHT_RELEASE_TYPE`, `RAILWAY_RELEASE_TYPE`, `server/release-marker.json`, then `unknown`.
 
 Generate `MAX_WEBHOOK_SECRET` as a long random value in Railway. Do not paste it into chat, docs, logs, commits, or screenshots. After enabling it, verify that MAX webhook registration logs redact the secret and that bot events are still received.
 
@@ -137,7 +140,7 @@ Backup доступен только admin-пользователям и ска�
 Run these checks after every production deploy:
 
 1. Backend health: `GET /health` returns `200`.
-2. Backend version: `GET /api/version` returns the expected commit/build.
+2. Backend version: `GET /api/version` returns the expected commit/build and `releaseType` is not `unknown` for backend/full-stack releases.
 3. Frontend opens at the GitHub Pages URL.
 4. Release preflight passes:
    `npm run release:preflight -- --env production --expected-commit <commit>`.

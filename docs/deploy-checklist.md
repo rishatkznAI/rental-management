@@ -116,6 +116,7 @@ Production deployment is allowed while the product is conserved. Conservation is
 ## 11. Production backend/frontend deploy
 
 - [ ] Backend deploy success.
+- [ ] Railway backend runtime reports `backend` from the start wrapper, or explicit `RELEASE_TYPE=full-stack` for a full-stack release.
 - [ ] Frontend deploy success.
 - [ ] Frontend/backend match.
 - [ ] Frontend API target = production backend.
@@ -312,15 +313,17 @@ On failed staging smoke, stop the production release, inspect GitHub Actions art
 ## Backend Deploy
 
 1. Confirm Railway service root is `server`.
-2. Confirm Railway start command is `npm start`.
+2. Confirm Railway start command comes from `server/railway.toml`: `node scripts/start-with-release-type.cjs`.
 3. Confirm Railway healthcheck path is `/health`.
 4. Confirm persistent volume is mounted and `DB_PATH` points to the volume.
-5. Deploy the backend.
-6. Verify:
+5. For full-stack releases, set Railway runtime release metadata before backend deploy: `RELEASE_TYPE=full-stack`. Backend-only Railway Git deploys default to `RAILWAY_RELEASE_TYPE=backend` through `server/scripts/start-with-release-type.cjs`.
+6. Deploy the backend.
+7. Verify:
    - `GET https://rental-management-production-35bc.up.railway.app/health`
    - `GET https://rental-management-production-35bc.up.railway.app/api/version`
-7. Record backend commit, build time and deployment id when available.
-8. During conservation, do not disable deploys only to preserve the pause. Production deployment is allowed; production usage must remain blocked by `APP_DISABLED`, `BOT_DISABLED`, and GSM disable flags.
+8. Confirm `/health` and `/api/version` show the expected backend release type, not `unknown`.
+9. Record backend commit, build time and deployment id when available.
+10. During conservation, do not disable deploys only to preserve the pause. Production deployment is allowed; production usage must remain blocked by `APP_DISABLED`, `BOT_DISABLED`, and GSM disable flags.
 
 ## Frontend Deploy
 

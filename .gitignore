@@ -45,6 +45,7 @@ test-results/
 
 # Local server state
 server/.env
+server/release-marker.json
 server/data/*.json
 server/data/*.sqlite
 server/data/*.sqlite-shm

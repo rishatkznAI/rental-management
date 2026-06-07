@@ -12,9 +12,20 @@ function systemControlSource() {
   return settingsSource.slice(start, end);
 }
 
-test('Admin settings page contains Контроль системы tab', () => {
-  assert.match(settingsSource, /value: 'system-control', label: 'Контроль системы'/);
-  assert.match(settingsSource, /<SystemControlCenterSection \/>/);
+test('Admin settings page opens Контроль системы inside the detail modal', () => {
+  assert.match(settingsSource, /type AdminModalKey = 'details' \| 'roles' \| 'permissions' \| 'system-settings' \| 'activity'/);
+  assert.match(settingsSource, /type AdminDetailTab = 'users' \| 'menu' \| 'configuration' \| 'reference' \| 'notifications' \| 'data' \| 'diagnostics' \| 'system-control'/);
+  assert.match(settingsSource, /const openDetailSection = \(tab: AdminDetailTab\) => \{\s+setActiveTab\(tab\);\s+setActiveModal\('details'\);\s+\}/);
+  assert.match(settingsSource, /<AdminDashboardModal/);
+  assert.match(settingsSource, /<button type="button" onClick=\{\(\) => openDetailSection\('diagnostics'\)\} className="hover:text-primary">Поддержка<\/button>/);
+  assert.match(settingsSource, /<button type="button" onClick=\{\(\) => openDetailSection\('system-control'\)\} className="hover:text-primary">О системе<\/button>/);
+  assert.match(settingsSource, /diagnostics: \{\s+title: 'Диагностика'/);
+  assert.match(settingsSource, /'system-control': \{\s+title: 'Контроль системы'/);
+  assert.match(settingsSource, /<TabsContent value="diagnostics">\s+<ProductionDiagnosticsSection \/>/);
+  assert.match(settingsSource, /<TabsContent value="system-control">\s+<SystemControlCenterSection \/>/);
+  assert.doesNotMatch(settingsSource, /admin-detail-sections/);
+  assert.doesNotMatch(settingsSource, /scrollIntoView/);
+  assert.doesNotMatch(settingsSource, /href="#/);
 });
 
 test('System Control Center UI contains safe Russian labels', () => {

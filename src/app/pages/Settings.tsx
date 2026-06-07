@@ -294,17 +294,27 @@ const ADMIN_MENU_SECTION_ICONS: Partial<Record<SidebarSection, React.ElementType
   profile_settings: UserRound,
 };
 
+type AdminModalKey = 'details' | 'roles' | 'permissions' | 'system-settings' | 'activity';
+type AdminDetailTab = 'users' | 'menu' | 'configuration' | 'reference' | 'notifications' | 'data' | 'diagnostics' | 'system-control';
+type SystemSettingsTab = 'general' | 'company' | 'notifications' | 'documents' | 'security' | 'integrations' | 'demo';
+
 const ADMIN_SETTINGS_ROWS: Array<{
   title: string;
   description: string;
   icon: React.ElementType;
-  tab: string;
+  tab: SystemSettingsTab;
 }> = [
   {
     title: 'Общие настройки',
     description: 'Название компании, часовой пояс, валюта, локализация',
     icon: SettingsIcon,
-    tab: 'configuration',
+    tab: 'general',
+  },
+  {
+    title: 'Компания',
+    description: 'Реквизиты, офисы, контакты, юридические данные',
+    icon: FileText,
+    tab: 'company',
   },
   {
     title: 'Уведомления',
@@ -313,55 +323,28 @@ const ADMIN_SETTINGS_ROWS: Array<{
     tab: 'notifications',
   },
   {
+    title: 'Документы',
+    description: 'Шаблоны, подпись, нумерация, сроки подписания',
+    icon: FileCheck,
+    tab: 'documents',
+  },
+  {
     title: 'Безопасность',
     description: 'Политики паролей, сессии, двухфакторная аутентификация',
     icon: Shield,
-    tab: 'audit',
+    tab: 'security',
   },
   {
     title: 'Интеграции',
     description: 'GSM, MAX-бот, внешние сервисы и API',
     icon: Link2,
-    tab: 'diagnostics',
+    tab: 'integrations',
   },
   {
-    title: 'Резервное копирование',
-    description: 'Настройки резервного копирования и восстановления',
+    title: 'Демо / публичные',
+    description: 'Публичные параметры и демонстрационный режим',
     icon: HardDrive,
-    tab: 'data',
-  },
-];
-
-const ADMIN_ACTIVITY_FALLBACK = [
-  {
-    text: 'Иванов И.И. создал нового пользователя Петров П.П.',
-    time: '27.04.2026 10:15',
-    icon: UserRound,
-    tone: 'blue',
-  },
-  {
-    text: 'Сидоров С.С. обновил запись техники JLG 450AJ (ИНВ-12345)',
-    time: '27.04.2026 09:48',
-    icon: Edit,
-    tone: 'green',
-  },
-  {
-    text: 'Петров П.П. создал аренду №А-2026-0456',
-    time: '27.04.2026 09:32',
-    icon: ClipboardList,
-    tone: 'purple',
-  },
-  {
-    text: 'Иванов И.И. изменил роль пользователя Кузнецова А.А.',
-    time: '26.04.2026 18:22',
-    icon: KeyRound,
-    tone: 'orange',
-  },
-  {
-    text: 'Волков В.В. удалил документ Акт возврата №123',
-    time: '26.04.2026 16:07',
-    icon: Trash2,
-    tone: 'red',
+    tab: 'demo',
   },
 ];
 
@@ -437,7 +420,9 @@ export default function Settings() {
   const { can } = usePermissions();
   const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = React.useState('users');
+  const [activeModal, setActiveModal] = React.useState<AdminModalKey | null>(null);
+  const [activeTab, setActiveTab] = React.useState<AdminDetailTab>('users');
+  const [activeSystemSettingsTab, setActiveSystemSettingsTab] = React.useState<SystemSettingsTab>('general');
   const [users, setUsersState] = React.useState<SystemUser[]>([]);
   const { data: usersData = EMPTY_SYSTEM_USERS } = useQuery<SystemUser[]>({
     queryKey: ['users'],
@@ -450,6 +435,11 @@ export default function Settings() {
   const { data: appSettings = EMPTY_APP_SETTINGS } = useQuery<AppSetting[]>({
     queryKey: ['app-settings'],
     queryFn: appSettingsService.getAll,
+  });
+  const auditPreviewQuery = useQuery<AuditLogResponse>({
+    queryKey: ['admin-audit-logs-preview'],
+    queryFn: () => api.get<AuditLogResponse>('/api/admin/audit-logs?limit=5'),
+    retry: 1,
   });
 
   React.useEffect(() => {
@@ -722,7 +712,6 @@ export default function Settings() {
   const enabledMenuCount = visibleSidebarOrder.filter(section => sidebarVisibility[section] !== false).length;
   const menuCount = enabledMenuCount > 0 ? enabledMenuCount : 28;
   const collectionCount = ADMIN_DATA_COLLECTIONS.length;
-  const activeSessionsCount = 12;
 
   const roleOptions = React.useMemo(() => {
     return Array.from(new Set(displayUsers.map(item => normalizeUserRole(item.role)).filter(Boolean)));
@@ -744,15 +733,23 @@ export default function Settings() {
     toggleSidebarSectionVisibility(section);
   };
 
-  const openDetailSection = (tab: string) => {
+  const openDetailSection = (tab: AdminDetailTab) => {
     setActiveTab(tab);
-    window.requestAnimationFrame(() => {
-      document.getElementById('admin-detail-sections')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    setActiveModal('details');
+  };
+
+  const openSystemSettings = (tab: SystemSettingsTab = 'general') => {
+    setActiveSystemSettingsTab(tab);
+    setActiveModal('system-settings');
+  };
+
+  const openActivity = () => {
+    setActiveModal('activity');
   };
 
   const kpiCards = [
     {
+      id: 'users',
       title: 'Пользователи',
       value: userCount,
       link: 'Все пользователи',
@@ -761,14 +758,25 @@ export default function Settings() {
       onClick: () => openDetailSection('users'),
     },
     {
+      id: 'roles',
       title: 'Роли',
       value: roleCount,
       link: 'Управление ролями',
       icon: ShieldCheck,
       iconClass: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300',
-      onClick: () => openDetailSection('users'),
+      onClick: () => setActiveModal('roles'),
     },
     {
+      id: 'permissions',
+      title: 'Права доступа',
+      value: 'RBAC',
+      link: 'Матрица прав',
+      icon: KeyRound,
+      iconClass: 'bg-cyan-50 text-cyan-600 dark:bg-cyan-950/40 dark:text-cyan-300',
+      onClick: () => setActiveModal('permissions'),
+    },
+    {
+      id: 'menu',
       title: 'Пункты меню',
       value: menuCount,
       link: 'Настроить меню',
@@ -777,6 +785,7 @@ export default function Settings() {
       onClick: () => openDetailSection('menu'),
     },
     {
+      id: 'data',
       title: 'Коллекции данных',
       value: collectionCount,
       link: 'Открыть коллекции',
@@ -784,15 +793,10 @@ export default function Settings() {
       iconClass: 'bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-300',
       onClick: () => openDetailSection('data'),
     },
-    {
-      title: 'Активные сессии',
-      value: activeSessionsCount,
-      link: 'Просмотреть сессии',
-      icon: LockKeyhole,
-      iconClass: 'bg-cyan-50 text-cyan-600 dark:bg-cyan-950/40 dark:text-cyan-300',
-      onClick: () => openDetailSection('audit'),
-    },
   ];
+
+  const auditPreviewLogs = auditPreviewQuery.data?.logs || [];
+  const modalMeta = getAdminModalMeta(activeModal, activeTab);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -813,7 +817,8 @@ export default function Settings() {
             const Icon = card.icon;
             return (
               <button
-                key={card.title}
+                key={card.id}
+                data-testid={`admin-kpi-${card.id}`}
                 type="button"
                 onClick={card.onClick}
                 className={`${adminCardClass} flex min-h-[96px] items-center gap-3 px-4 py-3 text-left transition hover:-translate-y-0.5 hover:border-primary/40 hover:bg-accent/30 hover:shadow-[0_22px_50px_-34px_rgba(37,99,235,0.6)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
@@ -961,8 +966,9 @@ export default function Settings() {
                 return (
                   <button
                     key={item.title}
+                    data-testid={`admin-settings-${item.tab}`}
                     type="button"
-                    onClick={() => openDetailSection(item.tab)}
+                    onClick={() => openSystemSettings(item.tab)}
                     className="flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left transition hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-primary/10 text-primary">
@@ -1064,29 +1070,56 @@ export default function Settings() {
           <div className={`${adminCardClass} min-w-0 overflow-hidden`}>
             <div className="flex items-center justify-between border-b border-border/70 px-5 py-3">
               <h2 className="text-base font-extrabold text-foreground">Активность в системе</h2>
-              <button type="button" onClick={() => openDetailSection('audit')} className={adminLinkClass}>Просмотреть всё</button>
+              <button type="button" data-testid="admin-activity-open" onClick={openActivity} className={adminLinkClass}>Просмотреть всё</button>
             </div>
             <div className="divide-y divide-border/70 px-5">
-              {ADMIN_ACTIVITY_FALLBACK.map(item => {
-                const Icon = item.icon;
+              {auditPreviewQuery.isLoading ? (
+                <div className="py-6 text-sm text-muted-foreground">Загружаем журнал действий...</div>
+              ) : auditPreviewQuery.isError ? (
+                <button
+                  type="button"
+                  onClick={openActivity}
+                  className="flex w-full items-center gap-3 py-4 text-left transition hover:bg-accent/50"
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300">
+                    <AlertTriangle className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0 flex-1 text-[13px] font-semibold leading-snug text-foreground">Журнал действий пока недоступен</span>
+                </button>
+              ) : auditPreviewLogs.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={openActivity}
+                  className="flex w-full items-center gap-3 py-4 text-left transition hover:bg-accent/50"
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-muted text-muted-foreground">
+                    <ClipboardList className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0 flex-1 text-[13px] font-semibold leading-snug text-foreground">История активности пока не подключена</span>
+                </button>
+              ) : auditPreviewLogs.map(item => {
+                const Icon = auditEntryIcon(item);
                 return (
                   <button
-                    key={`${item.text}-${item.time}`}
+                    key={item.id}
                     type="button"
-                    onClick={() => openDetailSection('audit')}
+                    onClick={openActivity}
                     className="flex w-full items-center gap-3 py-2.5 text-left transition hover:bg-accent/50"
                   >
-                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] ${activityToneClass(item.tone)}`}>
+                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] ${activityToneClass(auditEntryTone(item))}`}>
                       <Icon className="h-4 w-4" />
                     </span>
-                    <span className="min-w-0 flex-1 text-[13px] font-semibold leading-snug text-foreground">{item.text}</span>
-                    <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-muted-foreground sm:block">{item.time}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-semibold leading-snug text-foreground">{item.description || item.action}</span>
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground">{item.userName || 'Система'} · {item.entityType || 'system'}</span>
+                    </span>
+                    <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-muted-foreground sm:block">{formatAdminDate(item.createdAt, '—')}</span>
                   </button>
                 );
               })}
             </div>
             <div className="px-5 py-4">
-              <button type="button" onClick={() => openDetailSection('audit')} className={adminLinkClass}>Показать всю активность</button>
+              <button type="button" onClick={openActivity} className={adminLinkClass}>Показать всю активность</button>
             </div>
           </div>
         </section>
@@ -1103,39 +1136,30 @@ export default function Settings() {
           </div>
         </footer>
 
-        <section className="pt-2" id="admin-detail-sections">
-          <div className="mb-3">
-            <h2 className="text-lg font-extrabold text-foreground">Детальные настройки</h2>
-            <p className={`mt-1 text-[13px] ${adminMutedTextClass}`}>Расширенное управление пользователями, меню, справочниками, данными и диагностикой системы.</p>
-          </div>
-        </section>
-
-      <Tabs
-        value={activeTab}
-        onValueChange={setActiveTab}
-        className="space-y-6 rounded-[16px] border border-border/80 bg-card p-4 text-card-foreground shadow-[0_18px_42px_-34px_rgba(15,23,42,0.42)] dark:shadow-none"
-      >
-        <TabsList className="app-scroll-fade-x flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-none border-b border-border bg-transparent p-0 sm:gap-4">
-          {[
-            { value: 'users',         label: 'Пользователи и роли' },
-            { value: 'menu',          label: 'Левое меню' },
-            { value: 'configuration', label: 'Списки и поля' },
-            { value: 'reference',     label: 'Справочники' },
-            { value: 'notifications', label: 'Уведомления' },
-            { value: 'data',          label: 'Данные системы' },
-            { value: 'audit',         label: 'Журнал действий' },
-            { value: 'diagnostics',   label: 'Диагностика' },
-            { value: 'system-control', label: 'Контроль системы' },
-          ].map(tab => (
-            <TabsTrigger
-              key={tab.value}
-              value={tab.value}
-              className="shrink-0 whitespace-nowrap rounded-none border-b-2 border-transparent bg-transparent px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary dark:data-[state=active]:border-primary dark:data-[state=active]:bg-transparent dark:data-[state=active]:text-primary"
+        <AdminDashboardModal
+          open={Boolean(activeModal)}
+          onOpenChange={open => { if (!open) setActiveModal(null); }}
+          title={modalMeta.title}
+          description={modalMeta.description}
+        >
+          {activeModal === 'system-settings' ? (
+            <SystemSettingsModalContent
+              appSettings={appSettings}
+              activeTab={activeSystemSettingsTab}
+              onTabChange={setActiveSystemSettingsTab}
+            />
+          ) : activeModal === 'roles' ? (
+            <RolesOverviewSection users={displayUsers} />
+          ) : activeModal === 'permissions' ? (
+            <PermissionsOverviewSection />
+          ) : activeModal === 'activity' ? (
+            <AuditLogSection />
+          ) : (
+            <Tabs
+              value={activeTab}
+              onValueChange={value => setActiveTab(value as AdminDetailTab)}
+              className="space-y-5"
             >
-              {tab.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
 
         {/* ── Пользователи ─────────────────────────────────────────────────── */}
         <TabsContent value="users" data-testid="admin-users-roles-section">
@@ -1420,7 +1444,9 @@ export default function Settings() {
         <TabsContent value="system-control">
           <SystemControlCenterSection />
         </TabsContent>
-      </Tabs>
+            </Tabs>
+          )}
+        </AdminDashboardModal>
 
       {/* ── Диалог добавления / редактирования ─────────────────────────────── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -1634,6 +1660,424 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
+}
+
+function AdminDashboardModal({
+  open,
+  onOpenChange,
+  title,
+  description,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-[1180px] gap-0 border-border/80 bg-card p-0 text-card-foreground sm:max-w-[1180px]">
+        <DialogHeader className="border-b border-border/70 px-5 pb-4 pt-5 sm:px-6">
+          <DialogTitle>{title}</DialogTitle>
+          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>
+        </DialogHeader>
+        <div className="min-w-0 overflow-y-auto px-4 py-5 sm:px-6">
+          {children}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function getAdminModalMeta(activeModal: AdminModalKey | null, activeTab: AdminDetailTab) {
+  if (activeModal === 'roles') {
+    return {
+      title: 'Роли',
+      description: 'Обзор системных ролей, привязанных пользователей и границ доступа без перехода в старую панель.',
+    };
+  }
+  if (activeModal === 'permissions') {
+    return {
+      title: 'Права доступа',
+      description: 'Краткая RBAC-матрица по ключевым разделам. Backend остаётся источником истины для доступа.',
+    };
+  }
+  if (activeModal === 'system-settings') {
+    return {
+      title: 'Настройки системы',
+      description: 'Подготовленные вкладки системной конфигурации. Сохранение доступно только там, где уже подключены реальные API.',
+    };
+  }
+  if (activeModal === 'activity') {
+    return {
+      title: 'Активность в системе',
+      description: 'Реальный admin-only audit log с фильтрами по пользователю, действию, разделу и периоду.',
+    };
+  }
+
+  const detailMeta: Record<AdminDetailTab, { title: string; description: string }> = {
+    users: {
+      title: 'Пользователи',
+      description: 'Полный список пользователей с существующими действиями добавления, редактирования и смены статуса.',
+    },
+    menu: {
+      title: 'Левое меню',
+      description: 'Управление видимостью, группами и порядком боковой навигации для приложения.',
+    },
+    configuration: {
+      title: 'Списки и поля',
+      description: 'Справочные списки и конфигурация форм, которые уже хранятся в app_settings.',
+    },
+    reference: {
+      title: 'Справочники',
+      description: 'Административные справочники техники, собственников, механиков, перевозчиков, работ и запчастей.',
+    },
+    notifications: {
+      title: 'Уведомления',
+      description: 'Правила уведомлений и подготовленные каналы доставки сообщений.',
+    },
+    data: {
+      title: 'Данные системы',
+      description: 'Read-only диагностика, резервные копии и осторожные операции с системными коллекциями.',
+    },
+    diagnostics: {
+      title: 'Диагностика',
+      description: 'Проверки backend/frontend endpoints, версии сборки и доступности производственных зависимостей.',
+    },
+    'system-control': {
+      title: 'Контроль системы',
+      description: 'Состояние приложения, режима консервации, хранилища и рекомендаций перед production-действиями.',
+    },
+  };
+
+  return detailMeta[activeTab];
+}
+
+const ROLE_DESCRIPTIONS: Record<string, string> = {
+  'Администратор': 'Полный backend-доступ к административным операциям, пользователям, настройкам и данным.',
+  'Офис-менеджер': 'Операционный доступ к арендам, сервису, финансам и документам без панели администратора.',
+  'Менеджер по аренде': 'Работа с клиентами, арендами, доставками и scoped-отчётами без системных настроек.',
+  'Менеджер по продажам': 'Продажи, CRM, клиенты и просмотр связанных документов/платежей.',
+  'Механик': 'Техника, сервисные заявки, планировщик и служебные поездки в рамках механика.',
+  'Инвестор': 'Просмотр собственной техники и связанных аренд без финансовой админки.',
+  'Перевозчик': 'Только назначенные активные доставки через carrier DTO и MAX-сценарии.',
+};
+
+function RolesOverviewSection({ users }: { users: SystemUser[] }) {
+  const roles = Array.from(new Set([...ROLES, ...users.map(item => normalizeUserRole(item.role))].filter(Boolean)));
+  return (
+    <div className="space-y-4" data-testid="admin-roles-modal">
+      <div className="grid gap-3 md:grid-cols-3">
+        <AdminMiniMetric title="Всего ролей" value={roles.length} />
+        <AdminMiniMetric title="Пользователей с ролями" value={users.length} />
+        <AdminMiniMetric title="Источник" value="frontend + backend RBAC" />
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {roles.map(role => {
+          const count = users.filter(user => normalizeUserRole(user.role) === role).length;
+          return (
+            <div key={role} className="rounded-[14px] border border-border/80 bg-background/70 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-extrabold text-foreground">{role}</p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">{ROLE_DESCRIPTIONS[role] || 'Роль поддерживается системой; подробные права задаются в RBAC-конфигурации.'}</p>
+                </div>
+                <Badge variant={count > 0 ? 'success' : 'secondary'}>{count} польз.</Badge>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const PERMISSION_ROWS = [
+  { role: 'Администратор', sections: 'Все разделы', actions: 'view/create/edit/delete', note: 'Единственная роль с доступом к панели администратора.' },
+  { role: 'Офис-менеджер', sections: 'Операции, клиенты, документы, платежи, финансы', actions: 'view/create/edit', note: 'Без системных настроек и управления пользователями.' },
+  { role: 'Менеджер по аренде', sections: 'Аренды, доставки, клиенты, документы, сервис', actions: 'view/create/edit частично', note: 'Scoped-логика и проверки остаются на backend.' },
+  { role: 'Менеджер по продажам', sections: 'Продажи, CRM, клиенты', actions: 'view/create/edit частично', note: 'Финансовые и admin-разделы закрыты.' },
+  { role: 'Механик / гарантийные роли', sections: 'Техника, сервис, планировщик', actions: 'view/create/edit по роли', note: 'Сервисные действия дополнительно проверяются backend-helper’ами.' },
+  { role: 'Перевозчик', sections: 'Назначенные доставки', actions: 'view', note: 'Frontend-вход закрыт для bot-only перевозчиков.' },
+  { role: 'Инвестор', sections: 'Своя техника и связанные аренды', actions: 'view', note: 'Финансы клиентов и документы не раскрываются.' },
+];
+
+function PermissionsOverviewSection() {
+  return (
+    <div className="space-y-4" data-testid="admin-permissions-modal">
+      <div className="rounded-[14px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+        Права показаны как обзор. Реальное применение ролей и коллекций выполняется на backend routes/domain helpers; неизвестные роли и коллекции должны отклоняться по умолчанию.
+      </div>
+      <div className="overflow-x-auto">
+        <Table className="min-w-[760px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Роль</TableHead>
+              <TableHead>Разделы</TableHead>
+              <TableHead>Действия</TableHead>
+              <TableHead>Примечание</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {PERMISSION_ROWS.map(row => (
+              <TableRow key={row.role}>
+                <TableCell className="font-semibold">{row.role}</TableCell>
+                <TableCell>{row.sections}</TableCell>
+                <TableCell className="font-mono text-xs">{row.actions}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{row.note}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="flex justify-end">
+        <Button type="button" disabled title="Редактирование RBAC не подключено к безопасному API">
+          Изменение прав пока не подключено
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AdminMiniMetric({ title, value }: { title: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-[14px] border border-border/80 bg-background/70 p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{title}</p>
+      <p className="mt-2 text-xl font-extrabold text-foreground">{value}</p>
+    </div>
+  );
+}
+
+const SYSTEM_SETTINGS_TABS: Array<{ value: SystemSettingsTab; label: string; icon: React.ElementType }> = [
+  { value: 'general', label: 'Общие настройки', icon: SettingsIcon },
+  { value: 'company', label: 'Компания', icon: FileText },
+  { value: 'notifications', label: 'Уведомления', icon: Bell },
+  { value: 'documents', label: 'Документы', icon: FileCheck },
+  { value: 'security', label: 'Безопасность', icon: LockKeyhole },
+  { value: 'integrations', label: 'Интеграции', icon: Link2 },
+  { value: 'demo', label: 'Демо / публичные', icon: Eye },
+];
+
+function SystemSettingsModalContent({
+  appSettings,
+  activeTab,
+  onTabChange,
+}: {
+  appSettings: AppSetting[];
+  activeTab: SystemSettingsTab;
+  onTabChange: (tab: SystemSettingsTab) => void;
+}) {
+  const source = appSettings.length > 0 ? 'реальные app_settings' : 'локальная конфигурация, сохранение пока не подключено';
+  const companyName = settingText(appSettings, ['companyName', 'systemName', 'publicCompanyName'], 'Skytech Rental Management');
+  const timezone = settingText(appSettings, ['timezone', 'timeZone'], 'Europe/Moscow');
+  const currency = settingText(appSettings, ['currency', 'defaultCurrency'], 'RUB');
+  const dateFormat = settingText(appSettings, ['dateFormat', 'defaultDateFormat'], 'DD.MM.YYYY');
+  const office = settingText(appSettings, ['mainOffice', 'region', 'workingRegion'], 'Москва / основной офис');
+  const demoEnabled = Boolean(readSettingValue(appSettings, ['demoMode']) || readSettingValue(appSettings, ['publicDemoSettings']));
+
+  return (
+    <Tabs value={activeTab} onValueChange={value => onTabChange(value as SystemSettingsTab)} className="space-y-5" data-testid="admin-system-settings-modal">
+      <TabsList className="app-scroll-fade-x flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-[14px] border border-border/80 bg-background/70 p-1">
+        {SYSTEM_SETTINGS_TABS.map(tab => {
+          const Icon = tab.icon;
+          return (
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              className="shrink-0 gap-2 rounded-[10px] px-3 py-2 text-xs font-bold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+            >
+              <Icon className="h-4 w-4" />
+              {tab.label}
+            </TabsTrigger>
+          );
+        })}
+      </TabsList>
+
+      <TabsContent value="general" className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-2">
+          <ReadonlySettingField label="Название компании / системы" value={companyName} />
+          <ReadonlySettingField label="Часовой пояс" value={timezone} />
+          <ReadonlySettingField label="Валюта" value={currency} />
+          <ReadonlySettingField label="Формат даты" value={dateFormat} />
+          <ReadonlySettingField label="Рабочий регион / основной офис" value={office} />
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <ReadonlyToggle label="Включить уведомления" checked />
+          <ReadonlyToggle label="Показывать демо-данные" checked={demoEnabled} />
+          <ReadonlyToggle label="Компактный режим интерфейса" checked={false} />
+        </div>
+        <SettingsStatus source={source} />
+      </TabsContent>
+
+      <TabsContent value="company" className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-2">
+          <ReadonlySettingField label="Юридическое имя" value={settingText(appSettings, ['legalName', 'companyLegalName'], companyName)} />
+          <ReadonlySettingField label="Контактный email" value={settingText(appSettings, ['companyEmail', 'supportEmail'], 'не подключено')} />
+          <ReadonlySettingField label="Телефон офиса" value={settingText(appSettings, ['companyPhone', 'supportPhone'], 'не подключено')} />
+          <ReadonlySettingField label="Основной офис" value={office} />
+        </div>
+        <PreparedSettingsNote text="Реквизиты и офисы показаны как подготовленная форма. Отдельного безопасного API сохранения для профиля компании в этой панели сейчас нет." />
+      </TabsContent>
+
+      <TabsContent value="notifications" className="space-y-4">
+        <SettingsItemList
+          items={[
+            'Возвраты, приёмка, сервисные заявки и просроченные платежи отправляются в центр уведомлений.',
+            'MAX-канал используется только там, где уже подключены backend-сценарии.',
+            'Email/Telegram параметры отображаются как заготовка и не сохраняются из этой формы.',
+          ]}
+        />
+        <PreparedSettingsNote text="Сохранение токенов, webhook secrets и chat ids намеренно не добавлено в frontend-форму." />
+      </TabsContent>
+
+      <TabsContent value="documents" className="space-y-4">
+        <SettingsItemList
+          items={[
+            'Шаблоны актов, спецификаций и документов живут в документном контуре приложения.',
+            'Нумерация документов уже использует app_settings через существующие finance/documents API.',
+            'Сроки подписания и подписи можно подключить отдельным безопасным workflow без массовой миграции данных.',
+          ]}
+        />
+      </TabsContent>
+
+      <TabsContent value="security" className="space-y-4">
+        <SettingsItemList
+          items={[
+            'Роли и права проверяются на backend routes/domain helpers.',
+            'Bot-only перевозчики не должны входить во frontend.',
+            '2FA и парольная политика показаны как заготовка; secrets и session data не раскрываются в UI.',
+          ]}
+        />
+        <div className="flex justify-start">
+          <Button type="button" variant="secondary" onClick={() => onTabChange('general')}>Вернуться к общим настройкам</Button>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="integrations" className="space-y-4">
+        <SettingsItemList
+          items={[
+            'MAX-бот, GSM/GPRS и внешние endpoints проверяются в разделе диагностики.',
+            'Интеграционные токены не выводятся и не редактируются из этой формы.',
+            'Телефония/1С/API могут быть добавлены отдельными безопасными настройками после backend-контракта.',
+          ]}
+        />
+      </TabsContent>
+
+      <TabsContent value="demo" className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-2">
+          <ReadonlySettingField label="Демо-режим" value={demoEnabled ? 'включён по app_settings' : 'не найден в app_settings'} />
+          <ReadonlySettingField label="Публичные настройки" value={appSettings.length > 0 ? `${appSettings.length} записей доступно` : 'пока не подключено'} />
+        </div>
+        <PreparedSettingsNote text="Демо-сброс и production safeguards остаются в разделе контроля системы; эта вкладка только показывает состояние." />
+      </TabsContent>
+
+      <div className="flex justify-end border-t border-border/70 pt-4">
+        <Button type="button" disabled title="Для этой формы нет подключенного безопасного сохранения">
+          Сохранение пока не подключено
+        </Button>
+      </div>
+    </Tabs>
+  );
+}
+
+function ReadonlySettingField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <label className="block space-y-2">
+      <span className="text-sm font-semibold text-foreground">{label}</span>
+      <input
+        readOnly
+        value={String(value ?? '')}
+        className="h-10 w-full rounded-[10px] border border-input bg-input-background px-3 text-sm text-foreground outline-none"
+      />
+    </label>
+  );
+}
+
+function ReadonlyToggle({ label, checked }: { label: string; checked: boolean }) {
+  return (
+    <label className="flex items-center gap-3 rounded-[12px] border border-border/80 bg-background/70 px-3 py-3 text-sm font-semibold text-foreground">
+      <input type="checkbox" checked={checked} readOnly disabled className="h-4 w-4 accent-primary" />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+function SettingsStatus({ source }: { source: string }) {
+  return (
+    <div className="rounded-[14px] border border-primary/20 bg-primary/10 p-4">
+      <p className="text-sm font-extrabold text-foreground">Статус настроек</p>
+      <p className="mt-1 text-sm text-muted-foreground">Источник данных: {source}.</p>
+    </div>
+  );
+}
+
+function PreparedSettingsNote({ text }: { text: string }) {
+  return (
+    <div className="rounded-[14px] border border-border/80 bg-background/70 px-4 py-3 text-sm leading-6 text-muted-foreground">
+      {text}
+    </div>
+  );
+}
+
+function SettingsItemList({ items }: { items: string[] }) {
+  return (
+    <div className="grid gap-3">
+      {items.map(item => (
+        <div key={item} className="flex gap-3 rounded-[14px] border border-border/80 bg-background/70 p-4">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <p className="text-sm leading-6 text-foreground">{item}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function readSettingValue(appSettings: AppSetting[], keys: string[]): unknown {
+  const normalizedKeys = new Set(keys.map(key => key.toLowerCase()));
+  return appSettings.find(item => normalizedKeys.has(String(item.key || '').toLowerCase()))?.value;
+}
+
+function settingText(appSettings: AppSetting[], keys: string[], fallback: string): string {
+  const value = readSettingValue(appSettings, keys);
+  if (typeof value === 'string' || typeof value === 'number') {
+    const text = String(value).trim();
+    return text || fallback;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    for (const key of ['name', 'label', 'value', 'title']) {
+      const text = String(record[key] ?? '').trim();
+      if (text) return text;
+    }
+  }
+  return fallback;
+}
+
+function auditEntryIcon(entry: AuditLogEntry): React.ElementType {
+  const action = String(entry.action || '').toLowerCase();
+  if (action.includes('delete') || action.includes('deactivate')) return Trash2;
+  if (action.includes('login') || action.includes('auth')) return KeyRound;
+  if (action.includes('create')) return Plus;
+  if (action.includes('update') || action.includes('status')) return Edit;
+  if (String(entry.entityType || '').includes('documents')) return FileText;
+  return ClipboardList;
+}
+
+function auditEntryTone(entry: AuditLogEntry): string {
+  const action = String(entry.action || '').toLowerCase();
+  if (action.includes('fail') || action.includes('delete') || action.includes('deactivate')) return 'red';
+  if (action.includes('create')) return 'green';
+  if (action.includes('login') || action.includes('auth')) return 'orange';
+  if (action.includes('documents')) return 'purple';
+  return 'blue';
+}
+
+function auditStatus(entry: AuditLogEntry): { label: string; variant: 'success' | 'warning' | 'danger' | 'secondary' } {
+  const action = String(entry.action || '').toLowerCase();
+  if (action.includes('fail') || action.includes('error')) return { label: 'Ошибка', variant: 'danger' };
+  if (action.includes('pending')) return { label: 'В процессе', variant: 'warning' };
+  return { label: 'Выполнено', variant: 'success' };
 }
 
 type ProductionDiagnostics = {
@@ -2260,35 +2704,41 @@ function AuditLogSection() {
               <TableRow>
                 <TableHead>Дата</TableHead>
                 <TableHead>Пользователь</TableHead>
-                <TableHead>Роль</TableHead>
                 <TableHead>Действие</TableHead>
                 <TableHead>Сущность</TableHead>
+                <TableHead>Статус</TableHead>
+                <TableHead>Источник / раздел</TableHead>
                 <TableHead>Описание</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {logs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-sm text-gray-500">
-                    Записей не найдено.
+                  <TableCell colSpan={7} className="py-8 text-center text-sm text-gray-500">
+                    История активности пока не подключена или записей по выбранным фильтрам нет. После подключения аудита здесь будут действия пользователей.
                   </TableCell>
                 </TableRow>
-              ) : logs.map(entry => (
-                <TableRow key={entry.id}>
-                  <TableCell className="whitespace-nowrap text-xs">{entry.createdAt ? new Date(entry.createdAt).toLocaleString('ru-RU') : '—'}</TableCell>
-                  <TableCell>
-                    <p className="text-sm font-medium">{entry.userName || 'Система'}</p>
-                    <p className="text-xs text-gray-500">{entry.userId || '—'}</p>
-                  </TableCell>
-                  <TableCell><Badge variant="secondary">{entry.role || '—'}</Badge></TableCell>
-                  <TableCell className="font-mono text-xs">{entry.action}</TableCell>
-                  <TableCell>
-                    <p className="text-sm">{entry.entityType || '—'}</p>
-                    <p className="font-mono text-xs text-gray-500">{entry.entityId || '—'}</p>
-                  </TableCell>
-                  <TableCell className="max-w-[360px] text-sm">{entry.description || '—'}</TableCell>
-                </TableRow>
-              ))}
+              ) : logs.map(entry => {
+                const status = auditStatus(entry);
+                return (
+                  <TableRow key={entry.id}>
+                    <TableCell className="whitespace-nowrap text-xs">{entry.createdAt ? new Date(entry.createdAt).toLocaleString('ru-RU') : '—'}</TableCell>
+                    <TableCell>
+                      <p className="text-sm font-medium">{entry.userName || 'Система'}</p>
+                      <p className="text-xs text-gray-500">{entry.userId || '—'}</p>
+                      <p className="text-xs text-gray-500">{entry.role || '—'}</p>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{entry.action}</TableCell>
+                    <TableCell>
+                      <p className="text-sm">{entry.entityType || '—'}</p>
+                      <p className="font-mono text-xs text-gray-500">{entry.entityId || '—'}</p>
+                    </TableCell>
+                    <TableCell><Badge variant={status.variant}>{status.label}</Badge></TableCell>
+                    <TableCell className="text-sm">{entry.entityType || 'system'}</TableCell>
+                    <TableCell className="max-w-[360px] text-sm">{entry.description || '—'}</TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}

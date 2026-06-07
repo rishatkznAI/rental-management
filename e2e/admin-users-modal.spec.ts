@@ -14,7 +14,8 @@ async function setTheme(page: Page, theme: 'light' | 'dark') {
 async function openUserEditor(page: Page, email: string) {
   await navigateInApp(page, '/admin');
   await expect(page.getByRole('heading', { name: 'Панель администратора' })).toBeVisible();
-  await page.getByRole('tab', { name: 'Пользователи и роли' }).click();
+  await page.getByTestId('admin-kpi-users').click();
+  await expect(page.getByRole('dialog', { name: 'Пользователи' })).toBeVisible();
 
   const row = page.getByRole('row', { name: new RegExp(email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) });
   await expect(row).toBeVisible();

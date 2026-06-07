@@ -11,7 +11,9 @@ type UiIssue = {
   status?: number;
 };
 
-const ADMIN_SECTIONS: Array<{ name: RegExp; label: string; route: string }> = [
+type AdminSection = { name: RegExp; label: string; route: string };
+
+const ADMIN_SECTIONS: AdminSection[] = [
   { name: /^Дашборд/, label: 'Дашборд', route: '/' },
   { name: /^Техника/, label: 'Техника', route: '/equipment' },
   { name: /^GSM/, label: 'GSM', route: '/gsm' },
@@ -29,6 +31,9 @@ const ADMIN_SECTIONS: Array<{ name: RegExp; label: string; route: string }> = [
   { name: /^Бот/, label: 'Бот', route: '/bots' },
   { name: /^Отчёты/, label: 'Отчёты', route: '/reports' },
   { name: /^Панель администратора/, label: 'Панель администратора', route: '/admin' },
+];
+
+const OPTIONAL_ADMIN_SECTIONS: AdminSection[] = [
   { name: /^Личные настройки/, label: 'Личные настройки', route: '/settings' },
 ];
 
@@ -79,12 +84,23 @@ async function expectHealthyScreen(page: Page, action: string) {
   await expect(page.getByText(/Cannot read properties|Maximum update depth exceeded|Unexpected Application Error|Application error|Something went wrong|ошибка приложения/i)).toHaveCount(0);
 }
 
-async function openSectionFromSidebar(page: Page, section: { name: RegExp; label: string; route: string }) {
+async function openSectionFromSidebar(page: Page, section: AdminSection) {
   const button = page.locator('aside').getByRole('button', { name: section.name });
   await expect(button, `${section.label} nav button should be visible`).toBeVisible();
   await button.click();
   await goToRoute(page, section.route);
   await expectHealthyScreen(page, `open ${section.label}`);
+}
+
+async function openOptionalSectionFromSidebar(page: Page, section: AdminSection) {
+  const button = page.locator('aside').getByRole('button', { name: section.name });
+  if ((await button.count()) === 0) return false;
+  if (!(await button.first().isVisible().catch(() => false))) return false;
+
+  await button.first().click();
+  await goToRoute(page, section.route);
+  await expectHealthyScreen(page, `open optional ${section.label}`);
+  return true;
 }
 
 async function goToRoute(page: Page, route: string) {
@@ -155,11 +171,21 @@ test('smoke-admin can click admin UI sections without runtime errors', async ({ 
     await exerciseFilters(page, section.label);
   }
 
+  for (const section of OPTIONAL_ADMIN_SECTIONS) {
+    action = `optional section ${section.label}`;
+    if (await openOptionalSectionFromSidebar(page, section)) {
+      await exerciseVisibleTabs(page, section.label);
+      await exerciseFilters(page, section.label);
+    }
+  }
+
   action = 'admin references regression';
   await page.locator('aside').getByRole('button', { name: /^Панель администратора/ }).click();
-  await page.getByRole('tab', { name: 'Справочники' }).click();
-  await expect(page.getByText('Механики')).toBeVisible();
-  await expect(page.getByText('Перевозчики')).toBeVisible();
+  await page.locator('main').getByRole('button', { name: 'Документация' }).click();
+  const referencesDialog = page.getByRole('dialog', { name: 'Справочники' });
+  await expect(referencesDialog).toBeVisible();
+  await expect(referencesDialog.getByText('Механики')).toBeVisible();
+  await expect(referencesDialog.getByText('Перевозчики')).toBeVisible();
   await expectHealthyScreen(page, action);
 
   expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);

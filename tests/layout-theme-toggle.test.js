@@ -53,7 +53,9 @@ test('admin route keeps the common app shell around dashboard content', () => {
   assert.match(sidebarSource, /sidebarGroups\[item\.section\] === group\.id/);
 
   assert.match(settingsSource, /data-testid="admin-reference-dashboard"/);
-  assert.match(settingsSource, /Детальные настройки/);
+  assert.match(settingsSource, /AdminDashboardModal/);
+  assert.doesNotMatch(settingsSource, /admin-detail-sections/);
+  assert.doesNotMatch(settingsSource, /scrollIntoView/);
   assert.doesNotMatch(settingsSource, /<aside\b/);
 });
 
@@ -64,9 +66,9 @@ test('admin dashboard overview uses theme-aware surfaces and controls', () => {
 
   assert.match(settingsSource, /data-testid="admin-reference-dashboard" className="min-h-\[calc\(100vh-4rem\)\] bg-background text-foreground transition-colors"/);
   assert.match(settingsSource, /border border-input bg-input-background/);
-  assert.match(settingsSource, /border border-border\/80 bg-card p-4 text-card-foreground/);
-  assert.match(settingsSource, /data-\[state=active\]:border-primary/);
-  assert.match(settingsSource, /dark:data-\[state=active\]:text-primary/);
+  assert.match(settingsSource, /border-border\/80 bg-card p-0 text-card-foreground/);
+  assert.match(settingsSource, /data-\[state=active\]:bg-primary/);
+  assert.match(settingsSource, /data-testid="admin-system-settings-modal"/);
 
   assert.doesNotMatch(settingsSource, /dark:bg-\[#f7f9fc\]/);
   assert.doesNotMatch(settingsSource, /dark:text-\[#172033\]/);

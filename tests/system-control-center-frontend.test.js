@@ -16,7 +16,8 @@ test('admin can see System Control Center in the admin panel', () => {
   assert.match(rolePermissionBlock('Администратор'), /admin_panel:\s+ALL/);
   assert.match(sidebarSource, /Панель администратора/);
   assert.match(settingsSource, /Контроль системы/);
-  assert.match(settingsSource, /value:\s*'system-control'/);
+  assert.match(settingsSource, /type AdminDetailTab = [^\n]*'system-control'/);
+  assert.match(settingsSource, /openDetailSection\('system-control'\)/);
   assert.match(settingsSource, /<SystemControlCenterSection \/>/);
 });
 

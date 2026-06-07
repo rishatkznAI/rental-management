@@ -148,7 +148,7 @@ If the post-deploy gate fails, the workflow is failed and the release is not con
 
 Production release order:
 
-1. Deploy production backend through the Railway/external backend flow with `RELEASE_TYPE=backend` or `RELEASE_TYPE=full-stack` in the Railway runtime variables for the deployed service.
+1. Deploy production backend through the Railway/external backend flow. The Railway start wrapper sets `RAILWAY_RELEASE_TYPE=backend` for Git-backed backend deploys when no explicit release metadata exists; set `RELEASE_TYPE=full-stack` for a full-stack release before the backend deploy when the release owner needs the backend to report `full-stack`.
 2. Deploy production frontend through GitHub Pages.
 3. Run production preflight.
 4. Run production smoke.

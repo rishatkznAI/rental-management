@@ -14,6 +14,7 @@ const {
   registerSystemRoutes,
 } = require('../server/routes/system.js');
 const { getBuildInfo } = require('../server/lib/build-info.js');
+const { resolveReleaseEnv } = require('../server/scripts/start-with-release-type.cjs');
 
 function createSystemApp(overrides = {}) {
   const app = express();
@@ -348,6 +349,17 @@ test('build info reads RELEASE_PREFLIGHT_RELEASE_TYPE when RELEASE_TYPE is absen
   });
 });
 
+test('build info reads RAILWAY_RELEASE_TYPE when explicit release env is absent', async () => {
+  await withBuildInfoEnv({
+    BACKEND_RELEASE_MARKER_FILE: path.join(os.tmpdir(), 'missing-rentCore-release-marker.json'),
+    RAILWAY_RELEASE_TYPE: 'backend',
+  }, async () => {
+    const build = getBuildInfo();
+    assert.equal(build.releaseType, 'backend');
+    assert.deepEqual(build.release, { type: 'backend' });
+  });
+});
+
 test('build info preserves Railway commit SHA while reading release type metadata', async () => {
   await withBuildInfoEnv({
     BACKEND_RELEASE_MARKER_FILE: path.join(os.tmpdir(), 'missing-rentCore-release-marker.json'),
@@ -360,6 +372,22 @@ test('build info preserves Railway commit SHA while reading release type metadat
     assert.equal(build.releaseType, 'backend');
     assert.deepEqual(build.release, { type: 'backend' });
   });
+});
+
+test('Railway start wrapper provides backend release type when Railway commit metadata is present', () => {
+  const env = resolveReleaseEnv({
+    RAILWAY_GIT_COMMIT_SHA: '7050d37628f5e7469b59ec3f30741049b1c3aa94',
+  });
+  assert.equal(env.RAILWAY_RELEASE_TYPE, 'backend');
+});
+
+test('Railway start wrapper preserves explicit full-stack release type metadata', () => {
+  const env = resolveReleaseEnv({
+    RAILWAY_GIT_COMMIT_SHA: '7050d37628f5e7469b59ec3f30741049b1c3aa94',
+    RELEASE_TYPE: 'full-stack',
+  });
+  assert.equal(env.RELEASE_TYPE, 'full-stack');
+  assert.equal(env.RAILWAY_RELEASE_TYPE, undefined);
 });
 
 test('/api/admin/system-control-center is admin-only', async () => {

@@ -116,7 +116,7 @@ Production deployment is allowed while the product is conserved. Conservation is
 ## 11. Production backend/frontend deploy
 
 - [ ] Backend deploy success.
-- [ ] Railway backend runtime has `RELEASE_TYPE=backend` or `RELEASE_TYPE=full-stack` for backend/full-stack release.
+- [ ] Railway backend runtime reports `backend` from the start wrapper, or explicit `RELEASE_TYPE=full-stack` for a full-stack release.
 - [ ] Frontend deploy success.
 - [ ] Frontend/backend match.
 - [ ] Frontend API target = production backend.
@@ -313,10 +313,10 @@ On failed staging smoke, stop the production release, inspect GitHub Actions art
 ## Backend Deploy
 
 1. Confirm Railway service root is `server`.
-2. Confirm Railway start command is `npm start`.
+2. Confirm Railway start command comes from `server/railway.toml`: `node scripts/start-with-release-type.cjs`.
 3. Confirm Railway healthcheck path is `/health`.
 4. Confirm persistent volume is mounted and `DB_PATH` points to the volume.
-5. Set Railway runtime release metadata for this deploy: `RELEASE_TYPE=backend` or `RELEASE_TYPE=full-stack`.
+5. For full-stack releases, set Railway runtime release metadata before backend deploy: `RELEASE_TYPE=full-stack`. Backend-only Railway Git deploys default to `RAILWAY_RELEASE_TYPE=backend` through `server/scripts/start-with-release-type.cjs`.
 6. Deploy the backend.
 7. Verify:
    - `GET https://rental-management-production-35bc.up.railway.app/health`

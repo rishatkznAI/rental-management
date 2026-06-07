@@ -365,9 +365,9 @@ const ADMIN_ACTIVITY_FALLBACK = [
   },
 ];
 
-const adminCardClass = 'rounded-[16px] border border-[#e6ebf2] bg-white shadow-[0_18px_42px_-34px_rgba(15,23,42,0.42)]';
-const adminMutedTextClass = 'text-[#6b778c]';
-const adminLinkClass = 'text-[12px] font-semibold text-[#2563eb] transition hover:text-[#1d4ed8] hover:underline';
+const adminCardClass = 'rounded-[16px] border border-border/80 bg-card text-card-foreground shadow-[0_18px_42px_-34px_rgba(15,23,42,0.42)] dark:shadow-none';
+const adminMutedTextClass = 'text-muted-foreground';
+const adminLinkClass = 'text-[12px] font-semibold text-primary transition hover:text-primary-hover hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background';
 
 function adminNormalize(value: unknown): string {
   return String(value ?? '').trim().toLowerCase();
@@ -404,21 +404,21 @@ function userLastLogin(user: SystemUser, index: number): string {
 
 function rolePillClass(role: UserRole | string): string {
   const normalized = normalizeUserRole(role);
-  if (normalized === 'Администратор') return 'bg-sky-50 text-sky-700 ring-sky-100';
-  if (normalized === 'Менеджер по аренде') return 'bg-blue-50 text-blue-700 ring-blue-100';
-  if (isMechanicRole(normalized)) return 'bg-violet-50 text-violet-700 ring-violet-100';
-  if (normalized === 'Инвестор') return 'bg-orange-50 text-orange-700 ring-orange-100';
-  if (normalized === 'Перевозчик') return 'bg-cyan-50 text-cyan-700 ring-cyan-100';
-  if (normalized === 'Менеджер по продажам') return 'bg-emerald-50 text-emerald-700 ring-emerald-100';
-  return 'bg-slate-100 text-slate-700 ring-slate-200';
+  if (normalized === 'Администратор') return 'bg-sky-50 text-sky-700 ring-sky-100 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-900/60';
+  if (normalized === 'Менеджер по аренде') return 'bg-blue-50 text-blue-700 ring-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:ring-blue-900/60';
+  if (isMechanicRole(normalized)) return 'bg-violet-50 text-violet-700 ring-violet-100 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-900/60';
+  if (normalized === 'Инвестор') return 'bg-orange-50 text-orange-700 ring-orange-100 dark:bg-orange-950/40 dark:text-orange-300 dark:ring-orange-900/60';
+  if (normalized === 'Перевозчик') return 'bg-cyan-50 text-cyan-700 ring-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-300 dark:ring-cyan-900/60';
+  if (normalized === 'Менеджер по продажам') return 'bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900/60';
+  return 'bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800/70 dark:text-slate-300 dark:ring-slate-700';
 }
 
 function activityToneClass(tone: string): string {
-  if (tone === 'green') return 'bg-emerald-50 text-emerald-600';
-  if (tone === 'purple') return 'bg-violet-50 text-violet-600';
-  if (tone === 'orange') return 'bg-orange-50 text-orange-600';
-  if (tone === 'red') return 'bg-rose-50 text-rose-600';
-  return 'bg-blue-50 text-blue-600';
+  if (tone === 'green') return 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300';
+  if (tone === 'purple') return 'bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-300';
+  if (tone === 'orange') return 'bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-300';
+  if (tone === 'red') return 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300';
+  return 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300';
 }
 
 const EMPTY_FORM = {
@@ -757,7 +757,7 @@ export default function Settings() {
       value: userCount,
       link: 'Все пользователи',
       icon: Users,
-      iconClass: 'bg-blue-50 text-blue-600',
+      iconClass: 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300',
       onClick: () => openDetailSection('users'),
     },
     {
@@ -765,7 +765,7 @@ export default function Settings() {
       value: roleCount,
       link: 'Управление ролями',
       icon: ShieldCheck,
-      iconClass: 'bg-emerald-50 text-emerald-600',
+      iconClass: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300',
       onClick: () => openDetailSection('users'),
     },
     {
@@ -773,7 +773,7 @@ export default function Settings() {
       value: menuCount,
       link: 'Настроить меню',
       icon: List,
-      iconClass: 'bg-violet-50 text-violet-600',
+      iconClass: 'bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-300',
       onClick: () => openDetailSection('menu'),
     },
     {
@@ -781,7 +781,7 @@ export default function Settings() {
       value: collectionCount,
       link: 'Открыть коллекции',
       icon: Database,
-      iconClass: 'bg-orange-50 text-orange-600',
+      iconClass: 'bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-300',
       onClick: () => openDetailSection('data'),
     },
     {
@@ -789,21 +789,21 @@ export default function Settings() {
       value: activeSessionsCount,
       link: 'Просмотреть сессии',
       icon: LockKeyhole,
-      iconClass: 'bg-cyan-50 text-cyan-600',
+      iconClass: 'bg-cyan-50 text-cyan-600 dark:bg-cyan-950/40 dark:text-cyan-300',
       onClick: () => openDetailSection('audit'),
     },
   ];
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div data-testid="admin-reference-dashboard" className="min-h-[calc(100vh-4rem)] bg-[#f7f9fc] text-[#172033] dark:bg-[#f7f9fc] dark:text-[#172033]">
+    <div data-testid="admin-reference-dashboard" className="min-h-[calc(100vh-4rem)] bg-background text-foreground transition-colors">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
         <section className="flex items-center gap-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-blue-50 text-blue-600 ring-1 ring-blue-100">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-primary/10 text-primary ring-1 ring-primary/20">
             <Shield className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-[22px] font-extrabold leading-tight text-[#172033] sm:text-[24px]">Панель администратора</h1>
+            <h1 className="text-[22px] font-extrabold leading-tight text-foreground sm:text-[24px]">Панель администратора</h1>
             <p className={`mt-1 text-[13px] ${adminMutedTextClass}`}>Управление системой, пользователями, ролями и настройками приложения.</p>
           </div>
         </section>
@@ -816,15 +816,15 @@ export default function Settings() {
                 key={card.title}
                 type="button"
                 onClick={card.onClick}
-                className={`${adminCardClass} flex min-h-[96px] items-center gap-3 px-4 py-3 text-left transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_22px_50px_-34px_rgba(37,99,235,0.6)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300`}
+                className={`${adminCardClass} flex min-h-[96px] items-center gap-3 px-4 py-3 text-left transition hover:-translate-y-0.5 hover:border-primary/40 hover:bg-accent/30 hover:shadow-[0_22px_50px_-34px_rgba(37,99,235,0.6)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
               >
                 <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${card.iconClass}`}>
                   <Icon className="h-5 w-5" />
                 </span>
                 <span className="min-w-0">
                   <span className={`block text-[13px] font-medium ${adminMutedTextClass}`}>{card.title}</span>
-                  <span className="mt-0.5 block text-[26px] font-extrabold leading-none text-[#172033]">{card.value}</span>
-                  <span className="mt-3 block text-[12px] font-semibold text-blue-600">{card.link} →</span>
+                  <span className="mt-0.5 block text-[26px] font-extrabold leading-none text-foreground">{card.value}</span>
+                  <span className="mt-3 block text-[12px] font-semibold text-primary">{card.link} →</span>
                 </span>
               </button>
             );
@@ -833,9 +833,9 @@ export default function Settings() {
 
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,1fr)]">
           <div className={`${adminCardClass} min-w-0 overflow-hidden`}>
-            <div className="flex flex-col gap-3 border-b border-[#edf1f6] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <h2 className="text-base font-extrabold text-[#172033]">Управление пользователями</h2>
-              <Button className="h-9 rounded-[10px] bg-blue-600 px-4 text-sm text-white shadow-[0_14px_30px_-20px_rgba(37,99,235,0.95)] hover:bg-blue-700" onClick={openAdd}>
+            <div className="flex flex-col gap-3 border-b border-border/70 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-base font-extrabold text-foreground">Управление пользователями</h2>
+              <Button className="h-9 rounded-[10px] px-4 text-sm shadow-[0_14px_30px_-20px_rgba(37,99,235,0.95)] dark:shadow-none" onClick={openAdd}>
                 <Plus className="h-4 w-4" />
                 Новый пользователь
               </Button>
@@ -843,20 +843,20 @@ export default function Settings() {
             <div className="space-y-3 px-5 py-3">
               <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
                 <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <input
                     data-testid="admin-users-search"
                     value={userSearch}
                     onChange={event => setUserSearch(event.target.value)}
                     placeholder="Поиск пользователей..."
-                    className="h-10 w-full rounded-[10px] border border-[#e3e8ef] bg-white pl-10 pr-3 text-sm text-[#172033] outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    className="h-10 w-full rounded-[10px] border border-input bg-input-background pl-10 pr-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-4 focus:ring-ring/30"
                   />
                 </div>
                 <select
                   data-testid="admin-role-filter"
                   value={roleFilter}
                   onChange={event => setRoleFilter(event.target.value)}
-                  className="h-10 rounded-[10px] border border-[#e3e8ef] bg-white px-3 text-sm font-medium text-[#172033] outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  className="h-10 rounded-[10px] border border-input bg-input-background px-3 text-sm font-medium text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-ring/30"
                   aria-label="Фильтр ролей"
                 >
                   <option value="all">Все роли</option>
@@ -867,7 +867,7 @@ export default function Settings() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[640px] border-separate border-spacing-0 text-left text-[12px]">
                   <thead>
-                    <tr className="text-[12px] font-semibold text-[#7a869a]">
+                    <tr className="text-[12px] font-semibold text-muted-foreground">
                       <th className="py-2 pr-3">Пользователь</th>
                       <th className="px-2 py-2">Роль</th>
                       <th className="px-2 py-2">Собственник</th>
@@ -878,38 +878,38 @@ export default function Settings() {
                   </thead>
                   <tbody>
                     {filteredUsers.map((item, index) => (
-                      <tr key={item.id} className="border-t border-[#eef2f7]">
-                        <td className="border-t border-[#eef2f7] py-2 pr-3">
+                      <tr key={item.id} className="border-t border-border/60">
+                        <td className="border-t border-border/60 py-2 pr-3">
                           <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-[10px] font-bold text-slate-700">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
                               {item.profilePhoto ? <img src={item.profilePhoto} alt={item.name} className="h-full w-full object-cover" /> : adminInitials(item.name)}
                             </span>
                             <span className="min-w-0">
-                              <span className="block truncate font-bold text-[#172033]">{item.name}</span>
-                              <span className="block truncate text-[11px] text-[#7a869a]">{item.email}</span>
+                              <span className="block truncate font-bold text-foreground">{item.name}</span>
+                              <span className="block truncate text-[11px] text-muted-foreground">{item.email}</span>
                             </span>
                           </div>
                         </td>
-                        <td className="whitespace-nowrap border-t border-[#eef2f7] px-2 py-2">
+                        <td className="whitespace-nowrap border-t border-border/60 px-2 py-2">
                           <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${rolePillClass(item.role)}`}>
                             {normalizeUserRole(item.role)}
                           </span>
                         </td>
-                        <td className="whitespace-nowrap border-t border-[#eef2f7] px-2 py-2 text-[#172033]">
+                        <td className="whitespace-nowrap border-t border-border/60 px-2 py-2 text-foreground">
                           {normalizeUserRole(item.role) === 'Инвестор' ? (item.ownerName || 'Не привязан') : '—'}
                         </td>
-                        <td className="whitespace-nowrap border-t border-[#eef2f7] px-2 py-2">
-                          <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${item.status === 'Активен' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-100'}`}>
+                        <td className="whitespace-nowrap border-t border-border/60 px-2 py-2">
+                          <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${item.status === 'Активен' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900/60' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-300 dark:ring-rose-900/60'}`}>
                             {item.status}
                           </span>
                         </td>
-                        <td className="whitespace-nowrap border-t border-[#eef2f7] px-2 py-2 text-[#172033]">{userLastLogin(item, index)}</td>
-                        <td className="border-t border-[#eef2f7] py-2 pl-2">
+                        <td className="whitespace-nowrap border-t border-border/60 px-2 py-2 text-foreground">{userLastLogin(item, index)}</td>
+                        <td className="border-t border-border/60 py-2 pl-2">
                           <div className="flex justify-end gap-1.5">
                             <button
                               type="button"
                               onClick={() => openEdit(item)}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-blue-50 hover:text-blue-600"
+                              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
                               title="Редактировать"
                             >
                               <Edit className="h-4 w-4" />
@@ -917,7 +917,7 @@ export default function Settings() {
                             <button
                               type="button"
                               onClick={() => openUserAction(item.status === 'Активен' ? 'deactivate' : 'activate', item)}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
                               title={item.status === 'Активен' ? 'Деактивировать' : 'Активировать'}
                             >
                               <MoreHorizontal className="h-4 w-4" />
@@ -928,7 +928,7 @@ export default function Settings() {
                     ))}
                     {filteredUsers.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="border-t border-[#eef2f7] py-8 text-center text-sm text-[#7a869a]">
+                        <td colSpan={6} className="border-t border-border/60 py-8 text-center text-sm text-muted-foreground">
                           Пользователи не найдены.
                         </td>
                       </tr>
@@ -952,8 +952,8 @@ export default function Settings() {
           </div>
 
           <div className={`${adminCardClass} min-w-0 overflow-hidden`}>
-            <div className="border-b border-[#edf1f6] px-5 py-3">
-              <h2 className="text-base font-extrabold text-[#172033]">Настройки системы</h2>
+            <div className="border-b border-border/70 px-5 py-3">
+              <h2 className="text-base font-extrabold text-foreground">Настройки системы</h2>
             </div>
             <div className="space-y-1 px-4 py-3">
               {ADMIN_SETTINGS_ROWS.map(item => {
@@ -963,16 +963,16 @@ export default function Settings() {
                     key={item.title}
                     type="button"
                     onClick={() => openDetailSection(item.tab)}
-                    className="flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left transition hover:bg-[#f6f9ff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200"
+                    className="flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left transition hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-blue-50 text-blue-600">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-primary/10 text-primary">
                       <Icon className="h-4 w-4" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[13px] font-extrabold text-[#172033]">{item.title}</span>
-                      <span className="mt-0.5 block text-[12px] leading-snug text-[#7a869a]">{item.description}</span>
+                      <span className="block text-[13px] font-extrabold text-foreground">{item.title}</span>
+                      <span className="mt-0.5 block text-[12px] leading-snug text-muted-foreground">{item.description}</span>
                     </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-[#9aa6b2]" />
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                   </button>
                 );
               })}
@@ -982,12 +982,12 @@ export default function Settings() {
 
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,1fr)]">
           <div className={`${adminCardClass} min-w-0 overflow-hidden`}>
-            <div className="flex items-center justify-between border-b border-[#edf1f6] px-5 py-3">
-              <h2 className="text-base font-extrabold text-[#172033]">Управление меню</h2>
+            <div className="flex items-center justify-between border-b border-border/70 px-5 py-3">
+              <h2 className="text-base font-extrabold text-foreground">Управление меню</h2>
               <Button
                 type="button"
                 variant="secondary"
-                className="h-9 rounded-[10px] border border-blue-100 bg-blue-50 px-3 text-sm font-bold text-blue-600 hover:bg-blue-100"
+                className="h-9 rounded-[10px] border border-primary/20 bg-primary/10 px-3 text-sm font-bold text-primary hover:bg-primary/15"
                 onClick={() => openDetailSection('menu')}
               >
                 <Plus className="h-4 w-4" />
@@ -1004,10 +1004,10 @@ export default function Settings() {
                       key={group.id}
                       type="button"
                       onClick={() => setSelectedMenuGroup(group.id)}
-                      className={`flex w-full items-center justify-between rounded-[11px] px-3 py-2.5 text-sm font-bold transition ${selected ? 'bg-blue-50 text-blue-700' : 'text-[#5f6b7a] hover:bg-slate-50 hover:text-[#172033]'}`}
+                      className={`flex w-full items-center justify-between rounded-[11px] px-3 py-2.5 text-sm font-bold transition ${selected ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}`}
                     >
                       <span>{group.title}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] ${selected ? 'bg-white text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{group.sections.length}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] ${selected ? 'bg-background text-primary ring-1 ring-border/70' : 'bg-muted text-muted-foreground'}`}>{group.sections.length}</span>
                     </button>
                   );
                 })}
@@ -1021,24 +1021,24 @@ export default function Settings() {
               </div>
 
               <div className="min-w-0">
-                <p className="mb-3 text-[13px] font-medium text-[#5f6b7a]">Пункты меню в группе «{selectedMenuGroupMeta.title}»</p>
-                <div className="divide-y divide-[#edf1f6] rounded-[12px] border border-[#edf1f6] bg-white">
+                <p className="mb-3 text-[13px] font-medium text-muted-foreground">Пункты меню в группе «{selectedMenuGroupMeta.title}»</p>
+                <div className="divide-y divide-border/70 rounded-[12px] border border-border/70 bg-background/60">
                   {selectedMenuSections.slice(0, 5).map(section => {
                     const Icon = ADMIN_MENU_SECTION_ICONS[section] || List;
                     const enabled = sidebarVisibility[section] !== false;
                     const canToggleVisibility = isSidebarSectionVisibilityConfigurable(section);
                     return (
                       <div key={section} className="flex items-center gap-3 px-3 py-2.5">
-                        <GripVertical className="h-4 w-4 shrink-0 text-[#b3bdc9]" />
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                        <GripVertical className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                           <Icon className="h-4 w-4" />
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-sm font-bold text-[#172033]">{SIDEBAR_SECTION_LABELS[section]}</span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-bold text-foreground">{SIDEBAR_SECTION_LABELS[section]}</span>
                         <button
                           type="button"
                           onClick={() => toggleMenuSection(section)}
                           disabled={!canToggleVisibility}
-                          className={`relative h-6 w-11 shrink-0 rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                          className={`relative h-6 w-11 shrink-0 rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${enabled ? 'bg-emerald-500' : 'bg-muted'}`}
                           aria-pressed={enabled}
                           aria-label={`${enabled ? 'Скрыть' : 'Показать'} пункт ${SIDEBAR_SECTION_LABELS[section]}`}
                           title={canToggleVisibility ? undefined : 'Обязательный пункт меню'}
@@ -1048,7 +1048,7 @@ export default function Settings() {
                         <button
                           type="button"
                           onClick={() => openDetailSection('menu')}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
                           title="Настройки пункта"
                         >
                           <MoreHorizontal className="h-4 w-4" />
@@ -1062,11 +1062,11 @@ export default function Settings() {
           </div>
 
           <div className={`${adminCardClass} min-w-0 overflow-hidden`}>
-            <div className="flex items-center justify-between border-b border-[#edf1f6] px-5 py-3">
-              <h2 className="text-base font-extrabold text-[#172033]">Активность в системе</h2>
+            <div className="flex items-center justify-between border-b border-border/70 px-5 py-3">
+              <h2 className="text-base font-extrabold text-foreground">Активность в системе</h2>
               <button type="button" onClick={() => openDetailSection('audit')} className={adminLinkClass}>Просмотреть всё</button>
             </div>
-            <div className="divide-y divide-[#edf1f6] px-5">
+            <div className="divide-y divide-border/70 px-5">
               {ADMIN_ACTIVITY_FALLBACK.map(item => {
                 const Icon = item.icon;
                 return (
@@ -1074,13 +1074,13 @@ export default function Settings() {
                     key={`${item.text}-${item.time}`}
                     type="button"
                     onClick={() => openDetailSection('audit')}
-                    className="flex w-full items-center gap-3 py-2.5 text-left transition hover:bg-[#f8fbff]"
+                    className="flex w-full items-center gap-3 py-2.5 text-left transition hover:bg-accent/50"
                   >
                     <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] ${activityToneClass(item.tone)}`}>
                       <Icon className="h-4 w-4" />
                     </span>
-                    <span className="min-w-0 flex-1 text-[13px] font-semibold leading-snug text-[#172033]">{item.text}</span>
-                    <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-[#7a869a] sm:block">{item.time}</span>
+                    <span className="min-w-0 flex-1 text-[13px] font-semibold leading-snug text-foreground">{item.text}</span>
+                    <span className="hidden shrink-0 whitespace-nowrap text-[12px] text-muted-foreground sm:block">{item.time}</span>
                   </button>
                 );
               })}
@@ -1091,21 +1091,21 @@ export default function Settings() {
           </div>
         </section>
 
-        <footer className="flex flex-col gap-3 py-5 text-[12px] text-[#7a869a] sm:flex-row sm:items-center">
+        <footer className="flex flex-col gap-3 py-5 text-[12px] text-muted-foreground sm:flex-row sm:items-center">
           <div className="flex flex-wrap gap-x-8 gap-y-2">
             <span>Скайтех © 2026</span>
             <span>Версия 1.0.0</span>
           </div>
           <div className="flex flex-wrap gap-x-8 gap-y-2 sm:ml-auto">
-            <button type="button" onClick={() => openDetailSection('reference')} className="hover:text-blue-600">Документация</button>
-            <button type="button" onClick={() => openDetailSection('diagnostics')} className="hover:text-blue-600">Поддержка</button>
-            <button type="button" onClick={() => openDetailSection('system-control')} className="hover:text-blue-600">О системе</button>
+            <button type="button" onClick={() => openDetailSection('reference')} className="hover:text-primary">Документация</button>
+            <button type="button" onClick={() => openDetailSection('diagnostics')} className="hover:text-primary">Поддержка</button>
+            <button type="button" onClick={() => openDetailSection('system-control')} className="hover:text-primary">О системе</button>
           </div>
         </footer>
 
         <section className="pt-2" id="admin-detail-sections">
           <div className="mb-3">
-            <h2 className="text-lg font-extrabold text-[#172033]">Детальные настройки</h2>
+            <h2 className="text-lg font-extrabold text-foreground">Детальные настройки</h2>
             <p className={`mt-1 text-[13px] ${adminMutedTextClass}`}>Расширенное управление пользователями, меню, справочниками, данными и диагностикой системы.</p>
           </div>
         </section>
@@ -1113,9 +1113,9 @@ export default function Settings() {
       <Tabs
         value={activeTab}
         onValueChange={setActiveTab}
-        className="space-y-6 rounded-[16px] border border-[#e6ebf2] bg-white p-4 shadow-[0_18px_42px_-34px_rgba(15,23,42,0.42)]"
+        className="space-y-6 rounded-[16px] border border-border/80 bg-card p-4 text-card-foreground shadow-[0_18px_42px_-34px_rgba(15,23,42,0.42)] dark:shadow-none"
       >
-        <TabsList className="app-scroll-fade-x flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-none border-b border-gray-200 bg-transparent p-0 dark:border-gray-200 sm:gap-4">
+        <TabsList className="app-scroll-fade-x flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-none border-b border-border bg-transparent p-0 sm:gap-4">
           {[
             { value: 'users',         label: 'Пользователи и роли' },
             { value: 'menu',          label: 'Левое меню' },
@@ -1130,7 +1130,7 @@ export default function Settings() {
             <TabsTrigger
               key={tab.value}
               value={tab.value}
-              className="shrink-0 whitespace-nowrap border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 data-[state=active]:border-blue-600 data-[state=active]:text-blue-600"
+              className="shrink-0 whitespace-nowrap rounded-none border-b-2 border-transparent bg-transparent px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary dark:data-[state=active]:border-primary dark:data-[state=active]:bg-transparent dark:data-[state=active]:text-primary"
             >
               {tab.label}
             </TabsTrigger>

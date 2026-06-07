@@ -56,3 +56,19 @@ test('admin route keeps the common app shell around dashboard content', () => {
   assert.match(settingsSource, /Детальные настройки/);
   assert.doesNotMatch(settingsSource, /<aside\b/);
 });
+
+test('admin dashboard overview uses theme-aware surfaces and controls', () => {
+  assert.match(settingsSource, /const adminCardClass = 'rounded-\[16px\] border border-border\/80 bg-card text-card-foreground/);
+  assert.match(settingsSource, /const adminMutedTextClass = 'text-muted-foreground'/);
+  assert.match(settingsSource, /const adminLinkClass = 'text-\[12px\] font-semibold text-primary/);
+
+  assert.match(settingsSource, /data-testid="admin-reference-dashboard" className="min-h-\[calc\(100vh-4rem\)\] bg-background text-foreground transition-colors"/);
+  assert.match(settingsSource, /border border-input bg-input-background/);
+  assert.match(settingsSource, /border border-border\/80 bg-card p-4 text-card-foreground/);
+  assert.match(settingsSource, /data-\[state=active\]:border-primary/);
+  assert.match(settingsSource, /dark:data-\[state=active\]:text-primary/);
+
+  assert.doesNotMatch(settingsSource, /dark:bg-\[#f7f9fc\]/);
+  assert.doesNotMatch(settingsSource, /dark:text-\[#172033\]/);
+  assert.doesNotMatch(settingsSource, /border border-\[#e6ebf2\] bg-white/);
+});

@@ -9,11 +9,11 @@ import {
   LockKeyhole,
   LogIn,
   Mail,
-  TowerControl,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { traceAuth } from '../lib/authDebug';
 import { getDailyQuote } from '../lib/dailyQuote';
+import { LiftLogo } from '../components/layout/LiftLogo';
 
 const DEMO_URL = String(import.meta.env.VITE_DEMO_URL || '').trim();
 
@@ -102,9 +102,7 @@ export default function Login() {
 
           <div className="relative z-10 flex w-full max-w-[560px] flex-col justify-between">
             <div className="flex items-center gap-3 lg:ml-auto lg:w-full lg:max-w-[360px]">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[#c8f135] text-[#0b1120] shadow-lg shadow-[#c8f135]/10">
-                <TowerControl className="h-[18px] w-[18px]" aria-hidden="true" strokeWidth={2.2} />
-              </div>
+              <LiftLogo className="h-9 w-9 rounded-[9px]" />
               <div>
                 <div className="text-[15px] font-medium leading-5 text-[#f0f0f0]">Скайтех</div>
                 <div className="text-[11px] leading-4 text-[#5e7534]">Система управления арендой</div>

@@ -54,7 +54,7 @@ const DialogContent = React.forwardRef<
         ref={ref}
         data-slot="dialog-content"
         className={animatedModalClassName(cn(
-          "grid max-h-[min(92dvh,calc(100dvh-2rem),760px)] overflow-hidden",
+          "flex max-h-[min(92dvh,calc(100dvh-2rem),760px)] flex-col overflow-hidden",
           className,
         ))}
         {...props}

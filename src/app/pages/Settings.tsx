@@ -1457,7 +1457,7 @@ export default function Settings() {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-2 pr-1">
             {/* Имя */}
             <Field label="Полное имя">
               <input
@@ -1576,7 +1576,7 @@ export default function Settings() {
           </DialogHeader>
 
           {userAction && (
-            <div className="space-y-4 py-2">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-2 pr-1">
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm dark:border-gray-700 dark:bg-gray-900">
                 <p className="font-medium text-gray-900 dark:text-white">{userAction.user.name}</p>
                 <p className="text-gray-600 dark:text-gray-300">{userAction.user.email}</p>
@@ -1677,12 +1677,12 @@ function AdminDashboardModal({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-1rem)] max-w-[1180px] gap-0 border-border/80 bg-card p-0 text-card-foreground sm:max-w-[1180px]">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] w-[calc(100vw-1rem)] max-w-[1180px] gap-0 border-border/80 bg-card p-0 text-card-foreground sm:max-w-[1180px]">
         <DialogHeader className="border-b border-border/70 px-5 pb-4 pt-5 sm:px-6">
           <DialogTitle>{title}</DialogTitle>
           <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>
         </DialogHeader>
-        <div className="min-w-0 overflow-y-auto px-4 py-5 sm:px-6">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
           {children}
         </div>
       </DialogContent>
@@ -6222,65 +6222,67 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
       </CardContent>
 
       <Dialog open={rentalPreviewOpen} onOpenChange={setRentalPreviewOpen}>
-        <DialogContent className="max-w-5xl">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-5xl">
           <DialogHeader>
             <DialogTitle>Предпросмотр импорта аренд {rentalImportFileName ? `· ${rentalImportFileName}` : ''}</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-3 sm:grid-cols-4">
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Всего строк</p>
-              <p className="text-lg font-semibold">{rentalPreview.length}</p>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            <div className="grid gap-3 sm:grid-cols-4">
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Всего строк</p>
+                <p className="text-lg font-semibold">{rentalPreview.length}</p>
+              </div>
+              <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20 px-3 py-2">
+                <p className="text-xs text-green-700 dark:text-green-300">Готово к импорту</p>
+                <p className="text-lg font-semibold">{rentalPreview.filter(item => item.status === 'ready').length}</p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 px-3 py-2">
+                <p className="text-xs text-amber-700 dark:text-amber-300">Конфликт/дубликат</p>
+                <p className="text-lg font-semibold">{rentalPreview.filter(item => item.status === 'conflict' || item.status === 'duplicate').length}</p>
+              </div>
+              <div className="rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20 px-3 py-2">
+                <p className="text-xs text-red-700 dark:text-red-300">Ошибки</p>
+                <p className="text-lg font-semibold">{rentalPreview.filter(item => item.status === 'error').length}</p>
+              </div>
             </div>
-            <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20 px-3 py-2">
-              <p className="text-xs text-green-700 dark:text-green-300">Готово к импорту</p>
-              <p className="text-lg font-semibold">{rentalPreview.filter(item => item.status === 'ready').length}</p>
-            </div>
-            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 px-3 py-2">
-              <p className="text-xs text-amber-700 dark:text-amber-300">Конфликт/дубликат</p>
-              <p className="text-lg font-semibold">{rentalPreview.filter(item => item.status === 'conflict' || item.status === 'duplicate').length}</p>
-            </div>
-            <div className="rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20 px-3 py-2">
-              <p className="text-xs text-red-700 dark:text-red-300">Ошибки</p>
-              <p className="text-lg font-semibold">{rentalPreview.filter(item => item.status === 'error').length}</p>
-            </div>
-          </div>
-          <div className="max-h-[420px] overflow-auto rounded-lg border border-gray-200 dark:border-gray-700">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Строка</TableHead>
-                  <TableHead>Клиент</TableHead>
-                  <TableHead>Техника</TableHead>
-                  <TableHead>Период</TableHead>
-                  <TableHead>Статус</TableHead>
-                  <TableHead>Комментарий</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rentalPreview.map(row => (
-                  <TableRow key={`${row.line}-${row.client}-${row.equipmentLabel}`}>
-                    <TableCell>{row.line}</TableCell>
-                    <TableCell>{row.client}</TableCell>
-                    <TableCell>{row.equipmentLabel}</TableCell>
-                    <TableCell>{row.startDate} — {row.endDate}</TableCell>
-                    <TableCell>
-                      <Badge variant={
-                        row.status === 'ready'
-                          ? 'success'
-                          : row.status === 'duplicate'
-                            ? 'secondary'
-                            : row.status === 'conflict'
-                              ? 'warning'
-                              : 'danger'
-                      }>
-                        {row.status === 'ready' ? 'Готово' : row.status === 'duplicate' ? 'Дубликат' : row.status === 'conflict' ? 'Конфликт' : 'Ошибка'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-500 dark:text-gray-400">{row.message}</TableCell>
+            <div className="overflow-auto rounded-lg border border-gray-200 dark:border-gray-700">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Строка</TableHead>
+                    <TableHead>Клиент</TableHead>
+                    <TableHead>Техника</TableHead>
+                    <TableHead>Период</TableHead>
+                    <TableHead>Статус</TableHead>
+                    <TableHead>Комментарий</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {rentalPreview.map(row => (
+                    <TableRow key={`${row.line}-${row.client}-${row.equipmentLabel}`}>
+                      <TableCell>{row.line}</TableCell>
+                      <TableCell>{row.client}</TableCell>
+                      <TableCell>{row.equipmentLabel}</TableCell>
+                      <TableCell>{row.startDate} — {row.endDate}</TableCell>
+                      <TableCell>
+                        <Badge variant={
+                          row.status === 'ready'
+                            ? 'success'
+                            : row.status === 'duplicate'
+                              ? 'secondary'
+                              : row.status === 'conflict'
+                                ? 'warning'
+                                : 'danger'
+                        }>
+                          {row.status === 'ready' ? 'Готово' : row.status === 'duplicate' ? 'Дубликат' : row.status === 'conflict' ? 'Конфликт' : 'Ошибка'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-500 dark:text-gray-400">{row.message}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setRentalPreviewOpen(false)}>Отмена</Button>
@@ -6518,7 +6520,7 @@ function DataResetSection() {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-2 pr-1">
             <div className="rounded-lg border border-red-200 bg-red-50 dark:border-red-700/50 dark:bg-red-900/20 p-4 text-sm text-red-800 dark:text-red-300">
               <p className="font-semibold mb-2">Внимание! Это действие необратимо.</p>
               <p>Будет удалено <strong>{totalToDelete} записей</strong>:</p>

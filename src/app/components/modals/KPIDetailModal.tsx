@@ -1,6 +1,6 @@
 import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, TrendingUp, ExternalLink } from 'lucide-react';
+import { CalendarDays, ExternalLink, ListChecks, X, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '../ui/button';
 import { formatCurrency, formatDate } from '../../lib/utils';
@@ -39,8 +39,25 @@ function safeCurrency(value: unknown) {
   return formatCurrency(Number.isFinite(amount) ? amount : 0);
 }
 
+function safeNumber(value: unknown) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
 function entityHref(section: string, id?: string | number | null, fallback = `/${section}`) {
   return id ? `/${section}/${id}` : fallback;
+}
+
+function utilizationEquipmentStatusLabel(status: unknown) {
+  const value = String(status || '').trim();
+  const labels: Record<string, string> = {
+    available: 'Свободна',
+    rented: 'В аренде',
+    in_service: 'В сервисе',
+    inactive: 'Неактивна',
+    reserved: 'Резерв',
+  };
+  return labels[value] || value || 'Статус не указан';
 }
 
 export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailModalProps) {
@@ -49,37 +66,165 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
   const getContent = () => {
     switch (kpiType) {
       case 'utilization':
+        const affectedEquipment = Array.isArray(data.affectedEquipment) ? data.affectedEquipment : [];
+        const shownEquipment = affectedEquipment.slice(0, 12);
+        const hiddenEquipmentCount = Math.max(0, affectedEquipment.length - shownEquipment.length);
+        const activeEquipment = safeNumber(data.activeEquipment);
+        const rentedEquipment = safeNumber(data.rentedEquipment);
+        const excludedEquipment = safeNumber(data.excludedEquipment);
+        const occupiedMachineDays = data.occupiedMachineDays === null || data.occupiedMachineDays === undefined
+          ? null
+          : safeNumber(data.occupiedMachineDays);
+        const availableMachineDays = data.availableMachineDays === null || data.availableMachineDays === undefined
+          ? null
+          : safeNumber(data.availableMachineDays);
+        const utilization = safeNumber(data.utilization);
+        const detailLimited = occupiedMachineDays === null || availableMachineDays === null || affectedEquipment.length === 0;
+
         return {
-          title: 'Утилизация парка за текущий месяц',
-          description: 'Процент техники, находящейся в активной аренде в текущем месяце',
+          title: 'Как считается утилизация парка',
+          description: 'Пояснение к KPI без перехода из дашборда: что вошло в расчёт, что исключено и как получился процент.',
           details: (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Всего единиц</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{data.totalEquipment}</p>
-                </div>
-                <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">В аренде</p>
-                  <p className="text-2xl font-bold text-green-600">{data.rentedEquipment}</p>
-                </div>
-                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Свободно</p>
-                  <p className="text-2xl font-bold text-yellow-600">{data.availableEquipment}</p>
-                </div>
-                <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Утилизация (месяц)</p>
-                  <p className="text-2xl font-bold text-purple-600">{data.utilization}%</p>
+              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200">
+                    <CalendarDays className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Период расчёта</p>
+                    <p className="mt-1 text-base font-semibold text-gray-950 dark:text-white">{data.periodLabel || 'Текущий расчётный срез'}</p>
+                    {data.pagePeriodLabel && (
+                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Период страницы: {data.pagePeriodLabel}</p>
+                    )}
+                  </div>
                 </div>
               </div>
-              <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Расчёт утилизации за месяц:</p>
-                <p className="text-sm text-gray-900 dark:text-white font-mono">
-                  ({data.rentedEquipment} / {data.activeEquipment}) × 100 = {data.utilization}%
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/60">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Всего техники</p>
+                  <p className="mt-1 text-2xl font-bold text-gray-950 dark:text-white">{safeNumber(data.totalEquipment)}</p>
+                </div>
+                <div className="rounded-lg border border-blue-200 bg-blue-50/80 p-4 dark:border-blue-900/60 dark:bg-blue-950/30">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Участвует в расчёте</p>
+                  <p className="mt-1 text-2xl font-bold text-blue-700 dark:text-blue-200">{activeEquipment}</p>
+                </div>
+                {excludedEquipment > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-4 dark:border-amber-900/60 dark:bg-amber-950/25">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Исключено из расчёта</p>
+                    <p className="mt-1 text-2xl font-bold text-amber-700 dark:text-amber-200">{excludedEquipment}</p>
+                  </div>
+                )}
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/25">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">В аренде / занятые машино-дни</p>
+                  <p className="mt-1 text-2xl font-bold text-emerald-700 dark:text-emerald-200">
+                    {rentedEquipment} ед.{occupiedMachineDays !== null ? ` / ${occupiedMachineDays} м-дн.` : ''}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-violet-200 bg-violet-50/80 p-4 dark:border-violet-900/60 dark:bg-violet-950/25">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Итоговый процент</p>
+                  <p className="mt-1 text-2xl font-bold text-violet-700 dark:text-violet-200">{utilization}%</p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Формула</p>
+                <p className="mt-2 rounded-md bg-white px-3 py-2 font-mono text-sm text-gray-950 dark:bg-slate-950 dark:text-gray-100">
+                  Утилизация = занятые машино-дни / доступные машино-дни × 100%
+                </p>
+                <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                  {occupiedMachineDays !== null && availableMachineDays !== null
+                    ? `${occupiedMachineDays} / ${availableMachineDays} × 100% = ${utilization}%`
+                    : 'Детализация машино-дней ограничена текущими данными.'}
                 </p>
               </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/60">
+                <p className="text-sm leading-6 text-gray-700 dark:text-gray-300">
+                  {activeEquipment > 0
+                    ? `Из ${activeEquipment} единиц техники, доступных для арендного парка, ${rentedEquipment} сейчас занято в активной аренде. Поэтому KPI показывает ${utilization}% утилизации.`
+                    : 'Активный арендный парк не сформирован, поэтому утилизация считается как 0%.'}
+                </p>
+                {detailLimited && (
+                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Детализация ограничена текущими данными.</p>
+                )}
+              </div>
+
+              {shownEquipment.length > 0 && (
+                <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/60">
+                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+                    <ListChecks className="h-4 w-4 text-gray-500" />
+                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">Техника, повлиявшая на показатель</p>
+                  </div>
+                  <div className="divide-y divide-slate-100 sm:hidden dark:divide-slate-800">
+                    {shownEquipment.map((equipment: any, index: number) => (
+                      <div key={kpiRowKey('utilization-equipment-mobile', equipment, index, equipment?.inventoryNumber)} className="space-y-2 px-4 py-3">
+                        <div>
+                          <p className="font-medium text-gray-950 dark:text-white">{equipment.label || equipment.inventoryNumber || 'Техника'}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{equipment.inventoryNumber || equipment.equipmentId || 'без инв. номера'}</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="rounded-md bg-slate-100 px-2 py-1 text-gray-700 dark:bg-slate-800 dark:text-gray-200">
+                            {equipment.inRent ? (equipment.rentalClient ? `В аренде · ${equipment.rentalClient}` : 'В аренде') : utilizationEquipmentStatusLabel(equipment.status)}
+                          </span>
+                          <span className="rounded-md bg-blue-50 px-2 py-1 font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-200">
+                            {equipment.inRent ? `${safeNumber(equipment.occupiedMachineDays) || 1} м-дн.` : 'знаменатель'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="hidden overflow-x-auto sm:block">
+                    <table className="min-w-full divide-y divide-slate-100 text-sm dark:divide-slate-800">
+                      <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-gray-500 dark:bg-slate-950/60 dark:text-gray-400">
+                        <tr>
+                          <th className="px-4 py-2">Техника</th>
+                          <th className="px-4 py-2">Статус</th>
+                          <th className="px-4 py-2">Вклад</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {shownEquipment.map((equipment: any, index: number) => (
+                          <tr key={kpiRowKey('utilization-equipment', equipment, index, equipment?.inventoryNumber)}>
+                            <td className="px-4 py-3">
+                              <p className="font-medium text-gray-950 dark:text-white">{equipment.label || equipment.inventoryNumber || 'Техника'}</p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">{equipment.inventoryNumber || equipment.equipmentId || 'без инв. номера'}</p>
+                            </td>
+                            <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                              {equipment.inRent ? (equipment.rentalClient ? `В аренде · ${equipment.rentalClient}` : 'В аренде') : utilizationEquipmentStatusLabel(equipment.status)}
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-gray-950 dark:text-white">
+                              {equipment.inRent ? `${safeNumber(equipment.occupiedMachineDays) || 1} м-дн.` : 'знаменатель'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {hiddenEquipmentCount > 0 && (
+                    <p className="border-t border-slate-100 px-4 py-3 text-sm text-gray-500 dark:border-slate-800 dark:text-gray-400">
+                      Ещё {hiddenEquipmentCount} ед. техники скрыто для компактности.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
-          )
+          ),
+          actions: (
+            <>
+              <Button variant="secondary" asChild>
+                <Link to={data.plannerHref || '/planner'} onClick={() => onOpenChange(false)}>
+                  Открыть в планировщике
+                </Link>
+              </Button>
+              <Button variant="secondary" asChild>
+                <Link to={data.rentalsHref || '/rentals'} onClick={() => onOpenChange(false)}>
+                  Открыть аренды
+                </Link>
+              </Button>
+            </>
+          ),
         };
 
       case 'activeRentals':
@@ -594,7 +739,8 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 pr-5">{content.details}</div>
 
-          <div className="flex shrink-0 justify-end border-t border-slate-100 bg-white/95 px-6 py-4 dark:border-gray-800 dark:bg-gray-950/95">
+          <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 dark:border-gray-800 dark:bg-gray-950/95">
+            {content.actions}
             <Button variant="secondary" onClick={() => onOpenChange(false)}>
               Закрыть
             </Button>

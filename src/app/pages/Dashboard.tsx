@@ -1471,6 +1471,14 @@ export default function Dashboard() {
     });
     return keys;
   }, [activeRentalFleetLookup, rentedEquipmentKeys, reservedRentalsList]);
+  const activeRentalByEquipmentKey = useMemo(() => {
+    const rentalsByEquipment = new Map<string, GanttRentalData>();
+    activeRentalsList.forEach(rental => {
+      const key = getRentalEquipmentKey(rental, activeRentalFleetLookup);
+      if (key && !rentalsByEquipment.has(key)) rentalsByEquipment.set(key, rental);
+    });
+    return rentalsByEquipment;
+  }, [activeRentalFleetLookup, activeRentalsList]);
 
   // Utilization
   const totalEquipment = equipment.length;
@@ -3266,8 +3274,8 @@ export default function Dashboard() {
       hint: `Средняя загрузка за период · ${rentedEquipment} из ${activeEquipment} ед.`,
       icon: Activity,
       tone: utilizationTone,
-      href: '/planner',
-      cta: 'Открыть планировщик',
+      onClick: () => setSelectedKPI('utilization'),
+      cta: 'Как считается',
     },
     canViewService && {
       id: 'executive-service-load',
@@ -3310,7 +3318,34 @@ export default function Dashboard() {
 
   // ── KPI data objects for modal ──────────────────────────────────────────────
   const kpiData = {
-    utilization: { totalEquipment, activeEquipment, rentedEquipment, availableEquipment, utilization },
+    utilization: {
+      periodLabel: `Текущий срез на ${today.toLocaleDateString('ru-RU')}`,
+      pagePeriodLabel: monthRangeLabel,
+      totalEquipment,
+      activeEquipment,
+      excludedEquipment: Math.max(0, totalEquipment - activeEquipment),
+      rentedEquipment,
+      availableEquipment,
+      occupiedMachineDays: rentedEquipment,
+      availableMachineDays: activeEquipment,
+      utilization,
+      plannerHref: '/planner',
+      rentalsHref: '/rentals',
+      affectedEquipment: activeRentalFleetLookup.activeFleet.map(equipment => {
+        const rental = equipment.id ? activeRentalByEquipmentKey.get(String(equipment.id)) : undefined;
+        return {
+          id: equipment.id,
+          equipmentId: equipment.id,
+          label: [equipment.manufacturer, equipment.model].filter(Boolean).join(' ') || equipment.name || equipment.inventoryNumber || equipment.id,
+          inventoryNumber: equipment.inventoryNumber,
+          status: equipment.status,
+          inRent: Boolean(rental),
+          rentalClient: rental?.client,
+          rentalId: rental?.id,
+          occupiedMachineDays: rental ? 1 : 0,
+        };
+      }),
+    },
     activeRentals: {
       activeRentals: activeRentalsList.map(rental => ({
         ...rental,

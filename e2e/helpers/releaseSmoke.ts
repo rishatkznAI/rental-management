@@ -331,10 +331,13 @@ async function expectExecutiveCockpitVisible(page: Page) {
 
   const fleetUtilizationCard = page.getByTestId('dashboard-kpi-fleet-utilization');
   const serviceLoadCard = page.getByTestId('dashboard-kpi-service-load');
-  await expect(fleetUtilizationCard.getByText('Открыть планировщик', { exact: true }), 'planner CTA should be visible').toBeVisible();
+  await expect(fleetUtilizationCard.getByText('Как считается', { exact: true }), 'utilization explanation CTA should be visible').toBeVisible();
   await expect(serviceLoadCard.getByText('Открыть сервис', { exact: true }), 'service CTA should be visible').toBeVisible();
-  await expect(fleetUtilizationCard, 'planner CTA should target #/planner')
-    .toHaveAttribute('href', /#\/planner$/);
+  await fleetUtilizationCard.click();
+  await expect(page.getByRole('dialog', { name: 'Как считается утилизация парка' }), 'utilization modal should open from KPI click').toBeVisible();
+  await expect(page.getByRole('link', { name: 'Открыть в планировщике' }), 'planner action should remain inside modal').toHaveAttribute('href', /#\/planner$/);
+  await expect(page.getByRole('link', { name: 'Открыть аренды' }), 'rentals action should be available inside modal').toHaveAttribute('href', /#\/rentals$/);
+  await page.getByRole('button', { name: 'Закрыть' }).click();
   await expect(serviceLoadCard, 'service CTA should target #/service')
     .toHaveAttribute('href', /#\/service$/);
 

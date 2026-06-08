@@ -111,10 +111,10 @@ function statusLabel(status?: string) {
 
 function statusClassName(status?: string) {
   const normalized = String(status || 'active').toLowerCase();
-  if (normalized === 'blocked') return 'border-red-400/25 bg-red-400/10 text-red-200';
-  if (normalized === 'inactive') return 'border-slate-400/20 bg-slate-400/10 text-slate-300';
-  if (normalized === 'new') return 'border-lime-300/25 bg-lime-300/10 text-lime-200';
-  return 'border-emerald-300/25 bg-emerald-300/10 text-emerald-200';
+  if (normalized === 'blocked') return 'border-red-200 bg-red-50 text-red-700 dark:border-red-400/25 dark:bg-red-400/10 dark:text-red-200';
+  if (normalized === 'inactive') return 'border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-400/20 dark:bg-slate-400/10 dark:text-slate-300';
+  if (normalized === 'new') return 'border-lime-200 bg-lime-50 text-lime-700 dark:border-lime-300/25 dark:bg-lime-300/10 dark:text-lime-200';
+  return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-300/25 dark:bg-emerald-300/10 dark:text-emerald-200';
 }
 
 function FilterSelect({
@@ -129,12 +129,12 @@ function FilterSelect({
   options: { value: string; label: string }[];
 }) {
   return (
-    <label className="flex h-11 min-w-[150px] items-center gap-2 rounded-lg border border-white/10 bg-[#111827]/80 px-3 text-sm text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-      <span className="shrink-0 text-xs text-slate-500">{label}</span>
+    <label className="flex h-11 min-w-[150px] items-center gap-2 rounded-lg border border-border bg-input-background px-3 text-sm text-foreground shadow-sm dark:border-white/10 dark:bg-[#111827]/80 dark:text-slate-300 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="min-w-0 flex-1 border-0 bg-transparent text-sm font-medium text-slate-100 outline-none"
+        className="min-w-0 flex-1 border-0 bg-transparent text-sm font-medium text-foreground outline-none dark:text-slate-100"
       >
         {options.map(option => (
           <option key={option.value} value={option.value}>{option.label}</option>
@@ -150,8 +150,8 @@ function KindBadge({ kind }: { kind: ClientKind }) {
     <span className={cn(
       'inline-flex h-7 items-center rounded-full border px-3 text-xs font-semibold',
       isRental
-        ? 'border-sky-400/25 bg-sky-400/10 text-sky-200'
-        : 'border-violet-400/25 bg-violet-400/10 text-violet-200',
+        ? 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-400/25 dark:bg-sky-400/10 dark:text-sky-200'
+        : 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-400/25 dark:bg-violet-400/10 dark:text-violet-200',
     )}>
       {isRental ? 'По аренде' : 'По продаже'}
     </span>
@@ -170,16 +170,16 @@ function KpiCard({
   caption: string;
 }) {
   return (
-    <div className="min-h-[138px] rounded-lg border border-white/10 bg-[linear-gradient(145deg,rgba(22,31,49,0.96),rgba(10,16,28,0.96))] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)]">
+    <div className="min-h-[138px] rounded-lg border border-border bg-card p-4 text-card-foreground shadow-[0_18px_44px_-34px_rgba(15,23,42,0.42)] dark:border-white/10 dark:bg-[linear-gradient(145deg,rgba(22,31,49,0.96),rgba(10,16,28,0.96))] dark:shadow-[0_18px_60px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)]">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-lime-300/20 bg-lime-300/10 text-lime-200 shadow-[0_0_24px_rgba(190,242,100,0.12)]">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-lime-200 bg-lime-50 text-lime-700 shadow-[0_10px_28px_-22px_rgba(77,124,15,0.8)] dark:border-lime-300/20 dark:bg-lime-300/10 dark:text-lime-200 dark:shadow-[0_0_24px_rgba(190,242,100,0.12)]">
           <Icon className="h-5 w-5" />
         </div>
-        <span className="h-2 w-2 rounded-full bg-lime-300/80 shadow-[0_0_16px_rgba(190,242,100,0.8)]" />
+        <span className="h-2 w-2 rounded-full bg-lime-500 shadow-[0_0_14px_rgba(132,204,22,0.48)] dark:bg-lime-300/80 dark:shadow-[0_0_16px_rgba(190,242,100,0.8)]" />
       </div>
-      <p className="mt-4 text-sm font-medium text-slate-400">{title}</p>
-      <p className="mt-2 truncate text-2xl font-semibold tracking-normal text-white">{value}</p>
-      <p className="mt-2 text-xs font-medium text-lime-200/85">{caption}</p>
+      <p className="mt-4 text-sm font-medium text-muted-foreground">{title}</p>
+      <p className="mt-2 truncate text-2xl font-semibold tracking-normal text-foreground dark:text-white">{value}</p>
+      <p className="mt-2 text-xs font-medium text-lime-700 dark:text-lime-200/85">{caption}</p>
     </div>
   );
 }
@@ -196,31 +196,31 @@ function ClientMobileCard({
   return (
     <Link
       to={`/clients/${client.id}`}
-      className="block rounded-lg border border-white/10 bg-[#111827]/90 p-4 shadow-[0_18px_45px_rgba(0,0,0,0.25)] transition-colors hover:border-lime-300/35"
+      className="block rounded-lg border border-border bg-card p-4 shadow-[0_16px_34px_-28px_rgba(15,23,42,0.5)] transition-colors hover:border-lime-400/45 dark:border-white/10 dark:bg-[#111827]/90 dark:shadow-[0_18px_45px_rgba(0,0,0,0.25)] dark:hover:border-lime-300/35"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-white">{client.company}</p>
-          <p className="mt-1 text-xs font-mono text-slate-500">{client.inn || 'Нет ИНН'}</p>
+          <p className="truncate text-sm font-semibold text-foreground dark:text-white">{client.company}</p>
+          <p className="mt-1 text-xs font-mono text-muted-foreground">{client.inn || 'Нет ИНН'}</p>
         </div>
         <KindBadge kind={kind} />
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
+      <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-muted-foreground dark:text-slate-400">
         <div>
-          <p className="text-slate-500">Контакт</p>
-          <p className="mt-1 text-slate-200">{safeText(client.contact)}</p>
+          <p>Контакт</p>
+          <p className="mt-1 text-foreground dark:text-slate-200">{safeText(client.contact)}</p>
         </div>
         <div>
-          <p className="text-slate-500">Телефон</p>
-          <p className="mt-1 text-slate-200">{safeText(client.phone)}</p>
+          <p>Телефон</p>
+          <p className="mt-1 text-foreground dark:text-slate-200">{safeText(client.phone)}</p>
         </div>
         <div>
-          <p className="text-slate-500">Менеджер</p>
-          <p className="mt-1 text-slate-200">{manager}</p>
+          <p>Менеджер</p>
+          <p className="mt-1 text-foreground dark:text-slate-200">{manager}</p>
         </div>
         <div>
-          <p className="text-slate-500">Статус</p>
-          <p className="mt-1 text-slate-200">{statusLabel(client.status)}</p>
+          <p>Статус</p>
+          <p className="mt-1 text-foreground dark:text-slate-200">{statusLabel(client.status)}</p>
         </div>
       </div>
     </Link>
@@ -290,41 +290,41 @@ export default function Clients() {
   };
 
   return (
-    <div className="space-y-5 p-4 text-slate-100 sm:p-6 md:p-8">
+    <div className="space-y-5 p-4 text-foreground sm:p-6 md:p-8">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
+          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
             <span>Рабочее пространство</span>
-            <span className="text-slate-700">/</span>
-            <span className="text-slate-300">Клиенты</span>
+            <span className="text-muted-foreground/70">/</span>
+            <span className="text-foreground">Клиенты</span>
           </div>
-          <h1 className="mt-3 text-3xl font-semibold tracking-normal text-white">Клиенты</h1>
-          <p className="mt-1 text-sm text-slate-400">База клиентов и контрагентов</p>
+          <h1 className="mt-3 text-3xl font-semibold tracking-normal text-foreground dark:text-white">Клиенты</h1>
+          <p className="mt-1 text-sm text-muted-foreground">База клиентов и контрагентов</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {can('create', 'clients') && (
-            <Button asChild className="h-11 rounded-lg bg-lime-300 px-5 text-sm font-semibold text-slate-950 shadow-[0_0_26px_rgba(190,242,100,0.26)] hover:bg-lime-200">
+            <Button asChild className="h-11 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-[0_14px_30px_-24px_rgba(37,99,235,0.7)] hover:bg-[color:var(--primary-hover)] dark:shadow-[0_0_26px_rgba(190,242,100,0.26)]">
               <Link to="/clients/new">
                 <Plus className="h-4 w-4" />
                 Новый клиент
               </Link>
             </Button>
           )}
-          <Button type="button" variant="secondary" className="h-11 rounded-lg border border-white/10 bg-[#121b2c] px-4 text-slate-200 hover:bg-[#182235]">
+          <Button type="button" variant="secondary" className="h-11 rounded-lg border border-border bg-secondary px-4 text-secondary-foreground hover:bg-accent dark:border-white/10 dark:bg-[#121b2c] dark:text-slate-200 dark:hover:bg-[#182235]">
             <Download className="h-4 w-4" />
             Импорт
           </Button>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-[#0d1524]/88 p-3 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.42)] dark:border-white/10 dark:bg-[#0d1524]/88 dark:shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
         <div className="relative min-w-[260px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <Input
             placeholder="Поиск: компания, ИНН, контакт, телефон..."
             value={pagination.search}
             onChange={(event) => pagination.setSearch(event.target.value)}
-            className="h-11 rounded-lg border-white/10 bg-[#111827]/90 pl-10 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:ring-lime-300/20"
+            className="h-11 rounded-lg border-border bg-input-background pl-10 text-sm text-foreground placeholder:text-muted-foreground focus-visible:ring-ring/30 dark:border-white/10 dark:bg-[#111827]/90 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus-visible:ring-lime-300/20"
           />
         </div>
         <FilterSelect
@@ -355,14 +355,14 @@ export default function Clients() {
           onChange={setManagerFilter}
           options={managerOptions}
         />
-        <Button type="button" variant="secondary" className="h-11 rounded-lg border border-white/10 bg-[#111827]/90 px-4 text-slate-200 hover:bg-[#182235]">
+        <Button type="button" variant="secondary" className="h-11 rounded-lg border border-border bg-secondary px-4 text-secondary-foreground hover:bg-accent dark:border-white/10 dark:bg-[#111827]/90 dark:text-slate-200 dark:hover:bg-[#182235]">
           <SlidersHorizontal className="h-4 w-4" />
           Больше фильтров
         </Button>
         <button
           type="button"
           onClick={resetFilters}
-          className="inline-flex h-11 items-center gap-2 rounded-lg px-2 text-sm font-medium text-slate-400 transition-colors hover:text-lime-200"
+          className="inline-flex h-11 items-center gap-2 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary dark:hover:text-lime-200"
         >
           <RotateCcw className="h-4 w-4" />
           Сбросить
@@ -377,26 +377,26 @@ export default function Clients() {
         <KpiCard icon={UserPlus} title="Новые клиенты" value={String(displayNew)} caption={`+${newThisWeek || 3} за неделю`} />
       </div>
 
-      <section className="overflow-hidden rounded-lg border border-white/10 bg-[#0d1524]/95 shadow-[0_24px_80px_rgba(0,0,0,0.32)]">
-        <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-4 md:flex-row md:items-center md:justify-between">
+      <section className="overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-[0_24px_58px_-42px_rgba(15,23,42,0.55)] dark:border-white/10 dark:bg-[#0d1524]/95 dark:shadow-[0_24px_80px_rgba(0,0,0,0.32)]">
+        <div className="flex flex-col gap-3 border-b border-border px-4 py-4 md:flex-row md:items-center md:justify-between dark:border-white/10">
           <div className="flex items-center gap-3">
-            <div className="inline-flex h-9 items-center rounded-lg bg-lime-300 px-4 text-sm font-semibold text-slate-950">
+            <div className="inline-flex h-9 items-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">
               Все клиенты
             </div>
-            <span className="inline-flex h-7 min-w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 px-2 text-xs font-semibold text-slate-300">
+            <span className="inline-flex h-7 min-w-9 items-center justify-center rounded-full border border-border bg-muted px-2 text-xs font-semibold text-muted-foreground dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
               {displayTotal}
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex h-10 items-center rounded-lg border border-white/10 bg-[#111827]/90 p-1">
-              <button type="button" aria-label="Вид плиткой" className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:text-slate-200">
+            <div className="flex h-10 items-center rounded-lg border border-border bg-muted p-1 dark:border-white/10 dark:bg-[#111827]/90">
+              <button type="button" aria-label="Вид плиткой" className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground dark:text-slate-500 dark:hover:text-slate-200">
                 <Grid2X2 className="h-4 w-4" />
               </button>
-              <button type="button" aria-label="Вид списком" className="flex h-8 w-8 items-center justify-center rounded-md bg-lime-300 text-slate-950">
+              <button type="button" aria-label="Вид списком" className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
                 <List className="h-4 w-4" />
               </button>
             </div>
-            <Button type="button" variant="secondary" className="h-10 rounded-lg border border-white/10 bg-[#111827]/90 px-4 text-slate-200 hover:bg-[#182235]">
+            <Button type="button" variant="secondary" className="h-10 rounded-lg border border-border bg-secondary px-4 text-secondary-foreground hover:bg-accent dark:border-white/10 dark:bg-[#111827]/90 dark:text-slate-200 dark:hover:bg-[#182235]">
               <Download className="h-4 w-4" />
               Экспорт
             </Button>
@@ -405,8 +405,8 @@ export default function Clients() {
 
         <div className="hidden sm:block">
           <Table className="min-w-[1040px]">
-            <TableHeader className="bg-[#111827]/95 text-slate-500 [&_tr]:border-white/10">
-              <TableRow className="border-white/10 hover:bg-transparent">
+            <TableHeader className="bg-muted/70 text-muted-foreground dark:bg-[#111827]/95 dark:text-slate-500 [&_tr]:border-border dark:[&_tr]:border-white/10">
+              <TableRow className="border-border hover:bg-transparent dark:border-white/10">
                 <TableHead className="w-12 px-4"> </TableHead>
                 <TableHead className="px-4">Компания</TableHead>
                 <TableHead className="px-4">ИНН</TableHead>
@@ -419,33 +419,33 @@ export default function Clients() {
             </TableHeader>
             <TableBody className="[&_tr:last-child]:border-0">
               {visibleClients.map(({ client, kind, manager }, index) => (
-                <TableRow key={client.id} className="border-white/10 bg-transparent hover:bg-lime-300/[0.035]">
+                <TableRow key={client.id} className="border-border bg-transparent hover:bg-accent/55 dark:border-white/10 dark:hover:bg-lime-300/[0.035]">
                   <TableCell className="px-4 py-3">
-                    <button type="button" aria-label="Избранное" className="text-slate-600 transition-colors hover:text-lime-200">
+                    <button type="button" aria-label="Избранное" className="text-muted-foreground transition-colors hover:text-primary dark:text-slate-600 dark:hover:text-lime-200">
                       <Star className="h-4 w-4" />
                     </button>
                   </TableCell>
                   <TableCell className="px-4 py-3">
                     <Link to={`/clients/${client.id}`} className="block max-w-[260px]">
-                      <span className="block truncate text-sm font-semibold text-white hover:text-lime-200">{safeText(client.company, 'Без названия')}</span>
+                      <span className="block truncate text-sm font-semibold text-foreground hover:text-primary dark:text-white dark:hover:text-lime-200">{safeText(client.company, 'Без названия')}</span>
                       {(index === 0 || Number(client.totalRentals || 0) >= 3) && (
-                        <span className="mt-1 inline-flex rounded-full bg-white/5 px-2 py-0.5 text-[11px] font-medium text-slate-400">
+                        <span className="mt-1 inline-flex rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:bg-white/5 dark:text-slate-400">
                           Постоянный клиент
                         </span>
                       )}
                     </Link>
                   </TableCell>
                   <TableCell className="px-4 py-3">
-                    <span className="font-mono text-sm text-slate-300">{client.inn || '—'}</span>
+                    <span className="font-mono text-sm text-foreground/80 dark:text-slate-300">{client.inn || '—'}</span>
                   </TableCell>
                   <TableCell className="px-4 py-3">
                     {client.contact || client.phone ? (
                       <div>
-                        <p className="text-sm font-medium text-slate-200">{safeText(client.contact)}</p>
-                        <p className="mt-0.5 text-xs text-slate-500">{safeText(client.phone)}</p>
+                        <p className="text-sm font-medium text-foreground dark:text-slate-200">{safeText(client.contact)}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground dark:text-slate-500">{safeText(client.phone)}</p>
                       </div>
                     ) : (
-                      <span className="text-sm text-slate-500">—</span>
+                      <span className="text-sm text-muted-foreground">—</span>
                     )}
                   </TableCell>
                   <TableCell className="px-4 py-3">
@@ -454,13 +454,13 @@ export default function Clients() {
                   <TableCell className="px-4 py-3">
                     {manager ? (
                       <div className="flex items-center gap-3">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-[#1b2638] text-[11px] font-semibold text-lime-100">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-lime-200 bg-lime-50 text-[11px] font-semibold text-lime-700 dark:border-white/10 dark:bg-[#1b2638] dark:text-lime-100">
                           {initialsFor(manager)}
                         </span>
-                        <span className="text-sm font-medium text-slate-200">{manager}</span>
+                        <span className="text-sm font-medium text-foreground dark:text-slate-200">{manager}</span>
                       </div>
                     ) : (
-                      <span className="text-sm text-slate-500">—</span>
+                      <span className="text-sm text-muted-foreground">—</span>
                     )}
                   </TableCell>
                   <TableCell className="px-4 py-3">
@@ -469,7 +469,7 @@ export default function Clients() {
                     </span>
                   </TableCell>
                   <TableCell className="px-4 py-3 text-right">
-                    <button type="button" aria-label="Действия" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white/5 hover:text-slate-200">
+                    <button type="button" aria-label="Действия" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground dark:text-slate-500 dark:hover:bg-white/5 dark:hover:text-slate-200">
                       <MoreHorizontal className="h-4 w-4" />
                     </button>
                   </TableCell>
@@ -487,11 +487,11 @@ export default function Clients() {
 
         {visibleClients.length === 0 && (
           <div className="flex flex-col items-center justify-center px-4 py-14 text-center">
-            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-white/5">
-              <Search className="h-7 w-7 text-slate-500" />
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-border bg-muted dark:border-white/10 dark:bg-white/5">
+              <Search className="h-7 w-7 text-muted-foreground" />
             </div>
-            <h3 className="text-base font-semibold text-white">Клиенты не найдены</h3>
-            <p className="mt-1 text-sm text-slate-500">Попробуйте изменить параметры поиска или фильтры</p>
+            <h3 className="text-base font-semibold text-foreground dark:text-white">Клиенты не найдены</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Попробуйте изменить параметры поиска или фильтры</p>
           </div>
         )}
 
@@ -500,7 +500,7 @@ export default function Clients() {
           loading={clientsQuery.isFetching}
           onPageChange={pagination.setPage}
           onPageSizeChange={pagination.setPageSize}
-          className="border-white/10 bg-[#0d1524]/95 px-4 py-4 text-slate-500 dark:border-white/10 dark:text-slate-400 [&_button]:rounded-lg [&_button]:border-white/10 [&_button]:bg-[#111827] [&_button]:text-slate-300 [&_button:hover]:text-lime-200 [&_select]:border-white/10 [&_select]:bg-[#111827] [&_select]:text-slate-100 [&_span.font-medium]:text-slate-300"
+          className="border-border bg-card px-4 py-4 text-muted-foreground dark:border-white/10 dark:bg-[#0d1524]/95 dark:text-slate-400 [&_button]:rounded-lg [&_button]:border-border [&_button]:bg-secondary [&_button]:text-secondary-foreground [&_button:hover]:bg-accent dark:[&_button]:border-white/10 dark:[&_button]:bg-[#111827] dark:[&_button]:text-slate-300 dark:[&_button:hover]:text-lime-200 [&_select]:border-border [&_select]:bg-input-background [&_select]:text-foreground dark:[&_select]:border-white/10 dark:[&_select]:bg-[#111827] dark:[&_select]:text-slate-100 [&_span.font-medium]:text-foreground dark:[&_span.font-medium]:text-slate-300"
         />
       </section>
     </div>

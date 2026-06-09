@@ -420,35 +420,35 @@ function getDocumentStatusLabel(status: unknown) {
 function getDocumentTypeVisual(doc: Partial<Doc> | null | undefined) {
   const type = doc?.type;
   if (type === 'rental_contract' || type === 'contract') {
-    return { Icon: FileSignature, className: 'bg-blue-500/15 text-blue-300 ring-blue-400/25' };
+    return { Icon: FileSignature, className: 'bg-blue-100 text-blue-700 ring-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/25' };
   }
   if (type === 'rental_specification') {
-    return { Icon: ClipboardList, className: 'bg-emerald-500/15 text-emerald-300 ring-emerald-400/25' };
+    return { Icon: ClipboardList, className: 'bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/25' };
   }
   if (type === 'transfer_act_to_client') {
-    return { Icon: Send, className: 'bg-indigo-500/15 text-indigo-300 ring-indigo-400/25' };
+    return { Icon: Send, className: 'bg-indigo-100 text-indigo-700 ring-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/25' };
   }
   if (type === 'return_act_from_client') {
-    return { Icon: Printer, className: 'bg-orange-500/15 text-orange-300 ring-orange-400/25' };
+    return { Icon: Printer, className: 'bg-orange-100 text-orange-700 ring-orange-200 dark:bg-orange-500/15 dark:text-orange-300 dark:ring-orange-400/25' };
   }
   if (type === 'trip_ticket') {
-    return { Icon: Route, className: 'bg-cyan-500/15 text-cyan-300 ring-cyan-400/25' };
+    return { Icon: Route, className: 'bg-cyan-100 text-cyan-700 ring-cyan-200 dark:bg-cyan-500/15 dark:text-cyan-300 dark:ring-cyan-400/25' };
   }
   if (type === 'work_order' || type === 'service_act') {
-    return { Icon: Wrench, className: 'bg-violet-500/15 text-violet-300 ring-violet-400/25' };
+    return { Icon: Wrench, className: 'bg-violet-100 text-violet-700 ring-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-violet-400/25' };
   }
-  return { Icon: FileText, className: 'bg-slate-500/20 text-slate-300 ring-white/10' };
+  return { Icon: FileText, className: 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-500/20 dark:text-slate-300 dark:ring-white/10' };
 }
 
 function getDocumentStatusPill(status: unknown) {
   const safe = getSafeDocumentStatus(status);
   const map: Record<DocumentStatus, { label: string; className: string }> = {
-    draft: { label: 'Черновик', className: 'bg-sky-400/12 text-sky-200 ring-sky-300/20' },
-    signed: { label: 'Подписано', className: 'bg-emerald-400/12 text-emerald-200 ring-emerald-300/25' },
-    sent: { label: 'Отправлено', className: 'bg-blue-400/12 text-blue-200 ring-blue-300/20' },
-    pending_signature: { label: 'На подписи', className: 'bg-amber-300/15 text-amber-100 ring-amber-200/25' },
-    expired: { label: 'Просрочено', className: 'bg-rose-400/15 text-rose-100 ring-rose-300/25' },
-    cancelled: { label: 'Отменено', className: 'bg-slate-400/12 text-slate-300 ring-white/10' },
+    draft: { label: 'Черновик', className: 'bg-sky-100 text-sky-700 ring-sky-200 dark:bg-sky-400/12 dark:text-sky-200 dark:ring-sky-300/20' },
+    signed: { label: 'Подписано', className: 'bg-emerald-100 text-emerald-700 ring-emerald-200 dark:bg-emerald-400/12 dark:text-emerald-200 dark:ring-emerald-300/25' },
+    sent: { label: 'Отправлено', className: 'bg-blue-100 text-blue-700 ring-blue-200 dark:bg-blue-400/12 dark:text-blue-200 dark:ring-blue-300/20' },
+    pending_signature: { label: 'На подписи', className: 'bg-amber-100 text-amber-700 ring-amber-200 dark:bg-amber-300/15 dark:text-amber-100 dark:ring-amber-200/25' },
+    expired: { label: 'Просрочено', className: 'bg-rose-100 text-rose-700 ring-rose-200 dark:bg-rose-400/15 dark:text-rose-100 dark:ring-rose-300/25' },
+    cancelled: { label: 'Отменено', className: 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-400/12 dark:text-slate-300 dark:ring-white/10' },
   };
   const meta = map[safe];
   return (
@@ -1984,11 +1984,11 @@ export default function Documents() {
   };
 
   return (
-    <div className="min-h-full space-y-4 bg-slate-950 p-4 text-slate-100 sm:space-y-6 sm:p-6 md:p-8">
+    <div className="min-h-full space-y-4 bg-[#f7f9fc] p-4 text-slate-950 dark:bg-slate-950 dark:text-slate-100 sm:space-y-6 sm:p-6 md:p-8">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white sm:text-3xl">Документы</h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-400">
+          <h1 className="text-2xl font-bold text-slate-950 dark:text-white sm:text-3xl">Документы</h1>
+          <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
             Генерация и контроль договоров, актов, заказ-нарядов и путевых листов.
           </p>
         </div>
@@ -1999,7 +1999,7 @@ export default function Documents() {
               Создать документ
             </Button>
           ) : null}
-          <Button variant="secondary" onClick={() => setView('general')} className="border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]">
+          <Button variant="secondary" onClick={() => setView('general')} className="border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]">
             <ClipboardList className="h-4 w-4" />
             Шаблоны
           </Button>
@@ -2008,7 +2008,7 @@ export default function Documents() {
             onClick={() => setView('general')}
             className={view === 'general'
               ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
-              : 'border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'}
+              : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]'}
           >
             Документы
           </Button>
@@ -2017,13 +2017,13 @@ export default function Documents() {
             onClick={() => setView('control')}
             className={view === 'control'
               ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
-              : 'border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'}
+              : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]'}
           >
             <AlertTriangle className="h-4 w-4" />
             Контроль
           </Button>
           {isAdmin ? (
-            <Button variant="secondary" className="border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]">
+            <Button variant="secondary" className="border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]">
               <Settings2 className="h-4 w-4" />
               Настройки полей
             </Button>
@@ -2033,7 +2033,7 @@ export default function Documents() {
             onClick={() => setView('mechanics')}
             className={view === 'mechanics'
               ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
-              : 'border border-white/10 bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]'}
+              : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]'}
           >
             <UserRound className="h-4 w-4" />
             Механики
@@ -2045,14 +2045,14 @@ export default function Documents() {
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {kpiCards.map(({ label, value, Icon }) => (
-              <div key={label} className="relative overflow-hidden rounded-lg border border-white/10 bg-white/[0.055] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(190,242,100,0.12),transparent_36%)]" />
+              <div key={label} className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.055] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(132,204,22,0.12),transparent_36%)] dark:bg-[radial-gradient(circle_at_top_right,rgba(190,242,100,0.12),transparent_36%)]" />
                 <div className="relative flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-medium text-slate-400">{label}</p>
-                    <p className="mt-1 text-3xl font-bold text-white">{value}</p>
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</p>
+                    <p className="mt-1 text-3xl font-bold text-slate-950 dark:text-white">{value}</p>
                   </div>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-slate-900/70 text-lime-200">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-lime-200 bg-lime-50 text-lime-700 dark:border-white/10 dark:bg-slate-900/70 dark:text-lime-200">
                     <Icon className="h-5 w-5" />
                   </div>
                 </div>
@@ -2077,7 +2077,7 @@ export default function Documents() {
                 className={`h-9 shrink-0 rounded-full px-4 text-sm font-semibold transition ${
                   quickTypeFilter === key
                     ? 'bg-lime-300 text-slate-950 shadow-[0_0_22px_rgba(190,242,100,0.18)]'
-                    : 'border border-white/10 bg-white/[0.05] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+                    : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.1] dark:hover:text-white'
                 }`}
               >
                 {label}
@@ -2085,19 +2085,19 @@ export default function Documents() {
             ))}
           </div>
 
-          <div className="rounded-lg border border-white/10 bg-white/[0.055] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] sm:p-4">
+          <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.055] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] sm:p-4">
             <div className="grid gap-3 lg:grid-cols-[minmax(240px,1.4fr)_repeat(4,minmax(150px,1fr))_auto]">
               <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                 <Input
                   placeholder="Поиск по номеру, клиенту, технике, примечанию"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="h-10 border-white/10 bg-slate-950/70 pl-10 text-slate-100 placeholder:text-slate-500"
+                  className="h-10 border-slate-200 bg-white pl-10 text-slate-950 placeholder:text-slate-400 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
               <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="h-10 border-white/10 bg-slate-950/70 text-slate-100">
+                <SelectTrigger className="h-10 border-slate-200 bg-white text-slate-950 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-100">
                   <SelectValue placeholder="Тип документа" />
                 </SelectTrigger>
                 <SelectContent>
@@ -2116,7 +2116,7 @@ export default function Documents() {
                 </SelectContent>
               </Select>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="h-10 border-white/10 bg-slate-950/70 text-slate-100">
+                <SelectTrigger className="h-10 border-slate-200 bg-white text-slate-950 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-100">
                   <SelectValue placeholder="Статус" />
                 </SelectTrigger>
                 <SelectContent>
@@ -2130,7 +2130,7 @@ export default function Documents() {
                 </SelectContent>
               </Select>
               <Select value={clientFilter} onValueChange={setClientFilter}>
-                <SelectTrigger className="h-10 border-white/10 bg-slate-950/70 text-slate-100">
+                <SelectTrigger className="h-10 border-slate-200 bg-white text-slate-950 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-100">
                   <SelectValue placeholder="Клиент" />
                 </SelectTrigger>
                 <SelectContent>
@@ -2145,20 +2145,20 @@ export default function Documents() {
                   type="date"
                   value={periodFrom}
                   onChange={(event) => setPeriodFrom(event.target.value)}
-                  className="h-10 border-white/10 bg-slate-950/70 text-slate-100"
+                  className="h-10 border-slate-200 bg-white text-slate-950 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-100"
                 />
                 <Input
                   type="date"
                   value={periodTo}
                   onChange={(event) => setPeriodTo(event.target.value)}
-                  className="h-10 border-white/10 bg-slate-950/70 text-slate-100"
+                  className="h-10 border-slate-200 bg-white text-slate-950 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-100"
                 />
               </div>
               <Button
                 type="button"
                 variant="secondary"
                 onClick={() => setShowFilters(true)}
-                className="h-10 border border-white/10 bg-white/[0.07] px-3 text-slate-200 hover:bg-white/[0.12]"
+                className="h-10 border border-slate-200 bg-slate-50 px-3 text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.07] dark:text-slate-200 dark:hover:bg-white/[0.12]"
               >
                 <SlidersHorizontal className="h-4 w-4" />
                 Фильтры{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
@@ -2167,17 +2167,17 @@ export default function Documents() {
             <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
               {canManageDocuments ? (
                 <>
-                  <Button variant="secondary" onClick={() => openContractCreate('rental')} className="border border-lime-300/20 bg-lime-300/10 text-lime-100 hover:bg-lime-300/15">
+                  <Button variant="secondary" onClick={() => openContractCreate('rental')} className="border border-lime-300 bg-lime-50 text-lime-700 hover:bg-lime-100 dark:border-lime-300/20 dark:bg-lime-300/10 dark:text-lime-100 dark:hover:bg-lime-300/15">
                     <Plus className="h-4 w-4" />
                     Договор аренды
                   </Button>
-                  <Button variant="secondary" onClick={() => openContractCreate('supply')} className="border border-lime-300/20 bg-lime-300/10 text-lime-100 hover:bg-lime-300/15">
+                  <Button variant="secondary" onClick={() => openContractCreate('supply')} className="border border-lime-300 bg-lime-50 text-lime-700 hover:bg-lime-100 dark:border-lime-300/20 dark:bg-lime-300/10 dark:text-lime-100 dark:hover:bg-lime-300/15">
                     <Plus className="h-4 w-4" />
                     Договор поставки
                   </Button>
                 </>
               ) : null}
-              <Button variant="secondary" onClick={resetDocumentFilters} className="border border-white/10 bg-white/[0.05] px-3 text-slate-300 hover:bg-white/[0.1]">
+              <Button variant="secondary" onClick={resetDocumentFilters} className="border border-slate-200 bg-slate-50 px-3 text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.1]">
                 <Settings2 className="h-4 w-4" />
               </Button>
             </div>
@@ -2346,14 +2346,14 @@ export default function Documents() {
 
           <div className="space-y-3 sm:hidden">
             {documentRows.length === 0 ? (
-              <div className="flex flex-col items-center justify-center rounded-lg border border-white/10 bg-white/[0.055] px-4 py-10 text-center">
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-white/[0.08]">
-                  <Search className="h-7 w-7 text-slate-500" />
+              <div className="flex flex-col items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-10 text-center shadow-[0_12px_30px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.055] dark:shadow-none">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 dark:bg-white/[0.08]">
+                  <Search className="h-7 w-7 text-slate-400 dark:text-slate-500" />
                 </div>
-                <h3 className="text-base font-medium text-white">
+                <h3 className="text-base font-medium text-slate-950 dark:text-white">
                   {hasQuickClientContext ? 'Документы по клиенту не найдены' : 'Документы не найдены'}
                 </h3>
-                <p className="mt-1 text-sm text-slate-400">
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                   {hasQuickClientContext
                     ? `Для ${contextFilterLabel(quickActionContext)} нет документов по выбранным фильтрам`
                     : 'Созданные документы появятся здесь карточками с типом, номером, связью, суммой и статусом'}
@@ -2379,15 +2379,15 @@ export default function Documents() {
               const typeVisual = getDocumentTypeVisual(row.doc);
               const TypeIcon = typeVisual.Icon;
               return (
-              <article key={row.key} className="rounded-lg border border-white/10 bg-white/[0.055] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+              <article key={row.key} className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.055] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                 <div className="flex min-w-0 items-start justify-between gap-3">
                   <div className="flex min-w-0 flex-1 gap-3">
                     <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ${typeVisual.className}`}>
                       <TypeIcon className="h-4 w-4" />
                     </span>
                     <div className="min-w-0">
-                      <p className="break-words text-sm font-semibold text-white">{getDocumentTypeLabel(row.doc)}</p>
-                      <p className="mt-1 break-words text-xs text-slate-400">
+                      <p className="break-words text-sm font-semibold text-slate-950 dark:text-white">{getDocumentTypeLabel(row.doc)}</p>
+                      <p className="mt-1 break-words text-xs text-slate-500 dark:text-slate-400">
                         {row.doc.contractKind ? (row.doc.contractKind === 'rental' ? 'Реестр аренды' : 'Реестр поставки') : 'Документ'}
                       </p>
                     </div>
@@ -2395,50 +2395,50 @@ export default function Documents() {
                   <div className="shrink-0">{getDocumentStatusPill(row.doc.status)}</div>
                 </div>
 
-                <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/60 p-3">
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-slate-950/60">
                   <div className="flex min-w-0 items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-xs text-slate-500">Номер</p>
-                      <p className="mt-1 break-words text-base font-semibold text-white">{row.docNumber || 'Без номера'}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-500">Номер</p>
+                      <p className="mt-1 break-words text-base font-semibold text-slate-950 dark:text-white">{row.docNumber || 'Без номера'}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-xs text-slate-500">Дата</p>
-                      <p className="mt-1 text-sm font-medium text-white">{row.documentDateLabel}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-500">Дата</p>
+                      <p className="mt-1 text-sm font-medium text-slate-950 dark:text-white">{row.documentDateLabel}</p>
                     </div>
                   </div>
                   {row.isDuplicate || row.doc.signedScanFileName ? (
                     <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                      {row.isDuplicate ? <span className="rounded-full bg-amber-300/15 px-2 py-1 text-amber-100">Дубль номера</span> : null}
-                      {row.doc.signedScanFileName ? <span className="rounded-full bg-emerald-300/15 px-2 py-1 text-emerald-100">Скан загружен</span> : null}
+                      {row.isDuplicate ? <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700 dark:bg-amber-300/15 dark:text-amber-100">Дубль номера</span> : null}
+                      {row.doc.signedScanFileName ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-emerald-700 dark:bg-emerald-300/15 dark:text-emerald-100">Скан загружен</span> : null}
                     </div>
                   ) : null}
                 </div>
 
                 <dl className="mt-3 grid gap-2 text-sm">
                   <div className="min-w-0">
-                    <dt className="text-xs text-slate-500">Клиент</dt>
-                    <dd className="mt-0.5 break-words text-slate-100">{displayText(row.clientName)}</dd>
+                    <dt className="text-xs text-slate-500 dark:text-slate-500">Клиент</dt>
+                    <dd className="mt-0.5 break-words text-slate-700 dark:text-slate-100">{displayText(row.clientName)}</dd>
                   </div>
                   <div className="min-w-0">
-                    <dt className="text-xs text-slate-500">Аренда / техника</dt>
-                    <dd className="mt-0.5 break-words text-slate-100">{row.linkedEntity}</dd>
-                    <dd className="mt-0.5 break-words text-xs text-slate-400">
+                    <dt className="text-xs text-slate-500 dark:text-slate-500">Аренда / техника</dt>
+                    <dd className="mt-0.5 break-words text-slate-700 dark:text-slate-100">{row.linkedEntity}</dd>
+                    <dd className="mt-0.5 break-words text-xs text-slate-500 dark:text-slate-400">
                       {[row.equipmentLabel, row.equipmentModel].filter(Boolean).join(' · ') || 'Техника не указана'}
                     </dd>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="min-w-0">
-                      <dt className="text-xs text-slate-500">Сумма</dt>
-                      <dd className="mt-0.5 break-words font-medium text-slate-100">{row.amountLabel}</dd>
+                      <dt className="text-xs text-slate-500 dark:text-slate-500">Сумма</dt>
+                      <dd className="mt-0.5 break-words font-medium text-slate-700 dark:text-slate-100">{row.amountLabel}</dd>
                     </div>
                     <div className="min-w-0">
-                      <dt className="text-xs text-slate-500">Ответственный</dt>
-                      <dd className="mt-0.5 break-words text-slate-100">{displayText(row.managerName || row.doc.createdBy)}</dd>
+                      <dt className="text-xs text-slate-500 dark:text-slate-500">Ответственный</dt>
+                      <dd className="mt-0.5 break-words text-slate-700 dark:text-slate-100">{displayText(row.managerName || row.doc.createdBy)}</dd>
                     </div>
                   </div>
                   <div className="min-w-0">
-                    <dt className="text-xs text-slate-500">Создан / отправлен</dt>
-                    <dd className="mt-0.5 break-words text-slate-100">
+                    <dt className="text-xs text-slate-500 dark:text-slate-500">Создан / отправлен</dt>
+                    <dd className="mt-0.5 break-words text-slate-700 dark:text-slate-100">
                       {row.createdLabel} · {row.sentLabel}{row.signedLabel ? ` · подп. ${row.signedLabel}` : ''}
                     </dd>
                   </div>
@@ -2481,18 +2481,18 @@ export default function Documents() {
             })}
           </div>
 
-          <div className="hidden overflow-hidden rounded-lg border border-white/10 bg-slate-900/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] [&_[data-slot=table-container]]:bg-none sm:block">
+          <div className="hidden overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-slate-900/70 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] [&_[data-slot=table-container]]:bg-none sm:block">
             <Table className="min-w-[1080px]">
               <TableHeader>
-                <TableRow className="border-white/12 bg-slate-800/70 hover:bg-slate-800/70">
-                  <TableHead className="text-slate-300">Тип</TableHead>
-                  <TableHead className="text-slate-300">Номер</TableHead>
-                  <TableHead className="text-slate-300">Дата документа</TableHead>
-                  <TableHead className="text-slate-300">Клиент</TableHead>
-                  <TableHead className="text-slate-300">Техника / Объект</TableHead>
-                  <TableHead className="text-slate-300">Статус</TableHead>
-                  <TableHead className="text-slate-300">Связанная сущность</TableHead>
-                  <TableHead className="w-20 text-right text-slate-300">Действия</TableHead>
+                <TableRow className="border-slate-200 bg-slate-50 hover:bg-slate-50 dark:border-white/12 dark:bg-slate-800/70 dark:hover:bg-slate-800/70">
+                  <TableHead className="text-slate-500 dark:text-slate-300">Тип</TableHead>
+                  <TableHead className="text-slate-500 dark:text-slate-300">Номер</TableHead>
+                  <TableHead className="text-slate-500 dark:text-slate-300">Дата документа</TableHead>
+                  <TableHead className="text-slate-500 dark:text-slate-300">Клиент</TableHead>
+                  <TableHead className="text-slate-500 dark:text-slate-300">Техника / Объект</TableHead>
+                  <TableHead className="text-slate-500 dark:text-slate-300">Статус</TableHead>
+                  <TableHead className="text-slate-500 dark:text-slate-300">Связанная сущность</TableHead>
+                  <TableHead className="w-20 text-right text-slate-500 dark:text-slate-300">Действия</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -2501,15 +2501,15 @@ export default function Documents() {
                   const typeVisual = getDocumentTypeVisual(doc);
                   const TypeIcon = typeVisual.Icon;
                   return (
-                  <TableRow key={row.key} className="cursor-pointer border-white/10 bg-slate-900/35 hover:bg-lime-300/[0.07]" onClick={() => setSelectedDocument(doc)}>
+                  <TableRow key={row.key} className="cursor-pointer border-slate-100 bg-white hover:bg-lime-50/60 dark:border-white/10 dark:bg-slate-900/35 dark:hover:bg-lime-300/[0.07]" onClick={() => setSelectedDocument(doc)}>
                     <TableCell className="max-w-[260px] py-3">
                       <div className="flex min-w-0 items-center gap-3">
                         <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ${typeVisual.className}`}>
                           <TypeIcon className="h-4 w-4" />
                         </span>
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-slate-100">{getDocumentTypeLabel(doc)}</p>
-                          <p className="truncate text-xs text-slate-500">
+                          <p className="truncate text-sm font-semibold text-slate-950 dark:text-slate-100">{getDocumentTypeLabel(doc)}</p>
+                          <p className="truncate text-xs text-slate-500 dark:text-slate-500">
                             {doc.contractKind ? (doc.contractKind === 'rental' ? 'Реестр аренды' : 'Реестр поставки') : 'Документ'}
                           </p>
                         </div>
@@ -2517,74 +2517,74 @@ export default function Documents() {
                     </TableCell>
                     <TableCell className="max-w-[160px]">
                       <div>
-                        <p className="truncate font-semibold text-white">{row.docNumber || 'Без номера'}</p>
+                        <p className="truncate font-semibold text-slate-950 dark:text-white">{row.docNumber || 'Без номера'}</p>
                         <div className="mt-1 flex flex-wrap gap-1.5">
-                          {row.isDuplicate ? <span className="rounded-full bg-amber-300/15 px-2 py-0.5 text-[11px] text-amber-100">Дубль</span> : null}
-                          {doc.signedScanFileName ? <span className="rounded-full bg-emerald-300/15 px-2 py-0.5 text-[11px] text-emerald-100">Скан</span> : null}
+                          {row.isDuplicate ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700 dark:bg-amber-300/15 dark:text-amber-100">Дубль</span> : null}
+                          {doc.signedScanFileName ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-300/15 dark:text-emerald-100">Скан</span> : null}
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="text-slate-300">{row.documentDateLabel}</TableCell>
+                    <TableCell className="text-slate-600 dark:text-slate-300">{row.documentDateLabel}</TableCell>
                     <TableCell className="max-w-[210px]">
-                      <p className="truncate text-sm text-slate-100">{displayText(row.clientName)}</p>
+                      <p className="truncate text-sm text-slate-700 dark:text-slate-100">{displayText(row.clientName)}</p>
                     </TableCell>
                     <TableCell className="max-w-[220px]">
-                      <p className="truncate text-sm text-slate-100">{row.equipmentLabel}</p>
+                      <p className="truncate text-sm text-slate-700 dark:text-slate-100">{row.equipmentLabel}</p>
                       {row.equipmentModel ? (
-                        <p className="truncate text-xs text-slate-500">{row.equipmentModel}</p>
+                        <p className="truncate text-xs text-slate-500 dark:text-slate-500">{row.equipmentModel}</p>
                       ) : null}
                       {doc.objectId ? (
-                        <p className="truncate text-xs text-slate-500">Объект {doc.objectId}</p>
+                        <p className="truncate text-xs text-slate-500 dark:text-slate-500">Объект {doc.objectId}</p>
                       ) : null}
                     </TableCell>
                     <TableCell>{getDocumentStatusPill(doc.status)}</TableCell>
                     <TableCell className="max-w-[240px]">
-                      <p className="truncate text-sm text-slate-100">{row.linkedEntity}</p>
+                      <p className="truncate text-sm text-slate-700 dark:text-slate-100">{row.linkedEntity}</p>
                       {row.rentalId ? (
-                        <p className="truncate text-xs text-slate-500">Аренда: {row.rentalId}</p>
+                        <p className="truncate text-xs text-slate-500 dark:text-slate-500">Аренда: {row.rentalId}</p>
                       ) : null}
                     </TableCell>
                     <TableCell className="text-right">
                       <details className="relative inline-block" onClick={(event) => event.stopPropagation()}>
-                        <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-white/10 bg-white/[0.06] text-slate-300 transition hover:bg-white/[0.12] [&::-webkit-details-marker]:hidden">
+                        <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500 transition hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.12] [&::-webkit-details-marker]:hidden">
                           <MoreHorizontal className="h-4 w-4" />
                         </summary>
-                        <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-lg border border-white/10 bg-slate-900 py-1 text-left shadow-xl">
-                          <button type="button" onClick={() => setSelectedDocument(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                        <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-left shadow-xl dark:border-white/10 dark:bg-slate-900">
+                          <button type="button" onClick={() => setSelectedDocument(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/[0.08]">
                             <Eye className="h-4 w-4" />
                             Детали
                           </button>
-                          <button type="button" onClick={() => openDocument(doc)} disabled={!row.canOpen} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08] disabled:text-slate-600">
+                          <button type="button" onClick={() => openDocument(doc)} disabled={!row.canOpen} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-white/[0.08] dark:disabled:text-slate-600">
                             <Eye className="h-4 w-4" />
                             Открыть
                           </button>
-                          <button type="button" onClick={() => downloadDocument(doc)} disabled={!row.canDownload} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08] disabled:text-slate-600">
+                          <button type="button" onClick={() => downloadDocument(doc)} disabled={!row.canDownload} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-white/[0.08] dark:disabled:text-slate-600">
                             <Download className="h-4 w-4" />
                             Скачать
                           </button>
                           {!row.docNumber && canManageDocuments ? (
-                            <button type="button" onClick={() => void handleAssignNumber(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                            <button type="button" onClick={() => void handleAssignNumber(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/[0.08]">
                               <FileSignature className="h-4 w-4" />
                               Присвоить номер
                             </button>
                           ) : null}
                           {canManageDocuments && doc.type === 'contract' ? (
-                            <button type="button" onClick={() => startMarkAsSigned(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                            <button type="button" onClick={() => startMarkAsSigned(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/[0.08]">
                               {doc.status === 'signed' ? <CheckCircle2 className="h-4 w-4" /> : <Upload className="h-4 w-4" />}
                               {doc.signedScanDataUrl ? 'Заменить скан' : 'Загрузить скан'}
                             </button>
                           ) : null}
                           {canManageDocuments && doc.type === 'rental_contract' ? (
                             <>
-                              <button type="button" onClick={() => openDocumentChainAction(doc, 'rental_specification')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                              <button type="button" onClick={() => openDocumentChainAction(doc, 'rental_specification')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/[0.08]">
                                 <ClipboardList className="h-4 w-4" />
                                 Создать спецификацию
                               </button>
-                              <button type="button" onClick={() => openDocumentChainAction(doc, 'transfer_act_to_client')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                              <button type="button" onClick={() => openDocumentChainAction(doc, 'transfer_act_to_client')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/[0.08]">
                                 <Send className="h-4 w-4" />
                                 Создать акт передачи
                               </button>
-                              <button type="button" onClick={() => openDocumentChainAction(doc, 'return_act_from_client')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                              <button type="button" onClick={() => openDocumentChainAction(doc, 'return_act_from_client')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/[0.08]">
                                 <Printer className="h-4 w-4" />
                                 Создать акт возврата
                               </button>
@@ -2592,20 +2592,20 @@ export default function Documents() {
                           ) : null}
                           {canManageDocuments ? (
                             <>
-                              <button type="button" onClick={() => void handleMarkSent(doc, 'pending_signature')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                              <button type="button" onClick={() => void handleMarkSent(doc, 'pending_signature')} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/[0.08]">
                                 <Send className="h-4 w-4" />
                                 Отметить на подписи
                               </button>
-                              <button type="button" onClick={() => void handleMarkSigned(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                              <button type="button" onClick={() => void handleMarkSigned(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/[0.08]">
                                 <CheckCircle2 className="h-4 w-4" />
                                 Отметить подписанным
                               </button>
-                              <button type="button" onClick={() => void handleDuplicateDocument(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.08]">
+                              <button type="button" onClick={() => void handleDuplicateDocument(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-white/[0.08]">
                                 <Layers3 className="h-4 w-4" />
                                 Дублировать
                               </button>
                               {isAdmin ? (
-                                <button type="button" onClick={() => void handleDeleteDocument(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-rose-200 hover:bg-rose-500/10">
+                                <button type="button" onClick={() => void handleDeleteDocument(doc)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-rose-600 hover:bg-rose-50 dark:text-rose-200 dark:hover:bg-rose-500/10">
                                   <Trash2 className="h-4 w-4" />
                                   Удалить
                                 </button>
@@ -2623,13 +2623,13 @@ export default function Documents() {
 
             {filteredDocuments.length === 0 && (
               <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/[0.08]">
-                  <Search className="h-8 w-8 text-slate-500" />
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 dark:bg-white/[0.08]">
+                  <Search className="h-8 w-8 text-slate-400 dark:text-slate-500" />
                 </div>
-                <h3 className="text-lg font-medium text-white">
+                <h3 className="text-lg font-medium text-slate-950 dark:text-white">
                   {hasQuickClientContext ? 'Документы по клиенту не найдены' : 'Документы не найдены'}
                 </h3>
-                <p className="mt-1 text-sm text-slate-400">
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                   {hasQuickClientContext
                     ? `Для ${contextFilterLabel(quickActionContext)} нет документов по выбранным фильтрам`
                     : 'Попробуйте изменить параметры поиска или фильтры'}

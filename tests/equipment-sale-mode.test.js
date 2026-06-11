@@ -767,7 +767,7 @@ test('equipment registry status badges use normalized visual categories without 
     assert.match(statusBadgeSource, new RegExp(label));
   }
 
-  for (const tone of ['bg-emerald', 'bg-blue', 'bg-yellow', 'bg-orange', 'bg-violet', 'bg-slate']) {
+  for (const tone of ['app-status-success', 'app-status-info', 'app-status-warning', 'app-status-danger', 'app-status-default', 'bg-violet']) {
     assert.match(statusBadgeSource, new RegExp(tone));
   }
 

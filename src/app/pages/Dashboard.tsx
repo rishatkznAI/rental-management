@@ -709,7 +709,7 @@ function DashboardKpiGrid({ cards }: { cards: DashboardKpi[] }) {
             <p className={`mt-4 line-clamp-2 text-sm ${tone.accent}`}>{card.hint}</p>
           </>
         );
-        const className = 'rounded-2xl border border-border bg-white p-4 text-left shadow-[0_18px_44px_-36px_rgba(15,23,42,0.38)] transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-[0_22px_54px_-38px_rgba(15,23,42,0.45)] dark:bg-card dark:shadow-none';
+        const className = 'app-kpi-card p-4 text-left';
 
         if (card.href) {
           return <Link key={card.id} to={card.href} className={className}>{content}</Link>;
@@ -785,7 +785,7 @@ function DashboardRiskPanel({
               {item.value ? <span className={`shrink-0 text-sm font-semibold ${tone.accent}`}>{item.value}</span> : null}
             </>
           );
-          const className = 'flex items-start gap-3 rounded-2xl border border-border bg-white px-4 py-3 transition hover:border-blue-300 dark:bg-background/30';
+          const className = 'flex items-start gap-3 rounded-2xl border border-border bg-card/70 px-4 py-3 transition hover:border-primary/35 hover:bg-accent/30';
           return item.href ? (
             <Link key={item.id} to={item.href} className={className}>{content}</Link>
           ) : (

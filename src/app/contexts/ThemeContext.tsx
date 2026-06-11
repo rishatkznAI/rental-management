@@ -17,6 +17,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const root = document.documentElement;
+    root.classList.add('rentcore-industrial-ui');
     if (theme === 'dark') {
       root.classList.add('dark');
     } else {

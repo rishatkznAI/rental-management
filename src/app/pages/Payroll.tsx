@@ -152,7 +152,7 @@ function EmptyState({ title, description }: { title: string; description: string
 
 function MetricCard({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'positive' | 'warning' }) {
   return (
-    <Card className="rounded-2xl border-border/80">
+    <Card className="app-kpi-card border-border/80 p-0">
       <CardContent className="p-4">
         <p className="text-xs font-medium text-muted-foreground">{label}</p>
         <p className={cn(

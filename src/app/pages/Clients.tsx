@@ -170,16 +170,16 @@ function KpiCard({
   caption: string;
 }) {
   return (
-    <div className="min-h-[138px] rounded-lg border border-border bg-card p-4 text-card-foreground shadow-[0_18px_44px_-34px_rgba(15,23,42,0.42)] dark:border-white/10 dark:bg-[linear-gradient(145deg,rgba(22,31,49,0.96),rgba(10,16,28,0.96))] dark:shadow-[0_18px_60px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.04)]">
+    <div className="app-kpi-card min-h-[138px] p-4 text-card-foreground">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-lime-200 bg-lime-50 text-lime-700 shadow-[0_10px_28px_-22px_rgba(77,124,15,0.8)] dark:border-lime-300/20 dark:bg-lime-300/10 dark:text-lime-200 dark:shadow-[0_0_24px_rgba(190,242,100,0.12)]">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/12 text-primary shadow-[0_12px_30px_-24px_rgba(183,242,58,0.72)]">
           <Icon className="h-5 w-5" />
         </div>
         <span className="h-2 w-2 rounded-full bg-lime-500 shadow-[0_0_14px_rgba(132,204,22,0.48)] dark:bg-lime-300/80 dark:shadow-[0_0_16px_rgba(190,242,100,0.8)]" />
       </div>
       <p className="mt-4 text-sm font-medium text-muted-foreground">{title}</p>
       <p className="mt-2 truncate text-2xl font-semibold tracking-normal text-foreground dark:text-white">{value}</p>
-      <p className="mt-2 text-xs font-medium text-lime-700 dark:text-lime-200/85">{caption}</p>
+      <p className="mt-2 text-xs font-semibold text-primary">{caption}</p>
     </div>
   );
 }
@@ -196,7 +196,7 @@ function ClientMobileCard({
   return (
     <Link
       to={`/clients/${client.id}`}
-      className="block rounded-lg border border-border bg-card p-4 shadow-[0_16px_34px_-28px_rgba(15,23,42,0.5)] transition-colors hover:border-lime-400/45 dark:border-white/10 dark:bg-[#111827]/90 dark:shadow-[0_18px_45px_rgba(0,0,0,0.25)] dark:hover:border-lime-300/35"
+      className="block rounded-2xl border border-border bg-card/80 p-4 shadow-[0_18px_48px_-40px_rgba(0,0,0,0.72)] transition-colors hover:border-primary/40 hover:bg-accent/20"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -290,41 +290,41 @@ export default function Clients() {
   };
 
   return (
-    <div className="space-y-5 p-4 text-foreground sm:p-6 md:p-8">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="app-page-shell text-foreground">
+      <div className="app-page-header">
         <div>
           <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
             <span>Рабочее пространство</span>
             <span className="text-muted-foreground/70">/</span>
             <span className="text-foreground">Клиенты</span>
           </div>
-          <h1 className="mt-3 text-3xl font-semibold tracking-normal text-foreground dark:text-white">Клиенты</h1>
+          <h1 className="app-page-title mt-3">Клиенты</h1>
           <p className="mt-1 text-sm text-muted-foreground">База клиентов и контрагентов</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {can('create', 'clients') && (
-            <Button asChild className="h-11 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-[0_14px_30px_-24px_rgba(37,99,235,0.7)] hover:bg-[color:var(--primary-hover)] dark:shadow-[0_0_26px_rgba(190,242,100,0.26)]">
+            <Button asChild className="h-11 px-5 text-sm">
               <Link to="/clients/new">
                 <Plus className="h-4 w-4" />
                 Новый клиент
               </Link>
             </Button>
           )}
-          <Button type="button" variant="secondary" className="h-11 rounded-lg border border-border bg-secondary px-4 text-secondary-foreground hover:bg-accent dark:border-white/10 dark:bg-[#121b2c] dark:text-slate-200 dark:hover:bg-[#182235]">
+          <Button type="button" variant="secondary" className="h-11 px-4">
             <Download className="h-4 w-4" />
             Импорт
           </Button>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.42)] dark:border-white/10 dark:bg-[#0d1524]/88 dark:shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+      <div className="app-filter-bar">
         <div className="relative min-w-[260px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <Input
             placeholder="Поиск: компания, ИНН, контакт, телефон..."
             value={pagination.search}
             onChange={(event) => pagination.setSearch(event.target.value)}
-            className="h-11 rounded-lg border-border bg-input-background pl-10 text-sm text-foreground placeholder:text-muted-foreground focus-visible:ring-ring/30 dark:border-white/10 dark:bg-[#111827]/90 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus-visible:ring-lime-300/20"
+            className="h-11 pl-10 text-sm"
           />
         </div>
         <FilterSelect
@@ -355,7 +355,7 @@ export default function Clients() {
           onChange={setManagerFilter}
           options={managerOptions}
         />
-        <Button type="button" variant="secondary" className="h-11 rounded-lg border border-border bg-secondary px-4 text-secondary-foreground hover:bg-accent dark:border-white/10 dark:bg-[#111827]/90 dark:text-slate-200 dark:hover:bg-[#182235]">
+        <Button type="button" variant="secondary" className="h-11 px-4">
           <SlidersHorizontal className="h-4 w-4" />
           Больше фильтров
         </Button>

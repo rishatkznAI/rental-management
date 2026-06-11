@@ -16,8 +16,9 @@ test('shared dialog shell keeps action footer inside the viewport', () => {
   assert.match(dialogSource, /sticky bottom-0 z-10/);
   assert.match(dialogSource, /flex shrink-0 flex-col-reverse/);
   assert.match(dialogSource, /pb-\[env\(safe-area-inset-bottom\)\]/);
-  assert.match(dialogSource, /bg-white\/95/);
-  assert.match(dialogSource, /dark:bg-gray-950\/95/);
+  assert.match(dialogSource, /bg-card text-card-foreground/);
+  assert.match(dialogSource, /bg-card\/95/);
+  assert.match(dialogSource, /backdrop-blur/);
 });
 
 test('shared sheet footer is sticky and safe-area aware', () => {

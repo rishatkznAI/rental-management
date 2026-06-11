@@ -53,23 +53,23 @@ export const EQUIPMENT_PREVIEW_TABS: Array<{ key: EquipmentPreviewTab; label: st
 export const EQUIPMENT_STATUS_BADGE_STYLES: Record<EquipmentRegistryStatusKind, { label: string; className: string }> = {
   available: {
     label: 'Свободна',
-    className: 'bg-emerald-500/12 text-emerald-300 ring-1 ring-emerald-500/20',
+    className: 'app-status-success',
   },
   rented: {
     label: 'В аренде',
-    className: 'bg-blue-500/12 text-blue-300 ring-1 ring-blue-500/20',
+    className: 'app-status-info',
   },
   reserved: {
     label: 'Бронь',
-    className: 'bg-yellow-500/12 text-yellow-300 ring-1 ring-yellow-500/20',
+    className: 'app-status-warning',
   },
   service: {
     label: 'В сервисе',
-    className: 'bg-orange-500/12 text-orange-300 ring-1 ring-orange-500/20',
+    className: 'app-status-danger',
   },
   written_off: {
     label: 'Списана',
-    className: 'bg-slate-500/12 text-slate-300 ring-1 ring-slate-500/20',
+    className: 'app-status-default',
   },
   for_sale: {
     label: 'На продажу',
@@ -77,7 +77,7 @@ export const EQUIPMENT_STATUS_BADGE_STYLES: Record<EquipmentRegistryStatusKind, 
   },
   sold: {
     label: 'Проданная',
-    className: 'bg-slate-700/35 text-slate-200 ring-1 ring-slate-500/30',
+    className: 'app-status-default',
   },
 };
 

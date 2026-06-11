@@ -1034,8 +1034,7 @@ function RentalKpiCard({
 
   return (
     <div className={cn(
-      'group relative flex min-h-[148px] min-w-0 flex-col justify-between overflow-hidden rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md',
-      'bg-card',
+      'app-kpi-card group relative flex min-h-[148px] min-w-0 flex-col justify-between overflow-hidden p-4',
       toneStyle.card,
     )}>
       <div className="flex min-w-0 items-start justify-between gap-3">

@@ -9,6 +9,7 @@ const equipmentDetailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/
 const ganttModalsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/gantt/GanttModals.tsx'), 'utf8');
 const serviceTicketFormSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/service/ServiceTicketForm.tsx'), 'utf8');
 const pdiFormSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/sales/PdiForm.tsx'), 'utf8');
+const paymentsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Payments.tsx'), 'utf8');
 
 test('shared dialog shell keeps action footer inside the viewport', () => {
   assert.match(dialogSource, /max-h-\[min\(92dvh,calc\(100dvh-2rem\),760px\)\]/);
@@ -55,4 +56,18 @@ test('equipment service and PDI modals opt into sticky form actions', () => {
   assert.match(serviceTicketFormSource, /sticky bottom-0 z-10 flex shrink-0/);
   assert.match(pdiFormSource, /stickyActions\?: boolean/);
   assert.match(pdiFormSource, /sticky bottom-0 z-10 flex shrink-0/);
+});
+
+test('payments add modal is portaled and centered by a viewport wrapper', () => {
+  const modalStart = paymentsSource.indexOf('function AddPaymentModal');
+  const modalEnd = paymentsSource.indexOf('type AllocationDraft', modalStart);
+  const modalSource = paymentsSource.slice(modalStart, modalEnd > modalStart ? modalEnd : undefined);
+
+  assert.match(modalSource, /createPortal\(/);
+  assert.match(modalSource, /document\.body/);
+  assert.match(modalSource, /fixed inset-0 z-50 grid place-items-center overflow-y-auto/);
+  assert.match(modalSource, /max-h-\[min\(92dvh,calc\(100dvh-2rem\)\)\]/);
+  assert.match(modalSource, /min-h-0 flex-1 space-y-4 overflow-y-auto/);
+  assert.match(modalSource, /pb-\[calc\(1rem\+env\(safe-area-inset-bottom\)\)\]/);
+  assert.doesNotMatch(modalSource, /app-animate-modal fixed left-1\/2 top-1\/2/);
 });

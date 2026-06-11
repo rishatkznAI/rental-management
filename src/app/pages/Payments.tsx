@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -236,12 +237,12 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
     onSave(newPayment);
   };
 
-  if (!presence.shouldRender) return null;
+  if (!presence.shouldRender || typeof document === 'undefined') return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+  return createPortal(
+    <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4 sm:p-6">
       <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-slate-950/45 backdrop-blur-[3px] dark:bg-black/60" onClick={onClose} />
-      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="app-animate-modal fixed left-1/2 top-1/2 z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl">
+      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="relative z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] transition duration-200 ease-out data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0 data-[state=open]:scale-100 data-[state=open]:opacity-100 dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800">
           <div>
             <h2 className="text-xl font-semibold text-slate-950 dark:text-white">Добавить платёж</h2>
@@ -422,13 +423,14 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
           </div>
 
           </div>
-          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 sm:flex-row dark:border-gray-800 dark:bg-gray-950/95">
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:flex-row dark:border-gray-800 dark:bg-gray-950/95">
             <Button type="button" variant="secondary" onClick={onClose}>Отмена</Button>
             <Button type="submit" className="flex-1">Сохранить платёж</Button>
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

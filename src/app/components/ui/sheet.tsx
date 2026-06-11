@@ -65,13 +65,13 @@ function SheetContent({
             "inset-x-0 top-0 h-auto rounded-b-2xl border-b",
           side === "bottom" &&
             "inset-x-0 bottom-0 h-auto rounded-t-2xl border-t",
-          "overflow-hidden",
+          "overflow-hidden border-border bg-card text-card-foreground",
           className,
         ))}
         {...props}
       >
         {children}
-        <SheetPrimitive.Close className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:pointer-events-none dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200">
+        <SheetPrimitive.Close className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-muted-foreground transition hover:border-primary/30 hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:pointer-events-none">
           <XIcon className="size-4" />
           <span className="sr-only">Close</span>
         </SheetPrimitive.Close>
@@ -85,7 +85,7 @@ function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="sheet-header"
       className={cn(
-        "flex shrink-0 flex-col gap-2 border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800",
+        "flex shrink-0 flex-col gap-2 border-b border-border px-6 py-5 pr-14",
         className,
       )}
       {...props}
@@ -98,7 +98,7 @@ function SheetFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="sheet-footer"
       className={cn(
-        "sticky bottom-0 z-10 mt-auto flex shrink-0 flex-col gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur dark:border-gray-800 dark:bg-gray-950/95",
+        "sticky bottom-0 z-10 mt-auto flex shrink-0 flex-col gap-2 border-t border-border bg-card/95 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur",
         className,
       )}
       {...props}
@@ -113,7 +113,7 @@ function SheetTitle({
   return (
     <SheetPrimitive.Title
       data-slot="sheet-title"
-      className={cn("text-xl font-semibold leading-tight text-slate-950 dark:text-white", className)}
+      className={cn("app-shell-title text-xl font-extrabold leading-tight text-foreground", className)}
       {...props}
     />
   );
@@ -126,7 +126,7 @@ function SheetDescription({
   return (
     <SheetPrimitive.Description
       data-slot="sheet-description"
-      className={cn("text-sm leading-6 text-slate-500 dark:text-gray-400", className)}
+      className={cn("text-sm leading-6 text-muted-foreground", className)}
       {...props}
     />
   );

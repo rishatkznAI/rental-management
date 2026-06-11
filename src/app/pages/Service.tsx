@@ -479,14 +479,14 @@ function ServiceMetricCard({
   }[tone];
 
   return (
-    <div data-service-kpi-card="true" className="flex min-h-[104px] min-w-0 rounded-lg border border-[#E5EAF3] bg-white p-3.5 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
+    <div data-service-kpi-card="true" className="app-kpi-card flex min-h-[104px] min-w-0 p-3.5">
       <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${toneClasses.icon}`} aria-hidden="true">
           {icon ?? <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.accent}`} />}
       </div>
       <div className="ml-3 min-w-0 flex-1">
         <div className={`text-[26px] font-bold leading-none ${toneClasses.value}`}>{safeValue}</div>
-        <div className="mt-1 truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{title}</div>
-        <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-500">{caption}</div>
+        <div className="mt-1 truncate text-sm font-semibold text-foreground">{title}</div>
+        <div className="mt-0.5 truncate text-xs text-muted-foreground">{caption}</div>
       </div>
     </div>
   );

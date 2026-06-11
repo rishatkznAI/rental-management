@@ -7,4 +7,4 @@ const configuredBrandName = String(
   || '',
 ).trim();
 
-export const APP_BRAND_NAME = configuredBrandName || (DEMO_MODE_ENABLED ? 'Rental Management Demo' : 'Скайтех');
+export const APP_BRAND_NAME = configuredBrandName || (DEMO_MODE_ENABLED ? 'Rental Management Demo' : 'rentCore');

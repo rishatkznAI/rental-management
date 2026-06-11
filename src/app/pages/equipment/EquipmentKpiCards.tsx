@@ -71,7 +71,7 @@ function EquipmentKpiCard({
   const hasPercent = typeof percent === 'number' && Number.isFinite(percent);
 
   return (
-    <div className={`group flex min-h-[136px] min-w-0 flex-col justify-between rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md ${toneStyle.card}`}>
+    <div className={`app-kpi-card group flex min-h-[136px] min-w-0 flex-col justify-between p-4 ${toneStyle.card}`}>
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="truncate text-xs font-semibold text-muted-foreground">{title}</div>

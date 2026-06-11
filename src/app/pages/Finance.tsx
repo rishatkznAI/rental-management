@@ -619,21 +619,21 @@ function FinanceKpiCard({
   icon: React.ElementType;
 }) {
   const toneClass = {
-    default: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
-    success: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/35 dark:text-emerald-300',
-    danger: 'bg-red-100 text-red-700 dark:bg-red-900/35 dark:text-red-300',
-    warning: 'bg-amber-100 text-amber-700 dark:bg-amber-900/35 dark:text-amber-300',
+    default: 'app-status-default',
+    success: 'app-status-success',
+    danger: 'app-status-danger',
+    warning: 'app-status-warning',
   }[tone];
   return (
-    <Card className="h-full min-w-0">
+    <Card className="app-kpi-card h-full min-w-0 p-0">
       <CardContent className="h-full p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium leading-snug text-gray-500 dark:text-gray-400">{title}</p>
-            <p className="mt-2 break-words text-xl font-semibold leading-tight text-gray-900 dark:text-white sm:text-2xl xl:text-xl 2xl:text-2xl">{value}</p>
-            {hint && <p className="mt-2 text-xs leading-snug text-gray-500 dark:text-gray-400">{hint}</p>}
+            <p className="text-sm font-medium leading-snug text-muted-foreground">{title}</p>
+            <p className="mt-2 break-words text-xl font-semibold leading-tight text-foreground sm:text-2xl xl:text-xl 2xl:text-2xl">{value}</p>
+            {hint && <p className="mt-2 text-xs leading-snug text-muted-foreground">{hint}</p>}
           </div>
-          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${toneClass}`}>
+          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${toneClass}`}>
             <Icon className="h-5 w-5" />
           </div>
         </div>

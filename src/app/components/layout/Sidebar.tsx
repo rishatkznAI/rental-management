@@ -418,7 +418,7 @@ export function Sidebar({
     <aside
       className={cn(
         'fixed left-0 top-0 z-40 h-screen w-64',
-        'border-r border-sidebar-border bg-[linear-gradient(180deg,#081225_0%,#0b1730_54%,#101b3f_100%)] text-sidebar-foreground shadow-[0_36px_60px_-34px_rgba(0,0,0,0.7)] backdrop-blur-xl dark:bg-none dark:bg-sidebar',
+        'border-r border-sidebar-border bg-[linear-gradient(180deg,#060807_0%,#0b120e_54%,#101912_100%)] text-sidebar-foreground shadow-[0_36px_70px_-42px_rgba(0,0,0,0.92)] backdrop-blur-xl dark:bg-sidebar',
         'transition-[transform,width] duration-300 ease-in-out',
         desktopCollapsed ? 'sm:w-20' : 'sm:w-64',
         isOpen ? 'translate-x-0' : '-translate-x-full',
@@ -460,7 +460,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={onToggleDesktopCollapse}
-              className="hidden h-10 w-full items-center justify-center rounded-xl border border-sidebar-border bg-white/8 text-white/60 transition hover:border-blue-300/40 hover:bg-white/12 hover:text-sidebar-foreground sm:flex"
+              className="hidden h-10 w-full items-center justify-center rounded-xl border border-sidebar-border bg-white/8 text-white/60 transition hover:border-primary/40 hover:bg-primary/10 hover:text-sidebar-foreground sm:flex"
               aria-label="Поиск"
               title="Поиск"
             >
@@ -476,12 +476,12 @@ export function Sidebar({
                 if (normalizedSearch.length > 0) setIsSearchOpen(true);
               }}
               placeholder="Поиск: техника, клиенты, аренды, сервис"
-              className="h-10 rounded-xl border-sidebar-border bg-white/8 pl-9 pr-3 text-sm text-sidebar-foreground placeholder:text-white/45 focus-visible:border-blue-300/60 focus-visible:ring-blue-400/25"
+              className="h-10 rounded-xl border-sidebar-border bg-white/8 pl-9 pr-3 text-sm text-sidebar-foreground placeholder:text-white/45 focus-visible:border-primary/60 focus-visible:ring-primary/25"
             />
           </div>
 
           {isSearchOpen && !desktopCollapsed && (
-            <div className="mt-2 rounded-2xl border border-sidebar-border bg-[#0f1b34] shadow-[0_24px_45px_-30px_rgba(0,0,0,0.85)] dark:bg-popover">
+            <div className="mt-2 rounded-2xl border border-sidebar-border bg-popover shadow-[0_24px_52px_-32px_rgba(0,0,0,0.9)]">
               {searchResultsCount === 0 ? (
                 <div className="px-4 py-4 text-sm text-muted-foreground">
                   Ничего не найдено
@@ -515,7 +515,7 @@ export function Sidebar({
                                   {highlightMatch(result.subtitle, normalizedSearch)}
                                 </div>
                               </div>
-                              <span className="mt-1 shrink-0 text-[11px] font-medium text-blue-300">Открыть</span>
+                              <span className="mt-1 shrink-0 text-[11px] font-semibold text-primary">Открыть</span>
                             </button>
                           );
                         })}
@@ -560,7 +560,7 @@ export function Sidebar({
                         'relative flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[13px] transition-colors',
                         desktopCollapsed && 'sm:h-11 sm:justify-center sm:gap-0 sm:px-0',
                         isActive
-                          ? 'bg-[linear-gradient(135deg,#2563eb_0%,#6366f1_100%)] text-white shadow-[0_16px_30px_-22px_rgba(59,130,246,0.95)] dark:bg-none dark:bg-primary dark:text-primary-foreground dark:shadow-[0_16px_30px_-22px_rgba(212,247,74,0.95)]'
+                          ? 'bg-primary text-primary-foreground shadow-[0_18px_34px_-24px_rgba(183,242,58,0.9)]'
                           : 'text-white/68 hover:bg-white/8 hover:text-sidebar-foreground',
                       )}
                     >
@@ -573,8 +573,8 @@ export function Sidebar({
                           isActive
                             ? 'bg-black/15 text-primary-foreground'
                             : item.section === 'service'
-                              ? 'bg-orange-500/12 text-orange-400'
-                              : 'bg-emerald-500/12 text-emerald-400',
+                              ? 'bg-amber-500/14 text-amber-300'
+                              : 'bg-primary/14 text-primary',
                         )}>
                           {badgeValue > 99 ? '99+' : badgeValue}
                         </span>
@@ -596,7 +596,7 @@ export function Sidebar({
             aria-label={themeToggleLabel}
             title={desktopCollapsed ? themeToggleLabel : undefined}
             className={cn(
-              'flex min-h-11 w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/8 px-3 py-2 text-left text-white/74 transition hover:border-blue-300/40 hover:bg-white/12 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+              'flex min-h-11 w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/8 px-3 py-2 text-left text-white/74 transition hover:border-primary/40 hover:bg-primary/10 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
               desktopCollapsed && 'sm:justify-center sm:px-0',
             )}
           >

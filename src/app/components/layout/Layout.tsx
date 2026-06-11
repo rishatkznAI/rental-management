@@ -19,6 +19,7 @@ import { AppLoadingState } from '../ui/AppLoadingState';
 import { AppErrorState } from '../ui/AppErrorState';
 import { LiftLogo } from './LiftLogo';
 import { animatedPageClassName, isDemoPresentationMotionEnabled } from '../../lib/animations';
+import { APP_BRAND_NAME } from '../../lib/appBrand';
 
 const SIDEBAR_STATE_STORAGE_KEY = 'rental-management:desktop-sidebar-state';
 
@@ -118,7 +119,7 @@ export function Layout() {
       settings: 'Личные настройки',
       admin: 'Панель администратора',
     };
-    return map[segment] || 'Скайтех';
+    return map[segment] || APP_BRAND_NAME;
   }, [location.pathname]);
 
   const handleLogout = () => {
@@ -150,7 +151,7 @@ export function Layout() {
       aria-pressed={theme === 'dark'}
       aria-label={themeToggleLabel}
       title={themeToggleLabel}
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-white text-muted-foreground transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:bg-input/30 dark:text-primary dark:hover:bg-accent/50"
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card/80 text-muted-foreground shadow-[0_16px_38px_-34px_rgba(0,0,0,0.65)] transition hover:border-primary/35 hover:bg-accent hover:text-primary"
     >
       <ThemeIcon className="h-5 w-5" />
     </button>
@@ -258,7 +259,7 @@ export function Layout() {
   if (shouldRedirectBySection || shouldRedirectByAction) return null;
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="rentcore-industrial-shell min-h-screen bg-background text-foreground">
       {/* Desktop sidebar */}
       <Sidebar
         isOpen={sidebarOpen}
@@ -270,13 +271,13 @@ export function Layout() {
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/40 sm:hidden"
+          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm sm:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       {/* Mobile top bar */}
-      <header className="fixed top-0 left-0 right-0 z-20 flex h-14 items-center justify-between border-b border-border/80 bg-sidebar/95 px-4 backdrop-blur-xl sm:hidden">
+      <header className="fixed top-0 left-0 right-0 z-20 flex h-14 items-center justify-between border-b border-sidebar-border bg-sidebar/95 px-4 shadow-[0_18px_42px_-36px_rgba(0,0,0,0.9)] backdrop-blur-xl sm:hidden">
         <button
           onClick={() => setSidebarOpen(true)}
           className="rounded-lg p-2 transition-colors hover:bg-accent"
@@ -286,7 +287,7 @@ export function Layout() {
         </button>
         <div className="flex items-center gap-2">
           <LiftLogo className="h-8 w-8" />
-          <span className="app-shell-title text-base font-extrabold text-sidebar-foreground">Скайтех</span>
+          <span className="app-shell-title text-base font-extrabold text-sidebar-foreground">{APP_BRAND_NAME}</span>
         </div>
         <div className="flex items-center gap-2">
           {renderThemeToggleButton()}
@@ -295,7 +296,7 @@ export function Layout() {
             <button
               type="button"
               onClick={() => setProfileOpen((value) => !value)}
-              className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[linear-gradient(135deg,#2563eb,#6366f1)] text-sm font-bold text-white"
+              className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-primary/25 bg-[linear-gradient(135deg,var(--primary),#5eead4)] text-sm font-bold text-primary-foreground"
               aria-expanded={profileOpen}
               aria-haspopup="menu"
               aria-label="Профиль пользователя"
@@ -343,7 +344,7 @@ export function Layout() {
 
       {/* Desktop top bar */}
       <header className={cn(
-        'fixed right-0 top-0 z-20 hidden h-16 items-center justify-between border-b border-border/80 bg-white/88 px-6 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.45)] backdrop-blur-xl transition-[left] duration-300 dark:bg-background/80 sm:flex',
+        'fixed right-0 top-0 z-20 hidden h-16 items-center justify-between border-b border-border bg-[color:var(--rc-topbar)] px-6 shadow-[0_22px_58px_-46px_rgba(0,0,0,0.82)] backdrop-blur-xl transition-[left] duration-300 sm:flex',
         desktopSidebarOffsetClass,
       )}>
         <div className="min-w-0">
@@ -356,7 +357,7 @@ export function Layout() {
             <button
               type="button"
               onClick={() => navigate(primaryCreatePath)}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-blue-200 bg-white text-blue-600 shadow-[0_12px_30px_-26px_rgba(37,99,235,0.75)] transition hover:border-blue-300 hover:bg-blue-50 dark:border-border dark:bg-input/30 dark:text-primary dark:hover:bg-accent/50"
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/30 bg-primary text-primary-foreground shadow-[0_18px_42px_-30px_rgba(183,242,58,0.72)] transition hover:bg-[color:var(--primary-hover)]"
               aria-label="Создать"
               title="Создать"
             >
@@ -367,7 +368,7 @@ export function Layout() {
             <button
               type="button"
               onClick={() => navigate('/planner')}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-white text-muted-foreground transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:bg-input/30 dark:hover:bg-accent/50"
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card/80 text-muted-foreground transition hover:border-primary/35 hover:bg-accent hover:text-primary"
               aria-label="Планировщик"
               title="Планировщик"
             >
@@ -380,11 +381,11 @@ export function Layout() {
             <button
               type="button"
               onClick={() => setProfileOpen((value) => !value)}
-              className="flex min-w-0 items-center gap-3 rounded-2xl border border-border bg-card px-3 py-2 text-left shadow-[0_14px_36px_-30px_rgba(15,23,42,0.5)] transition hover:border-primary/35 hover:bg-accent/45 dark:hover:bg-accent/50"
+              className="flex min-w-0 items-center gap-3 rounded-2xl border border-border bg-card/80 px-3 py-2 text-left shadow-[0_18px_44px_-38px_rgba(0,0,0,0.75)] transition hover:border-primary/35 hover:bg-accent"
               aria-expanded={profileOpen}
               aria-haspopup="menu"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[linear-gradient(135deg,#2563eb,#6366f1)] text-sm font-bold text-white">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-primary/25 bg-[linear-gradient(135deg,var(--primary),#5eead4)] text-sm font-bold text-primary-foreground">
                 {user?.profilePhoto ? (
                   <img src={user.profilePhoto} alt={user.name} className="h-full w-full object-cover" />
                 ) : (
@@ -446,7 +447,7 @@ export function Layout() {
             'pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm transition-[left] duration-300',
             desktopSidebarOffsetClass,
           )}>
-            <div className="w-full max-w-sm rounded-2xl border border-border bg-card/95 px-6 py-7 text-center shadow-xl">
+            <div className="w-full max-w-sm rounded-2xl border border-border bg-card/95 px-6 py-7 text-center shadow-[0_28px_82px_-58px_rgba(0,0,0,0.9)] backdrop-blur-xl">
               <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
               <div className="space-y-1">
                 <p className="text-base font-semibold text-foreground">Загружаем раздел</p>
@@ -458,7 +459,7 @@ export function Layout() {
       </main>
 
       {/* Mobile bottom navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-border/80 bg-sidebar/95 backdrop-blur-xl sm:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-sidebar-border bg-sidebar/95 shadow-[0_-18px_42px_-36px_rgba(0,0,0,0.9)] backdrop-blur-xl sm:hidden">
         <div
           className="grid"
           style={{ gridTemplateColumns: `repeat(${Math.max(visibleBottomNav.length, 1)}, minmax(0, 1fr))` }}

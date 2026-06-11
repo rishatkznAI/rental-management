@@ -127,14 +127,14 @@ function PaymentKpiCard({
   valueClassName?: string;
 }) {
   return (
-    <div className="flex min-h-[116px] items-center gap-4 rounded-[18px] border border-slate-900/[0.08] bg-white p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)] dark:border-border dark:bg-card dark:shadow-none">
+    <div className="app-kpi-card flex min-h-[116px] items-center gap-4 p-5">
       <div className={cn('flex h-12 w-12 shrink-0 items-center justify-center rounded-full', tone)}>
         <Icon className="h-5 w-5" />
       </div>
       <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-500 dark:text-muted-foreground">{title}</p>
-        <p className={cn('mt-1 truncate text-xl font-semibold text-slate-950 dark:text-foreground sm:text-2xl', valueClassName)}>{value}</p>
-        <p className="mt-1 text-sm text-slate-400 dark:text-muted-foreground">{caption}</p>
+        <p className="text-sm font-medium text-muted-foreground">{title}</p>
+        <p className={cn('mt-1 truncate text-xl font-semibold text-foreground sm:text-2xl', valueClassName)}>{value}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{caption}</p>
       </div>
     </div>
   );

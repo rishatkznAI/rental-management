@@ -162,16 +162,16 @@ export function NotificationCenter() {
       <SheetTrigger asChild>
         <button
           type="button"
-          className="relative rounded-lg p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+          className="relative rounded-xl border border-transparent p-2 text-muted-foreground transition-colors hover:border-primary/30 hover:bg-accent hover:text-primary"
           aria-label="Уведомления"
           title="Уведомления"
         >
-          <Bell className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+          <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
             <span
               className={cn(
                 'absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white',
-                criticalCount > 0 ? 'bg-red-500' : 'bg-blue-500',
+                criticalCount > 0 ? 'bg-[color:var(--danger)]' : 'bg-primary text-primary-foreground',
               )}
             >
               {unreadCount > 99 ? '99+' : unreadCount}

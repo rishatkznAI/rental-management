@@ -987,7 +987,7 @@ export default function RentalDetail() {
       ['Кандидаты rentals', diagnostics.candidateIds.join(', ') || 'нет'],
     ];
     return (
-      <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
+      <div className="min-w-0 max-w-full space-y-4 overflow-x-clip p-4 sm:space-y-6 sm:p-6 md:p-8" data-rental-detail-responsive="true">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1030,7 +1030,7 @@ export default function RentalDetail() {
   }
 
   return (
-    <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
+    <div className="min-w-0 max-w-full space-y-4 overflow-x-clip p-4 sm:space-y-6 sm:p-6 md:p-8" data-rental-detail-responsive="true">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Button variant="secondary" onClick={() => navigate(-1)}>
@@ -1121,7 +1121,7 @@ export default function RentalDetail() {
         </Card>
       )}
 
-      <div className="flex gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1 dark:border-gray-800 dark:bg-gray-950">
+      <div className="flex flex-wrap gap-1 overflow-visible rounded-xl border border-gray-200 bg-white p-1 dark:border-gray-800 dark:bg-gray-950">
         {([
           ['overview', 'Обзор'],
           ['terms', 'Сроки и возврат'],
@@ -1141,7 +1141,7 @@ export default function RentalDetail() {
                 document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
               });
             }}
-            className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+            className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
               activeDetailTab === tab
                 ? 'bg-[--color-primary] text-white shadow-sm'
                 : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-900'
@@ -1162,7 +1162,7 @@ export default function RentalDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Компания</p>
                   {isEditing ? (
@@ -1254,7 +1254,7 @@ export default function RentalDetail() {
                 </div>
               )}
               {selectedClient && (
-                <div className="grid grid-cols-2 gap-4 border-t border-gray-200 pt-3 dark:border-gray-700">
+                <div className="grid gap-4 border-t border-gray-200 pt-3 sm:grid-cols-2 dark:border-gray-700">
                   <div>
                     <p className="text-sm text-gray-500 dark:text-gray-400">ИНН</p>
                     <p className="mt-0.5 font-mono text-sm text-gray-900 dark:text-white">{selectedClient.inn}</p>
@@ -1336,7 +1336,7 @@ export default function RentalDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid gap-4 sm:grid-cols-3">
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Дата начала</p>
                   {isEditing ? (
@@ -1674,7 +1674,7 @@ export default function RentalDetail() {
                         </Badge>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+                      <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
                         <div>
                           <p className="text-xs text-gray-500 dark:text-gray-400">Сумма счёта</p>
                           <p className="font-medium text-gray-900 dark:text-white">{formatCurrency(item.documentAmount || 0)}</p>
@@ -1929,12 +1929,12 @@ export default function RentalDetail() {
       </div>
 
       <Dialog open={extensionDialogOpen} onOpenChange={setExtensionDialogOpen}>
-        <DialogContent className="sm:max-w-[620px]">
+        <DialogContent className="w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-[620px]" data-rental-responsive-dialog="detail-extension">
           <DialogHeader>
             <DialogTitle>Продлить аренду</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Текущая дата окончания</p>
                 <p className="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-900 dark:border-gray-700 dark:text-white">
@@ -2079,7 +2079,7 @@ export default function RentalDetail() {
                 {(() => {
                   const conflict = extensionConflict || extensionPreviewConflict;
                   return conflict ? (
-                    <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
                       <span>Дата: {conflict.date}</span>
                       <span>Период: {conflict.period}</span>
                       <span>Клиент: {conflict.client}</span>
@@ -2105,12 +2105,12 @@ export default function RentalDetail() {
       </Dialog>
 
       <Dialog open={documentDialogOpen} onOpenChange={setDocumentDialogOpen}>
-        <DialogContent className="sm:max-w-[520px]">
+        <DialogContent className="w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-[520px]" data-rental-responsive-dialog="detail-document">
           <DialogHeader>
             <DialogTitle>Создать документ по аренде</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Тип</p>
                 <Select
@@ -2151,7 +2151,7 @@ export default function RentalDetail() {
                 onChange={(e) => setDocumentForm(prev => ({ ...prev, number: e.target.value }))}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Дата</p>
                 <Input
@@ -2181,7 +2181,7 @@ export default function RentalDetail() {
       </Dialog>
 
       <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
-        <DialogContent className="sm:max-w-[520px]">
+        <DialogContent className="w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-[520px]" data-rental-responsive-dialog="detail-payment">
           <DialogHeader>
             <DialogTitle>Зарегистрировать оплату</DialogTitle>
           </DialogHeader>
@@ -2193,7 +2193,7 @@ export default function RentalDetail() {
                 onChange={(e) => setPaymentForm(prev => ({ ...prev, invoiceNumber: e.target.value }))}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Сумма счёта</p>
                 <Input
@@ -2213,7 +2213,7 @@ export default function RentalDetail() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid gap-3 sm:grid-cols-3">
               <div>
                 <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Срок оплаты</p>
                 <Input

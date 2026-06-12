@@ -118,6 +118,45 @@ const PRIORITY_OPTIONS: Array<{ value: ServicePriority; label: string }> = [
   { value: 'critical', label: 'Критический' },
 ];
 
+const SECTION_CARD_CLASS = 'rounded-lg border-border bg-card shadow-sm';
+const SURFACE_PANEL_CLASS = 'rounded-lg border border-border bg-muted/30';
+const EMPTY_STATE_CLASS = 'rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground';
+const FIELD_LABEL_CLASS = 'text-sm font-medium text-foreground';
+const DETAIL_BLOCK_CLASS = 'rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground';
+
+const KPI_TONE_CLASS = {
+  default: {
+    card: 'border-border bg-card/85',
+    label: 'text-muted-foreground',
+    value: 'text-foreground',
+    caption: 'text-muted-foreground',
+  },
+  info: {
+    card: 'border-info/30 bg-info/10',
+    label: 'text-info-foreground',
+    value: 'text-info-foreground',
+    caption: 'text-info-foreground/80',
+  },
+  warning: {
+    card: 'border-warning/30 bg-warning/10',
+    label: 'text-warning-foreground',
+    value: 'text-warning-foreground',
+    caption: 'text-warning-foreground/80',
+  },
+  success: {
+    card: 'border-success/30 bg-success/10',
+    label: 'text-success-foreground',
+    value: 'text-success-foreground',
+    caption: 'text-success-foreground/80',
+  },
+  danger: {
+    card: 'border-danger/30 bg-danger/10',
+    label: 'text-danger-foreground',
+    value: 'text-danger-foreground',
+    caption: 'text-danger-foreground/80',
+  },
+} as const;
+
 type ClaimFormState = {
   serviceTicketId: string;
   equipmentId: string;
@@ -272,10 +311,10 @@ function isClaimClosedThisMonth(claim: WarrantyClaim) {
 }
 
 function getClaimDueTone(claim: WarrantyClaim) {
-  if (normalizeManagementStatus(claim.status) === 'closed') return 'text-emerald-700 dark:text-emerald-300';
-  if (isResponseOverdue(claim)) return 'font-semibold text-red-600 dark:text-red-300';
-  if (claim.status === 'factory_review' || claim.status === 'parts_shipping') return 'font-semibold text-orange-600 dark:text-orange-300';
-  return 'text-gray-600 dark:text-gray-300';
+  if (normalizeManagementStatus(claim.status) === 'closed') return 'text-success-foreground';
+  if (isResponseOverdue(claim)) return 'font-semibold text-danger-foreground';
+  if (claim.status === 'factory_review' || claim.status === 'parts_shipping') return 'font-semibold text-warning-foreground';
+  return 'text-muted-foreground';
 }
 
 function claimMatchesPeriod(claim: WarrantyClaim, period: string) {
@@ -404,6 +443,14 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
     closedMonth: claims.filter(isClaimClosedThisMonth).length,
     overdue: claims.filter(isResponseOverdue).length,
   }), [claims]);
+
+  const kpiCards = React.useMemo(() => [
+    { label: 'Активные', value: metrics.active, caption: 'Требуют контроля', tone: 'default' as const },
+    { label: 'Новые', value: metrics.new, caption: 'Первичная проверка', tone: 'info' as const },
+    { label: 'На рассмотрении', value: metrics.inReview, caption: 'Разбор причины', tone: 'warning' as const },
+    { label: 'Закрыты за месяц', value: metrics.closedMonth, caption: 'Итог за период', tone: 'success' as const },
+    { label: 'Просрочены', value: metrics.overdue, caption: 'Нарушен срок реакции', tone: 'danger' as const },
+  ], [metrics]);
 
   function handleTicketChange(value: string) {
     const serviceTicketId = value === NO_VALUE ? '' : value;
@@ -572,37 +619,22 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
   return (
     <div className="space-y-3">
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-        <div className="min-h-[88px] rounded-lg border border-[#E5EAF3] bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">Активные</p>
-          <p className="mt-2 text-2xl font-black text-gray-900 dark:text-white">{metrics.active}</p>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Требуют контроля</p>
-        </div>
-        <div className="min-h-[88px] rounded-lg border border-blue-100 bg-white p-3 shadow-[0_8px_24px_rgba(37,99,235,0.08)] dark:border-blue-900/50 dark:bg-blue-950/20 dark:shadow-none">
-          <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">Новые</p>
-          <p className="mt-2 text-2xl font-black text-blue-900 dark:text-blue-100">{metrics.new}</p>
-          <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">Первичная проверка</p>
-        </div>
-        <div className="min-h-[88px] rounded-lg border border-orange-100 bg-white p-3 shadow-[0_8px_24px_rgba(249,115,22,0.08)] dark:border-orange-900/50 dark:bg-orange-950/20 dark:shadow-none">
-          <p className="text-xs font-semibold text-orange-700 dark:text-orange-300">На рассмотрении</p>
-          <p className="mt-2 text-2xl font-black text-orange-900 dark:text-orange-100">{metrics.inReview}</p>
-          <p className="mt-1 text-xs text-orange-700/80 dark:text-orange-300/80">Разбор причины</p>
-        </div>
-        <div className="min-h-[88px] rounded-lg border border-green-100 bg-white p-3 shadow-[0_8px_24px_rgba(5,150,105,0.08)] dark:border-green-900/50 dark:bg-green-950/20 dark:shadow-none">
-          <p className="text-xs font-semibold text-green-700 dark:text-green-300">Закрыты за месяц</p>
-          <p className="mt-2 text-2xl font-black text-green-900 dark:text-green-100">{metrics.closedMonth}</p>
-          <p className="mt-1 text-xs text-green-700/80 dark:text-green-300/80">Итог за период</p>
-        </div>
-        <div className="min-h-[88px] rounded-lg border border-red-100 bg-white p-3 shadow-[0_8px_24px_rgba(220,38,38,0.08)] dark:border-red-900/50 dark:bg-red-950/20 dark:shadow-none">
-          <p className="text-xs font-semibold text-red-700 dark:text-red-300">Просрочены</p>
-          <p className="mt-2 text-2xl font-black text-red-900 dark:text-red-100">{metrics.overdue}</p>
-          <p className="mt-1 text-xs text-red-700/80 dark:text-red-300/80">Нарушен срок реакции</p>
-        </div>
+        {kpiCards.map(card => {
+          const tone = KPI_TONE_CLASS[card.tone];
+          return (
+            <div key={card.label} className={cn('min-h-[88px] rounded-lg border p-3 shadow-sm', tone.card)}>
+              <p className={cn('text-xs font-semibold', tone.label)}>{card.label}</p>
+              <p className={cn('mt-2 text-2xl font-black', tone.value)}>{card.value}</p>
+              <p className={cn('mt-1 text-xs', tone.caption)}>{card.caption}</p>
+            </div>
+          );
+        })}
       </div>
 
-      <Card className="rounded-lg border-[#E5EAF3] bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-amber-900/50 dark:bg-amber-950/10">
+      <Card className={SECTION_CARD_CLASS}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
-            <Factory className="h-5 w-5 text-[--color-primary]" />
+            <Factory className="h-5 w-5 text-primary" />
             Управленческий контур рекламаций
           </CardTitle>
           <CardDescription>
@@ -619,15 +651,15 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                 className={cn(
                   'rounded-lg border p-3 text-left transition-colors',
                   statusFilter === status
-                    ? 'border-[--color-primary] bg-[--color-primary]/10'
-                    : 'border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900/40 dark:hover:border-gray-600',
+                    ? 'border-primary bg-primary/10'
+                    : 'border-border bg-card/70 hover:border-primary/30 hover:bg-accent/40',
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
                   <Badge variant={MANAGEMENT_STATUS_META[status].variant}>{MANAGEMENT_STATUS_META[status].label}</Badge>
-                  <span className="text-sm font-semibold text-gray-900 dark:text-white">{statusCounts[status]}</span>
+                  <span className="text-sm font-semibold text-foreground">{statusCounts[status]}</span>
                 </div>
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{MANAGEMENT_STATUS_META[status].description}</p>
+                <p className="mt-2 text-xs text-muted-foreground">{MANAGEMENT_STATUS_META[status].description}</p>
               </button>
             ))}
           </div>
@@ -636,10 +668,10 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
         <div className="space-y-4">
-          <Card className="rounded-lg border-[#E5EAF3] shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:shadow-none">
+          <Card className={SECTION_CARD_CLASS}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
-                <Send className="h-5 w-5 text-[--color-primary]" />
+                <Send className="h-5 w-5 text-primary" />
                 Новая рекламация
               </CardTitle>
               <CardDescription>Зафиксируйте повторную поломку, претензию клиента, гарантийный случай или спор по качеству ремонта.</CardDescription>
@@ -648,7 +680,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
               <form onSubmit={handleCreateClaim} className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Сервисная заявка</span>
+                    <span className={FIELD_LABEL_CLASS}>Сервисная заявка</span>
                     <Select value={form.serviceTicketId || NO_VALUE} onValueChange={handleTicketChange}>
                       <SelectTrigger>
                         <SelectValue placeholder="Без заявки" />
@@ -664,7 +696,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     </Select>
                   </label>
                   <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Техника</span>
+                    <span className={FIELD_LABEL_CLASS}>Техника</span>
                     <EquipmentCombobox
                       equipment={equipmentList}
                       value={form.equipmentId}
@@ -673,7 +705,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     />
                   </label>
                   <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Контрагент / производитель</span>
+                    <span className={FIELD_LABEL_CLASS}>Контрагент / производитель</span>
                     <Input
                       value={form.factoryName}
                       onChange={(event) => setForm(prev => ({ ...prev, factoryName: event.target.value }))}
@@ -681,7 +713,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     />
                   </label>
                   <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Контакт</span>
+                    <span className={FIELD_LABEL_CLASS}>Контакт</span>
                     <Input
                       value={form.factoryContact}
                       onChange={(event) => setForm(prev => ({ ...prev, factoryContact: event.target.value }))}
@@ -689,7 +721,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     />
                   </label>
                   <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Внешний номер</span>
+                    <span className={FIELD_LABEL_CLASS}>Внешний номер</span>
                     <Input
                       value={form.factoryCaseNumber}
                       onChange={(event) => setForm(prev => ({ ...prev, factoryCaseNumber: event.target.value }))}
@@ -697,7 +729,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     />
                   </label>
                   <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Срок реакции</span>
+                    <span className={FIELD_LABEL_CLASS}>Срок реакции</span>
                     <Input
                       type="date"
                       value={form.responseDueDate}
@@ -705,7 +737,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                     />
                   </label>
                   <label className="space-y-1.5">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Приоритет</span>
+                    <span className={FIELD_LABEL_CLASS}>Приоритет</span>
                     <Select
                       value={form.priority}
                       onValueChange={(value) => setForm(prev => ({ ...prev, priority: value as ServicePriority }))}
@@ -722,8 +754,8 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                       </SelectContent>
                     </Select>
                   </label>
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300">
-                    <p className="font-medium text-gray-900 dark:text-white">Что пойдёт в обращение</p>
+                  <div className={DETAIL_BLOCK_CLASS}>
+                    <p className="font-medium text-foreground">Что пойдёт в обращение</p>
                     <p className="mt-1">
                       {form.equipmentId && equipmentById.get(form.equipmentId)
                         ? eqLabel(equipmentById.get(form.equipmentId)!)
@@ -733,7 +765,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                 </div>
 
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Причина рекламации</span>
+                  <span className={FIELD_LABEL_CLASS}>Причина рекламации</span>
                   <Textarea
                     value={form.failureDescription}
                     onChange={(event) => setForm(prev => ({ ...prev, failureDescription: event.target.value }))}
@@ -743,7 +775,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                 </label>
 
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Ожидаемый итог</span>
+                  <span className={FIELD_LABEL_CLASS}>Ожидаемый итог</span>
                   <Textarea
                     value={form.requestedResolution}
                     onChange={(event) => setForm(prev => ({ ...prev, requestedResolution: event.target.value }))}
@@ -762,10 +794,10 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
             </CardContent>
           </Card>
 
-          <Card className="rounded-lg border-[#E5EAF3] shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:shadow-none">
+          <Card className={SECTION_CARD_CLASS}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
-                <FileText className="h-5 w-5 text-[--color-primary]" />
+                <FileText className="h-5 w-5 text-primary" />
                 Журнал рекламаций
               </CardTitle>
               <CardDescription>Поиск по номеру, технике, клиенту, связанной заявке и причине.</CardDescription>
@@ -856,16 +888,16 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
 
               <div className="space-y-2">
                 {isLoading ? (
-                  <div className="rounded-lg border border-gray-200 p-4 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  <div className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
                     Загружаем рекламации...
                   </div>
                 ) : filteredClaims.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  <div className={EMPTY_STATE_CLASS}>
                     Рекламации не найдены.
                   </div>
                 ) : (
-                  <div className="overflow-hidden rounded-lg border border-[#E5EAF3] shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:border-gray-700 dark:shadow-none">
-                    <div className="hidden grid-cols-[minmax(110px,0.7fr)_minmax(160px,1fr)_minmax(130px,0.8fr)_minmax(110px,0.7fr)_minmax(190px,1.2fr)_130px_minmax(130px,0.8fr)_105px_minmax(110px,0.7fr)] gap-3 border-b border-gray-100 bg-slate-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-gray-700 dark:bg-gray-900/50 xl:grid">
+                  <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+                    <div className="hidden grid-cols-[minmax(110px,0.7fr)_minmax(160px,1fr)_minmax(130px,0.8fr)_minmax(110px,0.7fr)_minmax(190px,1.2fr)_130px_minmax(130px,0.8fr)_105px_minmax(110px,0.7fr)] gap-3 border-b border-border bg-muted/40 px-4 py-3 text-xs font-semibold text-muted-foreground xl:grid">
                       <div>№ рекламации</div>
                       <div>Техника</div>
                       <div>Клиент</div>
@@ -882,32 +914,32 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                         type="button"
                         onClick={() => setSelectedClaimId(claim.id)}
                         className={cn(
-                          'grid w-full gap-3 border-b border-gray-100 px-4 py-3 text-left transition-colors last:border-b-0 dark:border-gray-800 xl:grid-cols-[minmax(110px,0.7fr)_minmax(160px,1fr)_minmax(130px,0.8fr)_minmax(110px,0.7fr)_minmax(190px,1.2fr)_130px_minmax(130px,0.8fr)_105px_minmax(110px,0.7fr)] xl:items-center',
+                          'grid w-full gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-b-0 xl:grid-cols-[minmax(110px,0.7fr)_minmax(160px,1fr)_minmax(130px,0.8fr)_minmax(110px,0.7fr)_minmax(190px,1.2fr)_130px_minmax(130px,0.8fr)_105px_minmax(110px,0.7fr)] xl:items-center',
                           selectedClaim?.id === claim.id
-                            ? 'bg-[--color-primary]/10'
-                            : 'bg-white hover:bg-gray-50 dark:bg-gray-900/40 dark:hover:bg-gray-900',
+                            ? 'bg-primary/10'
+                            : 'bg-card hover:bg-accent/35',
                         )}
                       >
-                        <div className="font-mono text-sm font-bold text-[--color-primary]">{getClaimNumber(claim)}</div>
+                        <div className="font-mono text-sm font-bold text-primary">{getClaimNumber(claim)}</div>
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">{claim.equipmentLabel || '—'}</div>
-                          <div className="mt-0.5 truncate font-mono text-xs text-gray-500">
+                          <div className="truncate text-sm font-semibold text-foreground">{claim.equipmentLabel || '—'}</div>
+                          <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
                             INV: {claim.inventoryNumber || '—'} · SN: {claim.serialNumber || '—'}
                           </div>
                         </div>
-                        <div className="truncate text-sm text-gray-700 dark:text-gray-200">{getClaimClient(claim, ticketById)}</div>
-                        <div className="font-mono text-sm text-gray-700 dark:text-gray-200">{claim.serviceTicketId || '—'}</div>
+                        <div className="truncate text-sm text-foreground">{getClaimClient(claim, ticketById)}</div>
+                        <div className="font-mono text-sm text-foreground">{claim.serviceTicketId || '—'}</div>
                         <div className="min-w-0">
-                          <div className="line-clamp-2 text-sm font-medium text-gray-900 dark:text-white">{getClaimReason(claim)}</div>
-                          <div className="mt-0.5 truncate text-xs text-gray-500">{getClaimResult(claim)}</div>
+                          <div className="line-clamp-2 text-sm font-medium text-foreground">{getClaimReason(claim)}</div>
+                          <div className="mt-0.5 truncate text-xs text-muted-foreground">{getClaimResult(claim)}</div>
                         </div>
                         <div className="flex flex-wrap gap-1">
                           {getManagementStatusBadge(claim.status)}
                           {isResponseOverdue(claim) && <Badge variant="error">Просрочено</Badge>}
                         </div>
-                        <div className="truncate text-sm text-gray-700 dark:text-gray-200">{getClaimResponsible(claim)}</div>
+                        <div className="truncate text-sm text-foreground">{getClaimResponsible(claim)}</div>
                         <div className={`text-sm ${getClaimDueTone(claim)}`}>{formatDateSafe(getClaimDeadline(claim))}</div>
-                        <div className="text-sm text-gray-600 dark:text-gray-300">{formatDateSafe(claim.updatedAt || claim.createdAt)}</div>
+                        <div className="text-sm text-muted-foreground">{formatDateSafe(claim.updatedAt || claim.createdAt)}</div>
                       </button>
                     ))}
                   </div>
@@ -917,31 +949,31 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
           </Card>
         </div>
 
-        <Card className="rounded-lg border-[#E5EAF3] shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:shadow-none">
+        <Card className={SECTION_CARD_CLASS}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
-                <ShieldCheck className="h-5 w-5 text-[--color-primary]" />
+                <ShieldCheck className="h-5 w-5 text-primary" />
               Карточка рекламации
               </CardTitle>
             <CardDescription>Детали причины, срока реакции, связанной заявки и управленческого итога.</CardDescription>
           </CardHeader>
           <CardContent>
             {!selectedClaim || !editForm ? (
-              <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              <div className={EMPTY_STATE_CLASS}>
                 Выберите рекламацию из журнала.
               </div>
             ) : (
               <div className="space-y-5">
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/50">
+                <div className={cn(SURFACE_PANEL_CLASS, 'p-4')}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-[--color-primary]">{selectedClaim.id}</span>
+                        <span className="font-semibold text-primary">{selectedClaim.id}</span>
                         {getManagementStatusBadge(selectedClaim.status)}
                         <Badge variant="default">{getPriorityLabel(selectedClaim.priority)}</Badge>
                       </div>
-                      <p className="mt-3 font-medium text-gray-900 dark:text-white">{selectedClaim.equipmentLabel}</p>
-                      <div className="mt-2 grid gap-1 text-sm text-gray-500 dark:text-gray-400">
+                      <p className="mt-3 font-medium text-foreground">{selectedClaim.equipmentLabel}</p>
+                      <div className="mt-2 grid gap-1 text-sm text-muted-foreground">
                         <p>Клиент: {getClaimClient(selectedClaim, ticketById)}</p>
                         <p>INV: {selectedClaim.inventoryNumber || '—'} · SN: {selectedClaim.serialNumber || '—'}</p>
                         <p>Создано: {formatDateSafe(selectedClaim.createdAt)}</p>
@@ -951,14 +983,14 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                             <button
                               type="button"
                               onClick={() => onOpenTicket(selectedClaim.serviceTicketId!)}
-                              className="text-left font-medium text-[--color-primary] hover:underline"
+                              className="text-left font-medium text-primary hover:underline"
                             >
                               Открыть сервисную заявку {selectedClaim.serviceTicketId}
                             </button>
                           ) : (
                             <Link
                               to={`/service/${selectedClaim.serviceTicketId}`}
-                              className="font-medium text-[--color-primary] hover:underline"
+                              className="font-medium text-primary hover:underline"
                             >
                               Открыть сервисную заявку {selectedClaim.serviceTicketId}
                             </Link>
@@ -967,7 +999,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                       </div>
                     </div>
                     {isResponseOverdue(selectedClaim) && (
-                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">
+                      <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger-foreground">
                         <div className="flex items-center gap-2">
                           <CalendarClock className="h-4 w-4" />
                           Срок реакции прошёл
@@ -977,7 +1009,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   </div>
                 </div>
 
-                <div className="flex gap-1 overflow-x-auto border-b border-gray-200 pb-2 dark:border-gray-700">
+                <div className="flex gap-1 overflow-x-auto border-b border-border pb-2">
                   {[
                     { id: 'overview', label: 'Обзор' },
                     { id: 'works', label: 'Работы' },
@@ -1000,35 +1032,35 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                 {panelTab === 'overview' && (
                   <div className="space-y-4">
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                      <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                        <p className="font-medium text-gray-900 dark:text-white">Клиент</p>
+                      <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground">
+                        <p className="font-medium text-foreground">Клиент</p>
                         <p className="mt-1">{getClaimClient(selectedClaim, ticketById)}</p>
                       </div>
-                      <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                        <p className="font-medium text-gray-900 dark:text-white">Ответственный</p>
+                      <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground">
+                        <p className="font-medium text-foreground">Ответственный</p>
                         <p className="mt-1">{getClaimResponsible(selectedClaim)}</p>
                       </div>
-                      <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                        <p className="font-medium text-gray-900 dark:text-white">Ключевые даты</p>
+                      <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground">
+                        <p className="font-medium text-foreground">Ключевые даты</p>
                         <p className="mt-1">Реакция до: {formatDateSafe(getClaimDeadline(selectedClaim))}</p>
                         <p>Отправлено: {formatDateSafe(selectedClaim.sentAt)}</p>
                         <p>Закрыто: {formatDateSafe(selectedClaim.closedAt)}</p>
                       </div>
-                      <div className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                        <p className="font-medium text-gray-900 dark:text-white">Связи</p>
+                      <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground">
+                        <p className="font-medium text-foreground">Связи</p>
                         <p className="mt-1">Заявка: {selectedClaim.serviceTicketId || '—'}</p>
                         <p>Аренда: {selectedClaim.rentalId || '—'}</p>
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Причина</span>
-                      <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-200">
+                      <span className={FIELD_LABEL_CLASS}>Причина</span>
+                      <div className="rounded-lg border border-border bg-card/70 p-3 text-sm text-foreground">
                         {getClaimReason(selectedClaim)}
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Итог / ожидаемое решение</span>
-                      <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-200">
+                      <span className={FIELD_LABEL_CLASS}>Итог / ожидаемое решение</span>
+                      <div className="rounded-lg border border-border bg-card/70 p-3 text-sm text-foreground">
                         {getClaimResult(selectedClaim) !== '—' ? getClaimResult(selectedClaim) : selectedClaim.requestedResolution || '—'}
                       </div>
                     </div>
@@ -1062,19 +1094,19 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                 )}
 
                 {panelTab === 'works' && (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+                  <div className={cn(SURFACE_PANEL_CLASS, 'p-4 text-sm text-muted-foreground')}>
                     Работы по рекламации ведутся в связанной сервисной заявке.
                     {selectedClaim.serviceTicketId && (
                       onOpenTicket ? (
                         <button
                           type="button"
                           onClick={() => onOpenTicket(selectedClaim.serviceTicketId!)}
-                          className="mt-2 block text-left font-medium text-[--color-primary] hover:underline"
+                          className="mt-2 block text-left font-medium text-primary hover:underline"
                         >
                           Открыть работы в заявке {selectedClaim.serviceTicketId}
                         </button>
                       ) : (
-                        <Link to={`/service/${selectedClaim.serviceTicketId}`} className="mt-2 block font-medium text-[--color-primary] hover:underline">
+                        <Link to={`/service/${selectedClaim.serviceTicketId}`} className="mt-2 block font-medium text-primary hover:underline">
                           Открыть работы в заявке {selectedClaim.serviceTicketId}
                         </Link>
                       )
@@ -1083,7 +1115,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                 )}
 
                 {panelTab === 'documents' && (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+                  <div className={cn(SURFACE_PANEL_CLASS, 'p-4 text-sm text-muted-foreground')}>
                     Документы и заводская переписка остаются связанными с рекламацией и сервисной заявкой.
                     <div className="mt-3 flex flex-wrap gap-2">
                       {selectedClaim.serviceTicketId && (
@@ -1115,20 +1147,20 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                 {panelTab === 'history' && (
                   <div className="space-y-3">
                     {canEdit && (
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+                      <div className={cn(SURFACE_PANEL_CLASS, 'p-3 text-sm text-muted-foreground')}>
                         Комментарии добавляются при сохранении ответа завода или решения.
                       </div>
                     )}
                     {(selectedClaim.history || []).length === 0 ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">История пока пустая.</p>
+                      <p className="text-sm text-muted-foreground">История пока пустая.</p>
                     ) : (
                       [...(selectedClaim.history || [])].reverse().map((entry, index) => (
-                        <div key={`${entry.date}-${index}`} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                        <div key={`${entry.date}-${index}`} className="rounded-lg border border-border p-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-sm font-medium text-gray-900 dark:text-white">{entry.author}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{formatDateSafe(entry.date)}</p>
+                            <p className="text-sm font-medium text-foreground">{entry.author}</p>
+                            <p className="text-xs text-muted-foreground">{formatDateSafe(entry.date)}</p>
                           </div>
-                          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{entry.text}</p>
+                          <p className="mt-1 text-sm text-muted-foreground">{entry.text}</p>
                         </div>
                       ))
                     )}
@@ -1139,7 +1171,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   <div className="space-y-4">
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                       <label className="space-y-1.5">
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Статус</span>
+                        <span className={FIELD_LABEL_CLASS}>Статус</span>
                         <Select
                           value={editForm.status}
                           onValueChange={(value) => setEditForm(prev => prev ? ({ ...prev, status: value as WarrantyClaimStatus }) : prev)}
@@ -1154,20 +1186,20 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                         </Select>
                       </label>
                       <label className="space-y-1.5">
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Номер дела завода</span>
+                        <span className={FIELD_LABEL_CLASS}>Номер дела завода</span>
                         <Input value={editForm.factoryCaseNumber} onChange={(event) => setEditForm(prev => prev ? ({ ...prev, factoryCaseNumber: event.target.value }) : prev)} disabled={!canEdit} />
                       </label>
                       <label className="space-y-1.5">
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Срок ответа</span>
+                        <span className={FIELD_LABEL_CLASS}>Срок ответа</span>
                         <Input type="date" value={editForm.responseDueDate} onChange={(event) => setEditForm(prev => prev ? ({ ...prev, responseDueDate: event.target.value }) : prev)} disabled={!canEdit} />
                       </label>
                     </div>
                     <label className="space-y-1.5">
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Ответ завода</span>
+                      <span className={FIELD_LABEL_CLASS}>Ответ завода</span>
                       <Textarea value={editForm.factoryResponse} onChange={(event) => setEditForm(prev => prev ? ({ ...prev, factoryResponse: event.target.value }) : prev)} rows={4} disabled={!canEdit} placeholder="Что ответил завод, какие уточнения запросил..." />
                     </label>
                     <label className="space-y-1.5">
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Итоговое решение</span>
+                      <span className={FIELD_LABEL_CLASS}>Итоговое решение</span>
                       <Textarea value={editForm.decision} onChange={(event) => setEditForm(prev => prev ? ({ ...prev, decision: event.target.value }) : prev)} rows={3} disabled={!canEdit} placeholder="Что делаем дальше: ремонт по гарантии, заказ запчастей, отказ..." />
                     </label>
                     <div className="flex flex-wrap justify-between gap-2">

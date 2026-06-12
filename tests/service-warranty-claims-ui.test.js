@@ -68,3 +68,31 @@ test('reclamations frontend RBAC does not broaden tab access to all mechanics', 
   assert.match(servicePageSource, /const canManageWarrantyClaims = \['Администратор', 'Офис-менеджер'\]\.includes\(normalizedRole\) \|\| isWarrantyMechanicRole\(normalizedRole\)/);
   assert.doesNotMatch(servicePageSource, /const canManageWarrantyClaims = can\('edit', 'service'\)/);
 });
+
+test('reclamations tab uses rentCore semantic UI tokens instead of legacy palettes', () => {
+  for (const legacyPattern of [
+    /#[0-9a-fA-F]{3,8}/,
+    /\bbg-white\b/,
+    /\btext-gray-/,
+    /\bborder-gray-/,
+    /\bbg-slate-/,
+    /\b(?:blue|red|amber|emerald|orange|green)-/,
+    /shadow-\[/,
+  ]) {
+    assert.doesNotMatch(warrantyTabSource, legacyPattern);
+  }
+
+  for (const tokenPattern of [
+    /\bbg-card\b/,
+    /\bbg-muted\//,
+    /\bborder-border\b/,
+    /\btext-foreground\b/,
+    /\btext-muted-foreground\b/,
+    /\btext-warning-foreground\b/,
+    /\btext-danger-foreground\b/,
+    /\btext-success-foreground\b/,
+    /\btext-info-foreground\b/,
+  ]) {
+    assert.match(warrantyTabSource, tokenPattern);
+  }
+});

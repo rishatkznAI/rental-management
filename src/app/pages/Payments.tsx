@@ -337,7 +337,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             {/* Amount due */}
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -367,7 +367,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Срок оплаты <span className="text-red-500">*</span>
@@ -696,7 +696,7 @@ function PaymentAllocationPanel({
   }
 
   return (
-    <div className="rounded-lg border border-blue-200 bg-white p-4 shadow-sm dark:border-blue-900/60 dark:bg-gray-900">
+    <div data-payment-detail-responsive="true" className="max-w-full overflow-hidden rounded-lg border border-blue-200 bg-white p-4 shadow-sm dark:border-blue-900/60 dark:bg-gray-900">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Распределение оплаты</h2>
@@ -721,7 +721,42 @@ function PaymentAllocationPanel({
         </div>
       )}
 
-      <div className="mt-5 overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+      <div data-payment-allocation-mobile-list="true" className="mt-5 space-y-3 md:hidden">
+        {paymentAllocations.map(item => {
+          const rental = item.rentalId ? rentalsById.get(item.rentalId) : null;
+          const doc = item.documentId ? documentsById.get(item.documentId) : null;
+          return (
+            <div key={item.id} data-payment-allocation-mobile-card="true" className="rounded-xl border border-gray-200 bg-white p-3 text-sm dark:border-gray-700 dark:bg-gray-950/35">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="break-words font-semibold text-gray-900 dark:text-white">
+                    {item.rentalId ? `${item.rentalId} · ${rental?.equipmentInv || 'аренда'}` : 'Без аренды'}
+                  </p>
+                  <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">
+                    {objectsById.get(text(item.objectId))?.name || 'Без объекта'} · {contractsById.get(text(item.contractId))?.number || text(item.contractId) || 'без договора'}
+                  </p>
+                </div>
+                <p className="shrink-0 whitespace-nowrap font-semibold text-gray-900 dark:text-white">{formatCurrency(item.amount)}</p>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-gray-500 dark:text-gray-400">
+                <p className="break-words">Документ: {doc ? `${doc.type} ${doc.number || doc.documentNumber || doc.id}` : text(item.documentId) || '—'}</p>
+                <p>Период: {item.periodStart || rental?.startDate || '—'} — {item.periodEnd || rental?.endDate || rental?.plannedReturnDate || '—'}</p>
+                <p className="break-words">Комментарий: {item.comment || '—'}</p>
+                <p>Источник: {item.source || 'manual'}</p>
+              </div>
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                <Button size="sm" variant="secondary" onClick={() => editAllocation(item)}><Edit2 className="h-4 w-4" /> Изменить</Button>
+                <Button size="sm" variant="ghost" onClick={() => deleteAllocation.mutate(item.id)}><Trash2 className="h-4 w-4" /> Удалить</Button>
+              </div>
+            </div>
+          );
+        })}
+        {paymentAllocations.length === 0 && (
+          <div className="rounded-xl border border-dashed border-gray-200 px-3 py-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">Распределений пока нет</div>
+        )}
+      </div>
+
+      <div data-payment-allocation-desktop-table="true" className="mt-5 hidden overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 md:block">
         <Table>
           <TableHeader><TableRow><TableHead>Объект</TableHead><TableHead>Договор</TableHead><TableHead>Аренда</TableHead><TableHead>Документ/УПД</TableHead><TableHead>Период</TableHead><TableHead>Сумма</TableHead><TableHead>Комментарий</TableHead><TableHead>Источник</TableHead><TableHead>Действия</TableHead></TableRow></TableHeader>
           <TableBody>
@@ -805,7 +840,7 @@ function PaymentAllocationPanel({
                 : 0;
               return (
                 <div key={row.rentalId} className="grid gap-2 rounded-lg border border-gray-200 p-3 text-sm md:grid-cols-[1fr_150px] dark:border-gray-700">
-                  <div className="flex gap-3">
+                  <div className="flex min-w-0 gap-3">
                     <input
                       type="checkbox"
                       className="mt-1 h-4 w-4"
@@ -815,10 +850,10 @@ function PaymentAllocationPanel({
                         [row.rentalId]: event.target.checked ? String(Math.min(row.outstanding, unallocated)) : '',
                       }))}
                     />
-                    <div>
-                    <p className="font-medium">{payment.client} → {objectName} → {contractNumber} → {row.rentalId}</p>
-                    <p className="text-gray-500">{rental?.equipmentInv || row.equipmentInv} · {row.startDate} — {row.endDate} · менеджер {row.manager || '—'} · документ {doc?.number || doc?.id || '—'}</p>
-                    <p className="text-gray-500">Начислено {formatCurrency(row.amount)} · оплачено {formatCurrency(row.paidAmount)} · долг {formatCurrency(row.outstanding)} · просрочка {overdueDays > 0 ? `${overdueDays} дн.` : 'нет'}</p>
+                    <div className="min-w-0">
+                    <p className="break-words font-medium">{payment.client} → {objectName} → {contractNumber} → {row.rentalId}</p>
+                    <p className="break-words text-gray-500">{rental?.equipmentInv || row.equipmentInv} · {row.startDate} — {row.endDate} · менеджер {row.manager || '—'} · документ {doc?.number || doc?.id || '—'}</p>
+                    <p className="break-words text-gray-500">Начислено {formatCurrency(row.amount)} · оплачено {formatCurrency(row.paidAmount)} · долг {formatCurrency(row.outstanding)} · просрочка {overdueDays > 0 ? `${overdueDays} дн.` : 'нет'}</p>
                     </div>
                   </div>
                   <Input type="number" min="0" value={selectedDebt[row.rentalId] || ''} onChange={e => setSelectedDebt(current => ({ ...current, [row.rentalId]: e.target.value }))} placeholder="Сумма" />
@@ -842,7 +877,7 @@ function PaymentAllocationPanel({
               </div>
             ))}
           </div>
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
             <Button onClick={applyPreview}>Применить автозачёт</Button>
             <Button variant="secondary" onClick={() => setPreview([])}>Отмена</Button>
           </div>
@@ -978,7 +1013,7 @@ export default function Payments() {
   const visibleRentalDebtRows = showAllRentalDebts ? rentalDebtRows : rentalDebtRows.slice(0, 8);
 
   return (
-    <div className="min-h-screen space-y-6 bg-[#f7f9fc] p-4 text-slate-950 dark:bg-background dark:text-foreground sm:p-6 md:p-8">
+    <div data-payments-responsive-root="true" className="min-h-screen max-w-full space-y-6 overflow-x-clip bg-[#f7f9fc] p-4 text-slate-950 dark:bg-background dark:text-foreground sm:p-6 md:p-8">
       <AddPaymentModal
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
@@ -1292,7 +1327,114 @@ export default function Payments() {
             {paymentSummary?.count ?? paymentsQuery.data?.pagination.total ?? 0} записей
           </div>
         </div>
-        <div className="overflow-x-auto">
+        <div data-payment-mobile-list="true" className="grid gap-3 p-3 md:hidden">
+          {paymentList.map((payment) => {
+            const paid = payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0);
+            const remaining = payment.amount - paid;
+            const clientProfileId = resolveClientProfileId({
+              clients,
+              clientsById,
+              clientId: payment.clientId,
+              clientName: payment.client,
+            });
+            return (
+              <article
+                key={payment.id}
+                data-payment-mobile-card="true"
+                className={cn(
+                  'max-w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_28px_rgba(15,23,42,0.05)] dark:border-border dark:bg-card/70 dark:shadow-none',
+                  payment.status === 'overdue' && 'border-red-200 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20',
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Счёт</p>
+                    <p className="mt-1 break-words font-semibold text-slate-950 dark:text-white">{payment.invoiceNumber || payment.id}</p>
+                  </div>
+                  <div data-payment-mobile-status="true" className="flex max-w-[52%] shrink-0 justify-end [&_.app-status-pill]:max-w-full [&_.app-status-pill]:whitespace-normal [&_.app-status-pill]:text-center">
+                    {getPaymentStatusBadge(payment.status)}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3">
+                  <div data-payment-mobile-client="true" className="min-w-0">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Клиент</p>
+                    {clientProfileId ? (
+                      <Link
+                        to={`/clients/${clientProfileId}`}
+                        className="mt-1 block break-words rounded-md text-sm font-semibold text-slate-800 transition hover:text-[--color-primary] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 dark:text-foreground"
+                        aria-label={`Открыть карточку клиента ${payment.client}`}
+                      >
+                        {payment.client}
+                      </Link>
+                    ) : (
+                      <p className="mt-1 break-words text-sm font-semibold text-slate-800 dark:text-foreground">{payment.client || '—'}</p>
+                    )}
+                  </div>
+
+                  <div data-payment-mobile-rental="true" className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Аренда</span>
+                    {payment.rentalId ? (
+                      <span className="max-w-full break-all rounded-lg bg-slate-100 px-2 py-1 font-mono text-xs font-medium text-slate-600 dark:bg-secondary dark:text-foreground">
+                        {payment.rentalId}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-slate-400 dark:text-muted-foreground">—</span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div data-payment-mobile-amount="true" className="min-w-0 rounded-xl bg-slate-50 p-3 dark:bg-secondary/45">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Сумма</p>
+                      <p className="mt-1 break-words text-base font-semibold text-slate-950 dark:text-white">{formatCurrency(payment.amount)}</p>
+                    </div>
+                    <div className="min-w-0 rounded-xl bg-emerald-50 p-3 dark:bg-emerald-950/20">
+                      <p className="text-xs font-medium uppercase tracking-wide text-emerald-700/70 dark:text-emerald-200/70">Оплачено</p>
+                      <p className="mt-1 break-words text-base font-semibold text-emerald-700 dark:text-emerald-300">{formatCurrency(paid)}</p>
+                      {remaining > 0 && (
+                        <p className="mt-1 break-words text-xs text-slate-500 dark:text-muted-foreground">Остаток: {formatCurrency(remaining)}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div data-payment-mobile-date="true" className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Срок оплаты</p>
+                      <p className="mt-1 text-slate-700 dark:text-foreground">{formatDate(payment.dueDate)}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Дата оплаты</p>
+                      <p className="mt-1 text-slate-700 dark:text-foreground">{payment.paidDate ? formatDate(payment.paidDate) : '—'}</p>
+                    </div>
+                  </div>
+
+                  {payment.comment && (
+                    <div data-payment-mobile-comment="true" className="min-w-0 rounded-xl border border-slate-100 px-3 py-2 dark:border-border">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Комментарий</p>
+                      <p className="mt-1 break-words text-sm text-slate-600 dark:text-muted-foreground">{payment.comment}</p>
+                    </div>
+                  )}
+                </div>
+
+                <div data-payment-mobile-actions="true" className="mt-4 flex flex-wrap justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant={selectedPayment?.id === payment.id ? 'default' : 'secondary'}
+                    onClick={() => setSelectedPaymentId(payment.id)}
+                    className={cn(
+                      'w-full rounded-xl sm:w-auto',
+                      selectedPayment?.id !== payment.id && 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-secondary dark:text-foreground dark:hover:bg-accent',
+                    )}
+                  >
+                    Открыть распределение
+                  </Button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
+        <div data-payment-desktop-table="true" className="hidden overflow-x-auto md:block">
         <table className="min-w-[1040px] w-full border-collapse text-sm">
           <thead className="bg-slate-50 text-slate-500 dark:bg-muted/55 dark:text-muted-foreground">
             <tr className="border-b border-slate-200 dark:border-border">
@@ -1425,6 +1567,19 @@ export default function Payments() {
               <Button size="sm" className="mt-4" onClick={() => setShowAddModal(true)}>
                 <Plus className="h-4 w-4" />
                 Добавить платёж
+              </Button>
+            )}
+            {(paymentsQuery.data?.pagination.total ?? 0) > 0 && activeFilterCount > 0 && (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="mt-4"
+                onClick={() => {
+                  pagination.setSearch('');
+                  pagination.setFilters({ clientId: 'all', status: 'all' });
+                }}
+              >
+                Сбросить фильтры
               </Button>
             )}
           </div>

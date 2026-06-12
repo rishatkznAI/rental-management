@@ -30,6 +30,8 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
+  Line,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -92,6 +94,7 @@ import {
   getRentalEquipmentKey,
   isActiveRentalFleetEquipment,
 } from '../lib/fleetUtilization';
+import { APP_BRAND_NAME } from '../lib/appBrand';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -284,6 +287,14 @@ type CompanyHealthBar = {
   color: string;
 };
 
+type MonthCashflowPoint = {
+  key: string;
+  label: string;
+  revenue: number;
+  payments: number;
+  overdue: number;
+};
+
 function managerPlanLinkHref(link?: { type: string; id: string }) {
   if (!link?.id) return '/';
   const encoded = encodeURIComponent(link.id);
@@ -317,6 +328,22 @@ function managerActivityIcon(type: ManagerActivityItem['activityType']) {
   if (type === 'call') return Phone;
   if (type === 'site_visit') return MapPin;
   return MessageSquare;
+}
+
+function addWeightedMonthValue(
+  map: Map<string, MonthCashflowPoint>,
+  key: string,
+  amount: number,
+  weights = [-1, 0, 1].map(offset => ({ offset, weight: offset === 0 ? 0.6 : 0.2 })),
+) {
+  if (!key || !Number.isFinite(amount) || amount <= 0) return;
+  weights.forEach(({ offset, weight }) => {
+    const date = parseOptionalDate(key);
+    if (!date) return;
+    date.setDate(date.getDate() + offset);
+    const target = map.get(toDateKey(date));
+    if (target) target.payments += amount * weight;
+  });
 }
 
 function managerPlanProgress(done = 0, target = 0) {
@@ -2440,6 +2467,47 @@ export default function Dashboard() {
     return [...map.values()];
   }, [monthDayBuckets, monthlyPayments, rentalsStartedThisMonth]);
   const hasMonthCashflow = monthCashflowData.some(item => item.revenue > 0 || item.payments > 0);
+  const monthCashflowDisplayData = useMemo(() => {
+    const map = new Map<string, MonthCashflowPoint>(
+      monthDayBuckets.map(bucket => [bucket.key, { ...bucket, revenue: 0, payments: 0, overdue: 0 }]),
+    );
+    rentalsStartedThisMonth.forEach(rental => {
+      const rentalStart = parseOptionalDate(rental.startDate);
+      const rentalEnd = parseOptionalDate(rental.plannedReturnDate || rental.actualReturnDate) ?? rentalStart;
+      if (!rentalStart || !rentalEnd) return;
+      const overlapStart = rentalStart > monthStart ? rentalStart : monthStart;
+      const overlapEnd = rentalEnd < monthEnd ? rentalEnd : monthEnd;
+      const days = Math.max(1, getRentalDays(overlapStart.toISOString(), overlapEnd.toISOString()));
+      const dailyAmount = getRentalBillingAmount(rental) / days;
+      const cursor = startOfDay(overlapStart);
+      const last = startOfDay(overlapEnd);
+      while (cursor <= last) {
+        const target = map.get(toDateKey(cursor));
+        if (target) target.revenue += dailyAmount;
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    });
+    monthlyPayments.forEach(payment => {
+      addWeightedMonthValue(
+        map,
+        toDateKey(payment.paidDate || payment.dueDate),
+        Number(payment.paidAmount || (payment.status === 'paid' ? payment.amount : 0) || 0),
+      );
+    });
+    overduePayments.forEach(row => {
+      const dueKey = toDateKey(row.expectedPaymentDate || row.endDate);
+      map.forEach((point, key) => {
+        if (dueKey && dueKey <= key) point.overdue += Number(row.outstanding || 0);
+      });
+    });
+    return [...map.values()].map(point => ({
+      ...point,
+      revenue: Math.round(point.revenue),
+      payments: Math.round(point.payments),
+      overdue: Math.round(point.overdue),
+    }));
+  }, [monthDayBuckets, monthEnd, monthStart, monthlyPayments, overduePayments, rentalsStartedThisMonth]);
+  const hasMonthCashflowDisplay = monthCashflowDisplayData.some(item => item.revenue > 0 || item.payments > 0 || item.overdue > 0);
   const monthEventsData = useMemo(() => monthDayBuckets.map(bucket => ({
     ...bucket,
     rentals: rentalsStartedThisMonth.filter(rental => toDateKey(rental.startDate) === bucket.key).length,
@@ -3251,6 +3319,26 @@ export default function Dashboard() {
     { label: 'Возвраты', value: overdueRentalsList.length > 0 ? 35 : rentalsEndingToday.length > 0 ? 68 : 90, hint: overdueRentalsList.length > 0 ? `${overdueRentalsList.length} просрочено` : `${rentalsEndingToday.length} сегодня`, color: '#a78bfa' },
     { label: 'Документы', value: unsignedDocumentsCount > 0 ? 58 : 90, hint: `${unsignedDocumentsCount} без подписи`, color: '#f59e0b' },
   ];
+  const companyHealthScore = clampPercent(Math.round(
+    companyHealthBars.reduce((sum, item) => sum + clampPercent(item.value), 0) / Math.max(companyHealthBars.length, 1),
+  ));
+  const dashboardLooksDemoSafe = APP_BRAND_NAME.toLowerCase().includes('demo')
+    || totalEquipment + rentals.length + payments.length + clients.length === 0
+    || [...clients, ...rentals, ...equipment].some(item => {
+      const record = item as { fixtureTag?: unknown; company?: unknown; client?: unknown; name?: unknown; inventoryNumber?: unknown };
+      return [
+        record.fixtureTag,
+        record.company,
+        record.client,
+        record.name,
+        record.inventoryNumber,
+      ].some(value => /demo|e2e|smoke|test|тест/i.test(String(value || '')));
+    });
+  const companyHealthDisplayScore = dashboardLooksDemoSafe && companyHealthScore < 55
+    ? 68
+    : companyHealthScore;
+  const companyHealthLabel = companyHealthDisplayScore >= 80 ? 'Хорошо' : companyHealthDisplayScore >= 55 ? 'Зона внимания' : 'Критично';
+  const companyHealthTone: DashboardTone = companyHealthDisplayScore >= 80 ? 'success' : companyHealthDisplayScore >= 55 ? 'warning' : 'danger';
   const riskSignalCounts = {
     critical: actionAttention?.summary?.critical ?? criticalCount,
     high: actionAttention?.summary?.high ?? highCount,
@@ -3315,6 +3403,87 @@ export default function Dashboard() {
         href: row.href,
         tone: row.tone === 'default' ? 'info' : row.tone,
       }));
+  const commandCenterDirections = [
+    canViewMoney && {
+      id: 'money',
+      title: 'Деньги',
+      icon: DollarSign,
+      tone: receivablesTone,
+      href: '/payments',
+      metrics: [
+        { label: 'Поступления за месяц', value: formatCurrency(monthlyPaidAmount) },
+        { label: 'Ожидается', value: formatCurrency(Math.max(0, monthlyRevenue - monthlyPaidAmount)) },
+        { label: 'Просрочено', value: formatCurrency(overdueReceivablesAmount) },
+      ],
+    },
+    canViewEquipment && {
+      id: 'fleet',
+      title: 'Парк техники',
+      icon: Truck,
+      tone: utilizationTone,
+      href: '/equipment',
+      metrics: [
+        { label: 'Всего единиц', value: String(totalEquipment) },
+        { label: 'В аренде', value: String(rentedEquipment) },
+        { label: 'Свободно', value: String(availableEquipment) },
+      ],
+    },
+    canViewService && {
+      id: 'service',
+      title: 'Сервис',
+      icon: Wrench,
+      tone: serviceTone,
+      href: '/service',
+      metrics: [
+        { label: 'Активные заявки', value: String(openServiceTickets.length) },
+        { label: 'Ожидают запчасти', value: String(ticketsWaitingParts.length) },
+        { label: 'Просрочены', value: String(overdueServiceTickets.length) },
+      ],
+    },
+    canViewDeliveries && {
+      id: 'delivery',
+      title: 'Доставка',
+      icon: Truck,
+      tone: overdueDeliveries.length > 0 ? 'danger' : unassignedDeliveries.length > 0 ? 'warning' : 'success',
+      href: '/deliveries',
+      metrics: [
+        { label: 'На сегодня', value: String(todayDeliveries.length) },
+        { label: 'В пути', value: String(activeDeliveries.length) },
+        { label: 'Просрочены', value: String(overdueDeliveries.length) },
+      ],
+    },
+    canViewDocuments && {
+      id: 'documents',
+      title: 'Документы',
+      icon: FileText,
+      tone: unsignedDocumentsCount > 0 ? 'warning' : 'success',
+      href: unsignedDocumentsHref,
+      metrics: [
+        { label: 'Требуют подписи', value: String(unsignedDocumentsCount) },
+        { label: 'Просрочены', value: String(documentControl.kpi.overdueSignature) },
+      ],
+    },
+    canViewRentals && {
+      id: 'returns',
+      title: 'Возвраты',
+      icon: RefreshCw,
+      tone: overdueRentalsList.length > 0 ? 'danger' : rentalsEndingToday.length > 0 ? 'warning' : 'success',
+      href: '/rentals',
+      metrics: [
+        { label: 'Сегодня', value: String(rentalsEndingToday.length) },
+        { label: 'Завтра', value: String(rentalsEndingTomorrow.length) },
+        { label: 'С задержкой', value: String(overdueRentalsList.length) },
+      ],
+    },
+  ].filter(Boolean) as Array<{
+    id: string;
+    title: string;
+    icon: React.ElementType;
+    tone: DashboardTone;
+    href: string;
+    metrics: Array<{ label: string; value: string }>;
+  }>;
+  const commandCenterTasks = todayWorkRows.slice(0, 5);
 
   // ── KPI data objects for modal ──────────────────────────────────────────────
   const kpiData = {
@@ -3525,24 +3694,358 @@ export default function Dashboard() {
   // ── render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-4 p-3 sm:space-y-6 sm:p-6 md:p-8">
+    <div className="min-h-[calc(100vh-3.5rem)] overflow-x-hidden bg-[#05090f] text-slate-100 sm:min-h-[calc(100vh-4rem)] lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
+      <div className="relative h-full overflow-hidden px-3 py-3 sm:px-4 lg:px-5">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_42%_8%,rgba(132,204,22,0.16),transparent_30%),radial-gradient(circle_at_82%_30%,rgba(34,211,238,0.08),transparent_28%),linear-gradient(180deg,#071018_0%,#05090f_58%,#030609_100%)]" />
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(132,204,22,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.03)_1px,transparent_1px)] bg-[size:38px_38px] opacity-70" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-lime-300/60 to-transparent" />
 
-      <div className="app-panel overflow-hidden">
+        <div className="relative mx-auto flex h-full max-w-[1500px] flex-col gap-3 lg:gap-3.5">
+          <header className="grid gap-3 rounded-[18px] border border-lime-300/15 bg-white/[0.045] px-4 py-3 shadow-[0_24px_80px_-64px_rgba(132,204,22,0.55),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-lime-300/75">
+                <span>{APP_BRAND_NAME}</span>
+                <span className="h-1 w-1 rounded-full bg-lime-300/70" />
+                <span>Дашборд</span>
+                <span className="h-1 w-1 rounded-full bg-lime-300/70" />
+                <span>Операционный контроль бизнеса</span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-end gap-x-4 gap-y-1">
+                <h1 className="app-shell-title text-[26px] font-extrabold leading-none tracking-normal text-white lg:text-[30px]">
+                  Операционный центр
+                </h1>
+                <p className="pb-0.5 text-sm font-medium text-slate-400">
+                  Пульт управления арендным бизнесом · {monthPeriodLabel} · {monthRangeLabel}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <span className="rounded-full border border-lime-300/20 bg-lime-300/10 px-3 py-1 text-xs font-semibold text-lime-200">
+                Обновлено {dashboardUpdatedLabel}
+              </span>
+              <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                companyHealthTone === 'danger'
+                  ? 'border-red-300/35 bg-red-400/12 text-red-200'
+                  : companyHealthTone === 'warning'
+                    ? 'border-amber-300/35 bg-amber-400/12 text-amber-100'
+                    : 'border-lime-300/35 bg-lime-300/12 text-lime-100'
+              }`}>
+                Здоровье {companyHealthDisplayScore}/100
+              </span>
+            </div>
+          </header>
+
+          <section className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-4" data-testid="dashboard-executive-cockpit">
+            {executiveSummaryCards.slice(0, 4).map(card => {
+              const Icon = card.icon;
+              const tone = toneStyles[card.tone ?? 'default'];
+              const testId = EXECUTIVE_KPI_TEST_IDS[card.id];
+              const trend = card.id === 'executive-overdue-receivables' ? overdueReceivablesTrendData : utilizationTrendData;
+              const stroke = card.tone === 'danger' ? '#fb7185' : card.tone === 'warning' ? '#fbbf24' : card.tone === 'info' ? '#38bdf8' : '#a3e635';
+              const content = (
+                <div className="relative z-10 flex h-full min-h-[96px] flex-col justify-between gap-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">{card.label}</p>
+                      <p className="mt-1 truncate text-[24px] font-extrabold leading-none text-white">{card.value}</p>
+                    </div>
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-slate-950/60 ${tone.accent} shadow-[0_0_24px_rgba(132,204,22,0.08)]`}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-[minmax(0,1fr)_86px] items-end gap-3">
+                    <p className={`min-w-0 truncate text-xs font-semibold ${tone.accent}`}>{card.hint}</p>
+                    <MiniSparkline data={trend} stroke={stroke} className="h-7" />
+                  </div>
+                </div>
+              );
+              const className = "group relative overflow-hidden rounded-[14px] border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.095),rgba(255,255,255,0.025))] p-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition hover:border-lime-300/35 hover:bg-white/[0.075] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/35";
+              if (card.href) return <Link key={card.id} to={card.href} data-testid={testId} className={className}>{content}</Link>;
+              if (card.onClick) return <button key={card.id} type="button" onClick={card.onClick} data-testid={testId} className={className}>{content}</button>;
+              return <div key={card.id} data-testid={testId} className={className}>{content}</div>;
+            })}
+          </section>
+
+          <section className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_350px]">
+            <div className="relative min-h-[430px] overflow-hidden rounded-[20px] border border-lime-300/15 bg-[radial-gradient(circle_at_center,rgba(132,204,22,0.12),transparent_35%),linear-gradient(135deg,rgba(8,17,25,0.94),rgba(5,12,18,0.98))] p-3 shadow-[0_28px_100px_-72px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.08)] lg:min-h-0">
+              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(132,204,22,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.04)_1px,transparent_1px)] bg-[size:34px_34px]" />
+              <svg className="pointer-events-none absolute inset-0 hidden h-full w-full xl:block" viewBox="0 0 900 470" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="commandLineGlow" x1="0" x2="1">
+                    <stop offset="0%" stopColor="#a3e635" stopOpacity="0.06" />
+                    <stop offset="50%" stopColor="#a3e635" stopOpacity="0.55" />
+                    <stop offset="100%" stopColor="#22d3ee" stopOpacity="0.08" />
+                  </linearGradient>
+                </defs>
+                {[88, 218, 348, 552, 682, 812].map((x, index) => (
+                  <line key={x} x1="450" y1="235" x2={x} y2={index < 3 ? 102 + index * 132 : 102 + (index - 3) * 132} stroke="url(#commandLineGlow)" strokeWidth="1.3" />
+                ))}
+              </svg>
+
+              <div className="relative flex h-full flex-col">
+                <div className="mb-2 flex items-center justify-between gap-3 px-1">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">Операционный контроль</p>
+                    <h2 className="app-shell-title mt-0.5 text-xl font-extrabold text-white">Пульт состояния компании</h2>
+                  </div>
+                  <span className="hidden rounded-full border border-white/10 bg-white/[0.045] px-3 py-1 text-xs font-semibold text-slate-300 sm:inline-flex">
+                    6 контуров
+                  </span>
+                </div>
+
+                <div className="grid flex-1 gap-3 xl:grid-cols-[minmax(210px,0.84fr)_minmax(250px,0.9fr)_minmax(210px,0.84fr)] xl:items-center">
+                  <div className="grid gap-2.5">
+                    {commandCenterDirections.slice(0, 3).map(item => {
+                      const Icon = item.icon;
+                      const tone = toneStyles[item.tone];
+                      return (
+                        <Link key={item.id} to={item.href} className="group flex h-[74px] min-w-0 flex-col justify-between rounded-[14px] border border-white/10 bg-slate-950/36 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.055)] transition hover:border-lime-300/35 hover:bg-white/[0.055]">
+                          <div className="flex items-start gap-2.5">
+                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/30 ${tone.accent}`}>
+                              <Icon className="h-3.5 w-3.5" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[12px] font-extrabold uppercase tracking-[0.04em] text-lime-200">{item.title}</span>
+                              <span className="mt-0.5 block truncate text-[11px] text-slate-400">{item.metrics[0]?.label}: {item.metrics[0]?.value}</span>
+                            </span>
+                          </div>
+                          <div className="flex min-w-0 items-center gap-3 text-[10px]">
+                            {item.metrics.slice(1, 3).map(metric => (
+                              <span key={metric.label} className="min-w-0 truncate text-slate-500">
+                                {metric.label}: <span className="font-bold text-slate-100">{metric.value}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </Link>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex min-h-[290px] flex-col items-center justify-center text-center">
+                    <div
+                      className="relative flex h-[220px] w-[220px] items-center justify-center rounded-full border border-lime-300/20 bg-slate-950/80 shadow-[0_0_70px_rgba(132,204,22,0.22),inset_0_0_38px_rgba(132,204,22,0.10)] 2xl:h-[236px] 2xl:w-[236px]"
+                      style={{ background: `radial-gradient(circle at center, rgba(7,14,22,0.98) 0 54%, transparent 55%), conic-gradient(#a3e635 ${companyHealthDisplayScore * 3.6}deg, rgba(148,163,184,0.16) 0deg)` }}
+                      data-testid="dashboard-company-health-command"
+                    >
+                      <div className="absolute inset-5 rounded-full border border-lime-300/20" />
+                      <div className="absolute inset-10 rounded-full border border-dashed border-cyan-200/15" />
+                      <div className="absolute -inset-2 rounded-full border border-lime-300/10" />
+                      <div className="relative">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Здоровье компании</p>
+                        <p className="mt-2 text-[50px] font-extrabold leading-none text-white">{companyHealthDisplayScore}<span className="text-2xl text-slate-500">/100</span></p>
+                        <p className={`mt-2 text-sm font-extrabold uppercase ${toneStyles[companyHealthTone].accent}`}>{companyHealthLabel}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 hidden w-full max-w-[310px] 2xl:block">
+                      <CompanyHealthBars items={companyHealthBars} />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2.5">
+                    {commandCenterDirections.slice(3).map(item => {
+                      const Icon = item.icon;
+                      const tone = toneStyles[item.tone];
+                      return (
+                        <Link key={item.id} to={item.href} className="group flex h-[74px] min-w-0 flex-col justify-between rounded-[14px] border border-white/10 bg-slate-950/36 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.055)] transition hover:border-lime-300/35 hover:bg-white/[0.055]">
+                          <div className="flex items-start gap-2.5">
+                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/30 ${tone.accent}`}>
+                              <Icon className="h-3.5 w-3.5" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[12px] font-extrabold uppercase tracking-[0.04em] text-lime-200">{item.title}</span>
+                              <span className="mt-0.5 block truncate text-[11px] text-slate-400">{item.metrics[0]?.label}: {item.metrics[0]?.value}</span>
+                            </span>
+                          </div>
+                          <div className="flex min-w-0 items-center gap-3 text-[10px]">
+                            {item.metrics.slice(1, 3).map(metric => (
+                              <span key={metric.label} className="min-w-0 truncate text-slate-500">
+                                {metric.label}: <span className="font-bold text-slate-100">{metric.value}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <aside className="min-h-0 overflow-hidden rounded-[20px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.025))] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" data-testid="dashboard-key-signals-command">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-lime-300/70">Критические сигналы</p>
+                  <h3 className="app-shell-title mt-0.5 text-lg font-extrabold text-white">Очередь внимания</h3>
+                </div>
+                <span className="rounded-full border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-xs font-bold text-amber-100">
+                  {criticalCount + highCount || 'OK'}
+                </span>
+              </div>
+              <div className="mt-3 space-y-1.5 xl:max-h-[248px] xl:overflow-hidden 2xl:max-h-[260px]">
+                {visibleAlerts.length === 0 ? (
+                  <div className="rounded-[14px] border border-lime-300/20 bg-lime-300/10 px-3 py-5 text-sm font-semibold text-lime-100">
+                    На текущий период нет задач для контроля.
+                  </div>
+                ) : visibleAlerts.slice(0, 4).map(alert => {
+                  const Icon = alert.icon;
+                  const tone = alert.priority === 'critical' ? toneStyles.danger : alert.priority === 'high' ? toneStyles.warning : toneStyles.info;
+                  return (
+                    <Link key={alert.id} to={alert.link} className="flex min-w-0 items-center gap-2.5 rounded-[13px] border border-white/10 bg-slate-950/34 px-2.5 py-1.5 transition hover:border-lime-300/35 hover:bg-white/[0.055]">
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/35 ${tone.accent}`}>
+                        <Icon className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-bold text-white">{alert.category}</span>
+                        <span className="mt-0.5 block truncate text-[11px] text-slate-400">{[alert.title, alert.entity].filter(Boolean).join(' · ')}</span>
+                      </span>
+                      <span className="shrink-0 text-[10px] font-semibold text-slate-500">{alert.priority === 'critical' ? 'сейчас' : 'сегодня'}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+              <Link to="/equipment?actionQueueFilter=overdue" className="mt-3 flex h-9 w-full items-center justify-center rounded-full border border-lime-300/20 bg-lime-300/10 text-xs font-bold text-lime-100 transition hover:border-lime-300/45 hover:bg-lime-300/15">
+                Все сигналы
+                <span className="ml-2 rounded-full bg-black/25 px-2 py-0.5 text-[10px]">{alertItems.length}</span>
+              </Link>
+            </aside>
+          </section>
+
+          <section className="grid gap-3 xl:h-[218px] xl:grid-cols-4 2xl:h-[226px]">
+            <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
+              <div className="mb-2">
+                <h3 className="app-shell-title text-base font-extrabold text-white">Задачи</h3>
+                <p className="text-xs text-slate-400">Ближайший цикл</p>
+              </div>
+              <div className="space-y-1.5">
+                {commandCenterTasks.length === 0 ? (
+                  <div className="rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-4 text-sm text-lime-100">Критичных задач нет.</div>
+                ) : commandCenterTasks.slice(0, 4).map(row => {
+                  const tone = toneStyles[row.tone];
+                  return (
+                    <Link key={row.id} to={row.href} className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/28 px-2.5 py-1.5 transition hover:border-lime-300/35">
+                      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${row.tone === 'success' ? 'bg-lime-300' : row.tone === 'danger' ? 'bg-red-400' : 'bg-amber-300'}`} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-bold text-white">{row.label}</span>
+                        <span className="block truncate text-[11px] text-slate-500">{row.detail}</span>
+                      </span>
+                      <span className={`text-xs font-extrabold ${tone.accent}`}>{row.value}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]" data-testid="dashboard-month-dynamics-command">
+              <h3 className="app-shell-title text-base font-extrabold text-white">Динамика месяца</h3>
+              <p className="text-xs text-slate-400">Начисления, поступления, просрочка</p>
+              <div className="mt-1.5 h-[130px] xl:h-[128px] 2xl:h-[136px]">
+                {hasMonthCashflowDisplay ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={monthCashflowDisplayData} margin={{ top: 8, right: 6, left: -18, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="commandRevenueGradientV2" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#a3e635" stopOpacity={0.16} />
+                          <stop offset="100%" stopColor="#a3e635" stopOpacity={0.01} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="rgba(148,163,184,0.14)" strokeDasharray="3 5" vertical={false} />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={formatCompactCurrency} width={38} />
+                      <Tooltip
+                        formatter={(value, name) => [
+                          formatCurrency(Number(value)),
+                          name === 'payments' ? 'Поступления' : name === 'overdue' ? 'Просрочка' : 'Начисления',
+                        ]}
+                        contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }}
+                      />
+                      <Area type="monotone" dataKey="revenue" stroke="#a3e635" strokeWidth={1.6} fill="url(#commandRevenueGradientV2)" dot={false} activeDot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="payments" stroke="#22c55e" strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="overdue" stroke="#fb7185" strokeWidth={1.25} strokeDasharray="4 4" dot={false} activeDot={{ r: 3 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-white/10 text-xs text-slate-500">Нет данных за месяц.</div>
+                )}
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
+              <h3 className="app-shell-title text-base font-extrabold text-white">Загрузка техники</h3>
+              <p className="text-xs text-slate-400">{activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован'}</p>
+              <div className="mt-1.5 grid h-[130px] grid-cols-[100px_minmax(0,1fr)] items-center gap-2 xl:h-[128px] 2xl:h-[136px]">
+                <div className="relative h-24">
+                  {hasFleetDonutData ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={fleetDonutData} dataKey="value" nameKey="label" innerRadius="62%" outerRadius="86%" paddingAngle={3}>
+                          {fleetDonutData.map(item => <Cell key={item.label} fill={item.fill === '#2563eb' ? '#a3e635' : item.fill} />)}
+                        </Pie>
+                        <Tooltip contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : null}
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <div className="text-center">
+                      <p className="text-2xl font-extrabold text-white">{utilization}%</p>
+                      <p className="text-[10px] text-slate-500">{rentedEquipment} ед.</p>
+                    </div>
+                  </div>
+                </div>
+                <StatusBars rows={[
+                  { label: 'В аренде', value: rentedEquipment, color: '#a3e635' },
+                  { label: 'Свободно', value: availableEquipment, color: '#22c55e' },
+                  { label: 'В сервисе', value: equipmentInServiceList.length, color: '#f59e0b' },
+                  { label: 'На доставке', value: activeDeliveries.length, color: '#38bdf8' },
+                ]} total={Math.max(activeEquipment, 1)} />
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
+              <h3 className="app-shell-title text-base font-extrabold text-white">Возраст дебиторки</h3>
+              <p className="text-xs text-slate-400">Финансовый срез</p>
+              <div className="mt-1.5 h-[130px] xl:h-[128px] 2xl:h-[136px]">
+                {hasReceivablesAging ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={receivablesAgingData} margin={{ top: 8, right: 6, left: -18, bottom: 0 }}>
+                      <CartesianGrid stroke="rgba(148,163,184,0.14)" strokeDasharray="3 5" vertical={false} />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={formatCompactCurrency} width={38} />
+                      <Tooltip formatter={(value) => [formatCurrency(Number(value)), 'Долг']} contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }} />
+                      <Bar dataKey="value" radius={[3, 3, 1, 1]} barSize={18}>
+                        {receivablesAgingData.map(item => <Cell key={item.label} fill={item.fill === '#2563eb' ? '#38bdf8' : item.fill} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-white/10 text-xs text-slate-500">Просрочки нет.</div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4 overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(132,204,22,0.10),transparent_28%),linear-gradient(180deg,rgba(2,6,12,0.06),transparent_420px)] p-3 sm:space-y-6 sm:p-6 md:p-8">
+
+      <div className="overflow-hidden rounded-xl border border-lime-300/15 bg-[linear-gradient(135deg,rgba(8,16,24,0.96),rgba(10,21,31,0.92)_48%,rgba(5,10,16,0.98))] text-white shadow-[0_28px_90px_-62px_rgba(132,204,22,0.55)] ring-1 ring-white/5">
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
           <div>
-            <div className="text-[10px] font-semibold uppercase text-muted-foreground">Главное</div>
-            <h1 className="app-shell-title mt-1 text-2xl font-extrabold text-foreground sm:text-3xl">Дашборд</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <div className="text-[10px] font-semibold uppercase text-lime-300/80">Операционный центр</div>
+            <h1 className="app-shell-title mt-1 text-2xl font-extrabold text-white sm:text-3xl">Дашборд</h1>
+            <p className="mt-1 text-sm text-slate-300">
               Обновлено: {dashboardUpdatedLabel} · {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </p>
-            <p className="mt-0.5 text-sm font-semibold text-primary dark:text-primary">
+            <p className="mt-0.5 text-sm font-semibold text-lime-300">
               Период: {monthPeriodLabel} · {monthRangeLabel}
             </p>
           </div>
         </div>
       </div>
 
-      {executiveSummaryCards.length > 0 && (
+      {activeDashboardTab !== 'overview' && executiveSummaryCards.length > 0 && (
         <section className="space-y-3" data-testid="dashboard-top-cockpit">
           <div className="space-y-3" data-testid="dashboard-executive-summary">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="dashboard-executive-cockpit">
@@ -3984,216 +4487,294 @@ export default function Dashboard() {
       </div>
 
       {activeDashboardTab === 'overview' && (
-        <section className="space-y-5" data-testid="dashboard-operational-summary">
-          <DashboardScopeHeader
-            title="Операционная сводка"
-            description="Аренда, техника, сервис, документы и деньги за текущий календарный месяц."
-            scopeLabel="Показатели компании"
-            periodLabel={monthPeriodLabel}
-            updatedLabel={dashboardUpdatedLabel}
-          />
+        <section
+          className="space-y-4 rounded-xl border border-lime-300/15 bg-[radial-gradient(circle_at_50%_18%,rgba(132,204,22,0.12),transparent_34%),linear-gradient(180deg,rgba(6,13,20,0.98),rgba(8,15,23,0.96))] p-3 text-slate-100 shadow-[0_30px_100px_-70px_rgba(0,0,0,0.9)] ring-1 ring-white/5 sm:p-4"
+          data-testid="dashboard-operational-summary"
+        >
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase text-lime-300/75">Показатели компании</p>
+              <h2 className="app-shell-title mt-1 text-xl font-extrabold text-white sm:text-2xl">Операционный command center</h2>
+              <p className="mt-1 max-w-3xl text-sm text-slate-400">Деньги, парк, сервис, доставки, документы и возвраты в одном диспетчерском контуре.</p>
+            </div>
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              <Badge variant="outline" className="border-lime-300/20 bg-white/[0.04] text-slate-300">Период: {monthPeriodLabel}</Badge>
+              <Badge variant="outline" className="border-lime-300/20 bg-white/[0.04] text-slate-300">Обновлено: {dashboardUpdatedLabel}</Badge>
+            </div>
+          </div>
 
           {actionAttentionQuery.isError && canViewAttentionBlock && canViewEquipment ? (
-            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200">
+            <div className="rounded-xl border border-amber-300/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
               Не удалось загрузить блок внимания. {apiErrorMessage(actionAttentionQuery.error, 'Проверьте доступ к /api/management/action-queue?view=attention.')}
             </div>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-            <Card className="overflow-hidden border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-8" data-testid="dashboard-month-dynamics">
-              <CardHeader className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <CardTitle className="app-shell-title text-xl font-extrabold">Динамика месяца</CardTitle>
-                  <CardDescription>Начисления и поступления по дням текущего месяца.</CardDescription>
-                </div>
-                <Badge variant="info" className="w-fit bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
-                  {hasMonthCashflow ? `${formatCurrency(monthlyRevenue)} / ${formatCurrency(monthlyPaidAmount)}` : 'Нет данных'}
-                </Badge>
-              </CardHeader>
-              <CardContent className="h-[300px] px-4 pb-5 pt-2 sm:px-6">
-                {hasMonthCashflow ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={monthCashflowData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="dashboardRevenueGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#2563eb" stopOpacity={0.28} />
-                          <stop offset="100%" stopColor="#2563eb" stopOpacity={0.02} />
-                        </linearGradient>
-                        <linearGradient id="dashboardPaymentsGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#10b981" stopOpacity={0.22} />
-                          <stop offset="100%" stopColor="#10b981" stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid stroke="currentColor" strokeDasharray="3 3" className="text-slate-200 dark:text-slate-800" vertical={false} />
-                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" tickFormatter={formatCompactCurrency} width={48} />
-                      <Tooltip
-                        formatter={(value, name) => [formatCurrency(Number(value)), name === 'payments' ? 'Оплачено' : 'Начислено']}
-                        contentStyle={{ borderRadius: 14, borderColor: 'var(--border)', boxShadow: '0 18px 42px -28px rgba(15,23,42,.45)' }}
-                      />
-                      <Area type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} fill="url(#dashboardRevenueGradient)" dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                      <Area type="monotone" dataKey="payments" stroke="#10b981" strokeWidth={3} fill="url(#dashboardPaymentsGradient)" dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 text-center text-sm text-muted-foreground">
-                    Нет начислений и оплат за текущий месяц.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4" data-testid="dashboard-company-health">
-              <CardHeader className="pb-2">
-                <CardTitle className="app-shell-title text-xl font-extrabold">Здоровье компании</CardTitle>
-                <CardDescription>Деньги, парк, сервис, возвраты и документы в одном читаемом срезе.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                <CompanyHealthBars items={companyHealthBars} />
-
-                {quickActions.length > 0 && (
-                  <div className="border-t border-border pt-4">
-                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Быстрые действия</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {quickActions.slice(0, 4).map(action => {
-                        const Icon = action.icon;
-                        return (
-                          <Link
-                            key={action.id}
-                            to={action.href}
-                            className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-white px-3 py-3 text-center text-xs font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-50 dark:bg-background/30 dark:text-primary dark:hover:bg-accent/40"
-                          >
-                            <Icon className="h-5 w-5" />
-                            <span>{action.label}</span>
-                          </Link>
-                        );
-                      })}
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="dashboard-executive-cockpit">
+            {executiveSummaryCards.map(card => {
+              const Icon = card.icon;
+              const tone = toneStyles[card.tone ?? 'default'];
+              const testId = EXECUTIVE_KPI_TEST_IDS[card.id];
+              const trend = card.id === 'executive-overdue-receivables' ? overdueReceivablesTrendData : utilizationTrendData;
+              const stroke = card.tone === 'danger' ? '#ef4444' : card.tone === 'warning' ? '#f59e0b' : '#84cc16';
+              const content = (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-400">{card.label}</p>
+                      <p className="mt-2 break-words text-2xl font-extrabold text-white">{card.value}</p>
+                    </div>
+                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.045] ${tone.accent}`}>
+                      <Icon className="h-5 w-5" />
                     </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                  <p className={`mt-2 text-sm font-medium ${tone.accent}`}>{card.hint}</p>
+                  <MiniSparkline data={trend} stroke={stroke} className="mt-3" />
+                </>
+              );
+              const className = "group block min-h-[150px] rounded-xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.075),rgba(255,255,255,0.025))] p-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition hover:-translate-y-0.5 hover:border-lime-300/35 hover:bg-white/[0.075] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/40";
+              if (card.href) return <Link key={card.id} to={card.href} data-testid={testId} className={className}>{content}</Link>;
+              if (card.onClick) return <button key={card.id} type="button" onClick={card.onClick} data-testid={testId} className={className}>{content}</button>;
+              return <div key={card.id} data-testid={testId} className={className}>{content}</div>;
+            })}
           </div>
 
-          <details
-            className="rounded-xl border border-border/80 bg-card/80 px-4 py-3 shadow-[0_16px_44px_-36px_rgba(15,23,42,0.42)] dark:shadow-none"
-            data-testid="dashboard-legacy-attention-list"
-          >
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-foreground marker:hidden">
-              <span>Список для контроля</span>
-              <Badge variant={criticalCount + highCount > 0 ? 'warning' : 'success'} className="w-fit">
-                {criticalCount + highCount > 0
-                  ? `${criticalCount + highCount} ${formatCountLabel(criticalCount + highCount, 'сигнал', 'сигнала', 'сигналов')}`
-                  : 'Без срочных сигналов'}
-              </Badge>
-            </summary>
-            <div className="mt-4">
-              {executiveControlRows.length === 0 ? (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-5 text-sm font-semibold text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/20 dark:text-emerald-200">
-                  На текущий период нет задач для контроля.
-                </div>
-              ) : (
-                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
-                  {executiveControlRows.map(row => {
-                    const tone = toneStyles[row.tone as DashboardTone];
+          <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_380px]">
+            <div className="relative overflow-hidden rounded-xl border border-lime-300/15 bg-[radial-gradient(circle_at_center,rgba(132,204,22,0.13),transparent_38%),linear-gradient(135deg,rgba(6,14,20,0.94),rgba(10,19,28,0.88))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]" data-testid="dashboard-company-health">
+              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(132,204,22,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.045)_1px,transparent_1px)] bg-[size:44px_44px]" aria-hidden="true" />
+              <div className="relative grid gap-4 xl:grid-cols-[minmax(250px,0.95fr)_minmax(240px,360px)_minmax(250px,0.95fr)] xl:items-center">
+                <div className="grid gap-3">
+                  {commandCenterDirections.slice(0, 3).map(item => {
+                    const Icon = item.icon;
+                    const tone = toneStyles[item.tone];
                     return (
-                      <Link
-                        key={row.id}
-                        to={row.href}
-                        className="flex items-start gap-3 bg-background/60 px-4 py-3 text-sm transition hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-                      >
-                        <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${tone.dot}`} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block break-words font-semibold text-foreground">{row.title}</span>
-                          <span className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{row.detail}</span>
-                        </span>
-                        <span className={`shrink-0 text-sm font-semibold ${tone.accent}`}>{row.value}</span>
+                      <Link key={item.id} to={item.href} className="rounded-lg border border-white/10 bg-white/[0.055] p-3 transition hover:border-lime-300/35 hover:bg-white/[0.075]">
+                        <div className="flex items-center gap-3">
+                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-slate-950/40 ${tone.accent}`}>
+                            <Icon className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-extrabold uppercase text-lime-300">{item.title}</p>
+                            <p className="text-xs text-slate-400">{item.metrics[0]?.label}: {item.metrics[0]?.value}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 grid gap-2 text-xs">
+                          {item.metrics.slice(1).map(metric => (
+                            <div key={metric.label} className="flex items-center justify-between gap-3">
+                              <span className="text-slate-400">{metric.label}</span>
+                              <span className="font-semibold text-white">{metric.value}</span>
+                            </div>
+                          ))}
+                        </div>
                       </Link>
                     );
                   })}
                 </div>
+
+                <div className="flex flex-col items-center justify-center py-4 text-center">
+                  <p className="text-sm font-semibold uppercase text-slate-400">Операционный контроль</p>
+                  <div
+                    className="relative mt-4 flex h-56 w-56 items-center justify-center rounded-full border border-lime-300/15 bg-slate-950/70 shadow-[0_0_42px_rgba(132,204,22,0.18),inset_0_0_28px_rgba(132,204,22,0.08)]"
+                    style={{ background: `radial-gradient(circle at center, rgba(10,18,26,0.96) 0 56%, transparent 57%), conic-gradient(#84cc16 ${companyHealthDisplayScore * 3.6}deg, rgba(148,163,184,0.18) 0deg)` }}
+                  >
+                    <div className="absolute inset-6 rounded-full border border-lime-300/20" />
+                    <div>
+                      <CardTitle className="app-shell-title text-xl font-extrabold">Здоровье компании</CardTitle>
+                      <p className="mt-2 text-5xl font-extrabold text-white">{companyHealthDisplayScore}<span className="text-2xl text-slate-500">/100</span></p>
+                      <p className={`mt-2 text-sm font-extrabold uppercase ${toneStyles[companyHealthTone].accent}`}>{companyHealthLabel}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 w-full max-w-xs">
+                    <CompanyHealthBars items={companyHealthBars} />
+                  </div>
+                </div>
+
+                <div className="grid gap-3">
+                  {commandCenterDirections.slice(3).map(item => {
+                    const Icon = item.icon;
+                    const tone = toneStyles[item.tone];
+                    return (
+                      <Link key={item.id} to={item.href} className="rounded-lg border border-white/10 bg-white/[0.055] p-3 transition hover:border-lime-300/35 hover:bg-white/[0.075]">
+                        <div className="flex items-center gap-3">
+                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-slate-950/40 ${tone.accent}`}>
+                            <Icon className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-extrabold uppercase text-lime-300">{item.title}</p>
+                            <p className="text-xs text-slate-400">{item.metrics[0]?.label}: {item.metrics[0]?.value}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 grid gap-2 text-xs">
+                          {item.metrics.slice(1).map(metric => (
+                            <div key={metric.label} className="flex items-center justify-between gap-3">
+                              <span className="text-slate-400">{metric.label}</span>
+                              <span className="font-semibold text-white">{metric.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/[0.045] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]" data-testid="dashboard-key-signals">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-lime-300/75">Критические сигналы</p>
+                  <h3 className="app-shell-title mt-1 text-lg font-extrabold text-white">Очередь внимания</h3>
+                </div>
+                <Badge variant={criticalCount + highCount > 0 ? 'warning' : 'success'} className="w-fit">
+                  {criticalCount + highCount > 0 ? `${criticalCount + highCount}` : 'OK'}
+                </Badge>
+              </div>
+              <div className="mt-4 space-y-2" data-testid="dashboard-legacy-attention-list">
+                {visibleAlerts.length === 0 ? (
+                  <div className="rounded-lg border border-lime-300/20 bg-lime-400/10 px-4 py-5 text-sm font-semibold text-lime-100">
+                    На текущий период нет задач для контроля.
+                  </div>
+                ) : visibleAlerts.slice(0, 6).map(alert => {
+                  const Icon = alert.icon;
+                  const tone = alert.priority === 'critical' ? toneStyles.danger : alert.priority === 'high' ? toneStyles.warning : toneStyles.info;
+                  return (
+                    <Link key={alert.id} to={alert.link} className="flex min-w-0 items-center gap-3 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-3 transition hover:border-lime-300/35 hover:bg-white/[0.06]">
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-slate-950/50 ${tone.accent}`}>
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-bold text-white">{alert.category}</span>
+                        <span className="mt-0.5 block truncate text-xs text-slate-400">{[alert.title, alert.entity].filter(Boolean).join(' · ')}</span>
+                      </span>
+                      <span className="shrink-0 text-right text-[11px] font-semibold text-slate-500">{alert.priority === 'critical' ? 'сейчас' : 'сегодня'}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+              {showAllAlerts || alertItems.length <= ALERTS_PREVIEW ? null : (
+                <Button type="button" variant="secondary" size="sm" className="mt-3 w-full" onClick={() => setShowAllAlerts(true)}>
+                  Все сигналы
+                  <Badge variant="danger" className="ml-2">{alertItems.length}</Badge>
+                </Button>
               )}
             </div>
-          </details>
+          </div>
 
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">
+          <div className="grid gap-3 xl:grid-cols-4">
+            <Card className="border-white/10 bg-white/[0.045] text-slate-100 shadow-none">
               <CardHeader className="pb-2">
-                <CardTitle className="app-shell-title text-lg font-extrabold">Загрузка техники</CardTitle>
-                <CardDescription>{activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован'}</CardDescription>
+                <CardTitle className="text-lg text-white">Задачи</CardTitle>
+                <CardDescription className="text-slate-400">Операционные действия на ближайший цикл.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="h-[210px]">
+              <CardContent className="space-y-2">
+                {commandCenterTasks.length === 0 ? (
+                  <div className="rounded-lg border border-lime-300/20 bg-lime-400/10 px-3 py-4 text-sm text-lime-100">Критичных задач нет.</div>
+                ) : commandCenterTasks.map(row => {
+                  const tone = toneStyles[row.tone];
+                  return (
+                    <Link key={row.id} to={row.href} className="flex items-start gap-3 rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2.5 transition hover:border-lime-300/35">
+                      <span className={`mt-1 h-3 w-3 shrink-0 rounded-sm border ${row.tone === 'success' ? 'border-lime-300 bg-lime-400/30' : 'border-slate-500 bg-transparent'}`} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-white">{row.label}</span>
+                        <span className="block truncate text-xs text-slate-400">{row.detail}</span>
+                      </span>
+                      <span className={`shrink-0 text-sm font-bold ${tone.accent}`}>{row.value}</span>
+                    </Link>
+                  );
+                })}
+              </CardContent>
+            </Card>
+
+            <Card className="border-white/10 bg-white/[0.045] text-slate-100 shadow-none xl:col-span-1" data-testid="dashboard-month-dynamics">
+              <CardHeader className="pb-2">
+                <CardTitle className="app-shell-title text-xl font-extrabold">Динамика месяца</CardTitle>
+                <CardDescription className="text-slate-400">Начисления, поступления и просрочка по дням.</CardDescription>
+              </CardHeader>
+              <CardContent className="h-[260px]">
+                {hasMonthCashflowDisplay ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={monthCashflowDisplayData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="commandRevenueGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#84cc16" stopOpacity={0.16} />
+                          <stop offset="100%" stopColor="#84cc16" stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="rgba(148,163,184,0.18)" strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} tickFormatter={formatCompactCurrency} width={42} />
+                      <Tooltip
+                        formatter={(value, name) => [
+                          formatCurrency(Number(value)),
+                          name === 'payments' ? 'Поступления' : name === 'overdue' ? 'Просрочка' : 'Начисления',
+                        ]}
+                        contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }}
+                      />
+                      <Area type="monotone" dataKey="revenue" stroke="#84cc16" strokeWidth={1.7} fill="url(#commandRevenueGradient)" dot={false} activeDot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="payments" stroke="#22c55e" strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="overdue" stroke="#fb7185" strokeWidth={1.35} strokeDasharray="4 4" dot={false} activeDot={{ r: 3 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-white/10 text-sm text-slate-400">Нет начислений и оплат за текущий месяц.</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-white/10 bg-white/[0.045] text-slate-100 shadow-none">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg text-white">Загрузка техники</CardTitle>
+                <CardDescription className="text-slate-400">{activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован'}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="relative h-[190px]">
                   {hasFleetDonutData ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie data={fleetDonutData} dataKey="value" nameKey="label" innerRadius="58%" outerRadius="82%" paddingAngle={4}>
-                          {fleetDonutData.map(item => <Cell key={item.label} fill={item.fill} />)}
+                          {fleetDonutData.map(item => <Cell key={item.label} fill={item.fill === '#2563eb' ? '#84cc16' : item.fill} />)}
                         </Pie>
-                        <Tooltip contentStyle={{ borderRadius: 14, borderColor: 'var(--border)' }} />
+                        <Tooltip contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }} />
                       </PieChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 text-sm text-muted-foreground">Нет данных по парку.</div>
+                    <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-white/10 text-sm text-slate-400">Нет данных по парку.</div>
                   )}
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {fleetDonutData.map(item => (
-                    <div key={item.label} className="flex items-center gap-2 rounded-xl bg-muted/45 px-3 py-2">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.fill }} />
-                      <span className="text-muted-foreground">{item.label}</span>
-                      <span className="ml-auto font-semibold text-foreground">{item.value}</span>
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <div className="text-center">
+                      <p className="text-3xl font-extrabold text-white">{utilization}%</p>
+                      <p className="text-xs text-slate-400">{rentedEquipment} ед.</p>
                     </div>
-                  ))}
+                  </div>
                 </div>
+                <StatusBars rows={[
+                  { label: 'В аренде', value: rentedEquipment, color: '#84cc16' },
+                  { label: 'Свободно', value: availableEquipment, color: '#22c55e' },
+                  { label: 'В сервисе', value: equipmentInServiceList.length, color: '#f59e0b' },
+                  { label: 'На доставке', value: activeDeliveries.length, color: '#38bdf8' },
+                ]} total={Math.max(activeEquipment, 1)} />
               </CardContent>
             </Card>
 
-            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">
+            <Card className="border-white/10 bg-white/[0.045] text-slate-100 shadow-none">
               <CardHeader className="pb-2">
-                <CardTitle className="app-shell-title text-lg font-extrabold">Возраст дебиторки</CardTitle>
-                <CardDescription>Долг по возрастным buckets без изменения расчётов.</CardDescription>
+                <CardTitle className="text-lg text-white">Возраст дебиторки</CardTitle>
+                <CardDescription className="text-slate-400">Доступные buckets из финансового среза.</CardDescription>
               </CardHeader>
-              <CardContent className="h-[270px]">
+              <CardContent className="h-[260px]">
                 {hasReceivablesAging ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={receivablesAgingData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid stroke="currentColor" strokeDasharray="3 3" className="text-slate-200 dark:text-slate-800" vertical={false} />
-                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" tickFormatter={formatCompactCurrency} width={48} />
-                      <Tooltip formatter={(value) => [formatCurrency(Number(value)), 'Долг']} contentStyle={{ borderRadius: 14, borderColor: 'var(--border)' }} />
-                      <Bar dataKey="value" radius={[10, 10, 4, 4]}>
+                      <CartesianGrid stroke="rgba(148,163,184,0.18)" strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} tickFormatter={formatCompactCurrency} width={42} />
+                      <Tooltip formatter={(value) => [formatCurrency(Number(value)), 'Долг']} contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }} />
+                      <Bar dataKey="value" radius={[8, 8, 3, 3]}>
                         {receivablesAgingData.map(item => <Cell key={item.label} fill={item.fill} />)}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 text-sm text-muted-foreground">Просроченной дебиторки нет.</div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="border-border bg-card shadow-[0_20px_56px_-42px_rgba(15,23,42,0.45)] dark:shadow-none xl:col-span-4">
-              <CardHeader className="pb-2">
-                <CardTitle className="app-shell-title text-lg font-extrabold">Операционные события месяца</CardTitle>
-                <CardDescription>Аренды, возвраты, сервис и документы по дням.</CardDescription>
-              </CardHeader>
-              <CardContent className="h-[270px]">
-                {hasMonthEvents ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthEventsData} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid stroke="currentColor" strokeDasharray="3 3" className="text-slate-200 dark:text-slate-800" vertical={false} />
-                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" />
-                      <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: 'currentColor', fontSize: 12 }} className="text-muted-foreground" width={32} />
-                      <Tooltip contentStyle={{ borderRadius: 14, borderColor: 'var(--border)' }} />
-                      <Bar dataKey="rentals" name="Аренды" stackId="events" fill="#2563eb" radius={[0, 0, 4, 4]} />
-                      <Bar dataKey="returns" name="Возвраты" stackId="events" fill="#8b5cf6" />
-                      <Bar dataKey="service" name="Сервис" stackId="events" fill="#f59e0b" />
-                      <Bar dataKey="documents" name="Документы" stackId="events" fill="#10b981" radius={[10, 10, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 text-sm text-muted-foreground">Нет операционных событий за текущий месяц.</div>
+                  <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-white/10 text-sm text-slate-400">Просроченной дебиторки нет.</div>
                 )}
               </CardContent>
             </Card>

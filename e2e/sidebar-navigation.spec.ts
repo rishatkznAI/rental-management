@@ -13,7 +13,7 @@ test('sidebar navigation updates content without page refresh', async ({ page })
   await loginAsAdmin(page);
 
   await openSidebarRoute(page, /^Аренды/, '/rentals');
-  await expect(page.getByRole('heading', { name: 'Планировщик аренды' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Аренды', level: 1 })).toBeVisible();
 
   await openSidebarRoute(page, /^Сервис/, '/service');
   await expect(page.getByRole('heading', { name: 'Сервис' })).toBeVisible();
@@ -27,5 +27,5 @@ test('rentals page survives direct open on hash route', async ({ page }) => {
   await navigateInApp(page, '/rentals');
 
   await expect(page).toHaveURL(/#\/rentals$/);
-  await expect(page.getByRole('heading', { name: 'Планировщик аренды' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Аренды', level: 1 })).toBeVisible();
 });

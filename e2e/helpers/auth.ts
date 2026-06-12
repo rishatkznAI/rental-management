@@ -25,7 +25,7 @@ export async function login(page: Page, credentials: Credentials) {
 
 export async function loginAsAdmin(page: Page) {
   await login(page, ADMIN_CREDENTIALS);
-  await expect(page.getByRole('heading', { name: 'Дашборд' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Операционный центр' })).toBeVisible();
 }
 
 export async function navigateInApp(page: Page, route: string) {

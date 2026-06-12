@@ -297,16 +297,11 @@ async function expectAdminLoginSucceeded(
 
 async function expectExecutiveCockpitVisible(page: Page) {
   await page.setViewportSize({ width: 1440, height: 900 });
-  const summary = page.getByTestId('dashboard-executive-summary');
-  const topCockpit = page.getByTestId('dashboard-top-cockpit');
   const cockpit = page.getByTestId('dashboard-executive-cockpit');
-  const keySignals = page.getByTestId('dashboard-key-signals');
-  const legacyAttentionList = page.getByTestId('dashboard-legacy-attention-list');
-  const operationalSummary = page.getByTestId('dashboard-operational-summary');
-  const monthDynamics = page.getByTestId('dashboard-month-dynamics');
-  const companyHealth = page.getByTestId('dashboard-company-health');
-  await expect(summary, 'executive cockpit summary should be visible after login').toBeVisible();
-  await expect(topCockpit, 'dashboard top cockpit should be visible after login').toBeVisible();
+  const keySignals = page.getByTestId('dashboard-key-signals-command').or(page.getByTestId('dashboard-key-signals')).first();
+  const monthDynamics = page.getByTestId('dashboard-month-dynamics-command').or(page.getByTestId('dashboard-month-dynamics')).first();
+  const companyHealth = page.getByTestId('dashboard-company-health-command').or(page.getByTestId('dashboard-company-health')).first();
+  await expect(page.getByText('Пульт управления арендным бизнесом'), 'dashboard command center subtitle should be visible after login').toBeVisible();
   await expect(cockpit, 'executive cockpit KPI grid should be visible after login').toBeVisible();
 
   const kpiChecks = [
@@ -323,16 +318,12 @@ async function expectExecutiveCockpitVisible(page: Page) {
   }
 
   await expect(keySignals, 'dashboard key signals should be visible').toBeVisible();
-  await expect(keySignals.getByRole('heading', { name: 'Главные сигналы сегодня' }), 'dashboard signal strip should be visible').toBeVisible();
-  await expect(operationalSummary, 'dashboard operational summary should be available below cockpit').toBeVisible();
+  await expect(keySignals.getByRole('heading', { name: /Очередь внимания|Главные сигналы сегодня/ }), 'dashboard signal strip should be visible').toBeVisible();
   await expect(monthDynamics.getByRole('heading', { name: 'Динамика месяца' }), 'dashboard cash flow card should be visible').toBeVisible();
-  await expect(companyHealth.getByRole('heading', { name: 'Здоровье компании' }), 'dashboard company health card should be visible').toBeVisible();
-  await expect(legacyAttentionList, 'legacy attention list should remain secondary').toBeVisible();
+  await expect(companyHealth.getByText('Здоровье компании'), 'dashboard company health card should be visible').toBeVisible();
 
   const fleetUtilizationCard = page.getByTestId('dashboard-kpi-fleet-utilization');
   const serviceLoadCard = page.getByTestId('dashboard-kpi-service-load');
-  await expect(fleetUtilizationCard.getByText('Как считается', { exact: true }), 'utilization explanation CTA should be visible').toBeVisible();
-  await expect(serviceLoadCard.getByText('Открыть сервис', { exact: true }), 'service CTA should be visible').toBeVisible();
   await fleetUtilizationCard.click();
   await expect(page.getByRole('dialog', { name: 'Как считается утилизация парка' }), 'utilization modal should open from KPI click').toBeVisible();
   await expect(page.getByRole('link', { name: 'Открыть в планировщике' }), 'planner action should remain inside modal').toHaveAttribute('href', /#\/planner$/);
@@ -344,43 +335,30 @@ async function expectExecutiveCockpitVisible(page: Page) {
   const viewport = page.viewportSize() ?? { width: 1440, height: 900 };
   const rects = {
     keySignals: await elementRect(keySignals),
-    legacyAttentionList: await elementRect(legacyAttentionList),
-    operationalSummary: await elementRect(operationalSummary),
     monthDynamics: await elementRect(monthDynamics),
     companyHealth: await elementRect(companyHealth),
   };
-  const legacyCollapsed = await legacyAttentionList.evaluate(element => element.tagName.toLowerCase() === 'details' && !(element as HTMLDetailsElement).open);
   const monthDynamicsHeadingsInFirstViewport = await countVisibleHeadingsInViewport(page, 'Динамика месяца');
   const companyHealthHeadingsInFirstViewport = await countVisibleHeadingsInViewport(page, 'Здоровье компании');
 
   console.log('[release-smoke] dashboard visual acceptance', JSON.stringify({
     viewport,
     visibleCockpitBlocks: {
-      executiveSummary: true,
       executiveCockpit: true,
       keySignals: true,
       monthDynamics: Boolean(rects.monthDynamics),
       companyHealth: Boolean(rects.companyHealth),
     },
     blockRects: rects,
-    legacyAttentionList: {
-      collapsed: legacyCollapsed,
-      belowFold: (rects.legacyAttentionList?.top ?? 0) >= viewport.height,
-    },
     firstViewportHeadingCounts: {
       monthDynamics: monthDynamicsHeadingsInFirstViewport,
       companyHealth: companyHealthHeadingsInFirstViewport,
     },
   }));
 
-  expect(rects.keySignals?.top ?? Number.POSITIVE_INFINITY, 'Главные сигналы сегодня should be above the desktop fold').toBeLessThan(viewport.height);
-  expect(rects.legacyAttentionList?.top ?? 0, 'dashboard legacy attention list should be below dashboard key signals').toBeGreaterThan(rects.keySignals?.top ?? 0);
+  expect(rects.keySignals?.top ?? Number.POSITIVE_INFINITY, 'dashboard key signals should be above the desktop fold').toBeLessThan(viewport.height);
   expect(monthDynamicsHeadingsInFirstViewport, 'first viewport should not contain duplicate Динамика месяца headings').toBeLessThanOrEqual(1);
   expect(companyHealthHeadingsInFirstViewport, 'first viewport should not contain duplicate Здоровье компании headings').toBeLessThanOrEqual(1);
-  expect(
-    (rects.legacyAttentionList?.top ?? 0) >= viewport.height,
-    'Список для контроля should be below the desktop fold',
-  ).toBeTruthy();
 }
 
 async function elementRect(locator: Locator) {

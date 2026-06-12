@@ -740,13 +740,14 @@ export function RentalDrawer({
         data-side="right"
         data-state={presence.dataState}
         onAnimationEnd={presence.onExitAnimationEnd}
-        className="app-animate-drawer fixed inset-y-0 right-0 z-10 flex w-full max-w-[640px] flex-col overflow-hidden rounded-l-2xl border-l border-slate-200/90 bg-white shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] sm:w-[42%] sm:min-w-[440px] lg:max-w-[560px] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl"
+        className="app-animate-drawer fixed inset-y-0 right-0 z-10 flex w-full max-w-full flex-col overflow-hidden rounded-l-2xl border-l border-slate-200/90 bg-white shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] sm:w-[42%] sm:min-w-[440px] sm:max-w-[640px] lg:max-w-[560px] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl"
+        data-rental-detail-drawer="true"
       >
         {/* Header */}
-        <div className="flex shrink-0 items-start justify-between border-b border-slate-100 bg-white px-6 py-5 dark:border-gray-800 dark:bg-gray-950">
+        <div className="flex shrink-0 items-start justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6 sm:py-5 dark:border-gray-800 dark:bg-gray-950">
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2 className="max-w-[360px] truncate text-xl font-semibold text-slate-950 dark:text-white" title={rental.client}>{rental.client}</h2>
+              <h2 className="min-w-0 max-w-full break-words text-lg font-semibold leading-tight text-slate-950 sm:max-w-[360px] sm:text-xl dark:text-white" title={rental.client}>{rental.client}</h2>
               <Badge variant={rentalStatusVariant}>{rentalStatusLabel}</Badge>
               {isReturnOverdue && (
                 <Badge variant="warning">
@@ -757,7 +758,7 @@ export function RentalDrawer({
             <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500 dark:text-gray-400">
               <span className="font-mono">{rental.id}</span>
               <span>·</span>
-              <span className="max-w-full truncate">
+              <span className="max-w-full break-words">
                 {rental.equipmentInv} {currentEquipment?.model}
                 {currentEquipment?.serialNumber ? ` · SN ${currentEquipment.serialNumber}` : ''}
               </span>
@@ -772,7 +773,7 @@ export function RentalDrawer({
         </div>
 
         <div className="shrink-0 border-b border-slate-100 bg-white px-4 py-2 dark:border-gray-800 dark:bg-gray-950">
-          <div className="flex gap-1 overflow-x-auto">
+          <div className="flex flex-wrap gap-1 overflow-visible">
             {([
               ['overview', 'Обзор'],
               ['terms', 'Сроки и возврат'],
@@ -785,7 +786,7 @@ export function RentalDrawer({
                 key={tabId}
                 type="button"
                 onClick={() => setActiveTab(tabId)}
-                className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
                   activeTab === tabId
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-white'
@@ -798,7 +799,7 @@ export function RentalDrawer({
         </div>
 
         {/* Content */}
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-slate-50/40 p-6 dark:bg-gray-950">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden bg-slate-50/40 p-4 sm:p-6 dark:bg-gray-950">
           {activeTab === 'overview' && (
             <section className="space-y-4">
               <div className="grid gap-2 sm:grid-cols-2">
@@ -819,7 +820,7 @@ export function RentalDrawer({
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
                     <div className="text-xs font-medium text-slate-500 dark:text-gray-400">{label}</div>
-                    <div className="mt-1 truncate text-sm font-semibold text-slate-950 dark:text-white" title={String(value)}>{value}</div>
+                    <div className="mt-1 break-words text-sm font-semibold text-slate-950 dark:text-white" title={String(value)}>{value}</div>
                   </div>
                 ))}
               </div>
@@ -985,7 +986,7 @@ export function RentalDrawer({
                     <div className="text-sm font-semibold text-blue-800 dark:text-blue-200">Редактировать аренду</div>
                     <Button size="sm" variant="ghost" onClick={() => { setShowEdit(false); setEditError(''); }}>Свернуть</Button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-2 sm:grid-cols-2">
                     <div className="col-span-2">
                       <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Клиент *</label>
                       <select
@@ -1372,7 +1373,7 @@ export function RentalDrawer({
 
               {/* Paid / Remaining */}
               {(totalPaid > 0 || rentalPayments.length > 0) && (
-                <div className="mt-3 grid grid-cols-2 gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
+                <div className="mt-3 grid gap-2 border-t border-gray-200 pt-3 sm:grid-cols-2 dark:border-gray-700">
                   <div>
                     <div className="text-xs text-gray-500">Оплачено</div>
                     <div className="text-sm font-medium text-green-700 dark:text-green-400">{formatCurrency(totalPaid)}</div>
@@ -1422,7 +1423,7 @@ export function RentalDrawer({
             {canRegisterPayment && showAddPayment && (
               <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
                 <div className="mb-2 text-xs font-medium text-blue-700 dark:text-blue-400">Создать платёж по аренде</div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-2 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Сумма (₽) *</label>
                     <input
@@ -2025,7 +2026,7 @@ export function RentalDrawer({
       </div>
 
       <Dialog open={extensionDialogOpen} onOpenChange={setExtensionDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-lg" data-rental-responsive-dialog="drawer-extension">
           <DialogHeader>
             <DialogTitle>Продлить аренду</DialogTitle>
           </DialogHeader>

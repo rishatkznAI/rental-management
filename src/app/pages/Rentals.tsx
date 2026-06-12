@@ -3831,9 +3831,181 @@ export default function Rentals() {
     </div>
   );
 
+  const renderRentalMobileCard = (row: (typeof paginatedRentalRows)[number]) => {
+    const isBrokenRentalLink = isBrokenRentalLinkRow(row);
+    const statusClass = row.rental.status === 'active'
+      ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
+      : row.rental.status === 'created'
+        ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+        : row.rental.status === 'returned'
+          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+          : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300';
+    const returnTone = row.isOverdueReturn
+      ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+      : row.needsReturnService
+        ? 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300'
+        : row.isAwaitingAcceptance || row.isReturnedNotClosed
+          ? 'bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300'
+          : row.isReturnToday || row.isReturnTomorrow
+            ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+    const returnLabel = row.isReturnToday
+      ? 'Возврат сегодня'
+      : row.isReturnTomorrow
+        ? 'Возврат завтра'
+        : row.isOverdueReturn
+          ? 'Возврат просрочен'
+          : row.isAwaitingAcceptance
+            ? 'Ждёт приёмки'
+            : row.needsReturnService
+              ? 'Нужен сервис'
+              : 'По графику';
+    const updLabel = row.missingUpd
+      ? 'Нет УПД'
+      : row.rental.updSigned || row.relatedDocuments.some(doc => (doc.documentType || doc.type) === 'upd' && doc.status === 'signed')
+        ? 'УПД подписан'
+        : row.hasUnsignedDocuments
+          ? 'Документы не подписаны'
+          : 'УПД есть';
+
+    return (
+      <article
+        key={row.rental.id}
+        data-rental-mobile-card="true"
+        className={cn(
+          'min-w-0 rounded-2xl border border-border bg-card p-3 shadow-sm',
+          row.isOverdueReturn || (canViewPayments && row.debtAmount > 0)
+            ? 'bg-red-50/45 dark:bg-red-950/10'
+            : row.isReturnToday || row.isReturnTomorrow
+              ? 'bg-amber-50/45 dark:bg-amber-950/10'
+              : '',
+          isBrokenRentalLink && 'opacity-75',
+        )}
+      >
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="break-words text-sm font-bold text-foreground" data-rental-mobile-client>
+              {row.rental.client || 'Без клиента'}
+            </div>
+            <div className="mt-0.5 break-all text-[11px] font-medium text-muted-foreground">
+              {row.sourceRentalId || row.rental.id}
+            </div>
+            {row.classicRental?.contractId && (
+              <div className="mt-0.5 break-words text-[11px] text-muted-foreground">
+                Договор {row.classicRental.contractId}
+              </div>
+            )}
+          </div>
+          <span
+            data-rental-mobile-status
+            className={cn('max-w-[42%] shrink-0 whitespace-normal break-words rounded-full px-2 py-1 text-center text-[11px] font-semibold leading-tight', statusClass)}
+          >
+            {RENTAL_STATUS_LABEL[row.rental.status]}
+          </span>
+        </div>
+
+        {isBrokenRentalLink && (
+          <button
+            type="button"
+            disabled={!isAdminRole}
+            onClick={event => openLinkDiagnostic(row, event)}
+            className={cn('mt-2 inline-flex max-w-full rounded-full bg-red-100 px-2 py-1 text-left text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300', isAdminRole && 'hover:bg-red-200 dark:hover:bg-red-900/60')}
+          >
+            <span className="min-w-0 break-words">{brokenRentalLinkLabel(row.brokenRentalLinkReason)}</span>
+          </button>
+        )}
+
+        <div className="mt-3 min-w-0 rounded-xl border border-border/70 bg-background/70 px-3 py-2">
+          <div className="text-[11px] font-semibold uppercase text-muted-foreground">Техника</div>
+          <div className="mt-1 break-words text-sm font-semibold text-foreground" data-rental-mobile-equipment>
+            {getEquipmentMovementLabel(row.equipment)}
+          </div>
+          <div className="mt-0.5 break-words text-xs text-muted-foreground">
+            {row.equipment?.ownerName || row.equipment?.owner || row.rental.equipmentInv || 'Собственник не указан'}
+          </div>
+        </div>
+
+        <div className="mt-3 grid min-w-0 gap-2 text-sm" data-rental-mobile-period>
+          <div className="rounded-xl border border-border/70 bg-background/70 px-3 py-2">
+            <div className="text-[11px] font-semibold uppercase text-muted-foreground">Период</div>
+            <div className="mt-1 break-words font-semibold text-foreground">
+              {safeRentalDateRangeLabel(row.rental.startDate, row.rental.endDate)}
+            </div>
+            <div className={cn('mt-0.5 text-xs', row.isOverdueReturn ? 'font-semibold text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
+              {!row.isActive ? 'Период завершён' : row.isOverdueReturn ? `Просрочено на ${Math.abs(row.daysLeft)} дн.` : row.daysLeft >= 0 ? `Осталось ${row.daysLeft} дн.` : 'Период завершён'}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="min-w-0 rounded-xl border border-border/70 bg-background/70 px-3 py-2">
+              <div className="text-[11px] font-semibold uppercase text-muted-foreground">Сумма</div>
+              <div className="mt-1 break-words text-sm font-semibold text-foreground">
+                {canViewPayments ? formatCurrency(row.amount) : 'Скрыто'}
+              </div>
+              {canViewPayments && (
+                <div className={cn('mt-0.5 break-words text-xs font-semibold', row.debtAmount > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}>
+                  Долг {formatCurrency(row.debtAmount)}
+                </div>
+              )}
+            </div>
+            <div className="min-w-0 rounded-xl border border-border/70 bg-background/70 px-3 py-2">
+              <div className="text-[11px] font-semibold uppercase text-muted-foreground">Менеджер</div>
+              <div className="mt-1 break-words text-sm font-semibold text-foreground">{row.rental.manager || '—'}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex min-w-0 flex-wrap gap-1.5">
+          <span className={cn('inline-flex max-w-full items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold leading-tight', returnTone)}>
+            <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 break-words">{returnLabel}</span>
+          </span>
+          <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold leading-tight text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+            <Truck className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 break-words">{row.hasShippingDelivery || row.hasReturnDelivery ? 'Доставка есть' : 'Доставка —'}</span>
+          </span>
+          <span className={cn('inline-flex max-w-full rounded-full px-2 py-1 text-xs font-semibold leading-tight', row.missingUpd || row.hasUnsignedDocuments ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300')}>
+            <span className="min-w-0 break-words">{updLabel}</span>
+          </span>
+          <span className={cn('inline-flex max-w-full rounded-full px-2 py-1 text-xs font-semibold leading-tight', row.missingContract ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300')}>
+            <span className="min-w-0 break-words">{row.missingContract ? 'Без договора' : 'Договор есть'}</span>
+          </span>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2" data-rental-mobile-actions>
+          {isBrokenRentalLink ? (
+            <span className="col-span-2 rounded-xl bg-red-100 px-3 py-2 text-center text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+              Нет записи rentals
+            </span>
+          ) : (
+            <Button size="sm" variant="secondary" className="min-w-0 justify-center rounded-xl" onClick={() => setSelectedRental(buildRentalDrawerRental(row.rental, row.classicRental))}>
+              <MoreHorizontal className="h-4 w-4" />
+              Открыть
+            </Button>
+          )}
+          {activeWorkspaceTab === 'debt_docs' && canCreatePayments && !isBrokenRentalLink && (
+            <Button size="sm" variant="ghost" className="min-w-0 justify-center rounded-xl" onClick={() => { setSelectedRental(buildRentalDrawerRental(row.rental, row.classicRental)); showToast('Оплату можно добавить в открытой боковой панели аренды'); }}>
+              <CreditCard className="h-4 w-4" />
+              Оплата
+            </Button>
+          )}
+          {activeWorkspaceTab === 'debt_docs' && canViewDocuments && !isBrokenRentalLink && (
+            <Button size="sm" variant="ghost" className="min-w-0 justify-center rounded-xl" asChild>
+              <Link to="/documents">
+                <FileText className="h-4 w-4" />
+                Документы
+              </Link>
+            </Button>
+          )}
+        </div>
+      </article>
+    );
+  };
+
   return (
     <div
-      className="relative flex h-[calc(100vh-56px-64px)] w-full min-w-0 max-w-full flex-col overflow-hidden bg-background sm:h-[calc(100vh)] sm:w-[calc(100vw-16rem)]"
+      data-rentals-responsive-root="true"
+      className="relative flex h-[calc(100vh-56px-64px)] w-full min-w-0 max-w-full flex-col overflow-hidden overflow-x-clip bg-background sm:h-[calc(100vh)] sm:w-[calc(100vw-16rem)]"
       style={{ maxWidth: '100%', overflow: 'hidden' }}
     >
       <div
@@ -3870,7 +4042,7 @@ export default function Rentals() {
             </div>
           </div>
 
-          <div className="app-scroll-fade-x flex max-w-full gap-4 overflow-x-auto border-t border-border/70 pt-2 sm:gap-5 sm:pt-3">
+          <div className="flex max-w-full flex-wrap gap-x-4 gap-y-1 overflow-visible border-t border-border/70 pt-2 sm:gap-x-5 sm:pt-3">
             {workspaceTabs.map(tab => {
               const active = activeWorkspaceTab === tab.id;
               return (
@@ -3881,7 +4053,7 @@ export default function Rentals() {
                   data-state={active ? 'active' : 'inactive'}
                   onClick={() => setActiveWorkspaceTab(tab.id)}
                   className={cn(
-                    'relative flex h-11 shrink-0 items-center gap-2 border-b-2 px-1 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                    'relative flex h-11 max-w-full items-center gap-2 border-b-2 px-1 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                     active
                       ? 'rentals-workspace-tab-active border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300'
                       : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
@@ -4045,12 +4217,12 @@ export default function Rentals() {
             )}
 
             {activeWorkspaceTab === 'list' && (
-              <div className="flex max-w-full shrink-0 flex-nowrap items-center gap-1.5 overflow-x-auto whitespace-nowrap text-xs sm:ml-auto">
+              <div className="flex max-w-full flex-wrap items-center gap-1.5 whitespace-normal text-xs sm:ml-auto">
                 <button
                   type="button"
                   onClick={() => toggleRentalPreset('unpaid')}
                   className={cn(
-                    'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 transition-colors',
+                    'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-1 transition-colors',
                     rentalPreset === 'unpaid'
                       ? 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300'
                       : 'border-border bg-secondary/60 text-muted-foreground hover:text-foreground',
@@ -4064,7 +4236,7 @@ export default function Rentals() {
                   type="button"
                   onClick={() => toggleRentalPreset('overdue')}
                   className={cn(
-                    'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 transition-colors',
+                    'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-1 transition-colors',
                     rentalPreset === 'overdue'
                       ? 'border-red-400 bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300'
                       : 'border-border bg-secondary/60 text-muted-foreground hover:text-foreground',
@@ -4278,7 +4450,7 @@ export default function Rentals() {
       </div>
 
       <Dialog open={showFiltersDialog} onOpenChange={setShowFiltersDialog}>
-        <DialogContent className="sm:max-w-[760px]">
+        <DialogContent className="w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-[760px]" data-rental-responsive-dialog="filters">
           <DialogHeader>
             <DialogTitle>Вид, период и фильтры</DialogTitle>
             <DialogDescription>
@@ -5537,7 +5709,27 @@ export default function Rentals() {
                 </div>
                 {rentalListPaginationControls('top')}
               </div>
-              <div className="overflow-x-auto">
+              <div data-rental-mobile-list="true" className="grid gap-3 p-3 lg:hidden">
+                {rentalListPagination.total === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-border bg-secondary/25 px-4 py-10 text-center">
+                    <div className="text-sm font-semibold text-foreground">
+                      {activeWorkspaceTab === 'debt_docs' ? 'Нет проблем по оплатам и документам.' : 'Ничего не найдено'}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Попробуйте изменить поиск или сбросить фильтры, чтобы увидеть аренды.
+                    </p>
+                    {(hasActiveFilters || rentalPreset !== 'all') && (
+                      <Button type="button" size="sm" variant="secondary" className="mt-4 rounded-xl" onClick={resetFilters}>
+                        <RotateCcw className="h-4 w-4" />
+                        Сбросить фильтры
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  paginatedRentalRows.map(renderRentalMobileCard)
+                )}
+              </div>
+              <div data-rental-desktop-table="true" className="hidden overflow-x-auto lg:block">
                 <table className="min-w-[1180px] w-full text-left text-sm">
                   <thead className="bg-secondary/60 text-xs uppercase tracking-[0.08em] text-muted-foreground">
                     {activeWorkspaceTab === 'returns' ? (
@@ -5897,7 +6089,7 @@ export default function Rentals() {
       )}
 
       <Dialog open={Boolean(linkDiagnosticRow)} onOpenChange={open => !open && setLinkDiagnosticRow(null)}>
-        <DialogContent className="sm:max-w-[620px]">
+        <DialogContent className="w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-[620px]" data-rental-responsive-dialog="link-diagnostics">
           <DialogHeader>
             <DialogTitle>Диагностика связи аренды</DialogTitle>
             <DialogDescription>
@@ -6436,7 +6628,7 @@ export default function Rentals() {
         error={rentalApprovalsError}
       />
       <Sheet open={showMovementSheet} onOpenChange={setShowMovementSheet}>
-        <SheetContent side="right" className="w-full overflow-y-auto border-gray-200 bg-white sm:max-w-2xl dark:border-gray-700 dark:bg-gray-950">
+        <SheetContent side="right" className="w-full max-w-full overflow-y-auto overflow-x-hidden border-gray-200 bg-white sm:max-w-2xl dark:border-gray-700 dark:bg-gray-950" data-rental-responsive-sheet="movement">
           <SheetHeader className="border-b border-gray-200 pb-4 dark:border-gray-700">
             <SheetTitle>Движение техники</SheetTitle>
             <SheetDescription>

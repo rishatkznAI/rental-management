@@ -7,6 +7,10 @@ const source = fs.readFileSync(
   path.join(process.cwd(), 'src/app/components/modals/KPIDetailModal.tsx'),
   'utf8',
 );
+const approvalHistorySheetSource = fs.readFileSync(
+  path.join(process.cwd(), 'src/app/components/gantt/RentalApprovalHistorySheet.tsx'),
+  'utf8',
+);
 
 test('dashboard KPI modal uses stable fallback keys for legacy rows without ids', () => {
   assert.match(source, /function kpiRowKey/);
@@ -31,4 +35,11 @@ test('dashboard KPI modal formats missing money values as zero rubles instead of
   assert.match(source, /Number\.isFinite\(amount\) \? amount : 0/);
   assert.doesNotMatch(source, /formatCurrency\(client\.debt\)/);
   assert.doesNotMatch(source, /formatCurrency\(data\.totalDebt\)/);
+});
+
+test('deep dashboard modal and approval history sheet use semantic UI tokens', () => {
+  const legacyColorUtility = /\b(?:bg|text|border|divide)-(?:white|gray|slate|blue|red|yellow|amber|emerald|green|orange|purple|violet)-/;
+
+  assert.doesNotMatch(source, legacyColorUtility);
+  assert.doesNotMatch(approvalHistorySheetSource, legacyColorUtility);
 });

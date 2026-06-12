@@ -6,6 +6,19 @@ import { Button } from '../ui/button';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import { animatedModalClassName, animatedOverlayClassName } from '../../lib/animations';
 
+const metricCardClass = 'rounded-lg border border-border bg-card/85 p-4';
+const mutedPanelClass = 'rounded-lg border border-border bg-muted/25 p-4';
+const infoMetricClass = 'rounded-lg border border-primary/25 bg-primary/10 p-4';
+const warningMetricClass = 'rounded-lg border border-warning/30 bg-warning/10 p-4';
+const dangerMetricClass = 'rounded-lg border border-danger/30 bg-danger/10 p-4';
+const successMetricClass = 'rounded-lg border border-success/25 bg-success/10 p-4';
+const accentMetricClass = 'rounded-lg border border-info/25 bg-info/10 p-4';
+const mutedMetricClass = 'rounded-lg border border-border bg-muted/35 p-4';
+const linkCardClass = 'flex flex-col gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:border-primary/35 hover:bg-accent/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-center sm:justify-between';
+const dangerLinkCardClass = 'flex flex-col gap-3 rounded-lg border border-danger/30 bg-danger/10 p-3 transition-colors hover:border-danger/45 hover:bg-danger/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-center sm:justify-between';
+const warningLinkCardClass = 'flex flex-col gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 transition-colors hover:border-warning/45 hover:bg-warning/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-center sm:justify-between';
+const infoLinkCardClass = 'flex flex-col gap-3 rounded-lg border border-primary/25 bg-primary/10 p-3 transition-colors hover:border-primary/40 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-center sm:justify-between';
+
 interface KPIDetailModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -86,89 +99,89 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           description: 'Пояснение к KPI без перехода из дашборда: что вошло в расчёт, что исключено и как получился процент.',
           details: (
             <div className="space-y-4">
-              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+              <div className={mutedPanelClass}>
                 <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                     <CalendarDays className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Период расчёта</p>
-                    <p className="mt-1 text-base font-semibold text-gray-950 dark:text-white">{data.periodLabel || 'Текущий расчётный срез'}</p>
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">Период расчёта</p>
+                    <p className="mt-1 text-base font-semibold text-foreground">{data.periodLabel || 'Текущий расчётный срез'}</p>
                     {data.pagePeriodLabel && (
-                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Период страницы: {data.pagePeriodLabel}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">Период страницы: {data.pagePeriodLabel}</p>
                     )}
                   </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/60">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Всего техники</p>
-                  <p className="mt-1 text-2xl font-bold text-gray-950 dark:text-white">{safeNumber(data.totalEquipment)}</p>
+                <div className={metricCardClass}>
+                  <p className="text-sm text-muted-foreground">Всего техники</p>
+                  <p className="mt-1 text-2xl font-bold text-foreground">{safeNumber(data.totalEquipment)}</p>
                 </div>
-                <div className="rounded-lg border border-blue-200 bg-blue-50/80 p-4 dark:border-blue-900/60 dark:bg-blue-950/30">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Участвует в расчёте</p>
-                  <p className="mt-1 text-2xl font-bold text-blue-700 dark:text-blue-200">{activeEquipment}</p>
+                <div className={infoMetricClass}>
+                  <p className="text-sm text-muted-foreground">Участвует в расчёте</p>
+                  <p className="mt-1 text-2xl font-bold text-primary">{activeEquipment}</p>
                 </div>
                 {excludedEquipment > 0 && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-4 dark:border-amber-900/60 dark:bg-amber-950/25">
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Исключено из расчёта</p>
-                    <p className="mt-1 text-2xl font-bold text-amber-700 dark:text-amber-200">{excludedEquipment}</p>
+                  <div className={warningMetricClass}>
+                    <p className="text-sm text-muted-foreground">Исключено из расчёта</p>
+                    <p className="mt-1 text-2xl font-bold text-warning-foreground">{excludedEquipment}</p>
                   </div>
                 )}
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/25">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">В аренде / занятые машино-дни</p>
-                  <p className="mt-1 text-2xl font-bold text-emerald-700 dark:text-emerald-200">
+                <div className={successMetricClass}>
+                  <p className="text-sm text-muted-foreground">В аренде / занятые машино-дни</p>
+                  <p className="mt-1 text-2xl font-bold text-success-foreground">
                     {rentedEquipment} ед.{occupiedMachineDays !== null ? ` / ${occupiedMachineDays} м-дн.` : ''}
                   </p>
                 </div>
-                <div className="rounded-lg border border-violet-200 bg-violet-50/80 p-4 dark:border-violet-900/60 dark:bg-violet-950/25">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Итоговый процент</p>
-                  <p className="mt-1 text-2xl font-bold text-violet-700 dark:text-violet-200">{utilization}%</p>
+                <div className={accentMetricClass}>
+                  <p className="text-sm text-muted-foreground">Итоговый процент</p>
+                  <p className="mt-1 text-2xl font-bold text-info-foreground">{utilization}%</p>
                 </div>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/60">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Формула</p>
-                <p className="mt-2 rounded-md bg-white px-3 py-2 font-mono text-sm text-gray-950 dark:bg-slate-950 dark:text-gray-100">
+              <div className={mutedPanelClass}>
+                <p className="text-sm font-medium text-foreground">Формула</p>
+                <p className="mt-2 rounded-md bg-background/80 px-3 py-2 font-mono text-sm text-foreground">
                   Утилизация = занятые машино-дни / доступные машино-дни × 100%
                 </p>
-                <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                <p className="mt-2 text-sm text-muted-foreground">
                   {occupiedMachineDays !== null && availableMachineDays !== null
                     ? `${occupiedMachineDays} / ${availableMachineDays} × 100% = ${utilization}%`
                     : 'Детализация машино-дней ограничена текущими данными.'}
                 </p>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/60">
-                <p className="text-sm leading-6 text-gray-700 dark:text-gray-300">
+              <div className={metricCardClass}>
+                <p className="text-sm leading-6 text-foreground">
                   {activeEquipment > 0
                     ? `Из ${activeEquipment} единиц техники, доступных для арендного парка, ${rentedEquipment} сейчас занято в активной аренде. Поэтому KPI показывает ${utilization}% утилизации.`
                     : 'Активный арендный парк не сформирован, поэтому утилизация считается как 0%.'}
                 </p>
                 {detailLimited && (
-                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Детализация ограничена текущими данными.</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Детализация ограничена текущими данными.</p>
                 )}
               </div>
 
               {shownEquipment.length > 0 && (
-                <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/60">
-                  <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
-                    <ListChecks className="h-4 w-4 text-gray-500" />
-                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">Техника, повлиявшая на показатель</p>
+                <div className="rounded-lg border border-border bg-card">
+                  <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+                    <ListChecks className="h-4 w-4 text-muted-foreground" />
+                    <p className="text-sm font-semibold text-foreground">Техника, повлиявшая на показатель</p>
                   </div>
-                  <div className="divide-y divide-slate-100 sm:hidden dark:divide-slate-800">
+                  <div className="divide-y divide-border sm:hidden">
                     {shownEquipment.map((equipment: any, index: number) => (
                       <div key={kpiRowKey('utilization-equipment-mobile', equipment, index, equipment?.inventoryNumber)} className="space-y-2 px-4 py-3">
                         <div>
-                          <p className="font-medium text-gray-950 dark:text-white">{equipment.label || equipment.inventoryNumber || 'Техника'}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{equipment.inventoryNumber || equipment.equipmentId || 'без инв. номера'}</p>
+                          <p className="font-medium text-foreground">{equipment.label || equipment.inventoryNumber || 'Техника'}</p>
+                          <p className="text-xs text-muted-foreground">{equipment.inventoryNumber || equipment.equipmentId || 'без инв. номера'}</p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs">
-                          <span className="rounded-md bg-slate-100 px-2 py-1 text-gray-700 dark:bg-slate-800 dark:text-gray-200">
+                          <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
                             {equipment.inRent ? (equipment.rentalClient ? `В аренде · ${equipment.rentalClient}` : 'В аренде') : utilizationEquipmentStatusLabel(equipment.status)}
                           </span>
-                          <span className="rounded-md bg-blue-50 px-2 py-1 font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-200">
+                          <span className="rounded-md bg-primary/10 px-2 py-1 font-semibold text-primary">
                             {equipment.inRent ? `${safeNumber(equipment.occupiedMachineDays) || 1} м-дн.` : 'знаменатель'}
                           </span>
                         </div>
@@ -176,25 +189,25 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                     ))}
                   </div>
                   <div className="hidden overflow-x-auto sm:block">
-                    <table className="min-w-full divide-y divide-slate-100 text-sm dark:divide-slate-800">
-                      <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-gray-500 dark:bg-slate-950/60 dark:text-gray-400">
+                    <table className="min-w-full divide-y divide-border text-sm">
+                      <thead className="bg-muted/40 text-left text-xs font-semibold uppercase text-muted-foreground">
                         <tr>
                           <th className="px-4 py-2">Техника</th>
                           <th className="px-4 py-2">Статус</th>
                           <th className="px-4 py-2">Вклад</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      <tbody className="divide-y divide-border">
                         {shownEquipment.map((equipment: any, index: number) => (
                           <tr key={kpiRowKey('utilization-equipment', equipment, index, equipment?.inventoryNumber)}>
                             <td className="px-4 py-3">
-                              <p className="font-medium text-gray-950 dark:text-white">{equipment.label || equipment.inventoryNumber || 'Техника'}</p>
-                              <p className="text-xs text-gray-500 dark:text-gray-400">{equipment.inventoryNumber || equipment.equipmentId || 'без инв. номера'}</p>
+                              <p className="font-medium text-foreground">{equipment.label || equipment.inventoryNumber || 'Техника'}</p>
+                              <p className="text-xs text-muted-foreground">{equipment.inventoryNumber || equipment.equipmentId || 'без инв. номера'}</p>
                             </td>
-                            <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                            <td className="px-4 py-3 text-muted-foreground">
                               {equipment.inRent ? (equipment.rentalClient ? `В аренде · ${equipment.rentalClient}` : 'В аренде') : utilizationEquipmentStatusLabel(equipment.status)}
                             </td>
-                            <td className="px-4 py-3 font-semibold text-gray-950 dark:text-white">
+                            <td className="px-4 py-3 font-semibold text-foreground">
                               {equipment.inRent ? `${safeNumber(equipment.occupiedMachineDays) || 1} м-дн.` : 'знаменатель'}
                             </td>
                           </tr>
@@ -203,7 +216,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                     </table>
                   </div>
                   {hiddenEquipmentCount > 0 && (
-                    <p className="border-t border-slate-100 px-4 py-3 text-sm text-gray-500 dark:border-slate-800 dark:text-gray-400">
+                    <p className="border-t border-border px-4 py-3 text-sm text-muted-foreground">
                       Ещё {hiddenEquipmentCount} ед. техники скрыто для компактности.
                     </p>
                   )}
@@ -233,30 +246,30 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           description: 'Договоры аренды со статусом "Активен". Нажмите на аренду для просмотра деталей.',
           details: (
             <div className="space-y-3">
-              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Всего активных договоров</p>
-                <p className="text-3xl font-bold text-blue-600">{data.activeRentals?.length || 0}</p>
+              <div className={infoMetricClass}>
+                <p className="text-sm text-muted-foreground">Всего активных договоров</p>
+                <p className="text-3xl font-bold text-primary">{data.activeRentals?.length || 0}</p>
               </div>
               <div className="space-y-2">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Список активных аренд:</p>
+                <p className="text-sm font-medium text-foreground">Список активных аренд:</p>
                 {data.activeRentals?.slice(0, 10).map((rental: any, index: number) => (
                   <Link
                     key={kpiRowKey('active-rental', rental, index)}
                     to={rental.link || entityHref('rentals', rental.id)}
                     onClick={() => onOpenChange(false)}
-                    className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
+                    className={linkCardClass}
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className="font-medium text-gray-900 dark:text-white">{rental.client}</p>
-                        <span className="text-xs text-gray-400 dark:text-gray-500">{rental.id || '—'}</span>
+                        <p className="font-medium text-foreground">{rental.client}</p>
+                        <span className="text-xs text-muted-foreground">{rental.id || '—'}</span>
                       </div>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <p className="text-sm text-muted-foreground">
                         {rental.equipment?.join(', ')} · {formatDate(rental.startDate)} — {formatDate(rental.plannedReturnDate)}
                       </p>
                     </div>
                     <div className="ml-3 flex items-center gap-2">
-                      <p className="font-semibold text-gray-900 dark:text-white">{safeCurrency(rental.price)}</p>
+                      <p className="font-semibold text-foreground">{safeCurrency(rental.price)}</p>
                       <ExternalLink className="h-4 w-4 text-[--color-primary]" />
                     </div>
                   </Link>
@@ -272,31 +285,31 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           description: 'Аренды с истёкшим сроком возврата. Нажмите для перехода к деталям.',
           details: (
             <div className="space-y-3">
-              <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Просроченных возвратов</p>
-                <p className="text-3xl font-bold text-red-600">{data.overdueRentals?.length || 0}</p>
+              <div className={dangerMetricClass}>
+                <p className="text-sm text-muted-foreground">Просроченных возвратов</p>
+                <p className="text-3xl font-bold text-danger">{data.overdueRentals?.length || 0}</p>
               </div>
               {data.overdueRentals && data.overdueRentals.length > 0 ? (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Требуют внимания:</p>
+                  <p className="text-sm font-medium text-foreground">Требуют внимания:</p>
                   {data.overdueRentals.map((rental: any, index: number) => (
                     <Link
                       key={kpiRowKey('overdue-rental', rental, index)}
                       to={rental.link || entityHref('rentals', rental.id)}
                       onClick={() => onOpenChange(false)}
-                      className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 transition-colors hover:border-red-400 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:hover:border-red-600 dark:hover:bg-red-900/40"
+                      className={dangerLinkCardClass}
                     >
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{rental.client}</p>
-                        <p className="text-sm text-red-600">
+                        <p className="font-medium text-foreground">{rental.client}</p>
+                        <p className="text-sm text-danger">
                           Просрочен с {formatDate(rental.plannedReturnDate)}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="px-2 py-1 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 text-xs rounded">
+                        <span className="px-2 py-1 bg-danger/10 text-danger-foreground text-xs rounded">
                           Риск
                         </span>
-                        <ExternalLink className="h-4 w-4 text-red-600" />
+                        <ExternalLink className="h-4 w-4 text-danger" />
                       </div>
                     </Link>
                   ))}
@@ -304,10 +317,10 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
               ) : (
                 <div className="flex items-center justify-center py-8 text-center">
                   <div>
-                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
-                      <TrendingUp className="h-6 w-6 text-green-600" />
+                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-success/10">
+                      <TrendingUp className="h-6 w-6 text-success" />
                     </div>
-                    <p className="text-sm text-gray-500">Нет просроченных возвратов</p>
+                    <p className="text-sm text-muted-foreground">Нет просроченных возвратов</p>
                   </div>
                 </div>
               )}
@@ -322,55 +335,55 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           details: (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Сегодня</p>
-                  <p className="text-2xl font-bold text-yellow-600">{data.todayRentals?.length || 0}</p>
+                <div className={warningMetricClass}>
+                  <p className="text-sm text-muted-foreground">Сегодня</p>
+                  <p className="text-2xl font-bold text-warning">{data.todayRentals?.length || 0}</p>
                 </div>
-                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Завтра</p>
-                  <p className="text-2xl font-bold text-blue-600">{data.tomorrowRentals?.length || 0}</p>
+                <div className={infoMetricClass}>
+                  <p className="text-sm text-muted-foreground">Завтра</p>
+                  <p className="text-2xl font-bold text-primary">{data.tomorrowRentals?.length || 0}</p>
                 </div>
               </div>
               <div className="space-y-2">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Сегодня:</p>
+                <p className="text-sm font-medium text-foreground">Сегодня:</p>
                 {data.todayRentals?.length ? data.todayRentals.map((rental: any, index: number) => (
                   <Link
                     key={kpiRowKey('today-rental', rental, index)}
                     to={rental.link || '/rentals'}
                     onClick={() => onOpenChange(false)}
-                    className="flex items-center justify-between rounded-lg border border-yellow-200 bg-yellow-50 p-3 transition-colors hover:border-yellow-400 hover:bg-yellow-100 dark:border-yellow-800 dark:bg-yellow-900/20 dark:hover:bg-yellow-900/40"
+                    className={warningLinkCardClass}
                   >
                     <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{rental.client}</p>
-                      <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                      <p className="font-medium text-foreground">{rental.client}</p>
+                      <p className="text-sm text-warning-foreground">
                         Возврат {formatDate(rental.plannedReturnDate)} · {rental.equipmentInv}
                       </p>
                     </div>
-                    <ExternalLink className="h-4 w-4 text-yellow-600" />
+                    <ExternalLink className="h-4 w-4 text-warning" />
                   </Link>
                 )) : (
-                  <p className="text-sm text-gray-400">На сегодня возвратов нет</p>
+                  <p className="text-sm text-muted-foreground">На сегодня возвратов нет</p>
                 )}
               </div>
               <div className="space-y-2">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Завтра:</p>
+                <p className="text-sm font-medium text-foreground">Завтра:</p>
                 {data.tomorrowRentals?.length ? data.tomorrowRentals.map((rental: any, index: number) => (
                   <Link
                     key={kpiRowKey('tomorrow-rental', rental, index)}
                     to={rental.link || '/rentals'}
                     onClick={() => onOpenChange(false)}
-                    className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 p-3 transition-colors hover:border-blue-400 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:hover:bg-blue-900/40"
+                    className={infoLinkCardClass}
                   >
                     <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{rental.client}</p>
-                      <p className="text-sm text-blue-700 dark:text-blue-300">
+                      <p className="font-medium text-foreground">{rental.client}</p>
+                      <p className="text-sm text-primary">
                         Возврат {formatDate(rental.plannedReturnDate)} · {rental.equipmentInv}
                       </p>
                     </div>
-                    <ExternalLink className="h-4 w-4 text-blue-600" />
+                    <ExternalLink className="h-4 w-4 text-primary" />
                   </Link>
                 )) : (
-                  <p className="text-sm text-gray-400">На завтра возвратов нет</p>
+                  <p className="text-sm text-muted-foreground">На завтра возвратов нет</p>
                 )}
               </div>
             </div>
@@ -384,13 +397,13 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           details: (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Свободно</p>
-                  <p className="text-2xl font-bold text-green-600">{data.availableCount || 0}</p>
+                <div className={successMetricClass}>
+                  <p className="text-sm text-muted-foreground">Свободно</p>
+                  <p className="text-2xl font-bold text-success">{data.availableCount || 0}</p>
                 </div>
-                <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Неактивно</p>
-                  <p className="text-2xl font-bold text-gray-700 dark:text-gray-200">{data.inactiveCount || 0}</p>
+                <div className={mutedMetricClass}>
+                  <p className="text-sm text-muted-foreground">Неактивно</p>
+                  <p className="text-2xl font-bold text-foreground">{data.inactiveCount || 0}</p>
                 </div>
               </div>
               <div className="space-y-2">
@@ -399,18 +412,18 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                     key={kpiRowKey('idle-equipment', equipment, index, equipment?.inventoryNumber)}
                     to={entityHref('equipment', equipment.id)}
                     onClick={() => onOpenChange(false)}
-                    className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
+                    className={linkCardClass}
                   >
                     <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{equipment.manufacturer} {equipment.model}</p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <p className="font-medium text-foreground">{equipment.manufacturer} {equipment.model}</p>
+                      <p className="text-sm text-muted-foreground">
                         {equipment.inventoryNumber} · {equipment.status === 'inactive' ? 'Неактивна' : 'Свободна'}
                       </p>
                     </div>
                     <ExternalLink className="h-4 w-4 text-[--color-primary]" />
                   </Link>
                 )) : (
-                  <p className="text-sm text-gray-400">В простое техники нет</p>
+                  <p className="text-sm text-muted-foreground">В простое техники нет</p>
                 )}
               </div>
             </div>
@@ -423,23 +436,23 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           description: 'Все незакрытые заявки сервиса. Нажмите для перехода к карточке заявки.',
           details: (
             <div className="space-y-3">
-              <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Открытых заявок</p>
-                <p className="text-3xl font-bold text-orange-600">{data.openTickets?.length || 0}</p>
+              <div className={warningMetricClass}>
+                <p className="text-sm text-muted-foreground">Открытых заявок</p>
+                <p className="text-3xl font-bold text-warning">{data.openTickets?.length || 0}</p>
               </div>
               {data.openTickets && data.openTickets.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Список заявок:</p>
+                  <p className="text-sm font-medium text-foreground">Список заявок:</p>
                   {data.openTickets.map((ticket: any, index: number) => (
                     <Link
                       key={kpiRowKey('open-ticket', ticket, index)}
                       to={entityHref('service', ticket.id)}
                       onClick={() => onOpenChange(false)}
-                      className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
+                      className={linkCardClass}
                     >
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{ticket.equipment}</p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                        <p className="font-medium text-foreground">{ticket.equipment}</p>
+                        <p className="text-sm text-muted-foreground">
                           {ticket.reason} · {ticket.assignedMechanicName || ticket.assignedTo || 'Без механика'}
                         </p>
                       </div>
@@ -458,25 +471,25 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           description: 'Открытые заявки, которым ещё не назначен исполнитель.',
           details: (
             <div className="space-y-3">
-              <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Без механика</p>
-                <p className="text-3xl font-bold text-red-600">{data.unassignedTickets?.length || 0}</p>
+              <div className={dangerMetricClass}>
+                <p className="text-sm text-muted-foreground">Без механика</p>
+                <p className="text-3xl font-bold text-danger">{data.unassignedTickets?.length || 0}</p>
               </div>
               {data.unassignedTickets?.length ? data.unassignedTickets.map((ticket: any, index: number) => (
                 <Link
                   key={kpiRowKey('unassigned-ticket', ticket, index)}
                   to={entityHref('service', ticket.id)}
                   onClick={() => onOpenChange(false)}
-                  className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 transition-colors hover:border-red-400 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:hover:bg-red-900/40"
+                  className={dangerLinkCardClass}
                 >
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{ticket.equipment}</p>
-                    <p className="text-sm text-red-700 dark:text-red-300">{ticket.reason}</p>
+                    <p className="font-medium text-foreground">{ticket.equipment}</p>
+                    <p className="text-sm text-danger-foreground">{ticket.reason}</p>
                   </div>
-                  <ExternalLink className="h-4 w-4 text-red-600" />
+                  <ExternalLink className="h-4 w-4 text-danger" />
                 </Link>
               )) : (
-                <p className="text-sm text-green-600 dark:text-green-400">Все заявки распределены</p>
+                <p className="text-sm text-success-foreground">Все заявки распределены</p>
               )}
             </div>
           )
@@ -488,25 +501,25 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           description: 'Заявки в статусе ожидания запчастей.',
           details: (
             <div className="space-y-3">
-              <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Ждут запчасти</p>
-                <p className="text-3xl font-bold text-yellow-600">{data.waitingTickets?.length || 0}</p>
+              <div className={warningMetricClass}>
+                <p className="text-sm text-muted-foreground">Ждут запчасти</p>
+                <p className="text-3xl font-bold text-warning">{data.waitingTickets?.length || 0}</p>
               </div>
               {data.waitingTickets?.length ? data.waitingTickets.map((ticket: any, index: number) => (
                 <Link
                   key={kpiRowKey('waiting-ticket', ticket, index)}
                   to={entityHref('service', ticket.id)}
                   onClick={() => onOpenChange(false)}
-                  className="flex items-center justify-between rounded-lg border border-yellow-200 bg-yellow-50 p-3 transition-colors hover:border-yellow-400 hover:bg-yellow-100 dark:border-yellow-800 dark:bg-yellow-900/20 dark:hover:bg-yellow-900/40"
+                  className={warningLinkCardClass}
                 >
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{ticket.equipment}</p>
-                    <p className="text-sm text-yellow-700 dark:text-yellow-300">{ticket.reason}</p>
+                    <p className="font-medium text-foreground">{ticket.equipment}</p>
+                    <p className="text-sm text-warning-foreground">{ticket.reason}</p>
                   </div>
-                  <ExternalLink className="h-4 w-4 text-yellow-600" />
+                  <ExternalLink className="h-4 w-4 text-warning" />
                 </Link>
               )) : (
-                <p className="text-sm text-green-600 dark:text-green-400">Ожидания запчастей нет</p>
+                <p className="text-sm text-success-foreground">Ожидания запчастей нет</p>
               )}
             </div>
           )
@@ -518,27 +531,27 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           description: 'Техника с повторяющейся причиной обращения в сервис.',
           details: (
             <div className="space-y-3">
-              <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Повторных случаев</p>
-                <p className="text-3xl font-bold text-red-600">{data.repeatFailures?.length || 0}</p>
+              <div className={dangerMetricClass}>
+                <p className="text-sm text-muted-foreground">Повторных случаев</p>
+                <p className="text-3xl font-bold text-danger">{data.repeatFailures?.length || 0}</p>
               </div>
               {data.repeatFailures?.length ? data.repeatFailures.map((row: any, index: number) => (
                 <Link
                   key={kpiRowKey('repeat-failure', row, index, row?.reason)}
                   to={row.equipmentId ? `/equipment/${row.equipmentId}` : '/reports'}
                   onClick={() => onOpenChange(false)}
-                  className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 transition-colors hover:border-red-400 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:hover:bg-red-900/40"
+                  className={dangerLinkCardClass}
                 >
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{row.equipmentLabel}</p>
-                    <p className="text-sm text-red-700 dark:text-red-300">
+                    <p className="font-medium text-foreground">{row.equipmentLabel}</p>
+                    <p className="text-sm text-danger-foreground">
                       {row.reason} · {row.repairsCount} ремонтов
                     </p>
                   </div>
-                  <ExternalLink className="h-4 w-4 text-red-600" />
+                  <ExternalLink className="h-4 w-4 text-danger" />
                 </Link>
               )) : (
-                <p className="text-sm text-green-600 dark:text-green-400">Повторные поломки не найдены</p>
+                <p className="text-sm text-success-foreground">Повторные поломки не найдены</p>
               )}
             </div>
           )
@@ -551,17 +564,17 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           details: (
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-4">
-                <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Техника в сервисе</p>
-                  <p className="text-2xl font-bold text-orange-600">{data.equipmentInService?.length || 0}</p>
+                <div className={warningMetricClass}>
+                  <p className="text-sm text-muted-foreground">Техника в сервисе</p>
+                  <p className="text-2xl font-bold text-warning">{data.equipmentInService?.length || 0}</p>
                 </div>
-                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Средний срок</p>
-                  <p className="text-2xl font-bold text-blue-600">{data.averageDays || 0} дн.</p>
+                <div className={infoMetricClass}>
+                  <p className="text-sm text-muted-foreground">Средний срок</p>
+                  <p className="text-2xl font-bold text-primary">{data.averageDays || 0} дн.</p>
                 </div>
-                <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Максимум</p>
-                  <p className="text-2xl font-bold text-red-600">{data.maxDays || 0} дн.</p>
+                <div className={dangerMetricClass}>
+                  <p className="text-sm text-muted-foreground">Максимум</p>
+                  <p className="text-2xl font-bold text-danger">{data.maxDays || 0} дн.</p>
                 </div>
               </div>
               <div className="space-y-2">
@@ -570,21 +583,21 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                     key={kpiRowKey('service-days', row, index, row?.inventoryNumber)}
                     to={entityHref('service', row.id)}
                     onClick={() => onOpenChange(false)}
-                    className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
+                    className={linkCardClass}
                   >
                     <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{row.equipmentLabel}</p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <p className="font-medium text-foreground">{row.equipmentLabel}</p>
+                      <p className="text-sm text-muted-foreground">
                         {row.reason} · {row.inventoryLabel || row.inventoryNumber}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-orange-600">{row.daysInService} дн.</span>
+                      <span className="text-sm font-semibold text-warning">{row.daysInService} дн.</span>
                       <ExternalLink className="h-4 w-4 text-[--color-primary]" />
                     </div>
                   </Link>
                 )) : (
-                  <p className="text-sm text-green-600 dark:text-green-400">Открытых сервисных заявок нет</p>
+                  <p className="text-sm text-success-foreground">Открытых сервисных заявок нет</p>
                 )}
               </div>
             </div>
@@ -597,18 +610,18 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           description: 'Доход от активных договоров аренды',
           details: (
             <div className="space-y-4">
-              <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Общая выручка</p>
-                <p className="text-3xl font-bold text-green-600">{safeCurrency(data.weekRevenue)}</p>
+              <div className={successMetricClass}>
+                <p className="text-sm text-muted-foreground">Общая выручка</p>
+                <p className="text-3xl font-bold text-success">{safeCurrency(data.weekRevenue)}</p>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Активных договоров</p>
-                  <p className="text-xl font-bold text-gray-900 dark:text-white">{data.activeRentalsCount}</p>
+                <div className="rounded-lg border border-primary/25 bg-primary/10 p-3">
+                  <p className="text-xs text-muted-foreground">Активных договоров</p>
+                  <p className="text-xl font-bold text-foreground">{data.activeRentalsCount}</p>
                 </div>
-                <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Средний чек</p>
-                  <p className="text-xl font-bold text-gray-900 dark:text-white">
+                <div className="rounded-lg border border-info/25 bg-info/10 p-3">
+                  <p className="text-xs text-muted-foreground">Средний чек</p>
+                  <p className="text-xl font-bold text-foreground">
                     {safeCurrency(data.averagePrice)}
                   </p>
                 </div>
@@ -623,26 +636,26 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           description: 'Суммарная задолженность всех клиентов',
           details: (
             <div className="space-y-4">
-              <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Общая дебиторка</p>
-                <p className="text-3xl font-bold text-orange-600">{safeCurrency(data.totalDebt)}</p>
+              <div className={warningMetricClass}>
+                <p className="text-sm text-muted-foreground">Общая дебиторка</p>
+                <p className="text-3xl font-bold text-warning">{safeCurrency(data.totalDebt)}</p>
               </div>
               {data.clients && data.clients.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Клиенты с задолженностью:</p>
+                  <p className="text-sm font-medium text-foreground">Клиенты с задолженностью:</p>
                   {data.clients.map((client: any, index: number) => (
                     <Link
                       key={kpiRowKey('debt-client', client, index, client?.company)}
                       to={entityHref('clients', client.id)}
                       onClick={() => onOpenChange(false)}
-                      className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:border-[--color-primary] hover:bg-blue-50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
+                      className={linkCardClass}
                     >
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{client.company}</p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">{client.contact}</p>
+                        <p className="font-medium text-foreground">{client.company}</p>
+                        <p className="text-sm text-muted-foreground">{client.contact}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <p className="font-semibold text-orange-600">{safeCurrency(client.debt)}</p>
+                        <p className="font-semibold text-warning">{safeCurrency(client.debt)}</p>
                         <ExternalLink className="h-4 w-4 text-[--color-primary]" />
                       </div>
                     </Link>
@@ -651,16 +664,16 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
               )}
               {data.overduePayments && data.overduePayments.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Просроченные платежи:</p>
+                  <p className="text-sm font-medium text-foreground">Просроченные платежи:</p>
                   {data.overduePayments.map((p: any, index: number) => (
-                    <div key={kpiRowKey('total-debt-payment', p, index, p?.invoiceNumber)} className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+                    <div key={kpiRowKey('total-debt-payment', p, index, p?.invoiceNumber)} className={dangerLinkCardClass}>
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{p.client}</p>
-                        <p className="text-sm text-red-600">
+                        <p className="font-medium text-foreground">{p.client}</p>
+                        <p className="text-sm text-danger">
                           {p.invoiceNumber || `Аренда ${p.rentalId}`} · Срок: {formatDate(p.dueDate || p.expectedPaymentDate || p.endDate)}
                         </p>
                       </div>
-                      <p className="font-semibold text-red-600">{safeCurrency(p.outstanding ?? p.amount)}</p>
+                      <p className="font-semibold text-danger">{safeCurrency(p.outstanding ?? p.amount)}</p>
                     </div>
                   ))}
                 </div>
@@ -675,32 +688,32 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
           description: 'Просроченные платежи за текущий месяц',
           details: (
             <div className="space-y-4">
-              <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Дебиторка за месяц</p>
-                <p className="text-3xl font-bold text-red-600">{safeCurrency(data.monthDebt)}</p>
+              <div className={dangerMetricClass}>
+                <p className="text-sm text-muted-foreground">Дебиторка за месяц</p>
+                <p className="text-3xl font-bold text-danger">{safeCurrency(data.monthDebt)}</p>
               </div>
               {data.overduePayments && data.overduePayments.length > 0 ? (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Просроченные платежи:</p>
+                  <p className="text-sm font-medium text-foreground">Просроченные платежи:</p>
                   {data.overduePayments.map((p: any, index: number) => (
-                    <div key={kpiRowKey('month-debt-payment', p, index, p?.invoiceNumber)} className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+                    <div key={kpiRowKey('month-debt-payment', p, index, p?.invoiceNumber)} className={dangerLinkCardClass}>
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{p.client}</p>
-                        <p className="text-sm text-red-600">
+                        <p className="font-medium text-foreground">{p.client}</p>
+                        <p className="text-sm text-danger">
                           {p.invoiceNumber || `Аренда ${p.rentalId}`} · Срок: {formatDate(p.dueDate || p.expectedPaymentDate || p.endDate)}
                         </p>
                       </div>
-                      <p className="font-semibold text-red-600">{safeCurrency(p.outstanding ?? p.amount)}</p>
+                      <p className="font-semibold text-danger">{safeCurrency(p.outstanding ?? p.amount)}</p>
                     </div>
                   ))}
                 </div>
               ) : (
                 <div className="flex items-center justify-center py-8 text-center">
                   <div>
-                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
-                      <TrendingUp className="h-6 w-6 text-green-600" />
+                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-success/10">
+                      <TrendingUp className="h-6 w-6 text-success" />
                     </div>
-                    <p className="text-sm text-gray-500">Нет просроченных платежей</p>
+                    <p className="text-sm text-muted-foreground">Нет просроченных платежей</p>
                   </div>
                 </div>
               )}
@@ -720,26 +733,26 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={animatedOverlayClassName()} />
-        <Dialog.Content className={animatedModalClassName('flex !max-h-[85vh] !w-[calc(100vw-2rem)] !max-w-2xl flex-col overflow-hidden border-slate-200/90 bg-white p-0 dark:border-gray-800 dark:bg-gray-950')}>
-          <div className="shrink-0 border-b border-slate-100 px-6 py-5 pr-14 dark:border-gray-800">
+        <Dialog.Content className={animatedModalClassName('flex !max-h-[85vh] !w-[calc(100vw-2rem)] !max-w-2xl flex-col overflow-hidden border-border bg-card p-0 text-card-foreground')}>
+          <div className="shrink-0 border-b border-border bg-card/95 px-6 py-5 pr-14">
             <div className="flex items-start justify-between gap-4">
-              <Dialog.Title className="text-xl font-semibold text-slate-950 dark:text-white">
+              <Dialog.Title className="text-xl font-semibold text-foreground">
                 {content.title}
               </Dialog.Title>
               <Dialog.Close asChild>
-                <button className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200">
-                  <X className="h-5 w-5 text-gray-500" />
+                <button className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-muted-foreground transition hover:border-primary/30 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <X className="h-5 w-5 text-muted-foreground" />
                 </button>
               </Dialog.Close>
             </div>
-            <Dialog.Description className="mt-2 text-sm leading-6 text-slate-500 dark:text-gray-400">
+            <Dialog.Description className="mt-2 text-sm leading-6 text-muted-foreground">
               {content.description}
             </Dialog.Description>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 pr-5">{content.details}</div>
 
-          <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 dark:border-gray-800 dark:bg-gray-950/95">
+          <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-border bg-card/95 px-6 py-4 backdrop-blur">
             {content.actions}
             <Button variant="secondary" onClick={() => onOpenChange(false)}>
               Закрыть

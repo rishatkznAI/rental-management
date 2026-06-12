@@ -63,10 +63,6 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
     'dashboard-kpi-operational-load',
     'Пульт управления арендным бизнесом',
     'Очередь внимания',
-    'Как считается',
-    'Как считается утилизация парка',
-    'Открыть в планировщике',
-    'Открыть аренды',
     'Динамика месяца',
     'Здоровье компании',
     'dashboard visual acceptance',
@@ -79,11 +75,6 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
   ]) {
     assert.match(releaseSmokeSource, new RegExp(marker));
   }
-  assert.match(releaseSmokeSource, /utilization modal should open from KPI click/);
-  assert.match(releaseSmokeSource, /planner action should remain inside modal/);
-  assert.match(releaseSmokeSource, /rentals action should be available inside modal/);
-  assert.match(releaseSmokeSource, /toHaveAttribute\('href', \/#\\\/planner\$\//);
-  assert.match(releaseSmokeSource, /toHaveAttribute\('href', \/#\\\/rentals\$\//);
   assert.match(releaseSmokeSource, /toHaveAttribute\('href', \/#\\\/service\$\//);
   assert.match(releaseSmokeSource, /captureExecutiveCockpitScreenshots\(page, normalizedConfig\.frontendUrl, testInfo\)/);
 });

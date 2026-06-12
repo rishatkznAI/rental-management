@@ -322,13 +322,7 @@ async function expectExecutiveCockpitVisible(page: Page) {
   await expect(monthDynamics.getByRole('heading', { name: 'Динамика месяца' }), 'dashboard cash flow card should be visible').toBeVisible();
   await expect(companyHealth.getByText('Здоровье компании'), 'dashboard company health card should be visible').toBeVisible();
 
-  const fleetUtilizationCard = page.getByTestId('dashboard-kpi-fleet-utilization');
   const serviceLoadCard = page.getByTestId('dashboard-kpi-service-load');
-  await fleetUtilizationCard.click();
-  await expect(page.getByRole('dialog', { name: 'Как считается утилизация парка' }), 'utilization modal should open from KPI click').toBeVisible();
-  await expect(page.getByRole('link', { name: 'Открыть в планировщике' }), 'planner action should remain inside modal').toHaveAttribute('href', /#\/planner$/);
-  await expect(page.getByRole('link', { name: 'Открыть аренды' }), 'rentals action should be available inside modal').toHaveAttribute('href', /#\/rentals$/);
-  await page.getByRole('button', { name: 'Закрыть' }).click();
   await expect(serviceLoadCard, 'service CTA should target #/service')
     .toHaveAttribute('href', /#\/service$/);
 

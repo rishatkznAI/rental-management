@@ -1181,7 +1181,7 @@ export default function Deliveries() {
             </div>
           )}
           {canCreate && (
-            <Button className="min-w-0" onClick={() => openCreateDialog()}>
+            <Button onClick={() => openCreateDialog()}>
               <Plus className="mr-1.5 h-4 w-4" />
               Новая доставка
             </Button>

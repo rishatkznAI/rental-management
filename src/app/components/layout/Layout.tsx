@@ -93,8 +93,8 @@ export function Layout() {
     return null;
   }, [can]);
   const canOpenPlanner = canView('planner');
-  const desktopSidebarOffsetClass = desktopSidebarCollapsed ? 'sm:left-20' : 'sm:left-64';
-  const desktopSidebarMarginClass = desktopSidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64';
+  const desktopSidebarOffsetClass = desktopSidebarCollapsed ? 'sm:left-20' : 'sm:left-60';
+  const desktopSidebarMarginClass = desktopSidebarCollapsed ? 'sm:ml-20' : 'sm:ml-60';
   const pageTitle = useMemo(() => {
     if (location.pathname === '/') return 'Дашборд';
     const segment = location.pathname.split('/').filter(Boolean)[0] || '';

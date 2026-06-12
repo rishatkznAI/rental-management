@@ -417,18 +417,18 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        'fixed left-0 top-0 z-40 h-screen w-64',
-        'border-r border-sidebar-border bg-[linear-gradient(180deg,#060807_0%,#0b120e_54%,#101912_100%)] text-sidebar-foreground shadow-[0_36px_70px_-42px_rgba(0,0,0,0.92)] backdrop-blur-xl dark:bg-sidebar',
+        'fixed left-0 top-0 z-40 h-screen w-60',
+        'border-r border-lime-300/10 bg-[linear-gradient(180deg,#030604_0%,#07100b_54%,#0b130d_100%)] text-sidebar-foreground shadow-[0_36px_70px_-42px_rgba(0,0,0,0.92)] backdrop-blur-xl dark:bg-sidebar',
         'transition-[transform,width] duration-300 ease-in-out',
-        desktopCollapsed ? 'sm:w-20' : 'sm:w-64',
+        desktopCollapsed ? 'sm:w-20' : 'sm:w-60',
         isOpen ? 'translate-x-0' : '-translate-x-full',
         'sm:translate-x-0',
       )}
     >
       <div className="flex h-full flex-col">
         <div className={cn(
-          'flex items-center gap-3 border-b px-4 py-4',
-          'border-sidebar-border',
+          'flex items-center gap-3 border-b px-3.5 py-4',
+          'border-lime-300/10',
           desktopCollapsed && 'sm:justify-center sm:px-3',
         )}>
           <LiftLogo className="h-9 w-9" />
@@ -455,7 +455,7 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className={cn('px-3 py-3', desktopCollapsed && 'sm:px-2')} ref={searchRef}>
+        <div className={cn('px-2.5 py-3', desktopCollapsed && 'sm:px-2')} ref={searchRef}>
           {desktopCollapsed ? (
             <button
               type="button"
@@ -476,7 +476,7 @@ export function Sidebar({
                 if (normalizedSearch.length > 0) setIsSearchOpen(true);
               }}
               placeholder="Поиск: техника, клиенты, аренды, сервис"
-              className="h-10 rounded-xl border-sidebar-border bg-white/8 pl-9 pr-3 text-sm text-sidebar-foreground placeholder:text-white/45 focus-visible:border-primary/60 focus-visible:ring-primary/25"
+              className="h-9 rounded-xl border-lime-300/10 bg-white/[0.055] pl-9 pr-3 text-[13px] text-sidebar-foreground placeholder:text-white/38 focus-visible:border-primary/60 focus-visible:ring-primary/25"
             />
           </div>
 
@@ -557,11 +557,11 @@ export function Sidebar({
                         handleNavClick();
                       }}
                       className={cn(
-                        'relative flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[13px] transition-colors',
+                        'relative flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-[13px] transition-colors',
                         desktopCollapsed && 'sm:h-11 sm:justify-center sm:gap-0 sm:px-0',
                         isActive
                           ? 'bg-primary text-primary-foreground shadow-[0_18px_34px_-24px_rgba(183,242,58,0.9)]'
-                          : 'text-white/68 hover:bg-white/8 hover:text-sidebar-foreground',
+                          : 'text-white/62 hover:bg-white/[0.06] hover:text-sidebar-foreground',
                       )}
                     >
                       <Icon className="h-4 w-4 shrink-0" />
@@ -587,7 +587,7 @@ export function Sidebar({
           ))}
         </nav>
 
-        <div className={cn('border-t border-sidebar-border px-3 py-3', desktopCollapsed && 'sm:px-2')}>
+        <div className={cn('border-t border-lime-300/10 px-2.5 py-3', desktopCollapsed && 'sm:px-2')}>
           <button
             type="button"
             onClick={toggleTheme}

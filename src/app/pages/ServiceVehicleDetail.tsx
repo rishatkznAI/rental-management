@@ -715,7 +715,23 @@ export default function ServiceVehicleDetail() {
               <p>Путевых листов пока нет</p>
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+            <>
+            <div className="space-y-3 md:hidden">
+              {trips.map(trip => (
+                <TripCard
+                  key={trip.id}
+                  trip={trip}
+                  canEdit={canEdit}
+                  onEdit={() => openEditTrip(trip)}
+                  onClose={() => updateTripStatus(trip, 'completed')}
+                  onCancel={() => updateTripStatus(trip, 'cancelled')}
+                  onDelete={() => handleDeleteTrip(trip.id)}
+                  onWaybill={() => handleWaybill(trip)}
+                />
+              ))}
+            </div>
+
+            <div className="hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 md:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -745,6 +761,7 @@ export default function ServiceVehicleDetail() {
                 </TableBody>
               </Table>
             </div>
+            </>
           )}
 
           <p className="text-xs text-gray-400">Итого по машине: {trips.length} листов · {totalDistance.toLocaleString('ru-RU')} км</p>
@@ -977,5 +994,130 @@ function TripRow({
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+function TripCard({
+  trip, canEdit, onDelete, onWaybill, onEdit, onClose, onCancel,
+}: {
+  trip: VehicleTrip;
+  canEdit: boolean;
+  onDelete: () => void;
+  onWaybill: () => void;
+  onEdit: () => void;
+  onClose: () => void;
+  onCancel: () => void;
+}) {
+  const status = trip.status || 'completed';
+  const distance = trip.distanceKm ?? trip.distance ?? 0;
+  const fuel = trip.fuelConsumption;
+  const route = trip.route || [trip.routeFrom, trip.routeTo].filter(Boolean).join(' — ');
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate font-medium text-gray-900 dark:text-white">{trip.sheetNumber || trip.id}</div>
+          <div className="mt-1 flex items-center gap-1 text-xs text-gray-500">
+            <Calendar className="h-3 w-3 shrink-0" />
+            {formatDate(trip.date)}
+          </div>
+        </div>
+        <Badge variant={tripStatusVariant(status)}>{TRIP_STATUS_LABELS[status]}</Badge>
+      </div>
+
+      <div className="mt-3 space-y-2 text-sm text-gray-700 dark:text-gray-200">
+        <TripCardLine icon={User} label="Водитель" value={trip.driverName || trip.driver || '—'} />
+        <TripCardLine icon={MapPin} label="Маршрут" value={route || '—'} />
+        {(trip.serviceRequestId || trip.serviceTicketId) && (
+          <TripCardLine icon={Wrench} label="Заявка" value={trip.serviceRequestId || trip.serviceTicketId || '—'} />
+        )}
+        <TripCardLine icon={Gauge} label="Пробег" value={`${distance.toLocaleString('ru-RU')} км`} />
+        <div className="grid grid-cols-2 gap-3 pt-1 text-xs">
+          <TripCardMetric label="Одометр" value={`${Number(trip.odometerStart ?? trip.startMileage ?? 0).toLocaleString('ru-RU')} → ${trip.odometerEnd ?? trip.endMileage ?? '—'}`} />
+          <TripCardMetric label="Топливо" value={fuel === null || fuel === undefined ? '—' : `${Number(fuel).toLocaleString('ru-RU')} л`} />
+        </div>
+        {(trip.purpose || trip.comment) && (
+          <div className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-900/50 dark:text-gray-300">
+            {trip.purpose || '—'}
+            {trip.comment && <div className="mt-1 text-gray-400">{trip.comment}</div>}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-wrap justify-end gap-1 border-t border-gray-100 pt-3 dark:border-gray-700">
+        <TripActionButton label="Путевой лист" onClick={onWaybill} icon={FileText} />
+        {canEdit && (
+          <>
+            <TripActionButton label="Редактировать" onClick={onEdit} icon={Edit2} />
+            {status !== 'completed' && status !== 'cancelled' && (
+              <TripActionButton label="Закрыть путевой лист" onClick={onClose} icon={CheckCircle} tone="success" />
+            )}
+            {status !== 'cancelled' && (
+              <TripActionButton label="Отменить" onClick={onCancel} icon={Ban} tone="warning" />
+            )}
+            <TripActionButton label="Удалить" onClick={onDelete} icon={Trash2} tone="danger" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TripCardLine({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-2">
+      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
+      <div className="min-w-0">
+        <span className="text-xs text-gray-400">{label}: </span>
+        <span className="break-words">{value}</span>
+      </div>
+    </div>
+  );
+}
+
+function TripCardMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] uppercase text-gray-400">{label}</div>
+      <div className="mt-0.5 truncate text-gray-700 dark:text-gray-200">{value}</div>
+    </div>
+  );
+}
+
+function TripActionButton({
+  label,
+  onClick,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  onClick: () => void;
+  icon: React.ComponentType<{ className?: string }>;
+  tone?: 'success' | 'warning' | 'danger';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={cn(
+        'rounded p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-blue-500 dark:hover:bg-gray-700',
+        tone === 'success' && 'hover:text-emerald-500',
+        tone === 'warning' && 'hover:text-amber-500',
+        tone === 'danger' && 'hover:text-red-500',
+      )}
+    >
+      <Icon className="h-4 w-4" />
+    </button>
   );
 }

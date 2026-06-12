@@ -312,16 +312,17 @@ function DeliveryDialog({
     }}>
       <SheetContent
         side="right"
-        className="w-full gap-0 overflow-hidden border-gray-200 bg-white sm:max-w-3xl dark:border-gray-700 dark:bg-gray-900"
+        className="flex w-full max-w-full flex-col gap-0 overflow-hidden border-gray-200 bg-white sm:max-w-3xl dark:border-gray-700 dark:bg-gray-900"
+        data-delivery-form-sheet="true"
       >
-        <SheetHeader className="border-b border-gray-200 px-6 py-5 pr-12 dark:border-gray-700">
+        <SheetHeader className="border-b border-gray-200 px-4 py-4 pr-12 sm:px-6 sm:py-5 dark:border-gray-700">
           <SheetTitle className="text-xl text-gray-900 dark:text-white">{title}</SheetTitle>
           <SheetDescription className="text-sm text-gray-500 dark:text-gray-400">
             Доставка связывается с арендой и сразу попадает в планировщик как отгрузка или приёмка.
           </SheetDescription>
         </SheetHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 sm:px-6 sm:py-5">
           <div className="grid gap-4 md:grid-cols-2">
           <div className="md:col-span-2">
             <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Связанная аренда</label>
@@ -484,9 +485,9 @@ function DeliveryDialog({
           </div>
         </div>
 
-        <SheetFooter className="border-t border-gray-200 bg-white px-6 py-4 sm:flex-row sm:items-center sm:justify-end dark:border-gray-700 dark:bg-gray-900">
-          <Button variant="secondary" onClick={onClose}>Отмена</Button>
-          <Button onClick={onSubmit} disabled={isSaving}>
+        <SheetFooter className="border-t border-gray-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-6 sm:py-4 dark:border-gray-700 dark:bg-gray-900">
+          <Button variant="secondary" className="w-full sm:w-auto" onClick={onClose}>Отмена</Button>
+          <Button className="w-full sm:w-auto" onClick={onSubmit} disabled={isSaving}>
             {isSaving ? 'Сохраняю…' : 'Сохранить доставку'}
           </Button>
         </SheetFooter>
@@ -951,7 +952,7 @@ export default function Deliveries() {
           </div>
         )}
 
-        <div className="flex gap-1 overflow-x-auto border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+        <div className="flex max-w-full gap-1 overflow-x-auto border-b border-gray-100 px-4 py-3 dark:border-gray-800">
           {([
             ['overview', 'Обзор'],
             ['route', 'Маршрут'],
@@ -974,7 +975,7 @@ export default function Deliveries() {
           ))}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 sm:px-5" data-delivery-detail-responsive="true">
           {detailTab === 'overview' && (
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2">
@@ -995,15 +996,15 @@ export default function Deliveries() {
                   ['Адрес подачи', delivery.origin],
                   ['Адрес доставки', delivery.destination],
                 ].map(([label, value]) => (
-                  <div key={label} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
+                  <div key={label} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
                     <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</div>
-                    <div className="mt-1 break-words text-sm font-semibold text-gray-950 dark:text-white">{safeText(value)}</div>
+                    <div className="mt-1 break-words [overflow-wrap:anywhere] text-sm font-semibold text-gray-950 dark:text-white">{safeText(value)}</div>
                   </div>
                 ))}
               </div>
               <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900/70">
                 <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Комментарий</div>
-                <p className="mt-1 whitespace-pre-wrap break-words text-sm text-gray-800 dark:text-gray-200">{safeText(delivery.comment)}</p>
+                <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-gray-800 dark:text-gray-200">{safeText(delivery.comment)}</p>
               </div>
             </div>
           )}
@@ -1015,7 +1016,7 @@ export default function Deliveries() {
                   <Route className="mt-0.5 h-5 w-5 shrink-0 text-blue-500" />
                   <div className="min-w-0">
                     <div className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">Подача</div>
-                    <div className="mt-1 break-words text-sm font-semibold text-gray-950 dark:text-white">{safeText(delivery.origin)}</div>
+                    <div className="mt-1 break-words [overflow-wrap:anywhere] text-sm font-semibold text-gray-950 dark:text-white">{safeText(delivery.origin)}</div>
                   </div>
                 </div>
               </div>
@@ -1024,7 +1025,7 @@ export default function Deliveries() {
                   <Route className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
                   <div className="min-w-0">
                     <div className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">Доставка</div>
-                    <div className="mt-1 break-words text-sm font-semibold text-gray-950 dark:text-white">{safeText(delivery.destination)}</div>
+                    <div className="mt-1 break-words [overflow-wrap:anywhere] text-sm font-semibold text-gray-950 dark:text-white">{safeText(delivery.destination)}</div>
                   </div>
                 </div>
               </div>
@@ -1042,9 +1043,9 @@ export default function Deliveries() {
                 ['Инвентарный №', delivery.equipmentInv],
                 ['ID техники', delivery.equipmentId],
               ].map(([label, value]) => (
-                <div key={label} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
+                <div key={label} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/70">
                   <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</div>
-                  <div className="mt-1 break-words text-sm font-semibold text-gray-950 dark:text-white">{safeText(value)}</div>
+                  <div className="mt-1 break-words [overflow-wrap:anywhere] text-sm font-semibold text-gray-950 dark:text-white">{safeText(value)}</div>
                 </div>
               ))}
             </div>
@@ -1084,36 +1085,36 @@ export default function Deliveries() {
           )}
         </div>
 
-        <SheetFooter className="gap-2 sm:grid sm:grid-cols-2">
+        <SheetFooter className="gap-2 px-4 sm:grid sm:grid-cols-2 sm:px-6" data-delivery-detail-actions="true">
           {canEdit && (
-            <Button variant="secondary" onClick={() => openEditDialog(delivery)}>
+            <Button variant="secondary" className="w-full min-w-0" onClick={() => openEditDialog(delivery)}>
               Изменить доставку
             </Button>
           )}
           {delivery.carrierPhone && (
             <Button variant="secondary" asChild>
-              <a href={`tel:${delivery.carrierPhone}`}>
+              <a className="w-full min-w-0" href={`tel:${delivery.carrierPhone}`}>
                 <Phone className="h-4 w-4" />
                 Связаться с водителем
               </a>
             </Button>
           )}
           {canShareGeo && (
-            <Button variant="secondary" onClick={() => shareRoute(delivery)}>
+            <Button variant="secondary" className="w-full min-w-0" onClick={() => shareRoute(delivery)}>
               <Navigation className="h-4 w-4" />
               Передать геопозицию
             </Button>
           )}
           {canCreateDocuments && (
             <Button variant="secondary" asChild>
-              <Link to={`/documents?action=create&deliveryId=${encodeURIComponent(delivery.id)}`}>
+              <Link className="w-full min-w-0" to={`/documents?action=create&deliveryId=${encodeURIComponent(delivery.id)}`}>
                 <FileText className="h-4 w-4" />
                 Создать документ
               </Link>
             </Button>
           )}
           {canCancelDelivery && (
-            <Button variant="destructive" onClick={() => cancelDelivery(delivery)}>
+            <Button variant="destructive" className="w-full min-w-0" onClick={() => cancelDelivery(delivery)}>
               <XCircle className="h-4 w-4" />
               Отменить доставку
             </Button>
@@ -1124,19 +1125,19 @@ export default function Deliveries() {
   }
 
   return (
-    <div className="space-y-5 p-4 sm:p-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div>
+    <div className="min-w-0 max-w-full space-y-5 overflow-x-clip p-3 sm:p-6" data-delivery-responsive-ui="true">
+      <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
           <div className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-500">Операции</div>
           <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Доставка</h1>
           <p className="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
             Операционный экран отгрузок и возвратов: статусы, перевозчики, срочные действия и связь с MAX без карты и лишней аналитики.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex min-w-0 flex-wrap gap-2">
           {!isCarrierView && (
             <div className="relative">
-              <Button variant="secondary" type="button" onClick={() => setActionsOpen((open) => !open)}>
+              <Button variant="secondary" type="button" className="min-w-0" onClick={() => setActionsOpen((open) => !open)}>
                 <MoreHorizontal className="mr-1.5 h-4 w-4" />
                 Ещё действия
               </Button>
@@ -1180,7 +1181,7 @@ export default function Deliveries() {
             </div>
           )}
           {canCreate && (
-            <Button onClick={() => openCreateDialog()}>
+            <Button className="min-w-0" onClick={() => openCreateDialog()}>
               <Plus className="mr-1.5 h-4 w-4" />
               Новая доставка
             </Button>
@@ -1188,7 +1189,7 @@ export default function Deliveries() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" data-delivery-kpi-grid="true">
         {kpiCards.map((card) => {
           const Icon = card.icon;
           return (
@@ -1207,22 +1208,22 @@ export default function Deliveries() {
                   setActiveTab('completed');
                 }
               }}
-              className={`min-h-[112px] rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${card.card}`}
+              className={`min-h-[112px] min-w-0 rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${card.card}`}
             >
               <div className="flex items-start justify-between gap-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">{card.label}</div>
+                <div className="min-w-0 break-words text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">{card.label}</div>
                 <span className="rounded-xl bg-white/80 p-2 text-gray-500 ring-1 ring-gray-200 dark:bg-gray-950/70 dark:ring-gray-800">
                   <Icon className="h-4 w-4" />
                 </span>
               </div>
               <div className={`mt-3 text-3xl font-bold ${card.tone}`}>{card.value}</div>
-              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{card.hint}</div>
+              <div className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{card.hint}</div>
             </button>
           );
         })}
       </div>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <section className="min-w-0 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm sm:p-4 dark:border-gray-800 dark:bg-gray-900" data-delivery-filter-panel="true">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(260px,1.45fr)_repeat(4,minmax(150px,0.85fr))_auto]">
           <div className="relative sm:col-span-2 lg:col-span-3 2xl:col-span-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -1263,10 +1264,10 @@ export default function Deliveries() {
         </div>
       </section>
 
-      <div className={selectedDelivery ? 'grid gap-4 2xl:grid-cols-[minmax(0,1fr)_400px]' : undefined}>
-      <section className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div className={selectedDelivery ? 'grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_400px]' : 'min-w-0'}>
+      <section className="min-w-0 rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900" data-delivery-list-region="true">
         <div className="flex flex-col gap-3 border-b border-gray-100 p-3 dark:border-gray-800 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex gap-1 overflow-x-auto">
+          <div className="flex max-w-full gap-1 overflow-x-auto">
             {tabItems.map((tab) => {
               const isActive = activeTab === tab.id;
               const isOverdueTab = tab.id === 'overdue';
@@ -1300,13 +1301,13 @@ export default function Deliveries() {
               );
             })}
           </div>
-          <div className="flex rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-gray-800 dark:bg-gray-950">
+          <div className="flex w-full rounded-xl border border-gray-200 bg-gray-50 p-1 sm:w-auto dark:border-gray-800 dark:bg-gray-950">
             {(['list', 'compact'] as DeliveryViewMode[]).map((mode) => (
               <button
                 key={mode}
                 type="button"
                 onClick={() => setViewMode(mode)}
-                className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${viewMode === mode ? 'bg-white text-gray-950 shadow-sm dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}
+                className={`min-w-0 flex-1 rounded-lg px-3 py-1.5 text-sm font-semibold transition sm:flex-none ${viewMode === mode ? 'bg-white text-gray-950 shadow-sm dark:bg-gray-800 dark:text-white' : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}
               >
                 {mode === 'list' ? 'Список' : 'Компактно'}
               </button>
@@ -1348,7 +1349,7 @@ export default function Deliveries() {
             )}
           </div>
         ) : viewMode === 'compact' ? (
-          <div className="grid gap-3 p-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid min-w-0 gap-3 p-3 md:grid-cols-2 xl:grid-cols-3" data-delivery-compact-cards="true">
             {filtered.map((delivery) => (
               <button
                 key={delivery.id}
@@ -1357,28 +1358,222 @@ export default function Deliveries() {
                   setSelectedDeliveryId(delivery.id);
                   setDetailTab('overview');
                 }}
-                className={`rounded-2xl border p-4 text-left transition hover:border-blue-300 hover:shadow-sm dark:hover:border-blue-800 ${
+                className={`min-w-0 rounded-2xl border p-4 text-left transition hover:border-blue-300 hover:shadow-sm dark:hover:border-blue-800 ${
                   selectedDeliveryId === delivery.id ? 'border-blue-400 bg-blue-50/70 dark:border-blue-700 dark:bg-blue-950/20' : 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950/40'
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-gray-950 dark:text-white">{delivery.id}</div>
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="break-words text-sm font-semibold text-gray-950 dark:text-white">{delivery.id}</div>
                     <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatDate(delivery.transportDate)} · {delivery.pickupTime || 'время не указано'}</div>
                   </div>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_CLASSES[delivery.status] || STATUS_CLASSES.new}`}>{STATUS_LABELS[delivery.status] || delivery.status || 'Новая'}</span>
+                  <span className={`max-w-[52%] shrink-0 break-words rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_CLASSES[delivery.status] || STATUS_CLASSES.new}`}>{STATUS_LABELS[delivery.status] || delivery.status || 'Новая'}</span>
                 </div>
-                <div className="mt-3 text-sm font-medium text-gray-900 dark:text-white">{safeText(delivery.client)}</div>
-                <div className="mt-1 truncate text-sm text-gray-600 dark:text-gray-300">{safeText(delivery.cargo)}</div>
-                <div className="mt-3 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                  <Route className="h-3.5 w-3.5" />
-                  <span className="truncate">{safeText(delivery.origin)} → {safeText(delivery.destination)}</span>
+                <div className="mt-3 break-words [overflow-wrap:anywhere] text-sm font-medium text-gray-900 dark:text-white">{safeText(delivery.client)}</div>
+                <div className="mt-1 break-words [overflow-wrap:anywhere] text-sm text-gray-600 dark:text-gray-300">{safeText(delivery.cargo)}</div>
+                <div className="mt-3 flex min-w-0 items-start gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <Route className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span className="min-w-0 break-words [overflow-wrap:anywhere]">{safeText(delivery.origin)} → {safeText(delivery.destination)}</span>
                 </div>
               </button>
             ))}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="space-y-3 p-3 md:hidden" data-delivery-mobile-cards="true">
+            {filtered.map((delivery) => {
+              const statusMeta = getDeliveryStatusMeta(delivery, todayKey);
+              const isSelected = selectedDeliveryId === delivery.id;
+              const isOverdue = isDeliveryOverdue(delivery, todayKey);
+              const equipmentName = delivery.equipmentLabel || delivery.cargo;
+              const hasCarrier = Boolean(delivery.carrierName || delivery.carrierPhone);
+              const typeLabel = delivery.type === 'shipping' ? 'Отгрузка' : 'Приёмка';
+
+              return (
+                <article
+                  key={delivery.id}
+                  className={`min-w-0 rounded-2xl border p-4 shadow-sm ${
+                    isSelected
+                      ? 'border-blue-400 bg-blue-50/70 dark:border-blue-700 dark:bg-blue-950/20'
+                      : 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950/40'
+                  }`}
+                  data-delivery-mobile-card="true"
+                >
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedDeliveryId(delivery.id);
+                        setDetailTab('overview');
+                      }}
+                      className="min-w-0 text-left"
+                    >
+                      <span className="block break-words text-sm font-semibold text-blue-700 dark:text-blue-300">{delivery.id}</span>
+                      <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                        {formatDate(delivery.transportDate)} · {delivery.pickupTime || 'время не указано'}
+                      </span>
+                    </button>
+                    <DropdownMenu.Root>
+                      <DropdownMenu.Trigger asChild>
+                        <button
+                          type="button"
+                          className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none dark:hover:bg-accent/50"
+                          aria-label={`Действия доставки ${delivery.id}`}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </DropdownMenu.Trigger>
+                      <DropdownMenu.Portal>
+                        <DropdownMenu.Content align="end" className="z-50 min-w-48 rounded-xl border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-800 dark:bg-gray-900">
+                          <DropdownMenu.Item
+                            onSelect={() => {
+                              setSelectedDeliveryId(delivery.id);
+                              setDetailTab('overview');
+                            }}
+                            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                          >
+                            Открыть панель
+                          </DropdownMenu.Item>
+                          {canEdit && (
+                            <DropdownMenu.Item
+                              onSelect={() => openEditDialog(delivery)}
+                              className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              Изменить доставку
+                            </DropdownMenu.Item>
+                          )}
+                          {canEdit && !CLOSED_DELIVERY_STATUSES.includes(delivery.status) && delivery.status !== 'accepted' && (
+                            <DropdownMenu.Item
+                              onSelect={() => void toggleField(delivery, { status: 'accepted' })}
+                              className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              Принять
+                            </DropdownMenu.Item>
+                          )}
+                          {canEdit && !CLOSED_DELIVERY_STATUSES.includes(delivery.status) && delivery.status !== 'in_transit' && (
+                            <DropdownMenu.Item
+                              onSelect={() => void toggleField(delivery, { status: 'in_transit' })}
+                              className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              В пути
+                            </DropdownMenu.Item>
+                          )}
+                          {canEdit && delivery.status !== 'completed' && (
+                            <DropdownMenu.Item
+                              onSelect={() => void toggleField(delivery, { status: 'completed' })}
+                              className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              Выполнить
+                            </DropdownMenu.Item>
+                          )}
+                          {canEdit && !CLOSED_DELIVERY_STATUSES.includes(delivery.status) && (
+                            <DropdownMenu.Item
+                              onSelect={() => void cancelDelivery(delivery)}
+                              className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-600 outline-none hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
+                            >
+                              Отменить
+                            </DropdownMenu.Item>
+                          )}
+                          {canEdit && !CLOSED_DELIVERY_STATUSES.includes(delivery.status) && (
+                            <DropdownMenu.Item
+                              onSelect={() => resendToCarrier(delivery)}
+                              className="cursor-pointer rounded-lg px-3 py-2 text-sm text-gray-700 outline-none hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              Отправить в MAX
+                            </DropdownMenu.Item>
+                          )}
+                          {canDelete && (
+                            <DropdownMenu.Item
+                              onSelect={() => void removeDelivery(delivery)}
+                              className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-600 outline-none hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
+                            >
+                              Удалить
+                            </DropdownMenu.Item>
+                          )}
+                        </DropdownMenu.Content>
+                      </DropdownMenu.Portal>
+                    </DropdownMenu.Root>
+                  </div>
+
+                  <div className="mt-3 flex min-w-0 flex-wrap gap-2" data-delivery-mobile-badges="true">
+                    <span className={`max-w-full break-words rounded-full px-2.5 py-1 text-xs font-semibold ${statusMeta.className}`}>
+                      {statusMeta.label}
+                    </span>
+                    <span className={`max-w-full break-words rounded-full px-2.5 py-1 text-xs font-semibold ${TYPE_CLASSES[delivery.type] || TYPE_CLASSES.shipping}`}>
+                      {typeLabel}
+                    </span>
+                    {isOverdue && (
+                      <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                        <AlertTriangle className="h-3 w-3" />
+                        Просрочка
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-3 grid min-w-0 gap-2 text-sm">
+                    {!isCarrierView && (
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Клиент</div>
+                        <div className="mt-0.5 break-words [overflow-wrap:anywhere] font-semibold text-gray-950 dark:text-white">{safeText(delivery.client)}</div>
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Техника</div>
+                      <div className="mt-0.5 break-words [overflow-wrap:anywhere] font-semibold text-gray-950 dark:text-white">{safeText(equipmentName)}</div>
+                      <div className="mt-0.5 break-words [overflow-wrap:anywhere] text-xs text-gray-500 dark:text-gray-400">
+                        {delivery.equipmentInv ? `INV ${delivery.equipmentInv}` : 'Инв. номер не указан'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDeliveryId(delivery.id);
+                      setDetailTab('route');
+                    }}
+                    className="mt-3 grid w-full min-w-0 gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-left dark:border-gray-800 dark:bg-gray-900/70"
+                    data-delivery-mobile-route="true"
+                  >
+                    <span className="flex min-w-0 items-start gap-2">
+                      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[11px] font-bold text-gray-600 dark:bg-gray-800 dark:text-gray-300">A</span>
+                      <span className="min-w-0 break-words [overflow-wrap:anywhere] text-sm font-medium text-gray-950 dark:text-white">{safeText(delivery.origin)}</span>
+                    </span>
+                    <span className="flex min-w-0 items-start gap-2">
+                      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">B</span>
+                      <span className="min-w-0 break-words [overflow-wrap:anywhere] text-sm text-gray-600 dark:text-gray-300">{safeText(delivery.destination)}</span>
+                    </span>
+                  </button>
+
+                  <div className="mt-3 grid min-w-0 gap-2 rounded-xl bg-gray-50 p-3 text-sm dark:bg-gray-900/70">
+                    {!isCarrierView && (
+                      <div className="min-w-0">
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Перевозчик</span>
+                        <div className="mt-0.5 break-words [overflow-wrap:anywhere] font-semibold text-gray-950 dark:text-white">
+                          {hasCarrier ? safeText(delivery.carrierName, 'Водитель') : 'Ожидает назначения'}
+                        </div>
+                      </div>
+                    )}
+                    <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div className="min-w-0">
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Контакт</span>
+                        <div className="mt-0.5 break-words [overflow-wrap:anywhere] text-gray-950 dark:text-white">{safeText(delivery.contactName)}</div>
+                        <div className="break-words [overflow-wrap:anywhere] font-mono text-xs text-gray-500 dark:text-gray-400">{safeText(delivery.contactPhone)}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Дедлайн</span>
+                        <div className="mt-0.5 font-semibold text-gray-950 dark:text-white">{formatDate(delivery.neededBy || delivery.transportDate)}</div>
+                        {!isCarrierView && (
+                          <div className="text-xs text-gray-500 dark:text-gray-400">{formatDeliveryCost(delivery.cost)}</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          <div className="hidden overflow-x-auto md:block" data-delivery-desktop-table="true">
             <table className="w-full min-w-[1360px] text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/70 text-left text-xs uppercase tracking-[0.12em] text-gray-500 dark:border-gray-800 dark:bg-gray-950/60 dark:text-gray-400">
@@ -1609,6 +1804,7 @@ export default function Deliveries() {
               </tbody>
             </table>
           </div>
+          </>
         )}
         <PaginationControls
           pagination={deliveriesQuery.data?.pagination}
@@ -1642,7 +1838,7 @@ export default function Deliveries() {
       <Sheet open={Boolean(selectedDelivery) && !isDesktopDetail} onOpenChange={(open) => {
         if (!open) setSelectedDeliveryId(null);
       }}>
-        <SheetContent side="right" className="w-full overflow-hidden border-gray-200 bg-white sm:max-w-2xl dark:border-gray-800 dark:bg-gray-950">
+        <SheetContent side="right" className="flex w-full max-w-full flex-col overflow-hidden border-gray-200 bg-white sm:max-w-2xl dark:border-gray-800 dark:bg-gray-950" data-delivery-detail-sheet="true">
           {selectedDelivery && renderDeliveryPanel(selectedDelivery, 'sheet')}
         </SheetContent>
       </Sheet>

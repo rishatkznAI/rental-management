@@ -419,8 +419,9 @@ export default function Planner() {
     });
   }, [updateItem]);
 
-  const clearFilter = <K extends keyof Filters>(key: K, defaultValue: Filters[K]) => {
-    setFilters(f => ({ ...f, [key]: defaultValue }));
+  const resetFilters = () => {
+    setFilters(DEFAULT_FILTERS);
+    setIncludeShipped(false);
   };
 
   const activeFilterCount = useMemo(() => {
@@ -442,16 +443,16 @@ export default function Planner() {
   }), [rows]);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div data-planner-responsive-root="true" className="flex h-full min-w-0 flex-col overflow-hidden overflow-x-clip">
       {/* ── Заголовок ── */}
-      <div className="flex items-start justify-between gap-3 px-6 pt-5 pb-3">
-        <div>
+      <div className="flex min-w-0 flex-col gap-3 px-4 pt-5 pb-3 sm:flex-row sm:items-start sm:justify-between sm:px-6">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-gray-900 dark:text-white">Планировщик</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+          <p className="mt-0.5 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
             Очередь подготовки техники, логистики и запланированных сервисных работ
           </p>
         </div>
-        <div className="flex items-center gap-2 mt-1">
+        <div className="mt-1 flex shrink-0 flex-wrap items-center gap-2">
           {riskCount > 0 && (
             <span className="flex items-center gap-1 px-2 py-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-xs font-medium">
               <AlertTriangle className="h-3.5 w-3.5" />
@@ -470,7 +471,7 @@ export default function Planner() {
       </div>
 
       {/* ── Фильтры ── */}
-      <div className="px-6 pb-3">
+      <div className="px-4 pb-3 sm:px-6">
         <div className="flex justify-end">
           <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
         </div>
@@ -481,10 +482,7 @@ export default function Planner() {
         onOpenChange={setShowFilters}
         title="Фильтры планировщика"
         description="Настрой период, поиск и дополнительные условия отображения подготовки техники."
-        onReset={() => {
-          setFilters(DEFAULT_FILTERS);
-          setIncludeShipped(false);
-        }}
+        onReset={resetFilters}
       >
         <div className="space-y-5">
           <FilterField label="Поиск">
@@ -593,7 +591,7 @@ export default function Planner() {
 
       {/* ── Статистика ── */}
       {!isLoading && filtered.length > 0 && (
-        <div className="px-6 pb-2 flex gap-3 text-xs text-gray-500 dark:text-gray-400">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 px-4 pb-2 text-xs text-gray-500 dark:text-gray-400 sm:px-6">
           <span>Всего: {filtered.length}</span>
           {highCount > 0 && (
             <span className="text-red-600 dark:text-red-400 font-medium">
@@ -609,61 +607,71 @@ export default function Planner() {
       )}
 
       {/* ── Контент ── */}
-      <div className="flex-1 overflow-auto px-6 pb-6">
+      <div className="min-w-0 flex-1 overflow-y-auto overflow-x-clip px-4 pb-6 sm:px-6">
         {isLoading ? (
           <div className="flex items-center justify-center h-48 text-gray-400">
             <RefreshCw className="h-6 w-6 animate-spin mr-2" />
             Загрузка…
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-500">
+          <div data-planner-empty-state="true" className="flex min-h-48 flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-gray-400 dark:border-gray-700 dark:text-gray-500">
             <Calendar className="h-12 w-12 mb-3 opacity-40" />
             <p className="text-sm font-medium">Нет записей</p>
-            <p className="text-xs mt-1">
+            <p className="mt-1 max-w-xs text-xs">
               {rows.length === 0
                 ? 'Нет будущих операций и запланированных работ'
                 : 'Попробуйте изменить фильтры'}
             </p>
+            {activeFilterCount > 0 && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="mt-4 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Сбросить фильтры
+              </button>
+            )}
           </div>
         ) : (
           <>
-            <div className="space-y-3 sm:hidden">
+            <div data-planner-mobile-list="true" className="space-y-3 md:hidden">
               {filtered.map(row => {
                 const { label: daysLabel, className: daysClass } = formatDaysUntil(row.daysUntil);
 
                 return (
                   <div
                     key={row.id}
+                    data-planner-mobile-card="true"
                     className={cn(
-                      'rounded-xl border bg-white p-4 shadow-sm dark:bg-gray-900',
+                      'min-w-0 rounded-xl border bg-white p-4 shadow-sm dark:bg-gray-900',
                       row.risk
                         ? 'border-red-200 dark:border-red-800'
                         : getRowAccentClasses(row),
                       row.prepStatus === 'shipped' && 'opacity-70',
                     )}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div data-planner-mobile-equipment="true" className="min-w-0 flex-1">
                         {isServiceRow(row) && (
                           <span className="mb-2 inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700 dark:bg-violet-900/40 dark:text-violet-200">
                             <Wrench className="h-3 w-3" />
                             Запланированная работа
                           </span>
                         )}
-                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        <div className="break-words text-sm font-semibold text-gray-900 dark:text-gray-100 [overflow-wrap:anywhere]">
                           {row.equipmentLabel || '—'}
                         </div>
-                        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <div className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400 [overflow-wrap:anywhere]">
                           {row.inventoryNumber || '—'}{row.serialNumber ? ` · ${row.serialNumber}` : ''}
                         </div>
                       </div>
-                      <span className={cn('rounded px-2 py-0.5 text-xs font-medium', PRIORITY_COLORS[row.priority])}>
+                      <span className={cn('shrink-0 rounded px-2 py-0.5 text-xs font-medium', PRIORITY_COLORS[row.priority])}>
                         {PRIORITY_LABELS[row.priority]}
                       </span>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800">
+                    <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 text-xs min-[360px]:grid-cols-2">
+                      <div data-planner-mobile-period="true" className="min-w-0 rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800">
                           <div className="text-gray-400 dark:text-gray-500">Дата операции</div>
                           <div className="mt-1 font-medium text-gray-900 dark:text-gray-100">
                             {formatDate(row.startDate)}
@@ -675,12 +683,12 @@ export default function Planner() {
                             </span>
                           )}
                         </div>
-                      <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800">
+                      <div data-planner-mobile-equipment-status="true" className="min-w-0 rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800">
                         <div className="text-gray-400 dark:text-gray-500">Статус техники</div>
                         <div className="mt-1">
                           {row.equipmentStatus ? (
                             <span className={cn(
-                              'inline-flex rounded px-2 py-0.5 text-xs font-medium',
+                              'inline-flex max-w-full rounded px-2 py-0.5 text-xs font-medium',
                               EQUIPMENT_STATUS_COLORS[row.equipmentStatus] || 'bg-gray-100 text-gray-600',
                             )}>
                               {EQUIPMENT_STATUS_LABELS[row.equipmentStatus] || row.equipmentStatus}
@@ -693,20 +701,20 @@ export default function Planner() {
                     </div>
 
                     <div className="mt-3 space-y-2 text-xs">
-                      <div>
+                      <div data-planner-mobile-client="true" className="min-w-0">
                         <span className="text-gray-400 dark:text-gray-500">Клиент</span>
-                        <div className="mt-0.5 font-medium text-gray-900 dark:text-gray-100">{row.client || '—'}</div>
+                        <div className="mt-0.5 break-words font-medium text-gray-900 dark:text-gray-100 [overflow-wrap:anywhere]">{row.client || '—'}</div>
                         {row.deliveryAddress && (
-                          <div className="mt-0.5 text-gray-500 dark:text-gray-400">{row.deliveryAddress}</div>
+                          <div className="mt-0.5 break-words text-gray-500 dark:text-gray-400 [overflow-wrap:anywhere]">{row.deliveryAddress}</div>
                         )}
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <span className="text-gray-400 dark:text-gray-500">Менеджер</span>
-                        <div className="mt-0.5 text-gray-900 dark:text-gray-100">{row.manager || '—'}</div>
+                        <div className="mt-0.5 break-words text-gray-900 dark:text-gray-100 [overflow-wrap:anywhere]">{row.manager || '—'}</div>
                       </div>
                     </div>
 
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <div data-planner-mobile-status="true" className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
                       <PrepStatusBadge
                         rowId={row.id}
                         value={row.prepStatus}
@@ -725,21 +733,39 @@ export default function Planner() {
                       )}
                     </div>
 
-                    <div className="mt-3">
-                      <CommentCell
-                        rowId={row.id}
-                        value={row.comment}
-                        canEdit={canEdit}
-                        onSave={handleCommentSave}
-                      />
+                    <div data-planner-mobile-actions="true" className="mt-3 flex min-w-0 flex-col gap-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+                      <div className="min-w-0">
+                        <CommentCell
+                          rowId={row.id}
+                          value={row.comment}
+                          canEdit={canEdit}
+                          onSave={handleCommentSave}
+                        />
+                      </div>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => handleRiskToggle(row)}
+                          className={cn(
+                            'inline-flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
+                            row.risk
+                              ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/30'
+                              : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800',
+                          )}
+                        >
+                          <AlertTriangle className="h-3.5 w-3.5" />
+                          {row.risk ? 'Снять риск' : 'Отметить риск'}
+                        </button>
+                      )}
                     </div>
+
                   </div>
                 );
               })}
             </div>
 
-            <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 sm:block">
-            <table className="w-full text-sm border-collapse">
+            <div data-planner-desktop-table="true" className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 md:block">
+            <table className="min-w-[1120px] w-full text-sm border-collapse">
               <thead>
                 <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                   <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">
@@ -778,7 +804,6 @@ export default function Planner() {
                 {filtered.map(row => {
                   const { label: daysLabel, className: daysClass } = formatDaysUntil(row.daysUntil);
                   const isHighRisk = row.risk;
-                  const isHighPriority = row.priority === 'high';
 
                   return (
                     <tr

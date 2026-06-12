@@ -111,10 +111,10 @@ function priorityVariant(p: string): BadgeVariant {
 }
 
 function StatusBadge({ status }: { status: ServiceStatus }) {
-  return <Badge variant={statusVariant(status)}>{STATUS_LABELS[status]}</Badge>;
+  return <Badge variant={statusVariant(status)} className="max-w-full whitespace-normal text-left leading-tight">{STATUS_LABELS[status]}</Badge>;
 }
 function PriorityBadge({ priority }: { priority: string }) {
-  return <Badge variant={priorityVariant(priority)}>{PRIORITY_LABELS[priority] ?? priority}</Badge>;
+  return <Badge variant={priorityVariant(priority)} className="max-w-full whitespace-normal text-left leading-tight">{PRIORITY_LABELS[priority] ?? priority}</Badge>;
 }
 
 function Field({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) {
@@ -122,7 +122,7 @@ function Field({ label, value, mono }: { label: string; value?: string | null; m
   return (
     <div>
       <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
-      <p className={`text-sm font-medium text-gray-900 dark:text-white ${mono ? 'font-mono' : ''}`}>{value}</p>
+      <p className={`break-words text-sm font-medium text-gray-900 dark:text-white ${mono ? 'break-all font-mono' : ''}`}>{value}</p>
     </div>
   );
 }
@@ -141,7 +141,7 @@ function DetailTile({ label, value, mono }: { label: string; value?: React.React
   return (
     <div className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03]">
       <p className="text-[11px] font-bold uppercase text-gray-500 dark:text-gray-400">{label}</p>
-      <div className={`mt-1 min-h-5 text-sm font-semibold text-gray-900 dark:text-white ${mono ? 'font-mono' : ''}`}>
+      <div className={`mt-1 min-h-5 break-words text-sm font-semibold text-gray-900 dark:text-white ${mono ? 'break-all font-mono' : ''}`}>
         {value || <span className="font-normal text-gray-400">—</span>}
       </div>
     </div>
@@ -393,11 +393,11 @@ function RepairPhotoGroup({
             </p>
           )}
         </div>
-        <Badge variant={safePhotos.length > 0 ? 'info' : 'default'}>{safePhotos.length} фото</Badge>
+        <Badge variant={safePhotos.length > 0 ? 'info' : 'default'} className="shrink-0">{safePhotos.length} фото</Badge>
       </div>
 
       {safePhotos.length > 0 ? (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {safePhotos.map((photo, index) => {
             const normalizedPhoto = normalizePhotoForDisplay(photo, { idPrefix: `${title}-${index}` });
             return (
@@ -1397,7 +1397,7 @@ export default function ServiceDetail({
   // ── render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className={embedded ? 'space-y-4 p-4 pb-8 sm:space-y-6 sm:p-6' : 'space-y-4 p-4 pb-24 sm:space-y-6 sm:p-6 sm:pb-6 md:p-8'}>
+    <div data-service-detail-responsive="true" className={embedded ? 'min-w-0 max-w-full space-y-4 overflow-x-clip p-3 pb-8 sm:space-y-6 sm:p-6' : 'min-w-0 max-w-full space-y-4 overflow-x-clip p-3 pb-24 sm:space-y-6 sm:p-6 sm:pb-6 md:p-8'}>
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="flex items-start gap-3">
@@ -1416,7 +1416,7 @@ export default function ServiceDetail({
               <StatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.priority} />
             </div>
-            <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400 truncate max-w-[280px] sm:max-w-none">{ticket.equipment}</p>
+            <p className="mt-0.5 max-w-full break-words text-sm text-gray-500 dark:text-gray-400 sm:max-w-none">{ticket.equipment}</p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
               <span>Сценарий: {serviceScenarioLabel}</span>
               <span>Создана: {formatServiceDate(ticket.createdAt)}</span>
@@ -1469,7 +1469,7 @@ export default function ServiceDetail({
             <CardTitle className="text-base">Быстрые действия</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-wrap gap-2">
+            <div className="grid gap-2 sm:flex sm:flex-wrap">
               {quickActions.map(action => {
                 if (action.id === 'service-add-work' || action.id === 'service-add-part') {
                   return (
@@ -1477,6 +1477,7 @@ export default function ServiceDetail({
                       key={action.id}
                       size="sm"
                       variant={action.kind === 'primary' ? 'default' : 'secondary'}
+                      className="w-full sm:w-auto"
                       onClick={scrollToRepairResult}
                     >
                       {action.id === 'service-add-work' ? <Wrench className="h-4 w-4" /> : <Package className="h-4 w-4" />}
@@ -1486,7 +1487,7 @@ export default function ServiceDetail({
                 }
                 return action.to ? (
                   <Link key={action.id} to={action.to}>
-                    <Button size="sm" variant={action.kind === 'primary' ? 'default' : 'secondary'}>
+                    <Button size="sm" variant={action.kind === 'primary' ? 'default' : 'secondary'} className="w-full sm:w-auto">
                       {action.id === 'service-queue' && <History className="h-4 w-4" />}
                       {action.id === 'service-equipment' && <Wrench className="h-4 w-4" />}
                       {action.label}
@@ -1502,7 +1503,8 @@ export default function ServiceDetail({
       <Tabs defaultValue="overview" className="space-y-5">
         <TabsList
           aria-label="Разделы сервисной заявки"
-          className="h-auto w-full justify-start gap-2 overflow-x-auto rounded-lg border border-gray-200 bg-white p-1 dark:border-white/10 dark:bg-white/[0.03]"
+          data-service-responsive-tabs="detail"
+          className="h-auto w-full flex-wrap justify-start gap-1 overflow-visible rounded-lg border border-gray-200 bg-white p-1 sm:flex-nowrap sm:gap-2 sm:overflow-x-auto dark:border-white/10 dark:bg-white/[0.03]"
         >
           <TabsTrigger value="overview" className={serviceDetailTabTriggerClass}>Обзор</TabsTrigger>
           <TabsTrigger value="works" className={serviceDetailTabTriggerClass}>Работы</TabsTrigger>
@@ -1624,25 +1626,25 @@ export default function ServiceDetail({
                     <DetailTile label="Выезды" value={relatedFieldTrips.length} />
                     <DetailTile label="Документы" value={relatedDocuments.length} />
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="grid gap-2 sm:flex sm:flex-wrap">
                     {(ticket.rentalId || relatedRental || relatedGanttRental) && canViewRentals && (
                       <Link to={`/rentals/${ticket.rentalId || relatedRental?.id || relatedGanttRental?.rentalId || relatedGanttRental?.id}`}>
-                        <Button type="button" size="sm" variant="outline">Аренда</Button>
+                        <Button type="button" size="sm" variant="outline" className="w-full sm:w-auto">Аренда</Button>
                       </Link>
                     )}
                     {relatedDeliveries.slice(0, 2).map(delivery => (
                       <Link key={delivery.id} to={`/deliveries/${delivery.id}`}>
-                        <Button type="button" size="sm" variant="outline">Доставка {delivery.id}</Button>
+                        <Button type="button" size="sm" variant="outline" className="w-full sm:w-auto">Доставка {delivery.id}</Button>
                       </Link>
                     ))}
                     {relatedWarrantyClaims.slice(0, 2).map(claim => (
-                      <Button key={claim.id} type="button" size="sm" variant="outline" disabled>
+                        <Button key={claim.id} type="button" size="sm" variant="outline" className="w-full sm:w-auto" disabled>
                         Рекламация {claim.number || claim.id}
                       </Button>
                     ))}
                     {relatedDocuments.slice(0, 2).map(doc => (
                       <Link key={doc.id} to={`/documents/${doc.id}`}>
-                        <Button type="button" size="sm" variant="outline">Документ {doc.number || doc.id}</Button>
+                        <Button type="button" size="sm" variant="outline" className="w-full sm:w-auto">Документ {doc.number || doc.id}</Button>
                       </Link>
                     ))}
                   </div>
@@ -1760,9 +1762,9 @@ export default function ServiceDetail({
                           {repairResult.worksPerformed.map((work, index) => {
                             const item = repairWorkItems[index];
                             return (
-                            <div key={item?.id ?? `${work.catalogId}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                            <div key={item?.id ?? `${work.catalogId}-${index}`} className="flex flex-col gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-gray-700">
                               <div className="min-w-0 flex-1">
-                                <p className="font-medium text-gray-900 dark:text-white">{work.name || '—'}</p>
+                                <p className="break-words font-medium text-gray-900 dark:text-white">{work.name || '—'}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
                                   {work.normHours} н/ч × {work.qty} = {work.totalNormHours} н/ч
                                   {work.ratePerHour > 0 && (
@@ -1779,7 +1781,7 @@ export default function ServiceDetail({
                                 </p>
                               </div>
                               {canDeleteRepairItems && item && (
-                                <button onClick={() => void removeWorkPerformed(item, work.name)} className="text-xs text-red-500 hover:underline">
+                                <button onClick={() => void removeWorkPerformed(item, work.name)} className="w-full text-left text-xs text-red-500 hover:underline sm:w-auto">
                                   Удалить
                                 </button>
                               )}
@@ -1795,9 +1797,9 @@ export default function ServiceDetail({
                           {repairResult.partsUsed.map((part, index) => {
                             const item = repairPartItems[index];
                             return (
-                            <div key={item?.id ?? `${part.catalogId ?? part.name}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                            <div key={item?.id ?? `${part.catalogId ?? part.name}-${index}`} className="flex flex-col gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-gray-700">
                               <div className="min-w-0 flex-1">
-                                <p className="font-medium text-gray-900 dark:text-white">{part.name || '—'}</p>
+                                <p className="break-words font-medium text-gray-900 dark:text-white">{part.name || '—'}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
                                   {part.sku ? `${part.sku} · ` : ''}{part.qty} {item?.unitSnapshot || 'шт'} × {part.cost.toLocaleString('ru-RU')} ₽
                                   {part.cost > 0 && (
@@ -1808,7 +1810,7 @@ export default function ServiceDetail({
                                 </p>
                               </div>
                               {canDeleteRepairItems && item && (
-                                <button onClick={() => void removePartUsage(item, part.name)} className="text-xs text-red-500 hover:underline">
+                                <button onClick={() => void removePartUsage(item, part.name)} className="w-full text-left text-xs text-red-500 hover:underline sm:w-auto">
                                   Удалить
                                 </button>
                               )}
@@ -1824,7 +1826,7 @@ export default function ServiceDetail({
                 <>
                   <Divider />
                   <div className="space-y-4">
-                    <div className="flex gap-2 items-end">
+                    <div data-service-detail-form-row="result" className="flex flex-col gap-2 sm:flex-row sm:items-end">
                       <div className="flex-1">
                         <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">
                           {scenarioIsRepair ? 'Итог ремонта' : `Итог ${serviceScenarioLabel}`}
@@ -1838,7 +1840,7 @@ export default function ServiceDetail({
                         />
                       </div>
                       <div className="flex gap-1.5">
-                        <Button size="sm" onClick={saveResultSummary}>Сохранить</Button>
+                        <Button size="sm" className="w-full sm:w-auto" onClick={saveResultSummary}>Сохранить</Button>
                       </div>
                     </div>
                     {repairFormError && (
@@ -1855,7 +1857,7 @@ export default function ServiceDetail({
                           placeholder="Что исправлено или уточнено"
                         />
                         <div className="mt-2">
-                          <Button size="sm" onClick={() => void resolveRevision()} disabled={revisionBusy}>
+                          <Button size="sm" className="w-full sm:w-auto" onClick={() => void resolveRevision()} disabled={revisionBusy}>
                             Отправить повторно
                           </Button>
                         </div>
@@ -1863,7 +1865,7 @@ export default function ServiceDetail({
                     )}
                     {canAddRepairItems ? (
                     <>
-                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_auto]">
+                    <div data-service-detail-form-row="add-work" className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_90px_auto]">
                       <div>
                         <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Добавить работу</label>
                         <SearchableSelect
@@ -1883,12 +1885,12 @@ export default function ServiceDetail({
                         <Input type="number" min="1" value={selectedWorkQty} onChange={e => setSelectedWorkQty(e.target.value)} />
                       </div>
                       <div className="flex items-end">
-                        <Button size="sm" variant="secondary" onClick={() => void addWorkPerformed()} disabled={!selectedWorkId}>
+                        <Button size="sm" variant="secondary" className="w-full md:w-auto" onClick={() => void addWorkPerformed()} disabled={!selectedWorkId}>
                           Добавить работу
                         </Button>
                       </div>
                     </div>
-                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_120px_auto]">
+                    <div data-service-detail-form-row="add-part" className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_90px_120px_auto]">
                       <div>
                         <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Добавить запчасть</label>
                         <SearchableSelect
@@ -1916,7 +1918,7 @@ export default function ServiceDetail({
                         <Input type="number" min="0" value={selectedPartCost} onChange={e => setSelectedPartCost(e.target.value)} />
                       </div>
                       <div className="flex items-end">
-                        <Button size="sm" variant="secondary" onClick={() => void addPartUsage()} disabled={!selectedPartId}>
+                        <Button size="sm" variant="secondary" className="w-full md:w-auto" onClick={() => void addPartUsage()} disabled={!selectedPartId}>
                           Добавить запчасть
                         </Button>
                       </div>
@@ -2004,7 +2006,7 @@ export default function ServiceDetail({
               {canEditTicketFields && (
                 <>
                   <Divider />
-                  <div className="flex gap-2 items-end pt-1">
+                  <div data-service-detail-form-row="comment" className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-end">
                     <div className="flex-1">
                       <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Комментарий механика</label>
                       <textarea
@@ -2015,7 +2017,7 @@ export default function ServiceDetail({
                         placeholder="Добавить комментарий..."
                       />
                     </div>
-                    <Button size="sm" onClick={addComment} disabled={!newComment.trim()}>
+                    <Button size="sm" className="w-full sm:w-auto" onClick={addComment} disabled={!newComment.trim()}>
                       Добавить
                     </Button>
                   </div>
@@ -2027,13 +2029,13 @@ export default function ServiceDetail({
           {/* Photos card */}
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Camera className="h-4 w-4" />
                   Фото заявки
                 </CardTitle>
                 {canEditTicketFields && (
-                  <Button size="sm" variant="secondary" onClick={() => photoInputRef.current?.click()}>
+                  <Button size="sm" variant="secondary" className="w-full sm:w-auto" onClick={() => photoInputRef.current?.click()}>
                     <Plus className="h-4 w-4" />
                     Добавить фото
                   </Button>
@@ -2053,7 +2055,7 @@ export default function ServiceDetail({
               {/* Pending previews */}
               {canEditTicketFields && photoPending.length > 0 && (
                 <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <span className="text-sm text-blue-700 dark:text-blue-300 font-medium">Выбрано {photoPending.length} фото</span>
                     <button onClick={() => setPhotoPending([])} className="text-xs text-gray-500 hover:text-red-500">Очистить</button>
                   </div>
@@ -2070,7 +2072,7 @@ export default function ServiceDetail({
                       </div>
                     ))}
                   </div>
-                  <Button size="sm" onClick={savePhotos}>
+                  <Button size="sm" className="w-full sm:w-auto" onClick={savePhotos}>
                     <Upload className="h-3.5 w-3.5" />
                     Сохранить
                   </Button>
@@ -2079,7 +2081,7 @@ export default function ServiceDetail({
 
               {/* Saved photos grid */}
               {(ticket.photos ?? []).length > 0 ? (
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {(ticket.photos ?? []).map((photo, i) => {
                     const normalizedPhoto = normalizePhotoForDisplay(photo, { idPrefix: `${ticket.id}-photo-${i}` });
                     return (
@@ -2170,7 +2172,7 @@ export default function ServiceDetail({
               {canEditTicketFields && (
                 <>
                   <Divider />
-                  <div className="flex gap-2 items-end">
+                  <div data-service-detail-form-row="assignee" className="flex flex-col gap-2 sm:flex-row sm:items-end">
                     <div className="flex-1">
                       <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Назначить механика</label>
                       <select
@@ -2187,7 +2189,7 @@ export default function ServiceDetail({
                         )}
                       </select>
                     </div>
-                    <Button size="sm" onClick={saveAssignee} disabled={!newAssigneeId}>OK</Button>
+                    <Button size="sm" className="w-full sm:w-auto" onClick={saveAssignee} disabled={!newAssigneeId}>OK</Button>
                   </div>
                 </>
               )}
@@ -2207,15 +2209,15 @@ export default function ServiceDetail({
                 (() => {
                   const sv = serviceVehiclesList.find(v => v.id === ticket.serviceVehicleId);
                   return sv ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-medium text-gray-900 dark:text-white">
                           {sv.make} {sv.model}
                         </p>
-                        <p className="text-xs text-gray-500 font-mono">{sv.plateNumber}</p>
+                        <p className="break-all font-mono text-xs text-gray-500">{sv.plateNumber}</p>
                       </div>
                       {canEditTicketFields && (
-                        <Button variant="outline" size="sm"
+                        <Button variant="outline" size="sm" className="w-full sm:w-auto"
                           onClick={() => persist({ ...ticket, serviceVehicleId: null })}
                         >
                           <X className="h-3.5 w-3.5" />
@@ -2232,7 +2234,7 @@ export default function ServiceDetail({
               {canEditTicketFields && (
                 <>
                   <Divider />
-                  <div className="flex gap-2 items-end">
+                  <div data-service-detail-form-row="service-vehicle" className="flex flex-col gap-2 sm:flex-row sm:items-end">
                     <div className="flex-1">
                       <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">
                         Назначить машину
@@ -2279,7 +2281,7 @@ export default function ServiceDetail({
                 : canEditTicketFields && (
                   <>
                     <Divider />
-                    <div className="flex gap-2 items-end">
+                    <div data-service-detail-form-row="planned-date" className="flex flex-col gap-2 sm:flex-row sm:items-end">
                       <div className="flex-1">
                         <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">Плановая дата</label>
                       <Input
@@ -2288,7 +2290,7 @@ export default function ServiceDetail({
                           onChange={e => setNewPlannedDate(e.target.value)}
                         />
                       </div>
-                      <Button size="sm" onClick={savePlannedDate} disabled={!newPlannedDate}>OK</Button>
+                      <Button size="sm" className="w-full sm:w-auto" onClick={savePlannedDate} disabled={!newPlannedDate}>OK</Button>
                     </div>
                   </>
                 )
@@ -2353,8 +2355,8 @@ export default function ServiceDetail({
               <CardContent>
                 <div className="space-y-2">
                   {repairResult.partsUsed.map((p, i) => (
-                    <div key={i} className="flex justify-between text-sm">
-                      <span className="text-gray-700 dark:text-gray-300">{p.name} × {p.qty}</span>
+                    <div key={i} className="flex flex-col gap-1 text-sm sm:flex-row sm:justify-between">
+                      <span className="break-words text-gray-700 dark:text-gray-300">{p.name} × {p.qty}</span>
                       <span className="text-gray-500">{p.cost.toLocaleString('ru-RU')} ₽</span>
                     </div>
                   ))}
@@ -2385,9 +2387,9 @@ export default function ServiceDetail({
                   {repairResult.worksPerformed.map((work, index) => {
                     const item = repairWorkItems[index];
                     return (
-                      <div key={item?.id ?? `${work.catalogId}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                      <div key={item?.id ?? `${work.catalogId}-${index}`} className="flex flex-col gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-gray-700">
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium text-gray-900 dark:text-white">{work.name || '—'}</p>
+                          <p className="break-words font-medium text-gray-900 dark:text-white">{work.name || '—'}</p>
                           <p className="text-xs text-gray-500 dark:text-gray-400">
                             {work.normHours} н/ч × {work.qty} = {work.totalNormHours} н/ч
                             {work.ratePerHour > 0 && <span className="ml-2 font-medium text-gray-700 dark:text-gray-300">· {work.totalCost.toLocaleString('ru-RU')} ₽</span>}
@@ -2399,7 +2401,7 @@ export default function ServiceDetail({
                           </p>
                         </div>
                         {canDeleteRepairItems && item && (
-                          <button onClick={() => void removeWorkPerformed(item, work.name)} className="text-xs text-red-500 hover:underline">Удалить</button>
+                          <button onClick={() => void removeWorkPerformed(item, work.name)} className="w-full text-left text-xs text-red-500 hover:underline sm:w-auto">Удалить</button>
                         )}
                       </div>
                     );
@@ -2410,7 +2412,7 @@ export default function ServiceDetail({
               )}
               {repairFormError && <p className="text-sm text-red-500">{repairFormError}</p>}
               {canAddRepairItems && (
-                <div className="grid gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 md:grid-cols-[minmax(0,1fr)_90px_auto]">
+                <div data-service-detail-form-row="works-tab-add" className="grid min-w-0 gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 md:grid-cols-[minmax(0,1fr)_90px_auto]">
                   <div>
                     <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Добавить работу</label>
                     <SearchableSelect
@@ -2430,7 +2432,7 @@ export default function ServiceDetail({
                     <Input type="number" min="1" value={selectedWorkQty} onChange={e => setSelectedWorkQty(e.target.value)} />
                   </div>
                   <div className="flex items-end">
-                    <Button size="sm" variant="secondary" onClick={() => void addWorkPerformed()} disabled={!selectedWorkId}>Добавить работу</Button>
+                    <Button size="sm" variant="secondary" className="w-full md:w-auto" onClick={() => void addWorkPerformed()} disabled={!selectedWorkId}>Добавить работу</Button>
                   </div>
                 </div>
               )}
@@ -2452,9 +2454,9 @@ export default function ServiceDetail({
                   {repairResult.partsUsed.map((part, index) => {
                     const item = repairPartItems[index];
                     return (
-                      <div key={item?.id ?? `${part.catalogId ?? part.name}-${index}`} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                      <div key={item?.id ?? `${part.catalogId ?? part.name}-${index}`} className="flex flex-col gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-gray-700">
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium text-gray-900 dark:text-white">{part.name || '—'}</p>
+                          <p className="break-words font-medium text-gray-900 dark:text-white">{part.name || '—'}</p>
                           <p className="text-xs text-gray-500 dark:text-gray-400">
                             {part.sku ? `${part.sku} · ` : ''}{part.qty} {item?.unitSnapshot || 'шт'} × {part.cost.toLocaleString('ru-RU')} ₽
                             {part.cost > 0 && <span className="ml-2 font-medium text-gray-700 dark:text-gray-300">= {(part.qty * part.cost).toLocaleString('ru-RU')} ₽</span>}
@@ -2464,7 +2466,7 @@ export default function ServiceDetail({
                           </p>
                         </div>
                         {canDeleteRepairItems && item && (
-                          <button onClick={() => void removePartUsage(item, part.name)} className="text-xs text-red-500 hover:underline">Удалить</button>
+                          <button onClick={() => void removePartUsage(item, part.name)} className="w-full text-left text-xs text-red-500 hover:underline sm:w-auto">Удалить</button>
                         )}
                       </div>
                     );
@@ -2474,7 +2476,7 @@ export default function ServiceDetail({
                 <EmptySection icon={<Package className="h-8 w-8" />} title="Запчасти не добавлены" text="Если запчасти не требовались, это останется видимым в чек-листе закрытия." />
               )}
               {canAddRepairItems && (
-                <div className="grid gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 md:grid-cols-[minmax(0,1fr)_90px_120px_auto]">
+                <div data-service-detail-form-row="parts-tab-add" className="grid min-w-0 gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 md:grid-cols-[minmax(0,1fr)_90px_120px_auto]">
                   <div>
                     <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Добавить запчасть</label>
                     <SearchableSelect
@@ -2502,7 +2504,7 @@ export default function ServiceDetail({
                     <Input type="number" min="0" value={selectedPartCost} onChange={e => setSelectedPartCost(e.target.value)} />
                   </div>
                   <div className="flex items-end">
-                    <Button size="sm" variant="secondary" onClick={() => void addPartUsage()} disabled={!selectedPartId}>Добавить запчасть</Button>
+                    <Button size="sm" variant="secondary" className="w-full md:w-auto" onClick={() => void addPartUsage()} disabled={!selectedPartId}>Добавить запчасть</Button>
                   </div>
                 </div>
               )}
@@ -2531,7 +2533,7 @@ export default function ServiceDetail({
               <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-medium text-gray-900 dark:text-white">Фото из MAX-бота и карточки</p>
-                  <Badge variant={(ticket.photos ?? []).length > 0 ? 'info' : 'default'}>{(ticket.photos ?? []).length} фото</Badge>
+                  <Badge variant={(ticket.photos ?? []).length > 0 ? 'info' : 'default'} className="shrink-0">{(ticket.photos ?? []).length} фото</Badge>
                 </div>
                 {(ticket.photos ?? []).length > 0 ? (
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

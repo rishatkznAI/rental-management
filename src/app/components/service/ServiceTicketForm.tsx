@@ -479,7 +479,7 @@ export function ServiceTicketForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form data-service-form-responsive="true" onSubmit={handleSubmit} className="min-w-0 max-w-full space-y-5 overflow-x-clip sm:space-y-6">
       {submitError && (
         <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400">
           <span className="mt-0.5 shrink-0">⚠</span>
@@ -501,21 +501,21 @@ export function ServiceTicketForm({
               <div className="grid grid-cols-1 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60 md:grid-cols-2">
                 <div>
                   <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Техника</p>
-                  <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                  <p className="mt-1 break-words text-sm font-medium text-gray-900 dark:text-white">
                     {selectedEquipment.manufacturer} {selectedEquipment.model}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Инвентарный номер</p>
-                  <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.inventoryNumber}</p>
+                  <p className="mt-1 break-all text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.inventoryNumber}</p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Серийный номер</p>
-                  <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.serialNumber || 'Не указан'}</p>
+                  <p className="mt-1 break-all text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.serialNumber || 'Не указан'}</p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Системная локация</p>
-                  <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.location || 'Не указана'}</p>
+                  <p className="mt-1 break-words text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.location || 'Не указана'}</p>
                 </div>
               </div>
             ) : (
@@ -544,15 +544,15 @@ export function ServiceTicketForm({
                 <div className="grid grid-cols-1 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60 md:grid-cols-3">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Инвентарный номер</p>
-                    <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.inventoryNumber}</p>
+                    <p className="mt-1 break-all text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.inventoryNumber}</p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Серийный номер</p>
-                    <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.serialNumber || 'Не указан'}</p>
+                    <p className="mt-1 break-all text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.serialNumber || 'Не указан'}</p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Системная локация</p>
-                    <p className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.location || 'Не указана'}</p>
+                    <p className="mt-1 break-words text-sm font-medium text-gray-900 dark:text-white">{selectedEquipment.location || 'Не указана'}</p>
                   </div>
                 </div>
               ) : (
@@ -641,8 +641,8 @@ export function ServiceTicketForm({
           {activeRentalForEquipment && activeRentalForEquipment.id !== selectedRental?.id && (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100 md:col-span-2">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <span>По выбранной технике найдена активная аренда: {activeRentalForEquipment.label}</span>
-                <Button type="button" size="sm" variant="outline" onClick={() => applyRentalLink(activeRentalForEquipment)}>
+                <span className="min-w-0 break-words">По выбранной технике найдена активная аренда: {activeRentalForEquipment.label}</span>
+                <Button type="button" size="sm" variant="outline" className="w-full sm:w-auto" onClick={() => applyRentalLink(activeRentalForEquipment)}>
                   Связать с арендой
                 </Button>
               </div>
@@ -805,7 +805,7 @@ export function ServiceTicketForm({
                   Очистить всё
                 </button>
               </div>
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-5">
                 {photos.map((src, i) => (
                   <div key={i} className="group relative aspect-square overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
                     <img src={src} alt={`Фото ${i + 1}`} className="h-full w-full object-cover" />
@@ -854,11 +854,11 @@ export function ServiceTicketForm({
         </CardContent>
       </Card>
 
-      <div className={stickyActions ? 'sticky bottom-0 z-10 flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:flex-row dark:border-gray-800 dark:bg-gray-950/95' : 'flex gap-3'}>
-        <Button type="submit" disabled={isSubmitting}>
+      <div className={stickyActions ? 'sticky bottom-0 z-10 flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:flex-row dark:border-gray-800 dark:bg-gray-950/95' : 'flex flex-col-reverse gap-2 sm:flex-row sm:gap-3'}>
+        <Button type="submit" className="w-full sm:w-auto" disabled={isSubmitting}>
           {isSubmitting ? 'Создаём заявку…' : submitLabel}
         </Button>
-        <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>
+        <Button type="button" variant="secondary" className="w-full sm:w-auto" onClick={onCancel} disabled={isSubmitting}>
           Отмена
         </Button>
       </div>

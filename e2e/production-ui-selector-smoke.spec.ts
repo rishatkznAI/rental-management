@@ -340,7 +340,7 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
   await expectCrmDisabledUiHidden(page, frontendUrl);
 
   await page.goto(productionAppUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: 'Дашборд', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Операционный центр', exact: true })).toBeVisible();
 
   await expect(page.getByTestId('dashboard-top-cockpit')).toBeVisible();
   await expect(page.getByTestId('dashboard-key-signals')).toBeVisible();

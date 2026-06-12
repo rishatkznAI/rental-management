@@ -324,7 +324,8 @@ test.describe('production smoke', () => {
     await expect(page.getByText(seed.unsigned.number).first()).toBeVisible();
 
     await navigateInApp(page, '/');
-    await expect(page.getByRole('heading', { name: 'Дашборд' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Операционный центр' })).toBeVisible();
+    await expect(page.getByText('Пульт управления арендным бизнесом')).toBeVisible();
     await expect(page.getByText(/NaN|undefined|null/)).toHaveCount(0);
   });
 });

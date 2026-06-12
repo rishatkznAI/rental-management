@@ -215,7 +215,7 @@ test('production manager plan smoke stays read-only', async ({ page }) => {
   await page.getByLabel('Логин').fill(adminEmail);
   await page.getByRole('textbox', { name: 'Пароль' }).fill(adminPassword);
   await page.getByRole('button', { name: 'Войти' }).click();
-  await expect(page.getByRole('heading', { name: 'Дашборд', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Операционный центр', exact: true })).toBeVisible();
 
   const planBlock = page.getByTestId('manager-my-plan');
   await expect(planBlock, 'dashboard manager plan block should be visible').toBeVisible();

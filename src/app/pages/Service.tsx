@@ -288,9 +288,9 @@ function getServicePriorityPill(priority: ServiceTicket['priority']) {
   }[normalized];
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset ring-black/5 dark:ring-white/10 ${meta.className}`} title={servicePriorityLabel(normalized)}>
+    <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset ring-black/5 dark:ring-white/10 ${meta.className}`} title={servicePriorityLabel(normalized)}>
       <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-      {meta.label}
+      <span className="truncate">{meta.label}</span>
     </span>
   );
 }
@@ -526,8 +526,8 @@ function MechanicAvatar({ name }: { name: string }) {
 
 function RequestSubTabLabel({ label, count }: { label: string; count: number }) {
   return (
-    <span className="inline-flex items-center gap-2">
-      <span>{label}</span>
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <span className="truncate">{label}</span>
       <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500 group-data-[active=true]:bg-[--color-primary]/15 group-data-[active=true]:text-[--color-primary] dark:bg-white/8 dark:text-gray-300">
         {count}
       </span>
@@ -537,8 +537,8 @@ function RequestSubTabLabel({ label, count }: { label: string; count: number }) 
 
 function ServiceTabLabel({ label, count }: { label: string; count?: number }) {
   return (
-    <span className="inline-flex items-center gap-2">
-      <span>{label}</span>
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <span className="truncate">{label}</span>
       {typeof count === 'number' && (
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500 transition-colors group-data-[state=active]:bg-[--color-primary]/15 group-data-[state=active]:text-[--color-primary] dark:bg-white/8 dark:text-gray-300">
           {count}
@@ -774,8 +774,8 @@ function ServiceQueueTab({
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Или текущие фильтры скрыли все позиции очереди.</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-          <div className="hidden grid-cols-[minmax(120px,0.7fr)_minmax(180px,1fr)_minmax(220px,1.2fr)_120px_110px_minmax(130px,0.7fr)_95px_minmax(160px,0.8fr)_minmax(170px,0.9fr)] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] 2xl:grid">
+        <div data-service-responsive-list="queue" className="space-y-3 2xl:space-y-0 2xl:overflow-hidden 2xl:rounded-lg 2xl:border 2xl:border-gray-200 2xl:bg-white 2xl:shadow-sm 2xl:shadow-slate-200/40 2xl:dark:border-white/10 2xl:dark:bg-white/[0.03] 2xl:dark:shadow-none">
+          <div data-service-desktop-table="queue" className="hidden grid-cols-[minmax(120px,0.7fr)_minmax(180px,1fr)_minmax(220px,1.2fr)_120px_110px_minmax(130px,0.7fr)_95px_minmax(160px,0.8fr)_minmax(170px,0.9fr)] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] 2xl:grid">
             <div>Заявка</div>
             <div>Техника</div>
             <div>Причина в очереди</div>
@@ -794,7 +794,8 @@ function ServiceQueueTab({
             return (
               <article
                 key={item.ticketId}
-                className="grid gap-3 border-b border-gray-100 px-4 py-4 last:border-b-0 dark:border-white/6 2xl:grid-cols-[minmax(120px,0.7fr)_minmax(180px,1fr)_minmax(220px,1.2fr)_120px_110px_minmax(130px,0.7fr)_95px_minmax(160px,0.8fr)_minmax(170px,0.9fr)] 2xl:items-center"
+                data-service-mobile-card="queue"
+                className="grid min-w-0 gap-3 rounded-lg border border-gray-200 bg-white px-4 py-4 shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none 2xl:rounded-none 2xl:border-0 2xl:border-b 2xl:border-gray-100 2xl:bg-transparent 2xl:shadow-none 2xl:last:border-b-0 2xl:dark:border-white/6 2xl:grid-cols-[minmax(120px,0.7fr)_minmax(180px,1fr)_minmax(220px,1.2fr)_120px_110px_minmax(130px,0.7fr)_95px_minmax(160px,0.8fr)_minmax(170px,0.9fr)] 2xl:items-center"
               >
                 <div className="min-w-0">
                   <button
@@ -828,21 +829,34 @@ function ServiceQueueTab({
                   </div>
                   <p className="mt-2 line-clamp-2 text-sm text-gray-600 dark:text-gray-300">{item.reason}</p>
                 </div>
-                <div>{getServiceStatusBadge(item.ticketStatus)}</div>
-                <div>{getServicePriorityPill(item.ticketPriority)}</div>
-                <div className="text-sm font-medium text-gray-700 dark:text-gray-200">{item.mechanic}</div>
+                <div className="min-w-0">
+                  <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 2xl:hidden">Статус</span>
+                  {getServiceStatusBadge(item.ticketStatus)}
+                </div>
+                <div className="min-w-0">
+                  <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 2xl:hidden">Приоритет</span>
+                  {getServicePriorityPill(item.ticketPriority)}
+                </div>
+                <div className="min-w-0 text-sm font-medium text-gray-700 dark:text-gray-200">
+                  <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 2xl:hidden">Мастер</span>
+                  <span className="break-words">{item.mechanic}</span>
+                </div>
                 <div>
                   <span className={`inline-flex rounded-lg px-2.5 py-1 text-xs font-semibold ${dueMeta.className}`}>{dueMeta.label}</span>
                 </div>
-                <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{nextAction}</div>
-                <div className="flex flex-wrap justify-start gap-2 xl:justify-end">
+                <div className="min-w-0 text-sm font-semibold text-gray-800 dark:text-gray-100">
+                  <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 2xl:hidden">Следующее действие</span>
+                  <span className="break-words">{nextAction}</span>
+                </div>
+                <div className="flex min-w-0 flex-wrap justify-start gap-2 2xl:justify-end">
                   {canRunNextAction && (
-                    <Button type="button" size="sm" variant="secondary" onClick={() => onOpenTicket(item.ticketId)}>{nextAction}</Button>
+                    <Button type="button" size="sm" variant="secondary" className="w-full sm:w-auto" onClick={() => onOpenTicket(item.ticketId)}>{nextAction}</Button>
                   )}
                   <Button
                     type="button"
                     size="sm"
                     variant={canRunNextAction ? 'outline' : 'secondary'}
+                    className="w-full sm:w-auto"
                     onClick={() => onOpenTicket(item.ticketId)}
                   >
                     Открыть заявку
@@ -1763,7 +1777,7 @@ export default function Service() {
     dateTo !== '',
   ].filter(Boolean).length;
 
-  const serviceTabTriggerBaseClass = 'group flex-none rounded-none border-0 border-b-2 bg-transparent px-4 py-2.5 text-sm font-semibold shadow-none transition hover:bg-blue-50/60 hover:text-gray-900 dark:hover:bg-blue-500/10 dark:hover:text-white';
+  const serviceTabTriggerBaseClass = 'group min-w-0 flex-none rounded-none border-0 border-b-2 bg-transparent px-3 py-2.5 text-sm font-semibold shadow-none transition hover:bg-blue-50/60 hover:text-gray-900 dark:hover:bg-blue-500/10 dark:hover:text-white sm:px-4';
   const serviceTabTriggerClass = (tab: string) => `${serviceTabTriggerBaseClass} ${
     activeTopTab === tab
       ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-300'
@@ -1779,7 +1793,7 @@ export default function Service() {
   const repeatHighCriticalCount = (repeatBreakdownsQuery.data?.summary.high ?? 0) + (repeatBreakdownsQuery.data?.summary.critical ?? 0);
 
   return (
-    <div className="space-y-3 bg-slate-50/70 p-4 sm:p-5 md:p-6 dark:bg-gray-950">
+    <div data-service-responsive-root="service" className="min-w-0 max-w-full space-y-3 overflow-x-clip bg-slate-50/70 p-3 sm:p-5 md:p-6 dark:bg-gray-950">
       <section className="border-b border-gray-200 pb-3 dark:border-white/10">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
@@ -1945,7 +1959,7 @@ export default function Service() {
       </FilterDialog>
 
       <Tabs value={activeTopTab} onValueChange={setActiveTopTab} className="space-y-3">
-        <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-lg border border-[#E5EAF3] bg-white px-2 pt-1 shadow-[0_8px_24px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.03]">
+        <TabsList data-service-responsive-tabs="top" className="h-auto w-full flex-wrap justify-start gap-1 overflow-visible rounded-lg border border-[#E5EAF3] bg-white px-2 pt-1 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:flex-nowrap sm:overflow-x-auto dark:border-white/10 dark:bg-white/[0.03]">
           <TabsTrigger value="tickets" className={serviceTabTriggerClass('tickets')}>
             <ServiceTabLabel label="Заявки" count={activeTickets.length} />
           </TabsTrigger>
@@ -1965,7 +1979,7 @@ export default function Service() {
         </TabsList>
 
         <TabsContent value="tickets" className="space-y-3">
-          <div className="flex gap-1 overflow-x-auto rounded-lg border border-[#E5EAF3] bg-white px-2 pt-1 shadow-[0_8px_24px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.03]">
+          <div data-service-responsive-tabs="request" className="flex flex-wrap gap-1 overflow-visible rounded-lg border border-[#E5EAF3] bg-white px-2 pt-1 shadow-[0_8px_24px_rgba(15,23,42,0.05)] sm:flex-nowrap sm:overflow-x-auto dark:border-white/10 dark:bg-white/[0.03]">
             {[
               { value: 'actual' as const, label: 'Актуальные' },
               { value: 'in_progress' as const, label: 'В работе' },
@@ -1980,7 +1994,7 @@ export default function Service() {
                   type="button"
                   onClick={() => handleRequestTabChange(tab.value)}
                   data-active={String(isActive)}
-                  className={`group flex-none border-b-2 px-3 py-2 text-sm font-semibold transition hover:bg-blue-50/60 hover:text-gray-900 dark:hover:bg-blue-500/10 dark:hover:text-white ${
+                  className={`group min-w-0 flex-none border-b-2 px-2.5 py-2 text-sm font-semibold transition hover:bg-blue-50/60 hover:text-gray-900 sm:px-3 dark:hover:bg-blue-500/10 dark:hover:text-white ${
                     isActive
                       ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-300'
                       : 'border-transparent text-gray-500 dark:text-gray-400'
@@ -2137,8 +2151,8 @@ export default function Service() {
                   })}
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-lg border border-[#E5EAF3] bg-white shadow-[0_12px_34px_rgba(15,23,42,0.07)] dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-                  <div className="hidden gap-2 border-b border-gray-100 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-gray-500 dark:border-white/10 dark:bg-white/[0.04] xl:grid xl:grid-cols-[92px_minmax(160px,1fr)_minmax(138px,0.8fr)_90px_92px_86px_minmax(116px,0.7fr)_74px_74px_28px]">
+                <div data-service-responsive-list="tickets" className="space-y-3 xl:space-y-0 xl:overflow-hidden xl:rounded-lg xl:border xl:border-[#E5EAF3] xl:bg-white xl:shadow-[0_12px_34px_rgba(15,23,42,0.07)] xl:dark:border-white/10 xl:dark:bg-white/[0.03] xl:dark:shadow-none">
+                  <div data-service-desktop-table="tickets" className="hidden gap-2 border-b border-gray-100 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-gray-500 dark:border-white/10 dark:bg-white/[0.04] xl:grid xl:grid-cols-[92px_minmax(160px,1fr)_minmax(138px,0.8fr)_90px_92px_86px_minmax(116px,0.7fr)_74px_74px_28px]">
                     <div>№ заявки</div>
                     <div>Техника</div>
                     <div>Клиент / Объект</div>
@@ -2178,6 +2192,7 @@ export default function Service() {
                           key={ticket.id}
                           role="button"
                           tabIndex={0}
+                          data-service-mobile-card="ticket"
                           aria-label={`Открыть заявку ${ticket.id}`}
                           onClick={openTicket}
                           onKeyDown={(event) => {
@@ -2186,35 +2201,43 @@ export default function Service() {
                               openTicket();
                             }
                           }}
-                          className={`grid cursor-pointer gap-2 border-b border-gray-100 px-3 py-2.5 transition-colors last:border-b-0 hover:bg-blue-50/70 dark:border-white/6 dark:hover:bg-blue-500/10 md:grid-cols-[minmax(160px,0.9fr)_minmax(220px,1.1fr)] lg:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_minmax(190px,0.9fr)_minmax(160px,0.8fr)] xl:grid-cols-[92px_minmax(160px,1fr)_minmax(138px,0.8fr)_90px_92px_86px_minmax(116px,0.7fr)_74px_74px_28px] lg:items-center ${
+                          className={`grid min-w-0 cursor-pointer gap-3 rounded-lg border border-gray-200 px-3 py-3 shadow-sm shadow-slate-200/40 transition-colors hover:bg-blue-50/70 dark:border-white/10 dark:hover:bg-blue-500/10 md:grid-cols-[minmax(160px,0.9fr)_minmax(220px,1.1fr)] lg:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_minmax(190px,0.9fr)_minmax(160px,0.8fr)] xl:rounded-none xl:border-0 xl:border-b xl:border-gray-100 xl:px-3 xl:py-2.5 xl:shadow-none xl:last:border-b-0 xl:dark:border-white/6 xl:grid-cols-[92px_minmax(160px,1fr)_minmax(138px,0.8fr)_90px_92px_86px_minmax(116px,0.7fr)_74px_74px_28px] lg:items-center ${
                             isSelected
                               ? 'bg-blue-50 ring-1 ring-inset ring-[--color-primary]/25 dark:bg-blue-500/10'
                               : index % 2 === 0 ? 'bg-white dark:bg-transparent' : 'bg-slate-50/35 dark:bg-white/[0.015]'
                           }`}
                         >
                           <div className="min-w-0 text-left">
-                            <div className="truncate font-mono text-sm font-bold text-[--color-primary]">{ticket.id}</div>
+                            <div className="break-all font-mono text-sm font-bold text-[--color-primary] xl:truncate">{ticket.id}</div>
                             <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
                           </div>
                           <div className="flex min-w-0 items-center gap-3 text-left">
                             <TicketThumbnail ticket={ticket} />
                             <div className="min-w-0">
-                              <div className="truncate text-sm font-bold text-gray-900 dark:text-white">{getTicketEquipmentTitle(ticket)}</div>
-                              <div className="mt-0.5 truncate font-mono text-xs text-gray-500">
+                              <div className="break-words text-sm font-bold text-gray-900 dark:text-white xl:truncate">{getTicketEquipmentTitle(ticket)}</div>
+                              <div className="mt-0.5 break-all font-mono text-xs text-gray-500 xl:truncate">
                                 INV: {inventory}{serialNumber ? ` · SN: ${serialNumber}` : ''}
                               </div>
                             </div>
                           </div>
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{clientDetails.name}</div>
-                            <div className="mt-0.5 truncate text-xs text-gray-500">{objectLabel || (clientDetails.inn ? `ИНН ${clientDetails.inn}` : 'Объект не указан')}</div>
+                            <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 xl:hidden">Клиент / объект</span>
+                            <div className="break-words text-sm font-semibold text-gray-800 dark:text-gray-100 xl:truncate">{clientDetails.name}</div>
+                            <div className="mt-0.5 break-words text-xs text-gray-500 xl:truncate">{objectLabel || (clientDetails.inn ? `ИНН ${clientDetails.inn}` : 'Объект не указан')}</div>
                           </div>
                           <div className="min-w-0 text-left">
-                            <div className="truncate text-sm font-medium text-gray-700 dark:text-gray-200">{repairType}</div>
-                            <div className="mt-0.5 truncate text-xs text-gray-500">{ticket.reason || '—'}</div>
+                            <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 xl:hidden">Тип работ</span>
+                            <div className="break-words text-sm font-medium text-gray-700 dark:text-gray-200 xl:truncate">{repairType}</div>
+                            <div className="mt-0.5 break-words text-xs text-gray-500 xl:truncate">{ticket.reason || '—'}</div>
                           </div>
-                          <div>{getCompactServiceStatusPill(normalizeServiceStatus(ticket.status))}</div>
-                          <div>{getServicePriorityPill(ticket.priority)}</div>
+                          <div className="min-w-0">
+                            <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 xl:hidden">Статус</span>
+                            {getCompactServiceStatusPill(normalizeServiceStatus(ticket.status))}
+                          </div>
+                          <div className="min-w-0">
+                            <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 xl:hidden">Приоритет</span>
+                            {getServicePriorityPill(ticket.priority)}
+                          </div>
                           <div className="flex min-w-0 items-center gap-2">
                             <MechanicAvatar name={assignedMechanic || 'Не назначен'} />
                             <span className="min-w-0 truncate text-sm text-gray-600 dark:text-gray-300">{assignedMechanic || 'Не назначен'}</span>
@@ -2225,14 +2248,17 @@ export default function Service() {
                               <span className="font-medium opacity-75">{dueMeta.hint}</span>
                             </span>
                           </div>
-                          <div className="text-sm text-gray-600 dark:text-gray-300">{formatShortDate(ticket.completedAt || ticket.closedAt || ticket.createdAt)}</div>
+                          <div className="text-sm text-gray-600 dark:text-gray-300">
+                            <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 xl:hidden">Обновлено</span>
+                            {formatShortDate(ticket.completedAt || ticket.closedAt || ticket.createdAt)}
+                          </div>
                           <button
                             type="button"
                             onClick={(event) => {
                               event.stopPropagation();
                               openTicket();
                             }}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-[--color-primary] dark:hover:bg-white/10"
+                            className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-[--color-primary] sm:w-9 xl:h-8 xl:w-8 xl:border-0 xl:text-gray-400 dark:border-white/10 dark:hover:bg-white/10"
                             title="Открыть полную карточку"
                             aria-label={`Открыть полную карточку заявки ${ticket.id}`}
                           >
@@ -2304,8 +2330,8 @@ export default function Service() {
                 </div>
               </section>
 
-              <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-                <div className="hidden grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] lg:grid">
+              <div data-service-responsive-list="archive" className="space-y-3 lg:space-y-0 lg:overflow-hidden lg:rounded-lg lg:border lg:border-gray-200 lg:bg-white lg:shadow-sm lg:shadow-slate-200/40 lg:dark:border-white/10 lg:dark:bg-white/[0.03] lg:dark:shadow-none">
+                <div data-service-desktop-table="archive" className="hidden grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] lg:grid">
                   <div>№ заявки / дата</div>
                   <div>Статус</div>
                   <div>Техника</div>
@@ -2334,6 +2360,7 @@ export default function Service() {
                         key={ticket.id}
                         role="button"
                         tabIndex={0}
+                        data-service-mobile-card="archive-ticket"
                         aria-label={`Открыть архивную заявку ${ticket.id}`}
                         onClick={openTicket}
                         onKeyDown={(event) => {
@@ -2342,33 +2369,41 @@ export default function Service() {
                             openTicket();
                           }
                         }}
-                        className={`grid cursor-pointer gap-3 border-b border-gray-100 px-4 py-3 text-gray-600 transition-colors last:border-b-0 hover:bg-gray-50 dark:border-white/6 dark:text-gray-300 dark:hover:bg-white/[0.04] lg:grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] lg:items-start ${
+                        className={`grid min-w-0 cursor-pointer gap-3 rounded-lg border border-gray-200 px-4 py-3 text-gray-600 shadow-sm shadow-slate-200/40 transition-colors hover:bg-gray-50 dark:border-white/10 dark:text-gray-300 dark:hover:bg-white/[0.04] lg:rounded-none lg:border-0 lg:border-b lg:border-gray-100 lg:shadow-none lg:last:border-b-0 lg:dark:border-white/6 lg:grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] lg:items-start ${
                           index % 2 === 0 ? 'bg-gray-50/60 dark:bg-white/[0.015]' : 'bg-white dark:bg-transparent'
                         }`}
                       >
                         <div className="min-w-0 text-left">
-                          <div className="truncate font-mono text-sm font-bold text-[--color-primary]">{ticket.id}</div>
+                          <div className="break-all font-mono text-sm font-bold text-[--color-primary] lg:truncate">{ticket.id}</div>
                           <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
                         </div>
-                        <div>{getServiceStatusBadge(normalizeServiceStatus(ticket.status))}</div>
+                        <div className="min-w-0">
+                          <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 lg:hidden">Статус</span>
+                          {getServiceStatusBadge(normalizeServiceStatus(ticket.status))}
+                        </div>
                         <div className="min-w-0 text-left">
-                          <div className="truncate text-sm font-bold text-gray-900 dark:text-white">{getTicketEquipmentTitle(ticket)}</div>
-                          <div className="mt-0.5 truncate font-mono text-xs text-gray-500">
+                          <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 lg:hidden">Техника</span>
+                          <div className="break-words text-sm font-bold text-gray-900 dark:text-white lg:truncate">{getTicketEquipmentTitle(ticket)}</div>
+                          <div className="mt-0.5 break-all font-mono text-xs text-gray-500 lg:truncate">
                             INV: {inventory}{serialNumber ? ` · SN: ${serialNumber}` : ''}
                           </div>
                         </div>
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{clientDetails.name}</div>
-                          <div className="mt-0.5 truncate text-xs text-gray-500">{ticket.reason || description || '—'}</div>
+                          <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 lg:hidden">Клиент / проблема</span>
+                          <div className="break-words text-sm font-semibold text-gray-800 dark:text-gray-100 lg:truncate">{clientDetails.name}</div>
+                          <div className="mt-0.5 break-words text-xs text-gray-500 lg:truncate">{ticket.reason || description || '—'}</div>
                         </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-300">{ticket.closedAt ? formatShortDate(ticket.closedAt) : '—'}</div>
+                        <div className="text-sm text-gray-600 dark:text-gray-300">
+                          <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 lg:hidden">Закрыта</span>
+                          {ticket.closedAt ? formatShortDate(ticket.closedAt) : '—'}
+                        </div>
                         <button
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
                             openTicket();
                           }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-[--color-primary] dark:hover:bg-white/10"
+                          className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-[--color-primary] sm:w-9 lg:h-8 lg:w-8 lg:border-0 lg:text-gray-400 dark:border-white/10 dark:hover:bg-white/10"
                           title="Открыть полную карточку"
                           aria-label={`Открыть полную карточку архивной заявки ${ticket.id}`}
                         >
@@ -2438,8 +2473,8 @@ export default function Service() {
             </div>
           </section>
 
-          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm shadow-slate-200/40 dark:border-white/10 dark:bg-white/[0.03] dark:shadow-none">
-            <div className="hidden grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] lg:grid">
+          <div data-service-responsive-list="archive-tab" className="space-y-3 lg:space-y-0 lg:overflow-hidden lg:rounded-lg lg:border lg:border-gray-200 lg:bg-white lg:shadow-sm lg:shadow-slate-200/40 lg:dark:border-white/10 lg:dark:bg-white/[0.03] lg:dark:shadow-none">
+            <div data-service-desktop-table="archive-tab" className="hidden grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-bold uppercase text-gray-500 dark:border-white/10 dark:bg-white/[0.04] lg:grid">
               <div>№ заявки / дата</div>
               <div>Статус</div>
               <div>Техника</div>
@@ -2468,6 +2503,7 @@ export default function Service() {
                     key={ticket.id}
                     role="button"
                     tabIndex={0}
+                    data-service-mobile-card="archive-ticket"
                     aria-label={`Открыть архивную заявку ${ticket.id}`}
                     onClick={openTicket}
                     onKeyDown={(event) => {
@@ -2476,33 +2512,41 @@ export default function Service() {
                         openTicket();
                       }
                     }}
-                    className={`grid cursor-pointer gap-3 border-b border-gray-100 px-4 py-3 text-gray-600 transition-colors last:border-b-0 hover:bg-gray-50 dark:border-white/6 dark:text-gray-300 dark:hover:bg-white/[0.04] lg:grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] lg:items-start ${
+                    className={`grid min-w-0 cursor-pointer gap-3 rounded-lg border border-gray-200 px-4 py-3 text-gray-600 shadow-sm shadow-slate-200/40 transition-colors hover:bg-gray-50 dark:border-white/10 dark:text-gray-300 dark:hover:bg-white/[0.04] lg:rounded-none lg:border-0 lg:border-b lg:border-gray-100 lg:shadow-none lg:last:border-b-0 lg:dark:border-white/6 lg:grid-cols-[minmax(170px,0.8fr)_120px_minmax(220px,1fr)_minmax(180px,0.9fr)_120px_auto] lg:items-start ${
                       index % 2 === 0 ? 'bg-gray-50/60 dark:bg-white/[0.015]' : 'bg-white dark:bg-transparent'
                     }`}
                   >
                     <div className="min-w-0 text-left">
-                      <div className="truncate font-mono text-sm font-bold text-[--color-primary]">{ticket.id}</div>
+                      <div className="break-all font-mono text-sm font-bold text-[--color-primary] lg:truncate">{ticket.id}</div>
                       <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
                     </div>
-                    <div>{getServiceStatusBadge(normalizeServiceStatus(ticket.status))}</div>
+                    <div className="min-w-0">
+                      <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 lg:hidden">Статус</span>
+                      {getServiceStatusBadge(normalizeServiceStatus(ticket.status))}
+                    </div>
                     <div className="min-w-0 text-left">
-                      <div className="truncate text-sm font-bold text-gray-900 dark:text-white">{getTicketEquipmentTitle(ticket)}</div>
-                      <div className="mt-0.5 truncate font-mono text-xs text-gray-500">
+                      <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 lg:hidden">Техника</span>
+                      <div className="break-words text-sm font-bold text-gray-900 dark:text-white lg:truncate">{getTicketEquipmentTitle(ticket)}</div>
+                      <div className="mt-0.5 break-all font-mono text-xs text-gray-500 lg:truncate">
                         INV: {inventory}{serialNumber ? ` · SN: ${serialNumber}` : ''}
                       </div>
                     </div>
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{clientDetails.name}</div>
-                      <div className="mt-0.5 truncate text-xs text-gray-500">{ticket.reason || description || '—'}</div>
+                      <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 lg:hidden">Клиент / проблема</span>
+                      <div className="break-words text-sm font-semibold text-gray-800 dark:text-gray-100 lg:truncate">{clientDetails.name}</div>
+                      <div className="mt-0.5 break-words text-xs text-gray-500 lg:truncate">{ticket.reason || description || '—'}</div>
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-300">{ticket.closedAt ? formatShortDate(ticket.closedAt) : '—'}</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-300">
+                      <span className="mb-1 block text-[11px] font-bold uppercase text-gray-400 lg:hidden">Закрыта</span>
+                      {ticket.closedAt ? formatShortDate(ticket.closedAt) : '—'}
+                    </div>
                     <button
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
                         openTicket();
                       }}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-[--color-primary] dark:hover:bg-white/10"
+                      className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-[--color-primary] sm:w-9 lg:h-8 lg:w-8 lg:border-0 lg:text-gray-400 dark:border-white/10 dark:hover:bg-white/10"
                       title="Открыть полную карточку"
                       aria-label={`Открыть полную карточку архивной заявки ${ticket.id}`}
                     >

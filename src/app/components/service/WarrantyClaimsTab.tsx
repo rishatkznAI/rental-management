@@ -118,7 +118,7 @@ const PRIORITY_OPTIONS: Array<{ value: ServicePriority; label: string }> = [
   { value: 'critical', label: 'Критический' },
 ];
 
-const SECTION_CARD_CLASS = 'rounded-lg border-border bg-card shadow-sm';
+const SECTION_CARD_CLASS = 'min-w-0 rounded-lg border-border bg-card shadow-sm';
 const SURFACE_PANEL_CLASS = 'rounded-lg border border-border bg-muted/30';
 const EMPTY_STATE_CLASS = 'rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground';
 const FIELD_LABEL_CLASS = 'text-sm font-medium text-foreground';
@@ -667,7 +667,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
       </Card>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card className={SECTION_CARD_CLASS}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">

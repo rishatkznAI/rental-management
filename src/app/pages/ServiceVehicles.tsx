@@ -193,7 +193,21 @@ export default function ServiceVehicles() {
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+        <>
+        <div className="space-y-3 md:hidden">
+          {filtered.map(v => (
+            <VehicleCard
+              key={v.id}
+              vehicle={v}
+              onClick={() => navigate(`/service-vehicles/${v.id}`)}
+            />
+          ))}
+          <div className="text-xs text-gray-400">
+            Показано {filtered.length} из {vehicles.length}
+          </div>
+        </div>
+
+        <div className="hidden overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 md:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
@@ -221,6 +235,7 @@ export default function ServiceVehicles() {
             Показано {filtered.length} из {vehicles.length}
           </div>
         </div>
+        </>
       )}
     </div>
   );
@@ -299,5 +314,77 @@ function VehicleRow({ vehicle: v, onClick }: { vehicle: ServiceVehicle; onClick:
         <ChevronRight className="h-4 w-4" />
       </td>
     </tr>
+  );
+}
+
+function VehicleCard({ vehicle: v, onClick }: { vehicle: ServiceVehicle; onClick: () => void }) {
+  const docWarning =
+    isExpired(v.osagoExpiresAt) ||
+    isExpired(v.insuranceExpiresAt) ||
+    isExpiringSoon(v.osagoExpiresAt) ||
+    isExpiringSoon(v.insuranceExpiresAt) ||
+    isExpiringSoon(v.nextServiceAt, 14);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'w-full rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-colors',
+        'hover:border-blue-200 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-blue-800 dark:hover:bg-blue-950/20',
+        v.status === 'repair' && 'border-red-200 bg-red-50/50 dark:border-red-900/50 dark:bg-red-950/20',
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate font-medium text-gray-900 dark:text-white">
+            {v.make} {v.model}
+          </div>
+          <div className="mt-1 truncate font-mono text-xs text-gray-500 dark:text-gray-400">
+            {v.plateNumber}{v.year ? ` · ${v.year}` : ''}
+          </div>
+        </div>
+        <Badge variant={statusVariant(v.status)}>{STATUS_LABELS[v.status] ?? v.status}</Badge>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+        <VehicleCardMetric label="Тип" value={TYPE_LABELS[v.vehicleType] ?? v.vehicleType} />
+        <VehicleCardMetric label="Пробег" value={`${v.currentMileage.toLocaleString('ru-RU')} км`} />
+        <VehicleCardMetric label="Ответственный" value={v.responsiblePerson || '—'} wide />
+        <VehicleCardMetric
+          label="Документы"
+          value={docWarning ? 'Требует внимания' : 'ОК'}
+          tone={docWarning ? 'warning' : 'success'}
+        />
+        <VehicleCardMetric label="Обновлён" value={formatDate(v.updatedAt)} />
+      </div>
+    </button>
+  );
+}
+
+function VehicleCardMetric({
+  label,
+  value,
+  tone,
+  wide,
+}: {
+  label: string;
+  value: string;
+  tone?: 'success' | 'warning';
+  wide?: boolean;
+}) {
+  return (
+    <div className={cn('min-w-0', wide && 'col-span-2')}>
+      <div className="text-[11px] uppercase text-gray-400">{label}</div>
+      <div
+        className={cn(
+          'mt-0.5 truncate text-gray-700 dark:text-gray-200',
+          tone === 'success' && 'text-green-600 dark:text-green-400',
+          tone === 'warning' && 'text-amber-600 dark:text-amber-400',
+        )}
+      >
+        {value}
+      </div>
+    </div>
   );
 }

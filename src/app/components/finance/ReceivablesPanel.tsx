@@ -251,14 +251,23 @@ function primaryRental(row: ReceivableRow) {
 
 function KpiCard({ title, value }: { title: string; value: React.ReactNode }) {
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardHeader className="pb-2">
         <CardTitle className="text-xs font-medium text-gray-500 dark:text-gray-400">{title}</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="text-xl font-semibold text-gray-900 dark:text-white">{value}</div>
+        <div className="break-words text-xl font-semibold text-gray-900 dark:text-white">{value}</div>
       </CardContent>
     </Card>
+  );
+}
+
+function ReceivableMobileField({ label, value, className = '' }: { label: string; value: React.ReactNode; className?: string }) {
+  return (
+    <div className={`min-w-0 rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40 ${className}`} data-finance-mobile-field>
+      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</p>
+      <div className="mt-1 min-w-0 break-words text-sm font-medium text-gray-900 dark:text-white">{value}</div>
+    </div>
   );
 }
 
@@ -470,7 +479,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
                 Расчёт использует проверенную формулу: начислено по аренде минус фактически полученные оплаты.
               </p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-4" data-finance-mobile-filters>
               <Input placeholder="Клиент, ИНН, менеджер" value={query} onChange={(event) => setQuery(event.target.value)} />
               <Select value={manager} onValueChange={setManager}>
                 <SelectTrigger><SelectValue placeholder="Менеджер" /></SelectTrigger>
@@ -500,39 +509,39 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
               </Select>
             </div>
           </div>
-          <div className="flex flex-wrap gap-3 pt-2 text-sm text-gray-600 dark:text-gray-300">
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyOverdue} onChange={e => setOnlyOverdue(e.target.checked)} /> Только просроченные</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyNoNext} onChange={e => setOnlyNoNext(e.target.checked)} /> Без следующего действия</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyPromised} onChange={e => setOnlyPromised(e.target.checked)} /> С обещанием</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyBrokenPromise} onChange={e => setOnlyBrokenPromise(e.target.checked)} /> Обещание нарушено</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyPlan} onChange={e => setOnlyPlan(e.target.checked)} /> С планом</label>
+          <div className="flex min-w-0 flex-wrap gap-3 pt-2 text-sm text-gray-600 dark:text-gray-300">
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyOverdue} onChange={e => setOnlyOverdue(e.target.checked)} /> <span className="break-words">Только просроченные</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyNoNext} onChange={e => setOnlyNoNext(e.target.checked)} /> <span className="break-words">Без следующего действия</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyPromised} onChange={e => setOnlyPromised(e.target.checked)} /> <span className="break-words">С обещанием</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyBrokenPromise} onChange={e => setOnlyBrokenPromise(e.target.checked)} /> <span className="break-words">Обещание нарушено</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyPlan} onChange={e => setOnlyPlan(e.target.checked)} /> <span className="break-words">С планом</span></label>
             <Select value={status} onValueChange={(value) => setStatus(value as typeof status)}>
-              <SelectTrigger className="h-8 w-52"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 w-full sm:w-52"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Все статусы</SelectItem>
                 {Object.entries(STATUS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
               </SelectContent>
             </Select>
             <Select value={stage} onValueChange={(value) => setStage(value as typeof stage)}>
-              <SelectTrigger className="h-8 w-64"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 w-full sm:w-64"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Все этапы взыскания</SelectItem>
                 {Object.entries(STAGE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
               </SelectContent>
             </Select>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyNoNotification} onChange={e => setOnlyNoNotification(e.target.checked)} /> Без уведомления</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyNotificationOverdue} onChange={e => setOnlyNotificationOverdue(e.target.checked)} /> Уведомление без оплаты</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyPretrialOverdue} onChange={e => setOnlyPretrialOverdue(e.target.checked)} /> Претензия без оплаты</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyCourtScheduled} onChange={e => setOnlyCourtScheduled(e.target.checked)} /> Суд назначен</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyWrit} onChange={e => setOnlyWrit(e.target.checked)} /> Исполнительный лист</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyEnforcement} onChange={e => setOnlyEnforcement(e.target.checked)} /> Приставы</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyRecovered} onChange={e => setOnlyRecovered(e.target.checked)} /> Взыскано</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyWrittenOff} onChange={e => setOnlyWrittenOff(e.target.checked)} /> Списано</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={onlyOverdueNextAction} onChange={e => setOnlyOverdueNextAction(e.target.checked)} /> Просрочено действие</label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyNoNotification} onChange={e => setOnlyNoNotification(e.target.checked)} /> <span className="break-words">Без уведомления</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyNotificationOverdue} onChange={e => setOnlyNotificationOverdue(e.target.checked)} /> <span className="break-words">Уведомление без оплаты</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyPretrialOverdue} onChange={e => setOnlyPretrialOverdue(e.target.checked)} /> <span className="break-words">Претензия без оплаты</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyCourtScheduled} onChange={e => setOnlyCourtScheduled(e.target.checked)} /> <span className="break-words">Суд назначен</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyWrit} onChange={e => setOnlyWrit(e.target.checked)} /> <span className="break-words">Исполнительный лист</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyEnforcement} onChange={e => setOnlyEnforcement(e.target.checked)} /> <span className="break-words">Приставы</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyRecovered} onChange={e => setOnlyRecovered(e.target.checked)} /> <span className="break-words">Взыскано</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyWrittenOff} onChange={e => setOnlyWrittenOff(e.target.checked)} /> <span className="break-words">Списано</span></label>
+            <label className="flex min-w-0 items-center gap-2"><input type="checkbox" checked={onlyOverdueNextAction} onChange={e => setOnlyOverdueNextAction(e.target.checked)} /> <span className="break-words">Просрочено действие</span></label>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
+          <div className="hidden overflow-x-auto md:block" data-finance-desktop-table="receivables">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -631,6 +640,89 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
                 })}
               </TableBody>
             </Table>
+          </div>
+          <div className="space-y-3 md:hidden" data-finance-mobile-list="receivables">
+            {filteredRows.map(row => {
+              const rental = primaryRental(row);
+              const noticeAction = nextWorkflowActions(row.collectionStage || 'new_debt').find(item => item.type === 'generate_notification');
+              const claimAction = nextWorkflowActions(row.collectionStage || 'new_debt').find(item => item.type === 'generate_pretrial_claim');
+              const writeOffAction = nextWorkflowActions(row.collectionStage || 'new_debt').find(item => item.type === 'write_off');
+              return (
+                <div
+                  key={`mobile-receivable-${row.clientId || row.client}`}
+                  className={`rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40 ${row.collectionStatus === 'overdue_promise' || row.noNextAction ? 'border-red-200 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20' : ''}`}
+                  onClick={() => setSelectedRow(row)}
+                >
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{row.client}</p>
+                      <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{row.inn ? `ИНН ${row.inn}` : 'ИНН не указан'}</p>
+                    </div>
+                    <div className="max-w-[42%] shrink-0 text-right">
+                      <Badge variant={statusVariant(row.collectionStatus)}>{STATUS_LABELS[row.collectionStatus]}</Badge>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <ReceivableMobileField label="Менеджер" value={row.manager || '—'} />
+                    <ReceivableMobileField label="Сумма долга" value={formatCurrency(row.totalDebt)} />
+                    <ReceivableMobileField
+                      label="Возраст просрочки"
+                      value={(
+                        <>
+                          <span>{row.oldestOverdueDays} дн.</span>
+                          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">{formatCurrency(row.overdueDebt)}</span>
+                        </>
+                      )}
+                    />
+                    <ReceivableMobileField label="Последняя оплата" value={lastPaymentDate(row) ? formatDate(lastPaymentDate(row)) : '—'} />
+                    <ReceivableMobileField
+                      className="col-span-2"
+                      label="Связанная аренда"
+                      value={rental ? `${rental.rentalId} · ${rental.equipmentInv || 'техника не указана'} · ${formatCurrency(rental.outstanding)}` : '—'}
+                    />
+                    <ReceivableMobileField className="col-span-2" label="Этап взыскания" value={STAGE_LABELS[row.collectionStage || 'new_debt']} />
+                  </div>
+                  {canManageFinance ? (
+                    <div className="mt-3 grid grid-cols-2 gap-2" data-finance-mobile-actions onClick={(event) => event.stopPropagation()}>
+                      {row.clientId && (
+                        <Button size="sm" variant="outline" className="w-full" title="Открыть клиента" aria-label="Открыть клиента" onClick={() => openPath(`/clients/${row.clientId}`)}>
+                          <ExternalLink className="h-4 w-4" />
+                          Клиент
+                        </Button>
+                      )}
+                      {rental?.rentalId && (
+                        <Button size="sm" variant="outline" className="w-full" title="Открыть аренду" aria-label="Открыть аренду" onClick={() => openPath(`/rentals/${rental.rentalId}`)}>
+                          <CalendarClock className="h-4 w-4" />
+                          Аренда
+                        </Button>
+                      )}
+                      {noticeAction && (
+                        <Button size="sm" variant="secondary" className="w-full" title="Создать уведомление" onClick={() => openWorkflow(row, noticeAction.type, noticeAction.stage)}>
+                          Уведомление
+                        </Button>
+                      )}
+                      {claimAction && (
+                        <Button size="sm" variant="secondary" className="w-full" title="Создать претензию" onClick={() => openWorkflow(row, claimAction.type, claimAction.stage)}>
+                          Претензия
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" className="w-full" title="Отметить спор" onClick={() => openAction(row, 'legal_notice')}>
+                        Спор
+                      </Button>
+                      {writeOffAction && (
+                        <Button size="sm" variant="outline" className="w-full" title="Закрыть/списать" onClick={() => openWorkflow(row, writeOffAction.type, writeOffAction.stage)}>
+                          Списать
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" className="col-span-2 w-full" title="Добавить комментарий" onClick={() => openAction(row, 'comment')}>
+                        <FileText className="h-4 w-4" />
+                        Комментарий
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
           {!receivables.isLoading && filteredRows.length === 0 && (
             <div className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
@@ -746,7 +838,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
       </Sheet>
 
       <Dialog open={Boolean(workflowRow)} onOpenChange={(open) => !open && setWorkflowRow(null)}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{workflowRow ? `${ACTION_LABELS[workflowForm.actionType]}: ${workflowRow.client}` : 'Этап взыскания'}</DialogTitle>
           </DialogHeader>
@@ -837,7 +929,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
       </Dialog>
 
       <Dialog open={Boolean(actionRow)} onOpenChange={(open) => !open && setActionRow(null)}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-xl">
           <DialogHeader><DialogTitle>{actionRow ? `${ACTION_LABELS[actionForm.actionType]}: ${actionRow.client}` : 'Действие'}</DialogTitle></DialogHeader>
           <form className="space-y-3" onSubmit={submitAction}>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -869,7 +961,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
       </Dialog>
 
       <Dialog open={Boolean(planRow)} onOpenChange={(open) => !open && setPlanRow(null)}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[85vh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader><DialogTitle>{planRow ? `План погашения: ${planRow.client}` : 'План погашения'}</DialogTitle></DialogHeader>
           <form className="space-y-3" onSubmit={submitPlan}>
             <div className="grid gap-3 sm:grid-cols-2">

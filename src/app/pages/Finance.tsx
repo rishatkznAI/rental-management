@@ -642,6 +642,35 @@ function FinanceKpiCard({
   );
 }
 
+function FinanceMobileField({
+  label,
+  value,
+  className = '',
+  valueClassName = '',
+}: {
+  label: string;
+  value: React.ReactNode;
+  className?: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div className={`min-w-0 rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40 ${className}`} data-finance-mobile-field>
+      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</p>
+      <div className={`mt-1 min-w-0 break-words text-sm font-medium text-gray-900 dark:text-white ${valueClassName}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function FinanceMobileActions({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-2 gap-2 pt-1" data-finance-mobile-actions>
+      {children}
+    </div>
+  );
+}
+
 function getEconomicsStatusBadge(status: FinanceEconomicsEquipmentStatus) {
   const variant = status === 'profitable'
     ? 'success'
@@ -1557,7 +1586,7 @@ export default function Finance() {
                 </Select>
               </CardHeader>
               <CardContent>
-                <div className="overflow-x-auto">
+                <div className="hidden overflow-x-auto md:block" data-finance-desktop-table="latest-operations">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1591,6 +1620,31 @@ export default function Finance() {
                       ))}
                     </TableBody>
                   </Table>
+                </div>
+                <div className="space-y-3 md:hidden" data-finance-mobile-list="latest-operations">
+                  {latestOperations.map(operation => (
+                    <div key={`mobile-latest-${operation.id}`} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{operation.description}</p>
+                          <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{operation.counterparty || '—'}</p>
+                        </div>
+                        <Badge variant={operation.type === 'income' ? 'success' : operation.type === 'expense' ? 'danger' : 'default'}>
+                          {operation.type === 'income' ? 'Доход' : operation.type === 'expense' ? 'Расход' : 'Перевод'}
+                        </Badge>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <FinanceMobileField label="Дата" value={formatDate(operation.date)} />
+                        <FinanceMobileField label="Категория" value={operation.category} />
+                        <FinanceMobileField
+                          label="Сумма"
+                          value={`${operation.type === 'income' ? '+' : operation.type === 'expense' ? '-' : ''}${formatCurrency(operation.amount)}`}
+                          valueClassName={operation.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : operation.type === 'expense' ? 'text-red-600 dark:text-red-400' : ''}
+                        />
+                        <FinanceMobileField label="Действия" value="—" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
                 {latestOperations.length === 0 && (
                   <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">Операции за период не найдены.</div>
@@ -1695,7 +1749,7 @@ export default function Finance() {
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Каждая сумма показывает источник, статус и НДС.</p>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
+              <div className="hidden overflow-x-auto md:block" data-finance-desktop-table="cash-flow-items">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1724,6 +1778,31 @@ export default function Finance() {
                   </TableBody>
                 </Table>
               </div>
+              <div className="space-y-3 md:hidden" data-finance-mobile-list="cash-flow-items">
+                {(cashFlow?.items || []).map(item => (
+                  <div key={`mobile-cash-flow-${item.id}`} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{item.description}</p>
+                        <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{item.clientName || '—'}</p>
+                      </div>
+                      <Badge variant={item.direction === 'incoming' ? 'success' : item.direction === 'outgoing' ? 'danger' : 'default'}>
+                        {item.direction === 'non_cash' ? 'Non-cash' : item.status || '—'}
+                      </Badge>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <FinanceMobileField label="Дата" value={formatDate(item.date)} />
+                      <FinanceMobileField
+                        label="Сумма"
+                        value={`${item.direction === 'incoming' ? '+' : item.direction === 'outgoing' ? '-' : ''}${formatCurrency(item.amount)}`}
+                        valueClassName={item.direction === 'incoming' ? 'text-emerald-600 dark:text-emerald-400' : item.direction === 'outgoing' ? 'text-red-600 dark:text-red-400' : ''}
+                      />
+                      <FinanceMobileField label="НДС" value={item.vatAmount > 0 ? `${formatCurrency(item.vatAmount)} · ${item.vatRate}%` : '—'} />
+                      <FinanceMobileField label="Статус" value={item.direction === 'non_cash' ? 'Non-cash' : item.status || '—'} />
+                    </div>
+                  </div>
+                ))}
+              </div>
               {(cashFlow?.items || []).length === 0 && (
                 <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">Недостаточно данных для Cash Flow за выбранный период.</div>
               )}
@@ -1731,8 +1810,8 @@ export default function Finance() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="economics" className="space-y-4">
-          <Card>
+        <TabsContent value="economics" className="min-w-0 space-y-4 [&_[data-slot=card-content]]:min-w-0 [&_[data-slot=card]]:min-w-0">
+          <Card className="min-w-0">
             <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <CardTitle>Экономика компании</CardTitle>
@@ -1811,8 +1890,8 @@ export default function Finance() {
             </div>
           ) : null}
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
-            <Card>
+          <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
+            <Card className="min-w-0">
               <CardHeader>
                 <CardTitle>Выручка / расходы / прибыль</CardTitle>
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -1820,7 +1899,7 @@ export default function Finance() {
                 </p>
               </CardHeader>
               <CardContent>
-                <div className="h-[320px]">
+                <div className="h-[320px] min-w-0 overflow-hidden">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={economics?.periods || []} margin={{ top: 12, right: 16, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.28)" />
@@ -1849,7 +1928,7 @@ export default function Finance() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="min-w-0">
               <CardHeader>
                 <CardTitle>Проблемные блоки</CardTitle>
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Сигналы без паники, для управленческого разбора.</p>
@@ -1884,7 +1963,7 @@ export default function Finance() {
             </Card>
           </div>
 
-          <Card>
+          <Card className="min-w-0">
             <CardHeader>
               <CardTitle>Экономика по единицам техники</CardTitle>
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -1892,7 +1971,7 @@ export default function Finance() {
               </p>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
+              <div className="hidden overflow-x-auto md:block" data-finance-desktop-table="equipment-economics">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1923,6 +2002,28 @@ export default function Finance() {
                     ))}
                   </TableBody>
                 </Table>
+              </div>
+              <div className="space-y-3 md:hidden" data-finance-mobile-list="equipment-economics">
+                {(economics?.equipment || []).map(item => (
+                  <div key={`mobile-economics-${item.equipmentId || item.label}`} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <p className="min-w-0 break-words text-sm font-semibold text-gray-900 dark:text-white">{item.label || 'Техника без названия'}</p>
+                      <div className="max-w-[42%] shrink-0 text-right">{getEconomicsStatusBadge(item.status)}</div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <FinanceMobileField label="Выручка" value={formatCurrency(item.revenue)} />
+                      <FinanceMobileField label="Расходы" value={formatCurrency(item.expenses)} />
+                      <FinanceMobileField label="Амортизация" value={formatCurrency(item.depreciation)} />
+                      <FinanceMobileField
+                        label="Прибыль"
+                        value={formatCurrency(item.profitAfterDepreciation)}
+                        valueClassName={item.profitAfterDepreciation >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}
+                      />
+                      <FinanceMobileField label="Окупаемость" value={item.paybackPercent == null ? '—' : `${item.paybackPercent}%`} />
+                      <FinanceMobileField label="Рекомендация" value={item.recommendation || 'Недостаточно данных для точного расчёта.'} />
+                    </div>
+                  </div>
+                ))}
               </div>
               {!economicsLoading && (!economics?.equipment || economics.equipment.length === 0) && (
                 <div className="rounded-lg border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
@@ -2019,7 +2120,7 @@ export default function Finance() {
                   />
                 </div>
               </div>
-              <div className="overflow-x-auto">
+              <div className="hidden overflow-x-auto md:block" data-finance-desktop-table="operations-register">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -2072,6 +2173,45 @@ export default function Finance() {
                     ))}
                   </TableBody>
                 </Table>
+              </div>
+              <div className="space-y-3 md:hidden" data-finance-mobile-list="operations">
+                {filteredOperations.map(operation => (
+                  <div key={`mobile-operations-${operation.id}`} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{operation.description}</p>
+                        <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{operation.counterparty || '—'}</p>
+                      </div>
+                      <Badge variant={operation.type === 'income' ? 'success' : operation.type === 'expense' ? 'danger' : 'default'}>
+                        {OPERATION_TYPE_LABELS[operation.type]}
+                      </Badge>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <FinanceMobileField label="Дата" value={formatDate(operation.date)} />
+                      <FinanceMobileField label="Категория" value={operation.category} />
+                      <FinanceMobileField label="Счёт/касса" value={operation.account || '—'} />
+                      <FinanceMobileField label="Связь" value={operation.relatedEntity || '—'} />
+                      <FinanceMobileField label="Статус" value={operation.status || '—'} />
+                      <FinanceMobileField
+                        label="Сумма"
+                        value={`${operation.type === 'income' ? '+' : operation.type === 'expense' ? '-' : ''}${formatCurrency(operation.amount)}`}
+                        valueClassName={operation.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : operation.type === 'expense' ? 'text-red-600 dark:text-red-400' : ''}
+                      />
+                    </div>
+                    {operation.manual && canManageFinance ? (
+                      <FinanceMobileActions>
+                        <Button size="sm" variant="outline" className="w-full" title="Редактировать" onClick={() => openEditOperationDialog(operation.manual!)}>
+                          <Edit3 className="h-4 w-4" />
+                          Редактировать
+                        </Button>
+                        <Button size="sm" variant="outline" className="w-full" title="Архивировать" onClick={() => void archiveOperation(operation.manual!)}>
+                          <Archive className="h-4 w-4" />
+                          Архив
+                        </Button>
+                      </FinanceMobileActions>
+                    ) : null}
+                  </div>
+                ))}
               </div>
               {filteredOperations.length === 0 && (
                 <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">Операции за период не найдены.</div>
@@ -2169,7 +2309,7 @@ export default function Finance() {
         </Card>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="relative w-full lg:max-w-md">
@@ -2184,7 +2324,7 @@ export default function Finance() {
             <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="hidden overflow-x-auto md:block" data-finance-desktop-table="recurring-expenses">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -2281,6 +2421,82 @@ export default function Finance() {
               </TableBody>
             </Table>
           </div>
+          <div className="space-y-3 md:hidden" data-finance-mobile-list="recurring-expenses">
+            {filteredExpenses.map((expense) => {
+              const displayStatus = getExpenseDisplayStatus(expense);
+              const categoryLabel = getAdminListLabel(appSettings, 'finance_expense_categories', expense.category);
+              const frequencyLabel = getAdminListLabel(appSettings, 'finance_expense_frequency', expense.frequency) || FREQUENCY_LABELS[expense.frequency];
+              return (
+                <div key={`mobile-expense-${expense.id}`} className={`rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40 ${expense.status === 'archived' ? 'opacity-70' : ''}`}>
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{expense.name}</p>
+                      {expense.counterparty && (
+                        <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{expense.counterparty}</p>
+                      )}
+                    </div>
+                    <div className="max-w-[45%] shrink-0 text-right">
+                      {displayStatus.overdue
+                        ? <Badge variant="error">{displayStatus.label}</Badge>
+                        : getStatusBadge(displayStatus.status, getAdminListLabel(appSettings, 'finance_expense_statuses', expense.status) || displayStatus.label)}
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <FinanceMobileField label="Сумма" value={formatCurrency(expense.amount)} valueClassName="text-base font-semibold" />
+                    <FinanceMobileField label="Категория" value={categoryLabel} />
+                    <FinanceMobileField label="Периодичность" value={frequencyLabel} />
+                    <FinanceMobileField label="День оплаты" value={getDayLabel(expense.paymentDay)} />
+                    <FinanceMobileField
+                      label="Ближайшая оплата"
+                      value={(
+                        <>
+                          <span>{getNextPaymentLabel(expense)}</span>
+                          {displayStatus.overdue && <span className="mt-1 block text-xs font-medium text-red-600 dark:text-red-400">просрочено</span>}
+                          {!displayStatus.overdue && isUpcoming(expense, 7) && <span className="mt-1 block text-xs font-medium text-amber-600 dark:text-amber-400">в ближайшие 7 дней</span>}
+                        </>
+                      )}
+                    />
+                    <FinanceMobileField label="Источник/счёт" value={expense.account || '—'} />
+                  </div>
+                  {canManageFinance ? (
+                    <FinanceMobileActions>
+                      <Button size="sm" variant="outline" className="w-full" title="Редактировать" aria-label="Редактировать расход" onClick={() => openEditDialog(expense)}>
+                        <Edit3 className="h-4 w-4" />
+                        Изменить
+                      </Button>
+                      {expense.status === 'active' ? (
+                        <Button size="sm" variant="outline" className="w-full" title="Поставить на паузу" aria-label="Поставить расход на паузу" onClick={() => void updateStatus(expense, 'paused')}>
+                          <PauseCircle className="h-4 w-4" />
+                          Пауза
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline" className="w-full" title="Возобновить" aria-label="Возобновить расход" onClick={() => void updateStatus(expense, 'active')}>
+                          <CheckCircle2 className="h-4 w-4" />
+                          Вернуть
+                        </Button>
+                      )}
+                      {expense.status !== 'archived' && (
+                        <Button size="sm" variant="outline" className="w-full" title="Архивировать" aria-label="Архивировать расход" onClick={() => void updateStatus(expense, 'archived')}>
+                          <Archive className="h-4 w-4" />
+                          Архив
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" className="w-full" title="Открыть историю" aria-label="Открыть историю расхода" onClick={() => setHistoryExpense(expense)}>
+                        <History className="h-4 w-4" />
+                        История
+                      </Button>
+                      {can('delete', 'finance') && (
+                        <Button size="sm" variant="outline" className="col-span-2 w-full" title="Удалить" aria-label="Удалить расход" onClick={() => void handleDelete(expense)}>
+                          <Trash2 className="h-4 w-4" />
+                          Удалить
+                        </Button>
+                      )}
+                    </FinanceMobileActions>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
 
           {!isLoading && filteredExpenses.length === 0 && (
             <div className="flex flex-col items-center justify-center py-14 text-center">
@@ -2326,17 +2542,17 @@ export default function Finance() {
               Срочных оплат по постоянным расходам нет.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3" data-finance-mobile-list="upcoming-payments">
               {upcomingExpenses.map(expense => (
                 <div key={expense.id} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-700/60 dark:bg-amber-900/20">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{expense.name}</p>
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="break-words font-medium text-gray-900 dark:text-white">{expense.name}</p>
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         {getNextPaymentLabel(expense)} · {getAdminListLabel(appSettings, 'finance_expense_categories', expense.category)}
                       </p>
                     </div>
-                    <p className="shrink-0 font-semibold text-gray-900 dark:text-white">{formatCurrency(expense.amount)}</p>
+                    <p className="shrink-0 text-right font-semibold text-gray-900 dark:text-white">{formatCurrency(expense.amount)}</p>
                   </div>
                 </div>
               ))}
@@ -2406,7 +2622,7 @@ export default function Finance() {
                       icon={Archive}
                     />
                   </div>
-                  <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+                  <div className="hidden overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 md:block" data-finance-desktop-table="accounts">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -2458,6 +2674,42 @@ export default function Finance() {
                         ))}
                       </TableBody>
                     </Table>
+                  </div>
+                  <div className="space-y-3 md:hidden" data-finance-mobile-list="accounts">
+                    {financeAccounts.map(account => (
+                      <div key={`mobile-account-${account.id}`} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                        <div className="flex min-w-0 items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{account.name}</p>
+                            <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{ACCOUNT_TYPE_LABELS[account.type] || 'Прочее'} · {account.currency || 'RUB'}</p>
+                          </div>
+                          <Badge variant={account.status === 'active' ? 'success' : 'default'}>
+                            {ACCOUNT_STATUS_LABELS[account.status] || account.status}
+                          </Badge>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <FinanceMobileField label="Остаток" value={formatCurrency(account.balance || 0)} valueClassName="text-base font-semibold" />
+                          <FinanceMobileField label="Актуально на" value={formatDate(account.actualAt)} />
+                          <FinanceMobileField className="col-span-2" label="Комментарий" value={account.comment || '—'} />
+                        </div>
+                        <FinanceMobileActions>
+                          <Button size="sm" variant="secondary" className="w-full" onClick={() => openEditAccountDialog(account)} disabled={!canManageFinance}>
+                            <Edit3 className="h-4 w-4" />
+                            Остаток
+                          </Button>
+                          <Button size="sm" variant="secondary" className="w-full" onClick={() => openTransferDialog(account)} disabled={!canManageFinance || account.status !== 'active' || activeFinanceAccounts.length < 2}>
+                            <ArrowUpRight className="h-4 w-4" />
+                            Перевод
+                          </Button>
+                          {account.status !== 'archived' && (
+                            <Button size="sm" variant="secondary" className="col-span-2 w-full" onClick={() => archiveAccount(account)} disabled={!canManageFinance}>
+                              <Archive className="h-4 w-4" />
+                              Архивировать
+                            </Button>
+                          )}
+                        </FinanceMobileActions>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -2582,7 +2834,7 @@ export default function Finance() {
       </FilterDialog>
 
       <Dialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editingAccount ? 'Изменить счёт или кассу' : 'Добавить счёт или кассу'}</DialogTitle>
             <DialogDescription>
@@ -2644,7 +2896,7 @@ export default function Finance() {
       </Dialog>
 
       <Dialog open={transferDialogOpen} onOpenChange={setTransferDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+        <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Перевод между счетами</DialogTitle>
             <DialogDescription>
@@ -2698,7 +2950,7 @@ export default function Finance() {
       </Dialog>
 
       <Dialog open={Boolean(historyExpense)} onOpenChange={(open) => !open && setHistoryExpense(null)}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>История расхода</DialogTitle>
             <DialogDescription>
@@ -2770,7 +3022,7 @@ export default function Finance() {
       </Dialog>
 
       <Dialog open={operationDialogOpen} onOpenChange={setOperationDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{editingOperation ? 'Редактировать операцию' : 'Добавить операцию'}</DialogTitle>
             <DialogDescription>
@@ -2932,7 +3184,7 @@ export default function Finance() {
       </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{editingExpense ? 'Редактировать расход' : 'Добавить расход'}</DialogTitle>
             <DialogDescription>

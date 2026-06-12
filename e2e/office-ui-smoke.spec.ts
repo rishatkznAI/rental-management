@@ -414,7 +414,7 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   expect(meJson.user.userRole).toBe('Офис-менеджер');
 
   action = 'office dashboard';
-  await expect(page.getByRole('heading', { name: 'Дашборд', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Операционный центр', exact: true })).toBeVisible();
   await expect(page.getByText('Мой офисный дашборд')).toBeVisible();
   for (const label of [
     'Документы без подписи',

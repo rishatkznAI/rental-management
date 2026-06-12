@@ -247,7 +247,7 @@ test('production finance smoke stays read-only', async ({ page }) => {
   await page.getByLabel('Логин').fill(adminEmail);
   await page.getByRole('textbox', { name: 'Пароль' }).fill(adminPassword);
   await page.getByRole('button', { name: 'Войти' }).click();
-  await expect(page.getByRole('heading', { name: 'Дашборд', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Операционный центр', exact: true })).toBeVisible();
 
   await page.goto(productionAppUrl(frontendUrl, '/finance'), { waitUntil: 'domcontentloaded' });
   await expect(page.locator('main'), 'Finance page main should be visible').toBeVisible();

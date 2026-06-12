@@ -258,7 +258,7 @@ async function expectAdminLoginSucceeded(
   const authError = page.locator('[role="alert"], #auth-error').filter({
     hasText: /Неверный логин или пароль|invalid login|invalid password|unauthorized|forbidden/i,
   }).first();
-  const dashboardHeading = page.getByRole('heading', { name: 'Дашборд', exact: true });
+  const dashboardHeading = page.getByRole('heading', { name: 'Операционный центр', exact: true });
   const nav = page.getByRole('navigation').first();
 
   const deadline = Date.now() + 20_000;

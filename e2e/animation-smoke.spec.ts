@@ -34,7 +34,7 @@ test.describe('animation smoke', () => {
     await loginAsAdmin(page);
 
     await page.goto('./?debugVersion=1#/', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Дашборд' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Операционный центр' })).toBeVisible();
     const buildInfo = await page.evaluate(() => (
       window as Window & { __SKYTECH_BUILD_INFO__?: { commit?: string } }
     ).__SKYTECH_BUILD_INFO__);

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useQueries } from '@tanstack/react-query';
-import { AlertTriangle, Bell, CalendarClock, CreditCard, FileCheck, Wrench } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Bell, CalendarClock, CreditCard, FileCheck, Wrench } from 'lucide-react';
 import { rentalsService } from '../../services/rentals.service';
 import { serviceTicketsService } from '../../services/service-tickets.service';
 import { equipmentService } from '../../services/equipment.service';
@@ -17,15 +17,21 @@ const READ_KEY = 'app_notification_reads_v1';
 const READ_SYNC_EVENT = 'app-notification-reads-updated';
 
 const priorityStyles: Record<NotificationPriority, string> = {
-  critical: 'border-red-200 bg-red-50 dark:border-red-900/70 dark:bg-red-950/30',
-  high: 'border-amber-200 bg-amber-50 dark:border-amber-900/70 dark:bg-amber-950/30',
-  medium: 'border-blue-200 bg-blue-50 dark:border-blue-900/70 dark:bg-blue-950/30',
+  critical: 'border-danger/35 bg-danger/10 shadow-[0_18px_44px_-36px_color-mix(in_srgb,var(--danger)_58%,transparent)]',
+  high: 'border-warning/35 bg-warning/10 shadow-[0_18px_44px_-36px_color-mix(in_srgb,var(--warning)_58%,transparent)]',
+  medium: 'border-primary/30 bg-primary/8 shadow-[0_18px_44px_-36px_color-mix(in_srgb,var(--primary)_46%,transparent)]',
 };
 
 const priorityDotStyles: Record<NotificationPriority, string> = {
-  critical: 'bg-red-500',
-  high: 'bg-amber-500',
-  medium: 'bg-blue-500',
+  critical: 'bg-danger text-danger',
+  high: 'bg-warning text-warning',
+  medium: 'bg-primary text-primary',
+};
+
+const priorityChipStyles: Record<NotificationPriority, string> = {
+  critical: 'border-danger/25 bg-danger/10 text-danger-foreground',
+  high: 'border-warning/25 bg-warning/10 text-warning-foreground',
+  medium: 'border-primary/20 bg-primary/10 text-primary',
 };
 
 function readIdsFromStorage(): string[] {
@@ -180,24 +186,24 @@ export function NotificationCenter() {
         </button>
       </SheetTrigger>
 
-      <SheetContent side="right" className="w-full sm:max-w-lg">
-        <SheetHeader className="border-b border-gray-200 dark:border-gray-800">
+      <SheetContent side="right" className="flex w-full flex-col bg-card sm:max-w-lg">
+        <SheetHeader className="border-b border-border bg-card/95 shadow-[0_16px_34px_-30px_rgba(0,0,0,0.72)] backdrop-blur">
           <SheetTitle>Уведомления</SheetTitle>
           <SheetDescription>
             Возвраты, сервис, ТО и платежи, требующие внимания
           </SheetDescription>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto px-4 pb-4">
-          <div className="sticky top-0 z-10 flex items-center justify-between bg-background py-3">
-            <div className="text-sm text-gray-500 dark:text-gray-400">
+        <div className="flex-1 overflow-y-auto px-3 pb-4 sm:px-4">
+          <div className="sticky top-0 z-10 -mx-3 flex flex-col gap-2 border-b border-border bg-card/95 px-3 py-3 backdrop-blur sm:-mx-4 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+            <div className="text-sm font-medium text-muted-foreground">
               Непрочитанных: {unreadNotifications.length} {notifications.length !== unreadNotifications.length ? `· Всего: ${notifications.length}` : ''}
             </div>
             {unreadNotifications.length > 0 && (
               <button
                 type="button"
                 onClick={() => setReadIds(prev => Array.from(new Set([...prev, ...unreadNotifications.map(item => item.id)])))}
-                className="text-sm font-medium text-[--color-primary] hover:underline"
+                className="inline-flex min-h-9 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 px-3 text-sm font-semibold text-primary transition hover:border-primary/35 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Отметить прочитанным
               </button>
@@ -205,50 +211,55 @@ export function NotificationCenter() {
           </div>
 
           {unreadNotifications.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              Все уведомления прочитаны
+            <div className="mt-4 rounded-xl border border-dashed border-border bg-muted/25 px-5 py-8 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+                <Bell className="h-5 w-5" />
+              </div>
+              <p className="mt-3 text-sm font-semibold text-foreground">Все уведомления прочитаны</p>
+              <p className="mt-1 text-sm text-muted-foreground">Новые события появятся здесь, когда потребуют внимания.</p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 pt-4">
               {unreadNotifications.map(notification => {
                 const Icon = getIcon(notification);
                 return (
                   <div
                     key={notification.id}
-                    className={cn('rounded-xl border p-4', priorityStyles[notification.priority])}
+                    className={cn('rounded-xl border p-3 transition hover:border-primary/35 hover:bg-card/85 sm:p-4', priorityStyles[notification.priority])}
                   >
                     <div className="flex items-start gap-3">
-                      <div className="mt-0.5 rounded-lg bg-white/90 p-2 dark:bg-gray-900/60">
-                        <Icon className="h-4 w-4 text-gray-700 dark:text-gray-200" />
+                      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card/85 text-foreground shadow-sm">
+                        <Icon className="h-4 w-4" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className={cn('h-2.5 w-2.5 rounded-full', priorityDotStyles[notification.priority])} />
-                          <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className={cn('h-2.5 w-2.5 rounded-full shadow-[0_0_0_4px_color-mix(in_srgb,currentColor_12%,transparent)]', priorityDotStyles[notification.priority])} />
+                          <span className={cn('rounded-full border px-2 py-0.5 font-semibold uppercase tracking-wide', priorityChipStyles[notification.priority])}>
                             {notification.category}
                           </span>
                         </div>
-                        <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+                        <p className="mt-2 break-words text-sm font-semibold leading-5 text-foreground">
                           {notification.title}
                         </p>
                         {notification.entity && (
-                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          <p className="mt-1 break-words text-xs text-muted-foreground">
                             {notification.entity}
                           </p>
                         )}
-                        <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">
+                        <p className="mt-2 break-words text-sm leading-6 text-muted-foreground">
                           {notification.detail}
                         </p>
-                        <div className="mt-3 flex items-center justify-between gap-3">
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                        <div className="mt-3 flex flex-col gap-2 border-t border-border/70 pt-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                          <span className="text-xs font-medium text-muted-foreground">
                             {notification.date ? formatDate(notification.date) : 'Требует внимания'}
                           </span>
                           <Link
                             to={notification.link}
                             onClick={() => setOpen(false)}
-                            className="text-sm font-medium text-[--color-primary] hover:underline"
+                            className="inline-flex min-h-9 max-w-full items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary/10 px-3 text-sm font-semibold text-primary transition hover:border-primary/35 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           >
-                            {notification.linkLabel}
+                            <span className="break-words text-left">{notification.linkLabel}</span>
+                            <ArrowRight className="h-4 w-4 shrink-0" />
                           </Link>
                         </div>
                       </div>

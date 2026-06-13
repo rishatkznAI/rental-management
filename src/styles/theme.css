@@ -32,14 +32,14 @@
   --chart-4: #f59e0b;
   --chart-5: #fb7185;
   --radius: 1rem;
-  --sidebar: #0c120f;
-  --sidebar-foreground: #eef6ea;
-  --sidebar-primary: #b7f23a;
+  --sidebar: #f7faf4;
+  --sidebar-foreground: #172117;
+  --sidebar-primary: #6fb318;
   --sidebar-primary-foreground: #071006;
   --sidebar-accent: rgba(130, 201, 30, 0.12);
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: rgba(186, 255, 116, 0.12);
-  --sidebar-ring: rgba(183, 242, 58, 0.45);
+  --sidebar-accent-foreground: #172117;
+  --sidebar-border: rgba(71, 85, 70, 0.16);
+  --sidebar-ring: rgba(130, 201, 30, 0.38);
   --rc-app-bg: #f3f6f1;
   --rc-graphite-950: #060807;
   --rc-graphite-900: #0b0f0d;
@@ -363,11 +363,20 @@
     position: relative;
     min-height: calc(100vh - 3.5rem);
     overflow-x: hidden;
+    --rc-command-text: #101b14;
+    --rc-command-text-strong: #050c08;
+    --rc-command-text-muted: #435241;
+    --rc-command-text-subtle: #65705f;
+    --rc-command-accent: #457f0f;
+    --rc-command-panel-border: rgba(48, 70, 47, 0.22);
+    --rc-command-panel-bg: rgba(255, 255, 255, 0.88);
+    --rc-command-panel-bg-strong: rgba(255, 255, 255, 0.94);
+    --rc-command-panel-bg-soft: rgba(241, 246, 238, 0.78);
     background:
-      radial-gradient(circle at 47% 39%, rgba(132, 204, 22, 0.14), transparent 24rem),
-      radial-gradient(circle at 83% 17%, rgba(34, 211, 238, 0.1), transparent 20rem),
-      linear-gradient(180deg, #071018 0%, #050a0e 54%, #020507 100%);
-    color: #e5edf4;
+      radial-gradient(circle at 48% 36%, rgba(130, 201, 30, 0.14), transparent 25rem),
+      radial-gradient(circle at 86% 14%, rgba(14, 165, 233, 0.08), transparent 21rem),
+      linear-gradient(180deg, #f7faf4 0%, #edf3e9 56%, #e7eee4 100%);
+    color: var(--rc-command-text);
   }
 
   @media (min-width: 1024px) {
@@ -382,57 +391,58 @@
     inset: 0;
     pointer-events: none;
     background:
-      linear-gradient(rgba(132, 204, 22, 0.04) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(132, 204, 22, 0.035) 1px, transparent 1px),
-      radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.055), transparent 34rem);
+      linear-gradient(rgba(73, 94, 71, 0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(73, 94, 71, 0.045) 1px, transparent 1px),
+      radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.7), transparent 34rem);
     background-size: 36px 36px, 36px 36px, auto;
-    opacity: 0.88;
+    opacity: 0.72;
   }
 
   .rentcore-command-shell {
     position: relative;
-    border: 1px solid rgba(163, 230, 53, 0.16);
-    border-radius: 22px;
+    min-height: calc(100vh - 5.25rem);
+    border: 1px solid var(--rc-command-panel-border);
+    border-radius: 16px;
     background:
-      linear-gradient(180deg, rgba(10, 18, 27, 0.82), rgba(4, 10, 15, 0.92)),
-      rgba(5, 10, 14, 0.88);
+      linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(244, 249, 240, 0.82)),
+      rgba(255, 255, 255, 0.78);
     box-shadow:
-      0 30px 110px -82px rgba(0, 0, 0, 0.95),
-      inset 0 1px 0 rgba(255, 255, 255, 0.09),
-      inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+      0 28px 95px -76px rgba(28, 43, 28, 0.62),
+      inset 0 1px 0 rgba(255, 255, 255, 0.92),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.42);
     backdrop-filter: blur(18px);
   }
 
   .rentcore-command-header,
   .rentcore-command-panel,
   .rentcore-command-analytics {
-    border: 1px solid rgba(214, 255, 183, 0.075);
+    border: 1px solid var(--rc-command-panel-border);
     background:
-      radial-gradient(circle at 18% 0%, rgba(132, 204, 22, 0.052), transparent 30%),
-      linear-gradient(145deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.014)),
-      rgba(7, 14, 21, 0.68);
+      radial-gradient(circle at 18% 0%, rgba(130, 201, 30, 0.09), transparent 30%),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.48)),
+      var(--rc-command-panel-bg);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.058),
-      0 24px 70px -62px rgba(0, 0, 0, 0.92);
+      inset 0 1px 0 rgba(255, 255, 255, 0.72),
+      0 24px 70px -60px rgba(15, 34, 18, 0.54);
     backdrop-filter: blur(24px) saturate(128%);
   }
 
   .rentcore-command-header {
-    border-color: rgba(163, 230, 53, 0.17);
+    border-color: rgba(57, 83, 55, 0.24);
     background:
-      radial-gradient(circle at 12% 0%, rgba(163, 230, 53, 0.18), transparent 34%),
-      linear-gradient(135deg, rgba(12, 24, 32, 0.92), rgba(5, 12, 18, 0.96));
+      radial-gradient(circle at 12% 0%, rgba(130, 201, 30, 0.21), transparent 34%),
+      linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(237, 246, 231, 0.94));
   }
 
   .rentcore-command-kpi {
     position: relative;
     overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.105);
-    border-radius: 16px;
+    border: 1px solid var(--rc-command-panel-border);
+    border-radius: 12px;
     background:
-      radial-gradient(circle at 92% 0%, rgba(255, 255, 255, 0.09), transparent 34%),
-      linear-gradient(145deg, rgba(255, 255, 255, 0.092), rgba(255, 255, 255, 0.026));
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.085);
+      radial-gradient(circle at 92% 0%, rgba(130, 201, 30, 0.13), transparent 34%),
+      linear-gradient(145deg, var(--rc-command-panel-bg-strong), var(--rc-command-panel-bg-soft));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
     transition: border-color var(--motion-duration-fast) var(--motion-ease-standard), background var(--motion-duration-fast) var(--motion-ease-standard), transform var(--motion-duration-fast) var(--motion-ease-standard);
   }
 
@@ -467,29 +477,29 @@
   .rentcore-command-signal {
     position: relative;
     overflow: hidden;
-    border: 1px solid rgba(214, 255, 183, 0.062);
-    border-radius: 15px;
+    border: 1px solid rgba(64, 90, 61, 0.18);
+    border-radius: 12px;
     background:
-      radial-gradient(circle at 10% 0%, rgba(190, 242, 100, 0.045), transparent 38%),
-      linear-gradient(145deg, rgba(20, 34, 42, 0.34), rgba(5, 11, 17, 0.24)),
-      rgba(3, 8, 12, 0.31);
+      radial-gradient(circle at 10% 0%, rgba(130, 201, 30, 0.08), transparent 38%),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.86), rgba(242, 247, 239, 0.7)),
+      rgba(255, 255, 255, 0.64);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.042),
-      inset 0 0 24px rgba(132, 204, 22, 0.018),
-      0 14px 42px -38px rgba(0, 0, 0, 0.86);
+      inset 0 1px 0 rgba(255, 255, 255, 0.62),
+      inset 0 0 24px rgba(132, 204, 22, 0.026),
+      0 14px 42px -38px rgba(20, 34, 20, 0.42);
     backdrop-filter: blur(22px) saturate(136%);
     transition: border-color var(--motion-duration-fast) var(--motion-ease-standard), background-color var(--motion-duration-fast) var(--motion-ease-standard), transform var(--motion-duration-fast) var(--motion-ease-standard), box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
   }
 
   .rentcore-command-card {
-    min-height: 76px;
+    min-height: 70px;
   }
 
   .rentcore-health-orb {
     background:
       radial-gradient(circle at 48% 46%, rgba(236, 252, 203, 0.24) 0 2%, transparent 9%),
-      radial-gradient(circle at center, rgba(4, 12, 17, 0.99) 0 42%, transparent 43%),
-      conic-gradient(from -90deg, #bef264 0deg var(--health-lime-angle), var(--health-warning-color, #facc15) var(--health-lime-angle) var(--health-angle), rgba(71, 85, 105, 0.18) var(--health-angle) 360deg);
+      radial-gradient(circle at center, rgba(248, 252, 245, 0.98) 0 42%, transparent 43%),
+      conic-gradient(from -90deg, #82c91e 0deg var(--health-lime-angle), var(--health-warning-color, #facc15) var(--health-lime-angle) var(--health-angle), rgba(100, 116, 139, 0.18) var(--health-angle) 360deg);
     box-shadow:
       0 0 64px rgba(132, 204, 22, 0.19),
       0 0 0 1px rgba(190, 242, 100, 0.2),
@@ -526,8 +536,8 @@
 
   .rentcore-health-core {
     background:
-      radial-gradient(circle at 50% 0%, rgba(190, 242, 100, 0.09), transparent 46%),
-      radial-gradient(circle at center, rgba(7, 17, 22, 0.9), rgba(2, 7, 11, 0.98) 68%);
+      radial-gradient(circle at 50% 0%, rgba(130, 201, 30, 0.12), transparent 46%),
+      radial-gradient(circle at center, rgba(255, 255, 255, 0.96), rgba(239, 246, 235, 0.98) 68%);
     box-shadow:
       inset 0 0 28px rgba(190, 242, 100, 0.08),
       inset 0 0 54px rgba(34, 211, 238, 0.035),
@@ -536,14 +546,237 @@
   }
 
   .rentcore-command-analytics {
-    border-radius: 18px;
-    min-height: 160px;
+    border-radius: 14px;
+    min-height: 172px;
     background:
-      linear-gradient(rgba(163, 230, 53, 0.026) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(163, 230, 53, 0.02) 1px, transparent 1px),
-      radial-gradient(circle at 14% 0%, rgba(34, 211, 238, 0.03), transparent 36%),
-      linear-gradient(145deg, rgba(12, 24, 31, 0.5), rgba(3, 8, 12, 0.66));
+      linear-gradient(rgba(73, 94, 71, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(73, 94, 71, 0.028) 1px, transparent 1px),
+      radial-gradient(circle at 14% 0%, rgba(14, 165, 233, 0.035), transparent 36%),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(241, 246, 238, 0.72));
     background-size: 28px 28px, 28px 28px, auto;
+  }
+
+  .rentcore-command-screen .text-white {
+    color: var(--rc-command-text-strong) !important;
+  }
+
+  .rentcore-command-screen .text-slate-100,
+  .rentcore-command-screen .text-lime-100 {
+    color: color-mix(in srgb, var(--rc-command-text) 78%, var(--rc-command-accent)) !important;
+  }
+
+  .rentcore-command-screen .text-slate-300,
+  .rentcore-command-screen .text-slate-400,
+  .rentcore-command-screen .text-slate-500 {
+    color: var(--rc-command-text-muted) !important;
+  }
+
+  .rentcore-command-screen .text-lime-200,
+  .rentcore-command-screen .text-lime-300 {
+    color: var(--rc-command-accent) !important;
+  }
+
+  .rentcore-command-screen .text-amber-100,
+  .rentcore-command-screen .text-amber-200 {
+    color: #8a4f00 !important;
+  }
+
+  .rentcore-command-screen .text-red-200 {
+    color: #b4232d !important;
+  }
+
+  .rentcore-command-screen .text-cyan-200 {
+    color: #08728a !important;
+  }
+
+  .rentcore-command-screen .text-violet-200 {
+    color: #6b3db8 !important;
+  }
+
+  .rentcore-command-screen .rentcore-command-signal {
+    border-color: rgba(52, 71, 50, 0.22);
+    background:
+      radial-gradient(circle at 8% 0%, rgba(130, 201, 30, 0.1), transparent 38%),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(238, 245, 234, 0.78));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.78),
+      0 12px 34px -30px rgba(15, 34, 18, 0.5);
+  }
+
+  .rentcore-command-screen .rentcore-command-card {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.72),
+      0 12px 34px -32px rgba(15, 34, 18, 0.44);
+  }
+
+  .rentcore-command-screen .bg-black\/20,
+  .rentcore-command-screen .bg-black\/25,
+  .rentcore-command-screen .bg-black\/35,
+  .rentcore-command-screen .bg-slate-950\/60 {
+    background-color: rgba(255, 255, 255, 0.64) !important;
+  }
+
+  .dark .rentcore-command-screen {
+    --rc-command-text: #d9e4df;
+    --rc-command-text-strong: #f8fafc;
+    --rc-command-text-muted: #92a0ad;
+    --rc-command-text-subtle: #64748b;
+    --rc-command-accent: #a3e635;
+    --rc-command-panel-border: rgba(214, 255, 183, 0.075);
+    --rc-command-panel-bg: rgba(7, 14, 21, 0.68);
+    --rc-command-panel-bg-strong: rgba(10, 18, 27, 0.82);
+    --rc-command-panel-bg-soft: rgba(4, 10, 15, 0.92);
+    background:
+      radial-gradient(circle at 47% 39%, rgba(132, 204, 22, 0.12), transparent 24rem),
+      radial-gradient(circle at 83% 17%, rgba(34, 211, 238, 0.08), transparent 20rem),
+      linear-gradient(180deg, #06111a 0%, #050a0e 54%, #020507 100%);
+    color: #e5edf4;
+  }
+
+  .dark .rentcore-command-screen::before {
+    background:
+      linear-gradient(rgba(132, 204, 22, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(132, 204, 22, 0.03) 1px, transparent 1px),
+      radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.046), transparent 34rem);
+    opacity: 0.78;
+  }
+
+  .dark .rentcore-command-shell {
+    border-color: rgba(163, 230, 53, 0.15);
+    background:
+      linear-gradient(180deg, rgba(10, 18, 27, 0.82), rgba(4, 10, 15, 0.92)),
+      rgba(5, 10, 14, 0.88);
+    box-shadow:
+      0 30px 110px -82px rgba(0, 0, 0, 0.95),
+      inset 0 1px 0 rgba(255, 255, 255, 0.09),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+  }
+
+  .dark .rentcore-command-header,
+  .dark .rentcore-command-panel,
+  .dark .rentcore-command-analytics {
+    border-color: rgba(214, 255, 183, 0.075);
+    background:
+      radial-gradient(circle at 18% 0%, rgba(132, 204, 22, 0.045), transparent 30%),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.044), rgba(255, 255, 255, 0.012)),
+      rgba(7, 14, 21, 0.68);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.052),
+      0 24px 70px -62px rgba(0, 0, 0, 0.92);
+  }
+
+  .dark .rentcore-command-header {
+    border-color: rgba(163, 230, 53, 0.15);
+    background:
+      radial-gradient(circle at 12% 0%, rgba(163, 230, 53, 0.13), transparent 34%),
+      linear-gradient(135deg, rgba(12, 24, 32, 0.9), rgba(5, 12, 18, 0.96));
+  }
+
+  .dark .rentcore-command-kpi {
+    border-color: rgba(255, 255, 255, 0.105);
+    background:
+      radial-gradient(circle at 92% 0%, rgba(255, 255, 255, 0.07), transparent 34%),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.078), rgba(255, 255, 255, 0.022));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.075);
+  }
+
+  .dark .rentcore-command-card,
+  .dark .rentcore-command-signal {
+    border-color: rgba(214, 255, 183, 0.062);
+    background:
+      radial-gradient(circle at 10% 0%, rgba(190, 242, 100, 0.038), transparent 38%),
+      linear-gradient(145deg, rgba(20, 34, 42, 0.32), rgba(5, 11, 17, 0.24)),
+      rgba(3, 8, 12, 0.31);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.038),
+      inset 0 0 24px rgba(132, 204, 22, 0.014),
+      0 14px 42px -38px rgba(0, 0, 0, 0.86);
+  }
+
+  .dark .rentcore-health-orb {
+    background:
+      radial-gradient(circle at 48% 46%, rgba(236, 252, 203, 0.18) 0 2%, transparent 9%),
+      radial-gradient(circle at center, rgba(4, 12, 17, 0.99) 0 42%, transparent 43%),
+      conic-gradient(from -90deg, #a3e635 0deg var(--health-lime-angle), var(--health-warning-color, #facc15) var(--health-lime-angle) var(--health-angle), rgba(71, 85, 105, 0.18) var(--health-angle) 360deg);
+  }
+
+  .dark .rentcore-health-core {
+    background:
+      radial-gradient(circle at 50% 0%, rgba(190, 242, 100, 0.075), transparent 46%),
+      radial-gradient(circle at center, rgba(7, 17, 22, 0.9), rgba(2, 7, 11, 0.98) 68%);
+  }
+
+  .dark .rentcore-command-analytics {
+    background:
+      linear-gradient(rgba(163, 230, 53, 0.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(163, 230, 53, 0.018) 1px, transparent 1px),
+      radial-gradient(circle at 14% 0%, rgba(34, 211, 238, 0.026), transparent 36%),
+      linear-gradient(145deg, rgba(12, 24, 31, 0.5), rgba(3, 8, 12, 0.66));
+  }
+
+  .dark .rentcore-command-screen .text-white,
+  .dark .rentcore-command-screen .text-slate-100 {
+    color: #f8fafc !important;
+  }
+
+  .dark .rentcore-command-screen .text-slate-300 {
+    color: #cbd5e1 !important;
+  }
+
+  .dark .rentcore-command-screen .text-slate-400 {
+    color: #94a3b8 !important;
+  }
+
+  .dark .rentcore-command-screen .text-slate-500 {
+    color: #64748b !important;
+  }
+
+  .dark .rentcore-command-screen .text-lime-100 {
+    color: #ecfccb !important;
+  }
+
+  .dark .rentcore-command-screen .text-lime-200 {
+    color: #d9f99d !important;
+  }
+
+  .dark .rentcore-command-screen .text-lime-300 {
+    color: #bef264 !important;
+  }
+
+  .dark .rentcore-command-screen .text-amber-100 {
+    color: #fef3c7 !important;
+  }
+
+  .dark .rentcore-command-screen .text-amber-200 {
+    color: #fde68a !important;
+  }
+
+  .dark .rentcore-command-screen .text-red-200 {
+    color: #fecaca !important;
+  }
+
+  .dark .rentcore-command-screen .text-cyan-200 {
+    color: #a5f3fc !important;
+  }
+
+  .dark .rentcore-command-screen .text-violet-200 {
+    color: #ddd6fe !important;
+  }
+
+  .dark .rentcore-command-screen .bg-black\/20 {
+    background-color: rgba(0, 0, 0, 0.2) !important;
+  }
+
+  .dark .rentcore-command-screen .bg-black\/25 {
+    background-color: rgba(0, 0, 0, 0.25) !important;
+  }
+
+  .dark .rentcore-command-screen .bg-black\/35 {
+    background-color: rgba(0, 0, 0, 0.35) !important;
+  }
+
+  .dark .rentcore-command-screen .bg-slate-950\/60 {
+    background-color: rgba(2, 6, 23, 0.6) !important;
   }
 
   .rentcore-command-connector {

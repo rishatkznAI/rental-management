@@ -418,7 +418,7 @@ export function Sidebar({
     <aside
       className={cn(
         'fixed left-0 top-0 z-40 h-screen w-60',
-        'border-r border-lime-300/10 bg-[linear-gradient(180deg,#030604_0%,#07100b_54%,#0b130d_100%)] text-sidebar-foreground shadow-[0_36px_70px_-42px_rgba(0,0,0,0.92)] backdrop-blur-xl dark:bg-sidebar',
+        'border-r border-sidebar-border bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(244,248,241,0.96)_54%,rgba(237,244,232,0.98)_100%)] text-sidebar-foreground shadow-[0_36px_70px_-50px_rgba(38,57,38,0.42)] backdrop-blur-xl dark:border-lime-300/10 dark:bg-[linear-gradient(180deg,#030604_0%,#07100b_54%,#0b130d_100%)] dark:shadow-[0_36px_70px_-42px_rgba(0,0,0,0.92)]',
         'transition-[transform,width] duration-300 ease-in-out',
         desktopCollapsed ? 'sm:w-20' : 'sm:w-60',
         isOpen ? 'translate-x-0' : '-translate-x-full',
@@ -428,7 +428,7 @@ export function Sidebar({
       <div className="flex h-full flex-col">
         <div className={cn(
           'flex items-center gap-3 border-b px-3.5 py-4',
-          'border-lime-300/10',
+          'border-sidebar-border dark:border-lime-300/10',
           desktopCollapsed && 'sm:justify-center sm:px-3',
         )}>
           <LiftLogo className="h-9 w-9" />
@@ -439,7 +439,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={onToggleDesktopCollapse}
-              className="hidden rounded-lg p-2 text-white/68 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground sm:inline-flex"
+              className="hidden rounded-lg p-2 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground sm:inline-flex"
               aria-label={desktopCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
               title={desktopCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
             >
@@ -447,7 +447,7 @@ export function Sidebar({
             </button>
             <button
               onClick={onClose}
-              className="rounded-lg p-2 text-white/68 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground sm:hidden"
+              className="rounded-lg p-2 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground sm:hidden"
               aria-label="Закрыть меню"
             >
               <X className="h-4 w-4" />
@@ -460,7 +460,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={onToggleDesktopCollapse}
-              className="hidden h-10 w-full items-center justify-center rounded-xl border border-sidebar-border bg-white/8 text-white/60 transition hover:border-primary/40 hover:bg-primary/10 hover:text-sidebar-foreground sm:flex"
+              className="hidden h-10 w-full items-center justify-center rounded-xl border border-sidebar-border bg-sidebar-accent/70 text-sidebar-foreground/60 transition hover:border-primary/40 hover:bg-primary/10 hover:text-sidebar-foreground sm:flex"
               aria-label="Поиск"
               title="Поиск"
             >
@@ -468,7 +468,7 @@ export function Sidebar({
             </button>
           ) : null}
           <div className={cn('relative', desktopCollapsed && 'sm:hidden')}>
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/55" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sidebar-foreground/50" />
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -476,7 +476,7 @@ export function Sidebar({
                 if (normalizedSearch.length > 0) setIsSearchOpen(true);
               }}
               placeholder="Поиск: техника, клиенты, аренды, сервис"
-              className="h-9 rounded-xl border-lime-300/10 bg-white/[0.055] pl-9 pr-3 text-[13px] text-sidebar-foreground placeholder:text-white/38 focus-visible:border-primary/60 focus-visible:ring-primary/25"
+              className="h-9 rounded-xl border-sidebar-border bg-white/75 pl-9 pr-3 text-[13px] text-sidebar-foreground placeholder:text-sidebar-foreground/38 focus-visible:border-primary/60 focus-visible:ring-primary/25 dark:border-lime-300/10 dark:bg-white/[0.055]"
             />
           </div>
 
@@ -490,7 +490,7 @@ export function Sidebar({
                 <div className="max-h-96 overflow-y-auto py-2">
                   {groupedResults.map(({ group, items, hiddenCount }) => (
                     <div key={group}>
-                      <div className="flex items-center justify-between px-4 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">
+                      <div className="flex items-center justify-between px-4 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/45">
                         <span>{group}</span>
                         {hiddenCount > 0 ? <span>ещё {hiddenCount}</span> : null}
                       </div>
@@ -502,16 +502,16 @@ export function Sidebar({
                               key={result.id}
                               type="button"
                               onClick={() => handleSearchNavigate(result.href)}
-                              className="flex w-full items-start gap-3 rounded-xl px-2 py-2 text-left hover:bg-white/8"
+                              className="flex w-full items-start gap-3 rounded-xl px-2 py-2 text-left hover:bg-sidebar-accent"
                             >
-                              <div className="mt-0.5 rounded-lg bg-white/8 p-2 text-white/60">
+                              <div className="mt-0.5 rounded-lg bg-sidebar-accent p-2 text-sidebar-foreground/60">
                                 <Icon className="h-4 w-4" />
                               </div>
                               <div className="min-w-0 flex-1">
                                 <div className="truncate text-sm font-medium text-sidebar-foreground">
                                   {highlightMatch(result.title, normalizedSearch)}
                                 </div>
-                                <div className="line-clamp-2 text-xs text-white/55">
+                                <div className="line-clamp-2 text-xs text-sidebar-foreground/55">
                                   {highlightMatch(result.subtitle, normalizedSearch)}
                                 </div>
                               </div>
@@ -533,7 +533,7 @@ export function Sidebar({
             <div key={group.title} className="mb-2">
               <div className={cn(
                 'px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.18em]',
-                'text-white/45',
+                'text-sidebar-foreground/45',
                 desktopCollapsed && 'sm:hidden',
               )}>
                 {group.title}
@@ -560,8 +560,8 @@ export function Sidebar({
                         'relative flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-[13px] transition-colors',
                         desktopCollapsed && 'sm:h-11 sm:justify-center sm:gap-0 sm:px-0',
                         isActive
-                          ? 'bg-lime-300/12 text-lime-100 shadow-[0_18px_34px_-24px_rgba(183,242,58,0.82),inset_0_0_0_1px_rgba(183,242,58,0.20)] before:absolute before:left-0 before:top-1/2 before:h-6 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-lime-300'
-                          : 'text-white/62 hover:bg-white/[0.06] hover:text-sidebar-foreground',
+                          ? 'bg-sidebar-accent text-sidebar-foreground shadow-[0_18px_34px_-28px_rgba(95,159,21,0.34),inset_0_0_0_1px_rgba(130,201,30,0.22)] before:absolute before:left-0 before:top-1/2 before:h-6 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-sidebar-primary dark:text-lime-100 dark:shadow-[0_18px_34px_-24px_rgba(183,242,58,0.82),inset_0_0_0_1px_rgba(183,242,58,0.20)]'
+                          : 'text-sidebar-foreground/64 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                       )}
                     >
                       <Icon className="h-4 w-4 shrink-0" />
@@ -571,7 +571,7 @@ export function Sidebar({
                           'rounded-full px-2 py-0.5 text-[10px] font-medium',
                           desktopCollapsed && 'sm:absolute sm:right-1 sm:top-1 sm:min-w-4 sm:px-1 sm:text-[9px]',
                           isActive
-                            ? 'bg-lime-300/20 text-lime-100'
+                            ? 'bg-sidebar-primary/16 text-sidebar-foreground dark:bg-lime-300/20 dark:text-lime-100'
                             : item.section === 'service'
                               ? 'bg-amber-500/14 text-amber-300'
                               : 'bg-primary/14 text-primary',
@@ -587,7 +587,7 @@ export function Sidebar({
           ))}
         </nav>
 
-        <div className={cn('border-t border-lime-300/10 px-2.5 py-3', desktopCollapsed && 'sm:px-2')}>
+        <div className={cn('border-t border-sidebar-border px-2.5 py-3 dark:border-lime-300/10', desktopCollapsed && 'sm:px-2')}>
           <button
             type="button"
             onClick={toggleTheme}
@@ -596,15 +596,15 @@ export function Sidebar({
             aria-label={themeToggleLabel}
             title={desktopCollapsed ? themeToggleLabel : undefined}
             className={cn(
-              'flex min-h-11 w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/8 px-3 py-2 text-left text-white/74 transition hover:border-primary/40 hover:bg-primary/10 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+              'flex min-h-11 w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/70 px-3 py-2 text-left text-sidebar-foreground/74 transition hover:border-primary/40 hover:bg-primary/10 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60 dark:bg-white/8',
               desktopCollapsed && 'sm:justify-center sm:px-0',
             )}
           >
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/10 text-sidebar-primary">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent text-sidebar-primary">
               <CurrentThemeIcon className="h-4 w-4" />
             </span>
             <span className={cn('min-w-0 flex-1', desktopCollapsed && 'sm:hidden')}>
-              <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">Тема</span>
+              <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/45">Тема</span>
               <span className="block truncate text-[13px] font-medium text-sidebar-foreground">{themeName}</span>
             </span>
           </button>

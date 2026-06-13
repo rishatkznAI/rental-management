@@ -2032,14 +2032,14 @@ function registerRentalRoutes(deps) {
         if (!currentEnd || !parseDateKey(currentEnd)) {
           return res.status(400).json({ ok: false, error: 'В аренде не указана текущая дата окончания.' });
         }
+        if (isClosedRentalStatus(classicRental?.status) || isClosedRentalStatus(ganttRental?.status)) {
+          return res.status(409).json({ ok: false, error: 'Нельзя продлить закрытую или отменённую аренду.' });
+        }
         if (compareDateKeys(newPlannedReturnDate, currentEnd) <= 0) {
           return res.status(400).json({ ok: false, error: 'Новая дата должна быть позже текущей даты окончания.' });
         }
         if (compareDateKeys(newPlannedReturnDate, new Date().toISOString().slice(0, 10)) < 0) {
           return res.status(400).json({ ok: false, error: 'Нельзя продлить аренду в прошлую дату.' });
-        }
-        if (isClosedRentalStatus(classicRental?.status) || isClosedRentalStatus(ganttRental?.status)) {
-          return res.status(409).json({ ok: false, error: 'Нельзя продлить закрытую или отменённую аренду.' });
         }
         if (!invoiceSentToClient) {
           return res.status(400).json({ ok: false, error: 'Подтвердите, что счёт отправлен клиенту.' });

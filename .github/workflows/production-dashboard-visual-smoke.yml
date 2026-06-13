@@ -1,0 +1,85 @@
+name: Production Dashboard Visual Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_release_commit:
+        description: Expected production commit hash
+        required: true
+        default: 238f359244fcd9ff2fd20e6682b2593b57abf576
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-dashboard-visual-smoke
+  cancel-in-progress: false
+
+jobs:
+  production-dashboard-visual-smoke:
+    name: Authenticated dashboard dark and light visual smoke
+    runs-on: ubuntu-latest
+    env:
+      PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+      PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+      PRODUCTION_ADMIN_EMAIL: ${{ secrets.PRODUCTION_ADMIN_EMAIL }}
+      PRODUCTION_ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
+      EXPECTED_RELEASE_COMMIT: ${{ inputs.expected_release_commit }}
+      CI: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Validate required smoke secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in PRODUCTION_API_URL PRODUCTION_FRONTEND_URL PRODUCTION_ADMIN_EMAIL PRODUCTION_ADMIN_PASSWORD EXPECTED_RELEASE_COMMIT; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing secret::${name} is required for production dashboard visual smoke"
+              exit 1
+            fi
+          done
+          echo "Required production smoke secrets are present."
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run production dashboard visual smoke
+        run: npx playwright test e2e/production-dashboard-visual-smoke.spec.ts --config=playwright.production.config.ts --trace=off
+
+      - name: Upload production dashboard visual screenshots
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: production-dashboard-visual-smoke-screenshots
+          path: test-results/**/production-dashboard-*.png
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: production-dashboard-visual-smoke-playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Upload Playwright results on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: production-dashboard-visual-smoke-test-results
+          path: test-results/
+          retention-days: 7

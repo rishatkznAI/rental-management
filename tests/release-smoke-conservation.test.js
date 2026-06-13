@@ -79,6 +79,12 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
   assert.match(releaseSmokeSource, /captureExecutiveCockpitScreenshots\(page, normalizedConfig\.frontendUrl, testInfo\)/);
 });
 
+test('dashboard cockpit helper preserves caller viewport for mobile artifacts', () => {
+  const helper = releaseSmokeSource.match(/async function expectExecutiveCockpitVisible[\s\S]*?\n}\n\nasync function elementRect/)?.[0] || '';
+  assert.match(releaseSmokeSource, /await page\.setViewportSize\(\{ width: 390, height: 844 \}\)/);
+  assert.doesNotMatch(helper, /setViewportSize\(\{ width: 1440, height: 900 \}\)/);
+});
+
 test('production release smoke allows backend drift only for frontend-only and deploy-tooling releases', () => {
   assert.match(releaseSmokeSource, /type ReleaseType = 'frontend-only' \| 'backend' \| 'full-stack' \| 'deploy-tooling' \| 'frontend-deploy-tooling'/);
   assert.match(releaseSmokeSource, /releaseType\?: ReleaseType \| string/);

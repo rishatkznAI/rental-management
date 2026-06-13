@@ -296,7 +296,6 @@ async function expectAdminLoginSucceeded(
 }
 
 async function expectExecutiveCockpitVisible(page: Page) {
-  await page.setViewportSize({ width: 1440, height: 900 });
   const cockpit = page.getByTestId('dashboard-executive-cockpit');
   const keySignals = page.getByTestId('dashboard-key-signals-command').or(page.getByTestId('dashboard-key-signals')).first();
   const monthDynamics = page.getByTestId('dashboard-month-dynamics-command').or(page.getByTestId('dashboard-month-dynamics')).first();

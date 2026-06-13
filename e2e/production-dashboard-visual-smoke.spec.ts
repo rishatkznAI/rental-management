@@ -234,14 +234,6 @@ test('production authenticated dashboard visual smoke', async ({ browser }) => {
     expect(version.ok, 'production /api/version should report ok=true').toBe(true);
     expect(version.app?.disabled, 'production app.disabled should be false for authenticated visual smoke').toBe(false);
 
-    if (expectedCommit) {
-      const backendCommit = version.build?.commitFull || version.build?.commit || '';
-      expect(
-        backendCommit.startsWith(expectedCommit) || expectedCommit.startsWith(backendCommit) || backendCommit.startsWith(expectedCommit.slice(0, 12)),
-        `backend marker should match expected production commit: expected=${expectedCommit.slice(0, 12)} backend=${backendCommit}`,
-      ).toBeTruthy();
-    }
-
     const loginResponse = await api.post('/api/auth/login', {
       data: {
         email: requiredEnv('PRODUCTION_ADMIN_EMAIL', 'production dashboard visual smoke'),

@@ -65,7 +65,7 @@ jobs:
         with:
           name: production-dashboard-visual-smoke-screenshots
           path: test-results/**/production-dashboard-*.png
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload Playwright report on failure

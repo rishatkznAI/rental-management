@@ -31,7 +31,6 @@ import {
   CartesianGrid,
   Cell,
   ComposedChart,
-  LabelList,
   Line,
   Pie,
   PieChart,
@@ -924,18 +923,22 @@ function MiniSparkline({
   className?: string;
 }) {
   const width = 220;
-  const height = 56;
-  const points = miniChartPoints(data, width, height, 6);
+  const height = 52;
+  const points = miniChartPoints(data, width, height, 7);
   const path = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
 
   return (
     <svg aria-hidden="true" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className={`h-10 w-full ${className}`}>
-      <path d="M 0 48 H 220" fill="none" stroke="currentColor" strokeOpacity="0.16" strokeWidth="1.4" />
+      <g fill="none" stroke="currentColor" strokeOpacity="0.12" strokeWidth="1">
+        <path d="M 0 14 H 220" />
+        <path d="M 0 32 H 220" />
+        <path d="M 0 48 H 220" />
+      </g>
       {path ? (
         <>
-          <path d={path} fill="none" stroke={stroke} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" opacity="0.96" />
+          <path d={path} fill="none" stroke={stroke} strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.96" />
           {points.map((point, index) => index === points.length - 1 ? (
-            <circle key={`${point.x}-${point.y}`} cx={point.x} cy={point.y} r="4.8" fill={stroke} />
+            <circle key={`${point.x}-${point.y}`} cx={point.x} cy={point.y} r="3.8" fill={stroke} />
           ) : null)}
         </>
       ) : null}
@@ -3505,10 +3508,10 @@ export default function Dashboard() {
     href: string;
     metrics: Array<{ label: string; value: string }>;
   }>;
-  const commandCenterLeftDirections = ['money', 'documents', 'returns']
+  const commandCenterLeftDirections = ['money', 'fleet', 'service']
     .map(id => commandCenterDirections.find(item => item.id === id))
     .filter((item): item is (typeof commandCenterDirections)[number] => Boolean(item));
-  const commandCenterRightDirections = ['fleet', 'service', 'delivery']
+  const commandCenterRightDirections = ['delivery', 'documents', 'returns']
     .map(id => commandCenterDirections.find(item => item.id === id))
     .filter((item): item is (typeof commandCenterDirections)[number] => Boolean(item));
   const commandCenterTasks = todayWorkRows.slice(0, 5);
@@ -3726,8 +3729,8 @@ export default function Dashboard() {
       <div className="relative h-full px-1.5 py-1.5 sm:px-2 sm:py-2 lg:px-2.5">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-lime-300/70 to-transparent" />
 
-        <div className="rentcore-command-shell mx-0 flex h-full max-w-none flex-col gap-2.5 p-2 sm:p-2.5 lg:gap-3 min-[1360px]:min-h-[calc(100dvh-4.75rem)]">
-          <header className="rentcore-command-header grid min-h-[76px] gap-3 rounded-[14px] px-4 py-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div className="rentcore-command-shell mx-0 flex h-full max-w-none flex-col gap-2 p-2 sm:p-3 min-[1360px]:min-h-[1124px]">
+          <header className="rentcore-command-header grid min-h-[98px] gap-3 rounded-[14px] px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-lime-300/75">
                 <span>{APP_BRAND_NAME}</span>
@@ -3736,8 +3739,8 @@ export default function Dashboard() {
                 <span className="h-1 w-1 rounded-full bg-lime-300/70" />
                 <span>Операционный контроль бизнеса</span>
               </div>
-              <div className="mt-1.5 flex flex-wrap items-end gap-x-4 gap-y-1">
-                <h1 className="app-shell-title text-[26px] font-extrabold leading-none tracking-normal text-white lg:text-[29px]">
+              <div className="mt-2 flex flex-wrap items-end gap-x-4 gap-y-1">
+                <h1 className="app-shell-title text-[28px] font-extrabold leading-none tracking-normal text-white lg:text-[30px]">
                   Операционный центр
                 </h1>
                 <p className="pb-0.5 text-sm font-medium text-slate-400">
@@ -3746,15 +3749,13 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-              <span className="rounded-full border border-lime-300/20 bg-lime-300/10 px-3 py-1 text-xs font-semibold text-lime-200">
+              <span className="rounded-full border border-lime-300/16 bg-lime-300/8 px-3 py-1 text-xs font-semibold text-lime-200">
                 Обновлено {dashboardUpdatedLabel}
               </span>
               <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${
                 companyHealthTone === 'danger'
                   ? 'border-red-300/35 bg-red-400/12 text-red-200'
-                  : companyHealthTone === 'warning'
-                    ? 'border-amber-300/35 bg-amber-400/12 text-amber-100'
-                    : 'border-lime-300/35 bg-lime-300/12 text-lime-100'
+                  : 'border-lime-300/22 bg-lime-300/8 text-lime-100'
               }`}>
                 Здоровье {companyHealthDisplayScore}/100
               </span>
@@ -3770,23 +3771,21 @@ export default function Dashboard() {
               const trend = card.id === 'executive-overdue-receivables' ? overdueReceivablesTrendData : utilizationTrendData;
               const stroke = card.tone === 'danger' ? '#fb7185' : card.tone === 'warning' ? '#fbbf24' : card.tone === 'info' ? '#38bdf8' : '#a3e635';
               const content = (
-                <div className="relative z-10 flex h-full min-h-[126px] flex-col justify-between gap-3">
-                  <div className="flex items-start justify-between gap-3">
+                <div className="relative z-10 flex h-full min-h-[58px] flex-col justify-between">
+                  <div className="flex items-start justify-between gap-2.5">
                     <div className="min-w-0">
-                      <p className="line-clamp-2 min-h-[27px] text-[11px] font-semibold uppercase leading-tight tracking-[0.12em] text-slate-400">{card.label}</p>
-                      <p className="mt-2 break-words text-[27px] font-extrabold leading-none text-white min-[1500px]:text-[30px]">{card.value}</p>
+                      <p className="line-clamp-1 min-h-[13px] text-[10.5px] font-bold uppercase leading-none tracking-[0.08em] text-slate-400">{card.label}</p>
+                      <p className="mt-1.5 break-words text-[24px] font-extrabold leading-none text-white min-[1500px]:text-[26px]">{card.value}</p>
                     </div>
-                    <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-white/10 bg-slate-950/60 ${tone.accent} shadow-[0_0_26px_rgba(132,204,22,0.12)]`}>
-                      <Icon className="h-5 w-5" />
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-slate-950/60 ${tone.accent} shadow-[0_0_18px_rgba(132,204,22,0.1)]`}>
+                      <Icon className="h-4 w-4" />
                     </span>
                   </div>
-                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(108px,0.42fr)] items-end gap-3">
-                    <p className={`min-w-0 text-[13px] font-semibold leading-snug ${tone.accent}`}>{card.hint}</p>
-                    <MiniSparkline data={trend} stroke={stroke} className="h-11" />
-                  </div>
+                  <p className={`mt-1 min-w-0 truncate pr-[112px] text-[10.5px] font-bold leading-none ${tone.accent}`}>{card.hint}</p>
+                  <MiniSparkline data={trend} stroke={stroke} className="absolute bottom-0 right-0 h-7 !w-[106px]" />
                 </div>
               );
-              const className = "rentcore-command-kpi group p-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/35";
+              const className = "rentcore-command-kpi group p-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/35";
               if (card.href) return <Link key={card.id} to={card.href} data-testid={testId} className={className}>{content}</Link>;
               if (card.onClick) return <button key={card.id} type="button" onClick={card.onClick} data-testid={testId} className={className}>{content}</button>;
               return <div key={card.id} data-testid={testId} className={className}>{content}</div>;
@@ -3794,14 +3793,14 @@ export default function Dashboard() {
             </div>
           </section>
 
-          <section className="rentcore-command-board grid min-h-[690px] flex-1 gap-3 overflow-hidden rounded-[16px] p-2.5 xl:grid-cols-12 xl:grid-rows-[minmax(390px,1fr)_minmax(220px,0.5fr)] min-[1600px]:grid-rows-[minmax(420px,1fr)_minmax(238px,0.52fr)]" data-testid="dashboard-command-board">
-            <div className="rentcore-command-panel relative min-h-[440px] overflow-hidden rounded-[14px] p-4 xl:col-span-8 xl:min-h-[390px] min-[1600px]:min-h-[420px]" data-testid="dashboard-operational-summary">
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(132,204,22,0.13),transparent_35%),linear-gradient(rgba(132,204,22,0.027)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.024)_1px,transparent_1px)] bg-[size:auto,46px_46px,46px_46px]" />
+          <section className="rentcore-command-board grid min-h-0 flex-none gap-2.5 overflow-visible rounded-[16px] p-2 xl:flex-1 xl:grid-cols-12 xl:grid-rows-[minmax(520px,1fr)_minmax(250px,0.48fr)] xl:overflow-hidden min-[1600px]:grid-rows-[minmax(540px,1fr)_minmax(258px,0.48fr)]" data-testid="dashboard-command-board">
+            <div className="rentcore-command-panel relative min-h-[430px] overflow-hidden rounded-[14px] p-4 xl:col-span-8 xl:min-h-0" data-testid="dashboard-operational-summary">
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(132,204,22,0.135),transparent_37%),linear-gradient(rgba(132,204,22,0.022)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.019)_1px,transparent_1px)] bg-[size:auto,48px_48px,48px_48px]" />
               <svg className="pointer-events-none absolute inset-0 hidden h-full w-full xl:block" viewBox="0 0 900 420" preserveAspectRatio="none" aria-hidden="true">
                 <defs>
                   <linearGradient id="commandLineGlow" x1="0" x2="1">
                     <stop offset="0%" stopColor="#a3e635" stopOpacity="0.04" />
-                    <stop offset="48%" stopColor="#bef264" stopOpacity="0.62" />
+                    <stop offset="48%" stopColor="#bef264" stopOpacity="0.34" />
                     <stop offset="100%" stopColor="#22d3ee" stopOpacity="0.08" />
                   </linearGradient>
                 </defs>
@@ -3819,16 +3818,16 @@ export default function Dashboard() {
                       fill="none"
                       stroke="url(#commandLineGlow)"
                       strokeLinecap="round"
-                      strokeWidth="2"
+                      strokeWidth="1.45"
                     />
-                    <circle className="rentcore-command-node" cx={line.x2} cy={line.y2} r="4" fill="#bef264" opacity="0.86" />
+                    <circle className="rentcore-command-node" cx={line.x2} cy={line.y2} r="3.2" fill="#bef264" opacity="0.46" />
                   </g>
                 ))}
-                <circle className="rentcore-command-node" cx="450" cy="210" r="4.6" fill="#bef264" opacity="0.7" />
+                <circle className="rentcore-command-node" cx="450" cy="210" r="3.4" fill="#bef264" opacity="0.42" />
               </svg>
 
               <div className="relative flex h-full flex-col">
-                <div className="mb-2 flex items-center justify-between gap-3 px-1">
+                <div className="mb-3 flex items-center justify-between gap-3 px-1">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">Операционный контроль</p>
                     <h2 className="app-shell-title mt-0.5 text-xl font-extrabold text-white">Пульт состояния компании</h2>
@@ -3838,23 +3837,22 @@ export default function Dashboard() {
                   </span>
                 </div>
 
-                <div className="grid flex-1 gap-3 xl:grid-cols-[minmax(230px,0.95fr)_minmax(260px,0.82fr)_minmax(230px,0.95fr)] xl:items-center 2xl:grid-cols-[minmax(270px,0.95fr)_minmax(316px,0.82fr)_minmax(270px,0.95fr)]">
+                <div className="grid flex-1 gap-4 xl:grid-cols-[minmax(226px,0.97fr)_minmax(244px,0.8fr)_minmax(226px,0.97fr)] xl:items-center 2xl:grid-cols-[minmax(270px,0.98fr)_minmax(286px,0.8fr)_minmax(270px,0.98fr)]">
                   <div className="grid gap-3">
                     {commandCenterLeftDirections.map(item => {
                       const Icon = item.icon;
                       const tone = toneStyles[item.tone];
                       return (
-                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-4 py-3">
-                          <div className="flex items-start gap-3">
-                            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-lime-200/10 bg-black/25 ${tone.accent}`}>
-                              <Icon className="h-4 w-4" />
+                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-lime-300/25 bg-black/20 ring-1 ring-inset ring-lime-300/10 ${tone.accent}`}>
+                              <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
                             </span>
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[13px] font-extrabold uppercase tracking-[0.08em] text-lime-200">{item.title}</span>
-                              <span className="mt-1 block truncate text-[11px] font-medium text-slate-400">Операционный контур</span>
+                              <span className="block truncate text-[11px] font-extrabold uppercase tracking-[0.06em] text-lime-200">{item.title}</span>
                             </span>
                           </div>
-                          <div className="mt-3 grid gap-1.5 text-[11px]">
+                          <div className="mt-1.5 grid gap-0.5 text-[9.5px] leading-none">
                             {item.metrics.map(metric => (
                               <span key={metric.label} className="flex min-w-0 items-center justify-between gap-3">
                                 <span className="min-w-0 truncate text-slate-500">{metric.label}</span>
@@ -3867,9 +3865,9 @@ export default function Dashboard() {
                     })}
                   </div>
 
-                  <div className="flex min-h-[286px] flex-col items-center justify-center text-center 2xl:min-h-[310px]" data-testid="dashboard-company-health">
+                  <div className="flex min-h-[278px] flex-col items-center justify-center text-center 2xl:min-h-[296px]" data-testid="dashboard-company-health">
                     <div
-                      className="rentcore-health-orb relative flex h-[248px] w-[248px] items-center justify-center rounded-full 2xl:h-[272px] 2xl:w-[272px]"
+                      className="rentcore-health-orb relative flex h-[192px] w-[192px] translate-x-4 translate-y-3.5 items-center justify-center rounded-full 2xl:h-[206px] 2xl:w-[206px]"
                       style={{
                         '--health-angle': `${companyHealthDisplayScore * 3.6}deg`,
                         '--health-lime-angle': `${Math.max(companyHealthDisplayScore * 3.6 - (companyHealthTone === 'warning' ? 16 : 8), 0)}deg`,
@@ -3882,10 +3880,10 @@ export default function Dashboard() {
                       <div className="absolute inset-12 rounded-full border border-lime-100/10" />
                       <div className="absolute -inset-4 rounded-full border border-lime-300/10" />
                       <div className="absolute -inset-9 rounded-full bg-lime-300/[0.08] blur-3xl" />
-                      <div className="rentcore-health-core relative z-10 flex h-[154px] w-[154px] flex-col items-center justify-center rounded-full border border-lime-100/10 2xl:h-[168px] 2xl:w-[168px]">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Здоровье компании</p>
-                        <p className="mt-2 text-[50px] font-extrabold leading-none text-white 2xl:text-[54px]">{companyHealthDisplayScore}<span className="text-2xl text-slate-500">/100</span></p>
-                        <p className={`mt-2 text-sm font-extrabold uppercase ${toneStyles[companyHealthTone].accent}`}>{companyHealthLabel}</p>
+                      <div className="rentcore-health-core relative z-10 flex h-[100px] w-[100px] flex-col items-center justify-center rounded-full border border-lime-100/10 2xl:h-[108px] 2xl:w-[108px]">
+                        <p className="text-[8.5px] font-semibold uppercase tracking-[0.15em] text-slate-400">Здоровье компании</p>
+                        <p className="mt-1 text-[32px] font-extrabold leading-none text-white 2xl:text-[35px]">{companyHealthDisplayScore}<span className="text-[13px] text-slate-500">/100</span></p>
+                        <p className={`mt-1 text-[10.5px] font-extrabold uppercase ${toneStyles[companyHealthTone].accent}`}>{companyHealthLabel}</p>
                       </div>
                     </div>
                     <div className="mt-4 hidden w-full max-w-[330px]">
@@ -3898,17 +3896,16 @@ export default function Dashboard() {
                       const Icon = item.icon;
                       const tone = toneStyles[item.tone];
                       return (
-                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-4 py-3">
-                          <div className="flex items-start gap-3">
-                            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-lime-200/10 bg-black/25 ${tone.accent}`}>
-                              <Icon className="h-4 w-4" />
+                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-lime-300/25 bg-black/20 ring-1 ring-inset ring-lime-300/10 ${tone.accent}`}>
+                              <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
                             </span>
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[13px] font-extrabold uppercase tracking-[0.08em] text-lime-200">{item.title}</span>
-                              <span className="mt-1 block truncate text-[11px] font-medium text-slate-400">Операционный контур</span>
+                              <span className="block truncate text-[11px] font-extrabold uppercase tracking-[0.06em] text-lime-200">{item.title}</span>
                             </span>
                           </div>
-                          <div className="mt-3 grid gap-1.5 text-[11px]">
+                          <div className="mt-1.5 grid gap-0.5 text-[9.5px] leading-none">
                             {item.metrics.map(metric => (
                               <span key={metric.label} className="flex min-w-0 items-center justify-between gap-3">
                                 <span className="min-w-0 truncate text-slate-500">{metric.label}</span>
@@ -3924,99 +3921,110 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <aside className="rentcore-command-panel flex min-h-[440px] flex-col overflow-hidden rounded-[14px] p-3.5 xl:col-span-4 xl:min-h-[390px] min-[1600px]:min-h-[420px]" data-testid="dashboard-key-signals">
+            <aside className="rentcore-command-panel flex min-h-[430px] flex-col overflow-hidden rounded-[14px] p-4 xl:col-span-4 xl:min-h-0" data-testid="dashboard-key-signals">
               <div data-testid="dashboard-key-signals-command" className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-lime-300/70">Критические сигналы</p>
-                  <h3 className="app-shell-title mt-1 text-xl font-extrabold text-white">Очередь внимания</h3>
+                  <h3 className="app-shell-title mt-1 text-lg font-extrabold text-white">Очередь внимания</h3>
                 </div>
-                <span className="rounded-full border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-xs font-bold text-amber-100">
+                <span className="rounded-full border border-white/12 bg-black/25 px-2.5 py-1 text-xs font-bold text-slate-300">
                   {criticalCount + highCount || 'OK'}
                 </span>
               </div>
-              <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1" data-testid="dashboard-legacy-attention-list">
+              <div className="mt-5 min-h-0 flex-1 space-y-2 overflow-hidden pr-1" data-testid="dashboard-legacy-attention-list">
                 {visibleAlerts.length === 0 ? (
                   <div className="rounded-[14px] border border-lime-300/20 bg-lime-300/10 px-3 py-5 text-sm font-semibold text-lime-100">
                     На текущий период нет задач для контроля.
                   </div>
-                ) : visibleAlerts.slice(0, 5).map(alert => {
+                ) : visibleAlerts.slice(0, 7).map(alert => {
                   const Icon = alert.icon;
                   const tone = alert.priority === 'critical' ? toneStyles.danger : alert.priority === 'high' ? toneStyles.warning : toneStyles.info;
+                  const priorityLabel = alert.priority === 'critical' ? 'Критично' : alert.priority === 'high' ? 'Важно' : 'Контроль';
+                  const priorityClass = alert.priority === 'critical'
+                    ? 'border-red-300/20 bg-red-400/10 text-red-100'
+                    : alert.priority === 'high'
+                      ? 'border-amber-300/18 bg-amber-300/8 text-amber-100'
+                      : 'border-cyan-300/16 bg-cyan-300/8 text-cyan-100';
+                  const signalContext = [alert.title || alert.linkLabel, alert.detail].filter(Boolean).join(' · ');
                   return (
-                    <Link key={alert.id} to={alert.link} className="rentcore-command-signal flex min-w-0 items-center gap-3 px-3 py-2.5">
-                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/35 ${tone.accent}`}>
-                        <Icon className="h-4 w-4" />
+                    <Link key={alert.id} to={alert.link} className="rentcore-command-signal grid min-h-[54px] min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 px-3 py-2">
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-white/10 bg-black/25 ${tone.accent}`}>
+                        <Icon className="h-3.5 w-3.5" strokeWidth={1.7} />
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-extrabold text-white">{alert.category}</span>
-                        <span className="mt-1 block truncate text-xs text-slate-400">{[alert.title, alert.entity, alert.detail].filter(Boolean).join(' · ')}</span>
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-[12.5px] font-extrabold text-white">{alert.category}</span>
+                          <span className={`hidden shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-bold ${priorityClass}`}>{priorityLabel}</span>
+                        </span>
+                        {signalContext ? <span className="mt-1 block truncate text-[10.5px] font-medium text-slate-400">{signalContext}</span> : null}
                       </span>
-                      <span className="shrink-0 text-[10px] font-semibold text-slate-500">{alert.priority === 'critical' ? 'сейчас' : 'сегодня'}</span>
+                      <span className="shrink-0 text-right text-[9px] font-semibold uppercase tracking-normal text-slate-500">{alert.priority === 'critical' ? 'сейчас' : 'сегодня'}</span>
                     </Link>
                   );
                 })}
               </div>
-              <Link to="/equipment?actionQueueFilter=overdue" className="mt-3 flex h-9 w-full items-center justify-center rounded-[12px] border border-lime-300/20 bg-lime-300/10 text-xs font-bold text-lime-100 transition hover:border-lime-300/45 hover:bg-lime-300/15">
+              <Link to="/equipment?actionQueueFilter=overdue" className="mt-2 flex h-7 w-full items-center justify-center rounded-[12px] border border-lime-300/20 bg-lime-300/10 text-xs font-bold text-lime-100 transition hover:border-lime-300/45 hover:bg-lime-300/15">
                 Все сигналы
                 <span className="ml-2 rounded-full bg-black/25 px-2 py-0.5 text-[10px]">{alertItems.length}</span>
               </Link>
               </div>
             </aside>
 
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-3.5 xl:col-span-3">
-              <div className="mb-3">
-                <h3 className="app-shell-title text-lg font-extrabold text-white">Задачи</h3>
-                <p className="text-xs text-slate-400">Ближайший цикл</p>
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5 xl:col-span-3">
+              <div className="mb-1">
+                <h3 className="app-shell-title text-base font-extrabold text-white">Задачи</h3>
+                <p className="text-[11px] text-slate-400">Ближайший цикл</p>
               </div>
-              <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
+              <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden pt-2">
                 {commandCenterTasks.length === 0 ? (
                   <div className="rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-4 text-sm text-lime-100">Критичных задач нет.</div>
                 ) : commandCenterTasks.slice(0, 4).map(row => {
                   const tone = toneStyles[row.tone];
                   const isClear = row.tone === 'success';
                   return (
-                    <Link key={row.id} to={row.href} className="flex min-h-[34px] items-center gap-2.5 rounded-xl border border-lime-100/10 bg-black/20 px-2.5 py-2 transition hover:border-lime-300/35 hover:bg-white/[0.04]">
+                    <Link key={row.id} to={row.href} className="flex min-h-[42px] items-center gap-2 rounded-[10px] border border-lime-100/10 bg-black/20 px-2 py-2 transition hover:border-lime-300/35 hover:bg-white/[0.04]">
                       <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${isClear ? 'border-lime-300 bg-lime-300/20 text-lime-100' : 'border-slate-500/55 bg-black/20'}`}>
-                        {isClear ? <CheckCircle className="h-3 w-3" /> : null}
+                        {isClear ? <CheckCircle className="h-2.5 w-2.5" /> : null}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-bold text-white">{row.label}</span>
-                        <span className="block truncate text-[11px] text-slate-500">{row.detail}</span>
+                        <span className="block truncate text-[10.5px] font-bold leading-tight text-white">{row.label}</span>
+                        <span className="block truncate text-[8.5px] leading-tight text-slate-500">{row.detail}</span>
                       </span>
-                      <span className={`rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-xs font-extrabold ${tone.accent}`}>{row.value}</span>
+                      <span className={`rounded-full border border-white/10 bg-black/20 px-1.5 py-0.5 text-[10.5px] font-extrabold ${tone.accent}`}>{row.value}</span>
                     </Link>
                   );
                 })}
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-3.5 xl:col-span-3" data-testid="dashboard-month-dynamics">
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-3 xl:col-span-3" data-testid="dashboard-month-dynamics">
               <div data-testid="dashboard-month-dynamics-command" className="flex min-h-0 flex-1 flex-col">
               <div className="mb-2 flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="app-shell-title text-lg font-extrabold text-white">Динамика месяца</h3>
+                  <h3 className="app-shell-title whitespace-nowrap text-lg font-extrabold text-white">Динамика месяца</h3>
                   <p className="text-xs text-slate-400">Начисления, поступления, просрочка</p>
                 </div>
-                <div className="hidden shrink-0 items-center gap-2 text-[10px] font-semibold text-slate-400 sm:flex">
+                <div className="hidden shrink-0 items-center gap-2 text-[10px] font-semibold text-slate-400 min-[1536px]:flex">
                   <span className="flex items-center gap-1"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-lime-300" />Начисл.</span>
                   <span className="flex items-center gap-1"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-teal-300" />Поступл.</span>
                   <span className="flex items-center gap-1"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-rose-400" />Проср.</span>
                 </div>
               </div>
-              <div className="mt-1 min-h-0 flex-1">
+              <div className="mt-1.5 min-h-0 flex-1">
                 {hasMonthCashflowDisplay ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={monthCashflowDisplayData} margin={{ top: 14, right: 12, left: -4, bottom: 2 }}>
+                    <ComposedChart data={monthCashflowDisplayData} margin={{ top: 10, right: 8, left: -2, bottom: 0 }}>
                       <defs>
                         <linearGradient id="commandRevenueGradientV2" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#a3e635" stopOpacity={0.28} />
-                          <stop offset="100%" stopColor="#a3e635" stopOpacity={0.03} />
+                          <stop offset="0%" stopColor="#8fbf43" stopOpacity={0.30} />
+                          <stop offset="72%" stopColor="#8fbf43" stopOpacity={0.08} />
+                          <stop offset="100%" stopColor="#8fbf43" stopOpacity={0.01} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid stroke="rgba(163,230,53,0.14)" strokeDasharray="3 8" vertical={false} />
-                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 600 }} interval="preserveStartEnd" />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 600 }} tickFormatter={formatCompactCurrency} width={42} />
+                      <CartesianGrid stroke="rgba(148,163,184,0.18)" strokeDasharray="2 8" vertical={false} />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} interval="preserveStartEnd" minTickGap={8} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} tickFormatter={formatCompactCurrency} width={38} />
                       <Tooltip
                         formatter={(value, name) => [
                           formatCurrency(Number(value)),
@@ -4024,9 +4032,9 @@ export default function Dashboard() {
                         ]}
                         contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }}
                       />
-                      <Area type="monotone" dataKey="revenue" stroke="#a3e635" strokeWidth={3.4} fill="url(#commandRevenueGradientV2)" dot={false} activeDot={{ r: 5, stroke: '#ecfccb', strokeWidth: 1.5 }} />
-                      <Line type="monotone" dataKey="payments" stroke="#5eead4" strokeWidth={2.8} dot={false} activeDot={{ r: 4.5 }} />
-                      <Line type="monotone" dataKey="overdue" stroke="#fb7185" strokeWidth={2.4} strokeDasharray="6 7" dot={false} activeDot={{ r: 4.5 }} />
+                      <Area type="monotone" dataKey="revenue" stroke="#8fbf43" strokeWidth={3.2} fill="url(#commandRevenueGradientV2)" dot={{ r: 1.8, strokeWidth: 0, fill: '#a8d26a' }} activeDot={{ r: 5, stroke: '#ecfccb', strokeWidth: 1.5 }} />
+                      <Line type="monotone" dataKey="payments" stroke="#54d4c2" strokeWidth={2.8} dot={{ r: 1.8, strokeWidth: 0, fill: '#8ee8dc' }} activeDot={{ r: 4.6 }} />
+                      <Line type="monotone" dataKey="overdue" stroke="#f97386" strokeWidth={2.5} strokeDasharray="6 5" dot={{ r: 1.7, strokeWidth: 0, fill: '#fb7185' }} activeDot={{ r: 4.6 }} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 ) : (
@@ -4036,13 +4044,13 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-3.5 xl:col-span-3">
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-3 xl:col-span-3">
               <h3 className="app-shell-title text-lg font-extrabold text-white">Загрузка техники</h3>
               <p className="text-xs text-slate-400">{activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован'}</p>
-              <div className="mt-3 grid min-h-0 flex-1 grid-cols-[128px_minmax(0,1fr)] items-center gap-3">
-                <div className="relative h-[128px] w-[128px]">
+              <div className="mt-3 grid min-h-0 flex-1 grid-cols-[88px_minmax(0,1fr)] items-center gap-2">
+                <div className="relative h-[82px] w-[82px]">
                   {hasFleetDonutData ? (
-                    <svg aria-hidden="true" viewBox="0 0 120 120" className="h-full w-full -rotate-90 drop-shadow-[0_0_18px_rgba(163,230,53,0.22)]">
+                    <svg aria-hidden="true" viewBox="0 0 120 120" className="h-full w-full -rotate-90 drop-shadow-[0_0_10px_rgba(163,230,53,0.16)]">
                       <circle cx="60" cy="60" r="42" fill="none" stroke="rgba(148,163,184,0.16)" strokeWidth="18" />
                       {fleetDonutSegments.map(segment => (
                         <circle
@@ -4062,8 +4070,8 @@ export default function Dashboard() {
                   ) : null}
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                     <div className="text-center">
-                      <p className="text-2xl font-extrabold text-white">{utilization}%</p>
-                      <p className="text-[11px] font-semibold text-slate-500">{rentedEquipment} ед.</p>
+                      <p className="text-xl font-extrabold text-white">{utilization}%</p>
+                      <p className="text-[10px] font-semibold text-slate-500">{rentedEquipment} ед.</p>
                     </div>
                   </div>
                 </div>
@@ -4076,7 +4084,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-3.5 xl:col-span-3">
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-3 xl:col-span-3">
               <div className="mb-2 flex items-start justify-between gap-3">
                 <div>
                   <h3 className="app-shell-title text-lg font-extrabold text-white">Возраст дебиторки</h3>
@@ -4087,19 +4095,18 @@ export default function Dashboard() {
               <div className="mt-1 min-h-0 flex-1">
                 {hasReceivablesAging ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={receivablesAgingData} margin={{ top: 24, right: 8, left: -6, bottom: 2 }}>
-                      <CartesianGrid stroke="rgba(163,230,53,0.13)" strokeDasharray="3 8" vertical={false} />
+                    <BarChart data={receivablesAgingData} margin={{ top: 8, right: 8, left: -6, bottom: 0 }}>
+                      <CartesianGrid stroke="rgba(148,163,184,0.15)" strokeDasharray="3 7" vertical={false} />
                       <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 600 }} />
                       <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 600 }} tickFormatter={formatCompactCurrency} width={42} />
                       <Tooltip formatter={(value) => [formatCurrency(Number(value)), 'Долг']} contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }} />
-                      <Bar dataKey="value" radius={[5, 5, 2, 2]} barSize={26}>
+                      <Bar dataKey="value" radius={[4, 4, 2, 2]} barSize={14}>
                         {receivablesAgingData.map((item, index) => (
                           <Cell
                             key={item.label}
                             fill={index >= receivablesAgingData.length - 1 ? '#fb7185' : index === receivablesAgingData.length - 2 ? '#facc15' : index === 0 ? '#5eead4' : '#a3e635'}
                           />
                         ))}
-                        <LabelList dataKey="value" position="top" formatter={(value: unknown) => formatCompactCurrency(Number(value))} fill="#e2e8f0" fontSize={10} fontWeight={800} />
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>

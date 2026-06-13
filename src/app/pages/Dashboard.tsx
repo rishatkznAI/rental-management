@@ -708,6 +708,15 @@ const toneStyles: Record<DashboardTone, { bubble: string; accent: string; dot: s
   },
 };
 
+const commandMetricToneClass: Record<DashboardTone, string> = {
+  default: 'text-lime-100',
+  success: 'text-lime-200',
+  warning: 'text-amber-200',
+  danger: 'text-red-200',
+  info: 'text-cyan-200',
+  violet: 'text-violet-200',
+};
+
 function DashboardEmptyState({ text = 'Недостаточно данных для графика.' }: { text?: string }) {
   return (
     <div className="flex h-full min-h-48 items-center justify-center rounded-2xl border border-dashed border-border bg-muted/35 px-4 text-center text-sm text-muted-foreground">
@@ -1050,18 +1059,20 @@ function StatusBars({
   rows,
   total,
   showPercent = true,
+  compact = false,
 }: {
   rows: StatusBarRow[];
   total: number;
   showPercent?: boolean;
+  compact?: boolean;
 }) {
   const rowsTotal = rows.reduce((sum, row) => sum + row.value, 0);
   const denominator = Math.max(total, rowsTotal, 1);
   const stackRows = rows.filter(row => row.value > 0);
 
   return (
-    <div className="space-y-2">
-      <div className="flex h-3 overflow-hidden rounded-full bg-slate-950/10 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10" aria-hidden="true">
+    <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
+      <div className={`${compact ? 'h-2.5' : 'h-3'} flex overflow-hidden rounded-full bg-slate-950/10 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10`} aria-hidden="true">
         {stackRows.length > 0 ? stackRows.map(row => (
           <div
             key={row.label}
@@ -1070,20 +1081,22 @@ function StatusBars({
           />
         )) : <div className="h-full w-full bg-muted" />}
       </div>
-      <div className="space-y-1.5">
+      <div className={compact ? 'space-y-1' : 'space-y-1.5'}>
         {rows.map(row => {
           const percent = Math.round((row.value / denominator) * 100);
           return (
-            <div key={row.label} className="space-y-1">
-              <div className="flex items-center gap-2 text-xs">
+            <div key={row.label} className={compact ? 'space-y-0.5' : 'space-y-1'}>
+              <div className={`flex items-center gap-2 ${compact ? 'text-[11px]' : 'text-xs'}`}>
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: row.color }} />
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">{row.label}</span>
                 <span className="font-semibold text-foreground">{row.value}</span>
                 {showPercent ? <span className="w-8 text-right text-[11px] text-muted-foreground">{percent}%</span> : null}
               </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-slate-950/10 dark:bg-white/10">
-                <div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: row.color }} />
-              </div>
+              {!compact && (
+                <div className="h-1.5 overflow-hidden rounded-full bg-slate-950/10 dark:bg-white/10">
+                  <div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: row.color }} />
+                </div>
+              )}
             </div>
           );
         })}
@@ -3770,14 +3783,31 @@ export default function Dashboard() {
               <svg className="pointer-events-none absolute inset-0 hidden h-full w-full xl:block" viewBox="0 0 900 470" preserveAspectRatio="none" aria-hidden="true">
                 <defs>
                   <linearGradient id="commandLineGlow" x1="0" x2="1">
-                    <stop offset="0%" stopColor="#a3e635" stopOpacity="0.06" />
-                    <stop offset="50%" stopColor="#a3e635" stopOpacity="0.55" />
-                    <stop offset="100%" stopColor="#22d3ee" stopOpacity="0.08" />
+                    <stop offset="0%" stopColor="#a3e635" stopOpacity="0.01" />
+                    <stop offset="48%" stopColor="#bef264" stopOpacity="0.34" />
+                    <stop offset="100%" stopColor="#22d3ee" stopOpacity="0.035" />
                   </linearGradient>
                 </defs>
-                {[88, 218, 348, 552, 682, 812].map((x, index) => (
-                  <line key={x} x1="450" y1="235" x2={x} y2={index < 3 ? 102 + index * 132 : 102 + (index - 3) * 132} stroke="url(#commandLineGlow)" strokeWidth="1.3" />
+                {[
+                  { x1: 360, y1: 184, x2: 210, y2: 102, c1: 315, c2: 254 },
+                  { x1: 346, y1: 235, x2: 210, y2: 235, c1: 304, c2: 252 },
+                  { x1: 360, y1: 286, x2: 210, y2: 368, c1: 315, c2: 254 },
+                  { x1: 540, y1: 184, x2: 690, y2: 102, c1: 585, c2: 646 },
+                  { x1: 554, y1: 235, x2: 690, y2: 235, c1: 596, c2: 648 },
+                  { x1: 540, y1: 286, x2: 690, y2: 368, c1: 585, c2: 646 },
+                ].map(line => (
+                  <g key={`${line.x2}-${line.y2}`} className="rentcore-command-connector">
+                    <path
+                      d={`M ${line.x1} ${line.y1} C ${line.c1} ${line.y1}, ${line.c2} ${line.y2}, ${line.x2} ${line.y2}`}
+                      fill="none"
+                      stroke="url(#commandLineGlow)"
+                      strokeLinecap="round"
+                      strokeWidth="0.75"
+                    />
+                    <circle className="rentcore-command-node" cx={line.x2} cy={line.y2} r="2.15" fill="#bef264" opacity="0.7" />
+                  </g>
                 ))}
+                <circle className="rentcore-command-node" cx="450" cy="235" r="2.8" fill="#bef264" opacity="0.56" />
               </svg>
 
               <div className="relative flex h-full flex-col">
@@ -3797,20 +3827,20 @@ export default function Dashboard() {
                       const Icon = item.icon;
                       const tone = toneStyles[item.tone];
                       return (
-                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-3 py-2.5">
+                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-3.5 py-2.5">
                           <div className="flex items-start gap-2.5">
-                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/30 ${tone.accent}`}>
+                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-lime-200/10 bg-black/25 ${tone.accent}`}>
                               <Icon className="h-3.5 w-3.5" />
                             </span>
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[12px] font-extrabold uppercase tracking-[0.04em] text-lime-200">{item.title}</span>
+                              <span className="block truncate text-[12px] font-bold uppercase tracking-[0.06em] text-lime-200">{item.title}</span>
                               <span className="mt-0.5 block truncate text-[11px] text-slate-400">{item.metrics[0]?.label}: {item.metrics[0]?.value}</span>
                             </span>
                           </div>
                           <div className="flex min-w-0 items-center gap-3 text-[10px]">
                             {item.metrics.slice(1, 3).map(metric => (
                               <span key={metric.label} className="min-w-0 truncate text-slate-500">
-                                {metric.label}: <span className="font-bold text-slate-100">{metric.value}</span>
+                                {metric.label}: <span className={`font-bold ${commandMetricToneClass[item.tone]}`}>{metric.value}</span>
                               </span>
                             ))}
                           </div>
@@ -3824,15 +3854,17 @@ export default function Dashboard() {
                       className="rentcore-health-orb relative flex h-[192px] w-[192px] items-center justify-center rounded-full 2xl:h-[228px] 2xl:w-[228px]"
                       style={{
                         '--health-angle': `${companyHealthDisplayScore * 3.6}deg`,
-                        '--health-color': companyHealthTone === 'danger' ? '#fb7185' : companyHealthTone === 'warning' ? '#fbbf24' : '#a3e635',
+                        '--health-lime-angle': `${Math.max(companyHealthDisplayScore * 3.6 - (companyHealthTone === 'warning' ? 16 : 8), 0)}deg`,
+                        '--health-warning-color': companyHealthTone === 'danger' ? '#fb7185' : companyHealthTone === 'warning' ? '#facc15' : '#bef264',
                       } as React.CSSProperties}
                       data-testid="dashboard-company-health-command"
                     >
-                      <div className="absolute inset-4 rounded-full border border-lime-300/20 shadow-[inset_0_0_24px_rgba(132,204,22,0.08)]" />
-                      <div className="absolute inset-9 rounded-full border border-dashed border-cyan-200/18" />
-                      <div className="absolute -inset-3 rounded-full border border-lime-300/10" />
-                      <div className="absolute -inset-8 rounded-full bg-lime-300/10 blur-3xl" />
-                      <div className="relative">
+                      <div className="absolute inset-4 rounded-full border border-lime-300/20 shadow-[inset_0_0_26px_rgba(132,204,22,0.1)]" />
+                      <div className="absolute inset-8 rounded-full border border-dashed border-cyan-200/16" />
+                      <div className="absolute inset-12 rounded-full border border-lime-100/10" />
+                      <div className="absolute -inset-4 rounded-full border border-lime-300/10" />
+                      <div className="absolute -inset-9 rounded-full bg-lime-300/[0.08] blur-3xl" />
+                      <div className="rentcore-health-core relative z-10 flex h-[124px] w-[124px] flex-col items-center justify-center rounded-full border border-lime-100/10 2xl:h-[144px] 2xl:w-[144px]">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Здоровье компании</p>
                         <p className="mt-2 text-[42px] font-extrabold leading-none text-white 2xl:text-[46px]">{companyHealthDisplayScore}<span className="text-2xl text-slate-500">/100</span></p>
                         <p className={`mt-2 text-sm font-extrabold uppercase ${toneStyles[companyHealthTone].accent}`}>{companyHealthLabel}</p>
@@ -3848,20 +3880,20 @@ export default function Dashboard() {
                       const Icon = item.icon;
                       const tone = toneStyles[item.tone];
                       return (
-                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-3 py-2.5">
+                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-3.5 py-2.5">
                           <div className="flex items-start gap-2.5">
-                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/30 ${tone.accent}`}>
+                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-lime-200/10 bg-black/25 ${tone.accent}`}>
                               <Icon className="h-3.5 w-3.5" />
                             </span>
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[12px] font-extrabold uppercase tracking-[0.04em] text-lime-200">{item.title}</span>
+                              <span className="block truncate text-[12px] font-bold uppercase tracking-[0.06em] text-lime-200">{item.title}</span>
                               <span className="mt-0.5 block truncate text-[11px] text-slate-400">{item.metrics[0]?.label}: {item.metrics[0]?.value}</span>
                             </span>
                           </div>
                           <div className="flex min-w-0 items-center gap-3 text-[10px]">
                             {item.metrics.slice(1, 3).map(metric => (
                               <span key={metric.label} className="min-w-0 truncate text-slate-500">
-                                {metric.label}: <span className="font-bold text-slate-100">{metric.value}</span>
+                                {metric.label}: <span className={`font-bold ${commandMetricToneClass[item.tone]}`}>{metric.value}</span>
                               </span>
                             ))}
                           </div>
@@ -3913,7 +3945,7 @@ export default function Dashboard() {
           </section>
 
           <section className="grid gap-3 xl:h-[160px] xl:grid-cols-4 2xl:h-[178px]">
-            <div className="rentcore-command-analytics overflow-hidden p-2.5">
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5">
               <div className="mb-2">
                 <h3 className="app-shell-title text-base font-extrabold text-white">Задачи</h3>
                 <p className="text-xs text-slate-400">Ближайший цикл</p>
@@ -3924,7 +3956,7 @@ export default function Dashboard() {
                 ) : commandCenterTasks.slice(0, 4).map(row => {
                   const tone = toneStyles[row.tone];
                   return (
-                    <Link key={row.id} to={row.href} className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/28 px-2.5 py-1.5 transition hover:border-lime-300/35 hover:bg-white/[0.04]">
+                    <Link key={row.id} to={row.href} className="flex items-center gap-2 rounded-xl border border-lime-100/10 bg-black/20 px-2.5 py-1.5 transition hover:border-lime-300/35 hover:bg-white/[0.04]">
                       <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${row.tone === 'success' ? 'bg-lime-300' : row.tone === 'danger' ? 'bg-red-400' : 'bg-amber-300'}`} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs font-bold text-white">{row.label}</span>
@@ -3937,20 +3969,20 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics overflow-hidden p-2.5" data-testid="dashboard-month-dynamics-command">
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5" data-testid="dashboard-month-dynamics-command">
               <h3 className="app-shell-title text-base font-extrabold text-white">Динамика месяца</h3>
               <p className="text-xs text-slate-400">Начисления, поступления, просрочка</p>
-              <div className="mt-1 h-[112px] xl:h-[76px] 2xl:h-[94px]">
+              <div className="mt-1 min-h-0 flex-1">
                 {hasMonthCashflowDisplay ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={monthCashflowDisplayData} margin={{ top: 8, right: 6, left: -18, bottom: 0 }}>
+                    <ComposedChart data={monthCashflowDisplayData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
                       <defs>
                         <linearGradient id="commandRevenueGradientV2" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#a3e635" stopOpacity={0.16} />
+                          <stop offset="0%" stopColor="#a3e635" stopOpacity={0.12} />
                           <stop offset="100%" stopColor="#a3e635" stopOpacity={0.01} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid stroke="rgba(148,163,184,0.14)" strokeDasharray="3 5" vertical={false} />
+                      <CartesianGrid stroke="rgba(163,230,53,0.095)" strokeDasharray="2 6" vertical={false} />
                       <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
                       <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={formatCompactCurrency} width={38} />
                       <Tooltip
@@ -3960,9 +3992,9 @@ export default function Dashboard() {
                         ]}
                         contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }}
                       />
-                      <Area type="monotone" dataKey="revenue" stroke="#a3e635" strokeWidth={1.6} fill="url(#commandRevenueGradientV2)" dot={false} activeDot={{ r: 3 }} />
-                      <Line type="monotone" dataKey="payments" stroke="#22c55e" strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} />
-                      <Line type="monotone" dataKey="overdue" stroke="#fb7185" strokeWidth={1.25} strokeDasharray="4 4" dot={false} activeDot={{ r: 3 }} />
+                      <Area type="monotone" dataKey="revenue" stroke="#a3e635" strokeWidth={1.35} fill="url(#commandRevenueGradientV2)" dot={false} activeDot={{ r: 3, stroke: '#ecfccb', strokeWidth: 1 }} />
+                      <Line type="monotone" dataKey="payments" stroke="#5eead4" strokeWidth={1.2} dot={false} activeDot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="overdue" stroke="#fb7185" strokeWidth={1.05} strokeDasharray="5 5" dot={false} activeDot={{ r: 3 }} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 ) : (
@@ -3971,11 +4003,11 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics overflow-hidden p-2.5">
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5">
               <h3 className="app-shell-title text-base font-extrabold text-white">Загрузка техники</h3>
               <p className="text-xs text-slate-400">{activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован'}</p>
-              <div className="mt-1 grid h-[112px] grid-cols-[92px_minmax(0,1fr)] items-center gap-2 xl:h-[76px] 2xl:h-[94px]">
-                <div className="relative h-22">
+              <div className="mt-1 grid min-h-0 flex-1 grid-cols-[78px_minmax(0,1fr)] items-center gap-2">
+                <div className="relative h-[78px]">
                   {hasFleetDonutData ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
@@ -3988,33 +4020,38 @@ export default function Dashboard() {
                   ) : null}
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                     <div className="text-center">
-                      <p className="text-2xl font-extrabold text-white">{utilization}%</p>
+                      <p className="text-xl font-extrabold text-white">{utilization}%</p>
                       <p className="text-[10px] text-slate-500">{rentedEquipment} ед.</p>
                     </div>
                   </div>
                 </div>
                 <StatusBars rows={[
                   { label: 'В аренде', value: rentedEquipment, color: '#a3e635' },
-                  { label: 'Свободно', value: availableEquipment, color: '#22c55e' },
-                  { label: 'В сервисе', value: equipmentInServiceList.length, color: '#f59e0b' },
-                  { label: 'На доставке', value: activeDeliveries.length, color: '#38bdf8' },
-                ]} total={Math.max(activeEquipment, 1)} />
+                  { label: 'Свободно', value: availableEquipment, color: '#5eead4' },
+                  { label: 'В сервисе', value: equipmentInServiceList.length, color: '#facc15' },
+                  { label: 'На доставке', value: activeDeliveries.length, color: '#67e8f9' },
+                ]} total={Math.max(activeEquipment, 1)} compact />
               </div>
             </div>
 
-            <div className="rentcore-command-analytics overflow-hidden p-2.5">
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5">
               <h3 className="app-shell-title text-base font-extrabold text-white">Возраст дебиторки</h3>
               <p className="text-xs text-slate-400">Финансовый срез</p>
-              <div className="mt-1 h-[112px] xl:h-[76px] 2xl:h-[94px]">
+              <div className="mt-1 min-h-0 flex-1">
                 {hasReceivablesAging ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={receivablesAgingData} margin={{ top: 8, right: 6, left: -18, bottom: 0 }}>
-                      <CartesianGrid stroke="rgba(148,163,184,0.14)" strokeDasharray="3 5" vertical={false} />
+                    <BarChart data={receivablesAgingData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                      <CartesianGrid stroke="rgba(163,230,53,0.095)" strokeDasharray="2 6" vertical={false} />
                       <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} />
                       <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={formatCompactCurrency} width={38} />
                       <Tooltip formatter={(value) => [formatCurrency(Number(value)), 'Долг']} contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }} />
-                      <Bar dataKey="value" radius={[3, 3, 1, 1]} barSize={18}>
-                        {receivablesAgingData.map(item => <Cell key={item.label} fill={item.fill === '#2563eb' ? '#38bdf8' : item.fill} />)}
+                      <Bar dataKey="value" radius={[3, 3, 1, 1]} barSize={14}>
+                        {receivablesAgingData.map((item, index) => (
+                          <Cell
+                            key={item.label}
+                            fill={index >= receivablesAgingData.length - 1 ? '#fb7185' : index === receivablesAgingData.length - 2 ? '#facc15' : index === 0 ? '#5eead4' : '#a3e635'}
+                          />
+                        ))}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>

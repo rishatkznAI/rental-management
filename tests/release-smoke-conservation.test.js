@@ -83,6 +83,7 @@ test('dashboard cockpit helper preserves caller viewport for mobile artifacts', 
   const helper = releaseSmokeSource.match(/async function expectExecutiveCockpitVisible[\s\S]*?\n}\n\nasync function elementRect/)?.[0] || '';
   assert.match(releaseSmokeSource, /await page\.setViewportSize\(\{ width: 390, height: 844 \}\)/);
   assert.doesNotMatch(helper, /setViewportSize\(\{ width: 1440, height: 900 \}\)/);
+  assert.match(helper, /if \(viewport\.width >= 1024\) \{[\s\S]*dashboard key signals should be above the desktop fold/);
 });
 
 test('production release smoke allows backend drift only for frontend-only and deploy-tooling releases', () => {

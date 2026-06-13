@@ -418,7 +418,7 @@ export function Sidebar({
     <aside
       className={cn(
         'fixed left-0 top-0 z-40 h-screen w-60',
-        'border-r border-sidebar-border bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(244,248,241,0.96)_54%,rgba(237,244,232,0.98)_100%)] text-sidebar-foreground shadow-[0_36px_70px_-50px_rgba(38,57,38,0.42)] backdrop-blur-xl dark:border-lime-300/10 dark:bg-[linear-gradient(180deg,#030604_0%,#07100b_54%,#0b130d_100%)] dark:shadow-[0_36px_70px_-42px_rgba(0,0,0,0.92)]',
+        'border-r border-sidebar-border bg-[linear-gradient(180deg,rgba(255,255,255,0.99)_0%,rgba(246,250,243,0.98)_48%,rgba(237,244,232,0.99)_100%)] text-sidebar-foreground shadow-[0_36px_70px_-50px_rgba(38,57,38,0.42)] backdrop-blur-xl dark:border-lime-300/10 dark:bg-[linear-gradient(180deg,#03070b_0%,#061019_48%,#04090e_100%)] dark:shadow-[0_36px_70px_-42px_rgba(0,0,0,0.92)]',
         'transition-[transform,width] duration-300 ease-in-out',
         desktopCollapsed ? 'sm:w-20' : 'sm:w-60',
         isOpen ? 'translate-x-0' : '-translate-x-full',
@@ -428,7 +428,7 @@ export function Sidebar({
       <div className="flex h-full flex-col">
         <div className={cn(
           'flex items-center gap-3 border-b px-3.5 py-4',
-          'border-sidebar-border dark:border-lime-300/10',
+          'border-sidebar-border bg-white/35 dark:border-lime-300/10 dark:bg-white/[0.018]',
           desktopCollapsed && 'sm:justify-center sm:px-3',
         )}>
           <LiftLogo className="h-9 w-9" />
@@ -439,7 +439,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={onToggleDesktopCollapse}
-              className="hidden rounded-lg p-2 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground sm:inline-flex"
+              className="hidden rounded-lg border border-transparent p-2 text-sidebar-foreground/60 transition-colors hover:border-primary/25 hover:bg-sidebar-accent hover:text-sidebar-foreground sm:inline-flex"
               aria-label={desktopCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
               title={desktopCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
             >
@@ -476,7 +476,7 @@ export function Sidebar({
                 if (normalizedSearch.length > 0) setIsSearchOpen(true);
               }}
               placeholder="Поиск: техника, клиенты, аренды, сервис"
-              className="h-9 rounded-xl border-sidebar-border bg-white/75 pl-9 pr-3 text-[13px] text-sidebar-foreground placeholder:text-sidebar-foreground/38 focus-visible:border-primary/60 focus-visible:ring-primary/25 dark:border-lime-300/10 dark:bg-white/[0.055]"
+              className="h-9 rounded-xl border-sidebar-border bg-white/82 pl-9 pr-3 text-[13px] text-sidebar-foreground placeholder:text-sidebar-foreground/38 focus-visible:border-primary/60 focus-visible:ring-primary/25 dark:border-lime-300/10 dark:bg-white/[0.06]"
             />
           </div>
 
@@ -560,7 +560,7 @@ export function Sidebar({
                         'relative flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-[13px] transition-colors',
                         desktopCollapsed && 'sm:h-11 sm:justify-center sm:gap-0 sm:px-0',
                         isActive
-                          ? 'bg-sidebar-accent text-sidebar-foreground shadow-[0_18px_34px_-28px_rgba(95,159,21,0.34),inset_0_0_0_1px_rgba(130,201,30,0.22)] before:absolute before:left-0 before:top-1/2 before:h-6 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-sidebar-primary dark:text-lime-100 dark:shadow-[0_18px_34px_-24px_rgba(183,242,58,0.82),inset_0_0_0_1px_rgba(183,242,58,0.20)]'
+                          ? 'bg-sidebar-accent text-sidebar-foreground shadow-[0_18px_34px_-28px_rgba(95,159,21,0.34),inset_0_0_0_1px_rgba(130,201,30,0.22)] before:absolute before:left-0 before:top-1/2 before:h-6 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-sidebar-primary dark:bg-lime-300/10 dark:text-lime-100 dark:shadow-[0_18px_34px_-24px_rgba(183,242,58,0.48),inset_0_0_0_1px_rgba(183,242,58,0.22)]'
                           : 'text-sidebar-foreground/64 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                       )}
                     >
@@ -596,7 +596,7 @@ export function Sidebar({
             aria-label={themeToggleLabel}
             title={desktopCollapsed ? themeToggleLabel : undefined}
             className={cn(
-              'flex min-h-11 w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/70 px-3 py-2 text-left text-sidebar-foreground/74 transition hover:border-primary/40 hover:bg-primary/10 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60 dark:bg-white/8',
+              'flex min-h-11 w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/78 px-3 py-2 text-left text-sidebar-foreground/74 transition hover:border-primary/40 hover:bg-primary/10 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60 dark:bg-white/[0.055]',
               desktopCollapsed && 'sm:justify-center sm:px-0',
             )}
           >

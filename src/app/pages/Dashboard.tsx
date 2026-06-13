@@ -3496,6 +3496,12 @@ export default function Dashboard() {
     href: string;
     metrics: Array<{ label: string; value: string }>;
   }>;
+  const commandCenterLeftDirections = ['money', 'documents', 'returns']
+    .map(id => commandCenterDirections.find(item => item.id === id))
+    .filter((item): item is (typeof commandCenterDirections)[number] => Boolean(item));
+  const commandCenterRightDirections = ['fleet', 'service', 'delivery']
+    .map(id => commandCenterDirections.find(item => item.id === id))
+    .filter((item): item is (typeof commandCenterDirections)[number] => Boolean(item));
   const commandCenterTasks = todayWorkRows.slice(0, 5);
 
   // ── KPI data objects for modal ──────────────────────────────────────────────
@@ -3708,11 +3714,11 @@ export default function Dashboard() {
 
   return (
     <div className="rentcore-command-screen">
-      <div className="relative h-full px-2 py-2 sm:px-3 sm:py-3 lg:px-4">
+      <div className="relative h-full px-1.5 py-1.5 sm:px-2 sm:py-2 lg:px-2.5">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-lime-300/70 to-transparent" />
 
-        <div className="rentcore-command-shell mx-auto flex h-full max-w-[1540px] flex-col gap-2 p-2.5 sm:p-3 lg:gap-2.5">
-          <header className="rentcore-command-header grid gap-3 rounded-[14px] px-4 py-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div className="rentcore-command-shell mx-0 flex h-full max-w-none flex-col gap-2 p-2 sm:p-2.5 lg:gap-2.5 min-[1360px]:h-[calc(100dvh-4.75rem)] min-[1360px]:min-h-0">
+          <header className="rentcore-command-header grid min-h-[76px] gap-3 rounded-[14px] px-4 py-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-lime-300/75">
                 <span>{APP_BRAND_NAME}</span>
@@ -3721,8 +3727,8 @@ export default function Dashboard() {
                 <span className="h-1 w-1 rounded-full bg-lime-300/70" />
                 <span>Операционный контроль бизнеса</span>
               </div>
-              <div className="mt-2 flex flex-wrap items-end gap-x-4 gap-y-1">
-                <h1 className="app-shell-title text-[26px] font-extrabold leading-none tracking-normal text-white lg:text-[30px]">
+              <div className="mt-1.5 flex flex-wrap items-end gap-x-4 gap-y-1">
+                <h1 className="app-shell-title text-[26px] font-extrabold leading-none tracking-normal text-white lg:text-[29px]">
                   Операционный центр
                 </h1>
                 <p className="pb-0.5 text-sm font-medium text-slate-400">
@@ -3755,7 +3761,7 @@ export default function Dashboard() {
               const trend = card.id === 'executive-overdue-receivables' ? overdueReceivablesTrendData : utilizationTrendData;
               const stroke = card.tone === 'danger' ? '#fb7185' : card.tone === 'warning' ? '#fbbf24' : card.tone === 'info' ? '#38bdf8' : '#a3e635';
               const content = (
-                <div className="relative z-10 flex h-full min-h-[86px] flex-col justify-between gap-2">
+                <div className="relative z-10 flex h-full min-h-[92px] flex-col justify-between gap-2">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">{card.label}</p>
@@ -3779,8 +3785,8 @@ export default function Dashboard() {
             </div>
           </section>
 
-          <section className="grid min-h-0 gap-2.5 xl:h-[390px] xl:grid-cols-[minmax(0,1fr)_330px] 2xl:h-[420px] 2xl:grid-cols-[minmax(0,1fr)_370px]">
-            <div className="rentcore-command-panel relative min-h-[390px] overflow-hidden rounded-[14px] p-3 xl:min-h-0" data-testid="dashboard-operational-summary">
+          <section className="rentcore-command-board grid min-h-0 flex-1 gap-2.5 overflow-hidden rounded-[16px] p-2 xl:grid-cols-12 xl:grid-rows-[minmax(390px,1fr)_minmax(188px,0.48fr)] min-[1360px]:!grid-rows-[minmax(0,1fr)_154px]" data-testid="dashboard-command-board">
+            <div className="rentcore-command-panel relative min-h-[460px] overflow-hidden rounded-[14px] p-3 xl:col-span-8 xl:min-h-0" data-testid="dashboard-operational-summary">
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(132,204,22,0.16),transparent_34%),linear-gradient(rgba(132,204,22,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.04)_1px,transparent_1px)] bg-[size:auto,34px_34px,34px_34px]" />
               <svg className="pointer-events-none absolute inset-0 hidden h-full w-full xl:block" viewBox="0 0 900 420" preserveAspectRatio="none" aria-hidden="true">
                 <defs>
@@ -3823,9 +3829,9 @@ export default function Dashboard() {
                   </span>
                 </div>
 
-                <div className="grid flex-1 gap-2.5 xl:grid-cols-[minmax(190px,0.94fr)_minmax(220px,0.78fr)_minmax(190px,0.94fr)] xl:items-center 2xl:grid-cols-[minmax(230px,0.94fr)_minmax(270px,0.78fr)_minmax(230px,0.94fr)]">
+                <div className="grid flex-1 gap-2.5 xl:grid-cols-[minmax(210px,0.95fr)_minmax(238px,0.82fr)_minmax(210px,0.95fr)] xl:items-center 2xl:grid-cols-[minmax(250px,0.95fr)_minmax(292px,0.82fr)_minmax(250px,0.95fr)]">
                   <div className="grid gap-2.5">
-                    {commandCenterDirections.slice(0, 3).map(item => {
+                    {commandCenterLeftDirections.map(item => {
                       const Icon = item.icon;
                       const tone = toneStyles[item.tone];
                       return (
@@ -3851,9 +3857,9 @@ export default function Dashboard() {
                     })}
                   </div>
 
-                  <div className="flex min-h-[230px] flex-col items-center justify-center text-center 2xl:min-h-[256px]" data-testid="dashboard-company-health">
+                  <div className="flex min-h-[250px] flex-col items-center justify-center text-center 2xl:min-h-[276px]" data-testid="dashboard-company-health">
                     <div
-                      className="rentcore-health-orb relative flex h-[184px] w-[184px] items-center justify-center rounded-full 2xl:h-[214px] 2xl:w-[214px]"
+                      className="rentcore-health-orb relative flex h-[218px] w-[218px] items-center justify-center rounded-full 2xl:h-[244px] 2xl:w-[244px]"
                       style={{
                         '--health-angle': `${companyHealthDisplayScore * 3.6}deg`,
                         '--health-lime-angle': `${Math.max(companyHealthDisplayScore * 3.6 - (companyHealthTone === 'warning' ? 16 : 8), 0)}deg`,
@@ -3866,9 +3872,9 @@ export default function Dashboard() {
                       <div className="absolute inset-12 rounded-full border border-lime-100/10" />
                       <div className="absolute -inset-4 rounded-full border border-lime-300/10" />
                       <div className="absolute -inset-9 rounded-full bg-lime-300/[0.08] blur-3xl" />
-                      <div className="rentcore-health-core relative z-10 flex h-[120px] w-[120px] flex-col items-center justify-center rounded-full border border-lime-100/10 2xl:h-[136px] 2xl:w-[136px]">
+                      <div className="rentcore-health-core relative z-10 flex h-[138px] w-[138px] flex-col items-center justify-center rounded-full border border-lime-100/10 2xl:h-[152px] 2xl:w-[152px]">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Здоровье компании</p>
-                        <p className="mt-2 text-[42px] font-extrabold leading-none text-white 2xl:text-[46px]">{companyHealthDisplayScore}<span className="text-2xl text-slate-500">/100</span></p>
+                        <p className="mt-2 text-[46px] font-extrabold leading-none text-white 2xl:text-[50px]">{companyHealthDisplayScore}<span className="text-2xl text-slate-500">/100</span></p>
                         <p className={`mt-2 text-sm font-extrabold uppercase ${toneStyles[companyHealthTone].accent}`}>{companyHealthLabel}</p>
                       </div>
                     </div>
@@ -3878,7 +3884,7 @@ export default function Dashboard() {
                   </div>
 
                   <div className="grid gap-2.5">
-                    {commandCenterDirections.slice(3).map(item => {
+                    {commandCenterRightDirections.map(item => {
                       const Icon = item.icon;
                       const tone = toneStyles[item.tone];
                       return (
@@ -3907,7 +3913,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <aside className="rentcore-command-panel flex min-h-0 flex-col overflow-hidden rounded-[14px] p-3" data-testid="dashboard-key-signals">
+            <aside className="rentcore-command-panel flex min-h-[360px] flex-col overflow-hidden rounded-[14px] p-3 xl:col-span-4 xl:min-h-0" data-testid="dashboard-key-signals">
               <div data-testid="dashboard-key-signals-command" className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -3946,10 +3952,8 @@ export default function Dashboard() {
               </Link>
               </div>
             </aside>
-          </section>
 
-          <section className="grid gap-2.5 xl:min-h-[188px] xl:grid-cols-4 2xl:min-h-[210px]">
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5">
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5 xl:col-span-3">
               <div className="mb-2">
                 <h3 className="app-shell-title text-base font-extrabold text-white">Задачи</h3>
                 <p className="text-xs text-slate-400">Ближайший цикл</p>
@@ -3957,7 +3961,7 @@ export default function Dashboard() {
               <div className="space-y-1.5">
                 {commandCenterTasks.length === 0 ? (
                   <div className="rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-4 text-sm text-lime-100">Критичных задач нет.</div>
-                ) : commandCenterTasks.slice(0, 4).map(row => {
+                ) : commandCenterTasks.slice(0, 3).map(row => {
                   const tone = toneStyles[row.tone];
                   return (
                     <Link key={row.id} to={row.href} className="flex items-center gap-2 rounded-xl border border-lime-100/10 bg-black/20 px-2.5 py-1.5 transition hover:border-lime-300/35 hover:bg-white/[0.04]">
@@ -3973,7 +3977,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5" data-testid="dashboard-month-dynamics">
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5 xl:col-span-3" data-testid="dashboard-month-dynamics">
               <div data-testid="dashboard-month-dynamics-command" className="flex min-h-0 flex-1 flex-col">
               <h3 className="app-shell-title text-base font-extrabold text-white">Динамика месяца</h3>
               <p className="text-xs text-slate-400">Начисления, поступления, просрочка</p>
@@ -4009,7 +4013,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5">
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5 xl:col-span-3">
               <h3 className="app-shell-title text-base font-extrabold text-white">Загрузка техники</h3>
               <p className="text-xs text-slate-400">{activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован'}</p>
               <div className="mt-1 grid min-h-0 flex-1 grid-cols-[78px_minmax(0,1fr)] items-center gap-2">
@@ -4040,7 +4044,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5">
+            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-2.5 xl:col-span-3">
               <h3 className="app-shell-title text-base font-extrabold text-white">Возраст дебиторки</h3>
               <p className="text-xs text-slate-400">Финансовый срез</p>
               <div className="mt-1 min-h-0 flex-1">

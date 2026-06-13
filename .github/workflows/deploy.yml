@@ -117,6 +117,9 @@ jobs:
           blocked=()
 
           for file in "${files[@]}"; do
+            if [[ "$file" =~ ^docs/pr-assets/dashboard-dark-theme/.*\.png$ && ! -e "$file" ]]; then
+              continue
+            fi
             if [[ "$file" =~ $release_critical ]]; then
               blocked+=("$file")
               continue

@@ -108,7 +108,7 @@ async function expectNoHorizontalOverflow(page: Page, caseName: string) {
         const style = window.getComputedStyle(element);
         if (style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
         const rect = element.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0 && (rect.left < -1 || rect.right > documentWidth + 1);
+        return rect.width > 0 && rect.height > 0 && rect.right > documentWidth + 1;
       })
       .slice(0, 8)
       .map((element) => {

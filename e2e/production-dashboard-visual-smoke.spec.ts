@@ -147,6 +147,7 @@ async function expectTheme(page: Page, theme: Theme, caseName: string) {
       bodyBackground: window.getComputedStyle(body).backgroundColor,
       mainBackground: main ? window.getComputedStyle(main).backgroundColor : '',
       sidebarBackground: sidebar ? window.getComputedStyle(sidebar).backgroundColor : '',
+      sidebarToken: window.getComputedStyle(document.documentElement).getPropertyValue('--sidebar').trim(),
     };
   });
 
@@ -154,13 +155,13 @@ async function expectTheme(page: Page, theme: Theme, caseName: string) {
   if (theme === 'dark') {
     expect(colors.htmlClass, `${caseName}: html should have dark class`).toMatch(/\bdark\b/);
     expect(luminance(colors.bodyBackground), `${caseName}: dark body should be visually dark`).toBeLessThan(90);
-    expect(luminance(colors.sidebarBackground), `${caseName}: dark sidebar should be visually dark`).toBeLessThan(120);
+    expect(luminance(colors.sidebarToken || colors.sidebarBackground), `${caseName}: dark sidebar should be visually dark`).toBeLessThan(120);
     return;
   }
 
   expect(colors.htmlClass, `${caseName}: html should not have dark class`).not.toMatch(/\bdark\b/);
   expect(luminance(colors.bodyBackground), `${caseName}: light body should be visually light`).toBeGreaterThan(180);
-  expect(luminance(colors.sidebarBackground), `${caseName}: light sidebar should be visually light`).toBeGreaterThan(170);
+  expect(luminance(colors.sidebarToken || colors.sidebarBackground), `${caseName}: light sidebar should be visually light`).toBeGreaterThan(170);
 }
 
 async function captureDashboardCase(

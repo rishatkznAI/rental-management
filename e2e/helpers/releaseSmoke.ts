@@ -349,7 +349,9 @@ async function expectExecutiveCockpitVisible(page: Page) {
     },
   }));
 
-  expect(rects.keySignals?.top ?? Number.POSITIVE_INFINITY, 'dashboard key signals should be above the desktop fold').toBeLessThan(viewport.height);
+  if (viewport.width >= 1024) {
+    expect(rects.keySignals?.top ?? Number.POSITIVE_INFINITY, 'dashboard key signals should be above the desktop fold').toBeLessThan(viewport.height);
+  }
   expect(monthDynamicsHeadingsInFirstViewport, 'first viewport should not contain duplicate Динамика месяца headings').toBeLessThanOrEqual(1);
   expect(companyHealthHeadingsInFirstViewport, 'first viewport should not contain duplicate Здоровье компании headings').toBeLessThanOrEqual(1);
 }

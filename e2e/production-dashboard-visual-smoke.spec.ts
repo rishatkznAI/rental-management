@@ -40,6 +40,15 @@ function sanitize(text = '', limit = 800) {
 }
 
 function parseRgb(value: string) {
+  const hex = value.trim().match(/^#([0-9a-f]{6})$/i);
+  if (hex) {
+    const raw = hex[1];
+    return {
+      r: Number.parseInt(raw.slice(0, 2), 16),
+      g: Number.parseInt(raw.slice(2, 4), 16),
+      b: Number.parseInt(raw.slice(4, 6), 16),
+    };
+  }
   const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
   if (!match) return null;
   return {

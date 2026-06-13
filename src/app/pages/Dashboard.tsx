@@ -3694,14 +3694,12 @@ export default function Dashboard() {
   // ── render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] overflow-x-hidden bg-[#05090f] text-slate-100 sm:min-h-[calc(100vh-4rem)] lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
-      <div className="relative h-full overflow-hidden px-3 py-3 sm:px-4 lg:px-5">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_42%_8%,rgba(132,204,22,0.16),transparent_30%),radial-gradient(circle_at_82%_30%,rgba(34,211,238,0.08),transparent_28%),linear-gradient(180deg,#071018_0%,#05090f_58%,#030609_100%)]" />
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(132,204,22,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.03)_1px,transparent_1px)] bg-[size:38px_38px] opacity-70" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-lime-300/60 to-transparent" />
+    <div className="rentcore-command-screen text-slate-100">
+      <div className="relative h-full px-2 py-2 sm:px-3 sm:py-3 lg:px-4">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-lime-300/70 to-transparent" />
 
-        <div className="relative mx-auto flex h-full max-w-[1500px] flex-col gap-3 lg:gap-3.5">
-          <header className="grid gap-3 rounded-[18px] border border-lime-300/15 bg-white/[0.045] px-4 py-3 shadow-[0_24px_80px_-64px_rgba(132,204,22,0.55),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div className="rentcore-command-shell mx-auto flex h-full max-w-[1540px] flex-col gap-2.5 p-2.5 sm:p-3 lg:gap-3">
+          <header className="rentcore-command-header grid gap-3 rounded-[18px] px-4 py-2.5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-lime-300/75">
                 <span>{APP_BRAND_NAME}</span>
@@ -3743,7 +3741,7 @@ export default function Dashboard() {
               const trend = card.id === 'executive-overdue-receivables' ? overdueReceivablesTrendData : utilizationTrendData;
               const stroke = card.tone === 'danger' ? '#fb7185' : card.tone === 'warning' ? '#fbbf24' : card.tone === 'info' ? '#38bdf8' : '#a3e635';
               const content = (
-                <div className="relative z-10 flex h-full min-h-[96px] flex-col justify-between gap-2">
+                <div className="relative z-10 flex h-full min-h-[78px] flex-col justify-between gap-2">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">{card.label}</p>
@@ -3755,20 +3753,20 @@ export default function Dashboard() {
                   </div>
                   <div className="grid grid-cols-[minmax(0,1fr)_86px] items-end gap-3">
                     <p className={`min-w-0 truncate text-xs font-semibold ${tone.accent}`}>{card.hint}</p>
-                    <MiniSparkline data={trend} stroke={stroke} className="h-7" />
+                    <MiniSparkline data={trend} stroke={stroke} className="h-6" />
                   </div>
                 </div>
               );
-              const className = "group relative overflow-hidden rounded-[14px] border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.095),rgba(255,255,255,0.025))] p-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition hover:border-lime-300/35 hover:bg-white/[0.075] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/35";
+              const className = "rentcore-command-kpi group p-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/35";
               if (card.href) return <Link key={card.id} to={card.href} data-testid={testId} className={className}>{content}</Link>;
               if (card.onClick) return <button key={card.id} type="button" onClick={card.onClick} data-testid={testId} className={className}>{content}</button>;
               return <div key={card.id} data-testid={testId} className={className}>{content}</div>;
             })}
           </section>
 
-          <section className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_350px]">
-            <div className="relative min-h-[430px] overflow-hidden rounded-[20px] border border-lime-300/15 bg-[radial-gradient(circle_at_center,rgba(132,204,22,0.12),transparent_35%),linear-gradient(135deg,rgba(8,17,25,0.94),rgba(5,12,18,0.98))] p-3 shadow-[0_28px_100px_-72px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.08)] lg:min-h-0">
-              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(132,204,22,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.04)_1px,transparent_1px)] bg-[size:34px_34px]" />
+          <section className="grid min-h-0 gap-3 xl:h-[400px] xl:grid-cols-[minmax(0,1fr)_330px] 2xl:h-[430px] 2xl:grid-cols-[minmax(0,1fr)_370px]">
+            <div className="rentcore-command-panel relative min-h-[400px] overflow-hidden rounded-[20px] p-3 xl:min-h-0">
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(132,204,22,0.16),transparent_34%),linear-gradient(rgba(132,204,22,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.04)_1px,transparent_1px)] bg-[size:auto,34px_34px,34px_34px]" />
               <svg className="pointer-events-none absolute inset-0 hidden h-full w-full xl:block" viewBox="0 0 900 470" preserveAspectRatio="none" aria-hidden="true">
                 <defs>
                   <linearGradient id="commandLineGlow" x1="0" x2="1">
@@ -3793,13 +3791,13 @@ export default function Dashboard() {
                   </span>
                 </div>
 
-                <div className="grid flex-1 gap-3 xl:grid-cols-[minmax(210px,0.84fr)_minmax(250px,0.9fr)_minmax(210px,0.84fr)] xl:items-center">
+                <div className="grid flex-1 gap-3 xl:grid-cols-[minmax(180px,0.86fr)_minmax(220px,0.9fr)_minmax(180px,0.86fr)] xl:items-center 2xl:grid-cols-[minmax(225px,0.86fr)_minmax(270px,0.9fr)_minmax(225px,0.86fr)]">
                   <div className="grid gap-2.5">
                     {commandCenterDirections.slice(0, 3).map(item => {
                       const Icon = item.icon;
                       const tone = toneStyles[item.tone];
                       return (
-                        <Link key={item.id} to={item.href} className="group flex h-[74px] min-w-0 flex-col justify-between rounded-[14px] border border-white/10 bg-slate-950/36 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.055)] transition hover:border-lime-300/35 hover:bg-white/[0.055]">
+                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-3 py-2.5">
                           <div className="flex items-start gap-2.5">
                             <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/30 ${tone.accent}`}>
                               <Icon className="h-3.5 w-3.5" />
@@ -3821,18 +3819,22 @@ export default function Dashboard() {
                     })}
                   </div>
 
-                  <div className="flex min-h-[290px] flex-col items-center justify-center text-center">
+                  <div className="flex min-h-[248px] flex-col items-center justify-center text-center 2xl:min-h-[270px]">
                     <div
-                      className="relative flex h-[220px] w-[220px] items-center justify-center rounded-full border border-lime-300/20 bg-slate-950/80 shadow-[0_0_70px_rgba(132,204,22,0.22),inset_0_0_38px_rgba(132,204,22,0.10)] 2xl:h-[236px] 2xl:w-[236px]"
-                      style={{ background: `radial-gradient(circle at center, rgba(7,14,22,0.98) 0 54%, transparent 55%), conic-gradient(#a3e635 ${companyHealthDisplayScore * 3.6}deg, rgba(148,163,184,0.16) 0deg)` }}
+                      className="rentcore-health-orb relative flex h-[192px] w-[192px] items-center justify-center rounded-full 2xl:h-[228px] 2xl:w-[228px]"
+                      style={{
+                        '--health-angle': `${companyHealthDisplayScore * 3.6}deg`,
+                        '--health-color': companyHealthTone === 'danger' ? '#fb7185' : companyHealthTone === 'warning' ? '#fbbf24' : '#a3e635',
+                      } as React.CSSProperties}
                       data-testid="dashboard-company-health-command"
                     >
-                      <div className="absolute inset-5 rounded-full border border-lime-300/20" />
-                      <div className="absolute inset-10 rounded-full border border-dashed border-cyan-200/15" />
-                      <div className="absolute -inset-2 rounded-full border border-lime-300/10" />
+                      <div className="absolute inset-4 rounded-full border border-lime-300/20 shadow-[inset_0_0_24px_rgba(132,204,22,0.08)]" />
+                      <div className="absolute inset-9 rounded-full border border-dashed border-cyan-200/18" />
+                      <div className="absolute -inset-3 rounded-full border border-lime-300/10" />
+                      <div className="absolute -inset-8 rounded-full bg-lime-300/10 blur-3xl" />
                       <div className="relative">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Здоровье компании</p>
-                        <p className="mt-2 text-[50px] font-extrabold leading-none text-white">{companyHealthDisplayScore}<span className="text-2xl text-slate-500">/100</span></p>
+                        <p className="mt-2 text-[42px] font-extrabold leading-none text-white 2xl:text-[46px]">{companyHealthDisplayScore}<span className="text-2xl text-slate-500">/100</span></p>
                         <p className={`mt-2 text-sm font-extrabold uppercase ${toneStyles[companyHealthTone].accent}`}>{companyHealthLabel}</p>
                       </div>
                     </div>
@@ -3846,7 +3848,7 @@ export default function Dashboard() {
                       const Icon = item.icon;
                       const tone = toneStyles[item.tone];
                       return (
-                        <Link key={item.id} to={item.href} className="group flex h-[74px] min-w-0 flex-col justify-between rounded-[14px] border border-white/10 bg-slate-950/36 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.055)] transition hover:border-lime-300/35 hover:bg-white/[0.055]">
+                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-3 py-2.5">
                           <div className="flex items-start gap-2.5">
                             <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/30 ${tone.accent}`}>
                               <Icon className="h-3.5 w-3.5" />
@@ -3871,7 +3873,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <aside className="min-h-0 overflow-hidden rounded-[20px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.025))] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" data-testid="dashboard-key-signals-command">
+            <aside className="rentcore-command-panel flex min-h-0 flex-col overflow-hidden rounded-[20px] p-3" data-testid="dashboard-key-signals-command">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-lime-300/70">Критические сигналы</p>
@@ -3881,16 +3883,16 @@ export default function Dashboard() {
                   {criticalCount + highCount || 'OK'}
                 </span>
               </div>
-              <div className="mt-3 space-y-1.5 xl:max-h-[248px] xl:overflow-hidden 2xl:max-h-[260px]">
+              <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {visibleAlerts.length === 0 ? (
                   <div className="rounded-[14px] border border-lime-300/20 bg-lime-300/10 px-3 py-5 text-sm font-semibold text-lime-100">
                     На текущий период нет задач для контроля.
                   </div>
-                ) : visibleAlerts.slice(0, 4).map(alert => {
+                ) : visibleAlerts.slice(0, 8).map(alert => {
                   const Icon = alert.icon;
                   const tone = alert.priority === 'critical' ? toneStyles.danger : alert.priority === 'high' ? toneStyles.warning : toneStyles.info;
                   return (
-                    <Link key={alert.id} to={alert.link} className="flex min-w-0 items-center gap-2.5 rounded-[13px] border border-white/10 bg-slate-950/34 px-2.5 py-1.5 transition hover:border-lime-300/35 hover:bg-white/[0.055]">
+                    <Link key={alert.id} to={alert.link} className="rentcore-command-signal flex min-w-0 items-center gap-2.5 px-2.5 py-2">
                       <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/35 ${tone.accent}`}>
                         <Icon className="h-3.5 w-3.5" />
                       </span>
@@ -3903,15 +3905,15 @@ export default function Dashboard() {
                   );
                 })}
               </div>
-              <Link to="/equipment?actionQueueFilter=overdue" className="mt-3 flex h-9 w-full items-center justify-center rounded-full border border-lime-300/20 bg-lime-300/10 text-xs font-bold text-lime-100 transition hover:border-lime-300/45 hover:bg-lime-300/15">
+              <Link to="/equipment?actionQueueFilter=overdue" className="mt-3 flex h-9 w-full items-center justify-center rounded-[12px] border border-lime-300/20 bg-lime-300/10 text-xs font-bold text-lime-100 transition hover:border-lime-300/45 hover:bg-lime-300/15">
                 Все сигналы
                 <span className="ml-2 rounded-full bg-black/25 px-2 py-0.5 text-[10px]">{alertItems.length}</span>
               </Link>
             </aside>
           </section>
 
-          <section className="grid gap-3 xl:h-[218px] xl:grid-cols-4 2xl:h-[226px]">
-            <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
+          <section className="grid gap-3 xl:h-[160px] xl:grid-cols-4 2xl:h-[178px]">
+            <div className="rentcore-command-analytics overflow-hidden p-2.5">
               <div className="mb-2">
                 <h3 className="app-shell-title text-base font-extrabold text-white">Задачи</h3>
                 <p className="text-xs text-slate-400">Ближайший цикл</p>
@@ -3922,7 +3924,7 @@ export default function Dashboard() {
                 ) : commandCenterTasks.slice(0, 4).map(row => {
                   const tone = toneStyles[row.tone];
                   return (
-                    <Link key={row.id} to={row.href} className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/28 px-2.5 py-1.5 transition hover:border-lime-300/35">
+                    <Link key={row.id} to={row.href} className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/28 px-2.5 py-1.5 transition hover:border-lime-300/35 hover:bg-white/[0.04]">
                       <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${row.tone === 'success' ? 'bg-lime-300' : row.tone === 'danger' ? 'bg-red-400' : 'bg-amber-300'}`} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs font-bold text-white">{row.label}</span>
@@ -3935,10 +3937,10 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]" data-testid="dashboard-month-dynamics-command">
+            <div className="rentcore-command-analytics overflow-hidden p-2.5" data-testid="dashboard-month-dynamics-command">
               <h3 className="app-shell-title text-base font-extrabold text-white">Динамика месяца</h3>
               <p className="text-xs text-slate-400">Начисления, поступления, просрочка</p>
-              <div className="mt-1.5 h-[130px] xl:h-[128px] 2xl:h-[136px]">
+              <div className="mt-1 h-[112px] xl:h-[76px] 2xl:h-[94px]">
                 {hasMonthCashflowDisplay ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={monthCashflowDisplayData} margin={{ top: 8, right: 6, left: -18, bottom: 0 }}>
@@ -3969,11 +3971,11 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
+            <div className="rentcore-command-analytics overflow-hidden p-2.5">
               <h3 className="app-shell-title text-base font-extrabold text-white">Загрузка техники</h3>
               <p className="text-xs text-slate-400">{activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован'}</p>
-              <div className="mt-1.5 grid h-[130px] grid-cols-[100px_minmax(0,1fr)] items-center gap-2 xl:h-[128px] 2xl:h-[136px]">
-                <div className="relative h-24">
+              <div className="mt-1 grid h-[112px] grid-cols-[92px_minmax(0,1fr)] items-center gap-2 xl:h-[76px] 2xl:h-[94px]">
+                <div className="relative h-22">
                   {hasFleetDonutData ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
@@ -4000,10 +4002,10 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.045] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
+            <div className="rentcore-command-analytics overflow-hidden p-2.5">
               <h3 className="app-shell-title text-base font-extrabold text-white">Возраст дебиторки</h3>
               <p className="text-xs text-slate-400">Финансовый срез</p>
-              <div className="mt-1.5 h-[130px] xl:h-[128px] 2xl:h-[136px]">
+              <div className="mt-1 h-[112px] xl:h-[76px] 2xl:h-[94px]">
                 {hasReceivablesAging ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={receivablesAgingData} margin={{ top: 8, right: 6, left: -18, bottom: 0 }}>

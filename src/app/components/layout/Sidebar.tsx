@@ -560,7 +560,7 @@ export function Sidebar({
                         'relative flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-[13px] transition-colors',
                         desktopCollapsed && 'sm:h-11 sm:justify-center sm:gap-0 sm:px-0',
                         isActive
-                          ? 'bg-primary text-primary-foreground shadow-[0_18px_34px_-24px_rgba(183,242,58,0.9)]'
+                          ? 'bg-lime-300/12 text-lime-100 shadow-[0_18px_34px_-24px_rgba(183,242,58,0.82),inset_0_0_0_1px_rgba(183,242,58,0.20)] before:absolute before:left-0 before:top-1/2 before:h-6 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-lime-300'
                           : 'text-white/62 hover:bg-white/[0.06] hover:text-sidebar-foreground',
                       )}
                     >
@@ -571,7 +571,7 @@ export function Sidebar({
                           'rounded-full px-2 py-0.5 text-[10px] font-medium',
                           desktopCollapsed && 'sm:absolute sm:right-1 sm:top-1 sm:min-w-4 sm:px-1 sm:text-[9px]',
                           isActive
-                            ? 'bg-black/15 text-primary-foreground'
+                            ? 'bg-lime-300/20 text-lime-100'
                             : item.section === 'service'
                               ? 'bg-amber-500/14 text-amber-300'
                               : 'bg-primary/14 text-primary',

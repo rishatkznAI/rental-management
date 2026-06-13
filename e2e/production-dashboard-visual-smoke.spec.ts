@@ -177,7 +177,7 @@ async function captureDashboardCase(
   await page.addInitScript(({ token, theme }) => {
     window.localStorage.setItem('app_auth_token', token);
     window.localStorage.setItem('theme', theme);
-    document.documentElement.classList.toggle('dark', theme === 'dark');
+    document.documentElement?.classList.toggle('dark', theme === 'dark');
   }, { token: config.token, theme: visualCase.theme });
 
   try {

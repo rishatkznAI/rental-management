@@ -359,6 +359,216 @@
     @apply rounded-2xl border border-border bg-card/85 text-card-foreground shadow-[0_24px_70px_-58px_rgba(0,0,0,0.5)] backdrop-blur-xl transition duration-200 hover:-translate-y-0.5 hover:border-primary/35 hover:bg-card;
   }
 
+  .rentcore-command-screen {
+    position: relative;
+    min-height: calc(100vh - 3.5rem);
+    overflow-x: hidden;
+    background:
+      radial-gradient(circle at 47% 39%, rgba(132, 204, 22, 0.14), transparent 24rem),
+      radial-gradient(circle at 83% 17%, rgba(34, 211, 238, 0.1), transparent 20rem),
+      linear-gradient(180deg, #071018 0%, #050a0e 54%, #020507 100%);
+    color: #e5edf4;
+  }
+
+  @media (min-width: 1024px) {
+    .rentcore-command-screen {
+      min-height: calc(100vh - 4rem);
+    }
+  }
+
+  .rentcore-command-screen::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(rgba(132, 204, 22, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(132, 204, 22, 0.035) 1px, transparent 1px),
+      radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.055), transparent 34rem);
+    background-size: 36px 36px, 36px 36px, auto;
+    opacity: 0.88;
+  }
+
+  .rentcore-command-shell {
+    position: relative;
+    border: 1px solid rgba(163, 230, 53, 0.16);
+    border-radius: 22px;
+    background:
+      linear-gradient(180deg, rgba(10, 18, 27, 0.82), rgba(4, 10, 15, 0.92)),
+      rgba(5, 10, 14, 0.88);
+    box-shadow:
+      0 30px 110px -82px rgba(0, 0, 0, 0.95),
+      inset 0 1px 0 rgba(255, 255, 255, 0.09),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+    backdrop-filter: blur(18px);
+  }
+
+  .rentcore-command-header,
+  .rentcore-command-panel,
+  .rentcore-command-analytics {
+    border: 1px solid rgba(214, 255, 183, 0.075);
+    background:
+      radial-gradient(circle at 18% 0%, rgba(132, 204, 22, 0.052), transparent 30%),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.014)),
+      rgba(7, 14, 21, 0.68);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.058),
+      0 24px 70px -62px rgba(0, 0, 0, 0.92);
+    backdrop-filter: blur(24px) saturate(128%);
+  }
+
+  .rentcore-command-header {
+    border-color: rgba(163, 230, 53, 0.17);
+    background:
+      radial-gradient(circle at 12% 0%, rgba(163, 230, 53, 0.18), transparent 34%),
+      linear-gradient(135deg, rgba(12, 24, 32, 0.92), rgba(5, 12, 18, 0.96));
+  }
+
+  .rentcore-command-kpi {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.105);
+    border-radius: 16px;
+    background:
+      radial-gradient(circle at 92% 0%, rgba(255, 255, 255, 0.09), transparent 34%),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.092), rgba(255, 255, 255, 0.026));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.085);
+    transition: border-color var(--motion-duration-fast) var(--motion-ease-standard), background var(--motion-duration-fast) var(--motion-ease-standard), transform var(--motion-duration-fast) var(--motion-ease-standard);
+  }
+
+  .rentcore-command-kpi::after,
+  .rentcore-command-card::after,
+  .rentcore-command-signal::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(90deg, transparent, rgba(163, 230, 53, 0.12), transparent);
+    opacity: 0;
+    transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+  }
+
+  .rentcore-command-kpi:hover,
+  .rentcore-command-card:hover,
+  .rentcore-command-signal:hover {
+    border-color: rgba(163, 230, 53, 0.36);
+    background-color: rgba(255, 255, 255, 0.045);
+    transform: translateY(-1px);
+  }
+
+  .rentcore-command-kpi:hover::after,
+  .rentcore-command-card:hover::after,
+  .rentcore-command-signal:hover::after {
+    opacity: 1;
+  }
+
+  .rentcore-command-card,
+  .rentcore-command-signal {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(214, 255, 183, 0.062);
+    border-radius: 15px;
+    background:
+      radial-gradient(circle at 10% 0%, rgba(190, 242, 100, 0.045), transparent 38%),
+      linear-gradient(145deg, rgba(20, 34, 42, 0.34), rgba(5, 11, 17, 0.24)),
+      rgba(3, 8, 12, 0.31);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.042),
+      inset 0 0 24px rgba(132, 204, 22, 0.018),
+      0 14px 42px -38px rgba(0, 0, 0, 0.86);
+    backdrop-filter: blur(22px) saturate(136%);
+    transition: border-color var(--motion-duration-fast) var(--motion-ease-standard), background-color var(--motion-duration-fast) var(--motion-ease-standard), transform var(--motion-duration-fast) var(--motion-ease-standard), box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
+  }
+
+  .rentcore-command-card {
+    min-height: 76px;
+  }
+
+  .rentcore-health-orb {
+    background:
+      radial-gradient(circle at 48% 46%, rgba(236, 252, 203, 0.24) 0 2%, transparent 9%),
+      radial-gradient(circle at center, rgba(4, 12, 17, 0.99) 0 42%, transparent 43%),
+      conic-gradient(from -90deg, #bef264 0deg var(--health-lime-angle), var(--health-warning-color, #facc15) var(--health-lime-angle) var(--health-angle), rgba(71, 85, 105, 0.18) var(--health-angle) 360deg);
+    box-shadow:
+      0 0 64px rgba(132, 204, 22, 0.19),
+      0 0 0 1px rgba(190, 242, 100, 0.2),
+      0 0 0 8px rgba(132, 204, 22, 0.014),
+      0 0 0 18px rgba(34, 211, 238, 0.01),
+      inset 0 0 34px rgba(132, 204, 22, 0.13),
+      inset 0 0 92px rgba(34, 211, 238, 0.045);
+  }
+
+  .rentcore-health-orb::before,
+  .rentcore-health-orb::after {
+    content: "";
+    position: absolute;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  .rentcore-health-orb::before {
+    inset: 13px;
+    border: 1px solid rgba(190, 242, 100, 0.2);
+    background:
+      radial-gradient(circle at center, transparent 0 47%, rgba(190, 242, 100, 0.075) 48% 50%, transparent 51%),
+      radial-gradient(circle at center, transparent 0 58%, rgba(34, 211, 238, 0.052) 59% 60%, transparent 61%),
+      repeating-radial-gradient(circle at center, transparent 0 23px, rgba(190, 242, 100, 0.07) 24px, transparent 25px);
+    filter: blur(0.1px);
+  }
+
+  .rentcore-health-orb::after {
+    inset: -22px;
+    background: radial-gradient(circle at center, rgba(190, 242, 100, 0.14), rgba(34, 211, 238, 0.052) 34%, transparent 68%);
+    filter: blur(20px);
+    opacity: 0.78;
+  }
+
+  .rentcore-health-core {
+    background:
+      radial-gradient(circle at 50% 0%, rgba(190, 242, 100, 0.09), transparent 46%),
+      radial-gradient(circle at center, rgba(7, 17, 22, 0.9), rgba(2, 7, 11, 0.98) 68%);
+    box-shadow:
+      inset 0 0 28px rgba(190, 242, 100, 0.08),
+      inset 0 0 54px rgba(34, 211, 238, 0.035),
+      0 0 0 1px rgba(236, 252, 203, 0.08),
+      0 0 42px rgba(132, 204, 22, 0.1);
+  }
+
+  .rentcore-command-analytics {
+    border-radius: 18px;
+    min-height: 160px;
+    background:
+      linear-gradient(rgba(163, 230, 53, 0.026) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(163, 230, 53, 0.02) 1px, transparent 1px),
+      radial-gradient(circle at 14% 0%, rgba(34, 211, 238, 0.03), transparent 36%),
+      linear-gradient(145deg, rgba(12, 24, 31, 0.5), rgba(3, 8, 12, 0.66));
+    background-size: 28px 28px, 28px 28px, auto;
+  }
+
+  .rentcore-command-connector {
+    opacity: 0.74;
+    filter: drop-shadow(0 0 4px rgba(163, 230, 53, 0.22));
+  }
+
+  .rentcore-command-node {
+    filter: drop-shadow(0 0 6px rgba(190, 242, 100, 0.58));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rentcore-command-kpi,
+    .rentcore-command-card,
+    .rentcore-command-signal {
+      transition: none;
+    }
+
+    .rentcore-command-kpi:hover,
+    .rentcore-command-card:hover,
+    .rentcore-command-signal:hover {
+      transform: none;
+    }
+  }
+
   .app-filter-bar {
     @apply flex flex-col gap-3 rounded-2xl border border-border bg-card/70 p-3 shadow-[0_18px_60px_-52px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:flex-row sm:flex-wrap sm:items-center;
   }

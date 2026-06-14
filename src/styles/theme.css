@@ -829,22 +829,29 @@
   }
 
   .rentcore-command-map {
-    --rc-map-gap: clamp(8px, 1.2vw, 14px);
-    --rc-orb-col: clamp(236px, 34%, 288px);
-    --rc-card-w: clamp(196px, calc((100% - var(--rc-orb-col) - (var(--rc-map-gap) * 2)) / 2), 230px);
-    --rc-orb-size: clamp(188px, calc(var(--rc-orb-col) - 54px), 222px);
+    --rc-map-gap: clamp(10px, 0.72vw, 16px);
+    --rc-map-w: clamp(760px, 58vw, 1120px);
+    --rc-orb-col: clamp(252px, 18vw, 360px);
+    --rc-orb-size: clamp(220px, 15vw, 300px);
+    --rc-card-w: calc((100% - var(--rc-orb-col) - (var(--rc-map-gap) * 2)) / 2);
     --rc-orb-radius: calc(var(--rc-orb-size) / 2);
     --rc-card-edge: var(--rc-card-w);
     --rc-ring-left: calc(50% - var(--rc-orb-radius));
     --rc-ring-right: calc(50% + var(--rc-orb-radius));
     --rc-link-w: calc(var(--rc-ring-left) - var(--rc-card-edge));
-    grid-template-columns: minmax(0, var(--rc-card-w)) minmax(var(--rc-orb-size), var(--rc-orb-col)) minmax(0, var(--rc-card-w));
+    grid-template-columns: minmax(0, 1fr) minmax(var(--rc-orb-size), var(--rc-orb-col)) minmax(0, 1fr);
     column-gap: var(--rc-map-gap);
-    max-width: calc((var(--rc-card-w) * 2) + var(--rc-orb-col) + (var(--rc-map-gap) * 2));
+    width: min(100%, var(--rc-map-w));
+    max-width: var(--rc-map-w);
   }
 
   .rentcore-command-column {
-    width: var(--rc-card-w);
+    width: 100%;
+  }
+
+  .rentcore-command-map .rentcore-command-card {
+    min-height: clamp(68px, calc(var(--rc-orb-size) * 0.31), 92px);
+    padding: clamp(8px, calc(var(--rc-orb-size) * 0.035), 12px);
   }
 
   .rentcore-command-center {
@@ -856,6 +863,11 @@
     flex: 0 0 auto;
     width: var(--rc-orb-size, 206px);
     height: var(--rc-orb-size, 206px);
+  }
+
+  .rentcore-command-map .rentcore-health-core {
+    width: clamp(108px, calc(var(--rc-orb-size) * 0.48), 144px);
+    height: clamp(108px, calc(var(--rc-orb-size) * 0.48), 144px);
   }
 
   .rentcore-command-links {
@@ -1077,9 +1089,9 @@
     }
 
     .rentcore-command-map {
-      --rc-orb-col: 242px;
-      --rc-orb-size: 176px;
-      --rc-card-w: clamp(196px, calc((100% - var(--rc-orb-col) - (var(--rc-map-gap) * 2)) / 2), 212px);
+      --rc-map-w: clamp(720px, 56vw, 980px);
+      --rc-orb-col: clamp(236px, 17vw, 318px);
+      --rc-orb-size: clamp(188px, 14vw, 258px);
     }
 
     .rentcore-health-core {
@@ -1476,9 +1488,9 @@
 
   @media (min-width: 1280px) and (max-height: 950px) {
     body.rentcore-dashboard-reference-mode .rentcore-command-map {
-      --rc-orb-col: 248px;
-      --rc-orb-size: 188px;
-      --rc-card-w: clamp(196px, calc((100% - var(--rc-orb-col) - (var(--rc-map-gap) * 2)) / 2), 212px);
+      --rc-map-w: clamp(720px, 56vw, 980px);
+      --rc-orb-col: clamp(236px, 17vw, 318px);
+      --rc-orb-size: clamp(188px, 14vw, 258px);
     }
 
     body.rentcore-dashboard-reference-mode .rentcore-health-core {

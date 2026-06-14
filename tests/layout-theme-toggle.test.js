@@ -6,6 +6,7 @@ const layoutSource = readFileSync(new URL('../src/app/components/layout/Layout.t
 const sidebarSource = readFileSync(new URL('../src/app/components/layout/Sidebar.tsx', import.meta.url), 'utf8');
 const settingsSource = readFileSync(new URL('../src/app/pages/Settings.tsx', import.meta.url), 'utf8');
 const themeContextSource = readFileSync(new URL('../src/app/contexts/ThemeContext.tsx', import.meta.url), 'utf8');
+const themeCssSource = readFileSync(new URL('../src/styles/theme.css', import.meta.url), 'utf8');
 
 test('app layout exposes the persisted theme toggle in the topbar', () => {
   assert.match(layoutSource, /useTheme\(\)/);
@@ -57,6 +58,12 @@ test('admin route keeps the common app shell around dashboard content', () => {
   assert.doesNotMatch(settingsSource, /admin-detail-sections/);
   assert.doesNotMatch(settingsSource, /scrollIntoView/);
   assert.doesNotMatch(settingsSource, /<aside\b/);
+});
+
+test('dashboard reference mode keeps sidebar global search visible', () => {
+  assert.match(sidebarSource, /data-sidebar-search/);
+  assert.match(themeCssSource, /rentcore-dashboard-reference-mode[\s\S]*\[data-sidebar-search\]/);
+  assert.doesNotMatch(themeCssSource, /rentcore-dashboard-reference-mode[\s\S]{0,160}aside > div > div:nth-child\(2\)[\s\S]{0,80}display:\s*none/);
 });
 
 test('admin dashboard overview uses theme-aware surfaces and controls', () => {

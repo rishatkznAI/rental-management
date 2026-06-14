@@ -455,7 +455,11 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className={cn('px-2.5 py-3', desktopCollapsed && 'sm:px-2')} ref={searchRef}>
+        <div
+          className={cn('px-2.5 py-3', desktopCollapsed && 'sm:px-2')}
+          data-sidebar-search
+          ref={searchRef}
+        >
           {desktopCollapsed ? (
             <button
               type="button"

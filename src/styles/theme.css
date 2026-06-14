@@ -376,8 +376,22 @@
       display: none;
     }
 
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:nth-child(2) {
-      display: none;
+    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside [data-sidebar-search] {
+      display: block;
+      padding: 12px 14px 8px;
+      border-bottom: 1px solid rgba(214, 255, 183, 0.06);
+      background: rgba(255, 255, 255, 0.012);
+    }
+
+    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside [data-sidebar-search] input {
+      height: 36px;
+      border-color: rgba(214, 255, 183, 0.12);
+      background: rgba(255, 255, 255, 0.055);
+      color: #eef7e7;
+    }
+
+    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside [data-sidebar-search] input::placeholder {
+      color: rgba(226, 232, 240, 0.42);
     }
 
     body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav {

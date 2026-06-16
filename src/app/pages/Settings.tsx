@@ -1706,7 +1706,7 @@ function getAdminModalMeta(activeModal: AdminModalKey | null, activeTab: AdminDe
   if (activeModal === 'system-settings') {
     return {
       title: 'Настройки системы',
-      description: 'Подготовленные вкладки системной конфигурации. Сохранение доступно только там, где уже подключены реальные API.',
+      description: 'Подготовленная конфигурация системы. Профиль компании и будущие настройки отображаются только для просмотра до подключения безопасного API сохранения.',
     };
   }
   if (activeModal === 'activity') {
@@ -1895,6 +1895,11 @@ function SystemSettingsModalContent({
       </TabsList>
 
       <TabsContent value="general" className="space-y-4">
+        <SettingsReadOnlyHeader
+          title="Общие настройки"
+          status="Только просмотр"
+          description="Вкладка показывает текущую подготовленную конфигурацию. Изменение этих параметров будет доступно отдельным этапом после подключения безопасного API сохранения."
+        />
         <div className="grid gap-4 md:grid-cols-2">
           <ReadonlySettingField label="Название компании / системы" value={companyName} />
           <ReadonlySettingField label="Часовой пояс" value={timezone} />
@@ -1911,16 +1916,25 @@ function SystemSettingsModalContent({
       </TabsContent>
 
       <TabsContent value="company" className="space-y-4">
+        <SettingsReadOnlyHeader
+          title="Компания"
+          status="Сохранение не подключено"
+          description="Здесь показана подготовленная конфигурация профиля компании. Редактирование пока не подключено: данные отображаются только для просмотра, а сохранение будет добавлено отдельным этапом после безопасного API."
+        />
         <div className="grid gap-4 md:grid-cols-2">
           <ReadonlySettingField label="Юридическое имя" value={settingText(appSettings, ['legalName', 'companyLegalName'], companyName)} />
           <ReadonlySettingField label="Контактный email" value={settingText(appSettings, ['companyEmail', 'supportEmail'], 'не подключено')} />
           <ReadonlySettingField label="Телефон офиса" value={settingText(appSettings, ['companyPhone', 'supportPhone'], 'не подключено')} />
           <ReadonlySettingField label="Основной офис" value={office} />
         </div>
-        <PreparedSettingsNote text="Реквизиты и офисы показаны как подготовленная форма. Отдельного безопасного API сохранения для профиля компании в этой панели сейчас нет." />
       </TabsContent>
 
       <TabsContent value="notifications" className="space-y-4">
+        <SettingsReadOnlyHeader
+          title="Уведомления"
+          status="Только просмотр"
+          description="Показаны подготовленные правила уведомлений и каналы, которые уже описывают будущую конфигурацию. Секреты и параметры доставки не редактируются из этой формы."
+        />
         <SettingsItemList
           items={[
             'Возвраты, приёмка, сервисные заявки и просроченные платежи отправляются в центр уведомлений.',
@@ -1932,6 +1946,11 @@ function SystemSettingsModalContent({
       </TabsContent>
 
       <TabsContent value="documents" className="space-y-4">
+        <SettingsReadOnlyHeader
+          title="Документы"
+          status="Только просмотр"
+          description="Вкладка фиксирует текущие договорённости по документному контуру без изменения шаблонов, нумерации или правил подписания."
+        />
         <SettingsItemList
           items={[
             'Шаблоны актов, спецификаций и документов живут в документном контуре приложения.',
@@ -1942,6 +1961,11 @@ function SystemSettingsModalContent({
       </TabsContent>
 
       <TabsContent value="security" className="space-y-4">
+        <SettingsReadOnlyHeader
+          title="Безопасность"
+          status="Только просмотр"
+          description="Показаны ориентиры по security-настройкам. Права, роли, авторизация и секреты остаются в существующих backend-механизмах."
+        />
         <SettingsItemList
           items={[
             'Роли и права проверяются на backend routes/domain helpers.',
@@ -1955,6 +1979,11 @@ function SystemSettingsModalContent({
       </TabsContent>
 
       <TabsContent value="integrations" className="space-y-4">
+        <SettingsReadOnlyHeader
+          title="Интеграции"
+          status="Только просмотр"
+          description="Показан обзор интеграций без вывода токенов и без формы редактирования подключений."
+        />
         <SettingsItemList
           items={[
             'MAX-бот, GSM/GPRS и внешние endpoints проверяются в разделе диагностики.',
@@ -1965,41 +1994,75 @@ function SystemSettingsModalContent({
       </TabsContent>
 
       <TabsContent value="demo" className="space-y-4">
+        <SettingsReadOnlyHeader
+          title="Демо / публичные"
+          status="Только просмотр"
+          description="Отображается текущее состояние демо и публичных параметров. Операции сброса и production safeguards остаются в разделе контроля системы."
+        />
         <div className="grid gap-4 md:grid-cols-2">
           <ReadonlySettingField label="Демо-режим" value={demoEnabled ? 'включён по app_settings' : 'не найден в app_settings'} />
           <ReadonlySettingField label="Публичные настройки" value={appSettings.length > 0 ? `${appSettings.length} записей доступно` : 'пока не подключено'} />
         </div>
-        <PreparedSettingsNote text="Демо-сброс и production safeguards остаются в разделе контроля системы; эта вкладка только показывает состояние." />
       </TabsContent>
 
-      <div className="flex justify-end border-t border-border/70 pt-4">
-        <Button type="button" disabled title="Для этой формы нет подключенного безопасного сохранения">
-          Сохранение пока не подключено
-        </Button>
-      </div>
+      <SettingsSaveUnavailableNote />
     </Tabs>
   );
 }
 
 function ReadonlySettingField({ label, value }: { label: string; value: React.ReactNode }) {
+  const text = String(value ?? '').trim();
+  const displayValue = text || 'не задано';
+  const isPlaceholder = ['не задано', 'не подключено', 'пока не подключено'].includes(displayValue.toLowerCase());
+
   return (
-    <label className="block space-y-2">
-      <span className="text-sm font-semibold text-foreground">{label}</span>
-      <input
-        readOnly
-        value={String(value ?? '')}
-        className="h-10 w-full rounded-[10px] border border-input bg-input-background px-3 text-sm text-foreground outline-none"
-      />
-    </label>
+    <div className="rounded-[14px] border border-border/80 bg-background/70 px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+      <p className={`mt-2 min-h-6 text-sm font-semibold leading-6 ${isPlaceholder ? 'text-muted-foreground' : 'text-foreground'}`}>
+        {displayValue}
+      </p>
+    </div>
   );
 }
 
 function ReadonlyToggle({ label, checked }: { label: string; checked: boolean }) {
   return (
-    <label className="flex items-center gap-3 rounded-[12px] border border-border/80 bg-background/70 px-3 py-3 text-sm font-semibold text-foreground">
-      <input type="checkbox" checked={checked} readOnly disabled className="h-4 w-4 accent-primary" />
+    <div className="flex items-center justify-between gap-3 rounded-[12px] border border-border/80 bg-background/70 px-3 py-3 text-sm font-semibold text-foreground">
       <span>{label}</span>
-    </label>
+      <Badge variant={checked ? 'success' : 'outline'}>{checked ? 'Включено' : 'Отключено'}</Badge>
+    </div>
+  );
+}
+
+function SettingsReadOnlyHeader({
+  title,
+  status,
+  description,
+}: {
+  title: string;
+  status: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-[14px] border border-border/80 bg-background/70 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-extrabold text-foreground">{title}</h3>
+        <Badge variant="info">{status}</Badge>
+      </div>
+      <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+function SettingsSaveUnavailableNote() {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-4">
+      <div>
+        <p className="text-sm font-semibold text-foreground">Редактирование будет доступно после подключения API сохранения</p>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">Сейчас эта модалка не отправляет изменения и не записывает данные в системные настройки.</p>
+      </div>
+      <Badge variant="outline">Без сохранения</Badge>
+    </div>
   );
 }
 

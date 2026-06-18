@@ -22,7 +22,9 @@ test('system settings modal has non-empty internal tabs and no fake save', () =>
   }
   assert.match(settingsSource, /data-testid="admin-system-settings-modal"/);
   assert.match(settingsSource, /Источник данных:/);
-  assert.match(settingsSource, /Сохранение пока не подключено/);
+  assert.match(settingsSource, /Сохранение не подключено/);
+  assert.match(settingsSource, /Редактирование будет доступно после подключения API сохранения/);
+  assert.doesNotMatch(settingsSource, /<input\s+readOnly/);
 });
 
 test('admin activity uses real audit endpoint and honest empty state', () => {

@@ -1438,7 +1438,7 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="diagnostics">
-          <ProductionDiagnosticsSection />
+          <ProductionDiagnosticsSection appSettings={appSettings} />
         </TabsContent>
 
         <TabsContent value="system-control">
@@ -1868,13 +1868,12 @@ function SystemSettingsModalContent({
   activeTab: SystemSettingsTab;
   onTabChange: (tab: SystemSettingsTab) => void;
 }) {
-  const source = appSettings.length > 0 ? 'реальные app_settings' : 'локальная конфигурация, сохранение пока не подключено';
   const companyName = settingText(appSettings, ['companyName', 'systemName', 'publicCompanyName'], 'Skytech Rental Management');
   const timezone = settingText(appSettings, ['timezone', 'timeZone'], 'Europe/Moscow');
   const currency = settingText(appSettings, ['currency', 'defaultCurrency'], 'RUB');
   const dateFormat = settingText(appSettings, ['dateFormat', 'defaultDateFormat'], 'DD.MM.YYYY');
   const office = settingText(appSettings, ['mainOffice', 'region', 'workingRegion'], 'Москва / основной офис');
-  const demoEnabled = Boolean(readSettingValue(appSettings, ['demoMode']) || readSettingValue(appSettings, ['publicDemoSettings']));
+  const demoEnabled = settingBoolean(appSettings, ['demoMode', 'publicDemoSettings'], false);
 
   return (
     <Tabs value={activeTab} onValueChange={value => onTabChange(value as SystemSettingsTab)} className="space-y-5" data-testid="admin-system-settings-modal">
@@ -1907,14 +1906,6 @@ function SystemSettingsModalContent({
           <ReadonlySettingField label="Формат даты" value={dateFormat} />
           <ReadonlySettingField label="Рабочий регион / основной офис" value={office} />
         </div>
-        <SettingsStatus
-          source={source}
-          statuses={[
-            { label: 'Включить уведомления', enabled: true },
-            { label: 'Показывать демо-данные', enabled: demoEnabled },
-            { label: 'Компактный режим интерфейса', enabled: false },
-          ]}
-        />
       </TabsContent>
 
       <TabsContent value="company" className="space-y-4">
@@ -2069,7 +2060,7 @@ function SettingsStatus({
   return (
     <div className="rounded-[14px] border border-primary/20 bg-primary/10 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm font-extrabold text-foreground">Диагностика</p>
+        <p className="text-sm font-extrabold text-foreground">Статусы интерфейса</p>
         <Badge variant="outline">Только просмотр</Badge>
       </div>
       <p className="mt-1 break-words text-sm text-muted-foreground">Источник данных: {source}.</p>
@@ -2087,6 +2078,17 @@ function SettingsStatus({
       ) : null}
     </div>
   );
+}
+
+function InterfaceStatusDiagnosticsCard({ appSettings }: { appSettings: AppSetting[] }) {
+  const source = appSettings.length > 0 ? 'реальные app_settings' : 'локальная конфигурация, сохранение пока не подключено';
+  const statuses = [
+    { label: 'Включить уведомления', enabled: settingBoolean(appSettings, ['notificationsEnabled', 'enableNotifications'], true) },
+    { label: 'Показывать демо-данные', enabled: settingBoolean(appSettings, ['demoMode', 'publicDemoSettings'], false) },
+    { label: 'Компактный режим интерфейса', enabled: settingBoolean(appSettings, ['compactMode', 'compactUi', 'compactInterfaceMode'], false) },
+  ];
+
+  return <SettingsStatus source={source} statuses={statuses} />;
 }
 
 function PreparedSettingsNote({ text }: { text: string }) {
@@ -2113,6 +2115,19 @@ function SettingsItemList({ items }: { items: string[] }) {
 function readSettingValue(appSettings: AppSetting[], keys: string[]): unknown {
   const normalizedKeys = new Set(keys.map(key => key.toLowerCase()));
   return appSettings.find(item => normalizedKeys.has(String(item.key || '').toLowerCase()))?.value;
+}
+
+function settingBoolean(appSettings: AppSetting[], keys: string[], fallback: boolean): boolean {
+  const value = readSettingValue(appSettings, keys);
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on', 'enabled', 'включено', 'включён', 'включен'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off', 'disabled', 'отключено', 'выключено', 'отключён', 'отключен', 'выключен'].includes(normalized)) return false;
+  }
+  if (value && typeof value === 'object') return true;
+  return fallback;
 }
 
 function settingText(appSettings: AppSetting[], keys: string[], fallback: string): string {
@@ -3379,7 +3394,7 @@ function SystemControlCenterSection() {
   );
 }
 
-function ProductionDiagnosticsSection() {
+function ProductionDiagnosticsSection({ appSettings }: { appSettings: AppSetting[] }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [demoResetStatus, setDemoResetStatus] = React.useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -3483,6 +3498,7 @@ function ProductionDiagnosticsSection() {
         </CardContent>
       </Card>
 
+      <InterfaceStatusDiagnosticsCard appSettings={appSettings} />
       <GanttRentalRepairDiagnosticsSection query={ganttRepairQuery} />
       <GanttRentalCleanupPreviewSection query={ganttCleanupPreviewQuery} />
 

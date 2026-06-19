@@ -1907,28 +1907,14 @@ function SystemSettingsModalContent({
           <ReadonlySettingField label="Формат даты" value={dateFormat} />
           <ReadonlySettingField label="Рабочий регион / основной офис" value={office} />
         </div>
-        <div className="rounded-[16px] border border-primary/35 bg-primary/10 p-5 shadow-[0_24px_70px_-46px_rgba(200,241,53,0.7)]">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div className="flex items-start gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-primary/30 bg-primary/15 text-primary">
-                <ShieldCheck className="h-5 w-5" />
-              </span>
-              <div>
-                <h3 className="text-base font-extrabold text-foreground">Контроль системы</h3>
-                <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-                  Управляет поведением интерфейса, демо-режимом и системными уведомлениями.
-                </p>
-              </div>
-            </div>
-            <Badge variant="outline" className="w-fit border-primary/30 bg-background/60">Только просмотр</Badge>
-          </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <ReadonlyToggle label="Включить уведомления" checked />
-            <ReadonlyToggle label="Показывать демо-данные" checked={demoEnabled} />
-            <ReadonlyToggle label="Компактный режим интерфейса" checked={false} />
-          </div>
-        </div>
-        <SettingsStatus source={source} />
+        <SettingsStatus
+          source={source}
+          statuses={[
+            { label: 'Включить уведомления', enabled: true },
+            { label: 'Показывать демо-данные', enabled: demoEnabled },
+            { label: 'Компактный режим интерфейса', enabled: false },
+          ]}
+        />
       </TabsContent>
 
       <TabsContent value="company" className="space-y-4">
@@ -2041,15 +2027,6 @@ function ReadonlySettingField({ label, value }: { label: string; value: React.Re
   );
 }
 
-function ReadonlyToggle({ label, checked }: { label: string; checked: boolean }) {
-  return (
-    <div className="flex min-h-[62px] items-center justify-between gap-3 rounded-[12px] border border-primary/20 bg-background/80 px-4 py-3 text-sm font-semibold text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-      <span className="leading-5">{label}</span>
-      <Badge variant={checked ? 'success' : 'outline'}>{checked ? 'Включено' : 'Отключено'}</Badge>
-    </div>
-  );
-}
-
 function SettingsReadOnlyHeader({
   title,
   status,
@@ -2082,11 +2059,32 @@ function SettingsSaveUnavailableNote() {
   );
 }
 
-function SettingsStatus({ source }: { source: string }) {
+function SettingsStatus({
+  source,
+  statuses,
+}: {
+  source: string;
+  statuses?: Array<{ label: string; enabled: boolean }>;
+}) {
   return (
     <div className="rounded-[14px] border border-primary/20 bg-primary/10 p-4">
-      <p className="text-sm font-extrabold text-foreground">Статус настроек</p>
-      <p className="mt-1 text-sm text-muted-foreground">Источник данных: {source}.</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm font-extrabold text-foreground">Диагностика</p>
+        <Badge variant="outline">Только просмотр</Badge>
+      </div>
+      <p className="mt-1 break-words text-sm text-muted-foreground">Источник данных: {source}.</p>
+      {statuses && statuses.length > 0 ? (
+        <div className="mt-3 grid min-w-0 gap-2 md:grid-cols-3">
+          {statuses.map(status => (
+            <div key={status.label} className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-[12px] border border-border/70 bg-background/70 px-3 py-2">
+              <span className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground">{status.label}</span>
+              <Badge variant={status.enabled ? 'success' : 'outline'} className="shrink-0">
+                {status.enabled ? 'Включено' : 'Отключено'}
+              </Badge>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

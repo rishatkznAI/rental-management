@@ -1907,10 +1907,19 @@ function SystemSettingsModalContent({
           <ReadonlySettingField label="Формат даты" value={dateFormat} />
           <ReadonlySettingField label="Рабочий регион / основной офис" value={office} />
         </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <ReadonlyToggle label="Включить уведомления" checked />
-          <ReadonlyToggle label="Показывать демо-данные" checked={demoEnabled} />
-          <ReadonlyToggle label="Компактный режим интерфейса" checked={false} />
+        <div className="rounded-[14px] border border-border/80 bg-background/70 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-extrabold text-foreground">Контроль системы</h3>
+            <Badge variant="outline">Только просмотр</Badge>
+          </div>
+          <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">
+            Управляет поведением интерфейса, демо-режимом и системными уведомлениями.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <ReadonlyToggle label="Включить уведомления" checked />
+            <ReadonlyToggle label="Показывать демо-данные" checked={demoEnabled} />
+            <ReadonlyToggle label="Компактный режим интерфейса" checked={false} />
+          </div>
         </div>
         <SettingsStatus source={source} />
       </TabsContent>
@@ -2058,8 +2067,8 @@ function SettingsSaveUnavailableNote() {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-4">
       <div>
-        <p className="text-sm font-semibold text-foreground">Редактирование будет доступно после подключения API сохранения</p>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">Сейчас эта модалка не отправляет изменения и не записывает данные в системные настройки.</p>
+        <p className="text-sm font-semibold text-foreground">Режим только просмотра</p>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">Изменение параметров будет доступно после подключения безопасного API сохранения.</p>
       </div>
       <Badge variant="outline">Без сохранения</Badge>
     </div>

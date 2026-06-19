@@ -1907,14 +1907,21 @@ function SystemSettingsModalContent({
           <ReadonlySettingField label="Формат даты" value={dateFormat} />
           <ReadonlySettingField label="Рабочий регион / основной офис" value={office} />
         </div>
-        <div className="rounded-[14px] border border-border/80 bg-background/70 p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-extrabold text-foreground">Контроль системы</h3>
-            <Badge variant="outline">Только просмотр</Badge>
+        <div className="rounded-[16px] border border-primary/35 bg-primary/10 p-5 shadow-[0_24px_70px_-46px_rgba(200,241,53,0.7)]">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-primary/30 bg-primary/15 text-primary">
+                <ShieldCheck className="h-5 w-5" />
+              </span>
+              <div>
+                <h3 className="text-base font-extrabold text-foreground">Контроль системы</h3>
+                <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+                  Управляет поведением интерфейса, демо-режимом и системными уведомлениями.
+                </p>
+              </div>
+            </div>
+            <Badge variant="outline" className="w-fit border-primary/30 bg-background/60">Только просмотр</Badge>
           </div>
-          <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">
-            Управляет поведением интерфейса, демо-режимом и системными уведомлениями.
-          </p>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <ReadonlyToggle label="Включить уведомления" checked />
             <ReadonlyToggle label="Показывать демо-данные" checked={demoEnabled} />
@@ -2036,8 +2043,8 @@ function ReadonlySettingField({ label, value }: { label: string; value: React.Re
 
 function ReadonlyToggle({ label, checked }: { label: string; checked: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[12px] border border-border/80 bg-background/70 px-3 py-3 text-sm font-semibold text-foreground">
-      <span>{label}</span>
+    <div className="flex min-h-[62px] items-center justify-between gap-3 rounded-[12px] border border-primary/20 bg-background/80 px-4 py-3 text-sm font-semibold text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <span className="leading-5">{label}</span>
       <Badge variant={checked ? 'success' : 'outline'}>{checked ? 'Включено' : 'Отключено'}</Badge>
     </div>
   );

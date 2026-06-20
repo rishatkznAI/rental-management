@@ -28,6 +28,7 @@ import { calculateRentalAmount, formatCurrency, getRentalDays } from '../lib/uti
 import { isEquipmentBusy } from '../lib/rental-conflicts';
 import { buildClientReceivables, buildRentalDebtRows } from '../lib/finance';
 import { EquipmentCombobox } from '../components/ui/EquipmentCombobox';
+import { clientLabel } from '../components/ui/ClientCombobox';
 import { filterRentalManagerUsers } from '../lib/userStorage';
 import { staffService, type StaffOption } from '../services/staff.service';
 
@@ -139,18 +140,18 @@ export default function RentalNew() {
         : null;
     if (selected) {
       setClientId(selected.id);
-      setClient(selected.company);
+      setClient(clientLabel(selected));
     }
   }, [clientId, clients, searchParams]);
 
   useEffect(() => {
     if (!clientId || client) return;
     const selected = clients.find(item => item.id === clientId);
-    if (selected) setClient(selected.company);
+    if (selected) setClient(clientLabel(selected));
   }, [client, clientId, clients]);
 
-  const selectedClient = clients.find(item => item.id === clientId) ?? clients.find(item => item.company === client);
-  const selectedClientName = selectedClient?.company ?? client;
+  const selectedClient = clients.find(item => item.id === clientId) ?? clients.find(item => clientLabel(item) === client);
+  const selectedClientName = selectedClient ? clientLabel(selectedClient) : client;
   const selectedClientObjects = useMemo(
     () => clientObjects.filter(item => item.clientId === selectedClient?.id && item.status !== 'archived'),
     [clientObjects, selectedClient?.id],
@@ -297,11 +298,13 @@ export default function RentalNew() {
                   onValueChange={(value) => {
                     const selected = clients.find(item => item.id === value);
                     setClientId(value);
-                    setClient(selected?.company ?? '');
+                    setClient(selected ? clientLabel(selected) : '');
                   }}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Выберите клиента" />
+                    <SelectValue placeholder="Выберите клиента">
+                      {selectedClient ? selectedClientName : undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {clients.map(c => (

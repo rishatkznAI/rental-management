@@ -101,3 +101,17 @@ test('documents quick action can open rental document wizard with chain context'
   assert.match(source, /returnDate: quickActionContext\.returnDate \|\| quickActionRental\?\.actualReturnDate/);
   assert.match(source, /setWizardForm\(initialClient \? fillWizardClientFields\(nextForm, initialClient\) : nextForm\)/);
 });
+
+test('documents rental selects render selected labels from id fallback', () => {
+  assert.match(source, /const selectedWizardRentalLabel = React\.useMemo/);
+  assert.match(source, /rentalReferenceOptions\.find\(option => option\.id === wizardForm\.rentalId\)\?\.label/);
+  assert.match(source, /getRentalLabel\(rentalsById\.get\(wizardForm\.rentalId\)\)/);
+  assert.match(source, /getGanttReferenceLabel\(ganttByRentalId\.get\(wizardForm\.rentalId\)\)/);
+  assert.match(source, /<SelectValue placeholder="Выберите аренду">\{selectedWizardRentalLabel \|\| undefined\}<\/SelectValue>/);
+
+  assert.match(source, /const selectedContractRentalLabel = React\.useMemo/);
+  assert.match(source, /relatedRentalOptions\.find\(option => option\.id === contractForm\.rentalId\)\?\.label/);
+  assert.match(source, /getRentalLabel\(rentalsById\.get\(contractForm\.rentalId\)\)/);
+  assert.match(source, /getGanttReferenceLabel\(ganttByRentalId\.get\(contractForm\.rentalId\)\)/);
+  assert.match(source, /<SelectValue placeholder="Без аренды">\{selectedContractRentalLabel \|\| undefined\}<\/SelectValue>/);
+});

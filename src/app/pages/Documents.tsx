@@ -1029,6 +1029,18 @@ export default function Documents() {
         || gantt?.client === contractForm.client;
     });
   }, [contractForm.client, contractForm.clientId, ganttByRentalId, rentalReferenceOptions, rentalsById]);
+  const selectedWizardRentalLabel = React.useMemo(() => {
+    if (!wizardForm.rentalId) return '';
+    return rentalReferenceOptions.find(option => option.id === wizardForm.rentalId)?.label
+      || getRentalLabel(rentalsById.get(wizardForm.rentalId))
+      || getGanttReferenceLabel(ganttByRentalId.get(wizardForm.rentalId));
+  }, [ganttByRentalId, rentalReferenceOptions, rentalsById, wizardForm.rentalId]);
+  const selectedContractRentalLabel = React.useMemo(() => {
+    if (!contractForm.rentalId) return '';
+    return relatedRentalOptions.find(option => option.id === contractForm.rentalId)?.label
+      || getRentalLabel(rentalsById.get(contractForm.rentalId))
+      || getGanttReferenceLabel(ganttByRentalId.get(contractForm.rentalId));
+  }, [contractForm.rentalId, ganttByRentalId, relatedRentalOptions, rentalsById]);
   const selectedRental = contractForm.rentalId ? rentalsById.get(contractForm.rentalId) : undefined;
   const rentalEquipmentIds = React.useMemo(() => {
     if (!selectedRental) return new Set<string>();
@@ -2905,7 +2917,7 @@ export default function Documents() {
                             placeholder="Поиск аренды, клиента или техники"
                           />
                           <Select value={wizardForm.rentalId || 'none'} onValueChange={applyRentalToWizard}>
-                            <SelectTrigger><SelectValue placeholder="Выберите аренду" /></SelectTrigger>
+                            <SelectTrigger><SelectValue placeholder="Выберите аренду">{selectedWizardRentalLabel || undefined}</SelectValue></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">Не выбрана</SelectItem>
                               {rentalReferenceOptions.map(rental => <SelectItem key={rental.id} value={rental.id}>{rental.label}</SelectItem>)}
@@ -3169,7 +3181,7 @@ export default function Documents() {
                       }))}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Без аренды" />
+                        <SelectValue placeholder="Без аренды">{selectedContractRentalLabel || undefined}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Без аренды</SelectItem>

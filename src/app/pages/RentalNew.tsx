@@ -21,7 +21,7 @@ import { rentalsService } from '../services/rentals.service';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData } from '../mock-data';
-import type { EquipmentStatus } from '../types';
+import type { ClientContract, ClientObject, EquipmentStatus } from '../types';
 import { canEquipmentParticipateInRentals } from '../lib/equipmentClassification';
 import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { calculateRentalAmount, formatCurrency, getRentalDays } from '../lib/utils';
@@ -31,6 +31,23 @@ import { EquipmentCombobox } from '../components/ui/EquipmentCombobox';
 import { clientLabel } from '../components/ui/ClientCombobox';
 import { filterRentalManagerUsers } from '../lib/userStorage';
 import { staffService, type StaffOption } from '../services/staff.service';
+
+const selectId = (value: unknown) => (value === undefined || value === null ? '' : String(value));
+
+const clientObjectLabel = (object: ClientObject) => {
+  const name = String(object.name || '').trim();
+  const address = String(object.address || '').trim();
+  if (name && address) return `${name} · ${address}`;
+  return name || address || 'Объект без названия';
+};
+
+const clientContractLabel = (contract: ClientContract) => {
+  const number = String(contract.number || '').trim();
+  const title = String(contract.title || '').trim();
+  const date = String(contract.date || '').trim();
+  if (number && date) return `${number} · ${date}`;
+  return number || title || date || 'Договор без номера';
+};
 
 export default function RentalNew() {
   const navigate = useNavigate();
@@ -134,43 +151,74 @@ export default function RentalNew() {
     const requestedClientId = searchParams.get('clientId');
     const requestedClientName = searchParams.get('client');
     const selected = requestedClientId
-      ? clients.find(item => item.id === requestedClientId)
+      ? clients.find(item => selectId(item.id) === requestedClientId)
       : requestedClientName
         ? clients.find(item => item.company === requestedClientName)
         : null;
     if (selected) {
-      setClientId(selected.id);
+      setClientId(selectId(selected.id));
       setClient(clientLabel(selected));
     }
   }, [clientId, clients, searchParams]);
 
   useEffect(() => {
     if (!clientId || client) return;
-    const selected = clients.find(item => item.id === clientId);
+    const selected = clients.find(item => selectId(item.id) === clientId);
     if (selected) setClient(clientLabel(selected));
   }, [client, clientId, clients]);
 
-  const selectedClient = clients.find(item => item.id === clientId) ?? clients.find(item => clientLabel(item) === client);
+  const selectedClient = clients.find(item => selectId(item.id) === clientId) ?? clients.find(item => clientLabel(item) === client);
   const selectedClientName = selectedClient ? clientLabel(selectedClient) : client;
   const selectedClientObjects = useMemo(
-    () => clientObjects.filter(item => item.clientId === selectedClient?.id && item.status !== 'archived'),
+    () => clientObjects.filter(item => selectId(item.clientId) === selectId(selectedClient?.id) && item.status !== 'archived'),
     [clientObjects, selectedClient?.id],
   );
+  const objectOptions = useMemo(
+    () => selectedClientObjects.map(object => ({
+      id: selectId(object.id),
+      label: clientObjectLabel(object),
+    })),
+    [selectedClientObjects],
+  );
+  const selectedObjectOption = objectOptions.find(option => option.id === objectId);
   const selectedClientContracts = useMemo(
     () => clientContracts.filter(item =>
-      item.clientId === selectedClient?.id &&
+      selectId(item.clientId) === selectId(selectedClient?.id) &&
       item.status !== 'archived' &&
-      (!objectId || !item.objectId || item.objectId === objectId)
+      (!objectId || !item.objectId || selectId(item.objectId) === objectId)
     ),
     [clientContracts, objectId, selectedClient?.id],
   );
+  const contractOptions = useMemo(
+    () => selectedClientContracts.map(contract => ({
+      id: selectId(contract.id),
+      label: clientContractLabel(contract),
+    })),
+    [selectedClientContracts],
+  );
+  const selectedContractOption = contractOptions.find(option => option.id === contractId);
   useEffect(() => {
-    setObjectId('');
-    setContractId('');
-  }, [clientId]);
+    if (!selectedClient) {
+      setObjectId('');
+      setContractId('');
+      return;
+    }
+    setObjectId(currentObjectId => (
+      currentObjectId && !objectOptions.some(option => option.id === currentObjectId)
+        ? ''
+        : currentObjectId
+    ));
+  }, [objectOptions, selectedClient]);
+  useEffect(() => {
+    setContractId(currentContractId => (
+      currentContractId && !contractOptions.some(option => option.id === currentContractId)
+        ? ''
+        : currentContractId
+    ));
+  }, [contractOptions]);
   useEffect(() => {
     if (selectedClientObjects.length === 1 && !objectId) {
-      setObjectId(selectedClientObjects[0].id);
+      setObjectId(selectId(selectedClientObjects[0].id));
     }
   }, [objectId, selectedClientObjects]);
   const rentalDebtRows = useMemo(() => buildRentalDebtRows(ganttRents, payments), [ganttRents, payments]);
@@ -296,9 +344,11 @@ export default function RentalNew() {
                 <Select
                   value={clientId}
                   onValueChange={(value) => {
-                    const selected = clients.find(item => item.id === value);
+                    const selected = clients.find(item => selectId(item.id) === value);
                     setClientId(value);
                     setClient(selected ? clientLabel(selected) : '');
+                    setObjectId('');
+                    setContractId('');
                   }}
                 >
                   <SelectTrigger>
@@ -308,7 +358,7 @@ export default function RentalNew() {
                   </SelectTrigger>
                   <SelectContent>
                     {clients.map(c => (
-                      <SelectItem key={c.id} value={c.id}>{c.company}</SelectItem>
+                      <SelectItem key={c.id} value={selectId(c.id)}>{c.company}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -374,12 +424,16 @@ export default function RentalNew() {
                       }}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Выберите объект" />
+                        {selectedObjectOption ? (
+                          <span data-slot="select-value" className="truncate">{selectedObjectOption.label}</span>
+                        ) : (
+                          <SelectValue placeholder="Выберите объект" />
+                        )}
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Без объекта</SelectItem>
-                        {selectedClientObjects.map(object => (
-                          <SelectItem key={object.id} value={object.id}>{object.name} · {object.address}</SelectItem>
+                        {objectOptions.map(option => (
+                          <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -387,17 +441,27 @@ export default function RentalNew() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Договор <span className="text-red-500">*</span></label>
-                  <Select value={contractId || 'none'} onValueChange={(value) => setContractId(value === 'none' ? '' : value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите договор" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Выберите договор</SelectItem>
-                      {selectedClientContracts.map(contract => (
-                        <SelectItem key={contract.id} value={contract.id}>{contract.number}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {contractOptions.length === 0 ? (
+                    <p className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700">
+                      Для выбранного клиента и объекта нет активных договоров. Сначала добавьте договор в карточке клиента.
+                    </p>
+                  ) : (
+                    <Select value={contractId || 'none'} onValueChange={(value) => setContractId(value === 'none' ? '' : value)}>
+                      <SelectTrigger>
+                        {selectedContractOption ? (
+                          <span data-slot="select-value" className="truncate">{selectedContractOption.label}</span>
+                        ) : (
+                          <SelectValue placeholder="Выберите договор" />
+                        )}
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Выберите договор</SelectItem>
+                        {contractOptions.map(option => (
+                          <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               </div>
             )}

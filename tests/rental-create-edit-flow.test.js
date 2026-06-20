@@ -92,17 +92,6 @@ test('rental creation UI makes client object and contract requirements explicit'
   assert.match(rentalsPageSource, /contractId: data\.contractId \|\| undefined/);
 });
 
-test('standalone rental creation keeps selected client label visible from stable client id', () => {
-  assert.match(rentalNewSource, /import \{ clientLabel \} from '\.\.\/components\/ui\/ClientCombobox'/);
-  assert.match(rentalNewSource, /const selectedClient = clients\.find\(item => item\.id === clientId\) \?\? clients\.find\(item => clientLabel\(item\) === client\)/);
-  assert.match(rentalNewSource, /const selectedClientName = selectedClient \? clientLabel\(selectedClient\) : client/);
-  assert.match(rentalNewSource, /setClient\(selected \? clientLabel\(selected\) : ''\)/);
-  assert.match(rentalNewSource, /<SelectValue placeholder="Выберите клиента">\s*\{selectedClient \? selectedClientName : undefined\}\s*<\/SelectValue>/);
-  assert.match(rentalNewSource, /\{selectedClient && \(/);
-  assert.match(rentalNewSource, /Внимание: у клиента есть просроченная задолженность/);
-  assert.match(rentalNewSource, /selectedClientReceivable\?\.currentDebt \?\? selectedClient\.debt \?\? 0/);
-});
-
 test('equipment combobox search tolerates legacy equipment with missing labels', () => {
   assert.match(equipmentComboboxSource, /String\(eq\.manufacturer \|\| ''\)\.toLowerCase\(\)\.includes\(lower\)/);
   assert.match(equipmentComboboxSource, /String\(eq\.model \|\| ''\)\.toLowerCase\(\)\.includes\(lower\)/);

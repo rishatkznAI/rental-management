@@ -49,6 +49,12 @@ const clientContractLabel = (contract: ClientContract) => {
   return number || title || date || 'Договор без номера';
 };
 
+const managerOptionLabel = (manager: StaffOption) => {
+  const name = String(manager.name || '').trim();
+  const email = String((manager as StaffOption & { email?: unknown }).email || '').trim();
+  return name || email || 'Менеджер без имени';
+};
+
 export default function RentalNew() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -197,6 +203,14 @@ export default function RentalNew() {
     [selectedClientContracts],
   );
   const selectedContractOption = contractOptions.find(option => option.id === contractId);
+  const managerOptions = useMemo(
+    () => managers.map(item => ({
+      id: selectId(item.id),
+      label: managerOptionLabel(item),
+    })),
+    [managers],
+  );
+  const selectedManagerOption = managerOptions.find(option => option.id === managerId);
   useEffect(() => {
     if (!selectedClient) {
       setObjectId('');
@@ -529,29 +543,40 @@ export default function RentalNew() {
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Менеджер</label>
-                <Select
-                  value={managerId || 'none'}
-                  onValueChange={(value) => {
-                    if (value === 'none') {
-                      setManagerId('');
-                      setManager('');
-                      return;
-                    }
-                    const selected = managers.find(item => item.id === value);
-                    setManagerId(value);
-                    setManager(selected?.name ?? '');
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Выберите менеджера" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Не назначен</SelectItem>
-                    {managers.map(item => (
-                      <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {managerOptions.length === 0 ? (
+                  <p className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700">
+                    Нет доступных менеджеров для назначения.
+                  </p>
+                ) : (
+                  <Select
+                    value={managerId || 'none'}
+                    onValueChange={(value) => {
+                      if (value === 'none') {
+                        setManagerId('');
+                        setManager('');
+                        return;
+                      }
+                      const selected = managers.find(item => selectId(item.id) === value);
+                      const selectedLabel = selected ? managerOptionLabel(selected) : '';
+                      setManagerId(value);
+                      setManager(selectedLabel);
+                    }}
+                  >
+                    <SelectTrigger>
+                      {selectedManagerOption ? (
+                        <span data-slot="select-value" className="truncate">{selectedManagerOption.label}</span>
+                      ) : (
+                        <SelectValue placeholder="Выберите менеджера" />
+                      )}
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Не назначен</SelectItem>
+                      {managerOptions.map(option => (
+                        <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Ставка в день (₽)</label>
@@ -606,7 +631,7 @@ export default function RentalNew() {
 
             <div className="flex gap-3 pt-4">
               <Button type="submit" disabled={isSubmitting || !client || !objectId || !contractId || !equipmentId || !startDate || !endDate || conflictWarn}>
-                {isSubmitting ? 'Создание…' : 'Создать договор'}
+                {isSubmitting ? 'Создание…' : 'Создать аренду'}
               </Button>
               <Button
                 type="button"

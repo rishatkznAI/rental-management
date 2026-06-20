@@ -79,6 +79,26 @@ test('standalone rental creation form loads manager options', () => {
   assert.match(rentalNewSource, /Выберите менеджера/);
 });
 
+test('standalone rental creation keeps selected manager label visible from stable string id', () => {
+  assert.match(rentalNewSource, /const managerOptionLabel = \(manager: StaffOption\) => \{/);
+  assert.match(rentalNewSource, /return name \|\| email \|\| 'Менеджер без имени'/);
+  assert.match(rentalNewSource, /id: selectId\(item\.id\),\s*label: managerOptionLabel\(item\)/);
+  assert.match(rentalNewSource, /const selectedManagerOption = managerOptions\.find\(option => option\.id === managerId\)/);
+  assert.match(rentalNewSource, /const selected = managers\.find\(item => selectId\(item\.id\) === value\)/);
+  assert.match(rentalNewSource, /setManager\(selectedLabel\)/);
+  assert.match(rentalNewSource, /<span data-slot="select-value" className="truncate">\{selectedManagerOption\.label\}<\/span>/);
+  assert.match(rentalNewSource, /<SelectItem key=\{option\.id\} value=\{option\.id\}>\{option\.label\}<\/SelectItem>/);
+  assert.match(rentalNewSource, /Нет доступных менеджеров для назначения\./);
+});
+
+test('standalone rental creation submit button creates a rental, not a contract', () => {
+  const submitActions = extract(rentalNewSource, '<div className="flex gap-3 pt-4">', '</div>');
+
+  assert.match(submitActions, /<Button type="submit"/);
+  assert.match(submitActions, /'Создать аренду'/);
+  assert.doesNotMatch(submitActions, /Создать договор/);
+});
+
 test('rental creation UI makes client object and contract requirements explicit', () => {
   assert.match(rentalNewSource, /Объект клиента <span className="text-red-500">\*<\/span>/);
   assert.match(rentalNewSource, /Договор <span className="text-red-500">\*<\/span>/);

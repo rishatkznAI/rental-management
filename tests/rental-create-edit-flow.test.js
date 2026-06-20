@@ -92,11 +92,28 @@ test('rental creation UI makes client object and contract requirements explicit'
   assert.match(rentalsPageSource, /contractId: data\.contractId \|\| undefined/);
 });
 
+test('standalone rental creation keeps object and contract selects controlled by stable string ids', () => {
+  assert.match(rentalNewSource, /const selectId = \(value: unknown\) => \(value === undefined \|\| value === null \? '' : String\(value\)\)/);
+  assert.match(rentalNewSource, /id: selectId\(object\.id\),\s*label: clientObjectLabel\(object\)/);
+  assert.match(rentalNewSource, /id: selectId\(contract\.id\),\s*label: clientContractLabel\(contract\)/);
+  assert.match(rentalNewSource, /setObjectId\(value === 'none' \? '' : value\);\s*setContractId\(''\);/);
+  assert.match(rentalNewSource, /setClient\(selected \? clientLabel\(selected\) : ''\);\s*setObjectId\(''\);\s*setContractId\(''\);/);
+  assert.doesNotMatch(rentalNewSource, /useEffect\(\(\) => \{\s*setObjectId\(''\);\s*setContractId\(''\);\s*\}, \[clientId\]\)/);
+  assert.match(rentalNewSource, /<span data-slot="select-value" className="truncate">\{selectedObjectOption\.label\}<\/span>/);
+  assert.match(rentalNewSource, /<SelectValue placeholder="Выберите объект" \/>/);
+  assert.match(rentalNewSource, /<span data-slot="select-value" className="truncate">\{selectedContractOption\.label\}<\/span>/);
+  assert.match(rentalNewSource, /<SelectValue placeholder="Выберите договор" \/>/);
+  assert.match(rentalNewSource, /return name \|\| address \|\| 'Объект без названия'/);
+  assert.match(rentalNewSource, /return number \|\| title \|\| date \|\| 'Договор без номера'/);
+  assert.match(rentalNewSource, /Для выбранного клиента и объекта нет активных договоров/);
+});
+
 test('standalone rental creation keeps selected client label visible from stable client id', () => {
   assert.match(rentalNewSource, /import \{ clientLabel \} from '\.\.\/components\/ui\/ClientCombobox'/);
-  assert.match(rentalNewSource, /const selectedClient = clients\.find\(item => item\.id === clientId\) \?\? clients\.find\(item => clientLabel\(item\) === client\)/);
+  assert.match(rentalNewSource, /const selectedClient = clients\.find\(item => selectId\(item\.id\) === clientId\) \?\? clients\.find\(item => clientLabel\(item\) === client\)/);
   assert.match(rentalNewSource, /const selectedClientName = selectedClient \? clientLabel\(selectedClient\) : client/);
   assert.match(rentalNewSource, /setClient\(selected \? clientLabel\(selected\) : ''\)/);
+  assert.match(rentalNewSource, /<SelectItem key=\{c\.id\} value=\{selectId\(c\.id\)\}>\{c\.company\}<\/SelectItem>/);
   assert.match(rentalNewSource, /<SelectValue placeholder="Выберите клиента">\s*\{selectedClient \? selectedClientName : undefined\}\s*<\/SelectValue>/);
   assert.match(rentalNewSource, /\{selectedClient && \(/);
   assert.match(rentalNewSource, /Внимание: у клиента есть просроченная задолженность/);

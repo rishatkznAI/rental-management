@@ -1315,6 +1315,7 @@ export default function Rentals() {
   const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<RentalWorkspaceTab>('list');
+  const [showMovementSheet, setShowMovementSheet] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_RENTAL_LIST_PAGE_SIZE);
   const [filterModel, setFilterModel] = useState('');
@@ -1354,7 +1355,7 @@ export default function Rentals() {
     placeholderData: previous => previous,
   });
   const classicRentalData = rentalsPage?.items ?? EMPTY_RENTALS;
-  const shouldLoadTimelineData = activeWorkspaceTab === 'planner' || activeWorkspaceTab === 'movement';
+  const shouldLoadTimelineData = activeWorkspaceTab === 'planner' || activeWorkspaceTab === 'movement' || showMovementSheet;
 
   const { data: ganttData = EMPTY_GANTT_RENTALS } = useQuery({
     queryKey: RENTAL_KEYS.gantt,
@@ -1806,7 +1807,6 @@ export default function Rentals() {
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [showDowntimeModal, setShowDowntimeModal] = useState(false);
   const [showNewRentalModal, setShowNewRentalModal] = useState(false);
-  const [showMovementSheet, setShowMovementSheet] = useState(false);
   const [showApprovalHistorySheet, setShowApprovalHistorySheet] = useState(false);
   const [preselectedEquipmentInv, setPreselectedEquipmentInv] = useState('');
   const [preselectedEquipmentId, setPreselectedEquipmentId] = useState('');
@@ -2506,6 +2506,7 @@ export default function Rentals() {
         return bTime - aTime;
       })
       .map(event => {
+        const eventPhotos = Array.isArray(event.photos) ? event.photos : [];
         const resolution = resolveMovementEquipment(
           { ...event, sourceCollection: 'shipping_photos' },
           resolverContext,
@@ -2526,11 +2527,12 @@ export default function Rentals() {
           || '';
         return {
           ...event,
+          photos: eventPhotos,
           rental,
           delivery,
           equipment,
           equipmentNavigationId: resolution.equipmentNavigationId,
-          photoItems: (Array.isArray(event.photos) ? event.photos : []).map((photo, index) =>
+          photoItems: eventPhotos.map((photo, index) =>
             normalizePhotoReference(photo, { idPrefix: `${event.id || 'movement'}-${index}` }),
           ),
           equipmentLabel: getEquipmentMovementLabel(equipment, resolution.diagnosticReason),
@@ -5103,7 +5105,7 @@ export default function Rentals() {
 
                 {displayedMovementEntries.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-border bg-secondary/25 px-6 py-12 text-center text-sm text-muted-foreground">
-                    Движения техники пока нет
+                    Движение техники пока не зафиксировано
                   </div>
                 ) : (
                   <div className="overflow-x-auto rounded-xl border border-border">
@@ -6666,7 +6668,9 @@ export default function Rentals() {
 
             {filteredMovementEntries.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-400">
-                В истории пока нет событий для выбранного фильтра.
+                {movementEntries.length === 0
+                  ? 'Движение техники пока не зафиксировано'
+                  : 'Для выбранного фильтра движение техники пока не зафиксировано'}
               </div>
             ) : (
               <div className="space-y-3">

@@ -141,7 +141,76 @@ test('rentals movement tab resolves equipment links and shows diagnostic fallbac
   await expect(page.locator('main').getByText(seed.client.company).first()).toBeVisible();
   await expect(page.locator('main').getByText('Техника не найдена: нет equipmentId/SN/INV в источнике').first()).toBeVisible();
   await expect(page.locator('main').getByText(/undefined|null|\[object Object\]/)).toHaveCount(0);
-  await expect(page.locator('main').getByText(/Фото ещё не загружены/)).toHaveCount(0);
+
+  expect(issues).toEqual([]);
+});
+
+test('rentals movement tab shows empty state when movement history is empty', async ({ page }) => {
+  const issues: UiIssue[] = [];
+  installMovementGuards(page, issues);
+  await page.route('**/api/shipping_photos**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: '[]',
+  }));
+
+  await loginAsAdmin(page);
+  await navigateInApp(page, '/rentals');
+  await expect(page.locator('main').getByRole('heading', { name: 'Аренды', exact: true }).first()).toBeVisible();
+  await page.locator('main').getByRole('button', { name: /Движение техники/ }).click();
+
+  await expect(page.locator('main').getByRole('heading', { name: 'Движение техники' }).first()).toBeVisible();
+  await expect(page.locator('main').getByText('Движение техники пока не зафиксировано')).toBeVisible();
+
+  expect(issues).toEqual([]);
+});
+
+test('rentals movement sheet handles legacy movement entries without photos', async ({ page }) => {
+  const issues: UiIssue[] = [];
+  installMovementGuards(page, issues);
+
+  const suffix = `movement-empty-photos-${Date.now()}`;
+  const seed = await withAdminApi(async (api) => {
+    const client = await createClient(api, suffix);
+    const equipment = await createEquipment(api, suffix);
+    const { rental } = await createRentalPair(api, {
+      client: client.company,
+      clientId: client.id,
+      equipment,
+      startDate: '2026-05-21',
+      endDate: '2026-05-22',
+      status: 'active',
+      ganttStatus: 'active',
+    });
+    const comment = `Legacy no photos ${suffix}`;
+
+    const res = await api.post('/api/shipping_photos', {
+      data: {
+        id: `SP-${suffix}`,
+        rentalId: rental.id,
+        equipmentId: equipment.id,
+        type: 'shipping',
+        date: '2026-05-21T08:00:00.000Z',
+        uploadedBy: 'E2E',
+        comment,
+        source: 'manual',
+      },
+    });
+    expect(res.ok(), `${res.status()} ${await res.text()}`).toBeTruthy();
+
+    return { comment };
+  });
+
+  await loginAsAdmin(page);
+  await navigateInApp(page, '/rentals');
+  await expect(page.locator('main').getByRole('heading', { name: 'Аренды', exact: true }).first()).toBeVisible();
+  await page.locator('main').getByRole('button', { name: /Ещё действия/ }).click();
+
+  const sheet = page.locator('[data-rental-responsive-sheet="movement"]');
+  await expect(sheet.getByRole('heading', { name: 'Движение техники' })).toBeVisible();
+  const legacyCard = sheet.locator('div').filter({ hasText: seed.comment }).first();
+  await expect(legacyCard).toContainText(seed.comment);
+  await expect(legacyCard).toContainText('Фото: 0');
 
   expect(issues).toEqual([]);
 });

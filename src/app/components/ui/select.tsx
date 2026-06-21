@@ -14,18 +14,66 @@ import { cn } from "./utils";
 type SelectMotionContextValue = ReturnType<typeof useAnimatedPresence>;
 
 const SelectMotionContext = React.createContext<SelectMotionContextValue | null>(null);
+type SelectLabelContextValue = {
+  selectedValue: string;
+  labels: Map<string, string>;
+  registerLabel: (value: string, label: string) => void;
+};
+
+const SelectLabelContext = React.createContext<SelectLabelContextValue | null>(null);
+
+function normalizeSelectValue(value: unknown): string | undefined {
+  return value === undefined || value === null ? undefined : String(value);
+}
+
+function getNodeText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(getNodeText).join("");
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) return getNodeText(node.props.children);
+  return "";
+}
 
 function Select({
   open: controlledOpen,
   defaultOpen,
   onOpenChange,
+  value,
+  defaultValue,
+  onValueChange,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Root>) {
+  const normalizedValue = normalizeSelectValue(value);
+  const normalizedDefaultValue = normalizeSelectValue(defaultValue);
+  const [internalValue, setInternalValue] = React.useState(normalizedDefaultValue ?? "");
+  const selectedValue = normalizedValue ?? internalValue;
+  const [labels, setLabels] = React.useState(() => new Map<string, string>());
   const [radixOpen, setRadixOpen] = React.useState(Boolean(defaultOpen));
   const [visualOpen, setVisualOpen] = React.useState(Boolean(defaultOpen));
   const isControlled = controlledOpen !== undefined;
   const requestedOpen = isControlled ? Boolean(controlledOpen) : radixOpen;
   const presence = useAnimatedPresence(visualOpen, animationDurations.fast);
+
+  const registerLabel = React.useCallback((itemValue: string, label: string) => {
+    const normalizedLabel = label.trim();
+    if (!itemValue || !normalizedLabel) return;
+    setLabels(current => {
+      if (current.get(itemValue) === normalizedLabel) return current;
+      const next = new Map(current);
+      next.set(itemValue, normalizedLabel);
+      return next;
+    });
+  }, []);
+
+  const handleValueChange = React.useCallback((nextValue: string) => {
+    setInternalValue(nextValue);
+    onValueChange?.(nextValue);
+  }, [onValueChange]);
+
+  const labelContextValue = React.useMemo(() => ({
+    selectedValue,
+    labels,
+    registerLabel,
+  }), [labels, registerLabel, selectedValue]);
 
   React.useEffect(() => {
     if (requestedOpen) {
@@ -56,12 +104,17 @@ function Select({
 
   return (
     <SelectMotionContext.Provider value={presence}>
-      <SelectPrimitive.Root
-        data-slot="select"
-        open={radixOpen}
-        onOpenChange={handleOpenChange}
-        {...props}
-      />
+      <SelectLabelContext.Provider value={labelContextValue}>
+        <SelectPrimitive.Root
+          data-slot="select"
+          open={radixOpen}
+          onOpenChange={handleOpenChange}
+          value={normalizedValue}
+          defaultValue={normalizedDefaultValue}
+          onValueChange={handleValueChange}
+          {...props}
+        />
+      </SelectLabelContext.Provider>
     </SelectMotionContext.Provider>
   );
 }
@@ -73,9 +126,16 @@ function SelectGroup({
 }
 
 function SelectValue({
+  children,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Value>) {
-  return <SelectPrimitive.Value data-slot="select-value" {...props} />;
+  const labelContext = React.useContext(SelectLabelContext);
+  const selectedLabel = labelContext?.selectedValue ? labelContext.labels.get(labelContext.selectedValue) : undefined;
+  return (
+    <SelectPrimitive.Value data-slot="select-value" {...props}>
+      {children ?? selectedLabel}
+    </SelectPrimitive.Value>
+  );
 }
 
 function SelectTrigger({
@@ -161,8 +221,17 @@ function SelectLabel({
 function SelectItem({
   className,
   children,
+  value,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Item>) {
+  const labelContext = React.useContext(SelectLabelContext);
+  const normalizedValue = normalizeSelectValue(value) ?? "";
+  const label = getNodeText(children);
+
+  React.useEffect(() => {
+    labelContext?.registerLabel(normalizedValue, label);
+  }, [label, labelContext, normalizedValue]);
+
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
@@ -170,6 +239,7 @@ function SelectItem({
         "focus:bg-accent focus:text-accent-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-default items-center gap-2 rounded-lg py-1.5 pr-8 pl-2 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
         className,
       )}
+      value={normalizedValue}
       {...props}
     >
       <span className="absolute right-2 flex size-3.5 items-center justify-center">

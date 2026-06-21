@@ -14,16 +14,14 @@ import {
 import { ArrowLeft } from 'lucide-react';
 import { useClientsList } from '../hooks/useClients';
 import { useClientContractsList, useClientObjectsList } from '../hooks/useClientRelations';
-import { useEquipmentList, useUpdateEquipment } from '../hooks/useEquipment';
+import { useEquipmentList } from '../hooks/useEquipment';
 import { useGanttData } from '../hooks/useRentals';
 import { usePaymentsList } from '../hooks/usePayments';
 import { rentalsService } from '../services/rentals.service';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAuth } from '../contexts/AuthContext';
 import type { GanttRentalData } from '../mock-data';
-import type { ClientContract, ClientObject, EquipmentStatus } from '../types';
+import type { ClientContract, ClientObject } from '../types';
 import { canEquipmentParticipateInRentals } from '../lib/equipmentClassification';
-import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { calculateRentalAmount, formatCurrency, getRentalDays } from '../lib/utils';
 import { isEquipmentBusy } from '../lib/rental-conflicts';
 import { buildClientReceivables, buildRentalDebtRows } from '../lib/finance';
@@ -59,9 +57,7 @@ export default function RentalNew() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { can } = usePermissions();
-  const { user } = useAuth();
   const qc = useQueryClient();
-  const updateEquipment = useUpdateEquipment();
   const { data: clients = [] } = useClientsList();
   const { data: clientObjects = [] } = useClientObjectsList();
   const { data: clientContracts = [] } = useClientContractsList();
@@ -295,26 +291,6 @@ export default function RentalNew() {
         paymentStatus: 'unpaid',
         comments: notes,
       });
-
-      const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
-      const equipmentWithHistory = appendAuditHistory(
-        {
-          ...selectedEquipment,
-          status: eqStatus,
-          currentClient: initialStatus === 'active' ? selectedClientName : selectedEquipment.currentClient,
-          returnDate: initialStatus === 'active' ? endDate : selectedEquipment.returnDate,
-        },
-        createAuditEntry(
-          user?.name || 'Система',
-          initialStatus === 'active'
-            ? `Создана аренда и техника выдана клиенту ${selectedClientName}`
-            : `Создана бронь под клиента ${selectedClientName}`,
-        ),
-      );
-      const { id: _equipmentId, ...equipmentUpdateData } = equipmentWithHistory;
-      await updateEquipment.mutateAsync({ id: selectedEquipment.id, data: {
-        ...equipmentUpdateData,
-      } });
 
       qc.invalidateQueries();
       navigate('/rentals');

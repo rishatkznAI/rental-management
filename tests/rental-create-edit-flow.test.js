@@ -52,6 +52,15 @@ test('rental creation keeps stable equipment and manager links in the classic re
   assert.match(rentalNewSubmit, /paymentStatus: 'unpaid'/);
 });
 
+test('standalone rental creation does not patch equipment status through the generic equipment API', () => {
+  const rentalNewSubmit = extract(rentalNewSource, 'const handleSubmit = async', 'return (');
+
+  assert.match(rentalNewSubmit, /rentalsService\.create\(/);
+  assert.doesNotMatch(rentalNewSource, /useUpdateEquipment/);
+  assert.doesNotMatch(rentalNewSubmit, /updateEquipment\.mutateAsync/);
+  assert.doesNotMatch(rentalNewSubmit, /equipmentService\.update/);
+});
+
 test('rental creation surfaces validation and API errors instead of only logging them', () => {
   assert.match(rentalNewSource, /const \[formError, setFormError\] = useState\(''\)/);
   assert.match(rentalNewSource, /setFormError\('Дата окончания аренды не может быть раньше даты начала\.'\)/);

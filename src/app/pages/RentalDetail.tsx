@@ -89,6 +89,16 @@ const EMPTY_CLIENT_OBJECTS: ClientObject[] = [];
 const EMPTY_CLIENT_CONTRACTS: ClientContract[] = [];
 const EMPTY_DOCUMENTS: Document[] = [];
 const EMPTY_PAYMENT_ALLOCATIONS: PaymentAllocation[] = [];
+const RENTAL_DOCUMENT_TYPE_LABELS: Partial<Record<DocumentType, string>> = {
+  invoice: 'Счёт',
+  act: 'Акт',
+  contract: 'Договор',
+};
+const RENTAL_DOCUMENT_STATUS_LABELS: Record<'draft' | 'sent' | 'signed', string> = {
+  draft: 'Черновик',
+  sent: 'Отправлен',
+  signed: 'Подписан',
+};
 
 type RentalSaveResponse = Rental & {
   changeRequestSummary?: {
@@ -2121,7 +2131,9 @@ export default function RentalDetail() {
                     number: nextDocumentNumber(value as DocumentType, rental.id, relatedDocs.length),
                   }))}
                 >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue>{RENTAL_DOCUMENT_TYPE_LABELS[documentForm.type] || 'Без названия'}</SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="invoice">Счёт</SelectItem>
                     <SelectItem value="act">Акт</SelectItem>
@@ -2135,7 +2147,9 @@ export default function RentalDetail() {
                   value={documentForm.status}
                   onValueChange={(value) => setDocumentForm(prev => ({ ...prev, status: value as 'draft' | 'sent' | 'signed' }))}
                 >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue>{RENTAL_DOCUMENT_STATUS_LABELS[documentForm.status] || 'Не указан'}</SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="draft">Черновик</SelectItem>
                     <SelectItem value="sent">Отправлен</SelectItem>

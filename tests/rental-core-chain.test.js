@@ -168,6 +168,35 @@ test('creating a client rental creates a linked planner row with stable ids', as
   });
 });
 
+test('created rental blocks overlapping rental without mutating equipment through generic patch', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+
+    assert.equal(created.status, 201);
+    assert.equal(state.equipment.find(item => item.id === 'EQ-1').status, 'available');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-1').currentClient, undefined);
+    assert.equal(state.equipment.find(item => item.id === 'EQ-1').returnDate, undefined);
+
+    const plannerRows = await request(baseUrl, 'GET', '/api/gantt_rentals');
+    assert.equal(plannerRows.status, 200);
+    assert.equal(plannerRows.body.length, 1);
+    assert.equal(plannerRows.body[0].rentalId, created.body.id);
+    assert.equal(plannerRows.body[0].equipmentId, 'EQ-1');
+
+    const overlapping = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({
+      startDate: '2026-05-15',
+      plannedReturnDate: '2026-05-25',
+    }));
+
+    assert.equal(overlapping.status, 409);
+    assert.match(overlapping.body.error, /Техника уже занята/);
+    assert.equal(state.rentals.length, 1);
+    assert.equal(state.gantt_rentals.length, 1);
+  });
+});
+
 test('cannot create rental-type gantt row without an existing rental link', async () => {
   const { app } = createApp();
 

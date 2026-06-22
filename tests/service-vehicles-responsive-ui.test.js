@@ -11,6 +11,13 @@ test('service vehicles list uses mobile cards instead of a horizontal-only table
   assert.match(listSource, /className="hidden overflow-x-auto[\s\S]*md:block"/);
 });
 
+test('service vehicles list formats missing legacy mileage safely', () => {
+  assert.match(listSource, /function formatMileage\(value: unknown\): string/);
+  assert.match(listSource, /const safeMileage = Number\.isFinite\(mileage\) && mileage >= 0 \? mileage : 0/);
+  assert.match(listSource, /safeMileage\.toLocaleString\('ru-RU'\)/);
+  assert.doesNotMatch(listSource, /currentMileage\.toLocaleString/);
+});
+
 test('service vehicle trips use mobile cards and keep the desktop table at md and above', () => {
   assert.match(detailSource, /<TripCard[\s\S]*trip=\{trip\}/);
   assert.match(detailSource, /className="space-y-3 md:hidden"/);

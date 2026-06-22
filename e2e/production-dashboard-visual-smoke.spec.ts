@@ -1,7 +1,23 @@
 import { expect, request as playwrightRequest, test, type Browser, type Page, type TestInfo } from '@playwright/test';
+import { createRequire } from 'node:module';
 import { requiredEnv } from './helpers/releaseSmoke';
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
+
+const require = createRequire(import.meta.url);
+const {
+  buildClientFinancialSnapshots,
+  buildRentalDebtRows,
+  getEffectivePaidAmount,
+  getRentalBillingAmount,
+  shouldCountRental,
+} = require('../server/lib/finance-core.js') as {
+  buildClientFinancialSnapshots: (clients: unknown[], rentals: unknown[], payments: unknown[], today: string, options?: { paymentAllocations?: unknown[] }) => Array<{ currentDebt?: number }>;
+  buildRentalDebtRows: (rentals: unknown[], payments: unknown[], options?: { paymentAllocations?: unknown[] }) => Array<{ expectedPaymentDate?: string; endDate?: string; outstanding?: number }>;
+  getEffectivePaidAmount: (payment: unknown) => number;
+  getRentalBillingAmount: (rental: unknown) => number;
+  shouldCountRental: (rental: unknown) => boolean;
+};
 
 type Theme = 'dark' | 'light';
 type ViewportName = 'desktop-1440' | 'mobile-390';
@@ -20,6 +36,13 @@ type UiIssue = {
   text?: string;
 };
 
+type DashboardMetricSnapshot = {
+  totalDebt: number;
+  overdueReceivablesAmount: number;
+  monthlyInflow: number;
+  monthlyRevenue: number;
+};
+
 const VISUAL_CASES: VisualCase[] = [
   { theme: 'dark', viewportName: 'desktop-1440', viewport: { width: 1440, height: 900 } },
   { theme: 'dark', viewportName: 'mobile-390', viewport: { width: 390, height: 844 } },
@@ -30,6 +53,102 @@ const VISUAL_CASES: VisualCase[] = [
 function productionAppUrl(frontendUrl: string, route = '/') {
   const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
   return `${frontendUrl.replace(/\/$/, '')}/?debugVersion=1&_smoke=${Date.now()}#${normalizedRoute}`;
+}
+
+function dateKey(value?: unknown) {
+  if (!value) return '';
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toISOString().slice(0, 10);
+}
+
+function isDateInRange(value: unknown, start: Date, end: Date) {
+  const parsed = value instanceof Date ? value : new Date(String(value || ''));
+  return !Number.isNaN(parsed.getTime()) && parsed >= start && parsed <= end;
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'RUB',
+    minimumFractionDigits: 0,
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function normalizeVisibleText(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+async function fetchJson<T>(api: Awaited<ReturnType<typeof playwrightRequest.newContext>>, path: string): Promise<T> {
+  const response = await api.get(path);
+  expect(response.ok(), `${path} should return 200`).toBeTruthy();
+  return await response.json() as T;
+}
+
+async function buildDashboardMetricSnapshot(api: Awaited<ReturnType<typeof playwrightRequest.newContext>>): Promise<DashboardMetricSnapshot> {
+  const [ganttRentals, payments, paymentAllocations, clients] = await Promise.all([
+    fetchJson<unknown[]>(api, '/api/gantt_rentals'),
+    fetchJson<unknown[]>(api, '/api/payments'),
+    fetchJson<unknown[]>(api, '/api/payment_allocations'),
+    fetchJson<unknown[]>(api, '/api/clients'),
+  ]);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayKey = today.toISOString().slice(0, 10);
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+
+  const debtRows = buildRentalDebtRows(ganttRentals, payments, { paymentAllocations });
+  const clientFinancials = buildClientFinancialSnapshots(clients, ganttRentals, payments, todayKey, { paymentAllocations });
+  const overduePayments = debtRows.filter(row =>
+    (row.expectedPaymentDate && row.expectedPaymentDate < todayKey) || String(row.endDate || '') < todayKey,
+  );
+  const monthlyPayments = payments.filter(payment => {
+    const row = payment as { paidDate?: unknown; dueDate?: unknown };
+    return isDateInRange(row.paidDate || row.dueDate, monthStart, monthEnd);
+  });
+  const revenueRentalsStartedThisMonth = ganttRentals.filter(rental => {
+    const row = rental as { startDate?: unknown };
+    return isDateInRange(row.startDate, monthStart, monthEnd) && shouldCountRental(rental);
+  });
+
+  return {
+    totalDebt: Math.round(clientFinancials.reduce((sum, row) => sum + Number(row.currentDebt || 0), 0)),
+    overdueReceivablesAmount: Math.round(overduePayments.reduce((sum, row) => sum + Number(row.outstanding || 0), 0)),
+    monthlyInflow: Math.round(monthlyPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0)),
+    monthlyRevenue: Math.round(revenueRentalsStartedThisMonth.reduce((sum, rental) => sum + getRentalBillingAmount(rental), 0)),
+  };
+}
+
+async function metricCardByLabel(page: Page, label: string) {
+  const labelNode = page.getByText(label, { exact: true }).first();
+  await expect(labelNode, `metric label "${label}" should be visible`).toBeVisible();
+  const card = labelNode.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " app-kpi-card ")][1]');
+  await expect(card, `metric card "${label}" should be visible`).toBeVisible();
+  return card;
+}
+
+async function expectMetricCardValue(page: Page, label: string, value: string) {
+  const card = await metricCardByLabel(page, label);
+  const text = normalizeVisibleText(await card.innerText());
+  expect(text, `metric card "${label}" should contain ${value}`).toContain(normalizeVisibleText(value));
+  return card;
+}
+
+async function expectDashboardNumericReconciliation(page: Page, expected: DashboardMetricSnapshot) {
+  await expect(page.getByTestId('dashboard-kpi-overdue-debt'), 'executive overdue receivables card should match API calculation')
+    .toContainText(formatCurrency(expected.overdueReceivablesAmount));
+
+  await page.getByRole('button', { name: 'Деньги', exact: true }).click();
+  await expectMetricCardValue(page, 'Дебиторка на сегодня', formatCurrency(expected.totalDebt));
+  await expectMetricCardValue(page, 'Просрочка на сегодня', formatCurrency(expected.overdueReceivablesAmount));
+  await expectMetricCardValue(page, 'Оплачено за месяц', expected.monthlyInflow > 0 ? formatCurrency(expected.monthlyInflow) : '0 ₽');
+  await expectMetricCardValue(page, 'Начислено за месяц', expected.monthlyRevenue > 0 ? formatCurrency(expected.monthlyRevenue) : '0 ₽');
+
+  const debtCard = await metricCardByLabel(page, 'Дебиторка на сегодня');
+  await debtCard.click();
+  await expect(page.getByRole('dialog'), 'total debt KPI modal should open').toContainText(formatCurrency(expected.totalDebt));
+  await page.getByRole('button', { name: 'Закрыть' }).click();
 }
 
 function sanitize(text = '', limit = 800) {
@@ -177,7 +296,7 @@ async function captureDashboardCase(
   browser: Browser,
   testInfo: TestInfo,
   visualCase: VisualCase,
-  config: { frontendUrl: string; apiUrl: string; token: string },
+  config: { frontendUrl: string; apiUrl: string; token: string; expectedMetrics?: DashboardMetricSnapshot },
 ): Promise<{ frontendCommit: string; apiBaseUrl: string }> {
   const caseName = `${visualCase.theme}-${visualCase.viewportName}`;
   const issues: UiIssue[] = [];
@@ -200,6 +319,9 @@ async function captureDashboardCase(
 
     await expectTheme(page, visualCase.theme, caseName);
     await expectNoHorizontalOverflow(page, caseName);
+    if (config.expectedMetrics && visualCase.theme === 'dark' && visualCase.viewportName === 'desktop-1440') {
+      await expectDashboardNumericReconciliation(page, config.expectedMetrics);
+    }
     expect(issues, `${caseName}: console/page/request errors`).toEqual([]);
 
     await page.screenshot({
@@ -253,10 +375,15 @@ test('production authenticated dashboard visual smoke', async ({ browser }) => {
     expect(loginResponse.ok(), `production login should return 200: ${loginResponse.status()}`).toBeTruthy();
     const login = await loginResponse.json() as { token?: string };
     expect(login.token, 'production login should return token').toBeTruthy();
+    const authenticatedApi = await playwrightRequest.newContext({
+      baseURL: apiUrl,
+      extraHTTPHeaders: { Authorization: `Bearer ${login.token || ''}` },
+    });
+    const expectedMetrics = await buildDashboardMetricSnapshot(authenticatedApi);
 
     const frontendBuilds = [];
     for (const visualCase of VISUAL_CASES) {
-      frontendBuilds.push(await captureDashboardCase(browser, test.info(), visualCase, { frontendUrl, apiUrl, token: login.token || '' }));
+      frontendBuilds.push(await captureDashboardCase(browser, test.info(), visualCase, { frontendUrl, apiUrl, token: login.token || '', expectedMetrics }));
     }
     for (const frontendBuild of frontendBuilds) {
       expect(frontendBuild.apiBaseUrl, 'frontend marker should point at production API').toBe(apiUrl);
@@ -272,7 +399,14 @@ test('production authenticated dashboard visual smoke', async ({ browser }) => {
       expectedCommit: expectedCommit.slice(0, 12),
       frontendCommit: frontendBuilds[0]?.frontendCommit || '',
       backendCommit: version.build?.commit || version.build?.commitFull || '',
+      dashboardMetrics: {
+        totalDebt: expectedMetrics.totalDebt,
+        overdueReceivablesAmount: expectedMetrics.overdueReceivablesAmount,
+        monthlyInflow: expectedMetrics.monthlyInflow,
+        monthlyRevenue: expectedMetrics.monthlyRevenue,
+      },
     }));
+    await authenticatedApi.dispose();
   } finally {
     await api.dispose();
   }

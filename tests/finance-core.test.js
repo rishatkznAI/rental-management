@@ -803,6 +803,107 @@ test('manual client debt contributes to receivables and manager totals', () => {
   assert.equal(report.totals.debt, 35000);
 });
 
+test('finance report separates total debt from overdue receivables without paid cancelled or future rows', () => {
+  const report = buildFinanceReport(
+    {
+      clients: [
+        { id: 'c-overdue', company: 'Просроченный клиент', creditLimit: 0 },
+        { id: 'c-future', company: 'Будущий клиент', creditLimit: 0, debt: 15000, manager: 'Анна' },
+        { id: 'c-paid', company: 'Оплаченный клиент', creditLimit: 0 },
+      ],
+      rentals: [
+        {
+          id: 'gr-overdue-active',
+          clientId: 'c-overdue',
+          client: 'Просроченный клиент',
+          equipmentInv: '301',
+          manager: 'Руслан',
+          startDate: '2026-04-01',
+          endDate: '2026-04-10',
+          expectedPaymentDate: '2026-04-05',
+          amount: 100000,
+          paymentStatus: 'partial',
+          status: 'active',
+        },
+        {
+          id: 'gr-overdue-closed',
+          clientId: 'c-overdue',
+          client: 'Просроченный клиент',
+          equipmentInv: '302',
+          manager: 'Руслан',
+          startDate: '2026-03-01',
+          endDate: '2026-03-10',
+          expectedPaymentDate: '2026-03-15',
+          amount: 40000,
+          paymentStatus: 'unpaid',
+          status: 'closed',
+        },
+        {
+          id: 'gr-future',
+          clientId: 'c-future',
+          client: 'Будущий клиент',
+          equipmentInv: '303',
+          manager: 'Анна',
+          startDate: '2026-04-20',
+          endDate: '2026-04-30',
+          expectedPaymentDate: '2026-04-25',
+          amount: 70000,
+          paymentStatus: 'unpaid',
+          status: 'active',
+        },
+        {
+          id: 'gr-paid',
+          clientId: 'c-paid',
+          client: 'Оплаченный клиент',
+          equipmentInv: '304',
+          manager: 'Анна',
+          startDate: '2026-04-01',
+          endDate: '2026-04-10',
+          expectedPaymentDate: '2026-04-05',
+          amount: 50000,
+          paymentStatus: 'paid',
+          status: 'closed',
+        },
+        {
+          id: 'gr-cancelled',
+          clientId: 'c-overdue',
+          client: 'Просроченный клиент',
+          equipmentInv: '305',
+          manager: 'Руслан',
+          startDate: '2026-03-01',
+          endDate: '2026-03-10',
+          expectedPaymentDate: '2026-03-15',
+          amount: 999999,
+          paymentStatus: 'unpaid',
+          status: 'cancelled',
+        },
+      ],
+      payments: [
+        { id: 'p-overdue', rentalId: 'gr-overdue-active', clientId: 'c-overdue', amount: 100000, paidAmount: 25000, status: 'partial' },
+        { id: 'p-paid', rentalId: 'gr-paid', clientId: 'c-paid', amount: 50000, paidAmount: 50000, status: 'paid' },
+        { id: 'p-cancelled', rentalId: 'gr-cancelled', clientId: 'c-overdue', amount: 999999, paidAmount: 999999, status: 'cancelled' },
+      ],
+    },
+    '2026-04-18',
+  );
+
+  assert.equal(report.totals.debt, 200000);
+  assert.equal(report.totals.overdueDebt, 115000);
+  assert.equal(report.totals.unpaidRentals, 3);
+  assert.deepEqual(
+    report.debtRows.map(row => [row.rentalId, row.rentalStatus, row.outstanding]),
+    [
+      ['gr-overdue-active', 'active', 75000],
+      ['gr-future', 'active', 70000],
+      ['gr-overdue-closed', 'closed', 40000],
+    ],
+  );
+  assert.equal(report.clientSnapshots.find(row => row.clientId === 'c-future')?.currentDebt, 85000);
+  assert.equal(report.clientSnapshots.find(row => row.clientId === 'c-future')?.overdueRentals, 0);
+  assert.equal(report.managerReceivables.find(row => row.manager === 'Руслан')?.overdueDebt, 115000);
+  assert.equal(report.managerReceivables.find(row => row.manager === 'Анна')?.overdueDebt, 0);
+});
+
 test('client rename keeps receivables linked by clientId', () => {
   const clients = [{ id: 'c-1', company: 'ООО Ромашка Казань', creditLimit: 0 }];
   const rentals = [

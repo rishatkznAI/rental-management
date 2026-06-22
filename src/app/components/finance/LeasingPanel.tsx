@@ -70,6 +70,10 @@ function addMonths(dateKey: string, months: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function safeText(value: unknown): string {
+  return String(value || '');
+}
+
 function createEmptyLeasingForm(): LeasingFormState {
   const startDate = todayKey();
   return {
@@ -215,7 +219,7 @@ export function LeasingPanel({ canManageFinance, canDeleteFinance }: { canManage
   });
 
   const companies = React.useMemo(
-    () => Array.from(new Set(contracts.map(item => item.leasingCompany).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru')),
+    () => Array.from(new Set(contracts.map(item => safeText(item.leasingCompany)).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru')),
     [contracts],
   );
 
@@ -225,8 +229,8 @@ export function LeasingPanel({ canManageFinance, canDeleteFinance }: { canManage
       .filter(contract => {
         const equipmentName = contract.equipmentName || equipmentLabel(equipmentById.get(contract.equipmentId || ''));
         const matchesSearch = !query
-          || contract.contractNumber.toLowerCase().includes(query)
-          || contract.leasingCompany.toLowerCase().includes(query)
+          || safeText(contract.contractNumber).toLowerCase().includes(query)
+          || safeText(contract.leasingCompany).toLowerCase().includes(query)
           || equipmentName.toLowerCase().includes(query)
           || (contract.comment || '').toLowerCase().includes(query);
         const matchesStatus = statusFilter === 'all' || contract.status === statusFilter;
@@ -237,7 +241,7 @@ export function LeasingPanel({ canManageFinance, canDeleteFinance }: { canManage
       })
       .sort((left, right) =>
         (left.nextPaymentDate || '9999-12-31').localeCompare(right.nextPaymentDate || '9999-12-31')
-        || left.contractNumber.localeCompare(right.contractNumber, 'ru')
+        || safeText(left.contractNumber).localeCompare(safeText(right.contractNumber), 'ru')
       );
   }, [companyFilter, contracts, equipmentById, equipmentFilter, overdueOnly, search, statusFilter]);
 

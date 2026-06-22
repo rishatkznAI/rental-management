@@ -81,7 +81,7 @@ import type {
   ManagementActionAttentionItem,
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
-import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
+import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows, shouldCountRental } from '../lib/finance';
 import { calculateRentalBilling, getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
 import { buildDashboardAttentionSummary } from '../lib/dashboardAttention.js';
 import { buildDocumentControl, isUnsignedDocument } from '../lib/documentControl.js';
@@ -205,6 +205,30 @@ function formatCompactCurrency(value: number) {
   if (abs >= 1_000_000) return `${(value / 1_000_000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} млн`;
   if (abs >= 1_000) return `${Math.round(value / 1_000).toLocaleString('ru-RU')} тыс`;
   return value.toLocaleString('ru-RU');
+}
+
+const DASHBOARD_IGNORED_PAYMENT_STATUSES = new Set([
+  'cancelled',
+  'canceled',
+  'void',
+  'error',
+  'failed',
+  'closed',
+  'deleted',
+  'reversed',
+]);
+
+function getDashboardPaidAmount(payment: Payment) {
+  const status = String(payment.status || '').trim().toLowerCase();
+  if (DASHBOARD_IGNORED_PAYMENT_STATUSES.has(status)) return 0;
+  if (typeof payment.paidAmount === 'number') {
+    return Number.isFinite(payment.paidAmount) ? Math.max(0, payment.paidAmount) : 0;
+  }
+  if (status === 'paid') {
+    const amount = Number(payment.amount);
+    return Number.isFinite(amount) ? Math.max(0, amount) : 0;
+  }
+  return 0;
 }
 
 function normalizeRentalEquipmentRefs(value: Rental['equipment'] | string | null | undefined): string[] {
@@ -1368,6 +1392,7 @@ export default function Dashboard() {
     | 'serviceInDays'
     | 'weekRevenue'
     | 'totalDebt'
+    | 'overdueDebt'
     | 'monthDebt'
     | null
   >(null);
@@ -1566,6 +1591,12 @@ export default function Dashboard() {
   const overduePayments = rentalDebtRows.filter(row =>
     (row.expectedPaymentDate && row.expectedPaymentDate < todayKey) || row.endDate < todayKey,
   );
+  const overdueReceivablesAmount = overduePayments.reduce((sum, row) => sum + row.outstanding, 0);
+  const overdueReceivablesClients = new Set(
+    overduePayments
+      .map(row => row.clientId || row.client)
+      .filter(Boolean),
+  ).size;
   const totalDebt = clientFinancials.reduce((sum, row) => sum + row.currentDebt, 0);
   const {
     data: managerBreakdown,
@@ -1717,13 +1748,13 @@ export default function Dashboard() {
         canViewMoney && {
           id: 'admin-debt',
           title: 'Просроченная дебиторка',
-          value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽',
-          hint: overdueDebtClients.length > 0
-            ? `${overdueDebtClients.length} ${formatCountLabel(overdueDebtClients.length, 'клиент', 'клиента', 'клиентов')} с долгом`
+          value: overdueReceivablesAmount > 0 ? formatCurrency(overdueReceivablesAmount) : '0 ₽',
+          hint: overdueReceivablesClients > 0
+            ? `${overdueReceivablesClients} ${formatCountLabel(overdueReceivablesClients, 'клиент', 'клиента', 'клиентов')} с просрочкой`
             : 'Просроченной дебиторки нет',
           href: '/payments',
           cta: 'Проверить долги',
-          tone: totalDebt > 0 ? 'danger' : 'success',
+          tone: overdueReceivablesAmount > 0 ? 'danger' : 'success',
           icon: ShieldAlert,
         },
         canViewRentals && {
@@ -1902,13 +1933,13 @@ export default function Dashboard() {
         {
           id: 'office-debt',
           title: 'Просроченная дебиторка',
-          value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽',
-          hint: overdueDebtClients.length > 0
-            ? `${overdueDebtClients.length} ${formatCountLabel(overdueDebtClients.length, 'клиент', 'клиента', 'клиентов')} с долгом`
+          value: overdueReceivablesAmount > 0 ? formatCurrency(overdueReceivablesAmount) : '0 ₽',
+          hint: overdueReceivablesClients > 0
+            ? `${overdueReceivablesClients} ${formatCountLabel(overdueReceivablesClients, 'клиент', 'клиента', 'клиентов')} с просрочкой`
             : 'Просроченной дебиторки нет',
           href: '/payments',
           cta: 'Работать с долгом',
-          tone: totalDebt > 0 ? 'danger' : 'success',
+          tone: overdueReceivablesAmount > 0 ? 'danger' : 'success',
           icon: ShieldAlert,
         },
       ];
@@ -1933,6 +1964,8 @@ export default function Dashboard() {
     officePendingUpdRentals.length,
     officeReturnsQueue,
     officeUpcomingPayments.length,
+    overdueReceivablesAmount,
+    overdueReceivablesClients,
     overdueDebtClients.length,
     topAttentionActions,
     totalDebt,
@@ -2279,11 +2312,12 @@ export default function Dashboard() {
   const rentalsWithDebtThisMonth = rentalDebtRows.filter(row =>
     row.outstanding > 0 && (monthlyRentalIds.has(row.rentalId) || isDateInRange(row.startDate || row.endDate, monthStart, monthEnd)),
   );
-  const monthlyRevenue = rentalsStartedThisMonth.reduce((sum, rental) => sum + getRentalBillingAmount(rental), 0);
+  const revenueRentalsStartedThisMonth = rentalsStartedThisMonth.filter(shouldCountRental);
+  const monthlyRevenue = revenueRentalsStartedThisMonth.reduce((sum, rental) => sum + getRentalBillingAmount(rental), 0);
   const monthlyPayments = payments.filter(payment =>
     isDateInRange(payment.paidDate || payment.dueDate, monthStart, monthEnd),
   );
-  const monthlyPaidAmount = monthlyPayments.reduce((sum, payment) => sum + Number(payment.paidAmount || (payment.status === 'paid' ? payment.amount : 0) || 0), 0);
+  const monthlyPaidAmount = monthlyPayments.reduce((sum, payment) => sum + getDashboardPaidAmount(payment), 0);
   const monthlyDebtAmount = rentalsWithDebtThisMonth.reduce((sum, row) => sum + row.outstanding, 0);
   const serviceCreatedThisMonth = tickets.filter(ticket => isDateInRange(ticket.createdAt, monthStart, monthEnd));
   const serviceClosedThisMonth = tickets.filter(ticket =>
@@ -2361,11 +2395,11 @@ export default function Dashboard() {
     canViewMoney && {
       id: 'overdue-debt',
       label: 'Просроченная дебиторка',
-      value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽',
-      hint: `${overdueDebtClients.length} клиентов с долгом`,
+      value: overdueReceivablesAmount > 0 ? formatCurrency(overdueReceivablesAmount) : '0 ₽',
+      hint: `${overdueReceivablesClients} клиентов с просрочкой`,
       icon: CreditCard,
-      tone: totalDebt > 0 ? 'danger' : 'success',
-      onClick: () => setSelectedKPI('totalDebt'),
+      tone: overdueReceivablesAmount > 0 ? 'danger' : 'success',
+      onClick: () => setSelectedKPI('overdueDebt'),
     },
     canViewDocuments && {
       id: 'unsigned-docs',
@@ -2473,22 +2507,22 @@ export default function Dashboard() {
 
   const monthCashflowData = useMemo(() => {
     const map = new Map(monthDayBuckets.map(bucket => [bucket.key, { ...bucket, revenue: 0, payments: 0 }]));
-    rentalsStartedThisMonth.forEach(rental => {
+    revenueRentalsStartedThisMonth.forEach(rental => {
       const target = map.get(toDateKey(rental.startDate));
       if (target) target.revenue += getRentalBillingAmount(rental);
     });
     monthlyPayments.forEach(payment => {
       const target = map.get(toDateKey(payment.paidDate || payment.dueDate));
-      if (target) target.payments += Number(payment.paidAmount || (payment.status === 'paid' ? payment.amount : 0) || 0);
+      if (target) target.payments += getDashboardPaidAmount(payment);
     });
     return [...map.values()];
-  }, [monthDayBuckets, monthlyPayments, rentalsStartedThisMonth]);
+  }, [monthDayBuckets, monthlyPayments, revenueRentalsStartedThisMonth]);
   const hasMonthCashflow = monthCashflowData.some(item => item.revenue > 0 || item.payments > 0);
   const monthCashflowDisplayData = useMemo(() => {
     const map = new Map<string, MonthCashflowPoint>(
       monthDayBuckets.map(bucket => [bucket.key, { ...bucket, revenue: 0, payments: 0, overdue: 0 }]),
     );
-    rentalsStartedThisMonth.forEach(rental => {
+    revenueRentalsStartedThisMonth.forEach(rental => {
       const rentalStart = parseOptionalDate(rental.startDate);
       const rentalEnd = parseOptionalDate(rental.plannedReturnDate || rental.actualReturnDate) ?? rentalStart;
       if (!rentalStart || !rentalEnd) return;
@@ -2508,7 +2542,7 @@ export default function Dashboard() {
       addWeightedMonthValue(
         map,
         toDateKey(payment.paidDate || payment.dueDate),
-        Number(payment.paidAmount || (payment.status === 'paid' ? payment.amount : 0) || 0),
+        getDashboardPaidAmount(payment),
       );
     });
     overduePayments.forEach(row => {
@@ -2523,7 +2557,7 @@ export default function Dashboard() {
       payments: Math.round(point.payments),
       overdue: Math.round(point.overdue),
     }));
-  }, [monthDayBuckets, monthEnd, monthStart, monthlyPayments, overduePayments, rentalsStartedThisMonth]);
+  }, [monthDayBuckets, monthEnd, monthStart, monthlyPayments, overduePayments, revenueRentalsStartedThisMonth]);
   const hasMonthCashflowDisplay = monthCashflowDisplayData.some(item => item.revenue > 0 || item.payments > 0 || item.overdue > 0);
   const monthEventsData = useMemo(() => monthDayBuckets.map(bucket => ({
     ...bucket,
@@ -2795,7 +2829,7 @@ export default function Dashboard() {
     monthlyPayments.forEach(payment => {
       const target = dayMap.get(toDateKey(payment.paidDate || payment.dueDate));
       if (!target) return;
-      target.value += Number(payment.paidAmount || (payment.status === 'paid' ? payment.amount : 0) || 0);
+      target.value += getDashboardPaidAmount(payment);
     });
     return [...dayMap.values()];
   }, [monthDayBuckets, monthlyPayments]);
@@ -3249,7 +3283,6 @@ export default function Dashboard() {
   const criticalCount = alertItems.filter(a => a.priority === 'critical').length;
   const highCount = alertItems.filter(a => a.priority === 'high').length;
   const mediumCount = alertItems.filter(a => a.priority === 'medium').length;
-  const overdueReceivablesAmount = overduePayments.reduce((sum, row) => sum + row.outstanding, 0);
   const overdueReceivablesTrendData = useMemo(() => Array.from({ length: 14 }, (_, index) => {
     const date = new Date(today);
     date.setDate(today.getDate() - (13 - index));
@@ -3279,11 +3312,6 @@ export default function Dashboard() {
       value: activeEquipment > 0 ? Math.round((busyKeys.size / activeEquipment) * 100) : 0,
     };
   }), [activeEquipment, activeRentalFleetLookup, today, viewPlannerRentals]);
-  const overdueReceivablesClients = new Set(
-    overduePayments
-      .map(row => row.clientId || row.client)
-      .filter(Boolean),
-  ).size;
   const debt60PlusAmount = clientDebtAgingRows
     .filter(row => row.ageBucket === '60_plus')
     .reduce((sum, row) => sum + row.debt, 0);
@@ -3613,6 +3641,11 @@ export default function Dashboard() {
       totalDebt,
       clients: computedClients.filter(c => (c.debt ?? 0) > 0),
       overduePayments,
+    },
+    overdueDebt: {
+      overdueDebt: overdueReceivablesAmount,
+      overduePayments,
+      overdueClients: overdueReceivablesClients,
     },
     monthDebt: { monthDebt, overduePayments: monthOverduePayments },
   };
@@ -5075,7 +5108,7 @@ export default function Dashboard() {
             updatedLabel={dashboardUpdatedLabel}
           />
           <DashboardKpiGrid cards={[
-            { id: 'money-accrued-month', label: 'Начислено за месяц', value: monthlyRevenue > 0 ? formatCurrency(monthlyRevenue) : '0 ₽', hint: `${rentalsStartedThisMonth.length} аренд`, icon: TrendingUp, tone: monthlyRevenue > 0 ? 'success' : 'default', href: '/rentals' },
+            { id: 'money-accrued-month', label: 'Начислено за месяц', value: monthlyRevenue > 0 ? formatCurrency(monthlyRevenue) : '0 ₽', hint: `${revenueRentalsStartedThisMonth.length} аренд`, icon: TrendingUp, tone: monthlyRevenue > 0 ? 'success' : 'default', href: '/rentals' },
             { id: 'money-payments', label: 'Оплачено за месяц', value: monthlyPaidAmount > 0 ? formatCurrency(monthlyPaidAmount) : '0 ₽', hint: `${monthlyPayments.length} платежей`, icon: CreditCard, tone: 'success', href: '/payments' },
             { id: 'money-debt', label: 'Дебиторка на сегодня', value: totalDebt > 0 ? formatCurrency(totalDebt) : '0 ₽', hint: `${clientDebtAgingRows.length} клиентов в aging`, icon: DollarSign, tone: totalDebt > 0 ? 'warning' : 'success', onClick: () => setSelectedKPI('totalDebt') },
             { id: 'money-overdue', label: 'Просрочка на сегодня', value: formatCurrency(overduePayments.reduce((sum, row) => sum + row.outstanding, 0)), hint: `${overduePayments.length} строк`, icon: AlertTriangle, tone: overduePayments.length > 0 ? 'danger' : 'success' },

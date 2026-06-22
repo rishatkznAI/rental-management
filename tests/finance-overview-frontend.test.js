@@ -135,6 +135,14 @@ test('finance leasing tab keeps paused contracts out of active load', () => {
   assert.match(leasingSource, /Открыть график платежей/);
 });
 
+test('finance leasing tab handles legacy contracts without labels safely', () => {
+  assert.match(leasingSource, /function safeText\(value: unknown\): string/);
+  assert.match(leasingSource, /contracts\.map\(item => safeText\(item\.leasingCompany\)\)/);
+  assert.match(leasingSource, /safeText\(contract\.contractNumber\)\.toLowerCase\(\)\.includes\(query\)/);
+  assert.match(leasingSource, /safeText\(contract\.leasingCompany\)\.toLowerCase\(\)\.includes\(query\)/);
+  assert.match(leasingSource, /safeText\(left\.contractNumber\)\.localeCompare\(safeText\(right\.contractNumber\), 'ru'\)/);
+});
+
 test('finance overview does not expose payroll details', () => {
   assert.doesNotMatch(source, /payrollService|getPayrollRecords|getPayrollProfiles/);
   assert.match(source, /Зарплата/);

@@ -2602,20 +2602,20 @@ export default function Finance() {
               ) : (
                 <div className="space-y-4">
                   <div className="grid gap-3 md:grid-cols-3">
-                    <KpiCard
+                    <FinanceKpiCard
                       title="Активных счетов"
                       value={String(activeFinanceAccounts.length)}
                       hint={`Всего заведено: ${financeAccounts.length}`}
                       icon={WalletCards}
                     />
-                    <KpiCard
+                    <FinanceKpiCard
                       title="Остаток"
                       value={formatCurrency(accountsBalance || 0)}
                       hint="Сумма по активным счетам"
                       icon={Banknote}
                       tone="success"
                     />
-                    <KpiCard
+                    <FinanceKpiCard
                       title="Архив"
                       value={String(financeAccounts.filter(account => account.status === 'archived').length)}
                       hint="Счета не входят в остаток"

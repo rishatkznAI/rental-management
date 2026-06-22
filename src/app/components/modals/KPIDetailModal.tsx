@@ -35,6 +35,7 @@ interface KPIDetailModalProps {
     | 'serviceInDays'
     | 'weekRevenue'
     | 'totalDebt'
+    | 'overdueDebt'
     | 'monthDebt'
     | null;
   data: any;
@@ -676,6 +677,46 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                       <p className="font-semibold text-danger">{safeCurrency(p.outstanding ?? p.amount)}</p>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          )
+        };
+
+      case 'overdueDebt':
+        return {
+          title: 'Просроченная дебиторская задолженность',
+          description: 'Открытый долг по арендам, где ожидаемая дата оплаты или дата окончания уже прошла.',
+          details: (
+            <div className="space-y-4">
+              <div className={dangerMetricClass}>
+                <p className="text-sm text-muted-foreground">Просроченная дебиторка</p>
+                <p className="text-3xl font-bold text-danger">{safeCurrency(data.overdueDebt)}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{safeNumber(data.overdueClients)} клиентов</p>
+              </div>
+              {data.overduePayments && data.overduePayments.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-foreground">Просроченные аренды:</p>
+                  {data.overduePayments.map((p: any, index: number) => (
+                    <div key={kpiRowKey('overdue-debt-payment', p, index, p?.invoiceNumber)} className={dangerLinkCardClass}>
+                      <div>
+                        <p className="font-medium text-foreground">{p.client}</p>
+                        <p className="text-sm text-danger">
+                          {p.invoiceNumber || `Аренда ${p.rentalId}`} · Срок: {formatDate(p.dueDate || p.expectedPaymentDate || p.endDate)}
+                        </p>
+                      </div>
+                      <p className="font-semibold text-danger">{safeCurrency(p.outstanding ?? p.amount)}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-8 text-center">
+                  <div>
+                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-success/10">
+                      <TrendingUp className="h-6 w-6 text-success" />
+                    </div>
+                    <p className="text-sm text-muted-foreground">Просроченной дебиторки нет</p>
+                  </div>
                 </div>
               )}
             </div>

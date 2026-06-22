@@ -6,8 +6,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { ClientCombobox } from '../components/ui/ClientCombobox';
-import { getPaymentStatusBadge } from '../components/ui/badge';
-import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock, TrendingDown, Wand2, Trash2, Edit2, ListChecks, ChevronDown, ChevronRight } from 'lucide-react';
+import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock, TrendingDown, Wand2, Trash2, Edit2, ListChecks, Download, SlidersHorizontal, MoreVertical, CalendarDays, FileText, WalletCards, Hourglass, Settings2 } from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { usePermissions } from '../lib/permissions';
 import {
@@ -18,6 +17,7 @@ import {
   usePaymentAllocationsList,
   usePaymentsList,
   usePaginatedPayments,
+  useUpdatePayment,
   useUpdatePaymentAllocation,
 } from '../hooks/usePayments';
 import { useClientsList } from '../hooks/useClients';
@@ -27,7 +27,7 @@ import { useDocumentsList, DOCUMENT_KEYS } from '../hooks/useDocuments';
 import type { GanttRentalData } from '../mock-data';
 import { formatDate, formatCurrency } from '../lib/utils';
 import type { Client, ClientContract, ClientObject, Document, Payment, PaymentAllocation, PaymentStatus } from '../types';
-import { buildRentalDebtRows } from '../lib/finance';
+import { buildClientReceivables, buildRentalDebtRows } from '../lib/finance';
 import { financeService } from '../services/finance.service';
 import {
   buildQuickActionContext,
@@ -62,6 +62,81 @@ function allocationCap(payment: Payment) {
   return payment.amount > 0 ? Math.min(paid, payment.amount) : paid;
 }
 
+function safeLabel(value: unknown, fallback = '—') {
+  const result = text(value);
+  return result || fallback;
+}
+
+function paymentRecord(payment: Payment) {
+  return payment as Payment & Record<string, unknown>;
+}
+
+function paymentNumber(payment: Payment) {
+  const record = paymentRecord(payment);
+  return safeLabel(payment.invoiceNumber || record.documentNumber || payment.id, 'Без номера');
+}
+
+function paymentClientName(payment: Payment) {
+  const record = paymentRecord(payment);
+  return safeLabel(record.clientName || payment.client, 'Контрагент не указан');
+}
+
+function paymentDateLabel(payment: Payment) {
+  const record = paymentRecord(payment);
+  const value = record.date || record.paymentDate || payment.paidDate || payment.dueDate;
+  return value ? formatDate(value) : '—';
+}
+
+function paymentDueDateLabel(payment: Payment) {
+  return payment.dueDate ? formatDate(payment.dueDate) : '—';
+}
+
+function paymentTypeLabel(payment: Payment) {
+  const record = paymentRecord(payment);
+  return safeLabel(record.type || record.method || record.documentType || 'Аренда', '—');
+}
+
+function paymentContractLabel(payment: Payment, rentalsById?: Map<string, GanttRentalData>) {
+  const record = paymentRecord(payment);
+  const rental = payment.rentalId ? rentalsById?.get(payment.rentalId) : undefined;
+  const rentalRecord = (rental || {}) as GanttRentalData & Record<string, unknown>;
+  const contract = safeLabel(record.contractNumber || payment.contractId || rentalRecord.contractNumber || rentalRecord.contractId, '');
+  const rentalLabel = safeLabel(payment.rentalId || rental?.id, '');
+  if (contract && rentalLabel) return `${contract} / ${rentalLabel}`;
+  return contract || rentalLabel || '—';
+}
+
+function paymentPurpose(payment: Payment) {
+  const record = paymentRecord(payment);
+  return safeLabel(record.purpose || payment.comment || record.description || 'Платёж по аренде спецтехники', '—');
+}
+
+function paymentStatusLabel(status: unknown) {
+  const value = text(status).toLowerCase();
+  if (value === 'paid') return 'Оплачен';
+  if (value === 'overdue') return 'Просрочен';
+  if (value === 'partial') return 'Ожидает';
+  if (value === 'pending') return 'К оплате';
+  return safeLabel(status, 'Нет статуса');
+}
+
+function paymentStatusClass(status: unknown) {
+  const value = text(status).toLowerCase();
+  if (value === 'paid') return 'bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-200 dark:ring-emerald-400/20';
+  if (value === 'overdue') return 'bg-red-50 text-red-700 ring-red-100 dark:bg-red-500/15 dark:text-red-200 dark:ring-red-400/20';
+  if (value === 'partial') return 'bg-orange-50 text-orange-700 ring-orange-100 dark:bg-orange-500/15 dark:text-orange-200 dark:ring-orange-400/20';
+  if (value === 'pending') return 'bg-blue-50 text-blue-700 ring-blue-100 dark:bg-blue-500/15 dark:text-blue-200 dark:ring-blue-400/20';
+  return 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700';
+}
+
+function PaymentStatusPill({ status }: { status: unknown }) {
+  return (
+    <span className={cn('inline-flex max-w-full items-center rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ring-inset', paymentStatusClass(status))}>
+      {paymentStatusLabel(status)}
+    </span>
+  );
+}
+
 function paymentCountLabel(value: number) {
   const abs = Math.abs(value) % 100;
   const last = abs % 10;
@@ -69,10 +144,6 @@ function paymentCountLabel(value: number) {
   if (last > 1 && last < 5) return 'платежа';
   if (last === 1) return 'платёж';
   return 'платежей';
-}
-
-function clientInitial(name: string) {
-  return (name.trim()[0] || 'К').toUpperCase();
 }
 
 function normalizedClientName(value: unknown) {
@@ -98,18 +169,6 @@ function resolveClientProfileId({
 
   const matches = clients.filter(client => normalizedClientName(client.company) === name);
   return matches.length === 1 && clientsById.has(matches[0].id) ? matches[0].id : '';
-}
-
-function avatarTone(index: number) {
-  const tones = [
-    'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-200',
-    'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200',
-    'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200',
-    'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200',
-    'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200',
-    'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-200',
-  ];
-  return tones[index % tones.length];
 }
 
 function PaymentKpiCard({
@@ -900,12 +959,11 @@ export default function Payments() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedPaymentId, setSelectedPaymentId] = useState('');
-  const [showAllClientDebts, setShowAllClientDebts] = useState(false);
-  const [showAllRentalDebts, setShowAllRentalDebts] = useState(false);
   const { data: documents = [] } = useDocumentsList({
     enabled: Boolean(selectedPaymentId),
   });
   const createPayment = useCreatePayment();
+  const updatePayment = useUpdatePayment();
   const pagination = useServerPagination<{ status: string; clientId: string }>({
     initialSortBy: 'date',
     initialSortDir: 'desc',
@@ -963,57 +1021,89 @@ export default function Payments() {
     });
   };
 
-  // KPI sums
   const totalPending = paymentSummary?.pendingAmount ?? 0;
   const totalPaid = paymentSummary?.paidAmount ?? 0;
   const totalOverdue = paymentSummary?.overdueAmount ?? 0;
   const totalPartial = paymentSummary?.partialAmount ?? 0;
+  const totalCount = paymentSummary?.count ?? paymentsQuery.data?.pagination.total ?? 0;
   const pendingPaymentsCount = paymentList.filter(payment => ['pending', 'partial'].includes(String(payment.status || '').toLowerCase())).length;
   const paidPaymentsCount = paymentList.filter(payment => ['paid', 'partial'].includes(String(payment.status || '').toLowerCase())).length;
   const overduePaymentsCount = paymentList.filter(payment => String(payment.status || '').toLowerCase() === 'overdue').length;
-  const rentalDebtRows = useMemo(() => (
-    receivablesQuery.data?.rows.flatMap(row => row.rentals.map(rental => ({
-      ...rental,
-      client: row.client,
-      clientId: row.clientId,
-      expectedPaymentDate: rental.dueDate,
-    }))).sort((a, b) => {
-      if (b.overdueDays !== a.overdueDays) return b.overdueDays - a.overdueDays;
-      return b.outstanding - a.outstanding;
-    }) ?? []
-  ), [receivablesQuery.data]);
-  const clientReceivables = useMemo(() => (
-    receivablesQuery.data?.rows.map(row => ({
-      client: row.client,
-      clientId: row.clientId,
-      currentDebt: row.totalDebt,
-      creditLimit: clientsById.get(row.clientId || '')?.creditLimit ?? 0,
-      exceededLimit: Boolean((clientsById.get(row.clientId || '')?.creditLimit ?? 0) > 0 && row.totalDebt > (clientsById.get(row.clientId || '')?.creditLimit ?? 0)),
-      unpaidRentals: row.rentals.length,
-      overdueRentals: row.rentals.filter(rental => rental.overdueDays > 0).length,
-    })).sort((a, b) => b.currentDebt - a.currentDebt) ?? []
-  ), [clientsById, receivablesQuery.data]);
+  const waitingPaymentsCount = paymentList.filter(payment => String(payment.status || '').toLowerCase() === 'partial').length;
+  const forecastAmount = receivablesQuery.data?.summary?.totalDebt ?? totalPending + totalOverdue;
+  const rentalsById = useMemo(() => new Map((ganttRentals as GanttRentalData[]).map(rental => [rental.id, rental])), [ganttRentals]);
   const selectedPayment = useMemo(
     () => paymentList.find(payment => payment.id === selectedPaymentId),
     [paymentList, selectedPaymentId],
   );
-  const overdueDebtRentals = useMemo(
-    () => rentalDebtRows.filter(row => {
-      const today = new Date().toISOString().slice(0, 10);
-      return (row.expectedPaymentDate && row.expectedPaymentDate < today) || row.endDate < today;
-    }),
-    [rentalDebtRows],
-  );
+  const relatedDocuments = useMemo(() => {
+    if (!selectedPayment) return [];
+    const selectedClientId = text(selectedPayment.clientId);
+    const selectedRentalId = text(selectedPayment.rentalId);
+    return documents.filter(document => {
+      const documentRecord = document as Document & Record<string, unknown>;
+      return (
+        (selectedRentalId && text(documentRecord.rentalId || documentRecord.rental) === selectedRentalId) ||
+        (selectedClientId && text(documentRecord.clientId) === selectedClientId)
+      );
+    }).slice(0, 3);
+  }, [documents, selectedPayment]);
+  const invoiceDocument = relatedDocuments.find(document => text((document as Document & Record<string, unknown>).fileUrl));
   const activeFilterCount = [
     pagination.search.trim() !== '',
     pagination.filters.clientId !== 'all' || hasQuickClientContext,
     pagination.filters.status !== 'all',
   ].filter(Boolean).length;
-  const visibleClientReceivables = showAllClientDebts ? clientReceivables : clientReceivables.slice(0, 8);
-  const visibleRentalDebtRows = showAllRentalDebts ? rentalDebtRows : rentalDebtRows.slice(0, 8);
+  const tabs = [
+    { value: 'all', label: 'Все платежи', count: totalCount },
+    { value: 'pending', label: 'К оплате', count: paymentList.filter(payment => String(payment.status || '').toLowerCase() === 'pending').length },
+    { value: 'partial', label: 'Ожидают', count: waitingPaymentsCount },
+    { value: 'paid', label: 'Оплачено', count: paymentList.filter(payment => String(payment.status || '').toLowerCase() === 'paid').length },
+    { value: 'overdue', label: 'Просрочено', count: overduePaymentsCount },
+  ];
+
+  function resetFilters() {
+    pagination.setSearch('');
+    pagination.setFilters({ clientId: 'all', status: 'all' });
+  }
+
+  function exportCurrentPayments() {
+    const rows = paymentList.map(payment => [
+      paymentDateLabel(payment),
+      paymentNumber(payment),
+      paymentClientName(payment),
+      paymentContractLabel(payment, rentalsById),
+      paymentTypeLabel(payment),
+      String(payment.amount ?? 0),
+      paymentStatusLabel(payment.status),
+    ]);
+    const csv = [
+      ['Дата', 'Номер платежа', 'Контрагент', 'Договор / заказ', 'Тип', 'Сумма', 'Статус'],
+      ...rows,
+    ].map(row => row.map(cell => `"${String(cell).replaceAll('"', '""')}"`).join(';')).join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `payments-${today()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function markSelectedPaid() {
+    if (!selectedPayment || !can('update', 'payments')) return;
+    updatePayment.mutate({
+      id: selectedPayment.id,
+      data: {
+        status: 'paid',
+        paidAmount: selectedPayment.amount,
+        paidDate: today(),
+      },
+    });
+  }
 
   return (
-    <div data-payments-responsive-root="true" className="min-h-screen max-w-full space-y-6 overflow-x-clip bg-[#f7f9fc] p-4 text-slate-950 dark:bg-background dark:text-foreground sm:p-6 md:p-8">
+    <div data-payments-responsive-root="true" className="min-h-screen max-w-full space-y-6 overflow-x-clip bg-[#f6f8fb] p-4 text-slate-950 dark:bg-background dark:text-foreground sm:p-6 md:p-8">
       <AddPaymentModal
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
@@ -1024,33 +1114,42 @@ export default function Payments() {
         allPayments={allPaymentsForAllocation}
       />
 
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-muted-foreground">Рабочее пространство</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950 dark:text-white sm:text-4xl">Платежи</h1>
+          <h1 className="text-3xl font-semibold tracking-normal text-slate-950 dark:text-white sm:text-4xl">Платежи</h1>
           <p className="mt-2 text-sm text-slate-500 dark:text-muted-foreground">Управление платежами и задолженностями</p>
         </div>
-        {can('create', 'payments') && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Button
-            size="lg"
-            onClick={() => setShowAddModal(true)}
-            className="h-11 rounded-xl bg-lime-300 px-5 font-semibold text-slate-950 shadow-[0_16px_32px_rgba(132,204,22,0.22)] hover:bg-lime-200"
+            type="button"
+            variant="outline"
+            onClick={exportCurrentPayments}
+            disabled={paymentList.length === 0}
+            className="h-11 rounded-lg border-slate-200 bg-white px-4 text-slate-700 shadow-sm hover:bg-slate-50 dark:border-border dark:bg-card dark:text-foreground"
           >
-            <Plus className="h-4 w-4" />
-            Добавить платёж
+            <Download className="h-4 w-4" />
+            Экспорт
           </Button>
-        )}
+          {can('create', 'payments') && (
+            <Button
+              size="lg"
+              onClick={() => setShowAddModal(true)}
+              className="h-11 rounded-lg bg-blue-600 px-5 font-semibold text-white shadow-[0_14px_28px_rgba(37,99,235,0.22)] hover:bg-blue-700"
+            >
+              <Plus className="h-4 w-4" />
+              Новый платеж
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* KPI summary */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <PaymentKpiCard
           icon={Clock}
-          title="Ожидает оплаты"
+          title="К оплате"
           value={formatCurrency(totalPending)}
           caption={`${pendingPaymentsCount} ${paymentCountLabel(pendingPaymentsCount)}`}
-          tone="bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-200"
+          tone="bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-200"
         />
         <PaymentKpiCard
           icon={CheckCircle}
@@ -1061,6 +1160,14 @@ export default function Payments() {
           valueClassName="text-emerald-600 dark:text-emerald-300"
         />
         <PaymentKpiCard
+          icon={Hourglass}
+          title="Ожидают"
+          value={formatCurrency(totalPartial)}
+          caption={`${waitingPaymentsCount} ${paymentCountLabel(waitingPaymentsCount)}`}
+          tone="bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-200"
+          valueClassName="text-orange-600 dark:text-orange-300"
+        />
+        <PaymentKpiCard
           icon={AlertTriangle}
           title="Просрочено"
           value={formatCurrency(totalOverdue)}
@@ -1069,202 +1176,73 @@ export default function Payments() {
           valueClassName="text-red-600 dark:text-red-300"
         />
         <PaymentKpiCard
-          icon={DollarSign}
-          title="Всего платежей"
-          value={String(paymentSummary?.count ?? paymentsQuery.data?.pagination.total ?? 0)}
-          caption="За всё время"
-          tone="bg-sky-100 text-sky-600 dark:bg-sky-500/15 dark:text-sky-200"
+          icon={WalletCards}
+          title="Прогноз поступлений"
+          value={formatCurrency(forecastAmount)}
+          caption="на 30 дней"
+          tone="bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-200"
         />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.12fr)_minmax(380px,0.88fr)]">
-        <div className="rounded-[20px] border border-slate-900/[0.08] bg-white p-5 shadow-[0_22px_60px_rgba(15,23,42,0.07)] dark:border-border dark:bg-card dark:shadow-none sm:p-6">
-          <div className="mb-5 flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Дебиторка по клиентам</h2>
-              <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">Клиенты с текущей задолженностью по арендам</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs font-medium text-slate-400 dark:text-muted-foreground">Всего должников</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{clientReceivables.length}</p>
-            </div>
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-border dark:bg-card">
+        <div className="grid gap-3 lg:grid-cols-[minmax(260px,1.4fr)_repeat(4,minmax(150px,0.7fr))_auto]">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              placeholder="Поиск по платежам, договорам, контрагентам..."
+              value={pagination.search}
+              onChange={(event) => pagination.setSearch(event.target.value)}
+              className="h-11 rounded-lg border-slate-200 bg-white pl-10 dark:border-border dark:bg-background"
+            />
           </div>
-          {clientReceivables.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-sm text-slate-500 dark:border-border dark:text-muted-foreground">
-              Сейчас активной дебиторки нет
-            </div>
-          ) : (
-            <div>
-              <div className="hidden grid-cols-[minmax(0,1fr)_120px_190px_28px] gap-4 border-b border-slate-100 px-2 pb-3 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:border-border md:grid">
-                <span>Клиент</span>
-                <span className="text-center">Неоплаченные аренды</span>
-                <span className="text-right">Задолженность</span>
-                <span />
-              </div>
-              <div className="divide-y divide-slate-100 dark:divide-border">
-              {visibleClientReceivables.map((row, index) => {
-                const clientProfileId = resolveClientProfileId({
-                  clients,
-                  clientsById,
-                  clientId: row.clientId,
-                  clientName: row.client,
-                });
-                const rowClassName = cn(
-                  'grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_120px_190px_28px] md:items-center md:gap-4',
-                  clientProfileId && 'cursor-pointer rounded-2xl px-2 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 dark:hover:bg-muted/45',
-                );
-                const rowContent = (
-                  <>
-                    <div className="flex min-w-0 items-start gap-3">
-                      <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-semibold', avatarTone(index))}>
-                        {clientInitial(row.client)}
-                      </div>
-                      <div className="min-w-0">
-                        <p className={cn('truncate font-semibold text-slate-950 dark:text-white', clientProfileId && 'group-hover:text-[--color-primary]')}>{row.client}</p>
-                        <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">
-                          Неоплаченных аренд: {row.unpaidRentals}
-                          {' · '}
-                          Просроченных: {row.overdueRentals}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="hidden text-center text-sm font-semibold text-slate-700 dark:text-foreground md:block">{row.unpaidRentals}</div>
-                    <div className="flex items-end justify-between gap-3 md:block md:text-right">
-                      <span className="text-xs font-medium uppercase tracking-wide text-slate-400 md:hidden">Задолженность</span>
-                      <div>
-                        <p className={cn('text-lg font-semibold', row.exceededLimit ? 'text-red-600 dark:text-red-300' : 'text-slate-950 dark:text-white')}>
-                          {formatCurrency(row.currentDebt)}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-400 dark:text-muted-foreground">
-                          Лимит: {row.creditLimit > 0 ? formatCurrency(row.creditLimit) : 'не задан'}
-                        </p>
-                      </div>
-                    </div>
-                    <ChevronRight className={cn('hidden h-5 w-5 text-slate-300 dark:text-muted-foreground md:block', clientProfileId && 'transition group-hover:text-[--color-primary]')} />
-                  </>
-                );
-                return clientProfileId ? (
-                  <Link key={row.clientId || row.client} to={`/clients/${clientProfileId}`} className={cn('group', rowClassName)} aria-label={`Открыть карточку клиента ${row.client}`}>
-                    {rowContent}
-                  </Link>
-                ) : (
-                  <div key={row.clientId || row.client} className={rowClassName}>
-                    {rowContent}
-                  </div>
-                );
-              })}
-              </div>
-              {clientReceivables.length > 8 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllClientDebts(value => !value)}
-                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-border dark:bg-secondary/70 dark:text-foreground dark:hover:bg-accent"
-                >
-                  {showAllClientDebts ? 'Свернуть список клиентов' : 'Показать всех клиентов'}
-                  <ChevronDown className={cn('h-4 w-4 transition-transform', showAllClientDebts && 'rotate-180')} />
-                </button>
-              )}
-            </div>
-          )}
+          <div className="relative">
+            <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <select className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 pr-9 text-sm text-slate-700 shadow-sm dark:border-border dark:bg-background dark:text-foreground" defaultValue="all">
+              <option value="all">Период: все</option>
+            </select>
+          </div>
+          <select className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm dark:border-border dark:bg-background dark:text-foreground" defaultValue="all">
+            <option value="all">Тип: все</option>
+          </select>
+          <select
+            value={pagination.filters.status}
+            onChange={(event) => pagination.setFilters({ status: event.target.value })}
+            className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm dark:border-border dark:bg-background dark:text-foreground"
+          >
+            <option value="all">Статус: все</option>
+            <option value="pending">К оплате</option>
+            <option value="partial">Ожидают</option>
+            <option value="paid">Оплачено</option>
+            <option value="overdue">Просрочено</option>
+          </select>
+          <select
+            value={pagination.filters.clientId}
+            onChange={(event) => pagination.setFilters({ clientId: event.target.value })}
+            className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm dark:border-border dark:bg-background dark:text-foreground"
+          >
+            <option value="all">Контрагент: все</option>
+            {clients.map(client => (
+              <option key={client.id} value={client.id}>{client.company}</option>
+            ))}
+          </select>
+          <Button type="button" variant="outline" onClick={() => setShowFilters(true)} className="h-11 rounded-lg">
+            <SlidersHorizontal className="h-4 w-4" />
+            Ещё фильтры
+          </Button>
         </div>
-
-        <div className="rounded-[20px] border border-slate-900/[0.08] bg-white p-5 shadow-[0_22px_60px_rgba(15,23,42,0.07)] dark:border-border dark:bg-card dark:shadow-none sm:p-6">
-          <div className="mb-5 flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Неоплаченные аренды</h2>
-              <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">Самые рискованные аренды по дебиторке</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs font-medium text-slate-400 dark:text-muted-foreground">Всего</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{rentalDebtRows.length}</p>
-            </div>
-          </div>
-          {rentalDebtRows.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-sm text-slate-500 dark:border-border dark:text-muted-foreground">
-              Все аренды закрыты по оплате
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {visibleRentalDebtRows.map(row => {
-                const isOverdue = overdueDebtRentals.some(item => item.rentalId === row.rentalId);
-                const clientProfileId = resolveClientProfileId({
-                  clients,
-                  clientsById,
-                  clientId: row.clientId,
-                  clientName: row.client,
-                });
-                const cardClassName = cn(
-                  'grid gap-3 rounded-2xl border bg-white py-4 pl-4 pr-3 shadow-[0_12px_30px_rgba(15,23,42,0.04)] dark:bg-card/70 dark:shadow-none sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4',
-                  isOverdue ? 'border-red-200 border-l-4 border-l-red-400 bg-red-50/45 dark:border-red-900/50 dark:border-l-red-500 dark:bg-red-950/20' : 'border-slate-200 border-l-4 border-l-slate-200 dark:border-border dark:border-l-border',
-                  clientProfileId && 'cursor-pointer transition hover:border-lime-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 dark:hover:bg-muted/45',
-                );
-                const cardContent = (
-                  <>
-                    <div className="min-w-0">
-                      <p className={cn('truncate font-semibold text-slate-950 dark:text-white', clientProfileId && 'group-hover:text-[--color-primary]')}>{row.client}</p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">
-                        {row.rentalId} · {row.startDate} — {row.endDate}
-                      </p>
-                      {row.expectedPaymentDate && (
-                        <p className="mt-2 text-xs text-slate-500 dark:text-muted-foreground">
-                          Ожидаемая оплата: {formatDate(row.expectedPaymentDate)}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex items-start justify-between gap-2 text-left sm:justify-start sm:text-right">
-                      <div>
-                        <p className={cn('whitespace-nowrap text-lg font-semibold', isOverdue ? 'text-red-600 dark:text-red-300' : 'text-slate-950 dark:text-white')}>
-                          {formatCurrency(row.outstanding)}
-                        </p>
-                        <p className="mt-1 whitespace-nowrap text-xs text-slate-400 dark:text-muted-foreground">
-                          Оплачено: {formatCurrency(row.paidAmount)}
-                        </p>
-                      </div>
-                      <ChevronRight className={cn('mt-1 h-5 w-5 text-slate-300 dark:text-muted-foreground', clientProfileId && 'transition group-hover:text-[--color-primary]')} />
-                    </div>
-                  </>
-                );
-                return clientProfileId ? (
-                  <Link key={row.rentalId} to={`/clients/${clientProfileId}`} className={cn('group', cardClassName)} aria-label={`Открыть карточку клиента ${row.client}`}>
-                    {cardContent}
-                  </Link>
-                ) : (
-                  <div key={row.rentalId} className={cardClassName}>
-                    {cardContent}
-                  </div>
-                );
-              })}
-              {rentalDebtRows.length > 8 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllRentalDebts(value => !value)}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-border dark:bg-secondary/70 dark:text-foreground dark:hover:bg-accent"
-                >
-                  {showAllRentalDebts ? 'Свернуть список аренд' : 'Показать все просроченные аренды'}
-                  <ChevronDown className={cn('h-4 w-4 transition-transform', showAllRentalDebts && 'rotate-180')} />
-                </button>
-              )}
-            </div>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+          {activeFilterCount > 0 && (
+            <Button type="button" variant="ghost" onClick={resetFilters} className="h-9 rounded-lg text-slate-500">
+              <X className="h-4 w-4" />
+              Сбросить
+            </Button>
           )}
+          <Button type="button" variant="outline" onClick={() => setShowFilters(true)} className="h-9 rounded-lg">
+            <Settings2 className="h-4 w-4" />
+            Настроить вид
+          </Button>
         </div>
       </div>
-
-      <div className="flex justify-end">
-        <FilterButton activeCount={activeFilterCount} onClick={() => setShowFilters(true)} />
-      </div>
-
-      {selectedPayment && (
-        <PaymentAllocationPanel
-          payment={selectedPayment}
-          allPayments={allPaymentsForAllocation}
-          allocations={paymentAllocations}
-          rentals={ganttRentals as GanttRentalData[]}
-          objects={clientObjects}
-          contracts={clientContracts}
-          documents={documents}
-          onClose={() => setSelectedPaymentId('')}
-        />
-      )}
 
       <FilterDialog
         open={showFilters}
@@ -1307,17 +1285,35 @@ export default function Payments() {
               className="app-filter-input"
             >
               <option value="all">Все статусы</option>
+              <option value="pending">К оплате</option>
+              <option value="partial">Ожидают</option>
               <option value="paid">Оплачено</option>
-              <option value="partial">Частично</option>
-              <option value="pending">Не оплачено</option>
               <option value="overdue">Просрочено</option>
             </select>
           </FilterField>
         </div>
       </FilterDialog>
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-[20px] border border-slate-900/[0.08] bg-white shadow-[0_22px_60px_rgba(15,23,42,0.06)] dark:border-border dark:bg-card dark:shadow-none">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
+        <div className="flex max-w-full gap-5 overflow-x-auto border-b border-slate-100 px-4 dark:border-border sm:px-6">
+          {tabs.map(tab => (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => pagination.setFilters({ status: tab.value })}
+              className={cn(
+                'flex h-14 shrink-0 items-center gap-2 border-b-2 px-1 text-sm font-semibold transition',
+                pagination.filters.status === tab.value
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-muted-foreground dark:hover:text-foreground',
+              )}
+            >
+              {tab.label}
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500 dark:bg-secondary dark:text-muted-foreground">{tab.count}</span>
+            </button>
+          ))}
+        </div>
         <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-5 dark:border-border sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
             <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Регистр платежей</h2>
@@ -1329,104 +1325,73 @@ export default function Payments() {
         </div>
         <div data-payment-mobile-list="true" className="grid gap-3 p-3 md:hidden">
           {paymentList.map((payment) => {
-            const paid = payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0);
-            const remaining = payment.amount - paid;
             const clientProfileId = resolveClientProfileId({
               clients,
               clientsById,
               clientId: payment.clientId,
-              clientName: payment.client,
+              clientName: paymentClientName(payment),
             });
             return (
               <article
                 key={payment.id}
                 data-payment-mobile-card="true"
+                onClick={() => setSelectedPaymentId(payment.id)}
                 className={cn(
-                  'max-w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_28px_rgba(15,23,42,0.05)] dark:border-border dark:bg-card/70 dark:shadow-none',
-                  payment.status === 'overdue' && 'border-red-200 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20',
+                  'max-w-full cursor-pointer rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:bg-blue-50/30 dark:border-border dark:bg-card/70 dark:hover:bg-muted/40',
+                  selectedPayment?.id === payment.id && 'border-blue-300 bg-blue-50/60 ring-1 ring-blue-200 dark:border-blue-500/60 dark:bg-blue-950/20 dark:ring-blue-500/30',
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Счёт</p>
-                    <p className="mt-1 break-words font-semibold text-slate-950 dark:text-white">{payment.invoiceNumber || payment.id}</p>
+                    <p className="text-xs text-slate-400 dark:text-muted-foreground">№ платежа</p>
+                    <p className="mt-1 break-words font-semibold text-blue-700 dark:text-blue-300">{paymentNumber(payment)}</p>
                   </div>
-                  <div data-payment-mobile-status="true" className="flex max-w-[52%] shrink-0 justify-end [&_.app-status-pill]:max-w-full [&_.app-status-pill]:whitespace-normal [&_.app-status-pill]:text-center">
-                    {getPaymentStatusBadge(payment.status)}
+                  <div data-payment-mobile-status="true" className="flex max-w-[52%] shrink-0 justify-end">
+                    <PaymentStatusPill status={payment.status} />
                   </div>
                 </div>
 
                 <div className="mt-4 grid gap-3">
                   <div data-payment-mobile-client="true" className="min-w-0">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Клиент</p>
+                    <p className="text-xs text-slate-400 dark:text-muted-foreground">Контрагент</p>
                     {clientProfileId ? (
                       <Link
                         to={`/clients/${clientProfileId}`}
-                        className="mt-1 block break-words rounded-md text-sm font-semibold text-slate-800 transition hover:text-[--color-primary] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 dark:text-foreground"
-                        aria-label={`Открыть карточку клиента ${payment.client}`}
+                        onClick={(event) => event.stopPropagation()}
+                        className="mt-1 block break-words rounded-md text-sm font-semibold text-slate-800 transition hover:text-blue-700 dark:text-foreground"
+                        aria-label={`Открыть карточку клиента ${paymentClientName(payment)}`}
                       >
-                        {payment.client}
+                        {paymentClientName(payment)}
                       </Link>
                     ) : (
-                      <p className="mt-1 break-words text-sm font-semibold text-slate-800 dark:text-foreground">{payment.client || '—'}</p>
+                      <p className="mt-1 break-words text-sm font-semibold text-slate-800 dark:text-foreground">{paymentClientName(payment)}</p>
                     )}
                   </div>
 
-                  <div data-payment-mobile-rental="true" className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Аренда</span>
-                    {payment.rentalId ? (
-                      <span className="max-w-full break-all rounded-lg bg-slate-100 px-2 py-1 font-mono text-xs font-medium text-slate-600 dark:bg-secondary dark:text-foreground">
-                        {payment.rentalId}
-                      </span>
-                    ) : (
-                      <span className="text-sm text-slate-400 dark:text-muted-foreground">—</span>
-                    )}
+                  <div data-payment-mobile-rental="true" className="min-w-0">
+                    <p className="text-xs text-slate-400 dark:text-muted-foreground">Договор / заказ</p>
+                    <p className="mt-1 break-all text-sm text-slate-700 dark:text-foreground">{paymentContractLabel(payment, rentalsById)}</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <div data-payment-mobile-amount="true" className="min-w-0 rounded-xl bg-slate-50 p-3 dark:bg-secondary/45">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Сумма</p>
-                      <p className="mt-1 break-words text-base font-semibold text-slate-950 dark:text-white">{formatCurrency(payment.amount)}</p>
+                    <div data-payment-mobile-amount="true" className="min-w-0 rounded-lg bg-slate-50 p-3 dark:bg-secondary/45">
+                      <p className="text-xs text-slate-400 dark:text-muted-foreground">Сумма</p>
+                      <p className="mt-1 break-words text-base font-semibold text-slate-950 dark:text-white">{formatCurrency(payment.amount || 0)}</p>
                     </div>
-                    <div className="min-w-0 rounded-xl bg-emerald-50 p-3 dark:bg-emerald-950/20">
-                      <p className="text-xs font-medium uppercase tracking-wide text-emerald-700/70 dark:text-emerald-200/70">Оплачено</p>
-                      <p className="mt-1 break-words text-base font-semibold text-emerald-700 dark:text-emerald-300">{formatCurrency(paid)}</p>
-                      {remaining > 0 && (
-                        <p className="mt-1 break-words text-xs text-slate-500 dark:text-muted-foreground">Остаток: {formatCurrency(remaining)}</p>
-                      )}
+                    <div data-payment-mobile-date="true" className="min-w-0 rounded-lg bg-slate-50 p-3 dark:bg-secondary/45">
+                      <p className="text-xs text-slate-400 dark:text-muted-foreground">Дата</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-foreground">{paymentDateLabel(payment)}</p>
                     </div>
                   </div>
-
-                  <div data-payment-mobile-date="true" className="grid grid-cols-2 gap-3 text-sm">
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Срок оплаты</p>
-                      <p className="mt-1 text-slate-700 dark:text-foreground">{formatDate(payment.dueDate)}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Дата оплаты</p>
-                      <p className="mt-1 text-slate-700 dark:text-foreground">{payment.paidDate ? formatDate(payment.paidDate) : '—'}</p>
-                    </div>
-                  </div>
-
-                  {payment.comment && (
-                    <div data-payment-mobile-comment="true" className="min-w-0 rounded-xl border border-slate-100 px-3 py-2 dark:border-border">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Комментарий</p>
-                      <p className="mt-1 break-words text-sm text-slate-600 dark:text-muted-foreground">{payment.comment}</p>
-                    </div>
-                  )}
                 </div>
 
-                <div data-payment-mobile-actions="true" className="mt-4 flex flex-wrap justify-end gap-2">
+                <div data-payment-mobile-actions="true" className="mt-4 flex justify-end">
                   <Button
                     size="sm"
-                    variant={selectedPayment?.id === payment.id ? 'default' : 'secondary'}
-                    onClick={() => setSelectedPaymentId(payment.id)}
-                    className={cn(
-                      'w-full rounded-xl sm:w-auto',
-                      selectedPayment?.id !== payment.id && 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-secondary dark:text-foreground dark:hover:bg-accent',
-                    )}
+                    variant="secondary"
+                    onClick={(event) => { event.stopPropagation(); setSelectedPaymentId(payment.id); }}
                   >
-                    Открыть распределение
+                    Открыть детали
                   </Button>
                 </div>
               </article>
@@ -1436,103 +1401,77 @@ export default function Payments() {
 
         <div data-payment-desktop-table="true" className="hidden overflow-x-auto md:block">
         <table className="min-w-[1040px] w-full border-collapse text-sm">
-          <thead className="bg-slate-50 text-slate-500 dark:bg-muted/55 dark:text-muted-foreground">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-slate-500 dark:bg-muted/55 dark:text-muted-foreground">
             <tr className="border-b border-slate-200 dark:border-border">
-              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Счёт</th>
-              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Аренда</th>
-              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Клиент</th>
-              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Сумма</th>
-              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Оплачено</th>
-              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Срок оплаты</th>
-              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Дата оплаты</th>
-              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Статус</th>
-              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Комментарий</th>
-              <th className="h-11 px-4 text-left text-xs font-semibold uppercase tracking-[0.08em]">Распределение</th>
+              <th className="w-12 px-4 py-3 text-left"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" aria-label="Выбрать все платежи" /></th>
+              <th className="px-4 py-3 text-left text-xs font-semibold">Дата</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold">№ платежа</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold">Контрагент</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold">Договор / Заказ</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold">Тип</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold">Сумма</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold">Статус</th>
+              <th className="w-12 px-4 py-3 text-right text-xs font-semibold"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white dark:divide-border dark:bg-card">
             {paymentList.map((payment) => {
-              const paid = payment.paidAmount ?? (payment.status === 'paid' ? payment.amount : 0);
-              const remaining = payment.amount - paid;
               const clientProfileId = resolveClientProfileId({
                 clients,
                 clientsById,
                 clientId: payment.clientId,
-                clientName: payment.client,
+                clientName: paymentClientName(payment),
               });
               return (
                 <tr
                   key={payment.id}
+                  onClick={() => setSelectedPaymentId(payment.id)}
                   className={cn(
-                    'transition-colors hover:bg-slate-50/80 dark:hover:bg-muted/50',
-                    payment.status === 'overdue' && 'bg-red-50/60 hover:bg-red-50 dark:bg-red-950/20 dark:hover:bg-red-950/30',
+                    'cursor-pointer transition-colors hover:bg-slate-50/90 dark:hover:bg-muted/50',
+                    selectedPayment?.id === payment.id && 'bg-blue-50/80 dark:bg-blue-950/20',
                   )}
                 >
-                  <td className="whitespace-nowrap px-4 py-3 align-middle">
-                    <p className="font-semibold text-slate-950 dark:text-white">{payment.invoiceNumber}</p>
+                  <td className="px-4 py-3 align-middle" onClick={(event) => event.stopPropagation()}>
+                    <input type="checkbox" className="h-4 w-4 rounded border-slate-300" aria-label={`Выбрать ${paymentNumber(payment)}`} />
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-middle text-slate-700 dark:text-foreground">
+                    {paymentDateLabel(payment)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 align-middle">
-                    {payment.rentalId ? (
-                      <span className="rounded-lg bg-slate-100 px-2 py-1 font-mono text-xs font-medium text-slate-600 dark:bg-secondary dark:text-foreground">
-                        {payment.rentalId}
-                      </span>
-                    ) : (
-                      <span className="text-sm text-slate-400 dark:text-muted-foreground">—</span>
-                    )}
+                    <button type="button" onClick={() => setSelectedPaymentId(payment.id)} className="font-semibold text-blue-700 hover:text-blue-800 dark:text-blue-300">
+                      {paymentNumber(payment)}
+                    </button>
                   </td>
                   <td className="max-w-[220px] px-4 py-3 align-middle">
                     {clientProfileId ? (
                       <Link
                         to={`/clients/${clientProfileId}`}
-                        className="block truncate rounded-md text-sm font-medium text-slate-700 transition hover:text-[--color-primary] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 dark:text-foreground"
-                        aria-label={`Открыть карточку клиента ${payment.client}`}
+                        onClick={(event) => event.stopPropagation()}
+                        className="block truncate rounded-md font-medium text-slate-700 transition hover:text-blue-700 dark:text-foreground"
+                        aria-label={`Открыть карточку клиента ${paymentClientName(payment)}`}
                       >
-                        {payment.client}
+                        {paymentClientName(payment)}
                       </Link>
                     ) : (
-                      <p className="truncate text-sm font-medium text-slate-700 dark:text-foreground">{payment.client}</p>
+                      <p className="truncate font-medium text-slate-700 dark:text-foreground">{paymentClientName(payment)}</p>
                     )}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 align-middle">
-                    <p className="font-semibold text-slate-950 dark:text-white">{formatCurrency(payment.amount)}</p>
+                  <td className="max-w-[240px] px-4 py-3 align-middle">
+                    <p className="truncate text-slate-700 dark:text-foreground">{paymentContractLabel(payment, rentalsById)}</p>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 align-middle">
-                    <div>
-                      <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-300">{formatCurrency(paid)}</p>
-                      {remaining > 0 && (
-                        <p className="mt-0.5 text-xs text-slate-400 dark:text-muted-foreground">Остаток: {formatCurrency(remaining)}</p>
-                      )}
-                    </div>
+                    <span className="rounded-md bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-500/15 dark:text-blue-200">{paymentTypeLabel(payment)}</span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 align-middle">
-                    <p className="text-sm text-slate-600 dark:text-muted-foreground">{formatDate(payment.dueDate)}</p>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 align-middle">
-                    {payment.paidDate ? (
-                      <p className="text-sm text-slate-600 dark:text-muted-foreground">{formatDate(payment.paidDate)}</p>
-                    ) : (
-                      <span className="text-sm text-slate-400 dark:text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 align-middle">{getPaymentStatusBadge(payment.status)}</td>
-                  <td className="max-w-[180px] px-4 py-3 align-middle">
-                    {payment.comment ? (
-                      <p className="truncate text-sm text-slate-500 dark:text-muted-foreground">{payment.comment}</p>
-                    ) : (
-                      <span className="text-sm text-slate-400 dark:text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 align-middle">
+                  <td className="whitespace-nowrap px-4 py-3 text-right align-middle font-semibold text-slate-950 dark:text-white">{formatCurrency(payment.amount || 0)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 align-middle"><PaymentStatusPill status={payment.status} /></td>
+                  <td className="px-4 py-3 text-right align-middle">
                     <Button
-                      size="sm"
-                      variant={selectedPayment?.id === payment.id ? 'default' : 'secondary'}
-                      onClick={() => setSelectedPaymentId(payment.id)}
-                      className={cn(
-                        'rounded-xl',
-                        selectedPayment?.id !== payment.id && 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-secondary dark:text-foreground dark:hover:bg-accent',
-                      )}
+                      size="icon"
+                      variant="ghost"
+                      onClick={(event) => { event.stopPropagation(); setSelectedPaymentId(payment.id); }}
+                      aria-label={`Открыть меню ${paymentNumber(payment)}`}
                     >
-                      Открыть
+                      <MoreVertical className="h-4 w-4" />
                     </Button>
                   </td>
                 </tr>
@@ -1584,6 +1523,108 @@ export default function Payments() {
             )}
           </div>
         )}
+      </div>
+
+        <aside className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-border dark:bg-card xl:sticky xl:top-6 xl:self-start">
+          {!selectedPayment ? (
+            <div className="flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 px-5 text-center dark:border-border">
+              <FileText className="mb-3 h-10 w-10 text-slate-300 dark:text-muted-foreground" />
+              <h2 className="text-base font-semibold text-slate-950 dark:text-white">Выберите платёж</h2>
+              <p className="mt-2 text-sm text-slate-500 dark:text-muted-foreground">Детали, документы и действия появятся здесь.</p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="break-words text-lg font-semibold text-slate-950 dark:text-white">{paymentNumber(selectedPayment)}</h2>
+                  <div className="mt-3"><PaymentStatusPill status={selectedPayment.status} /></div>
+                </div>
+                <Button size="icon" variant="ghost" onClick={() => setSelectedPaymentId('')} aria-label="Закрыть детали">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <div>
+                <p className="text-2xl font-semibold text-slate-950 dark:text-white">{formatCurrency(selectedPayment.amount || 0)}</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">{paymentPurpose(selectedPayment)}</p>
+              </div>
+
+              <dl className="grid gap-3 text-sm">
+                {[
+                  ['Контрагент', paymentClientName(selectedPayment)],
+                  ['Договор / Заказ', paymentContractLabel(selectedPayment, rentalsById)],
+                  ['Дата платежа', paymentDateLabel(selectedPayment)],
+                  ['Срок оплаты', paymentDueDateLabel(selectedPayment)],
+                  ['Тип платежа', paymentTypeLabel(selectedPayment)],
+                  ['Назначение', paymentPurpose(selectedPayment)],
+                  ['Комментарий', safeLabel(selectedPayment.comment, '—')],
+                ].map(([label, value]) => (
+                  <div key={label} className="grid grid-cols-[104px_minmax(0,1fr)] gap-3">
+                    <dt className="text-slate-500 dark:text-muted-foreground">{label}</dt>
+                    <dd className="min-w-0 break-words font-medium text-slate-800 dark:text-foreground">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+
+              <div className="rounded-lg border border-slate-200 dark:border-border">
+                <div className="flex items-center justify-between border-b border-slate-100 px-3 py-3 dark:border-border">
+                  <h3 className="text-sm font-semibold text-slate-950 dark:text-white">Связанные документы ({relatedDocuments.length})</h3>
+                </div>
+                <div className="space-y-2 p-3">
+                  {relatedDocuments.length > 0 ? relatedDocuments.map(document => {
+                    const documentRecord = document as Document & Record<string, unknown>;
+                    return (
+                      <div key={document.id} className="flex min-w-0 items-center gap-2 text-sm">
+                        <FileText className="h-4 w-4 shrink-0 text-red-500" />
+                        <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-foreground">
+                          {safeLabel(documentRecord.type || documentRecord.documentType, 'Документ')} {safeLabel(documentRecord.number || documentRecord.documentNumber || document.id, '')}
+                        </span>
+                        <span className="text-xs text-slate-400">PDF</span>
+                      </div>
+                    );
+                  }) : (
+                    <p className="py-3 text-sm text-slate-500 dark:text-muted-foreground">Связанных документов нет</p>
+                  )}
+                </div>
+              </div>
+
+              <PaymentAllocationPanel
+                payment={selectedPayment}
+                allPayments={allPaymentsForAllocation}
+                allocations={paymentAllocations}
+                rentals={ganttRentals as GanttRentalData[]}
+                objects={clientObjects}
+                contracts={clientContracts}
+                documents={documents}
+                onClose={() => setSelectedPaymentId('')}
+              />
+
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!invoiceDocument}
+                  onClick={() => {
+                    const fileUrl = text((invoiceDocument as Document & Record<string, unknown> | undefined)?.fileUrl);
+                    if (fileUrl) window.open(fileUrl, '_blank', 'noopener,noreferrer');
+                  }}
+                  className="rounded-lg"
+                >
+                  <Download className="h-4 w-4" />
+                  Скачать счёт
+                </Button>
+                <Button
+                  type="button"
+                  onClick={markSelectedPaid}
+                  disabled={!can('update', 'payments') || selectedPayment.status === 'paid' || updatePayment.isPending}
+                  className="rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  Отметить оплаченным
+                </Button>
+              </div>
+            </div>
+          )}
+        </aside>
       </div>
 
       <PaginationControls

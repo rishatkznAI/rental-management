@@ -1,0 +1,94 @@
+name: Production Role Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_release_commit:
+        description: Expected production frontend commit hash
+        required: true
+        default: 1c54151cf65545002a33b7ba40b4fd98b2d52263
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-role-smoke
+  cancel-in-progress: false
+
+jobs:
+  production-role-smoke:
+    name: Read-only production role smoke
+    runs-on: ubuntu-latest
+    env:
+      PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+      PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+      PRODUCTION_RENTAL_MANAGER_EMAIL: ${{ secrets.PRODUCTION_RENTAL_MANAGER_EMAIL }}
+      PRODUCTION_RENTAL_MANAGER_PASSWORD: ${{ secrets.PRODUCTION_RENTAL_MANAGER_PASSWORD }}
+      PRODUCTION_MECHANIC_EMAIL: ${{ secrets.PRODUCTION_MECHANIC_EMAIL }}
+      PRODUCTION_MECHANIC_PASSWORD: ${{ secrets.PRODUCTION_MECHANIC_PASSWORD }}
+      PRODUCTION_INVESTOR_EMAIL: ${{ secrets.PRODUCTION_INVESTOR_EMAIL }}
+      PRODUCTION_INVESTOR_PASSWORD: ${{ secrets.PRODUCTION_INVESTOR_PASSWORD }}
+      PRODUCTION_CARRIER_EMAIL: ${{ secrets.PRODUCTION_CARRIER_EMAIL }}
+      PRODUCTION_CARRIER_PASSWORD: ${{ secrets.PRODUCTION_CARRIER_PASSWORD }}
+      EXPECTED_RELEASE_COMMIT: ${{ inputs.expected_release_commit }}
+      CI: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Validate required smoke secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in \
+            PRODUCTION_API_URL \
+            PRODUCTION_FRONTEND_URL \
+            PRODUCTION_RENTAL_MANAGER_EMAIL \
+            PRODUCTION_RENTAL_MANAGER_PASSWORD \
+            PRODUCTION_MECHANIC_EMAIL \
+            PRODUCTION_MECHANIC_PASSWORD \
+            PRODUCTION_INVESTOR_EMAIL \
+            PRODUCTION_INVESTOR_PASSWORD \
+            PRODUCTION_CARRIER_EMAIL \
+            PRODUCTION_CARRIER_PASSWORD \
+            EXPECTED_RELEASE_COMMIT
+          do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing secret::${name} is required for production role smoke"
+              exit 1
+            fi
+          done
+          echo "Required production role smoke secrets are present."
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run production role smoke
+        run: npx playwright test e2e/production-role-smoke.spec.ts --config=playwright.production.config.ts --trace=off
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: production-role-smoke-playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Upload Playwright results on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: production-role-smoke-test-results
+          path: test-results/
+          retention-days: 7

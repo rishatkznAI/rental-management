@@ -65,6 +65,18 @@ test('finance tabs filters and dialogs are mobile-safe', () => {
   assert.match(receivablesSource, /DialogContent className="max-h-\[85vh\] w-\[calc\(100vw-2rem\)\] overflow-y-auto/);
 });
 
+test('finance accounts KPI cards use the local finance KPI component', () => {
+  const accountsSection = financeSource.slice(
+    financeSource.indexOf('<TabsContent value="accounts">'),
+    financeSource.indexOf('data-finance-desktop-table="accounts"'),
+  );
+
+  assert.doesNotMatch(accountsSection, /<KpiCard\b/);
+  assert.match(accountsSection, /<FinanceKpiCard[\s\S]{0,180}title="Активных счетов"/);
+  assert.match(accountsSection, /<FinanceKpiCard[\s\S]{0,180}title="Остаток"/);
+  assert.match(accountsSection, /<FinanceKpiCard[\s\S]{0,180}title="Архив"/);
+});
+
 test('finance mobile layout is not table-only on narrow screens', () => {
   assert.doesNotMatch(financeSource, /data-finance-mobile-list="recurring-expenses"[\s\S]{0,260}<Table>/);
   assert.doesNotMatch(financeSource, /data-finance-mobile-list="operations"[\s\S]{0,260}<Table>/);

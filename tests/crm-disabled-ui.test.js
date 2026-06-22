@@ -37,3 +37,10 @@ test('knowledge base copy does not expose CRM as an active training topic', () =
   assert.doesNotMatch(knowledgeBaseSource, /Аренда, Продажи, CRM, Общее/);
   assert.doesNotMatch(knowledgeBaseSource, /следующий шаг в CRM/);
 });
+
+test('knowledge base treats legacy modules without quiz as empty tests', () => {
+  assert.match(knowledgeBaseSource, /function getModuleQuiz\(module: KnowledgeBaseModule \| null \| undefined\)/);
+  assert.match(knowledgeBaseSource, /Array\.isArray\(module\?\.quiz\) \? module\.quiz : \[\]/);
+  assert.doesNotMatch(knowledgeBaseSource, /selectedModule\.quiz/);
+  assert.doesNotMatch(knowledgeBaseSource, /module\.quiz\.length/);
+});

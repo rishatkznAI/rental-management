@@ -79,6 +79,15 @@ test('management action queue section renders on the equipment page', () => {
   assert.match(equipmentPageSource, /useManagementActionQueue\(\)/);
 });
 
+test('management action queue keeps assignees and write actions behind edit permission', () => {
+  assert.match(equipmentPageSource, /canManageActions = false/);
+  assert.match(equipmentPageSource, /useManagementActionAssignees\(\{ enabled: canManageActions \}\)/);
+  assert.match(equipmentPageSource, /if \(!canManageActions\) return;/);
+  assert.match(equipmentPageSource, /\{canManageActions \? \(/);
+  assert.match(equipmentPageSource, /const canManageActionQueue = can\('edit', 'equipment'\)/);
+  assert.match(equipmentPageSource, /canManageActions=\{canManageActionQueue\}/);
+});
+
 test('management action queue KPI cards render', () => {
   assert.match(equipmentPageSource, /Без ответственного/);
   assert.match(equipmentPageSource, /Просрочено/);

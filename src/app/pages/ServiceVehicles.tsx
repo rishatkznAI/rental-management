@@ -51,6 +51,12 @@ function isExpired(dateStr: string | null): boolean {
   return new Date(dateStr).getTime() < Date.now();
 }
 
+function formatMileage(value: unknown): string {
+  const mileage = Number(value);
+  const safeMileage = Number.isFinite(mileage) && mileage >= 0 ? mileage : 0;
+  return `${safeMileage.toLocaleString('ru-RU')} км`;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ServiceVehicles() {
@@ -284,7 +290,7 @@ function VehicleRow({ vehicle: v, onClick }: { vehicle: ServiceVehicle; onClick:
 
       {/* Пробег */}
       <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-200 tabular-nums">
-        {v.currentMileage.toLocaleString('ru-RU')} км
+        {formatMileage(v.currentMileage)}
       </td>
 
       {/* Ответственный */}
@@ -349,7 +355,7 @@ function VehicleCard({ vehicle: v, onClick }: { vehicle: ServiceVehicle; onClick
 
       <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
         <VehicleCardMetric label="Тип" value={TYPE_LABELS[v.vehicleType] ?? v.vehicleType} />
-        <VehicleCardMetric label="Пробег" value={`${v.currentMileage.toLocaleString('ru-RU')} км`} />
+        <VehicleCardMetric label="Пробег" value={formatMileage(v.currentMileage)} />
         <VehicleCardMetric label="Ответственный" value={v.responsiblePerson || '—'} wide />
         <VehicleCardMetric
           label="Документы"

@@ -272,6 +272,7 @@ function ManagementActionQueueSection({
   isLoading,
   error,
   currentUser,
+  canManageActions = false,
   initialFilter = 'all',
 }: {
   items: ManagementActionQueueItem[];
@@ -279,12 +280,13 @@ function ManagementActionQueueSection({
   isLoading: boolean;
   error: unknown;
   currentUser?: { id?: string; name?: string } | null;
+  canManageActions?: boolean;
   initialFilter?: ManagementActionQueueFilter;
 }) {
   const [filter, setFilter] = React.useState<ManagementActionQueueFilter>(initialFilter);
   const [editingItem, setEditingItem] = React.useState<ManagementActionQueueItem | null>(null);
   const updateState = useUpdateManagementActionState();
-  const assigneesQuery = useManagementActionAssignees();
+  const assigneesQuery = useManagementActionAssignees({ enabled: canManageActions });
   const [form, setForm] = React.useState({
     status: 'open' as ManagementActionExecutionStatus,
     assignedToUserId: '',
@@ -298,6 +300,7 @@ function ManagementActionQueueSection({
   }, [initialFilter]);
 
   const openEditor = React.useCallback((item: ManagementActionQueueItem) => {
+    if (!canManageActions) return;
     setEditingItem(item);
     setForm({
       status: item.executionStatus || 'open',
@@ -306,9 +309,10 @@ function ManagementActionQueueSection({
       dueDate: item.dueDate || '',
       comment: item.executionComment || '',
     });
-  }, []);
+  }, [canManageActions]);
 
   const updateActionStatus = React.useCallback((item: ManagementActionQueueItem, status: ManagementActionExecutionStatus) => {
+    if (!canManageActions) return;
     updateState.mutate({
       actionId: item.actionId,
       data: {
@@ -319,7 +323,7 @@ function ManagementActionQueueSection({
         comment: item.executionComment || '',
       },
     });
-  }, [currentUser?.id, currentUser?.name, updateState]);
+  }, [canManageActions, currentUser?.id, currentUser?.name, updateState]);
 
   const responsibleOptions = React.useMemo(() => {
     const options = new Map<string, { label: string; name: string }>();
@@ -477,20 +481,22 @@ function ManagementActionQueueSection({
                   <td className="max-w-[360px] px-3 py-3">
                     <div className="font-semibold text-foreground">{item.title || 'Уточнить действие'}</div>
                     <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.description || item.recommendedAction || 'Проверьте блокер техники.'}</div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <Button size="sm" type="button" onClick={() => updateActionStatus(item, 'in_progress')} disabled={updateState.isPending}>
-                        В работу
-                      </Button>
-                      <Button size="sm" variant="outline" type="button" onClick={() => updateActionStatus(item, 'postponed')} disabled={updateState.isPending}>
-                        Отложить
-                      </Button>
-                      <Button size="sm" variant="secondary" type="button" onClick={() => updateActionStatus(item, 'resolved')} disabled={updateState.isPending}>
-                        Решено
-                      </Button>
-                      <Button size="sm" variant="ghost" type="button" onClick={() => openEditor(item)}>
-                        Изменить
-                      </Button>
-                    </div>
+                    {canManageActions ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <Button size="sm" type="button" onClick={() => updateActionStatus(item, 'in_progress')} disabled={updateState.isPending}>
+                          В работу
+                        </Button>
+                        <Button size="sm" variant="outline" type="button" onClick={() => updateActionStatus(item, 'postponed')} disabled={updateState.isPending}>
+                          Отложить
+                        </Button>
+                        <Button size="sm" variant="secondary" type="button" onClick={() => updateActionStatus(item, 'resolved')} disabled={updateState.isPending}>
+                          Решено
+                        </Button>
+                        <Button size="sm" variant="ghost" type="button" onClick={() => openEditor(item)}>
+                          Изменить
+                        </Button>
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-3 py-3 text-xs text-muted-foreground">
                     <div className="flex flex-col gap-1.5">
@@ -1367,6 +1373,7 @@ export default function Equipment() {
   const canViewDocuments = canView('documents');
   const canViewSales = canView('sales');
   const canCreateEquipment = can('create', 'equipment');
+  const canManageActionQueue = can('edit', 'equipment');
   const normalizedRole = normalizeUserRole(user?.role);
   const canViewShippingPhotos = canReadCollection('shipping_photos');
   const [search, setSearch] = React.useState('');
@@ -1981,6 +1988,7 @@ export default function Equipment() {
         isLoading={actionQueueQuery.isLoading}
         error={actionQueueQuery.error}
         currentUser={user}
+        canManageActions={canManageActionQueue}
         initialFilter={initialActionQueueFilter}
       />
 

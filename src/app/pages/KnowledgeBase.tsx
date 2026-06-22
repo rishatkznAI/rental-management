@@ -277,7 +277,12 @@ function createEmptyModuleState(
   };
 }
 
+function getModuleQuiz(module: KnowledgeBaseModule | null | undefined) {
+  return Array.isArray(module?.quiz) ? module.quiz : [];
+}
+
 function moduleToEditorState(module: KnowledgeBaseModule): ModuleEditorState {
+  const quiz = getModuleQuiz(module);
   return {
     title: module.title,
     section: getModuleSectionId(module),
@@ -289,7 +294,7 @@ function moduleToEditorState(module: KnowledgeBaseModule): ModuleEditorState {
     passingScorePercent: String(module.passingScorePercent),
     sortOrder: String(module.sortOrder),
     isActive: module.isActive !== false,
-    quiz: module.quiz.map((question) => ({
+    quiz: quiz.map((question) => ({
       ...question,
       explanation: question.explanation || '',
       options: question.options.map((option) => ({ ...option })),
@@ -703,6 +708,7 @@ export default function KnowledgeBase() {
 
   async function handleMarkWatched() {
     if (!selectedModule || !user?.id || !canTakeTraining) return;
+    const quiz = getModuleQuiz(selectedModule);
     await upsertProgress({
       moduleId: selectedModule.id,
       userId: user.id,
@@ -712,7 +718,7 @@ export default function KnowledgeBase() {
       watchedVideo: true,
       watchedAt: currentProgress?.watchedAt || nowIso(),
       score: currentProgress?.score || 0,
-      maxScore: selectedModule.quiz.length,
+      maxScore: quiz.length,
       attemptsCount: currentProgress?.attemptsCount || 0,
       lastAttemptAt: currentProgress?.lastAttemptAt || null,
       completedAt: currentProgress?.completedAt || null,
@@ -726,16 +732,17 @@ export default function KnowledgeBase() {
       toast.error('Сначала отметьте, что видео просмотрено.');
       return;
     }
-    const unanswered = selectedModule.quiz.filter(question => !answers[question.id]);
+    const quiz = getModuleQuiz(selectedModule);
+    const unanswered = quiz.filter(question => !answers[question.id]);
     if (unanswered.length > 0) {
       toast.error('Ответьте на все вопросы теста.');
       return;
     }
 
-    const score = selectedModule.quiz.reduce((sum, question) => (
+    const score = quiz.reduce((sum, question) => (
       answers[question.id] === question.correctOptionId ? sum + 1 : sum
     ), 0);
-    const percent = selectedModule.quiz.length > 0 ? (score / selectedModule.quiz.length) * 100 : 0;
+    const percent = quiz.length > 0 ? (score / quiz.length) * 100 : 0;
     const passed = percent >= selectedModule.passingScorePercent;
 
     await upsertProgress({
@@ -747,7 +754,7 @@ export default function KnowledgeBase() {
       watchedVideo: true,
       watchedAt: currentProgress?.watchedAt || nowIso(),
       score,
-      maxScore: selectedModule.quiz.length,
+      maxScore: quiz.length,
       attemptsCount: (currentProgress?.attemptsCount || 0) + 1,
       lastAttemptAt: nowIso(),
       completedAt: passed ? nowIso() : currentProgress?.completedAt || null,
@@ -816,7 +823,7 @@ export default function KnowledgeBase() {
                         <Badge variant="info">{sectionMeta.title}</Badge>
                       ) : null}
                       <Badge variant="info">{getAudienceLabel(module.audience)}</Badge>
-                      <Badge variant="default">{module.quiz.length} вопроса</Badge>
+                      <Badge variant="default">{getModuleQuiz(module).length} вопроса</Badge>
                       {module.videoDurationMin ? <Badge variant="default">{module.videoDurationMin} мин</Badge> : null}
                     </div>
                     <div className="mt-3 text-xs text-muted-foreground">
@@ -945,7 +952,7 @@ export default function KnowledgeBase() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
-                  {selectedModule.quiz.map((question, index) => (
+                  {getModuleQuiz(selectedModule).map((question, index) => (
                     <div key={question.id} className="rounded-2xl border border-border/70 bg-card p-4">
                       <div className="mb-3 text-sm font-semibold text-foreground">
                         {index + 1}. {question.question}

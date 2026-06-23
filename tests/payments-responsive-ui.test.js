@@ -32,9 +32,29 @@ test('payment mobile cards expose safe office payment fields and actions', () =>
   assert.match(mobileBlock, /data-payment-mobile-actions="true"/);
   assert.match(mobileBlock, /break-words/);
   assert.match(mobileBlock, /break-all/);
-  assert.match(mobileBlock, /getPaymentStatusBadge\(payment\.status\)/);
+  assert.match(mobileBlock, /<PaymentStatusPill status=\{payment\.status\} \/>/);
   assert.match(mobileBlock, /setSelectedPaymentId\(payment\.id\)/);
   assert.doesNotMatch(mobileBlock, /<table/);
+});
+
+test('payments redesign exposes status tabs and right detail panel with safe fallbacks', () => {
+  assert.match(source, /Платежи/);
+  assert.match(source, /Управление платежами и задолженностями/);
+  assert.match(source, /Новый платеж/);
+  assert.match(source, /Экспорт/);
+  assert.match(source, /Прогноз поступлений/);
+  assert.match(source, /Все платежи/);
+  assert.match(source, /К оплате/);
+  assert.match(source, /Ожидают/);
+  assert.match(source, /Просрочено/);
+  assert.match(source, /Выберите платёж/);
+  assert.match(source, /Связанные документы/);
+  assert.match(source, /Скачать счёт/);
+  assert.match(source, /Отметить оплаченным/);
+  assert.match(source, /function safeLabel/);
+  assert.match(source, /function paymentNumber/);
+  assert.match(source, /function paymentClientName/);
+  assert.match(source, /function PaymentStatusPill/);
 });
 
 test('payment detail allocation panel has mobile card structure and desktop table fallback', () => {

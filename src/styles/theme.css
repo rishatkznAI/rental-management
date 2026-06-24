@@ -304,6 +304,19 @@
     font-weight: var(--font-weight-normal);
     line-height: 1.5;
   }
+
+  html.dark input[type='date'] {
+    color-scheme: dark;
+  }
+
+  html.dark input[type='date']::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    opacity: 0.82;
+  }
+
+  html.dark input[type='date']::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
 }
 
 @layer components {

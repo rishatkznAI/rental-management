@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -1201,6 +1201,195 @@ function CompanyHealthBars({ items }: { items: CompanyHealthBar[] }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+type CompanyHealthDirection = {
+  id: string;
+  title: string;
+  icon: React.ElementType;
+  tone: DashboardTone;
+  href: string;
+  metrics: Array<{ label: string; value: string }>;
+};
+
+function polarToCartesian(centerX: number, centerY: number, radius: number, angleInDegrees: number) {
+  const angleInRadians = (angleInDegrees - 90) * Math.PI / 180;
+  return {
+    x: centerX + (radius * Math.cos(angleInRadians)),
+    y: centerY + (radius * Math.sin(angleInRadians)),
+  };
+}
+
+function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) {
+  const Icon = item.icon;
+  const tone = toneStyles[item.tone];
+  const title = [
+    item.title,
+    ...item.metrics.map(metric => `${metric.label}: ${metric.value}`),
+  ].join('\n');
+
+  return (
+    <Link key={item.id} to={item.href} title={title} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-2.5 py-2">
+      <div className="rentcore-command-card-head flex min-w-0 items-center gap-2">
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] border border-lime-300/18 bg-black/20 ring-1 ring-inset ring-lime-300/8 ${tone.accent}`}>
+          <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
+        </span>
+        <span className="rentcore-command-card-copy min-w-0 flex-1">
+          <span className="rentcore-command-card-title block truncate text-[11px] font-extrabold uppercase tracking-[0.06em] text-lime-200">{item.title}</span>
+        </span>
+        <span className={`rentcore-command-card-compact-value hidden shrink-0 text-sm font-extrabold ${tone.accent}`}>
+          {item.metrics[0]?.value ?? ''}
+        </span>
+      </div>
+      <div className="rentcore-command-card-metrics mt-1.5 grid gap-0.5 text-[9.5px] leading-none">
+        {item.metrics.map(metric => (
+          <span key={metric.label} title={`${metric.label}: ${metric.value}`} className="flex min-w-0 items-center justify-between gap-3">
+            <span className="min-w-0 truncate text-slate-500">{metric.label}</span>
+            <span className={`shrink-0 font-extrabold ${commandMetricToneClass[item.tone]}`}>{metric.value}</span>
+          </span>
+        ))}
+      </div>
+    </Link>
+  );
+}
+
+function CompanyHealthCommandCenter({
+  leftDirections,
+  rightDirections,
+  allDirections,
+  bars,
+  score,
+  label,
+  tone,
+}: {
+  leftDirections: CompanyHealthDirection[];
+  rightDirections: CompanyHealthDirection[];
+  allDirections: CompanyHealthDirection[];
+  bars: CompanyHealthBar[];
+  score: number;
+  label: string;
+  tone: DashboardTone;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const measuredNode = node.parentElement ?? node;
+    const update = (width: number) => setContainerWidth(Math.round(width));
+    update(measuredNode.getBoundingClientRect().width);
+    const observer = new ResizeObserver(entries => {
+      const entry = entries[0];
+      if (entry) update(measuredNode.getBoundingClientRect().width);
+    });
+    observer.observe(measuredNode);
+    return () => observer.disconnect();
+  }, []);
+
+  const isCompact = containerWidth > 0 && containerWidth < 900;
+  const svgSize = Math.max(188, Math.min(300, Math.round((containerWidth || 900) * 0.28)));
+  const estimatedCardWidth = isCompact
+    ? containerWidth
+    : (containerWidth - svgSize - 32) / 2;
+  const cardDensity = estimatedCardWidth > 0 && estimatedCardWidth < 180 ? 'icon-value' : 'full';
+  const center = svgSize / 2;
+  const radius = svgSize * 0.43;
+  const dotRadius = Math.max(3.5, svgSize * 0.016);
+  const progress = clampPercent(score);
+  const circumference = 2 * Math.PI * (svgSize * 0.36);
+  const progressStroke = circumference * (progress / 100);
+  const toneColor = tone === 'danger' ? '#fb7185' : tone === 'warning' ? '#facc15' : '#a3e635';
+  const dots = allDirections.map((item, index) => {
+    const angle = -112 + (index * (224 / Math.max(allDirections.length - 1, 1)));
+    return { item, angle, point: polarToCartesian(center, center, radius, angle) };
+  });
+
+  return (
+    <div
+      ref={containerRef}
+      className="rentcore-command-map relative grid flex-1 gap-2.5 xl:mx-auto xl:w-full xl:items-center xl:justify-center"
+      style={{ '--rc-orb-size': `${svgSize}px` } as React.CSSProperties}
+      data-company-health-layout={isCompact ? 'compact' : 'svg'}
+      data-card-density={cardDensity}
+    >
+      {isCompact ? (
+        <div className="rentcore-command-compact-list grid gap-2.5" data-testid="dashboard-company-health-compact-list">
+          {allDirections.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
+          <div className="rounded-[12px] border border-lime-300/18 bg-black/20 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="app-shell-title text-xl font-extrabold">Здоровье компании</CardTitle>
+              <p className={`text-sm font-extrabold uppercase ${toneStyles[tone].accent}`}>{label}</p>
+            </div>
+            <p className="mt-1 text-3xl font-extrabold leading-none text-white">{progress}<span className="text-sm text-slate-500">/100</span></p>
+            <div className="mt-3">
+              <CompanyHealthBars items={bars} />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="rentcore-command-column grid gap-2.5 xl:justify-self-end">
+            {leftDirections.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
+          </div>
+
+          <div className="rentcore-command-center flex flex-col items-center justify-center text-center" data-testid="dashboard-company-health">
+            <svg
+              className="rentcore-health-svg overflow-visible"
+              width={svgSize}
+              height={svgSize}
+              viewBox={`0 0 ${svgSize} ${svgSize}`}
+              role="img"
+              aria-label={`Здоровье компании ${progress} из 100: ${label}`}
+              data-testid="dashboard-company-health-svg"
+              data-size-source="ResizeObserver"
+            >
+              <circle cx={center} cy={center} r={svgSize * 0.46} fill="rgba(8,15,23,0.82)" stroke="rgba(190,242,100,0.16)" strokeWidth="1" />
+              <circle cx={center} cy={center} r={svgSize * 0.36} fill="none" stroke="rgba(148,163,184,0.22)" strokeWidth={Math.max(8, svgSize * 0.045)} />
+              <circle
+                cx={center}
+                cy={center}
+                r={svgSize * 0.36}
+                fill="none"
+                stroke={toneColor}
+                strokeWidth={Math.max(8, svgSize * 0.045)}
+                strokeLinecap="round"
+                strokeDasharray={`${progressStroke} ${circumference - progressStroke}`}
+                transform={`rotate(-90 ${center} ${center})`}
+              />
+              <circle cx={center} cy={center} r={svgSize * 0.25} fill="rgba(2,6,12,0.88)" stroke="rgba(190,242,100,0.1)" strokeWidth="1" />
+              {dots.map(({ item, point }) => (
+                <circle
+                  key={item.id}
+                  data-testid="dashboard-company-health-point"
+                  cx={point.x}
+                  cy={point.y}
+                  r={dotRadius}
+                  fill={tone === 'danger' ? '#fb7185' : toneStyles[item.tone].dot.includes('red') ? '#fb7185' : toneStyles[item.tone].dot.includes('yellow') ? '#facc15' : '#a3e635'}
+                  stroke="rgba(2,6,12,0.92)"
+                  strokeWidth="2"
+                />
+              ))}
+              <foreignObject x={center - svgSize * 0.23} y={center - svgSize * 0.18} width={svgSize * 0.46} height={svgSize * 0.36}>
+                <div className="flex h-full flex-col items-center justify-center text-center">
+                  <p className="text-[8.5px] font-semibold uppercase tracking-[0.15em] text-slate-400">Здоровье компании</p>
+                  <p className="mt-1 text-[34px] font-extrabold leading-none text-white 2xl:text-[36px]">{progress}<span className="text-[13px] text-slate-500">/100</span></p>
+                  <p className={`mt-1 text-[11px] font-extrabold uppercase ${toneStyles[tone].accent}`}>{label}</p>
+                </div>
+              </foreignObject>
+            </svg>
+            <div className="mt-4 hidden w-full max-w-[330px]">
+              <CompanyHealthBars items={bars} />
+            </div>
+          </div>
+
+          <div className="rentcore-command-column grid gap-2.5 xl:justify-self-start">
+            {rightDirections.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -3846,7 +4035,7 @@ export default function Dashboard() {
           </section>
 
           <section className="rentcore-command-board grid min-h-0 flex-none gap-2.5 overflow-visible rounded-[16px] p-2 xl:flex-1 xl:grid-cols-12 xl:grid-rows-[minmax(420px,0.68fr)_minmax(218px,0.32fr)] xl:overflow-hidden min-[1600px]:grid-rows-[minmax(446px,0.68fr)_minmax(238px,0.32fr)]" data-testid="dashboard-command-board">
-            <div className="rentcore-command-panel relative min-h-[430px] overflow-hidden rounded-[14px] p-3.5 xl:col-span-8 xl:min-h-0 min-[1600px]:p-4" data-testid="dashboard-operational-summary">
+            <div className="rentcore-command-panel relative min-h-[430px] overflow-hidden rounded-[14px] p-3.5 xl:col-span-12 xl:min-h-[500px] 2xl:col-span-8 2xl:min-h-0 min-[1600px]:p-4" data-testid="dashboard-operational-summary">
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(132,204,22,0.075),transparent_36%),linear-gradient(rgba(132,204,22,0.012)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.01)_1px,transparent_1px)] bg-[size:auto,56px_56px,56px_56px]" />
 
               <div className="relative flex h-full flex-col">
@@ -3860,92 +4049,15 @@ export default function Dashboard() {
                   </span>
                 </div>
 
-                <div className="rentcore-command-map relative grid flex-1 gap-2.5 xl:mx-auto xl:w-full xl:items-center xl:justify-center">
-                  <div className="rentcore-command-links" aria-hidden="true">
-                    <span className="rentcore-command-link rentcore-command-link-left rentcore-command-link-top" />
-                    <span className="rentcore-command-link rentcore-command-link-left rentcore-command-link-middle" />
-                    <span className="rentcore-command-link rentcore-command-link-left rentcore-command-link-bottom" />
-                    <span className="rentcore-command-link rentcore-command-link-right rentcore-command-link-top" />
-                    <span className="rentcore-command-link rentcore-command-link-right rentcore-command-link-middle" />
-                    <span className="rentcore-command-link rentcore-command-link-right rentcore-command-link-bottom" />
-                  </div>
-                  <div className="rentcore-command-column grid gap-2.5 xl:justify-self-end">
-                    {commandCenterLeftDirections.map(item => {
-                      const Icon = item.icon;
-                      const tone = toneStyles[item.tone];
-                      return (
-                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-2.5 py-2">
-                          <div className="flex items-center gap-2">
-                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] border border-lime-300/18 bg-black/20 ring-1 ring-inset ring-lime-300/8 ${tone.accent}`}>
-                              <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[11px] font-extrabold uppercase tracking-[0.06em] text-lime-200">{item.title}</span>
-                            </span>
-                          </div>
-                          <div className="mt-1.5 grid gap-0.5 text-[9.5px] leading-none">
-                            {item.metrics.map(metric => (
-                              <span key={metric.label} className="flex min-w-0 items-center justify-between gap-3">
-                                <span className="min-w-0 truncate text-slate-500">{metric.label}</span>
-                                <span className={`shrink-0 font-extrabold ${commandMetricToneClass[item.tone]}`}>{metric.value}</span>
-                              </span>
-                            ))}
-                          </div>
-                        </Link>
-                      );
-                    })}
-                  </div>
-
-                  <div className="rentcore-command-center flex flex-col items-center justify-center text-center" data-testid="dashboard-company-health">
-                    <div
-                      className="rentcore-health-orb relative flex items-center justify-center rounded-full"
-                      style={{
-                        '--health-angle': `${companyHealthDisplayScore * 3.6}deg`,
-                        '--health-lime-angle': `${Math.max(companyHealthDisplayScore * 3.6 - (companyHealthTone === 'warning' ? 16 : 8), 0)}deg`,
-                        '--health-warning-color': companyHealthTone === 'danger' ? '#fb7185' : companyHealthTone === 'warning' ? '#facc15' : '#bef264',
-                      } as React.CSSProperties}
-                      data-testid="dashboard-company-health-command"
-                    >
-                      <div className="absolute inset-5 rounded-full border border-lime-300/18" />
-                      <div className="absolute inset-10 rounded-full border border-lime-100/10" />
-                      <div className="rentcore-health-core relative z-10 flex h-[108px] w-[108px] flex-col items-center justify-center rounded-full border border-lime-100/10 2xl:h-[116px] 2xl:w-[116px]">
-                        <p className="text-[8.5px] font-semibold uppercase tracking-[0.15em] text-slate-400">Здоровье компании</p>
-                        <p className="mt-1 text-[34px] font-extrabold leading-none text-white 2xl:text-[36px]">{companyHealthDisplayScore}<span className="text-[13px] text-slate-500">/100</span></p>
-                        <p className={`mt-1 text-[11px] font-extrabold uppercase ${toneStyles[companyHealthTone].accent}`}>{companyHealthLabel}</p>
-                      </div>
-                    </div>
-                    <div className="mt-4 hidden w-full max-w-[330px]">
-                      <CompanyHealthBars items={companyHealthBars} />
-                    </div>
-                  </div>
-
-                  <div className="rentcore-command-column grid gap-2.5 xl:justify-self-start">
-                    {commandCenterRightDirections.map(item => {
-                      const Icon = item.icon;
-                      const tone = toneStyles[item.tone];
-                      return (
-                        <Link key={item.id} to={item.href} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-2.5 py-2">
-                          <div className="flex items-center gap-2">
-                            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] border border-lime-300/18 bg-black/20 ring-1 ring-inset ring-lime-300/8 ${tone.accent}`}>
-                              <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[11px] font-extrabold uppercase tracking-[0.06em] text-lime-200">{item.title}</span>
-                            </span>
-                          </div>
-                          <div className="mt-1.5 grid gap-0.5 text-[9.5px] leading-none">
-                            {item.metrics.map(metric => (
-                              <span key={metric.label} className="flex min-w-0 items-center justify-between gap-3">
-                                <span className="min-w-0 truncate text-slate-500">{metric.label}</span>
-                                <span className={`shrink-0 font-extrabold ${commandMetricToneClass[item.tone]}`}>{metric.value}</span>
-                              </span>
-                            ))}
-                          </div>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                </div>
+                <CompanyHealthCommandCenter
+                  leftDirections={commandCenterLeftDirections}
+                  rightDirections={commandCenterRightDirections}
+                  allDirections={commandCenterDirections}
+                  bars={companyHealthBars}
+                  score={companyHealthDisplayScore}
+                  label={companyHealthLabel}
+                  tone={companyHealthTone}
+                />
               </div>
             </div>
 
@@ -4680,81 +4792,15 @@ export default function Dashboard() {
           <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_380px]">
             <div className="relative overflow-hidden rounded-xl border border-lime-300/15 bg-[radial-gradient(circle_at_center,rgba(132,204,22,0.13),transparent_38%),linear-gradient(135deg,rgba(6,14,20,0.94),rgba(10,19,28,0.88))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
               <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(132,204,22,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.045)_1px,transparent_1px)] bg-[size:44px_44px]" aria-hidden="true" />
-              <div className="relative grid gap-4 xl:grid-cols-[minmax(250px,0.95fr)_minmax(240px,360px)_minmax(250px,0.95fr)] xl:items-center">
-                <div className="grid gap-3">
-                  {commandCenterDirections.slice(0, 3).map(item => {
-                    const Icon = item.icon;
-                    const tone = toneStyles[item.tone];
-                    return (
-                      <Link key={item.id} to={item.href} className="rounded-lg border border-white/10 bg-white/[0.055] p-3 transition hover:border-lime-300/35 hover:bg-white/[0.075]">
-                        <div className="flex items-center gap-3">
-                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-slate-950/40 ${tone.accent}`}>
-                            <Icon className="h-5 w-5" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-extrabold uppercase text-lime-300">{item.title}</p>
-                            <p className="text-xs text-slate-400">{item.metrics[0]?.label}: {item.metrics[0]?.value}</p>
-                          </div>
-                        </div>
-                        <div className="mt-3 grid gap-2 text-xs">
-                          {item.metrics.slice(1).map(metric => (
-                            <div key={metric.label} className="flex items-center justify-between gap-3">
-                              <span className="text-slate-400">{metric.label}</span>
-                              <span className="font-semibold text-white">{metric.value}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-
-                <div className="flex flex-col items-center justify-center py-4 text-center">
-                  <p className="text-sm font-semibold uppercase text-slate-400">Операционный контроль</p>
-                  <div
-                    className="relative mt-4 flex h-56 w-56 items-center justify-center rounded-full border border-lime-300/15 bg-slate-950/70 shadow-[0_0_42px_rgba(132,204,22,0.18),inset_0_0_28px_rgba(132,204,22,0.08)]"
-                    style={{ background: `radial-gradient(circle at center, rgba(10,18,26,0.96) 0 56%, transparent 57%), conic-gradient(#84cc16 ${companyHealthDisplayScore * 3.6}deg, rgba(148,163,184,0.18) 0deg)` }}
-                  >
-                    <div className="absolute inset-6 rounded-full border border-lime-300/20" />
-                    <div>
-                      <CardTitle className="app-shell-title text-xl font-extrabold">Здоровье компании</CardTitle>
-                      <p className="mt-2 text-5xl font-extrabold text-white">{companyHealthDisplayScore}<span className="text-2xl text-slate-500">/100</span></p>
-                      <p className={`mt-2 text-sm font-extrabold uppercase ${toneStyles[companyHealthTone].accent}`}>{companyHealthLabel}</p>
-                    </div>
-                  </div>
-                  <div className="mt-4 w-full max-w-xs">
-                    <CompanyHealthBars items={companyHealthBars} />
-                  </div>
-                </div>
-
-                <div className="grid gap-3">
-                  {commandCenterDirections.slice(3).map(item => {
-                    const Icon = item.icon;
-                    const tone = toneStyles[item.tone];
-                    return (
-                      <Link key={item.id} to={item.href} className="rounded-lg border border-white/10 bg-white/[0.055] p-3 transition hover:border-lime-300/35 hover:bg-white/[0.075]">
-                        <div className="flex items-center gap-3">
-                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-slate-950/40 ${tone.accent}`}>
-                            <Icon className="h-5 w-5" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-extrabold uppercase text-lime-300">{item.title}</p>
-                            <p className="text-xs text-slate-400">{item.metrics[0]?.label}: {item.metrics[0]?.value}</p>
-                          </div>
-                        </div>
-                        <div className="mt-3 grid gap-2 text-xs">
-                          {item.metrics.slice(1).map(metric => (
-                            <div key={metric.label} className="flex items-center justify-between gap-3">
-                              <span className="text-slate-400">{metric.label}</span>
-                              <span className="font-semibold text-white">{metric.value}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
+              <CompanyHealthCommandCenter
+                leftDirections={commandCenterLeftDirections}
+                rightDirections={commandCenterRightDirections}
+                allDirections={commandCenterDirections}
+                bars={companyHealthBars}
+                score={companyHealthDisplayScore}
+                label={companyHealthLabel}
+                tone={companyHealthTone}
+              />
             </div>
 
             <div className="rounded-xl border border-white/10 bg-white/[0.045] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]" data-testid="dashboard-key-signals">

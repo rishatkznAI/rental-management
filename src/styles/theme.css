@@ -853,6 +853,7 @@
 
   .rentcore-command-card {
     min-height: 68px;
+    container-type: inline-size;
   }
 
   .rentcore-command-map {
@@ -874,6 +875,24 @@
 
   .rentcore-command-column {
     width: 100%;
+    min-width: 0;
+  }
+
+  .rentcore-command-map[data-company-health-layout="compact"] {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .rentcore-command-compact-list {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .rentcore-health-svg {
+    display: block;
+    max-width: 100%;
+    filter: drop-shadow(0 0 18px rgba(132, 204, 22, 0.11));
   }
 
   .rentcore-command-map .rentcore-command-card {
@@ -881,8 +900,43 @@
     padding: clamp(8px, calc(var(--rc-orb-size) * 0.035), 12px);
   }
 
+  .rentcore-command-map[data-card-density="icon-value"] .rentcore-command-card {
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .rentcore-command-map[data-card-density="icon-value"] .rentcore-command-card-title,
+  .rentcore-command-map[data-card-density="icon-value"] .rentcore-command-card-metrics,
+  .rentcore-command-map[data-card-density="icon-value"] .rentcore-command-card-copy {
+    display: none !important;
+  }
+
+  .rentcore-command-map[data-card-density="icon-value"] .rentcore-command-card-head {
+    justify-content: space-between;
+  }
+
+  .rentcore-command-map[data-card-density="icon-value"] .rentcore-command-card-compact-value {
+    display: inline-flex !important;
+  }
+
+  @container (max-width: 179px) {
+    .rentcore-command-card-title,
+    .rentcore-command-card-metrics,
+    .rentcore-command-card-copy {
+      display: none !important;
+    }
+
+    .rentcore-command-card-head {
+      justify-content: space-between;
+    }
+
+    .rentcore-command-card-compact-value {
+      display: inline-flex !important;
+    }
+  }
+
   .rentcore-command-center {
-    min-height: calc(var(--rc-orb-size) + 78px);
+    min-height: calc(var(--rc-orb-size) + 24px);
   }
 
   .rentcore-health-orb {
@@ -1085,14 +1139,18 @@
     }
 
     .rentcore-command-board {
-      flex: 0 0 calc(100vh - 314px) !important;
-      height: calc(100vh - 314px) !important;
-      max-height: calc(100vh - 314px) !important;
-      grid-template-rows: minmax(356px, 0.68fr) minmax(168px, 0.32fr) !important;
+      flex: 0 0 auto !important;
+      height: auto !important;
+      max-height: none !important;
+      grid-template-rows: minmax(430px, auto) minmax(168px, auto) !important;
     }
 
     .rentcore-command-panel {
       min-height: 0 !important;
+    }
+
+    .rentcore-command-panel[data-testid="dashboard-operational-summary"] {
+      min-height: 430px !important;
     }
 
     .rentcore-command-card {

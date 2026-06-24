@@ -353,13 +353,16 @@ export default function EquipmentNew() {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <Input
-                label="Производитель"
-                placeholder="Например, Genie, JLG, Haulotte"
-                value={form.manufacturer}
-                onChange={e => update('manufacturer', e.target.value)}
-                required
-              />
+              <div>
+                <Input
+                  label="Производитель"
+                  placeholder="Например, Genie, JLG, Haulotte"
+                  value={form.manufacturer}
+                  onChange={e => update('manufacturer', e.target.value)}
+                  required
+                />
+                <FieldHint>Бренд или завод-изготовитель техники из паспорта или шильдика</FieldHint>
+              </div>
               <div>
                 <Input
                   label="Серийный номер"

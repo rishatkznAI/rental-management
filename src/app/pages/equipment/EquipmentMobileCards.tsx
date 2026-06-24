@@ -1,4 +1,3 @@
-import { Link } from 'react-router-dom';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import type { Equipment as EquipmentEntity, EquipmentSalePdiStatus } from '../../types';
 import type { ActiveRentalIndex } from './equipment.types';
@@ -7,6 +6,8 @@ export type EquipmentMobileCardsProps = {
   equipmentItems: EquipmentEntity[];
   isSaleTab: boolean;
   activeRentalIndex: ActiveRentalIndex;
+  selectedEquipmentId: string | null;
+  onSelectEquipment: (equipment: EquipmentEntity) => void;
   getEquipmentDetailPath: (equipment: EquipmentEntity) => string;
   getEquipmentTypeLabel: (equipment: EquipmentEntity) => string;
   getEquipmentDriveLabel: (drive: EquipmentEntity['drive']) => string;
@@ -23,6 +24,8 @@ export function EquipmentMobileCards({
   equipmentItems,
   isSaleTab,
   activeRentalIndex,
+  selectedEquipmentId,
+  onSelectEquipment,
   getEquipmentDetailPath,
   getEquipmentTypeLabel,
   getEquipmentDriveLabel,
@@ -38,16 +41,23 @@ export function EquipmentMobileCards({
     <>
       {equipmentItems.map((equipment) => {
         const isSaleRecord = isSaleTab || isSaleRegistryEquipment(equipment);
-        const detailPath = getEquipmentDetailPath(equipment);
+        getEquipmentDetailPath(equipment);
         const equipmentTypeLabel = getEquipmentTypeLabel(equipment);
 
         return (
-          <div key={equipment.id} className="rounded-2xl border border-border bg-card/95 p-4 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)]">
+          <button
+            key={equipment.id}
+            type="button"
+            onClick={() => onSelectEquipment(equipment)}
+            className={`w-full rounded-xl border bg-white p-4 text-left shadow-[0_16px_34px_-30px_rgba(15,23,42,0.55)] transition hover:border-blue-200 ${
+              selectedEquipmentId === equipment.id ? 'border-blue-300 bg-blue-50/60' : 'border-slate-200'
+            }`}
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <Link to={detailPath} className="app-shell-title block break-words text-base font-extrabold text-foreground hover:text-primary">
+                <span className="app-shell-title block break-words text-base font-extrabold text-foreground">
                   {equipment.manufacturer} {equipment.model}
-                </Link>
+                </span>
                 <p className="mt-1 break-words text-xs text-muted-foreground">
                   Инв. № {equipment.inventoryNumber || '—'} · SN {equipment.serialNumber || 'не указан'}
                 </p>
@@ -83,7 +93,7 @@ export function EquipmentMobileCards({
                 </>
               )}
             </div>
-          </div>
+          </button>
         );
       })}
     </>

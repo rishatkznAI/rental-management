@@ -5,195 +5,87 @@ import { readFileSync } from 'node:fs';
 const equipmentPageSource = readFileSync(new URL('../src/app/pages/Equipment.tsx', import.meta.url), 'utf8');
 const equipmentServiceSource = readFileSync(new URL('../src/app/services/equipment.service.ts', import.meta.url), 'utf8');
 const equipmentHookSource = readFileSync(new URL('../src/app/hooks/useEquipment.ts', import.meta.url), 'utf8');
+const equipmentFiltersSource = readFileSync(new URL('../src/app/pages/equipment/EquipmentFilters.tsx', import.meta.url), 'utf8');
+const equipmentQuickViewSource = readFileSync(new URL('../src/app/pages/equipment/EquipmentQuickViewPanel.tsx', import.meta.url), 'utf8');
+const equipmentTableSource = readFileSync(new URL('../src/app/pages/equipment/EquipmentRegistryTable.tsx', import.meta.url), 'utf8');
+const equipmentMobileSource = readFileSync(new URL('../src/app/pages/equipment/EquipmentMobileCards.tsx', import.meta.url), 'utf8');
 
-test('readiness section renders on the equipment page', () => {
-  assert.match(equipmentPageSource, /function FleetReadinessSection/);
-  assert.match(equipmentPageSource, /data-testid="fleet-readiness-section"/);
-  assert.match(equipmentPageSource, /Готовность парка/);
-  assert.match(equipmentPageSource, /useEquipmentReadiness\(\)/);
-});
-
-test('readiness KPI cards render practical counters', () => {
-  assert.match(equipmentPageSource, /Готова к аренде/);
-  assert.match(equipmentPageSource, /Требует проверки/);
-  assert.match(equipmentPageSource, /В сервисе/);
-  assert.match(equipmentPageSource, /Блокеры доставки/);
-  assert.match(equipmentPageSource, /Внимание GSM/);
-});
-
-test('readiness loss KPI cards render financial counters', () => {
-  assert.match(equipmentPageSource, /Потеря в день/);
-  assert.match(equipmentPageSource, /Оценка потерь/);
-  assert.match(equipmentPageSource, /Без ставки/);
-  assert.match(equipmentPageSource, /Главный блокер/);
-  assert.match(equipmentPageSource, /formatCurrency\(value\)/);
-});
-
-test('readiness blockers and recommended actions display in the table', () => {
-  assert.match(equipmentPageSource, /item\.blockers\.length > 0 \? item\.blockers\.join/);
-  assert.match(equipmentPageSource, /item\.recommendedAction/);
-  assert.match(equipmentPageSource, /item\.financialRecommendation/);
-  assert.match(equipmentPageSource, /Нет открытых блокеров/);
-});
-
-test('readiness filter supports requested statuses', () => {
-  assert.match(equipmentPageSource, /READINESS_FILTERS/);
-  assert.match(equipmentPageSource, /value: 'all'/);
-  assert.match(equipmentPageSource, /value: 'ready'/);
-  assert.match(equipmentPageSource, /value: 'needs_check'/);
-  assert.match(equipmentPageSource, /value: 'in_service'/);
-  assert.match(equipmentPageSource, /value: 'delivery_blocked'/);
-  assert.match(equipmentPageSource, /value: 'gsm_attention'/);
-  assert.match(equipmentPageSource, /value: 'with_loss'/);
-  assert.match(equipmentPageSource, /value: 'without_rate'/);
-  assert.match(equipmentPageSource, /value: 'high_loss'/);
-  assert.match(equipmentPageSource, /filteredItems = React\.useMemo/);
-});
-
-test('readiness table renders loss fields without raw null states', () => {
-  assert.match(equipmentPageSource, /Потеря\/день/);
-  assert.match(equipmentPageSource, /Уже потеряно/);
-  assert.match(equipmentPageSource, /Ответственный/);
-  assert.match(equipmentPageSource, /Финансовое действие/);
-  assert.match(equipmentPageSource, /нет ставки/);
-  assert.match(equipmentPageSource, /оценочно/);
-  assert.match(equipmentPageSource, /responsibleAreaLabel\(item\.responsibleArea\)/);
-  assert.match(equipmentPageSource, /right\.estimatedLoss/);
-  assert.doesNotMatch(equipmentPageSource, /\[object Object\]/);
-});
-
-test('readiness error state is safe and endpoint is centralized in service hook', () => {
-  assert.match(equipmentPageSource, /Не удалось загрузить готовность парка/);
-  assert.match(equipmentPageSource, /apiErrorMessage\(error, 'Проверьте доступ к \/api\/equipment\/readiness\.'\)/);
-  assert.match(equipmentServiceSource, /getReadiness: \(\): Promise<FleetReadinessResponse> =>\s*api\.get<FleetReadinessResponse>\('\/api\/equipment\/readiness'\)/);
-  assert.match(equipmentHookSource, /useEquipmentReadiness/);
-  assert.match(equipmentHookSource, /EQUIPMENT_KEYS\.readiness/);
-  assert.match(equipmentHookSource, /refetchOnWindowFocus: false/);
-  assert.match(equipmentHookSource, /refetchOnReconnect: false/);
-});
-
-test('management action queue section renders on the equipment page', () => {
-  assert.match(equipmentPageSource, /function ManagementActionQueueSection/);
-  assert.match(equipmentPageSource, /data-testid="management-action-queue-section"/);
-  assert.match(equipmentPageSource, /Очередь управленческих действий/);
-  assert.match(equipmentPageSource, /useManagementActionQueue\(\)/);
-});
-
-test('management action queue keeps assignees and write actions behind edit permission', () => {
-  assert.match(equipmentPageSource, /canManageActions = false/);
-  assert.match(equipmentPageSource, /useManagementActionAssignees\(\{ enabled: canManageActions \}\)/);
-  assert.match(equipmentPageSource, /if \(!canManageActions\) return;/);
-  assert.match(equipmentPageSource, /\{canManageActions \? \(/);
-  assert.match(equipmentPageSource, /const canManageActionQueue = can\('edit', 'equipment'\)/);
-  assert.match(equipmentPageSource, /canManageActions=\{canManageActionQueue\}/);
-});
-
-test('management action queue KPI cards render', () => {
+test('equipment page renders enterprise layout with compact readiness attention chips', () => {
+  assert.match(equipmentPageSource, /data-testid="equipment-enterprise-page"/);
+  assert.match(equipmentPageSource, /bg-\[#F6F8FB\]/);
+  assert.match(equipmentPageSource, /function EquipmentAttentionChips/);
+  assert.match(equipmentPageSource, /data-testid="equipment-attention-chips"/);
+  assert.match(equipmentPageSource, /Требует внимания/);
   assert.match(equipmentPageSource, /Без ответственного/);
-  assert.match(equipmentPageSource, /Просрочено/);
-  assert.match(equipmentPageSource, /Сегодня/);
-  assert.match(equipmentPageSource, /Зависли/);
+  assert.match(equipmentPageSource, /Просрочено ТО/);
+  assert.match(equipmentPageSource, /GSM офлайн/);
+  assert.match(equipmentPageSource, /Нет локации/);
+  assert.match(equipmentPageSource, /Высокий приоритет/);
+  assert.match(equipmentPageSource, /Без ставки/);
 });
 
-test('management action queue filters include execution statuses, overdue, mine, priorities, and responsible areas', () => {
-  assert.match(equipmentPageSource, /ACTION_QUEUE_FILTERS/);
-  assert.match(equipmentPageSource, /value: 'all'/);
-  assert.match(equipmentPageSource, /value: 'unassigned'/);
-  assert.match(equipmentPageSource, /value: 'overdue'/);
-  assert.match(equipmentPageSource, /value: 'due_today'/);
-  assert.match(equipmentPageSource, /value: 'stale'/);
-  assert.match(equipmentPageSource, /value: 'open'/);
-  assert.match(equipmentPageSource, /value: 'in_progress'/);
-  assert.match(equipmentPageSource, /value: 'resolved'/);
-  assert.match(equipmentPageSource, /value: 'my_actions'/);
-  assert.match(equipmentPageSource, /value: 'critical'/);
-  assert.match(equipmentPageSource, /value: 'high'/);
-  assert.match(equipmentPageSource, /value: 'service'/);
-  assert.match(equipmentPageSource, /value: 'logistics'/);
-  assert.match(equipmentPageSource, /value: 'office'/);
-  assert.match(equipmentPageSource, /value: 'admin'/);
-  assert.match(equipmentPageSource, /item\.isUnassigned/);
-  assert.match(equipmentPageSource, /item\.isOverdue/);
-  assert.match(equipmentPageSource, /item\.isDueToday/);
-  assert.match(equipmentPageSource, /item\.isStale/);
-  assert.match(equipmentPageSource, /item\.assignedToUserId === currentUser\.id/);
-  assert.match(equipmentPageSource, /item\.executionStatus/);
-  assert.match(equipmentPageSource, /item\.executionLabel/);
-  assert.match(equipmentPageSource, /item\.priority === filter/);
-  assert.match(equipmentPageSource, /item\.responsibleArea === filter/);
-});
-
-test('management action queue reads URL filter params with safe fallback', () => {
-  assert.match(equipmentPageSource, /useSearchParams/);
-  assert.match(equipmentPageSource, /normalizeActionQueueFilter/);
-  assert.match(equipmentPageSource, /const actionQueueFilterParam = searchParams\.get\('actionQueueFilter'\) \|\| searchParams\.get\('actionQueue'\)/);
-  assert.match(equipmentPageSource, /ACTION_QUEUE_FILTERS\.some\(option => option\.value === value\)/);
-  assert.match(equipmentPageSource, /: 'all'/);
-  assert.match(equipmentPageSource, /normalizeActionQueueFilter\(actionQueueFilterParam\)/);
-  assert.match(equipmentPageSource, /\[actionQueueFilterParam\]/);
-  assert.match(equipmentPageSource, /initialFilter=\{initialActionQueueFilter\}/);
-  assert.match(equipmentPageSource, /React\.useEffect\(\(\) => \{\s*setFilter\(initialFilter\);/);
-});
-
-test('management action queue URL filters support dashboard attention shortcuts', () => {
-  assert.match(equipmentPageSource, /value: 'unassigned'/);
-  assert.match(equipmentPageSource, /value: 'overdue'/);
-  assert.match(equipmentPageSource, /value: 'due_today'/);
-  assert.match(equipmentPageSource, /value: 'stale'/);
-  assert.match(equipmentPageSource, /value: 'critical'/);
-  assert.match(equipmentPageSource, /activeFilterLabel/);
-  assert.match(equipmentPageSource, /Активный фильтр:/);
-  assert.match(equipmentPageSource, /aria-pressed=\{filter === option\.value\}/);
-});
-
-test('management action queue table renders sorted API items without raw undefined states', () => {
-  assert.match(equipmentPageSource, /Приоритет/);
-  assert.match(equipmentPageSource, /Действие/);
-  assert.match(equipmentPageSource, /Ответственный/);
-  assert.match(equipmentPageSource, /Срок/);
-  assert.match(equipmentPageSource, /Просрочка\/сегодня|actionDueHintLabel/);
-  assert.match(equipmentPageSource, /Статус исполнения/);
-  assert.match(equipmentPageSource, /Техника/);
-  assert.match(equipmentPageSource, /Ответственный блок/);
-  assert.match(equipmentPageSource, /Потеря/);
-  assert.match(equipmentPageSource, /Потеря\/день/);
-  assert.match(equipmentPageSource, /Ссылка/);
-  assert.match(equipmentPageSource, /filteredItems\.map/);
-  assert.match(equipmentPageSource, /executionStatusLabel\(item\.executionStatus, item\.executionLabel\)/);
-  assert.match(equipmentPageSource, /item\.isUnassigned \? <Badge variant="warning">Без ответственного<\/Badge> : null/);
-  assert.match(equipmentPageSource, /item\.isOverdue \? <Badge variant="danger">Просрочено<\/Badge> : null/);
-  assert.match(equipmentPageSource, /readinessLossText\(item\.estimatedLoss/);
-  assert.doesNotMatch(equipmentPageSource, /\[object Object\]/);
-  assert.doesNotMatch(equipmentPageSource, />undefined</);
-  assert.doesNotMatch(equipmentPageSource, />null</);
-});
-
-test('management action queue execution controls render and call state endpoint', () => {
-  assert.match(equipmentPageSource, /ACTION_EXECUTION_STATUS_OPTIONS/);
-  assert.match(equipmentPageSource, /Открыто/);
-  assert.match(equipmentPageSource, /В работе/);
-  assert.match(equipmentPageSource, /Отложено/);
-  assert.match(equipmentPageSource, /Решено/);
-  assert.match(equipmentPageSource, /Игнорировано/);
-  assert.match(equipmentPageSource, /В работу/);
-  assert.match(equipmentPageSource, /Отложить/);
-  assert.match(equipmentPageSource, /Исполнение действия/);
-  assert.match(equipmentPageSource, /actionDueHintLabel\(formDaysUntilDue, form\.dueDate\)/);
-  assert.match(equipmentPageSource, /Высокий риск сохраняется без ответственного/);
-  assert.match(equipmentPageSource, /useManagementActionAssignees/);
-  assert.match(equipmentServiceSource, /getManagementActionAssignees/);
-  assert.match(equipmentPageSource, /useUpdateManagementActionState/);
-  assert.match(equipmentServiceSource, /updateManagementActionState: \(actionId: string, data: ManagementActionStateUpdate\)/);
-  assert.match(equipmentServiceSource, /\/api\/management\/action-queue\/\$\{encodeURIComponent\(actionId\)\}\/state/);
-});
-
-test('management action queue empty and error states are safe', () => {
-  assert.match(equipmentPageSource, /Критичных действий нет/);
-  assert.match(equipmentPageSource, /Не удалось загрузить очередь действий/);
-  assert.match(equipmentPageSource, /apiErrorMessage\(error, 'Проверьте доступ к \/api\/management\/action-queue\.'\)/);
+test('readiness and action queue data remain sourced from existing frontend hooks', () => {
+  assert.match(equipmentPageSource, /useEquipmentReadiness\(\)/);
+  assert.match(equipmentPageSource, /useManagementActionQueue\(\)/);
+  assert.match(equipmentPageSource, /readinessSummary=\{readinessQuery\.data\?\.summary\}/);
+  assert.match(equipmentPageSource, /actionSummary=\{actionQueueQuery\.data\?\.summary\}/);
+  assert.match(equipmentServiceSource, /getReadiness: \(\): Promise<FleetReadinessResponse> =>\s*api\.get<FleetReadinessResponse>\('\/api\/equipment\/readiness'\)/);
   assert.match(equipmentServiceSource, /getManagementActionQueue: \(\): Promise<ManagementActionQueueResponse> =>\s*api\.get<ManagementActionQueueResponse>\('\/api\/management\/action-queue'\)/);
+  assert.match(equipmentHookSource, /useEquipmentReadiness/);
   assert.match(equipmentHookSource, /useManagementActionQueue/);
-  assert.match(equipmentHookSource, /EQUIPMENT_KEYS\.managementActionQueue/);
   assert.match(equipmentHookSource, /refetchOnWindowFocus: false/);
-  assert.match(equipmentHookSource, /refetchOnReconnect: false/);
+});
+
+test('equipment header renders requested actions and compact filters', () => {
+  assert.match(equipmentPageSource, /Управление парком, статусами, локациями и готовностью к аренде/);
+  assert.match(equipmentPageSource, /Глобальный поиск по технике/);
+  assert.match(equipmentPageSource, /Добавить технику/);
+  assert.doesNotMatch(equipmentPageSource, /Импорт/);
+  assert.doesNotMatch(equipmentPageSource, /Экспорт/);
+  assert.match(equipmentFiltersSource, /data-testid="equipment-filter-panel"/);
+  assert.match(equipmentFiltersSource, /Модель, S\/N, инв\. №/);
+  assert.match(equipmentFiltersSource, /Статус техники/);
+  assert.match(equipmentFiltersSource, /Тип техники/);
+  assert.match(equipmentFiltersSource, /Собственник/);
+  assert.match(equipmentFiltersSource, /Локация/);
+  assert.match(equipmentFiltersSource, /GSM: все/);
+  assert.match(equipmentFiltersSource, /Приоритет/);
+  assert.match(equipmentFiltersSource, /Ещё/);
+  assert.match(equipmentFiltersSource, /Сбросить/);
+});
+
+test('equipment page filters by GSM and priority without backend changes', () => {
+  assert.match(equipmentPageSource, /const \[gsmFilter, setGsmFilter\]/);
+  assert.match(equipmentPageSource, /const \[priorityFilter, setPriorityFilter\]/);
+  assert.match(equipmentPageSource, /matchesGsm/);
+  assert.match(equipmentPageSource, /matchesPriority/);
+  assert.match(equipmentPageSource, /onGsmFilterChange=\{setGsmFilter\}/);
+  assert.match(equipmentPageSource, /onPriorityFilterChange=\{setPriorityFilter\}/);
+  assert.doesNotMatch(equipmentServiceSource, /gsmFilter|priorityFilter/);
+});
+
+test('equipment registry uses table plus inline detail panel and mobile cards', () => {
+  assert.match(equipmentPageSource, /lg:grid-cols-\[minmax\(0,1fr\)_360px\]/);
+  assert.match(equipmentTableSource, /data-testid="equipment-registry-table"/);
+  assert.match(equipmentTableSource, /min-w-\[1040px\]/);
+  assert.match(equipmentTableSource, /Инв\. №/);
+  assert.match(equipmentTableSource, /S\/N/);
+  assert.match(equipmentQuickViewSource, /data-testid="equipment-detail-panel"/);
+  assert.match(equipmentQuickViewSource, /data-testid="equipment-detail-empty"/);
+  assert.match(equipmentQuickViewSource, /Выберите технику из списка/);
+  assert.match(equipmentPageSource, /mode="inline"/);
+  assert.match(equipmentMobileSource, /onSelectEquipment\(equipment\)/);
+  assert.match(equipmentPageSource, /selectedEquipmentId=\{selectedEquipmentId\}/);
+});
+
+test('equipment page no longer renders heavy readiness and management sections in main flow', () => {
+  const pageStart = equipmentPageSource.indexOf('export default function Equipment');
+  const renderStart = equipmentPageSource.indexOf('return (', pageStart);
+  const renderSource = equipmentPageSource.slice(renderStart);
+
+  assert.doesNotMatch(renderSource, /<FleetReadinessSection/);
+  assert.doesNotMatch(renderSource, /<ManagementActionQueueSection/);
+  assert.doesNotMatch(renderSource, /data-testid="fleet-readiness-section"/);
+  assert.doesNotMatch(renderSource, /data-testid="management-action-queue-section"/);
+  assert.doesNotMatch(renderSource, /Очередь управленческих действий/);
 });

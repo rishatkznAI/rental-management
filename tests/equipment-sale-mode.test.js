@@ -573,7 +573,8 @@ test('equipment registry uses asset-centric tabs for one equipment entity', () =
   assert.match(equipmentHelpersSource, /getExplicitSaleStatusKind\(equipment\) === 'sold'/);
   assert.match(source, /activeTab === 'for_sale' \|\| activeTab === 'sold'/);
   assert.match(source, /function getEquipmentDetailPath/);
-  assert.match(source, /\/sales\/equipment\/\$\{equipment\.id\}/);
+  assert.match(source, /return `\/equipment\/\$\{encodeURIComponent\(equipment\.id\)\}`;/);
+  assert.match(source, /const salePath = `\/sales\/equipment\/\$\{encodeURIComponent\(equipment\.id\)\}`;/);
   assert.doesNotMatch(source, /Активный парк'/);
   assert.doesNotMatch(source, /Сервисная \/ клиентская техника/);
 });
@@ -582,7 +583,7 @@ test('equipment registry KPI cards use real counts and percentages without fake 
   const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
   const kpiUiSource = `${source}\n${equipmentKpiCardsSource}`;
 
-  for (const label of ['Всего техники', 'Свободна', 'В аренде', 'В сервисе', 'На продажу', 'Проданная']) {
+  for (const label of ['Всего техники', 'Свободна', 'В аренде', 'В сервисе', 'Бронь', 'Списана / продана']) {
     assert.match(source, new RegExp(label));
   }
 
@@ -595,8 +596,8 @@ test('equipment registry KPI cards use real counts and percentages without fake 
   assert.match(source, /value: tabCounts\.available/);
   assert.match(source, /value: tabCounts\.rented/);
   assert.match(source, /value: tabCounts\.service/);
-  assert.match(source, /value: tabCounts\.for_sale/);
-  assert.match(source, /value: tabCounts\.sold/);
+  assert.match(source, /value: tabCounts\.reserved/);
+  assert.match(source, /value: \(tabCounts\.written_off \?\? 0\) \+ \(tabCounts\.sold \?\? 0\)/);
   assert.match(source, /Доля от общего парка/);
   assert.match(source, /CheckCircle2/);
   assert.match(source, /Truck/);
@@ -613,7 +614,7 @@ test('equipment registry filters are tab-aware and cover status sale type drive 
   const filterUiSource = `${source}\n${equipmentConstantsSource}\n${equipmentFiltersSource}`;
 
   for (const label of [
-    'Модель, инв. №, SN, собственник, локация',
+    'Модель, S/N, инв. №',
     'Свободна',
     'В аренде',
     'Бронь',
@@ -629,6 +630,8 @@ test('equipment registry filters are tab-aware and cover status sale type drive 
     'Другое',
     'Собственник',
     'Локация',
+    'GSM: все',
+    'Приоритет',
   ]) {
     assert.match(filterUiSource, new RegExp(label.replace('№', '№')));
   }
@@ -644,7 +647,8 @@ test('equipment registry filters are tab-aware and cover status sale type drive 
   assert.match(source, /ownerOptions=\{ownerOptions\}/);
   assert.match(source, /locationOptions=\{locationOptions\}/);
   assert.match(equipmentFiltersSource, /export function EquipmentFilters/);
-  assert.match(equipmentFiltersSource, /<FilterButton activeCount=\{activeFilterCount\}/);
+  assert.match(equipmentFiltersSource, /data-testid="equipment-filter-panel"/);
+  assert.match(equipmentFiltersSource, /activeFilterCount > 0/);
   assert.match(equipmentFiltersSource, /<FilterDialog[\s\S]*title="Фильтры техники"[\s\S]*onReset=\{onReset\}/);
   assert.match(equipmentHelpersSource, /export function matchesEquipmentSearch/);
   assert.match(equipmentHelpersSource, /export function getEquipmentCategoryLabel/);
@@ -682,9 +686,9 @@ test('equipment registry table is compact paginated and includes photo gsm owner
 
   for (const label of [
     'Фото',
-    'Инв. номер',
+    'Инв. №',
     'Модель',
-    'Тип / Привод',
+    'S/N',
     'Статус',
     'Категория',
     'Собственник',
@@ -706,7 +710,7 @@ test('equipment registry table is compact paginated and includes photo gsm owner
   assert.match(equipmentRegistryTableSource, /photoSource\(equipment\.photo\)/);
   assert.match(equipmentRegistryTableSource, /title="Нет фото"/);
   assert.match(equipmentRegistryTableSource, /onClick=\{\(\) => onSelectEquipment\(equipment\)\}/);
-  assert.match(equipmentRegistryTableSource, /SN \{equipment\.serialNumber \|\| 'не указан'\}/);
+  assert.match(equipmentRegistryTableSource, /\{equipment\.serialNumber \|\| 'не указан'\}/);
   assert.match(equipmentMobileCardsSource, /export function EquipmentMobileCards/);
   assert.match(equipmentMobileCardsSource, /Инв\. № \{equipment\.inventoryNumber \|\| '—'\} · SN \{equipment\.serialNumber \|\| 'не указан'\}/);
   assert.match(equipmentHelpersSource, /export function getEquipmentGsmDisplay/);

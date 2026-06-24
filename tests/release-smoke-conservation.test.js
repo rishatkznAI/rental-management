@@ -55,8 +55,10 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
     'dashboard-key-signals',
     'dashboard-month-dynamics-command',
     'dashboard-month-dynamics',
-    'dashboard-company-health-command',
     'dashboard-company-health',
+    'dashboard-company-health-svg',
+    'dashboard-company-health-point',
+    'dashboard-company-health-compact',
     'dashboard-kpi-overdue-debt',
     'dashboard-kpi-fleet-utilization',
     'dashboard-kpi-service-load',
@@ -66,12 +68,15 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
     'Динамика месяца',
     'Здоровье компании',
     'dashboard visual acceptance',
+    'expectDashboardCompanyHealthLayout',
+    'expectNoHorizontalOverflow',
     'above the desktop fold',
     'firstViewportHeadingCounts',
     'duplicate Динамика месяца',
     'duplicate Здоровье компании',
     'production-dashboard-cockpit-desktop.png',
     'production-dashboard-cockpit-mobile.png',
+    'production-dashboard-cockpit-tablet.png',
   ]) {
     assert.match(releaseSmokeSource, new RegExp(marker));
   }

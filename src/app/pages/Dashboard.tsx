@@ -1312,15 +1312,18 @@ function CompanyHealthCommandCenter({
       ref={containerRef}
       className="rentcore-command-map relative grid flex-1 gap-2.5 xl:mx-auto xl:w-full xl:items-center xl:justify-center"
       style={{ '--rc-orb-size': `${svgSize}px` } as React.CSSProperties}
+      role="region"
+      aria-label={`Здоровье компании ${progress} из 100: ${label}`}
+      data-testid="dashboard-company-health"
       data-company-health-layout={isCompact ? 'compact' : 'svg'}
       data-card-density={cardDensity}
     >
       {isCompact ? (
-        <div className="rentcore-command-compact-list grid gap-2.5" data-testid="dashboard-company-health-compact-list">
+        <div className="rentcore-command-compact-list grid gap-2.5" data-testid="dashboard-company-health-compact">
           {allDirections.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
           <div className="rounded-[12px] border border-lime-300/18 bg-black/20 p-3">
             <div className="flex items-center justify-between gap-3">
-              <CardTitle className="app-shell-title text-xl font-extrabold">Здоровье компании</CardTitle>
+              <CardTitle className="app-shell-title text-xl font-extrabold" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
               <p className={`text-sm font-extrabold uppercase ${toneStyles[tone].accent}`}>{label}</p>
             </div>
             <p className="mt-1 text-3xl font-extrabold leading-none text-white">{progress}<span className="text-sm text-slate-500">/100</span></p>
@@ -1335,7 +1338,7 @@ function CompanyHealthCommandCenter({
             {leftDirections.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
           </div>
 
-          <div className="rentcore-command-center flex flex-col items-center justify-center text-center" data-testid="dashboard-company-health">
+          <div className="rentcore-command-center flex flex-col items-center justify-center text-center">
             <svg
               className="rentcore-health-svg overflow-visible"
               width={svgSize}

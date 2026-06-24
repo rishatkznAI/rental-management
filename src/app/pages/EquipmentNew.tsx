@@ -330,13 +330,13 @@ export default function EquipmentNew() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Input
-                  label="Серийный номер"
-                  placeholder="Например, GS-SN-20240012"
-                  value={form.serialNumber}
-                  onChange={e => update('serialNumber', e.target.value)}
+                  label="Модель"
+                  placeholder="Например, GS-3246, S-40"
+                  value={form.model}
+                  onChange={e => update('model', e.target.value)}
                   required
                 />
-                <FieldHint>Заводской номер из паспорта или шильдика</FieldHint>
+                <FieldHint>Модель техники из паспорта или шильдика</FieldHint>
               </div>
               {!isSaleMode && (
                 <div>
@@ -360,13 +360,16 @@ export default function EquipmentNew() {
                 onChange={e => update('manufacturer', e.target.value)}
                 required
               />
-              <Input
-                label="Модель"
-                placeholder="Например, GS-3246, S-40"
-                value={form.model}
-                onChange={e => update('model', e.target.value)}
-                required
-              />
+              <div>
+                <Input
+                  label="Серийный номер"
+                  placeholder="Например, GS-SN-20240012"
+                  value={form.serialNumber}
+                  onChange={e => update('serialNumber', e.target.value)}
+                  required
+                />
+                <FieldHint>Заводской номер из паспорта или шильдика</FieldHint>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

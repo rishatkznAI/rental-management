@@ -33,6 +33,20 @@ function getNodeText(node: React.ReactNode): string {
   return "";
 }
 
+function collectSelectLabels(node: React.ReactNode, next = new Map<string, string>()): Map<string, string> {
+  React.Children.forEach(node, child => {
+    if (!React.isValidElement<{ children?: React.ReactNode; value?: unknown }>(child)) return;
+
+    const value = normalizeSelectValue(child.props.value);
+    const label = getNodeText(child.props.children).trim();
+    if (value && label) next.set(value, label);
+
+    if (child.props.children) collectSelectLabels(child.props.children, next);
+  });
+
+  return next;
+}
+
 function Select({
   open: controlledOpen,
   defaultOpen,
@@ -40,6 +54,7 @@ function Select({
   value,
   defaultValue,
   onValueChange,
+  children,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Root>) {
   const normalizedValue = normalizeSelectValue(value);
@@ -47,6 +62,7 @@ function Select({
   const [internalValue, setInternalValue] = React.useState(normalizedDefaultValue ?? "");
   const selectedValue = normalizedValue ?? internalValue;
   const [labels, setLabels] = React.useState(() => new Map<string, string>());
+  const staticLabels = React.useMemo(() => collectSelectLabels(children), [children]);
   const [radixOpen, setRadixOpen] = React.useState(Boolean(defaultOpen));
   const [visualOpen, setVisualOpen] = React.useState(Boolean(defaultOpen));
   const isControlled = controlledOpen !== undefined;
@@ -69,11 +85,18 @@ function Select({
     onValueChange?.(nextValue);
   }, [onValueChange]);
 
+  const resolvedLabels = React.useMemo(() => {
+    if (labels.size === 0) return staticLabels;
+    const next = new Map(staticLabels);
+    labels.forEach((label, value) => next.set(value, label));
+    return next;
+  }, [labels, staticLabels]);
+
   const labelContextValue = React.useMemo(() => ({
     selectedValue,
-    labels,
+    labels: resolvedLabels,
     registerLabel,
-  }), [labels, registerLabel, selectedValue]);
+  }), [registerLabel, resolvedLabels, selectedValue]);
 
   React.useEffect(() => {
     if (requestedOpen) {
@@ -113,7 +136,9 @@ function Select({
           defaultValue={normalizedDefaultValue}
           onValueChange={handleValueChange}
           {...props}
-        />
+        >
+          {children}
+        </SelectPrimitive.Root>
       </SelectLabelContext.Provider>
     </SelectMotionContext.Provider>
   );

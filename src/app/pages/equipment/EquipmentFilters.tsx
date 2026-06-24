@@ -1,5 +1,6 @@
-import { Search } from 'lucide-react';
-import { FilterButton, FilterDialog, FilterField } from '../../components/ui/filter-dialog';
+import { RotateCcw, Search, SlidersHorizontal } from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { FilterDialog, FilterField } from '../../components/ui/filter-dialog';
 
 export type EquipmentFilterOption = {
   value: string;
@@ -27,6 +28,10 @@ type EquipmentFiltersProps = {
   onDriveFilterChange: (value: string) => void;
   locationFilter: string;
   onLocationFilterChange: (value: string) => void;
+  gsmFilter: string;
+  onGsmFilterChange: (value: string) => void;
+  priorityFilter: string;
+  onPriorityFilterChange: (value: string) => void;
   categoryOptions: EquipmentFilterOption[];
   statusOptions: EquipmentFilterOption[];
   typeOptions: EquipmentFilterOption[];
@@ -57,6 +62,10 @@ export function EquipmentFilters({
   onDriveFilterChange,
   locationFilter,
   onLocationFilterChange,
+  gsmFilter,
+  onGsmFilterChange,
+  priorityFilter,
+  onPriorityFilterChange,
   categoryOptions,
   statusOptions,
   typeOptions,
@@ -67,18 +76,61 @@ export function EquipmentFilters({
 }: EquipmentFiltersProps) {
   return (
     <>
-      <div className="px-5 py-4 sm:px-6">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative min-w-0 flex-1">
+      <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.5)] sm:px-4" data-testid="equipment-filter-panel">
+        <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[minmax(220px,1.4fr)_150px_170px_170px_170px_130px_130px_auto_auto]">
+          <div className="relative min-w-0">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
-              placeholder="Модель, инв. №, SN, собственник, локация…"
+              aria-label="Поиск техники"
+              placeholder="Модель, S/N, инв. №"
               value={search}
               onChange={(event) => onSearchChange(event.target.value)}
-              className="app-filter-input pl-10"
+              className="app-filter-input h-10 bg-slate-50 pl-10"
             />
           </div>
-          <FilterButton activeCount={activeFilterCount} onClick={() => onOpenChange(true)} />
+          <select value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value)} className="app-filter-input h-10 bg-slate-50" aria-label="Статус техники">
+            {statusOptions.map((status) => (
+              <option key={status.value} value={status.value}>{status.label}</option>
+            ))}
+          </select>
+          <select value={typeFilter} onChange={(event) => onTypeFilterChange(event.target.value)} className="app-filter-input h-10 bg-slate-50" aria-label="Тип техники">
+            {typeOptions.map(type => (
+              <option key={type.value} value={type.value}>{type.label}</option>
+            ))}
+          </select>
+          <select value={ownerFilter} onChange={(event) => onOwnerFilterChange(event.target.value)} className="app-filter-input h-10 bg-slate-50" aria-label="Собственник">
+            <option value="all">Все собственники</option>
+            {ownerOptions.map((owner) => (
+              <option key={owner.value} value={owner.value}>{owner.label}</option>
+            ))}
+          </select>
+          <select value={locationFilter} onChange={(event) => onLocationFilterChange(event.target.value)} className="app-filter-input h-10 bg-slate-50" aria-label="Локация">
+            <option value="all">Все локации</option>
+            {locationOptions.map((location) => (
+              <option key={location} value={location}>{location}</option>
+            ))}
+          </select>
+          <select value={gsmFilter} onChange={(event) => onGsmFilterChange(event.target.value)} className="app-filter-input h-10 bg-slate-50" aria-label="GSM">
+            <option value="all">GSM: все</option>
+            <option value="online">Онлайн</option>
+            <option value="offline">Офлайн</option>
+            <option value="none">Нет трекера</option>
+          </select>
+          <select value={priorityFilter} onChange={(event) => onPriorityFilterChange(event.target.value)} className="app-filter-input h-10 bg-slate-50" aria-label="Приоритет">
+            <option value="all">Приоритет</option>
+            <option value="high">Высокий</option>
+            <option value="medium">Средний</option>
+            <option value="low">Низкий</option>
+          </select>
+          <Button type="button" variant="outline" className="h-10 rounded-lg px-3" onClick={() => onOpenChange(true)}>
+            <SlidersHorizontal className="h-4 w-4" />
+            Ещё
+            {activeFilterCount > 0 ? <span className="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-[10px] text-primary-foreground">{activeFilterCount}</span> : null}
+          </Button>
+          <Button type="button" variant="ghost" className="h-10 rounded-lg px-3" onClick={onReset}>
+            <RotateCcw className="h-4 w-4" />
+            Сбросить
+          </Button>
         </div>
       </div>
 
@@ -105,40 +157,10 @@ export function EquipmentFilters({
               <option value="false">{`Активный парк — ${activeFleetLabels.no}`}</option>
             </select>
           </FilterField>
-          <FilterField label="Статус">
-            <select value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value)} className="app-filter-input">
-              {statusOptions.map((status) => (
-                <option key={status.value} value={status.value}>{status.label}</option>
-              ))}
-            </select>
-          </FilterField>
-          <FilterField label="Тип">
-            <select value={typeFilter} onChange={(event) => onTypeFilterChange(event.target.value)} className="app-filter-input">
-              {typeOptions.map(type => (
-                <option key={type.value} value={type.value}>{type.label}</option>
-              ))}
-            </select>
-          </FilterField>
-          <FilterField label="Собственник">
-            <select value={ownerFilter} onChange={(event) => onOwnerFilterChange(event.target.value)} className="app-filter-input">
-              <option value="all">Все собственники</option>
-              {ownerOptions.map((owner) => (
-                <option key={owner.value} value={owner.value}>{owner.label}</option>
-              ))}
-            </select>
-          </FilterField>
           <FilterField label="Привод">
             <select value={driveFilter} onChange={(event) => onDriveFilterChange(event.target.value)} className="app-filter-input">
               {driveOptions.map((drive) => (
                 <option key={drive.value} value={drive.value}>{drive.label}</option>
-              ))}
-            </select>
-          </FilterField>
-          <FilterField label="Локация">
-            <select value={locationFilter} onChange={(event) => onLocationFilterChange(event.target.value)} className="app-filter-input">
-              <option value="all">Все локации</option>
-              {locationOptions.map((location) => (
-                <option key={location} value={location}>{location}</option>
               ))}
             </select>
           </FilterField>

@@ -802,6 +802,48 @@ function FleetReadinessSection({
   );
 }
 
+function EquipmentAttentionChips({
+  readinessSummary,
+  actionSummary,
+  gsmOfflineCount,
+  noLocationCount,
+  highPriorityCount,
+  isLoading,
+}: {
+  readinessSummary?: {
+    needsCheck: number;
+    inService: number;
+    deliveryBlocked: number;
+    gsmAttention: number;
+    loss?: { blockedItemsWithoutRate: number };
+  };
+  actionSummary?: ManagementActionQueueSummary;
+  gsmOfflineCount: number;
+  noLocationCount: number;
+  highPriorityCount: number;
+  isLoading: boolean;
+}) {
+  const chips = [
+    { label: 'Без ответственного', value: actionSummary?.unassigned ?? 0, tone: 'text-amber-700 bg-amber-50 border-amber-200' },
+    { label: 'Просрочено ТО', value: readinessSummary?.needsCheck ?? 0, tone: 'text-rose-700 bg-rose-50 border-rose-200' },
+    { label: 'GSM офлайн', value: readinessSummary?.gsmAttention ?? gsmOfflineCount, tone: 'text-blue-700 bg-blue-50 border-blue-200' },
+    { label: 'Нет локации', value: noLocationCount, tone: 'text-slate-700 bg-slate-50 border-slate-200' },
+    { label: 'Высокий приоритет', value: highPriorityCount, tone: 'text-orange-700 bg-orange-50 border-orange-200' },
+    { label: 'Без ставки', value: readinessSummary?.loss?.blockedItemsWithoutRate ?? 0, tone: 'text-violet-700 bg-violet-50 border-violet-200' },
+  ];
+
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid="equipment-attention-chips">
+      <span className="mr-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Требует внимания</span>
+      {chips.map(chip => (
+        <span key={chip.label} className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${chip.tone}`}>
+          {chip.label}: <span className="tabular-nums">{isLoading ? '…' : chip.value}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function getPriorityAppearance(priority: EquipmentEntity['priority']) {
   if (priority === 'critical' || priority === 'high') {
     return 'bg-red-500/12 text-red-300';
@@ -830,9 +872,7 @@ function getSalePdiAppearance(status: EquipmentSalePdiStatus = 'not_started') {
 }
 
 function getEquipmentDetailPath(equipment: EquipmentEntity) {
-  return isSaleRegistryEquipment(equipment)
-    ? `/sales/equipment/${equipment.id}`
-    : `/equipment/${equipment.id}`;
+  return `/equipment/${encodeURIComponent(equipment.id)}`;
 }
 
 function getRegistryStatusLabel(equipment: EquipmentEntity, activeRentalIndex?: ActiveRentalIndex) {
@@ -1385,6 +1425,8 @@ export default function Equipment() {
   const [fleetFilter, setFleetFilter] = React.useState<string>('all');
   const [ownerFilter, setOwnerFilter] = React.useState<string>('all');
   const [locationFilter, setLocationFilter] = React.useState<string>('all');
+  const [gsmFilter, setGsmFilter] = React.useState<string>('all');
+  const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
   const [showFilters, setShowFilters] = React.useState(false);
   const [pageSize, setPageSize] = React.useState(DEFAULT_EQUIPMENT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -1660,6 +1702,14 @@ export default function Equipment() {
         const matchesFleet = fleetFilter === 'all' || String(equipment.activeInFleet) === fleetFilter;
         const matchesOwner = matchesOwnerFilter(equipment, ownerFilter);
         const matchesLocation = locationFilter === 'all' || equipment.location === locationFilter;
+        const gsmDisplay = getEquipmentGsmDisplay(equipment);
+        const gsmLabel = lowerText(gsmDisplay.label);
+        const matchesGsm = gsmFilter === 'all'
+          || (gsmFilter === 'online' && gsmLabel.includes('онлайн'))
+          || (gsmFilter === 'offline' && (gsmLabel.includes('офлайн') || gsmLabel.includes('нет связи')))
+          || (gsmFilter === 'none' && (gsmLabel.includes('нет данных') || gsmLabel.includes('нет трекера')));
+        const priorityGroup = equipment.priority === 'critical' ? 'high' : equipment.priority || 'low';
+        const matchesPriority = priorityFilter === 'all' || priorityGroup === priorityFilter;
 
         return matchesSearch
           && matchesStatus
@@ -1669,6 +1719,8 @@ export default function Equipment() {
           && matchesFleet
           && matchesOwner
           && matchesLocation
+          && matchesGsm
+          && matchesPriority
           && matchesTabType(equipment, activeTab, activeRentalIndex, EQUIPMENT_REGISTRY_MATCH_OPTIONS);
       })
       .sort(compareEquipmentByPriority)
@@ -1680,8 +1732,10 @@ export default function Equipment() {
     enrichedEquipmentList,
     equipmentTypeOptions,
     fleetFilter,
+    gsmFilter,
     locationFilter,
     ownerFilter,
+    priorityFilter,
     search,
     statusFilter,
     typeFilter,
@@ -1779,20 +1833,20 @@ export default function Equipment() {
       percent: getRegistryPercent(tabCounts.service ?? 0, totalPark),
     },
     {
-      title: 'На продажу',
-      value: tabCounts.for_sale ?? 0,
+      title: 'Бронь',
+      value: tabCounts.reserved ?? 0,
       caption: 'Доля от общего парка',
-      icon: BadgeDollarSign,
+      icon: CalendarPlus,
       tone: 'sale',
-      percent: getRegistryPercent(tabCounts.for_sale ?? 0, totalPark),
+      percent: getRegistryPercent(tabCounts.reserved ?? 0, totalPark),
     },
     {
-      title: 'Проданная',
-      value: tabCounts.sold ?? 0,
+      title: 'Списана / продана',
+      value: (tabCounts.written_off ?? 0) + (tabCounts.sold ?? 0),
       caption: 'Доля от общего парка',
       icon: Archive,
       tone: 'sold',
-      percent: getRegistryPercent(tabCounts.sold ?? 0, totalPark),
+      percent: getRegistryPercent((tabCounts.written_off ?? 0) + (tabCounts.sold ?? 0), totalPark),
     },
   ], [tabCounts, totalPark]);
   const activeFilterCount = [
@@ -1804,6 +1858,8 @@ export default function Equipment() {
     ownerFilter !== 'all',
     driveFilter !== 'all',
     locationFilter !== 'all',
+    gsmFilter !== 'all',
+    priorityFilter !== 'all',
   ].filter(Boolean).length;
 
   const resetFilters = () => {
@@ -1815,6 +1871,8 @@ export default function Equipment() {
     setDriveFilter('all');
     setOwnerFilter('all');
     setLocationFilter('all');
+    setGsmFilter('all');
+    setPriorityFilter('all');
   };
 
   const isEquipmentLoading = equipmentQuery.isLoading || (canViewRentals && ganttQuery.isLoading);
@@ -1877,6 +1935,18 @@ export default function Equipment() {
 
   const isSaleTab = activeTab === 'for_sale' || activeTab === 'sold';
   const totalVisible = filteredEquipment.length;
+  const attentionCounts = React.useMemo(() => {
+    let gsmOffline = 0;
+    let noLocation = 0;
+    let highPriority = 0;
+    for (const equipment of enrichedEquipmentList) {
+      const gsmLabel = lowerText(getEquipmentGsmDisplay(equipment).label);
+      if (gsmLabel.includes('офлайн') || gsmLabel.includes('нет связи')) gsmOffline += 1;
+      if (!cleanText(equipment.location)) noLocation += 1;
+      if (equipment.priority === 'critical' || equipment.priority === 'high') highPriority += 1;
+    }
+    return { gsmOffline, noLocation, highPriority };
+  }, [enrichedEquipmentList]);
   const { totalPages, visibleCurrentPage, pageStart, pageEnd } = getEquipmentPageRange(totalVisible, currentPage, pageSize);
   const paginatedEquipment = React.useMemo(
     () => getEquipmentPageItems(filteredEquipment, visibleCurrentPage, pageSize),
@@ -1890,8 +1960,10 @@ export default function Equipment() {
     categoryFilter,
     driveFilter,
     fleetFilter,
+    gsmFilter,
     locationFilter,
     ownerFilter,
+    priorityFilter,
     search,
     statusFilter,
     typeFilter,
@@ -1902,33 +1974,43 @@ export default function Equipment() {
   }, [totalPages]);
 
   return (
-    <div className="space-y-5 p-4 sm:space-y-6 sm:p-6 md:p-8">
-      <section className="app-panel overflow-hidden">
-        <div className="border-b border-border/80 px-5 py-5 sm:px-6">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div>
-              <h1 className="app-shell-title text-3xl font-extrabold text-foreground">Техника</h1>
-              <p className="mt-2 text-sm text-muted-foreground">Единый реестр физических единиц техники</p>
+    <div className="min-h-screen space-y-4 bg-[#F6F8FB] p-4 text-slate-900 sm:p-6 md:p-8" data-testid="equipment-enterprise-page">
+      <section className="space-y-4">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
+            <h1 className="app-shell-title text-3xl font-extrabold text-slate-950">Техника</h1>
+            <p className="mt-1 text-sm text-slate-500">Управление парком, статусами, локациями и готовностью к аренде.</p>
+          </div>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <div className="relative min-w-0 sm:w-72">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                aria-label="Глобальный поиск по технике"
+                placeholder="Поиск по технике"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="app-filter-input h-10 bg-white pl-10"
+              />
             </div>
             {canCreateEquipment && (
-              <Link to="/equipment/new">
-                <Button size="sm" className="app-button-primary rounded-xl px-4">
+              <Link to="/equipment/new" className="sm:ml-1">
+                <Button className="h-10 w-full rounded-lg px-4 sm:w-auto">
                   <Plus className="h-4 w-4" />
                   Добавить технику
                 </Button>
               </Link>
             )}
           </div>
-
-          <EquipmentStatusTabs
-            activeTab={activeTab}
-            tabs={EQUIPMENT_TABS}
-            counts={tabCounts}
-            onTabChange={setActiveTab}
-          />
-
-          <EquipmentKpiCards cards={kpiCards} />
         </div>
+
+        <EquipmentKpiCards cards={kpiCards} />
+
+        <EquipmentStatusTabs
+          activeTab={activeTab}
+          tabs={EQUIPMENT_TABS}
+          counts={tabCounts}
+          onTabChange={setActiveTab}
+        />
 
         <EquipmentFilters
           search={search}
@@ -1951,6 +2033,10 @@ export default function Equipment() {
           onDriveFilterChange={setDriveFilter}
           locationFilter={locationFilter}
           onLocationFilterChange={setLocationFilter}
+          gsmFilter={gsmFilter}
+          onGsmFilterChange={setGsmFilter}
+          priorityFilter={priorityFilter}
+          onPriorityFilterChange={setPriorityFilter}
           categoryOptions={categoryOptions}
           statusOptions={EQUIPMENT_STATUS_FILTER_OPTIONS}
           typeOptions={typeFilterOptions}
@@ -1975,24 +2061,16 @@ export default function Equipment() {
         </section>
       )}
 
-      <FleetReadinessSection
-        items={readinessQuery.data?.items ?? []}
-        summary={readinessQuery.data?.summary}
-        isLoading={readinessQuery.isLoading}
-        error={readinessQuery.error}
+      <EquipmentAttentionChips
+        readinessSummary={readinessQuery.data?.summary}
+        actionSummary={actionQueueQuery.data?.summary}
+        gsmOfflineCount={attentionCounts.gsmOffline}
+        noLocationCount={attentionCounts.noLocation}
+        highPriorityCount={attentionCounts.highPriority}
+        isLoading={readinessQuery.isLoading || actionQueueQuery.isLoading}
       />
 
-      <ManagementActionQueueSection
-        items={actionQueueQuery.data?.items ?? []}
-        summary={actionQueueQuery.data?.summary}
-        isLoading={actionQueueQuery.isLoading}
-        error={actionQueueQuery.error}
-        currentUser={user}
-        canManageActions={canManageActionQueue}
-        initialFilter={initialActionQueueFilter}
-      />
-
-      <div className="space-y-3 sm:hidden">
+      <div className="space-y-3 lg:hidden">
         {totalVisible === 0 ? (
           <EmptyState {...emptyState} />
         ) : (
@@ -2000,6 +2078,8 @@ export default function Equipment() {
             equipmentItems={paginatedEquipment}
             isSaleTab={isSaleTab}
             activeRentalIndex={activeRentalIndex}
+            selectedEquipmentId={selectedEquipmentId}
+            onSelectEquipment={(equipment) => setSelectedEquipmentId(equipment.id)}
             getEquipmentDetailPath={getEquipmentDetailPath}
             getEquipmentTypeLabel={(equipment) => findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
             getEquipmentDriveLabel={getEquipmentDriveLabel}
@@ -2012,40 +2092,48 @@ export default function Equipment() {
             salePdiLabels={EQUIPMENT_SALE_PDI_LABELS}
           />
         )}
-      </div>
-
-      <section className="hidden overflow-hidden rounded-2xl border border-border bg-card/95 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)] sm:block">
-        {totalVisible === 0 ? (
-          <div className="p-6"><EmptyState {...emptyState} /></div>
-        ) : (
-          <EquipmentRegistryTable
-            equipmentItems={paginatedEquipment}
-            activeRentalIndex={activeRentalIndex}
-            selectedEquipmentId={selectedEquipmentId}
-            onSelectEquipment={(equipment) => setSelectedEquipmentId(equipment.id)}
-            getEquipmentDetailPath={getEquipmentDetailPath}
-            getEquipmentTypeLabel={(equipment) => findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
-            getEquipmentDriveLabel={getEquipmentDriveLabel}
-            getRegistryStatusLabel={getRegistryStatusLabel}
-            getRegistryStatusAppearance={getRegistryStatusAppearance}
-            getEquipmentCategoryLabel={getEquipmentCategoryLabel}
-            getRegistryOwnerLabel={getRegistryOwnerLabel}
-            getPriorityLabel={getPriorityLabel}
-            getPriorityDotClass={getPriorityDotClass}
-            getEquipmentGsmDisplay={getEquipmentGsmDisplay}
-          />
-        )}
-      </section>
-
-      {quickViewPanelData ? (
         <EquipmentQuickViewPanel
           selectedEquipment={selectedEquipment}
           activeTab={activeQuickViewTab}
           onTabChange={setActiveQuickViewTab}
           onClose={() => setSelectedEquipmentId(null)}
-          {...quickViewPanelData}
+          mode="inline"
+          {...(quickViewPanelData ?? {})}
         />
-      ) : null}
+      </div>
+
+      <div className="hidden gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_400px]">
+        <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_18px_42px_-34px_rgba(15,23,42,0.55)]">
+          {totalVisible === 0 ? (
+            <div className="p-6"><EmptyState {...emptyState} /></div>
+          ) : (
+            <EquipmentRegistryTable
+              equipmentItems={paginatedEquipment}
+              activeRentalIndex={activeRentalIndex}
+              selectedEquipmentId={selectedEquipmentId}
+              onSelectEquipment={(equipment) => setSelectedEquipmentId(equipment.id)}
+              getEquipmentDetailPath={getEquipmentDetailPath}
+              getEquipmentTypeLabel={(equipment) => findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
+              getEquipmentDriveLabel={getEquipmentDriveLabel}
+              getRegistryStatusLabel={getRegistryStatusLabel}
+              getRegistryStatusAppearance={getRegistryStatusAppearance}
+              getEquipmentCategoryLabel={getEquipmentCategoryLabel}
+              getRegistryOwnerLabel={getRegistryOwnerLabel}
+              getPriorityLabel={getPriorityLabel}
+              getPriorityDotClass={getPriorityDotClass}
+              getEquipmentGsmDisplay={getEquipmentGsmDisplay}
+            />
+          )}
+        </section>
+        <EquipmentQuickViewPanel
+          selectedEquipment={selectedEquipment}
+          activeTab={activeQuickViewTab}
+          onTabChange={setActiveQuickViewTab}
+          onClose={() => setSelectedEquipmentId(null)}
+          mode="inline"
+          {...(quickViewPanelData ?? {})}
+        />
+      </div>
 
       <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
         <div>

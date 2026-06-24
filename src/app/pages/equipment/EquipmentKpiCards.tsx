@@ -71,11 +71,11 @@ function EquipmentKpiCard({
   const hasPercent = typeof percent === 'number' && Number.isFinite(percent);
 
   return (
-    <div className={`app-kpi-card group flex min-h-[136px] min-w-0 flex-col justify-between p-4 ${toneStyle.card}`}>
+    <div className={`group flex min-h-[108px] min-w-0 flex-col justify-between rounded-xl border bg-white p-4 shadow-[0_16px_36px_-30px_rgba(15,23,42,0.45)] ${toneStyle.card}`}>
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="truncate text-xs font-semibold text-muted-foreground">{title}</div>
-          <div className={`mt-3 text-3xl font-extrabold leading-none tracking-normal ${toneStyle.value}`}>
+          <div className={`mt-2 text-3xl font-extrabold leading-none tracking-normal ${toneStyle.value}`}>
             {formatKpiCount(value)}
           </div>
         </div>
@@ -105,7 +105,7 @@ type EquipmentKpiCardsProps = {
 
 export function EquipmentKpiCards({ cards }: EquipmentKpiCardsProps) {
   return (
-    <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
       {cards.map((card) => (
         <EquipmentKpiCard key={card.title} {...card} />
       ))}

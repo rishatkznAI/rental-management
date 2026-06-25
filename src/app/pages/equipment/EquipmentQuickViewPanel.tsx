@@ -38,9 +38,9 @@ type EquipmentQuickViewPanelProps = EquipmentQuickViewPanelData & {
 
 function PreviewField({ label, value }: EquipmentPreviewField) {
   return (
-    <div className="min-w-0 rounded-lg bg-secondary/55 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate text-sm font-medium text-foreground">{value || '—'}</div>
+    <div className="min-w-0 rounded-lg border border-border/75 bg-secondary/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-foreground/58">{label}</div>
+      <div className="mt-1.5 truncate text-sm font-semibold text-foreground">{value || '—'}</div>
     </div>
   );
 }
@@ -96,23 +96,23 @@ export function EquipmentQuickViewPanel({
     <aside
       data-testid="equipment-quick-view-panel"
       className={mode === 'embedded'
-        ? 'flex h-full min-h-[560px] w-full flex-col overflow-hidden border-l border-border bg-card/80'
-        : 'fixed inset-x-0 bottom-0 z-50 flex max-h-[82vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border bg-background shadow-2xl xl:hidden'
+        ? 'flex h-full min-h-[560px] w-full flex-col overflow-hidden border-l border-border/90 bg-card/88'
+        : 'fixed inset-x-0 bottom-0 z-50 flex max-h-[82vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border/90 bg-background shadow-2xl xl:hidden'
       }
     >
-      <div className="border-b border-border p-4">
+      <div className="border-b border-border/85 bg-secondary/20 p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
             {mainPhoto ? (
               <AuthenticatedImage
                 photo={normalizePhotoReference(mainPhoto, { idPrefix: `${selectedEquipment.id}-quick-thumb` })}
                 alt={title}
-                className="h-14 w-16 shrink-0 rounded-lg border border-border"
+                className="h-14 w-16 shrink-0 rounded-lg border border-border/90 shadow-sm"
                 imgClassName="h-full w-full object-cover"
                 fallbackClassName="h-14 w-16"
               />
             ) : (
-              <div className="flex h-14 w-16 shrink-0 items-center justify-center rounded-lg border border-dashed border-border bg-secondary/60 text-muted-foreground">
+              <div className="flex h-14 w-16 shrink-0 items-center justify-center rounded-lg border border-dashed border-border/90 bg-secondary/60 text-foreground/55">
                 <Boxes className="h-5 w-5" />
               </div>
             )}
@@ -122,10 +122,10 @@ export function EquipmentQuickViewPanel({
                 <span className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-medium ${statusClassName}`}>
                   {statusLabel}
                 </span>
-                <span className="inline-flex max-w-full rounded-full bg-secondary px-2.5 py-1 font-mono text-xs text-muted-foreground">
+                <span className="inline-flex max-w-full rounded-full border border-border/70 bg-secondary/75 px-2.5 py-1 font-mono text-xs text-foreground/66">
                   <span className="truncate">INV {inventoryNumber || '—'}</span>
                 </span>
-                <span className="inline-flex max-w-full rounded-full bg-secondary px-2.5 py-1 font-mono text-xs text-muted-foreground">
+                <span className="inline-flex max-w-full rounded-full border border-border/70 bg-secondary/75 px-2.5 py-1 font-mono text-xs text-foreground/66">
                   <span className="truncate">SN {serialNumber || 'не указан'}</span>
                 </span>
               </div>
@@ -134,7 +134,7 @@ export function EquipmentQuickViewPanel({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground/62 transition hover:bg-secondary hover:text-foreground"
             aria-label="Закрыть панель техники"
           >
             <X className="h-4 w-4" />
@@ -142,7 +142,7 @@ export function EquipmentQuickViewPanel({
         </div>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto border-b border-border px-4 py-2">
+      <div className="flex gap-1 overflow-x-auto border-b border-border/85 bg-card/55 px-4 py-2">
         {EQUIPMENT_PREVIEW_TABS.map(tab => (
           <button
             key={tab.key}
@@ -183,9 +183,9 @@ export function EquipmentQuickViewPanel({
               <>
                 <div className="grid gap-2">
                   {documentSlots.map(slot => (
-                    <div key={slot.label} className="flex items-center justify-between rounded-lg bg-secondary/60 px-3 py-2 text-sm">
+                    <div key={slot.label} className="flex items-center justify-between rounded-lg border border-border/70 bg-secondary/48 px-3 py-2 text-sm">
                       <span className="font-medium text-foreground">{slot.label}</span>
-                      <span className={slot.count > 0 ? 'text-emerald-300' : 'text-muted-foreground'}>
+                      <span className={slot.count > 0 ? 'text-emerald-300' : 'text-foreground/58'}>
                         {slot.count > 0 ? `${slot.count} шт.` : 'Не найдено'}
                       </span>
                     </div>
@@ -194,13 +194,13 @@ export function EquipmentQuickViewPanel({
                 {documents.length > 0 ? (
                   <div className="space-y-2">
                     {documents.slice(0, 8).map(document => (
-                      <div key={document.id} className="rounded-lg border border-border p-3">
+                      <div key={document.id} className="rounded-lg border border-border/80 bg-secondary/25 p-3">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="truncate text-sm font-semibold text-foreground">{document.typeLabel}</div>
-                            <div className="mt-1 truncate font-mono text-xs text-muted-foreground">{document.number}</div>
+                            <div className="mt-1 truncate font-mono text-xs text-foreground/58">{document.number}</div>
                           </div>
-                          <span className="shrink-0 text-xs text-muted-foreground">{document.dateLabel}</span>
+                          <span className="shrink-0 text-xs text-foreground/58">{document.dateLabel}</span>
                         </div>
                       </div>
                     ))}
@@ -219,13 +219,13 @@ export function EquipmentQuickViewPanel({
         {activeTab === 'history' && (
           <div className="space-y-3">
             {timeline.length > 0 ? timeline.map(item => (
-              <div key={item.id} className="rounded-lg border border-border p-3">
+              <div key={item.id} className="rounded-lg border border-border/80 bg-secondary/25 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-foreground">{item.title}</div>
-                    <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.description}</div>
+                    <div className="mt-1 line-clamp-2 text-xs text-foreground/58">{item.description}</div>
                   </div>
-                  <span className="shrink-0 text-xs text-muted-foreground">{item.dateLabel}</span>
+                  <span className="shrink-0 text-xs text-foreground/58">{item.dateLabel}</span>
                 </div>
               </div>
             )) : (
@@ -243,7 +243,7 @@ export function EquipmentQuickViewPanel({
         )}
       </div>
 
-      <div className="flex gap-2 border-t border-border p-4">
+      <div className="flex gap-2 border-t border-border/85 bg-card/65 p-4">
         <Link to={`${detailPath}?action=edit`} className="min-w-0 flex-1">
           <Button className="w-full" variant="outline">Редактировать</Button>
         </Link>

@@ -12,19 +12,19 @@ export function EquipmentQuickActions({ actions }: EquipmentQuickActionsProps) {
 
   const toneClassName: Record<NonNullable<EquipmentPreviewQuickAction['tone']>, string> = {
     primary: 'border-primary/35 bg-primary/15 text-primary hover:bg-primary/20',
-    default: 'border-border bg-secondary/70 text-foreground hover:bg-secondary',
+    default: 'border-border/80 bg-secondary/62 text-foreground hover:bg-secondary/85',
     danger: 'border-red-500/25 bg-red-500/10 text-red-200 hover:bg-red-500/15',
   };
 
   return (
-    <section className="mb-5 rounded-xl border border-border bg-card/70 p-3">
-      <h3 className="text-sm font-semibold text-foreground">Быстрые действия</h3>
+    <section className="mb-5 rounded-xl border border-border/80 bg-card/78 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+      <h3 className="text-sm font-extrabold text-foreground">Быстрые действия</h3>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {actions.map((action) => {
           const Icon = action.icon;
           const disabled = Boolean(action.disabled || (!action.to && !action.onClick));
           const className = disabled
-            ? 'cursor-not-allowed border-border bg-secondary/35 text-muted-foreground opacity-80'
+            ? 'cursor-not-allowed border-border/75 bg-secondary/35 text-foreground/50 opacity-80'
             : toneClassName[action.tone || 'default'];
           const content = (
             <>
@@ -32,7 +32,7 @@ export function EquipmentQuickActions({ actions }: EquipmentQuickActionsProps) {
               <span className="min-w-0">
                 <span className="block truncate">{action.label}</span>
                 {disabled && action.reason ? (
-                  <span className="mt-0.5 block whitespace-normal text-left text-[11px] font-normal leading-snug text-muted-foreground">
+                  <span className="mt-0.5 block whitespace-normal text-left text-[11px] font-normal leading-snug text-foreground/56">
                     {action.reason}
                   </span>
                 ) : null}

@@ -69,15 +69,15 @@ export function EquipmentMobileCards({
               }
             }}
             className={`rounded-xl border bg-card/95 p-4 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)] ${
-              isSelected ? 'border-primary/40 bg-primary/8' : 'border-border'
-            } ${onSelectEquipment ? 'cursor-pointer transition hover:border-primary/35 focus:outline-none focus:ring-2 focus:ring-primary/35' : ''}`}
+              isSelected ? 'border-primary/45 bg-primary/8 shadow-[inset_3px_0_0_var(--primary)]' : 'border-border/85'
+            } ${onSelectEquipment ? 'cursor-pointer transition hover:border-primary/35 hover:bg-secondary/20 focus:outline-none focus:ring-2 focus:ring-primary/35' : ''}`}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <Link to={detailPath} onClick={(event) => event.stopPropagation()} className="app-shell-title block break-words text-base font-extrabold text-foreground hover:text-primary">
                   {equipment.manufacturer} {equipment.model}
                 </Link>
-                <p className="mt-1 break-words text-xs text-muted-foreground">
+                <p className="mt-1 break-words text-xs text-foreground/58">
                   Инв. № {equipment.inventoryNumber || '—'} · SN {equipment.serialNumber || 'не указан'}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -101,14 +101,14 @@ export function EquipmentMobileCards({
                     event.stopPropagation();
                     onSelectEquipment(equipment);
                   }}
-                  className="shrink-0 rounded-lg border border-border bg-secondary/60 px-2.5 py-1.5 text-xs font-semibold text-muted-foreground"
+                  className="shrink-0 rounded-lg border border-border/80 bg-secondary/65 px-2.5 py-1.5 text-xs font-semibold text-foreground/68 transition hover:bg-secondary hover:text-foreground"
                 >
                   Действия
                 </button>
               ) : null}
             </div>
 
-            <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-muted-foreground">
+            <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-foreground/60">
               <div className="min-w-0 break-words">Тип: <span className="text-foreground">{equipmentTypeLabel}</span></div>
               <div className="min-w-0 break-words">Привод: <span className="text-foreground">{getEquipmentDriveLabel(equipment.drive)}</span></div>
               <div className="min-w-0 break-words">Локация: <span className="text-foreground">{equipment.location || '—'}</span></div>

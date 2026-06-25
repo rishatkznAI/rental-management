@@ -45,8 +45,8 @@ export function EquipmentRegistryTable({
 }: EquipmentRegistryTableProps) {
   return (
     <div className="app-scroll-fade-x overflow-x-auto">
-      <table className="w-full min-w-[1480px] table-fixed text-left text-sm">
-        <thead className="border-b border-border bg-secondary/50 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <table className="w-full min-w-[1480px] table-fixed text-left text-sm text-foreground">
+        <thead className="border-b border-border/90 bg-secondary/65 text-[10px] uppercase tracking-[0.14em] text-foreground/62">
           <tr>
             <th className="w-[52px] px-4 py-3 font-medium">Выбор</th>
             <th className="w-[82px] px-3 py-3 font-medium">Фото</th>
@@ -63,7 +63,7 @@ export function EquipmentRegistryTable({
             <th className="w-[58px] px-3 py-3 font-medium">Действия</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-border/80">
+        <tbody className="divide-y divide-border/90">
           {equipmentItems.map((equipment) => {
             const detailPath = getEquipmentDetailPath(equipment);
             const imageSrc = photoSource(equipment.photo);
@@ -76,8 +76,8 @@ export function EquipmentRegistryTable({
             return (
               <tr
                 key={equipment.id}
-                className={`cursor-pointer align-top transition-colors hover:bg-secondary/45 ${
-                  selectedEquipmentId === equipment.id ? 'bg-primary/10 shadow-[inset_3px_0_0_var(--primary)]' : ''
+                className={`cursor-pointer align-top transition-colors hover:bg-secondary/55 ${
+                  selectedEquipmentId === equipment.id ? 'bg-primary/8 shadow-[inset_3px_0_0_var(--primary)]' : 'bg-card/20'
                 }`}
                 onClick={() => onSelectEquipment(equipment)}
               >
@@ -87,8 +87,8 @@ export function EquipmentRegistryTable({
                     aria-label={selectedEquipmentId === equipment.id ? 'Техника выбрана' : 'Выбрать технику'}
                     className={`flex h-5 w-5 items-center justify-center rounded border transition ${
                       selectedEquipmentId === equipment.id
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-border bg-secondary/40 text-transparent hover:border-primary/50'
+                        ? 'border-primary/80 bg-primary/90 text-primary-foreground'
+                        : 'border-border/90 bg-secondary/45 text-transparent hover:border-primary/55 hover:bg-secondary/70'
                     }`}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -123,7 +123,7 @@ export function EquipmentRegistryTable({
                   >
                     {equipment.inventoryNumber || '—'}
                   </Link>
-                  <div className="mt-1 truncate text-xs text-muted-foreground">
+                  <div className="mt-1 truncate text-xs text-foreground/58">
                     SN {equipment.serialNumber || 'не указан'}
                   </div>
                 </td>
@@ -132,12 +132,12 @@ export function EquipmentRegistryTable({
                     {title}
                   </Link>
                   {equipment.year ? (
-                    <div className="mt-1 text-xs text-muted-foreground">Год выпуска: {equipment.year}</div>
+                    <div className="mt-1 text-xs text-foreground/58">Год выпуска: {equipment.year}</div>
                   ) : null}
                 </td>
                 <td className="px-3 py-3">
                   <div className="truncate text-foreground">{equipmentTypeLabel}</div>
-                  <div className="mt-1 truncate text-xs text-muted-foreground">{driveLabel}</div>
+                  <div className="mt-1 truncate text-xs text-foreground/58">{driveLabel}</div>
                 </td>
                 <td className="px-3 py-3">
                   <span className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-medium ${getRegistryStatusAppearance(equipment, activeRentalIndex)}`}>
@@ -145,7 +145,7 @@ export function EquipmentRegistryTable({
                   </span>
                 </td>
                 <td className="px-3 py-3">
-                  <span className="inline-flex max-w-full rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                  <span className="inline-flex max-w-full rounded-full border border-border/70 bg-secondary/75 px-2.5 py-1 text-xs font-medium text-foreground/68">
                     <span className="truncate">{getEquipmentCategoryLabel(equipment.category)}</span>
                   </span>
                 </td>
@@ -153,7 +153,7 @@ export function EquipmentRegistryTable({
                   <div className="truncate text-foreground" title={ownerLabel}>{ownerLabel}</div>
                 </td>
                 <td className="px-3 py-3">
-                  <div className="truncate text-muted-foreground" title={equipment.location || '—'}>
+                  <div className="truncate text-foreground/68" title={equipment.location || '—'}>
                     {equipment.location || '—'}
                   </div>
                 </td>
@@ -162,7 +162,7 @@ export function EquipmentRegistryTable({
                     {equipment.currentClient || '—'}
                   </div>
                   {equipment.returnDate ? (
-                    <div className="mt-1 truncate text-xs text-muted-foreground">Возврат: {equipment.returnDate}</div>
+                    <div className="mt-1 truncate text-xs text-foreground/58">Возврат: {equipment.returnDate}</div>
                   ) : null}
                 </td>
                 <td className="px-3 py-3">
@@ -172,7 +172,7 @@ export function EquipmentRegistryTable({
                   </span>
                 </td>
                 <td className="px-3 py-3">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-foreground">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-secondary/75 px-2.5 py-1 text-xs font-medium text-foreground">
                     <span className={`h-2 w-2 rounded-full ${getPriorityDotClass(equipment.priority)}`} />
                     {getPriorityLabel(equipment.priority)}
                   </span>
@@ -184,7 +184,7 @@ export function EquipmentRegistryTable({
                         type="button"
                         aria-label="Действия по технике"
                         onClick={(event) => event.stopPropagation()}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-foreground/60 transition hover:bg-secondary hover:text-foreground"
                       >
                         <MoreVertical className="h-4 w-4" />
                       </button>

@@ -22,15 +22,15 @@ export function EquipmentStatusTabs({
             key={tab.key}
             type="button"
             onClick={() => onTabChange(tab.key)}
-            className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+            className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
               activeTab === tab.key
                 ? 'border-primary/35 bg-primary/12 text-foreground'
-                : 'border-border/60 bg-secondary/35 text-muted-foreground hover:border-border hover:bg-secondary/70 hover:text-foreground'
+                : 'border-border/70 bg-secondary/38 text-foreground/62 hover:border-border hover:bg-secondary/70 hover:text-foreground'
             }`}
           >
             {tab.label}
             <span className={`ml-2 rounded-full px-2 py-0.5 text-[11px] ${
-              activeTab === tab.key ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'
+              activeTab === tab.key ? 'bg-primary/15 text-primary' : 'bg-secondary/90 text-foreground/58'
             }`}>
               {count > 99 ? '99+' : count}
             </span>

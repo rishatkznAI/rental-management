@@ -73,7 +73,7 @@ export function EquipmentFilters({
   locationOptions,
   activeFleetLabels,
 }: EquipmentFiltersProps) {
-  const inlineSelectClass = 'app-filter-input h-9 min-w-[128px] rounded-lg text-xs';
+  const inlineSelectClass = 'app-filter-input h-9 min-w-[128px] rounded-lg text-xs font-medium text-foreground/82';
 
   return (
     <>
@@ -85,7 +85,7 @@ export function EquipmentFilters({
               placeholder="Модель, инв. №, SN, собственник, локация…"
               value={search}
               onChange={(event) => onSearchChange(event.target.value)}
-              className="app-filter-input h-9 rounded-lg pl-10 text-sm"
+              className="app-filter-input h-9 rounded-lg pl-10 text-sm font-medium text-foreground placeholder:text-foreground/42"
             />
           </div>
           <div className="hidden min-w-0 flex-nowrap items-center gap-2 xl:flex">
@@ -119,7 +119,7 @@ export function EquipmentFilters({
           </div>
           <div className="flex items-center justify-end gap-2">
             {activeFilterCount > 0 ? (
-              <button type="button" onClick={onReset} className="h-9 rounded-lg border border-border bg-secondary/55 px-3 text-xs font-semibold text-muted-foreground transition hover:bg-secondary hover:text-foreground">
+              <button type="button" onClick={onReset} className="h-9 rounded-lg border border-border/80 bg-secondary/60 px-3 text-xs font-semibold text-foreground/65 transition hover:bg-secondary hover:text-foreground">
                 Сбросить
               </button>
             ) : null}

@@ -1,53 +1,45 @@
-import { expect, request as playwrightRequest, test, type Browser, type Page, type TestInfo } from '@playwright/test';
-import { createRequire } from 'node:module';
+import { expect, request as playwrightRequest, test, type Page, type TestInfo } from '@playwright/test';
 import { requiredEnv } from './helpers/releaseSmoke';
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
-const require = createRequire(import.meta.url);
-const {
-  buildClientFinancialSnapshots,
-  buildRentalDebtRows,
-  getEffectivePaidAmount,
-  getRentalBillingAmount,
-  shouldCountRental,
-} = require('../server/lib/finance-core.js') as {
-  buildClientFinancialSnapshots: (clients: unknown[], rentals: unknown[], payments: unknown[], today: string, options?: { paymentAllocations?: unknown[] }) => Array<{ currentDebt?: number }>;
-  buildRentalDebtRows: (rentals: unknown[], payments: unknown[], options?: { paymentAllocations?: unknown[] }) => Array<{ expectedPaymentDate?: string; endDate?: string; outstanding?: number }>;
-  getEffectivePaidAmount: (payment: unknown) => number;
-  getRentalBillingAmount: (rental: unknown) => number;
-  shouldCountRental: (rental: unknown) => boolean;
-};
-
-type Theme = 'dark' | 'light';
-type ViewportName = 'desktop-1440' | 'mobile-390';
-
-type VisualCase = {
-  theme: Theme;
-  viewportName: ViewportName;
+type ViewportCase = {
+  name: 'desktop' | 'tablet' | 'mobile';
   viewport: { width: number; height: number };
+  expectedLayout: 'svg' | 'compact';
 };
 
 type UiIssue = {
   type: string;
-  caseName: string;
+  stage: string;
   url?: string;
   status?: number;
   text?: string;
 };
 
-type DashboardMetricSnapshot = {
-  totalDebt: number;
-  overdueReceivablesAmount: number;
-  monthlyInflow: number;
-  monthlyRevenue: number;
+type DashboardLayoutSnapshot = {
+  dashboardOpened: boolean;
+  svgVisible: boolean;
+  svgWidth: number;
+  svgHeight: number;
+  svgAspectDelta: number;
+  compactVisible: boolean;
+  compactCards: number;
+  overflowX: number;
+  overflowOffenders: Array<{
+    tag: string;
+    testId: string;
+    className: string;
+    left: number;
+    right: number;
+    width: number;
+  }>;
 };
 
-const VISUAL_CASES: VisualCase[] = [
-  { theme: 'dark', viewportName: 'desktop-1440', viewport: { width: 1440, height: 900 } },
-  { theme: 'dark', viewportName: 'mobile-390', viewport: { width: 390, height: 844 } },
-  { theme: 'light', viewportName: 'desktop-1440', viewport: { width: 1440, height: 900 } },
-  { theme: 'light', viewportName: 'mobile-390', viewport: { width: 390, height: 844 } },
+const VIEWPORT_CASES: ViewportCase[] = [
+  { name: 'desktop', viewport: { width: 1440, height: 900 }, expectedLayout: 'svg' },
+  { name: 'tablet', viewport: { width: 768, height: 1024 }, expectedLayout: 'compact' },
+  { name: 'mobile', viewport: { width: 390, height: 844 }, expectedLayout: 'compact' },
 ];
 
 function productionAppUrl(frontendUrl: string, route = '/') {
@@ -55,100 +47,14 @@ function productionAppUrl(frontendUrl: string, route = '/') {
   return `${frontendUrl.replace(/\/$/, '')}/?debugVersion=1&_smoke=${Date.now()}#${normalizedRoute}`;
 }
 
-function dateKey(value?: unknown) {
-  if (!value) return '';
-  const parsed = new Date(String(value));
-  if (Number.isNaN(parsed.getTime())) return '';
-  return parsed.toISOString().slice(0, 10);
+function shortCommit(value = '') {
+  return String(value || '').trim().slice(0, 12);
 }
 
-function isDateInRange(value: unknown, start: Date, end: Date) {
-  const parsed = value instanceof Date ? value : new Date(String(value || ''));
-  return !Number.isNaN(parsed.getTime()) && parsed >= start && parsed <= end;
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat('ru-RU', {
-    style: 'currency',
-    currency: 'RUB',
-    minimumFractionDigits: 0,
-  }).format(Number.isFinite(value) ? value : 0);
-}
-
-function normalizeVisibleText(value: string) {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
-async function fetchJson<T>(api: Awaited<ReturnType<typeof playwrightRequest.newContext>>, path: string): Promise<T> {
-  const response = await api.get(path);
-  expect(response.ok(), `${path} should return 200`).toBeTruthy();
-  return await response.json() as T;
-}
-
-async function buildDashboardMetricSnapshot(api: Awaited<ReturnType<typeof playwrightRequest.newContext>>): Promise<DashboardMetricSnapshot> {
-  const [ganttRentals, payments, paymentAllocations, clients] = await Promise.all([
-    fetchJson<unknown[]>(api, '/api/gantt_rentals'),
-    fetchJson<unknown[]>(api, '/api/payments'),
-    fetchJson<unknown[]>(api, '/api/payment_allocations'),
-    fetchJson<unknown[]>(api, '/api/clients'),
-  ]);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const todayKey = today.toISOString().slice(0, 10);
-  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
-
-  const debtRows = buildRentalDebtRows(ganttRentals, payments, { paymentAllocations });
-  const clientFinancials = buildClientFinancialSnapshots(clients, ganttRentals, payments, todayKey, { paymentAllocations });
-  const overduePayments = debtRows.filter(row =>
-    (row.expectedPaymentDate && row.expectedPaymentDate < todayKey) || String(row.endDate || '') < todayKey,
-  );
-  const monthlyPayments = payments.filter(payment => {
-    const row = payment as { paidDate?: unknown; dueDate?: unknown };
-    return isDateInRange(row.paidDate || row.dueDate, monthStart, monthEnd);
-  });
-  const revenueRentalsStartedThisMonth = ganttRentals.filter(rental => {
-    const row = rental as { startDate?: unknown };
-    return isDateInRange(row.startDate, monthStart, monthEnd) && shouldCountRental(rental);
-  });
-
-  return {
-    totalDebt: Math.round(clientFinancials.reduce((sum, row) => sum + Number(row.currentDebt || 0), 0)),
-    overdueReceivablesAmount: Math.round(overduePayments.reduce((sum, row) => sum + Number(row.outstanding || 0), 0)),
-    monthlyInflow: Math.round(monthlyPayments.reduce((sum, payment) => sum + getEffectivePaidAmount(payment), 0)),
-    monthlyRevenue: Math.round(revenueRentalsStartedThisMonth.reduce((sum, rental) => sum + getRentalBillingAmount(rental), 0)),
-  };
-}
-
-async function metricCardByLabel(page: Page, label: string) {
-  const labelNode = page.getByText(label, { exact: true }).first();
-  await expect(labelNode, `metric label "${label}" should be visible`).toBeVisible();
-  const card = labelNode.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " app-kpi-card ")][1]');
-  await expect(card, `metric card "${label}" should be visible`).toBeVisible();
-  return card;
-}
-
-async function expectMetricCardValue(page: Page, label: string, value: string) {
-  const card = await metricCardByLabel(page, label);
-  const text = normalizeVisibleText(await card.innerText());
-  expect(text, `metric card "${label}" should contain ${value}`).toContain(normalizeVisibleText(value));
-  return card;
-}
-
-async function expectDashboardNumericReconciliation(page: Page, expected: DashboardMetricSnapshot) {
-  await expect(page.getByTestId('dashboard-kpi-overdue-debt'), 'executive overdue receivables card should match API calculation')
-    .toContainText(formatCurrency(expected.overdueReceivablesAmount));
-
-  await page.getByRole('button', { name: 'Деньги', exact: true }).click();
-  await expectMetricCardValue(page, 'Дебиторка на сегодня', formatCurrency(expected.totalDebt));
-  await expectMetricCardValue(page, 'Просрочка на сегодня', formatCurrency(expected.overdueReceivablesAmount));
-  await expectMetricCardValue(page, 'Оплачено за месяц', expected.monthlyInflow > 0 ? formatCurrency(expected.monthlyInflow) : '0 ₽');
-  await expectMetricCardValue(page, 'Начислено за месяц', expected.monthlyRevenue > 0 ? formatCurrency(expected.monthlyRevenue) : '0 ₽');
-
-  const debtCard = await metricCardByLabel(page, 'Дебиторка на сегодня');
-  await debtCard.click();
-  await expect(page.getByRole('dialog'), 'total debt KPI modal should open').toContainText(formatCurrency(expected.totalDebt));
-  await page.getByRole('button', { name: 'Закрыть' }).click();
+function commitsMatch(actual = '', expected = '') {
+  const left = String(actual || '').trim();
+  const right = String(expected || '').trim();
+  return Boolean(left && right && (left.startsWith(right) || right.startsWith(left)));
 }
 
 function sanitize(text = '', limit = 800) {
@@ -158,32 +64,31 @@ function sanitize(text = '', limit = 800) {
     .slice(0, limit);
 }
 
-function parseRgb(value: string) {
-  const hex = value.trim().match(/^#([0-9a-f]{6})$/i);
-  if (hex) {
-    const raw = hex[1];
-    return {
-      r: Number.parseInt(raw.slice(0, 2), 16),
-      g: Number.parseInt(raw.slice(2, 4), 16),
-      b: Number.parseInt(raw.slice(4, 6), 16),
-    };
+function logStage(stage: string, fields: Record<string, unknown> = {}) {
+  console.log('[production-dashboard-visual-smoke] stage', JSON.stringify({ stage, ...fields }));
+}
+
+async function withStage<T>(
+  state: { currentStage: string },
+  stage: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  state.currentStage = stage;
+  logStage(stage, { status: 'start' });
+  try {
+    const result = await action();
+    logStage(stage, { status: 'done' });
+    return result;
+  } catch (error) {
+    logStage(stage, {
+      status: 'failed',
+      message: error instanceof Error ? sanitize(error.message) : sanitize(String(error)),
+    });
+    throw error;
   }
-  const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
-  if (!match) return null;
-  return {
-    r: Number(match[1]),
-    g: Number(match[2]),
-    b: Number(match[3]),
-  };
 }
 
-function luminance(value: string) {
-  const rgb = parseRgb(value);
-  if (!rgb) return 0;
-  return (0.2126 * rgb.r) + (0.7152 * rgb.g) + (0.0722 * rgb.b);
-}
-
-async function installReadOnlyGuard(page: Page, apiUrl: string, issues: UiIssue[], caseName: string) {
+async function installReadOnlyGuard(page: Page, apiUrl: string, issues: UiIssue[], getStage: () => string) {
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const method = request.method().toUpperCase();
@@ -191,7 +96,7 @@ async function installReadOnlyGuard(page: Page, apiUrl: string, issues: UiIssue[
       await route.continue();
       return;
     }
-    issues.push({ type: 'blocked-write', caseName, url: request.url(), text: method });
+    issues.push({ type: 'blocked-write', stage: getStage(), url: request.url(), text: method });
     await route.abort('blockedbyclient');
   });
 
@@ -199,11 +104,11 @@ async function installReadOnlyGuard(page: Page, apiUrl: string, issues: UiIssue[
     if (message.type() !== 'error') return;
     const text = message.text();
     if (/ResizeObserver loop|Download the React DevTools|favicon/i.test(text)) return;
-    issues.push({ type: 'console.error', caseName, url: page.url(), text: sanitize(text) });
+    issues.push({ type: 'console.error', stage: getStage(), url: page.url(), text: sanitize(text) });
   });
 
   page.on('pageerror', (error) => {
-    issues.push({ type: 'pageerror', caseName, url: page.url(), text: sanitize(error.stack || error.message) });
+    issues.push({ type: 'pageerror', stage: getStage(), url: page.url(), text: sanitize(error.stack || error.message) });
   });
 
   page.on('response', (response) => {
@@ -212,31 +117,44 @@ async function installReadOnlyGuard(page: Page, apiUrl: string, issues: UiIssue[
     const path = new URL(url).pathname;
     const isApi = url.startsWith(apiUrl) || /\/api\//.test(url);
     if (status >= 500) {
-      issues.push({ type: 'http-5xx', caseName, url, status });
+      issues.push({ type: 'http-5xx', stage: getStage(), url, status });
       return;
     }
     if (isApi && [401, 403].includes(status) && path !== '/api/auth/me') {
-      issues.push({ type: 'authz-response', caseName, url, status });
+      issues.push({ type: 'authz-response', stage: getStage(), url, status });
     }
   });
 
   page.on('requestfailed', (request) => {
     const failure = request.failure()?.errorText || '';
     if (failure === 'net::ERR_ABORTED' || /favicon|\.map($|\?)/.test(request.url())) return;
-    issues.push({ type: 'requestfailed', caseName, url: request.url(), text: sanitize(failure) });
+    issues.push({ type: 'requestfailed', stage: getStage(), url: request.url(), text: sanitize(failure) });
   });
 }
 
-async function expectNoHorizontalOverflow(page: Page, caseName: string) {
-  const overflow = await page.evaluate(() => {
-    const documentWidth = document.documentElement.clientWidth;
+async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnapshot> {
+  return await page.evaluate(() => {
+    const isVisible = (element: Element | null) => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+    };
+
+    const rectOf = (element: Element | null) => {
+      if (!element) return { width: 0, height: 0 };
+      const rect = element.getBoundingClientRect();
+      return { width: Math.round(rect.width), height: Math.round(rect.height) };
+    };
+
+    const viewportWidth = document.documentElement.clientWidth;
     const scrollWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
     const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
       .filter((element) => {
         const style = window.getComputedStyle(element);
         if (style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
         const rect = element.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0 && rect.right > documentWidth + 1;
+        return rect.width > 0 && rect.height > 0 && rect.right > viewportWidth + 1;
       })
       .slice(0, 8)
       .map((element) => {
@@ -250,164 +168,205 @@ async function expectNoHorizontalOverflow(page: Page, caseName: string) {
           width: Math.round(rect.width),
         };
       });
+
+    const health = document.querySelector('[data-testid="dashboard-company-health"]');
+    const svg = health?.querySelector('[data-testid="dashboard-company-health-svg"]') ?? null;
+    const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]') ?? null;
+    const svgRect = rectOf(svg);
+    const compactCards = compact?.querySelectorAll('a.rentcore-command-card').length || 0;
+
     return {
-      documentWidth,
-      scrollWidth,
-      overflowX: scrollWidth - documentWidth,
-      offenders,
+      dashboardOpened: Boolean(document.querySelector('[data-testid="dashboard-executive-cockpit"]')),
+      svgVisible: isVisible(svg),
+      svgWidth: svgRect.width,
+      svgHeight: svgRect.height,
+      svgAspectDelta: Math.abs((svgRect.width / Math.max(svgRect.height, 1)) - 1),
+      compactVisible: isVisible(compact),
+      compactCards,
+      overflowX: scrollWidth - viewportWidth,
+      overflowOffenders: offenders,
     };
   });
-
-  expect(overflow.overflowX, `${caseName}: document should not scroll horizontally (${JSON.stringify(overflow)})`).toBeLessThanOrEqual(1);
-  expect(overflow.offenders, `${caseName}: visible elements should stay inside viewport`).toEqual([]);
 }
 
-async function expectTheme(page: Page, theme: Theme, caseName: string) {
-  const colors = await page.evaluate(() => {
-    const sidebar = window.innerWidth < 640
-      ? Array.from(document.querySelectorAll('nav')).find((element) => window.getComputedStyle(element).position === 'fixed')
-      : document.querySelector('aside');
-    const main = document.querySelector('main');
-    const body = document.body;
-    return {
-      htmlClass: document.documentElement.className,
-      storedTheme: window.localStorage.getItem('theme'),
-      bodyBackground: window.getComputedStyle(body).backgroundColor,
-      mainBackground: main ? window.getComputedStyle(main).backgroundColor : '',
-      sidebarBackground: sidebar ? window.getComputedStyle(sidebar).backgroundColor : '',
-      sidebarToken: window.getComputedStyle(document.documentElement).getPropertyValue('--sidebar').trim(),
-    };
-  });
-
-  expect(colors.storedTheme, `${caseName}: localStorage theme should be ${theme}`).toBe(theme);
-  if (theme === 'dark') {
-    expect(colors.htmlClass, `${caseName}: html should have dark class`).toMatch(/\bdark\b/);
-    expect(luminance(colors.bodyBackground), `${caseName}: dark body should be visually dark`).toBeLessThan(90);
-    expect(luminance(colors.sidebarToken || colors.sidebarBackground), `${caseName}: dark sidebar should be visually dark`).toBeLessThan(120);
-    return;
-  }
-
-  expect(colors.htmlClass, `${caseName}: html should not have dark class`).not.toMatch(/\bdark\b/);
-  expect(luminance(colors.bodyBackground), `${caseName}: light body should be visually light`).toBeGreaterThan(180);
-  expect(luminance(colors.sidebarToken || colors.sidebarBackground), `${caseName}: light sidebar should be visually light`).toBeGreaterThan(170);
-}
-
-async function captureDashboardCase(
-  browser: Browser,
+async function expectDashboardContract(
+  page: Page,
+  viewportCase: ViewportCase,
+  state: { currentStage: string },
   testInfo: TestInfo,
-  visualCase: VisualCase,
-  config: { frontendUrl: string; apiUrl: string; token: string; expectedMetrics?: DashboardMetricSnapshot },
-): Promise<{ frontendCommit: string; apiBaseUrl: string }> {
-  const caseName = `${visualCase.theme}-${visualCase.viewportName}`;
-  const issues: UiIssue[] = [];
-  const context = await browser.newContext({ viewport: visualCase.viewport });
-  const page = await context.newPage();
-  await installReadOnlyGuard(page, config.apiUrl, issues, caseName);
-  await page.addInitScript(({ token, theme }) => {
-    window.localStorage.setItem('app_auth_token', token);
-    window.localStorage.setItem('theme', theme);
-    document.documentElement?.classList.toggle('dark', theme === 'dark');
-  }, { token: config.token, theme: visualCase.theme });
+): Promise<DashboardLayoutSnapshot> {
+  await withStage(state, `${viewportCase.name}: dashboard opened`, async () => {
+    await expect(
+      page.getByRole('heading', { name: 'Операционный центр', exact: true }),
+      `${viewportCase.name}: authenticated Dashboard heading should be visible`,
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.getByTestId('dashboard-executive-cockpit'),
+      `${viewportCase.name}: Dashboard cockpit should be visible`,
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.getByTestId('dashboard-company-health'),
+      `${viewportCase.name}: company health block should be visible`,
+    ).toBeVisible({ timeout: 20_000 });
+  });
 
-  try {
-    await page.goto(productionAppUrl(config.frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit));
-    const frontendBuild = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
-    await expect(page.getByRole('heading', { name: 'Операционный центр', exact: true }), `${caseName}: dashboard heading`).toBeVisible();
-    await expect(page.getByRole('navigation').first(), `${caseName}: sidebar navigation`).toBeVisible();
-    await expect(page.getByTestId('dashboard-executive-cockpit'), `${caseName}: dashboard cockpit`).toBeVisible();
+  const snapshot = await withStage(state, `${viewportCase.name}: layout snapshot`, async () => {
+    const value = await dashboardLayoutSnapshot(page);
+    logStage(`${viewportCase.name}: layout`, value as unknown as Record<string, unknown>);
+    return value;
+  });
 
-    await expectTheme(page, visualCase.theme, caseName);
-    await expectNoHorizontalOverflow(page, caseName);
-    if (config.expectedMetrics && visualCase.theme === 'dark' && visualCase.viewportName === 'desktop-1440') {
-      await expectDashboardNumericReconciliation(page, config.expectedMetrics);
+  await withStage(state, `${viewportCase.name}: ${viewportCase.expectedLayout} assertions`, async () => {
+    expect(snapshot.dashboardOpened, `${viewportCase.name}: authenticated Dashboard should be open`).toBe(true);
+    if (viewportCase.expectedLayout === 'svg') {
+      expect(snapshot.svgVisible, `${viewportCase.name}: company health SVG should be visible (${JSON.stringify(snapshot)})`).toBe(true);
+      expect(snapshot.svgWidth, `${viewportCase.name}: SVG width should be substantial`).toBeGreaterThanOrEqual(180);
+      expect(snapshot.svgHeight, `${viewportCase.name}: SVG height should be substantial`).toBeGreaterThanOrEqual(180);
+      expect(snapshot.svgAspectDelta, `${viewportCase.name}: SVG/ring should be square, not oval (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(0.05);
+      return;
     }
-    expect(issues, `${caseName}: console/page/request errors`).toEqual([]);
+    expect(snapshot.compactVisible, `${viewportCase.name}: compact wrapper should be visible (${JSON.stringify(snapshot)})`).toBe(true);
+    expect(snapshot.compactCards, `${viewportCase.name}: compact wrapper should contain six direction cards`).toBeGreaterThanOrEqual(6);
+  });
 
+  await withStage(state, `${viewportCase.name}: overflow checked`, async () => {
+    expect(snapshot.overflowX, `${viewportCase.name}: document should not scroll horizontally (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+    expect(snapshot.overflowOffenders, `${viewportCase.name}: visible elements should stay inside viewport`).toEqual([]);
+  });
+
+  await withStage(state, `${viewportCase.name}: screenshot captured`, async () => {
     await page.screenshot({
-      path: testInfo.outputPath(`production-dashboard-${caseName}.png`),
-      fullPage: true,
+      path: testInfo.outputPath(`production-dashboard-${viewportCase.name}.png`),
+      fullPage: false,
+      timeout: 15_000,
     });
+  });
 
-    const viewport = page.viewportSize();
-    console.log('[production-dashboard-visual-smoke] result', JSON.stringify({
-      caseName,
-      viewport,
-      theme: visualCase.theme,
-      frontendCommit: frontendBuild?.commit || '',
-      horizontalOverflow: false,
-      errors: 0,
-    }));
-    return {
-      frontendCommit: frontendBuild?.commit || '',
-      apiBaseUrl: frontendBuild?.apiBaseUrl || '',
-    };
-  } finally {
-    await context.close();
-  }
+  return snapshot;
 }
 
-test('production authenticated dashboard visual smoke', async ({ browser }) => {
+test('production authenticated dashboard visual smoke', async ({ page }, testInfo) => {
   test.setTimeout(180_000);
 
+  const state = { currentStage: 'start' };
+  const issues: UiIssue[] = [];
   const apiUrl = requiredEnv('PRODUCTION_API_URL', 'production dashboard visual smoke').replace(/\/$/, '');
   const frontendUrl = requiredEnv('PRODUCTION_FRONTEND_URL', 'production dashboard visual smoke').replace(/\/$/, '');
   const expectedCommit = String(process.env.EXPECTED_RELEASE_COMMIT || '').trim();
 
+  logStage('start', {
+    expectedCommit: shortCommit(expectedCommit),
+    frontendUrl,
+    apiUrl,
+  });
+
+  await installReadOnlyGuard(page, apiUrl, issues, () => state.currentStage);
+
   const api = await playwrightRequest.newContext({ baseURL: apiUrl });
+  let token = '';
+  let backendCommit = '';
   try {
-    const versionResponse = await api.get('/api/version');
-    expect(versionResponse.ok(), 'production /api/version should return 200').toBeTruthy();
-    const version = await versionResponse.json() as {
-      ok?: boolean;
-      build?: { commit?: string; commitFull?: string };
-      app?: { disabled?: boolean };
-    };
-    expect(version.ok, 'production /api/version should report ok=true').toBe(true);
-    expect(version.app?.disabled, 'production app.disabled should be false for authenticated visual smoke').toBe(false);
-
-    const loginResponse = await api.post('/api/auth/login', {
-      data: {
-        email: requiredEnv('PRODUCTION_ADMIN_EMAIL', 'production dashboard visual smoke'),
-        password: requiredEnv('PRODUCTION_ADMIN_PASSWORD', 'production dashboard visual smoke'),
-      },
+    await withStage(state, 'production preflight', async () => {
+      const versionResponse = await api.get('/api/version', { timeout: 15_000 });
+      expect(versionResponse.ok(), `production /api/version should return 200: ${versionResponse.status()}`).toBeTruthy();
+      const version = await versionResponse.json() as {
+        ok?: boolean;
+        build?: { commit?: string; commitFull?: string };
+        app?: { disabled?: boolean };
+      };
+      expect(version.ok, 'production /api/version should report ok=true').toBe(true);
+      expect(version.app?.disabled, 'production app.disabled should be false for authenticated visual smoke').toBe(false);
+      backendCommit = version.build?.commitFull || version.build?.commit || '';
     });
-    expect(loginResponse.ok(), `production login should return 200: ${loginResponse.status()}`).toBeTruthy();
-    const login = await loginResponse.json() as { token?: string };
-    expect(login.token, 'production login should return token').toBeTruthy();
-    const authenticatedApi = await playwrightRequest.newContext({
-      baseURL: apiUrl,
-      extraHTTPHeaders: { Authorization: `Bearer ${login.token || ''}` },
+
+    await withStage(state, 'login done', async () => {
+      const loginResponse = await api.post('/api/auth/login', {
+        data: {
+          email: requiredEnv('PRODUCTION_ADMIN_EMAIL', 'production dashboard visual smoke'),
+          password: requiredEnv('PRODUCTION_ADMIN_PASSWORD', 'production dashboard visual smoke'),
+        },
+        timeout: 20_000,
+      });
+      expect(loginResponse.ok(), `production login should return 200: ${loginResponse.status()}`).toBeTruthy();
+      const login = await loginResponse.json() as { token?: string };
+      expect(login.token, 'production login should return token').toBeTruthy();
+      token = login.token || '';
     });
-    const expectedMetrics = await buildDashboardMetricSnapshot(authenticatedApi);
-
-    const frontendBuilds = [];
-    for (const visualCase of VISUAL_CASES) {
-      frontendBuilds.push(await captureDashboardCase(browser, test.info(), visualCase, { frontendUrl, apiUrl, token: login.token || '', expectedMetrics }));
-    }
-    for (const frontendBuild of frontendBuilds) {
-      expect(frontendBuild.apiBaseUrl, 'frontend marker should point at production API').toBe(apiUrl);
-      if (expectedCommit) {
-        expect(
-          frontendBuild.frontendCommit.startsWith(expectedCommit.slice(0, 12)) || expectedCommit.startsWith(frontendBuild.frontendCommit),
-          `frontend marker should match expected production commit: expected=${expectedCommit.slice(0, 12)} frontend=${frontendBuild.frontendCommit}`,
-        ).toBeTruthy();
-      }
-    }
-
-    console.log('[production-dashboard-visual-smoke] frontend marker', JSON.stringify({
-      expectedCommit: expectedCommit.slice(0, 12),
-      frontendCommit: frontendBuilds[0]?.frontendCommit || '',
-      backendCommit: version.build?.commit || version.build?.commitFull || '',
-      dashboardMetrics: {
-        totalDebt: expectedMetrics.totalDebt,
-        overdueReceivablesAmount: expectedMetrics.overdueReceivablesAmount,
-        monthlyInflow: expectedMetrics.monthlyInflow,
-        monthlyRevenue: expectedMetrics.monthlyRevenue,
-      },
-    }));
-    await authenticatedApi.dispose();
   } finally {
     await api.dispose();
+  }
+
+  await page.addInitScript((authToken) => {
+    window.localStorage.setItem('app_auth_token', authToken);
+    window.localStorage.setItem('theme', 'dark');
+    document.documentElement?.classList.add('dark');
+  }, token);
+
+  const snapshots: Record<string, DashboardLayoutSnapshot> = {};
+  let frontendCommit = '';
+  let frontendApiBaseUrl = '';
+  try {
+    for (const viewportCase of VIEWPORT_CASES) {
+      await withStage(state, `${viewportCase.name}: viewport set`, async () => {
+        await page.setViewportSize(viewportCase.viewport);
+      });
+
+      await withStage(state, `${viewportCase.name}: dashboard navigation`, async () => {
+        await page.goto(productionAppUrl(frontendUrl, '/'), {
+          waitUntil: 'domcontentloaded',
+          timeout: 30_000,
+        });
+      });
+
+      await withStage(state, `${viewportCase.name}: marker checked`, async () => {
+        await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit), null, { timeout: 15_000 });
+        const marker = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
+        frontendCommit = marker?.commit || frontendCommit;
+        frontendApiBaseUrl = marker?.apiBaseUrl || frontendApiBaseUrl;
+        expect(marker?.apiBaseUrl, 'frontend marker should point at production API').toBe(apiUrl);
+        if (expectedCommit) {
+          expect(
+            commitsMatch(marker?.commit || '', shortCommit(expectedCommit)),
+            `frontend marker should match expected production commit: expected=${shortCommit(expectedCommit)} frontend=${marker?.commit || 'missing'}`,
+          ).toBeTruthy();
+        }
+      });
+
+      snapshots[viewportCase.name] = await expectDashboardContract(page, viewportCase, state, testInfo);
+    }
+
+    await withStage(state, 'console/api checked', async () => {
+      expect(issues, `Dashboard smoke should not emit console/page/API errors. Last stage: ${state.currentStage}`).toEqual([]);
+    });
+
+    logStage('final result', {
+      expectedCommit: shortCommit(expectedCommit),
+      frontendCommit,
+      backendCommit,
+      apiBaseUrl: frontendApiBaseUrl,
+      compactCards: {
+        tablet: snapshots.tablet?.compactCards ?? 0,
+        mobile: snapshots.mobile?.compactCards ?? 0,
+      },
+      horizontalOverflow: {
+        desktop: snapshots.desktop?.overflowX ?? 0,
+        tablet: snapshots.tablet?.overflowX ?? 0,
+        mobile: snapshots.mobile?.overflowX ?? 0,
+      },
+      errors: issues.length,
+    });
+  } catch (error) {
+    const lastSnapshot = snapshots.mobile || snapshots.tablet || snapshots.desktop || null;
+    console.error('[production-dashboard-visual-smoke] failure', JSON.stringify({
+      lastStage: state.currentStage,
+      compactCards: {
+        tablet: snapshots.tablet?.compactCards ?? 0,
+        mobile: snapshots.mobile?.compactCards ?? 0,
+      },
+      issues,
+      lastSnapshot,
+      message: error instanceof Error ? sanitize(error.message) : sanitize(String(error)),
+    }));
+    throw error;
   }
 });

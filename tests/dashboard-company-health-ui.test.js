@@ -20,7 +20,7 @@ test('dashboard company health renders a responsive SVG built from ResizeObserve
   assert.match(block, /new ResizeObserver/);
   assert.match(block, /containerRef/);
   assert.match(block, /role="region"/);
-  assert.match(block, /aria-label=\{`Здоровье компании \$\{progress\} из 100: \$\{label\}`\}/);
+  assert.match(block, /aria-label=\{hasScore \? `Здоровье компании \$\{progress\} из 100: \$\{label\}` : `Здоровье компании: \$\{label\}`\}/);
   assert.match(block, /data-testid="dashboard-company-health"/);
   assert.match(block, /data-size-source="ResizeObserver"/);
   assert.match(block, /<svg[\s\S]*data-testid="dashboard-company-health-svg"/);

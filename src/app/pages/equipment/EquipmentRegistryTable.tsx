@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { Boxes, MoreVertical } from 'lucide-react';
+import { Boxes, Check, MoreVertical } from 'lucide-react';
 import { AuthenticatedImage } from '../../components/ui/AuthenticatedImage';
 import { normalizePhotoReference, photoSource } from '../../lib/media';
 import type { Equipment as EquipmentEntity } from '../../types';
@@ -44,11 +44,12 @@ export function EquipmentRegistryTable({
   getEquipmentGsmDisplay,
 }: EquipmentRegistryTableProps) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[1320px] table-fixed text-left text-sm">
-        <thead className="border-b border-border bg-secondary/70 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+    <div className="app-scroll-fade-x overflow-x-auto">
+      <table className="w-full min-w-[1480px] table-fixed border-separate border-spacing-0 text-left text-sm text-foreground">
+        <thead className="sticky top-0 z-10 border-b border-border/90 bg-card/96 text-[10px] uppercase tracking-[0.14em] text-foreground/60 backdrop-blur">
           <tr>
-            <th className="w-[86px] px-4 py-3 font-medium">Фото</th>
+            <th className="w-[52px] px-4 py-3 font-medium">Выбор</th>
+            <th className="w-[82px] px-3 py-3 font-medium">Фото</th>
             <th className="w-[150px] px-3 py-3 font-medium">Инв. номер</th>
             <th className="w-[210px] px-3 py-3 font-medium">Модель</th>
             <th className="w-[170px] px-3 py-3 font-medium">Тип / Привод</th>
@@ -56,12 +57,13 @@ export function EquipmentRegistryTable({
             <th className="w-[125px] px-3 py-3 font-medium">Категория</th>
             <th className="w-[145px] px-3 py-3 font-medium">Собственник</th>
             <th className="w-[150px] px-3 py-3 font-medium">Локация</th>
-            <th className="w-[120px] px-3 py-3 font-medium">Приоритет</th>
+            <th className="w-[170px] px-3 py-3 font-medium">Клиент / объект</th>
             <th className="w-[120px] px-3 py-3 font-medium">GSM</th>
+            <th className="w-[120px] px-3 py-3 font-medium">Приоритет</th>
             <th className="w-[58px] px-3 py-3 font-medium">Действия</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-border/80">
+        <tbody>
           {equipmentItems.map((equipment) => {
             const detailPath = getEquipmentDetailPath(equipment);
             const imageSrc = photoSource(equipment.photo);
@@ -74,12 +76,29 @@ export function EquipmentRegistryTable({
             return (
               <tr
                 key={equipment.id}
-                className={`cursor-pointer align-top transition-colors hover:bg-secondary/50 ${
-                  selectedEquipmentId === equipment.id ? 'bg-primary/5' : ''
+                className={`cursor-pointer align-top transition-colors ${
+                  selectedEquipmentId === equipment.id ? 'bg-primary/7 shadow-[inset_3px_0_0_var(--primary)]' : 'bg-card/20 hover:bg-secondary/42'
                 }`}
                 onClick={() => onSelectEquipment(equipment)}
               >
-                <td className="px-4 py-3">
+                <td className="border-b border-border/75 px-4 py-3">
+                  <button
+                    type="button"
+                    aria-label={selectedEquipmentId === equipment.id ? 'Техника выбрана' : 'Выбрать технику'}
+                    className={`flex h-5 w-5 items-center justify-center rounded border transition ${
+                      selectedEquipmentId === equipment.id
+                        ? 'border-primary/80 bg-primary/90 text-primary-foreground'
+                        : 'border-border/90 bg-secondary/45 text-transparent hover:border-primary/55 hover:bg-secondary/70'
+                    }`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelectEquipment(equipment);
+                    }}
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </button>
+                </td>
+                <td className="border-b border-border/75 px-3 py-3">
                   {imageSrc ? (
                     <AuthenticatedImage
                       photo={normalizePhotoReference(equipment.photo, { idPrefix: `${equipment.id}-registry` })}
@@ -89,13 +108,13 @@ export function EquipmentRegistryTable({
                       fallbackClassName="h-12 min-h-0 w-16"
                     />
                   ) : (
-                    <div className="flex h-12 w-16 items-center justify-center rounded-lg border border-dashed border-border bg-secondary/70 text-muted-foreground" title="Нет фото">
+                    <div className="flex h-12 w-16 items-center justify-center rounded-lg border border-border/75 bg-[linear-gradient(135deg,rgba(255,255,255,0.055),rgba(255,255,255,0.018))] text-foreground/42 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]" title="Нет фото">
                       <Boxes className="h-4 w-4" />
                       <span className="sr-only">Нет фото</span>
                     </div>
                   )}
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <Link
                     to={detailPath}
                     onClick={(event) => event.stopPropagation()}
@@ -104,60 +123,68 @@ export function EquipmentRegistryTable({
                   >
                     {equipment.inventoryNumber || '—'}
                   </Link>
-                  <div className="mt-1 truncate text-xs text-muted-foreground">
+                  <div className="mt-1 truncate text-xs text-foreground/58">
                     SN {equipment.serialNumber || 'не указан'}
                   </div>
                 </td>
-                <td className="px-3 py-3">
-                  <Link to={detailPath} onClick={(event) => event.stopPropagation()} className="block truncate font-semibold text-foreground hover:text-primary">
+                <td className="border-b border-border/75 px-3 py-3">
+                  <Link to={detailPath} onClick={(event) => event.stopPropagation()} className="block truncate font-semibold text-foreground hover:text-primary" title={title}>
                     {title}
                   </Link>
                   {equipment.year ? (
-                    <div className="mt-1 text-xs text-muted-foreground">Год выпуска: {equipment.year}</div>
+                    <div className="mt-1 text-xs text-foreground/58">Год выпуска: {equipment.year}</div>
                   ) : null}
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <div className="truncate text-foreground">{equipmentTypeLabel}</div>
-                  <div className="mt-1 truncate text-xs text-muted-foreground">{driveLabel}</div>
+                  <div className="mt-1 truncate text-xs text-foreground/58">{driveLabel}</div>
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <span className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-medium ${getRegistryStatusAppearance(equipment, activeRentalIndex)}`}>
                     <span className="truncate">{getRegistryStatusLabel(equipment, activeRentalIndex)}</span>
                   </span>
                 </td>
-                <td className="px-3 py-3">
-                  <span className="inline-flex max-w-full rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                <td className="border-b border-border/75 px-3 py-3">
+                  <span className="inline-flex max-w-full rounded-full border border-border/70 bg-secondary/75 px-2.5 py-1 text-xs font-medium text-foreground/68">
                     <span className="truncate">{getEquipmentCategoryLabel(equipment.category)}</span>
                   </span>
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <div className="truncate text-foreground" title={ownerLabel}>{ownerLabel}</div>
                 </td>
-                <td className="px-3 py-3">
-                  <div className="truncate text-muted-foreground" title={equipment.location || '—'}>
+                <td className="border-b border-border/75 px-3 py-3">
+                  <div className="truncate text-foreground/68" title={equipment.location || '—'}>
                     {equipment.location || '—'}
                   </div>
                 </td>
-                <td className="px-3 py-3">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-foreground">
-                    <span className={`h-2 w-2 rounded-full ${getPriorityDotClass(equipment.priority)}`} />
-                    {getPriorityLabel(equipment.priority)}
-                  </span>
+                <td className="border-b border-border/75 px-3 py-3">
+                  <div className="truncate text-foreground" title={equipment.currentClient || '—'}>
+                    {equipment.currentClient || '—'}
+                  </div>
+                  {equipment.returnDate ? (
+                    <div className="mt-1 truncate text-xs text-foreground/58">Возврат: {equipment.returnDate}</div>
+                  ) : null}
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <span className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ${gsmDisplay.className}`}>
                     <span className={`h-2 w-2 rounded-full ${gsmDisplay.dotClassName}`} />
                     {gsmDisplay.label}
                   </span>
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-secondary/75 px-2.5 py-1 text-xs font-medium text-foreground">
+                    <span className={`h-2 w-2 rounded-full ${getPriorityDotClass(equipment.priority)}`} />
+                    {getPriorityLabel(equipment.priority)}
+                  </span>
+                </td>
+                <td className="border-b border-border/75 px-3 py-3">
                   <DropdownMenu.Root>
                     <DropdownMenu.Trigger asChild>
                       <button
                         type="button"
                         aria-label="Действия по технике"
                         onClick={(event) => event.stopPropagation()}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-foreground/60 transition hover:bg-secondary hover:text-foreground"
                       >
                         <MoreVertical className="h-4 w-4" />
                       </button>

@@ -12,7 +12,7 @@ export type ActiveRentalIndex = {
 
 export type EquipmentTypeOptions = Array<{ value: string; label: string }>;
 
-export type EquipmentPreviewTab = 'overview' | 'specs' | 'documents' | 'photos' | 'history';
+export type EquipmentPreviewTab = 'overview' | 'specs' | 'documents' | 'history' | 'gsm';
 
 export type EquipmentPreviewQuickAction = {
   id: string;

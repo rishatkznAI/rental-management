@@ -46,8 +46,8 @@ export const EQUIPMENT_PREVIEW_TABS: Array<{ key: EquipmentPreviewTab; label: st
   { key: 'overview', label: 'Обзор' },
   { key: 'specs', label: 'Характеристики' },
   { key: 'documents', label: 'Документы' },
-  { key: 'photos', label: 'Фото' },
   { key: 'history', label: 'История' },
+  { key: 'gsm', label: 'GSM' },
 ];
 
 export const EQUIPMENT_STATUS_BADGE_STYLES: Record<EquipmentRegistryStatusKind, { label: string; className: string }> = {

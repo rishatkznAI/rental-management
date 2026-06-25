@@ -86,6 +86,7 @@ import { calculateRentalBilling, getRentalBillingAmount } from '../lib/rentalDow
 import { buildDashboardAttentionSummary } from '../lib/dashboardAttention.js';
 import { buildDocumentControl, isUnsignedDocument } from '../lib/documentControl.js';
 import { buildDebtCollectionDashboardSummary } from '../lib/debtCollectionPlans.js';
+import { alertHasValidSource, buildCompanyHealthModel } from '../lib/dashboardCompanyHealth.js';
 import { taskPrioritySummaryLabel } from '../lib/tasksCenter.js';
 import { tasksCenterService } from '../services/tasks-center.service';
 import {
@@ -1211,6 +1212,7 @@ type CompanyHealthDirection = {
   icon: React.ElementType;
   tone: DashboardTone;
   href: string;
+  stateLabel?: string;
   metrics: Array<{ label: string; value: string }>;
 };
 
@@ -1262,6 +1264,7 @@ function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) 
         <span className="rentcore-command-card-status" aria-hidden="true" />
         <span className="rentcore-command-card-copy min-w-0 flex-1">
           <span className="rentcore-command-card-title block truncate text-[11px] font-extrabold uppercase tracking-[0.06em] text-lime-200">{item.title}</span>
+          {item.stateLabel ? <span className={`block truncate text-[9px] font-bold uppercase tracking-normal ${tone.accent}`}>{item.stateLabel}</span> : null}
         </span>
         <span className={`rentcore-command-card-compact-value hidden shrink-0 text-sm font-extrabold ${tone.accent}`}>
           {item.metrics[0]?.value ?? ''}
@@ -1288,15 +1291,19 @@ function CompanyHealthCommandCenter({
   label,
   tone,
   criticalSignals,
+  subtitle,
+  warning,
 }: {
   leftDirections: CompanyHealthDirection[];
   rightDirections: CompanyHealthDirection[];
   allDirections: CompanyHealthDirection[];
   bars: CompanyHealthBar[];
-  score: number;
+  score: number | null;
   label: string;
   tone: DashboardTone;
   criticalSignals: number;
+  subtitle: string;
+  warning?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -1326,7 +1333,8 @@ function CompanyHealthCommandCenter({
   const ringRadius = svgSize * 0.37;
   const segmentStrokeWidth = Math.max(8, Math.min(12, svgSize * 0.038));
   const dotRadius = Math.max(3.5, svgSize * 0.016);
-  const progress = clampPercent(score);
+  const hasScore = typeof score === 'number';
+  const progress = hasScore ? clampPercent(score) : 0;
   const segmentAngle = 360 / Math.max(allDirections.length, 1);
   const segmentGap = Math.min(8, segmentAngle * 0.18);
   const segments = allDirections.map((item, index) => {
@@ -1349,7 +1357,7 @@ function CompanyHealthCommandCenter({
       className="rentcore-command-map relative grid flex-1 gap-2.5 xl:mx-auto xl:w-full xl:items-center xl:justify-center"
       style={{ '--rc-orb-size': `${svgSize}px` } as React.CSSProperties}
       role="region"
-      aria-label={`Здоровье компании ${progress} из 100: ${label}`}
+      aria-label={hasScore ? `Здоровье компании ${progress} из 100: ${label}` : `Здоровье компании: ${label}`}
       data-testid="dashboard-company-health"
       data-company-health-layout={isCompact ? 'compact' : 'svg'}
       data-card-density={cardDensity}
@@ -1362,7 +1370,11 @@ function CompanyHealthCommandCenter({
               <CardTitle className="app-shell-title text-xl font-extrabold" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
               <p className={`text-sm font-extrabold uppercase ${toneStyles[tone].accent}`}>{label}</p>
             </div>
-            <p className="mt-1 text-3xl font-extrabold leading-none text-white">{progress}<span className="text-sm text-slate-500">/100</span></p>
+            <p className="mt-1 text-3xl font-extrabold leading-none text-white">
+              {hasScore ? <>{progress}<span className="text-sm text-slate-500">/100</span></> : 'Нет данных'}
+            </p>
+            <p className="mt-1 text-xs font-semibold text-slate-400">{subtitle}</p>
+            {warning ? <p className="mt-2 rounded-lg border border-amber-300/18 bg-amber-300/8 px-2 py-1 text-xs font-bold text-amber-100">{warning}</p> : null}
             <div className="mt-3">
               <CompanyHealthBars items={bars} />
             </div>
@@ -1381,7 +1393,7 @@ function CompanyHealthCommandCenter({
               height={svgSize}
               viewBox={`0 0 ${svgSize} ${svgSize}`}
               role="img"
-              aria-label={`Здоровье компании ${progress} из 100: ${label}`}
+              aria-label={hasScore ? `Здоровье компании ${progress} из 100: ${label}` : `Здоровье компании: ${label}`}
               data-testid="dashboard-company-health-svg"
               data-size-source="ResizeObserver"
             >
@@ -1425,12 +1437,16 @@ function CompanyHealthCommandCenter({
               <foreignObject x={center - svgSize * 0.24} y={center - svgSize * 0.2} width={svgSize * 0.48} height={svgSize * 0.4}>
                 <div className="flex h-full flex-col items-center justify-center text-center">
                   <p className="text-[8px] font-semibold uppercase tracking-[0.14em] text-slate-400">Здоровье компании</p>
-                  <p className="mt-1 text-[32px] font-extrabold leading-none text-slate-50 2xl:text-[34px]">{progress}<span className="text-[13px] font-semibold text-slate-500">/100</span></p>
-                  <p className="mt-1 rounded-full border border-amber-300/12 bg-amber-300/7 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.04em] text-amber-200/85">{label}</p>
-                  <p className="rentcore-health-critical-caption mt-1 text-[9.5px] font-semibold text-slate-500">{criticalSignals} критических сигнала</p>
+                  <p className={`${hasScore ? 'mt-1 text-[32px] 2xl:text-[34px]' : 'mt-1 text-[18px] 2xl:text-[20px]'} font-extrabold leading-none text-slate-50`}>
+                    {hasScore ? <>{progress}<span className="text-[13px] font-semibold text-slate-500">/100</span></> : 'Нет данных'}
+                  </p>
+                  <p className={`mt-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.04em] ${hasScore ? 'border-amber-300/12 bg-amber-300/7 text-amber-200/85' : 'border-slate-400/12 bg-slate-400/7 text-slate-300'}`}>{label}</p>
+                  <p className="mt-1 line-clamp-2 px-2 text-[8.5px] font-semibold leading-tight text-slate-500">{subtitle}</p>
+                  {hasScore ? <p className="rentcore-health-critical-caption mt-1 text-[9.5px] font-semibold text-slate-500">{criticalSignals} критических сигнала</p> : null}
                 </div>
               </foreignObject>
             </svg>
+            {warning ? <p className="mt-2 rounded-lg border border-amber-300/18 bg-amber-300/8 px-3 py-1.5 text-xs font-bold text-amber-100">{warning}</p> : null}
             <div className="mt-4 hidden w-full max-w-[330px]">
               <CompanyHealthBars items={bars} />
             </div>
@@ -3330,13 +3346,13 @@ export default function Dashboard() {
     linkLabel: string;
   }
 
-  const alertItems: AlertItem[] = [];
+  const rawAlertItems: AlertItem[] = [];
 
   // 1. Просроченные возвраты (критично)
   if (shouldShowRentalAttention) {
     overdueRentalsList.forEach(r => {
       const days = Math.max(1, Math.ceil((today.getTime() - new Date(r.endDate).getTime()) / 86400000));
-      alertItems.push({
+      rawAlertItems.push({
         id: `overdue-return-${r.id}`,
         priority: 'critical',
         icon: Calendar,
@@ -3355,7 +3371,7 @@ export default function Dashboard() {
     overduePayments.forEach(p => {
       const compareDate = p.expectedPaymentDate || p.endDate;
       const days = Math.max(0, Math.ceil((today.getTime() - new Date(compareDate).getTime()) / 86400000));
-      alertItems.push({
+      rawAlertItems.push({
         id: `overdue-pay-${p.rentalId}`,
         priority: days > 7 ? 'critical' : 'high',
         icon: DollarSign,
@@ -3371,7 +3387,7 @@ export default function Dashboard() {
 
   // 3. Критические сервисные заявки
   criticalTickets.forEach(t => {
-    alertItems.push({
+    rawAlertItems.push({
       id: `ticket-${t.id}`,
       priority: t.priority === 'critical' ? 'critical' : 'high',
       icon: Wrench,
@@ -3405,7 +3421,7 @@ export default function Dashboard() {
       .map(item => item.inventoryNumber || `${item.manufacturer} ${item.model}`);
     if (blockedEq.length > 0) {
       const isToday = new Date(r.startDate) < tomorrowStart;
-      alertItems.push({
+      rawAlertItems.push({
         id: `not-ready-${r.id}`,
         priority: isToday ? 'critical' : 'high',
         icon: PackageX,
@@ -3423,7 +3439,7 @@ export default function Dashboard() {
   const unsignedDocs = documents.filter(isUnsignedDocument);
   unsignedDocs.slice(0, 5).forEach(d => {
     const typeLabel = d.type === 'contract' ? 'Договор' : d.type === 'act' ? 'УПД/Акт' : 'Документ';
-    alertItems.push({
+    rawAlertItems.push({
       id: `doc-${d.id}`,
       priority: 'medium',
       icon: ClipboardX,
@@ -3448,7 +3464,7 @@ export default function Dashboard() {
       const d = new Date(date);
       if (d < today) {
         const days = Math.ceil((today.getTime() - d.getTime()) / 86400000);
-        alertItems.push({
+        rawAlertItems.push({
           id: `maint-${e.id}-${label}`,
           priority: days > 30 ? 'high' : 'medium',
           icon: Zap,
@@ -3468,7 +3484,7 @@ export default function Dashboard() {
   blockedClientsWithRentals.forEach(c => {
     const hasActive = activeRentalsList.some(r => r.clientId === c.id || (!r.clientId && r.client === c.company));
     if (hasActive) {
-      alertItems.push({
+      rawAlertItems.push({
         id: `blocked-client-${c.id}`,
         priority: 'critical',
         icon: Ban,
@@ -3485,7 +3501,7 @@ export default function Dashboard() {
   // 8. Долг превышает кредитный лимит
   if (canViewMoney) {
     computedClients.filter(c => c.creditLimit > 0 && c.debt > c.creditLimit).forEach(c => {
-      alertItems.push({
+      rawAlertItems.push({
         id: `credit-limit-${c.id}`,
         priority: 'high',
         icon: ShieldAlert,
@@ -3501,7 +3517,7 @@ export default function Dashboard() {
 
   // 9. Аренды с флагом риска
   viewRentals.filter(r => r.risk && (r.status === 'active' || r.status === 'confirmed')).forEach(r => {
-    alertItems.push({
+    rawAlertItems.push({
       id: `risk-rental-${r.id}`,
       priority: 'medium',
       icon: ShieldAlert,
@@ -3516,7 +3532,10 @@ export default function Dashboard() {
 
   // Sort: critical → high → medium
   const priorityOrder: Record<AlertPriority, number> = { critical: 0, high: 1, medium: 2 };
-  alertItems.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+  const invalidAlertItems = rawAlertItems.filter(item => !alertHasValidSource(item));
+  const alertItems = rawAlertItems
+    .filter(alertHasValidSource)
+    .sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
 
   const ALERTS_PREVIEW = 7;
   const visibleAlerts = showAllAlerts ? alertItems : alertItems.slice(0, ALERTS_PREVIEW);
@@ -3610,38 +3629,53 @@ export default function Dashboard() {
     : operationalLoadScore >= 40
       ? 'Нормальная'
       : 'Низкая';
-  const companyHealthBars: CompanyHealthBar[] = [
-    { label: 'Деньги', value: receivablesTone === 'success' ? 92 : receivablesTone === 'warning' ? 62 : 34, hint: overdueReceivablesAmount > 0 ? formatCurrency(overdueReceivablesAmount) : 'чисто', color: '#fb7185' },
-    { label: 'Парк', value: activeEquipment > 0 ? utilization : 0, hint: activeEquipment > 0 ? `${utilization}%` : 'нет активного парка', color: '#34d399' },
-    { label: 'Сервис', value: serviceTone === 'success' ? 88 : serviceTone === 'warning' ? 58 : 28, hint: `${serviceBlockersCount} блокеров`, color: serviceTone === 'danger' ? '#ef4444' : '#f59e0b' },
-    { label: 'Возвраты', value: overdueRentalsList.length > 0 ? 35 : rentalsEndingToday.length > 0 ? 68 : 90, hint: overdueRentalsList.length > 0 ? `${overdueRentalsList.length} просрочено` : `${rentalsEndingToday.length} сегодня`, color: '#a78bfa' },
-    { label: 'Документы', value: unsignedDocumentsCount > 0 ? 58 : 90, hint: `${unsignedDocumentsCount} без подписи`, color: '#f59e0b' },
-  ];
-  const companyHealthScore = clampPercent(Math.round(
-    companyHealthBars.reduce((sum, item) => sum + clampPercent(item.value), 0) / Math.max(companyHealthBars.length, 1),
-  ));
-  const dashboardLooksDemoSafe = APP_BRAND_NAME.toLowerCase().includes('demo')
-    || totalEquipment + rentals.length + payments.length + clients.length === 0
-    || [...clients, ...rentals, ...equipment].some(item => {
-      const record = item as { fixtureTag?: unknown; company?: unknown; client?: unknown; name?: unknown; inventoryNumber?: unknown };
-      return [
-        record.fixtureTag,
-        record.company,
-        record.client,
-        record.name,
-        record.inventoryNumber,
-      ].some(value => /demo|e2e|smoke|test|тест/i.test(String(value || '')));
-    });
-  const companyHealthDisplayScore = dashboardLooksDemoSafe && companyHealthScore < 55
-    ? 68
-    : companyHealthScore;
-  const companyHealthLabel = companyHealthDisplayScore >= 80 ? 'Хорошо' : companyHealthDisplayScore >= 55 ? 'Зона внимания' : 'Критично';
-  const companyHealthTone: DashboardTone = companyHealthDisplayScore >= 80 ? 'success' : companyHealthDisplayScore >= 55 ? 'warning' : 'danger';
   const riskSignalCounts = {
     critical: actionAttention?.summary?.critical ?? criticalCount,
     high: actionAttention?.summary?.high ?? highCount,
     medium: actionAttention?.summary?.medium ?? mediumCount,
   };
+  const companyHealthModel = buildCompanyHealthModel({
+    equipmentCount: totalEquipment,
+    rentalsCount: viewPlannerRentals.length || viewRentals.length,
+    paymentsCount: payments.length,
+    serviceCount: tickets.length,
+    documentsCount: documents.length,
+    deliveriesCount: deliveries.length,
+    utilization,
+    noActiveFleetCritical: totalEquipment > 0 && activeEquipment === 0 ? 1 : 0,
+    lowUtilizationRisk: activeEquipment > 0 && utilization < 40 ? 1 : 0,
+    overdueReturnsCount: overdueRentalsList.length,
+    returnsTodayCount: rentalsEndingToday.length,
+    overdueReceivablesCount: overduePayments.length,
+    oldDebtCount: debt60PlusAmount > 0 ? 1 : 0,
+    serviceRiskCount: unassignedServiceTickets.length + ticketsWaitingParts.length,
+    serviceCriticalCount: criticalTickets.length + overdueServiceTickets.length,
+    unsignedDocumentsCount,
+    overdueDocumentsCount: documentControl.kpi.overdueSignature + documentControl.kpi.closedRentalsWithoutClosingDocs,
+    unassignedDeliveriesCount: unassignedDeliveries.length,
+    overdueDeliveriesCount: overdueDeliveries.length,
+    criticalSignals: riskSignalCounts.critical,
+    invalidCriticalSignals: invalidAlertItems.length,
+  });
+  const companyHealthScore = companyHealthModel.score;
+  const companyHealthDisplayScore = companyHealthScore;
+  const companyHealthLabel = companyHealthModel.label;
+  const companyHealthSubtitle = companyHealthModel.subtitle;
+  const companyHealthTone = companyHealthModel.tone as DashboardTone;
+  const companyHealthWarning = companyHealthModel.warning;
+  const companyHealthContourById = new Map(companyHealthModel.contourStates.map(item => [item.id, item]));
+  const companyHealthContourHint = [
+    companyHealthModel.availableContours.length > 0 ? `Есть: ${companyHealthModel.availableContours.join(', ')}` : '',
+    companyHealthModel.missingContours.length > 0 ? `Нет: ${companyHealthModel.missingContours.join(', ')}` : '',
+  ].filter(Boolean).join(' · ');
+  const companyHealthBars: CompanyHealthBar[] = [
+    { label: 'Деньги', value: companyHealthContourById.get('payments')?.status === 'no_data' ? 0 : receivablesTone === 'success' ? 92 : receivablesTone === 'warning' ? 62 : 34, hint: companyHealthContourById.get('payments')?.stateLabel || 'Нет данных', color: companyHealthContourById.get('payments')?.status === 'no_data' ? '#64748b' : '#fb7185' },
+    { label: 'Парк', value: totalEquipment > 0 ? utilization : 0, hint: companyHealthContourById.get('equipment')?.stateLabel || 'Нет данных', color: totalEquipment > 0 ? '#34d399' : '#64748b' },
+    { label: 'Сервис', value: companyHealthContourById.get('service')?.status === 'no_data' ? 0 : serviceTone === 'success' ? 88 : serviceTone === 'warning' ? 58 : 28, hint: companyHealthContourById.get('service')?.stateLabel || 'Нет данных', color: companyHealthContourById.get('service')?.status === 'no_data' ? '#64748b' : serviceTone === 'danger' ? '#ef4444' : '#f59e0b' },
+    { label: 'Возвраты', value: companyHealthContourById.get('rentals')?.status === 'no_data' ? 0 : overdueRentalsList.length > 0 ? 35 : rentalsEndingToday.length > 0 ? 65 : 90, hint: companyHealthContourById.get('rentals')?.stateLabel || 'Нет данных', color: companyHealthContourById.get('rentals')?.status === 'no_data' ? '#64748b' : '#a78bfa' },
+    { label: 'Документы', value: companyHealthContourById.get('documents')?.status === 'no_data' ? 0 : unsignedDocumentsCount > 0 ? 58 : 90, hint: companyHealthContourById.get('documents')?.stateLabel || 'Нет данных', color: companyHealthContourById.get('documents')?.status === 'no_data' ? '#64748b' : '#f59e0b' },
+    { label: 'Доставки', value: companyHealthContourById.get('deliveries')?.status === 'no_data' ? 0 : overdueDeliveries.length > 0 ? 32 : unassignedDeliveries.length > 0 ? 60 : 88, hint: companyHealthContourById.get('deliveries')?.stateLabel || 'Нет данных', color: companyHealthContourById.get('deliveries')?.status === 'no_data' ? '#64748b' : '#38bdf8' },
+  ];
   const executiveSummaryCards = [
     canViewMoney && {
       id: 'executive-overdue-receivables',
@@ -3706,8 +3740,9 @@ export default function Dashboard() {
       id: 'money',
       title: 'Деньги',
       icon: DollarSign,
-      tone: receivablesTone,
+      tone: (companyHealthContourById.get('payments')?.tone ?? receivablesTone) as DashboardTone,
       href: '/payments',
+      stateLabel: companyHealthContourById.get('payments')?.stateLabel,
       metrics: [
         { label: 'Поступления за месяц', value: formatCurrency(monthlyPaidAmount) },
         { label: 'Ожидается', value: formatCurrency(Math.max(0, monthlyRevenue - monthlyPaidAmount)) },
@@ -3718,8 +3753,9 @@ export default function Dashboard() {
       id: 'fleet',
       title: 'Парк техники',
       icon: Truck,
-      tone: utilizationTone,
+      tone: (companyHealthContourById.get('equipment')?.tone ?? utilizationTone) as DashboardTone,
       href: '/equipment',
+      stateLabel: companyHealthContourById.get('equipment')?.stateLabel,
       metrics: [
         { label: 'Всего единиц', value: String(totalEquipment) },
         { label: 'В аренде', value: String(rentedEquipment) },
@@ -3730,8 +3766,9 @@ export default function Dashboard() {
       id: 'service',
       title: 'Сервис',
       icon: Wrench,
-      tone: serviceTone,
+      tone: (companyHealthContourById.get('service')?.tone ?? serviceTone) as DashboardTone,
       href: '/service',
+      stateLabel: companyHealthContourById.get('service')?.stateLabel,
       metrics: [
         { label: 'Активные заявки', value: String(openServiceTickets.length) },
         { label: 'Ожидают запчасти', value: String(ticketsWaitingParts.length) },
@@ -3742,8 +3779,9 @@ export default function Dashboard() {
       id: 'delivery',
       title: 'Доставка',
       icon: Truck,
-      tone: overdueDeliveries.length > 0 ? 'danger' : unassignedDeliveries.length > 0 ? 'warning' : 'success',
+      tone: (companyHealthContourById.get('deliveries')?.tone ?? (overdueDeliveries.length > 0 ? 'danger' : unassignedDeliveries.length > 0 ? 'warning' : 'success')) as DashboardTone,
       href: '/deliveries',
+      stateLabel: companyHealthContourById.get('deliveries')?.stateLabel,
       metrics: [
         { label: 'На сегодня', value: String(todayDeliveries.length) },
         { label: 'В пути', value: String(activeDeliveries.length) },
@@ -3754,8 +3792,9 @@ export default function Dashboard() {
       id: 'documents',
       title: 'Документы',
       icon: FileText,
-      tone: unsignedDocumentsCount > 0 ? 'warning' : 'success',
+      tone: (companyHealthContourById.get('documents')?.tone ?? (unsignedDocumentsCount > 0 ? 'warning' : 'success')) as DashboardTone,
       href: unsignedDocumentsHref,
+      stateLabel: companyHealthContourById.get('documents')?.stateLabel,
       metrics: [
         { label: 'Требуют подписи', value: String(unsignedDocumentsCount) },
         { label: 'Просрочены', value: String(documentControl.kpi.overdueSignature) },
@@ -3765,8 +3804,9 @@ export default function Dashboard() {
       id: 'returns',
       title: 'Возвраты',
       icon: RefreshCw,
-      tone: overdueRentalsList.length > 0 ? 'danger' : rentalsEndingToday.length > 0 ? 'warning' : 'success',
+      tone: (companyHealthContourById.get('rentals')?.tone ?? (overdueRentalsList.length > 0 ? 'danger' : rentalsEndingToday.length > 0 ? 'warning' : 'success')) as DashboardTone,
       href: '/rentals',
+      stateLabel: companyHealthContourById.get('rentals')?.stateLabel,
       metrics: [
         { label: 'Сегодня', value: String(rentalsEndingToday.length) },
         { label: 'Завтра', value: String(rentalsEndingTomorrow.length) },
@@ -3779,6 +3819,7 @@ export default function Dashboard() {
     icon: React.ElementType;
     tone: DashboardTone;
     href: string;
+    stateLabel?: string;
     metrics: Array<{ label: string; value: string }>;
   }>;
   const commandCenterLeftDirections = ['money', 'fleet', 'service']
@@ -4033,9 +4074,11 @@ export default function Dashboard() {
               <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${
                 companyHealthTone === 'danger'
                   ? 'border-red-300/35 bg-red-400/12 text-red-200'
+                  : companyHealthDisplayScore === null
+                    ? 'border-slate-400/20 bg-slate-400/8 text-slate-300'
                   : 'border-lime-300/22 bg-lime-300/8 text-lime-100'
               }`}>
-                Здоровье {companyHealthDisplayScore}/100
+                {companyHealthDisplayScore === null ? companyHealthLabel : `Здоровье ${companyHealthDisplayScore}/100`}
               </span>
             </div>
           </header>
@@ -4096,9 +4139,12 @@ export default function Dashboard() {
                     <h2 className="app-shell-title mt-0.5 text-xl font-extrabold text-white">Пульт состояния компании</h2>
                   </div>
                   <span className="hidden rounded-full border border-white/10 bg-white/[0.045] px-3 py-1 text-xs font-semibold text-slate-300 sm:inline-flex">
-                    6 контуров
+                    {companyHealthModel.contourStates.length} контуров
                   </span>
                 </div>
+                {companyHealthDisplayScore === null && companyHealthContourHint ? (
+                  <p className="mb-2 px-1 text-xs font-semibold text-slate-400">{companyHealthContourHint}</p>
+                ) : null}
 
                 <CompanyHealthCommandCenter
                   leftDirections={commandCenterLeftDirections}
@@ -4109,6 +4155,8 @@ export default function Dashboard() {
                   label={companyHealthLabel}
                   tone={companyHealthTone}
                   criticalSignals={riskSignalCounts.critical}
+                  subtitle={companyHealthSubtitle}
+                  warning={companyHealthWarning}
                 />
               </div>
             </div>
@@ -4853,6 +4901,8 @@ export default function Dashboard() {
                 label={companyHealthLabel}
                 tone={companyHealthTone}
                 criticalSignals={riskSignalCounts.critical}
+                subtitle={companyHealthSubtitle}
+                warning={companyHealthWarning}
               />
             </div>
 

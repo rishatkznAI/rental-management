@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { Boxes, MoreVertical } from 'lucide-react';
+import { Boxes, Check, MoreVertical } from 'lucide-react';
 import { AuthenticatedImage } from '../../components/ui/AuthenticatedImage';
 import { normalizePhotoReference, photoSource } from '../../lib/media';
 import type { Equipment as EquipmentEntity } from '../../types';
@@ -44,11 +44,12 @@ export function EquipmentRegistryTable({
   getEquipmentGsmDisplay,
 }: EquipmentRegistryTableProps) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[1320px] table-fixed text-left text-sm">
-        <thead className="border-b border-border bg-secondary/70 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+    <div className="app-scroll-fade-x overflow-x-auto">
+      <table className="w-full min-w-[1480px] table-fixed text-left text-sm">
+        <thead className="border-b border-border bg-secondary/50 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           <tr>
-            <th className="w-[86px] px-4 py-3 font-medium">Фото</th>
+            <th className="w-[52px] px-4 py-3 font-medium">Выбор</th>
+            <th className="w-[82px] px-3 py-3 font-medium">Фото</th>
             <th className="w-[150px] px-3 py-3 font-medium">Инв. номер</th>
             <th className="w-[210px] px-3 py-3 font-medium">Модель</th>
             <th className="w-[170px] px-3 py-3 font-medium">Тип / Привод</th>
@@ -56,8 +57,9 @@ export function EquipmentRegistryTable({
             <th className="w-[125px] px-3 py-3 font-medium">Категория</th>
             <th className="w-[145px] px-3 py-3 font-medium">Собственник</th>
             <th className="w-[150px] px-3 py-3 font-medium">Локация</th>
-            <th className="w-[120px] px-3 py-3 font-medium">Приоритет</th>
+            <th className="w-[170px] px-3 py-3 font-medium">Клиент / объект</th>
             <th className="w-[120px] px-3 py-3 font-medium">GSM</th>
+            <th className="w-[120px] px-3 py-3 font-medium">Приоритет</th>
             <th className="w-[58px] px-3 py-3 font-medium">Действия</th>
           </tr>
         </thead>
@@ -74,12 +76,29 @@ export function EquipmentRegistryTable({
             return (
               <tr
                 key={equipment.id}
-                className={`cursor-pointer align-top transition-colors hover:bg-secondary/50 ${
-                  selectedEquipmentId === equipment.id ? 'bg-primary/5' : ''
+                className={`cursor-pointer align-top transition-colors hover:bg-secondary/45 ${
+                  selectedEquipmentId === equipment.id ? 'bg-primary/10 shadow-[inset_3px_0_0_var(--primary)]' : ''
                 }`}
                 onClick={() => onSelectEquipment(equipment)}
               >
                 <td className="px-4 py-3">
+                  <button
+                    type="button"
+                    aria-label={selectedEquipmentId === equipment.id ? 'Техника выбрана' : 'Выбрать технику'}
+                    className={`flex h-5 w-5 items-center justify-center rounded border transition ${
+                      selectedEquipmentId === equipment.id
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border bg-secondary/40 text-transparent hover:border-primary/50'
+                    }`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelectEquipment(equipment);
+                    }}
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </button>
+                </td>
+                <td className="px-3 py-3">
                   {imageSrc ? (
                     <AuthenticatedImage
                       photo={normalizePhotoReference(equipment.photo, { idPrefix: `${equipment.id}-registry` })}
@@ -139,15 +158,23 @@ export function EquipmentRegistryTable({
                   </div>
                 </td>
                 <td className="px-3 py-3">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-foreground">
-                    <span className={`h-2 w-2 rounded-full ${getPriorityDotClass(equipment.priority)}`} />
-                    {getPriorityLabel(equipment.priority)}
-                  </span>
+                  <div className="truncate text-foreground" title={equipment.currentClient || '—'}>
+                    {equipment.currentClient || '—'}
+                  </div>
+                  {equipment.returnDate ? (
+                    <div className="mt-1 truncate text-xs text-muted-foreground">Возврат: {equipment.returnDate}</div>
+                  ) : null}
                 </td>
                 <td className="px-3 py-3">
                   <span className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ${gsmDisplay.className}`}>
                     <span className={`h-2 w-2 rounded-full ${gsmDisplay.dotClassName}`} />
                     {gsmDisplay.label}
+                  </span>
+                </td>
+                <td className="px-3 py-3">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-foreground">
+                    <span className={`h-2 w-2 rounded-full ${getPriorityDotClass(equipment.priority)}`} />
+                    {getPriorityLabel(equipment.priority)}
                   </span>
                 </td>
                 <td className="px-3 py-3">

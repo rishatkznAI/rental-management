@@ -563,7 +563,7 @@ test('equipment registry uses asset-centric tabs for one equipment entity', () =
   assert.match(source, /import \{ EquipmentStatusTabs \} from '\.\/equipment\/EquipmentStatusTabs';/);
   assert.match(source, /<EquipmentStatusTabs[\s\S]*activeTab=\{activeTab\}[\s\S]*tabs=\{EQUIPMENT_TABS\}[\s\S]*counts=\{tabCounts\}[\s\S]*onTabChange=\{setActiveTab\}/);
   assert.match(equipmentStatusTabsSource, /export function EquipmentStatusTabs/);
-  assert.match(equipmentStatusTabsSource, /activeTab === tab\.key[\s\S]*'border-primary\/30 bg-accent text-foreground'/);
+  assert.match(equipmentStatusTabsSource, /activeTab === tab\.key[\s\S]*'border-primary\/35 bg-primary\/12 text-foreground'/);
   assert.match(equipmentHelpersSource, /export function isSaleRegistryEquipment/);
   assert.match(equipmentHelpersSource, /export function hasExplicitSaleMode/);
   assert.match(equipmentHelpersSource, /saleMode === true/);
@@ -582,7 +582,7 @@ test('equipment registry KPI cards use real counts and percentages without fake 
   const source = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
   const kpiUiSource = `${source}\n${equipmentKpiCardsSource}`;
 
-  for (const label of ['Всего техники', 'Свободна', 'В аренде', 'В сервисе', 'На продажу', 'Проданная']) {
+  for (const label of ['Всего техники', 'Готова к аренде', 'В аренде', 'В сервисе', 'На продажу', 'Требует внимания']) {
     assert.match(source, new RegExp(label));
   }
 
@@ -596,14 +596,15 @@ test('equipment registry KPI cards use real counts and percentages without fake 
   assert.match(source, /value: tabCounts\.rented/);
   assert.match(source, /value: tabCounts\.service/);
   assert.match(source, /value: tabCounts\.for_sale/);
-  assert.match(source, /value: tabCounts\.sold/);
+  assert.match(source, /value: attentionCount/);
   assert.match(source, /Доля от общего парка/);
   assert.match(source, /CheckCircle2/);
   assert.match(source, /Truck/);
   assert.match(source, /Wrench/);
   assert.match(source, /BadgeDollarSign/);
+  assert.match(source, /AlertTriangle/);
   assert.match(equipmentKpiCardsSource, /border-violet-200\/80 bg-violet-50\/45/);
-  assert.match(equipmentKpiCardsSource, /border-slate-200\/85 bg-slate-50\/60/);
+  assert.match(equipmentKpiCardsSource, /border-red-200\/70 bg-red-50\/35/);
   assert.doesNotMatch(kpiUiSource, /sparkline|Sparkline|trend|Тренд|динамик/i);
   assert.doesNotMatch(kpiUiSource, /Math\.random|mockTrend|fakeTrend|fakeKpi/i);
 });
@@ -789,7 +790,7 @@ test('equipment registry row opens right quick view panel with tabs and linked c
   assert.match(equipmentQuickViewPanelSource, /export function EquipmentQuickViewPanel/);
   assert.match(equipmentConstantsSource, /export const EQUIPMENT_PREVIEW_TABS/);
   assert.match(equipmentQuickViewPanelSource, /EQUIPMENT_PREVIEW_TABS\.map/);
-  for (const label of ['Обзор', 'Характеристики', 'Документы', 'Фото', 'История']) {
+  for (const label of ['Обзор', 'Характеристики', 'Документы', 'История', 'GSM']) {
     assert.match(equipmentConstantsSource, new RegExp(label));
   }
 
@@ -799,7 +800,9 @@ test('equipment registry row opens right quick view panel with tabs and linked c
   assert.match(source, /setSelectedEquipmentId\(equipment\.id\)/);
   assert.match(source, /<EquipmentQuickViewPanel[\s\S]*selectedEquipment=\{selectedEquipment\}[\s\S]*activeTab=\{activeQuickViewTab\}[\s\S]*onTabChange=\{setActiveQuickViewTab\}/);
   assert.match(equipmentQuickViewPanelSource, /aria-label="Закрыть панель техники"/);
-  assert.match(equipmentQuickViewPanelSource, /<h2 className="app-shell-title truncate text-xl font-extrabold text-foreground">\{title\}<\/h2>/);
+  assert.match(equipmentQuickViewPanelSource, /<h2 className="app-shell-title truncate text-lg font-extrabold text-foreground">\{title\}<\/h2>/);
+  assert.match(source, /mode="embedded"/);
+  assert.match(equipmentQuickViewPanelSource, /buildGsmFields\(selectedEquipment\)/);
   assert.match(source, /getRegistryStatusLabel\(selectedEquipment, activeRentalIndex\)/);
   assert.match(equipmentQuickViewPanelSource, /INV \{inventoryNumber \|\| '—'\}/);
   assert.match(equipmentQuickViewPanelSource, /SN \{serialNumber \|\| 'не указан'\}/);

@@ -27,6 +27,10 @@ type EquipmentFiltersProps = {
   onDriveFilterChange: (value: string) => void;
   locationFilter: string;
   onLocationFilterChange: (value: string) => void;
+  gsmFilter: string;
+  onGsmFilterChange: (value: string) => void;
+  priorityFilter: string;
+  onPriorityFilterChange: (value: string) => void;
   categoryOptions: EquipmentFilterOption[];
   statusOptions: EquipmentFilterOption[];
   typeOptions: EquipmentFilterOption[];
@@ -57,6 +61,10 @@ export function EquipmentFilters({
   onDriveFilterChange,
   locationFilter,
   onLocationFilterChange,
+  gsmFilter,
+  onGsmFilterChange,
+  priorityFilter,
+  onPriorityFilterChange,
   categoryOptions,
   statusOptions,
   typeOptions,
@@ -65,20 +73,58 @@ export function EquipmentFilters({
   locationOptions,
   activeFleetLabels,
 }: EquipmentFiltersProps) {
+  const inlineSelectClass = 'app-filter-input h-9 min-w-[128px] rounded-lg text-xs';
+
   return (
     <>
-      <div className="px-5 py-4 sm:px-6">
+      <div className="px-4 py-3 sm:px-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative min-w-0 flex-1">
+          <div className="relative min-w-0 flex-1 lg:max-w-[360px]">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
               placeholder="Модель, инв. №, SN, собственник, локация…"
               value={search}
               onChange={(event) => onSearchChange(event.target.value)}
-              className="app-filter-input pl-10"
+              className="app-filter-input h-9 rounded-lg pl-10 text-sm"
             />
           </div>
-          <FilterButton activeCount={activeFilterCount} onClick={() => onOpenChange(true)} />
+          <div className="hidden min-w-0 flex-nowrap items-center gap-2 xl:flex">
+            <select value={categoryFilter} onChange={(event) => onCategoryFilterChange(event.target.value)} className={inlineSelectClass} aria-label="Категория техники">
+              <option value="all">Все категории</option>
+              {categoryOptions.map((category) => (
+                <option key={category.value} value={category.value}>{category.label}</option>
+              ))}
+            </select>
+            <select value={typeFilter} onChange={(event) => onTypeFilterChange(event.target.value)} className={inlineSelectClass} aria-label="Тип техники">
+              {typeOptions.map(type => (
+                <option key={type.value} value={type.value}>{type.label}</option>
+              ))}
+            </select>
+            <select value={driveFilter} onChange={(event) => onDriveFilterChange(event.target.value)} className={inlineSelectClass} aria-label="Привод техники">
+              {driveOptions.map((drive) => (
+                <option key={drive.value} value={drive.value}>{drive.label}</option>
+              ))}
+            </select>
+            <select value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value)} className={inlineSelectClass} aria-label="Статус техники">
+              {statusOptions.map((status) => (
+                <option key={status.value} value={status.value}>{status.label}</option>
+              ))}
+            </select>
+            <select value={locationFilter} onChange={(event) => onLocationFilterChange(event.target.value)} className={inlineSelectClass} aria-label="Локация техники">
+              <option value="all">Все локации</option>
+              {locationOptions.map((location) => (
+                <option key={location} value={location}>{location}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            {activeFilterCount > 0 ? (
+              <button type="button" onClick={onReset} className="h-9 rounded-lg border border-border bg-secondary/55 px-3 text-xs font-semibold text-muted-foreground transition hover:bg-secondary hover:text-foreground">
+                Сбросить
+              </button>
+            ) : null}
+            <FilterButton activeCount={activeFilterCount} onClick={() => onOpenChange(true)} />
+          </div>
         </div>
       </div>
 
@@ -140,6 +186,23 @@ export function EquipmentFilters({
               {locationOptions.map((location) => (
                 <option key={location} value={location}>{location}</option>
               ))}
+            </select>
+          </FilterField>
+          <FilterField label="GSM">
+            <select value={gsmFilter} onChange={(event) => onGsmFilterChange(event.target.value)} className="app-filter-input">
+              <option value="all">Любой GSM</option>
+              <option value="online">Онлайн</option>
+              <option value="offline">Офлайн / нет связи</option>
+              <option value="unknown">Нет данных</option>
+            </select>
+          </FilterField>
+          <FilterField label="Приоритет">
+            <select value={priorityFilter} onChange={(event) => onPriorityFilterChange(event.target.value)} className="app-filter-input">
+              <option value="all">Любой приоритет</option>
+              <option value="critical">Критический</option>
+              <option value="high">Высокий</option>
+              <option value="medium">Средний</option>
+              <option value="low">Низкий</option>
             </select>
           </FilterField>
         </div>

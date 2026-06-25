@@ -14,7 +14,7 @@ export function EquipmentStatusTabs({
   onTabChange,
 }: EquipmentStatusTabsProps) {
   return (
-    <div className="mt-5 flex flex-wrap gap-2">
+    <div className="mt-3 -mx-2 flex gap-1.5 overflow-x-auto px-2 pb-1">
       {tabs.map((tab) => {
         const count = counts[tab.key];
         return (
@@ -22,10 +22,10 @@ export function EquipmentStatusTabs({
             key={tab.key}
             type="button"
             onClick={() => onTabChange(tab.key)}
-            className={`rounded-xl border px-4 py-2 text-sm transition-colors ${
+            className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
               activeTab === tab.key
-                ? 'border-primary/30 bg-accent text-foreground'
-                : 'border-transparent bg-transparent text-muted-foreground hover:bg-secondary hover:text-foreground'
+                ? 'border-primary/35 bg-primary/12 text-foreground'
+                : 'border-border/60 bg-secondary/35 text-muted-foreground hover:border-border hover:bg-secondary/70 hover:text-foreground'
             }`}
           >
             {tab.label}

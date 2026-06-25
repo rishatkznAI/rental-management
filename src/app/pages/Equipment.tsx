@@ -114,7 +114,6 @@ import type {
   Equipment as EquipmentEntity,
   FleetReadinessItem,
   FleetReadinessResponsibleArea,
-  FleetReadinessSeverity,
   FleetReadinessStatus,
   ManagementActionExecutionStatus,
   ManagementActionPriority,
@@ -132,20 +131,7 @@ type PermissionCan = ReturnType<typeof usePermissions>['can'];
 
 const EQUIPMENT_REGISTRY_MATCH_OPTIONS = { canEquipmentParticipateInRentals };
 
-type FleetReadinessFilter = FleetReadinessStatus | 'all' | 'with_loss' | 'without_rate' | 'high_loss';
 type ManagementActionQueueFilter = 'all' | ManagementActionPriority | FleetReadinessResponsibleArea | ManagementActionExecutionStatus | 'unassigned' | 'overdue' | 'due_today' | 'stale' | 'my_actions';
-
-const READINESS_FILTERS: Array<{ value: FleetReadinessFilter; label: string }> = [
-  { value: 'all', label: 'Все' },
-  { value: 'ready', label: 'Готова' },
-  { value: 'needs_check', label: 'Проверка' },
-  { value: 'in_service', label: 'Сервис' },
-  { value: 'delivery_blocked', label: 'Доставка' },
-  { value: 'gsm_attention', label: 'GSM' },
-  { value: 'with_loss', label: 'С потерями' },
-  { value: 'without_rate', label: 'Нет ставки' },
-  { value: 'high_loss', label: 'Высокие потери' },
-];
 
 const ACTION_QUEUE_FILTERS: Array<{ value: ManagementActionQueueFilter; label: string }> = [
   { value: 'all', label: 'Все' },
@@ -178,24 +164,6 @@ const ACTION_EXECUTION_STATUS_OPTIONS: Array<{ value: ManagementActionExecutionS
   { value: 'resolved', label: 'Решено' },
   { value: 'ignored', label: 'Игнорировано' },
 ];
-
-function readinessBadgeVariant(severity: FleetReadinessSeverity) {
-  if (severity === 'good') return 'success';
-  if (severity === 'danger') return 'danger';
-  if (severity === 'warning') return 'warning';
-  return 'default';
-}
-
-function statusLabel(status: string) {
-  const labels: Record<string, string> = {
-    available: 'Свободна',
-    rented: 'В аренде',
-    reserved: 'Бронь',
-    in_service: 'В сервисе',
-    inactive: 'Неактивна',
-  };
-  return labels[status] || status || 'Не указан';
-}
 
 function readinessLossText(value: number | null, suffix = '') {
   if (value == null) return 'нет ставки';
@@ -643,38 +611,13 @@ function FleetReadinessSection({
   isLoading: boolean;
   error: unknown;
 }) {
-  const [filter, setFilter] = React.useState<FleetReadinessFilter>('all');
-  const filteredItems = React.useMemo(() => {
-    const list = filter === 'all'
-      ? items
-      : filter === 'with_loss'
-        ? items.filter(item => (item.estimatedLoss ?? 0) > 0)
-        : filter === 'without_rate'
-          ? items.filter(item => item.readinessStatus !== 'ready' && item.readinessStatus !== 'rented' && item.estimatedDailyRate == null)
-          : filter === 'high_loss'
-            ? items.filter(item => item.lossSeverity === 'high' || item.lossSeverity === 'critical')
-            : items.filter(item => item.readinessStatus === filter);
-    return list.slice().sort((left, right) => {
-      const leftBlocked = left.readinessStatus !== 'ready' && left.readinessStatus !== 'rented';
-      const rightBlocked = right.readinessStatus !== 'ready' && right.readinessStatus !== 'rented';
-      if (leftBlocked !== rightBlocked) return leftBlocked ? -1 : 1;
-      return (right.estimatedLoss ?? -1) - (left.estimatedLoss ?? -1);
-    });
-  }, [filter, items]);
-  const problemItems = React.useMemo(
-    () => filteredItems.filter(item => item.readinessStatus !== 'ready').slice(0, 12),
-    [filteredItems],
-  );
-  const visibleItems = filter === 'ready' ? filteredItems.slice(0, 12) : problemItems;
   const allGood = !isLoading && !error && items.length > 0 && items.every(item => item.readinessStatus === 'ready');
   const kpis = [
     { label: 'Готова к аренде', value: summary?.ready ?? 0, icon: CheckCircle2, className: 'text-emerald-400' },
     { label: 'Требует проверки', value: summary?.needsCheck ?? 0, icon: AlertTriangle, className: 'text-amber-400' },
     { label: 'В сервисе', value: summary?.inService ?? 0, icon: Wrench, className: 'text-red-400' },
     { label: 'Блокеры доставки', value: summary?.deliveryBlocked ?? 0, icon: Truck, className: 'text-orange-400' },
-    { label: 'Внимание GSM', value: summary?.gsmAttention ?? 0, icon: RadioTower, className: 'text-blue-400' },
-  ];
-  const lossKpis = [
+    { label: 'GSM офлайн', value: summary?.gsmAttention ?? 0, icon: RadioTower, className: 'text-blue-400' },
     { label: 'Потеря в день', value: readinessLossText(summary?.loss?.totalEstimatedDailyLoss ?? 0, ' оценочно'), icon: BadgeDollarSign, className: 'text-red-400' },
     { label: 'Оценка потерь', value: readinessLossText(summary?.loss?.totalEstimatedLoss ?? 0, ' оценочно'), icon: AlertTriangle, className: 'text-orange-400' },
     { label: 'Без ставки', value: summary?.loss?.blockedItemsWithoutRate ?? 0, icon: ClipboardList, className: 'text-amber-400' },
@@ -682,120 +625,31 @@ function FleetReadinessSection({
   ];
 
   return (
-    <section className="app-panel overflow-hidden" data-testid="fleet-readiness-section">
-      <div className="border-b border-border/80 px-5 py-5 sm:px-6">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="app-shell-title text-xl font-extrabold text-foreground">Готовность парка</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Что реально можно сдавать сейчас и что блокирует выдачу</p>
-          </div>
-          <div className="flex flex-wrap gap-2" aria-label="Фильтр готовности парка">
-            {READINESS_FILTERS.map(option => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setFilter(option.value)}
-                className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
-                  filter === option.value
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-border bg-secondary text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {kpis.map(({ label, value, icon: Icon, className }) => (
-            <div key={label} className="rounded-lg border border-border bg-secondary/50 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-muted-foreground">{label}</span>
-                <Icon className={`h-4 w-4 ${className}`} />
-              </div>
-              <div className="mt-2 text-2xl font-extrabold text-foreground">{isLoading ? '…' : value}</div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {lossKpis.map(({ label, value, icon: Icon, className }) => (
-            <div key={label} className="rounded-lg border border-border bg-secondary/50 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-muted-foreground">{label}</span>
-                <Icon className={`h-4 w-4 ${className}`} />
-              </div>
-              <div className="mt-2 text-xl font-extrabold text-foreground">{isLoading ? '…' : value}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
+    <section className="app-panel overflow-hidden px-4 py-3 sm:px-5" data-testid="fleet-readiness-section">
       {error ? (
-        <div className="p-5 text-sm text-red-200">
+        <div className="text-sm text-red-200">
           Не удалось загрузить готовность парка. {apiErrorMessage(error, 'Проверьте доступ к /api/equipment/readiness.')}
         </div>
       ) : allGood ? (
-        <div className="p-5 text-sm text-emerald-200">Все доступные единицы парка без открытых блокеров.</div>
-      ) : visibleItems.length === 0 ? (
-        <div className="p-5 text-sm text-muted-foreground">
-          {isLoading ? 'Загружаем готовность парка…' : 'По выбранному фильтру нет техники.'}
+        <div className="flex items-center gap-2 text-sm text-emerald-200">
+          <CheckCircle2 className="h-4 w-4" />
+          Критичных блокеров по парку нет.
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1280px] text-left text-sm">
-            <thead className="border-b border-border bg-secondary/60 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-              <tr>
-                <th className="px-5 py-3 font-medium">Модель</th>
-                <th className="px-3 py-3 font-medium">INV / SN</th>
-                <th className="px-3 py-3 font-medium">Текущий статус</th>
-                <th className="px-3 py-3 font-medium">Готовность</th>
-                <th className="px-3 py-3 font-medium">Потеря/день</th>
-                <th className="px-3 py-3 font-medium">Уже потеряно</th>
-                <th className="px-3 py-3 font-medium">Ответственный</th>
-                <th className="px-3 py-3 font-medium">Блокеры</th>
-                <th className="px-5 py-3 font-medium">Финансовое действие</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/80">
-              {visibleItems.map(item => (
-                <tr key={item.equipmentId} className="align-top">
-                  <td className="px-5 py-3">
-                    <Link to={item.links.equipment || `/equipment/${item.equipmentId}`} className="font-semibold text-foreground hover:text-primary">
-                      {item.model || 'Без модели'}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">
-                    <div>INV {item.inventoryNumber || '—'}</div>
-                    <div>SN {item.serialNumber || 'не указан'}</div>
-                  </td>
-                  <td className="px-3 py-3 text-muted-foreground">{statusLabel(item.status)}</td>
-                  <td className="px-3 py-3">
-                    <Badge variant={readinessBadgeVariant(item.readinessSeverity)}>{item.readinessLabel}</Badge>
-                  </td>
-                  <td className="px-3 py-3 text-xs font-semibold text-foreground">
-                    {readinessLossText(item.estimatedDailyRate)}
-                  </td>
-                  <td className="px-3 py-3 text-xs font-semibold text-foreground">
-                    {readinessLossText(item.estimatedLoss, item.estimatedLoss && item.estimatedLoss > 0 ? ' оценочно' : '')}
-                    {item.blockedDays ? <div className="mt-1 font-normal text-muted-foreground">{item.blockedDays} дн.</div> : null}
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">{responsibleAreaLabel(item.responsibleArea)}</td>
-                  <td className="max-w-[280px] px-3 py-3 text-xs text-muted-foreground">
-                    {item.blockers.length > 0 ? item.blockers.join('; ') : 'Нет открытых блокеров'}
-                  </td>
-                  <td className="px-5 py-3 text-xs text-foreground">
-                    <div>{item.financialRecommendation || item.recommendedAction}</div>
-                    <div className="mt-1 flex flex-wrap gap-2">
-                      {item.links.rental ? <Link className="text-primary hover:underline" to={item.links.rental}>Аренда</Link> : null}
-                      {item.links.serviceTicket ? <Link className="text-primary hover:underline" to={item.links.serviceTicket}>Сервис</Link> : null}
-                      {item.links.delivery ? <Link className="text-primary hover:underline" to={item.links.delivery}>Доставка</Link> : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="app-shell-title text-sm font-extrabold text-foreground">Готовность парка</span>
+            <span className="text-xs text-muted-foreground">{isLoading ? 'загрузка' : 'операционная сводка'}</span>
+          </div>
+          <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1 xl:pb-0">
+            {kpis.map(({ label, value, icon: Icon, className }) => (
+              <div key={label} className="flex min-w-max items-center gap-2 rounded-lg border border-border bg-secondary/45 px-3 py-2 text-xs">
+                <Icon className={`h-3.5 w-3.5 ${className}`} />
+                <span className="text-muted-foreground">{label}</span>
+                <span className="font-extrabold text-foreground">{isLoading ? '…' : value}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </section>
@@ -1385,6 +1239,8 @@ export default function Equipment() {
   const [fleetFilter, setFleetFilter] = React.useState<string>('all');
   const [ownerFilter, setOwnerFilter] = React.useState<string>('all');
   const [locationFilter, setLocationFilter] = React.useState<string>('all');
+  const [gsmFilter, setGsmFilter] = React.useState<string>('all');
+  const [priorityFilter, setPriorityFilter] = React.useState<string>('all');
   const [showFilters, setShowFilters] = React.useState(false);
   const [pageSize, setPageSize] = React.useState(DEFAULT_EQUIPMENT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -1585,14 +1441,16 @@ export default function Equipment() {
       serialNumber: selectedEquipment.serialNumber,
       quickActions,
       overviewFields: [
-        { label: 'Статус', value: statusLabel },
+        { label: 'Тип техники', value: equipmentTypeLabel },
+        { label: 'Привод', value: driveLabel },
+        { label: 'Год выпуска', value: selectedEquipment.year || '—' },
         { label: 'Категория', value: getEquipmentCategoryLabel(selectedEquipment.category) },
-        { label: 'Тип / привод', value: `${equipmentTypeLabel} · ${driveLabel}` },
         { label: 'Собственник', value: getRegistryOwnerLabel(selectedEquipment) },
         { label: 'Локация', value: selectedEquipment.location || '—' },
-        { label: 'GSM', value: gsmDisplay.label },
-        { label: 'Приоритет', value: getPriorityLabel(selectedEquipment.priority) },
         { label: 'Наработка', value: formatPreviewNumber(selectedEquipment.hours, ' м/ч') },
+        { label: 'Следующее ТО', value: formatPreviewDate(selectedEquipment.nextMaintenance) },
+        { label: 'Приоритет', value: getPriorityLabel(selectedEquipment.priority) },
+        { label: 'Примечание', value: selectedEquipment.notes || '—' },
       ],
       specFields: [
         { label: 'Рабочая высота', value: formatPreviewNumber(selectedEquipment.workingHeight, ' м') },
@@ -1660,6 +1518,12 @@ export default function Equipment() {
         const matchesFleet = fleetFilter === 'all' || String(equipment.activeInFleet) === fleetFilter;
         const matchesOwner = matchesOwnerFilter(equipment, ownerFilter);
         const matchesLocation = locationFilter === 'all' || equipment.location === locationFilter;
+        const gsmLabel = getEquipmentGsmDisplay(equipment).label;
+        const matchesGsm = gsmFilter === 'all'
+          || (gsmFilter === 'online' && gsmLabel === 'Онлайн')
+          || (gsmFilter === 'offline' && (gsmLabel === 'Офлайн' || gsmLabel === 'Нет связи'))
+          || (gsmFilter === 'unknown' && gsmLabel === 'Нет данных');
+        const matchesPriority = priorityFilter === 'all' || equipment.priority === priorityFilter;
 
         return matchesSearch
           && matchesStatus
@@ -1669,6 +1533,8 @@ export default function Equipment() {
           && matchesFleet
           && matchesOwner
           && matchesLocation
+          && matchesGsm
+          && matchesPriority
           && matchesTabType(equipment, activeTab, activeRentalIndex, EQUIPMENT_REGISTRY_MATCH_OPTIONS);
       })
       .sort(compareEquipmentByPriority)
@@ -1680,8 +1546,10 @@ export default function Equipment() {
     enrichedEquipmentList,
     equipmentTypeOptions,
     fleetFilter,
+    gsmFilter,
     locationFilter,
     ownerFilter,
+    priorityFilter,
     search,
     statusFilter,
     typeFilter,
@@ -1746,6 +1614,19 @@ export default function Equipment() {
   ), [activeRentalIndex, enrichedEquipmentList]);
   const totalPark = tabCounts.all ?? 0;
   const activeTabTotal = tabCounts[activeTab] ?? 0;
+  const attentionCount = React.useMemo(() => {
+    const readinessBlocked = new Set(
+      (readinessQuery.data?.items ?? [])
+        .filter(item => item.readinessStatus !== 'ready' && item.readinessStatus !== 'rented')
+        .map(item => item.equipmentId),
+    );
+    return enrichedEquipmentList.filter((equipment) => (
+      readinessBlocked.has(equipment.id)
+      || equipment.priority === 'critical'
+      || equipment.priority === 'high'
+      || getRegistryStatusKind(equipment, activeRentalIndex) === 'service'
+    )).length;
+  }, [activeRentalIndex, enrichedEquipmentList, readinessQuery.data?.items]);
   const kpiCards = React.useMemo<EquipmentKpiCardConfig[]>(() => [
     {
       title: 'Всего техники',
@@ -1755,7 +1636,7 @@ export default function Equipment() {
       tone: 'neutral',
     },
     {
-      title: 'Свободна',
+      title: 'Готова к аренде',
       value: tabCounts.available ?? 0,
       caption: 'Доля от общего парка',
       icon: CheckCircle2,
@@ -1787,14 +1668,14 @@ export default function Equipment() {
       percent: getRegistryPercent(tabCounts.for_sale ?? 0, totalPark),
     },
     {
-      title: 'Проданная',
-      value: tabCounts.sold ?? 0,
-      caption: 'Доля от общего парка',
-      icon: Archive,
-      tone: 'sold',
-      percent: getRegistryPercent(tabCounts.sold ?? 0, totalPark),
+      title: 'Требует внимания',
+      value: attentionCount,
+      caption: 'Блокеры и высокий приоритет',
+      icon: AlertTriangle,
+      tone: 'attention',
+      percent: getRegistryPercent(attentionCount, totalPark),
     },
-  ], [tabCounts, totalPark]);
+  ], [attentionCount, tabCounts, totalPark]);
   const activeFilterCount = [
     search.trim() !== '',
     categoryFilter !== 'all',
@@ -1804,6 +1685,8 @@ export default function Equipment() {
     ownerFilter !== 'all',
     driveFilter !== 'all',
     locationFilter !== 'all',
+    gsmFilter !== 'all',
+    priorityFilter !== 'all',
   ].filter(Boolean).length;
 
   const resetFilters = () => {
@@ -1815,6 +1698,8 @@ export default function Equipment() {
     setDriveFilter('all');
     setOwnerFilter('all');
     setLocationFilter('all');
+    setGsmFilter('all');
+    setPriorityFilter('all');
   };
 
   const isEquipmentLoading = equipmentQuery.isLoading || (canViewRentals && ganttQuery.isLoading);
@@ -1890,8 +1775,10 @@ export default function Equipment() {
     categoryFilter,
     driveFilter,
     fleetFilter,
+    gsmFilter,
     locationFilter,
     ownerFilter,
+    priorityFilter,
     search,
     statusFilter,
     typeFilter,
@@ -1902,13 +1789,13 @@ export default function Equipment() {
   }, [totalPages]);
 
   return (
-    <div className="space-y-5 p-4 sm:space-y-6 sm:p-6 md:p-8">
+    <div className="space-y-3 overflow-x-hidden p-4 sm:space-y-4 sm:p-5 md:p-6">
       <section className="app-panel overflow-hidden">
-        <div className="border-b border-border/80 px-5 py-5 sm:px-6">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="border-b border-border/80 px-4 py-4 sm:px-5">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div>
-              <h1 className="app-shell-title text-3xl font-extrabold text-foreground">Техника</h1>
-              <p className="mt-2 text-sm text-muted-foreground">Единый реестр физических единиц техники</p>
+              <h1 className="app-shell-title text-2xl font-extrabold text-foreground">Техника</h1>
+              <p className="mt-1 text-xs text-muted-foreground">Единый реестр парка, готовности и операционных блокеров</p>
             </div>
             {canCreateEquipment && (
               <Link to="/equipment/new">
@@ -1951,6 +1838,10 @@ export default function Equipment() {
           onDriveFilterChange={setDriveFilter}
           locationFilter={locationFilter}
           onLocationFilterChange={setLocationFilter}
+          gsmFilter={gsmFilter}
+          onGsmFilterChange={setGsmFilter}
+          priorityFilter={priorityFilter}
+          onPriorityFilterChange={setPriorityFilter}
           categoryOptions={categoryOptions}
           statusOptions={EQUIPMENT_STATUS_FILTER_OPTIONS}
           typeOptions={typeFilterOptions}
@@ -1982,16 +1873,6 @@ export default function Equipment() {
         error={readinessQuery.error}
       />
 
-      <ManagementActionQueueSection
-        items={actionQueueQuery.data?.items ?? []}
-        summary={actionQueueQuery.data?.summary}
-        isLoading={actionQueueQuery.isLoading}
-        error={actionQueueQuery.error}
-        currentUser={user}
-        canManageActions={canManageActionQueue}
-        initialFilter={initialActionQueueFilter}
-      />
-
       <div className="space-y-3 sm:hidden">
         {totalVisible === 0 ? (
           <EmptyState {...emptyState} />
@@ -2007,9 +1888,13 @@ export default function Equipment() {
             getRegistryStatusAppearance={getRegistryStatusAppearance}
             getPriorityLabel={getPriorityLabel}
             getPriorityAppearance={getPriorityAppearance}
+            getRegistryOwnerLabel={getRegistryOwnerLabel}
+            getEquipmentGsmDisplay={getEquipmentGsmDisplay}
             getSalePdiAppearance={getSalePdiAppearance}
             isSaleRegistryEquipment={isSaleRegistryEquipment}
             salePdiLabels={EQUIPMENT_SALE_PDI_LABELS}
+            selectedEquipmentId={selectedEquipmentId}
+            onSelectEquipment={(equipment) => setSelectedEquipmentId(equipment.id)}
           />
         )}
       </div>
@@ -2018,22 +1903,38 @@ export default function Equipment() {
         {totalVisible === 0 ? (
           <div className="p-6"><EmptyState {...emptyState} /></div>
         ) : (
-          <EquipmentRegistryTable
-            equipmentItems={paginatedEquipment}
-            activeRentalIndex={activeRentalIndex}
-            selectedEquipmentId={selectedEquipmentId}
-            onSelectEquipment={(equipment) => setSelectedEquipmentId(equipment.id)}
-            getEquipmentDetailPath={getEquipmentDetailPath}
-            getEquipmentTypeLabel={(equipment) => findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
-            getEquipmentDriveLabel={getEquipmentDriveLabel}
-            getRegistryStatusLabel={getRegistryStatusLabel}
-            getRegistryStatusAppearance={getRegistryStatusAppearance}
-            getEquipmentCategoryLabel={getEquipmentCategoryLabel}
-            getRegistryOwnerLabel={getRegistryOwnerLabel}
-            getPriorityLabel={getPriorityLabel}
-            getPriorityDotClass={getPriorityDotClass}
-            getEquipmentGsmDisplay={getEquipmentGsmDisplay}
-          />
+          <div className={`grid min-w-0 grid-cols-1 ${
+            quickViewPanelData ? 'xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px]' : ''
+          }`}>
+            <EquipmentRegistryTable
+              equipmentItems={paginatedEquipment}
+              activeRentalIndex={activeRentalIndex}
+              selectedEquipmentId={selectedEquipmentId}
+              onSelectEquipment={(equipment) => setSelectedEquipmentId(equipment.id)}
+              getEquipmentDetailPath={getEquipmentDetailPath}
+              getEquipmentTypeLabel={(equipment) => findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
+              getEquipmentDriveLabel={getEquipmentDriveLabel}
+              getRegistryStatusLabel={getRegistryStatusLabel}
+              getRegistryStatusAppearance={getRegistryStatusAppearance}
+              getEquipmentCategoryLabel={getEquipmentCategoryLabel}
+              getRegistryOwnerLabel={getRegistryOwnerLabel}
+              getPriorityLabel={getPriorityLabel}
+              getPriorityDotClass={getPriorityDotClass}
+              getEquipmentGsmDisplay={getEquipmentGsmDisplay}
+            />
+            {quickViewPanelData ? (
+              <div className="hidden xl:block">
+                <EquipmentQuickViewPanel
+                  selectedEquipment={selectedEquipment}
+                  activeTab={activeQuickViewTab}
+                  onTabChange={setActiveQuickViewTab}
+                  onClose={() => setSelectedEquipmentId(null)}
+                  mode="embedded"
+                  {...quickViewPanelData}
+                />
+              </div>
+            ) : null}
+          </div>
         )}
       </section>
 
@@ -2092,6 +1993,16 @@ export default function Equipment() {
           </div>
         ) : null}
       </div>
+
+      <ManagementActionQueueSection
+        items={actionQueueQuery.data?.items ?? []}
+        summary={actionQueueQuery.data?.summary}
+        isLoading={actionQueueQuery.isLoading}
+        error={actionQueueQuery.error}
+        currentUser={user}
+        canManageActions={canManageActionQueue}
+        initialFilter={initialActionQueueFilter}
+      />
     </div>
   );
 }

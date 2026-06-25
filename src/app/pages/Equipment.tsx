@@ -1791,11 +1791,11 @@ export default function Equipment() {
   return (
     <div className="space-y-3 overflow-x-hidden p-4 sm:space-y-4 sm:p-5 md:p-6">
       <section className="app-panel overflow-hidden">
-        <div className="border-b border-border/80 px-4 py-4 sm:px-5">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div className="border-b border-border/70 px-4 py-3 sm:px-5">
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
             <div>
               <h1 className="app-shell-title text-2xl font-extrabold text-foreground">Техника</h1>
-              <p className="mt-1 text-xs text-muted-foreground">Единый реестр парка, готовности и операционных блокеров</p>
+              <p className="mt-1 max-w-2xl text-xs font-medium text-foreground/58">Единый реестр парка, готовности и операционных блокеров</p>
             </div>
             {canCreateEquipment && (
               <Link to="/equipment/new">
@@ -1899,7 +1899,7 @@ export default function Equipment() {
         )}
       </div>
 
-      <section className="hidden overflow-hidden rounded-2xl border border-border bg-card/95 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)] sm:block">
+      <section className="hidden overflow-hidden rounded-2xl border border-border/85 bg-card/92 shadow-[0_18px_42px_-36px_rgba(15,23,42,0.9)] sm:block">
         {totalVisible === 0 ? (
           <div className="p-6"><EmptyState {...emptyState} /></div>
         ) : (

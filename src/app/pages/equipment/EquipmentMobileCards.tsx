@@ -68,7 +68,7 @@ export function EquipmentMobileCards({
                 onSelectEquipment(equipment);
               }
             }}
-            className={`rounded-xl border bg-card/95 p-4 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)] ${
+            className={`rounded-xl border bg-card/95 p-3.5 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.95)] ${
               isSelected ? 'border-primary/45 bg-primary/8 shadow-[inset_3px_0_0_var(--primary)]' : 'border-border/85'
             } ${onSelectEquipment ? 'cursor-pointer transition hover:border-primary/35 hover:bg-secondary/20 focus:outline-none focus:ring-2 focus:ring-primary/35' : ''}`}
           >
@@ -80,7 +80,7 @@ export function EquipmentMobileCards({
                 <p className="mt-1 break-words text-xs text-foreground/58">
                   Инв. № {equipment.inventoryNumber || '—'} · SN {equipment.serialNumber || 'не указан'}
                 </p>
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-2 flex flex-wrap gap-1.5">
                   <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${getRegistryStatusAppearance(equipment, activeRentalIndex)}`}>
                     {getRegistryStatusLabel(equipment, activeRentalIndex)}
                   </span>
@@ -108,10 +108,10 @@ export function EquipmentMobileCards({
               ) : null}
             </div>
 
-            <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-foreground/60">
+            <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-foreground/60">
               <div className="min-w-0 break-words">Тип: <span className="text-foreground">{equipmentTypeLabel}</span></div>
               <div className="min-w-0 break-words">Привод: <span className="text-foreground">{getEquipmentDriveLabel(equipment.drive)}</span></div>
-              <div className="min-w-0 break-words">Локация: <span className="text-foreground">{equipment.location || '—'}</span></div>
+              <div className="col-span-2 min-w-0 break-words">Локация: <span className="text-foreground">{equipment.location || '—'}</span></div>
               <div className="min-w-0 break-words">Собственник: <span className="text-foreground">{getRegistryOwnerLabel(equipment)}</span></div>
               <div className="flex min-w-0 items-center gap-2">GSM:
                 <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium ${gsmDisplay.className}`}>
@@ -119,15 +119,15 @@ export function EquipmentMobileCards({
                   {gsmDisplay.label}
                 </span>
               </div>
-              <div className="min-w-0 break-words">След. ТО: <span className={new Date(equipment.nextMaintenance) < new Date() ? 'text-red-300' : 'text-foreground'}>{formatDate(equipment.nextMaintenance)}</span></div>
+              <div className="col-span-2 min-w-0 break-words">След. ТО: <span className={new Date(equipment.nextMaintenance) < new Date() ? 'text-red-300' : 'text-foreground'}>{formatDate(equipment.nextMaintenance)}</span></div>
               {isSaleRecord ? (
-                <div className="min-w-0 break-words">
+                <div className="col-span-2 min-w-0 break-words">
                   Цена 1: <span className="text-foreground">{formatCurrency(equipment.salePrice1 ?? 0)}</span>
                 </div>
               ) : (
                 <>
-                  <div className="min-w-0 break-words">Клиент: <span className="text-foreground">{equipment.currentClient || '—'}</span></div>
-                  <div className="min-w-0 break-words">Возврат: <span className="text-foreground">{equipment.returnDate ? formatDate(equipment.returnDate) : '—'}</span></div>
+                  <div className="col-span-2 min-w-0 break-words">Клиент: <span className="text-foreground">{equipment.currentClient || '—'}</span></div>
+                  <div className="col-span-2 min-w-0 break-words">Возврат: <span className="text-foreground">{equipment.returnDate ? formatDate(equipment.returnDate) : '—'}</span></div>
                 </>
               )}
             </div>

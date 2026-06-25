@@ -45,8 +45,8 @@ export function EquipmentRegistryTable({
 }: EquipmentRegistryTableProps) {
   return (
     <div className="app-scroll-fade-x overflow-x-auto">
-      <table className="w-full min-w-[1480px] table-fixed text-left text-sm text-foreground">
-        <thead className="border-b border-border/90 bg-secondary/65 text-[10px] uppercase tracking-[0.14em] text-foreground/62">
+      <table className="w-full min-w-[1480px] table-fixed border-separate border-spacing-0 text-left text-sm text-foreground">
+        <thead className="sticky top-0 z-10 border-b border-border/90 bg-card/96 text-[10px] uppercase tracking-[0.14em] text-foreground/60 backdrop-blur">
           <tr>
             <th className="w-[52px] px-4 py-3 font-medium">Выбор</th>
             <th className="w-[82px] px-3 py-3 font-medium">Фото</th>
@@ -63,7 +63,7 @@ export function EquipmentRegistryTable({
             <th className="w-[58px] px-3 py-3 font-medium">Действия</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-border/90">
+        <tbody>
           {equipmentItems.map((equipment) => {
             const detailPath = getEquipmentDetailPath(equipment);
             const imageSrc = photoSource(equipment.photo);
@@ -76,12 +76,12 @@ export function EquipmentRegistryTable({
             return (
               <tr
                 key={equipment.id}
-                className={`cursor-pointer align-top transition-colors hover:bg-secondary/55 ${
-                  selectedEquipmentId === equipment.id ? 'bg-primary/8 shadow-[inset_3px_0_0_var(--primary)]' : 'bg-card/20'
+                className={`cursor-pointer align-top transition-colors ${
+                  selectedEquipmentId === equipment.id ? 'bg-primary/7 shadow-[inset_3px_0_0_var(--primary)]' : 'bg-card/20 hover:bg-secondary/42'
                 }`}
                 onClick={() => onSelectEquipment(equipment)}
               >
-                <td className="px-4 py-3">
+                <td className="border-b border-border/75 px-4 py-3">
                   <button
                     type="button"
                     aria-label={selectedEquipmentId === equipment.id ? 'Техника выбрана' : 'Выбрать технику'}
@@ -98,7 +98,7 @@ export function EquipmentRegistryTable({
                     <Check className="h-3.5 w-3.5" />
                   </button>
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   {imageSrc ? (
                     <AuthenticatedImage
                       photo={normalizePhotoReference(equipment.photo, { idPrefix: `${equipment.id}-registry` })}
@@ -108,13 +108,13 @@ export function EquipmentRegistryTable({
                       fallbackClassName="h-12 min-h-0 w-16"
                     />
                   ) : (
-                    <div className="flex h-12 w-16 items-center justify-center rounded-lg border border-dashed border-border bg-secondary/70 text-muted-foreground" title="Нет фото">
+                    <div className="flex h-12 w-16 items-center justify-center rounded-lg border border-border/75 bg-[linear-gradient(135deg,rgba(255,255,255,0.055),rgba(255,255,255,0.018))] text-foreground/42 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]" title="Нет фото">
                       <Boxes className="h-4 w-4" />
                       <span className="sr-only">Нет фото</span>
                     </div>
                   )}
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <Link
                     to={detailPath}
                     onClick={(event) => event.stopPropagation()}
@@ -127,37 +127,37 @@ export function EquipmentRegistryTable({
                     SN {equipment.serialNumber || 'не указан'}
                   </div>
                 </td>
-                <td className="px-3 py-3">
-                  <Link to={detailPath} onClick={(event) => event.stopPropagation()} className="block truncate font-semibold text-foreground hover:text-primary">
+                <td className="border-b border-border/75 px-3 py-3">
+                  <Link to={detailPath} onClick={(event) => event.stopPropagation()} className="block truncate font-semibold text-foreground hover:text-primary" title={title}>
                     {title}
                   </Link>
                   {equipment.year ? (
                     <div className="mt-1 text-xs text-foreground/58">Год выпуска: {equipment.year}</div>
                   ) : null}
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <div className="truncate text-foreground">{equipmentTypeLabel}</div>
                   <div className="mt-1 truncate text-xs text-foreground/58">{driveLabel}</div>
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <span className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-medium ${getRegistryStatusAppearance(equipment, activeRentalIndex)}`}>
                     <span className="truncate">{getRegistryStatusLabel(equipment, activeRentalIndex)}</span>
                   </span>
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <span className="inline-flex max-w-full rounded-full border border-border/70 bg-secondary/75 px-2.5 py-1 text-xs font-medium text-foreground/68">
                     <span className="truncate">{getEquipmentCategoryLabel(equipment.category)}</span>
                   </span>
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <div className="truncate text-foreground" title={ownerLabel}>{ownerLabel}</div>
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <div className="truncate text-foreground/68" title={equipment.location || '—'}>
                     {equipment.location || '—'}
                   </div>
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <div className="truncate text-foreground" title={equipment.currentClient || '—'}>
                     {equipment.currentClient || '—'}
                   </div>
@@ -165,19 +165,19 @@ export function EquipmentRegistryTable({
                     <div className="mt-1 truncate text-xs text-foreground/58">Возврат: {equipment.returnDate}</div>
                   ) : null}
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <span className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ${gsmDisplay.className}`}>
                     <span className={`h-2 w-2 rounded-full ${gsmDisplay.dotClassName}`} />
                     {gsmDisplay.label}
                   </span>
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <span className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-secondary/75 px-2.5 py-1 text-xs font-medium text-foreground">
                     <span className={`h-2 w-2 rounded-full ${getPriorityDotClass(equipment.priority)}`} />
                     {getPriorityLabel(equipment.priority)}
                   </span>
                 </td>
-                <td className="px-3 py-3">
+                <td className="border-b border-border/75 px-3 py-3">
                   <DropdownMenu.Root>
                     <DropdownMenu.Trigger asChild>
                       <button

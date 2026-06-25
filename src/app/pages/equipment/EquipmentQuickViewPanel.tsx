@@ -96,11 +96,11 @@ export function EquipmentQuickViewPanel({
     <aside
       data-testid="equipment-quick-view-panel"
       className={mode === 'embedded'
-        ? 'flex h-full min-h-[560px] w-full flex-col overflow-hidden border-l border-border/90 bg-card/88'
+        ? 'flex h-full min-h-[560px] w-full flex-col overflow-hidden border-l border-border/90 bg-card/92'
         : 'fixed inset-x-0 bottom-0 z-50 flex max-h-[82vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border/90 bg-background shadow-2xl xl:hidden'
       }
     >
-      <div className="border-b border-border/85 bg-secondary/20 p-4">
+      <div className="border-b border-border/85 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012))] p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
             {mainPhoto ? (
@@ -118,7 +118,7 @@ export function EquipmentQuickViewPanel({
             )}
             <div className="min-w-0">
               <h2 className="app-shell-title truncate text-lg font-extrabold text-foreground">{title}</h2>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <span className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-medium ${statusClassName}`}>
                   {statusLabel}
                 </span>
@@ -142,7 +142,7 @@ export function EquipmentQuickViewPanel({
         </div>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto border-b border-border/85 bg-card/55 px-4 py-2">
+      <div className="flex gap-1 overflow-x-auto border-b border-border/80 bg-card/62 px-4 py-2">
         {EQUIPMENT_PREVIEW_TABS.map(tab => (
           <button
             key={tab.key}

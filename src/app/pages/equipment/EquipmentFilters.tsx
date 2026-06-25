@@ -77,7 +77,7 @@ export function EquipmentFilters({
 
   return (
     <>
-      <div className="px-4 py-3 sm:px-5">
+      <div className="border-t border-border/45 bg-card/45 px-4 py-2.5 sm:px-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative min-w-0 flex-1 lg:max-w-[360px]">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -88,7 +88,7 @@ export function EquipmentFilters({
               className="app-filter-input h-9 rounded-lg pl-10 text-sm font-medium text-foreground placeholder:text-foreground/42"
             />
           </div>
-          <div className="hidden min-w-0 flex-nowrap items-center gap-2 xl:flex">
+          <div className="hidden min-w-0 flex-nowrap items-center gap-1.5 xl:flex">
             <select value={categoryFilter} onChange={(event) => onCategoryFilterChange(event.target.value)} className={inlineSelectClass} aria-label="Категория техники">
               <option value="all">Все категории</option>
               {categoryOptions.map((category) => (

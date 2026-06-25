@@ -17,9 +17,9 @@ export function EquipmentQuickActions({ actions }: EquipmentQuickActionsProps) {
   };
 
   return (
-    <section className="mb-5 rounded-xl border border-border/80 bg-card/78 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
-      <h3 className="text-sm font-extrabold text-foreground">Быстрые действия</h3>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+    <section className="mb-4 rounded-xl border border-border/80 bg-card/78 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]">
+      <h3 className="text-xs font-extrabold uppercase tracking-[0.1em] text-foreground/68">Быстрые действия</h3>
+      <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
         {actions.map((action) => {
           const Icon = action.icon;
           const disabled = Boolean(action.disabled || (!action.to && !action.onClick));

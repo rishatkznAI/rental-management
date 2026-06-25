@@ -19,6 +19,9 @@ test('dashboard company health renders a responsive SVG built from ResizeObserve
 
   assert.match(block, /new ResizeObserver/);
   assert.match(block, /containerRef/);
+  assert.match(block, /role="region"/);
+  assert.match(block, /aria-label=\{`Здоровье компании \$\{progress\} из 100: \$\{label\}`\}/);
+  assert.match(block, /data-testid="dashboard-company-health"/);
   assert.match(block, /data-size-source="ResizeObserver"/);
   assert.match(block, /<svg[\s\S]*data-testid="dashboard-company-health-svg"/);
   assert.doesNotMatch(block, /window\.innerWidth/);
@@ -41,7 +44,8 @@ test('dashboard company health uses compact list fallback below 900px container 
 
   assert.match(block, /containerWidth < 900/);
   assert.match(block, /data-company-health-layout=\{isCompact \? 'compact' : 'svg'\}/);
-  assert.match(block, /data-testid="dashboard-company-health-compact-list"/);
+  assert.match(block, /data-testid="dashboard-company-health-compact"/);
+  assert.match(block, /data-testid="dashboard-company-health-title"/);
   assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="compact"\]\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
 });
 

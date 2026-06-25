@@ -299,7 +299,7 @@ async function expectExecutiveCockpitVisible(page: Page) {
   const cockpit = page.getByTestId('dashboard-executive-cockpit');
   const keySignals = page.getByTestId('dashboard-key-signals-command').or(page.getByTestId('dashboard-key-signals')).first();
   const monthDynamics = page.getByTestId('dashboard-month-dynamics-command').or(page.getByTestId('dashboard-month-dynamics')).first();
-  const companyHealth = page.getByTestId('dashboard-company-health-command').or(page.getByTestId('dashboard-company-health')).first();
+  const companyHealth = page.getByTestId('dashboard-company-health');
   await expect(page.getByText('Пульт управления арендным бизнесом'), 'dashboard command center subtitle should be visible after login').toBeVisible();
   await expect(cockpit, 'executive cockpit KPI grid should be visible after login').toBeVisible();
 
@@ -319,7 +319,8 @@ async function expectExecutiveCockpitVisible(page: Page) {
   await expect(keySignals, 'dashboard key signals should be visible').toBeVisible();
   await expect(keySignals.getByRole('heading', { name: /Очередь внимания|Главные сигналы сегодня/ }), 'dashboard signal strip should be visible').toBeVisible();
   await expect(monthDynamics.getByRole('heading', { name: 'Динамика месяца' }), 'dashboard cash flow card should be visible').toBeVisible();
-  await expect(companyHealth.getByText('Здоровье компании'), 'dashboard company health card should be visible').toBeVisible();
+  await expectDashboardCompanyHealthLayout(page, companyHealth);
+  await expectNoHorizontalOverflow(page, 'dashboard executive cockpit');
 
   const serviceLoadCard = page.getByTestId('dashboard-kpi-service-load');
   await expect(serviceLoadCard, 'service CTA should target #/service')
@@ -354,6 +355,102 @@ async function expectExecutiveCockpitVisible(page: Page) {
   }
   expect(monthDynamicsHeadingsInFirstViewport, 'first viewport should not contain duplicate Динамика месяца headings').toBeLessThanOrEqual(1);
   expect(companyHealthHeadingsInFirstViewport, 'first viewport should not contain duplicate Здоровье компании headings').toBeLessThanOrEqual(1);
+}
+
+async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Locator) {
+  await expect(companyHealth, 'dashboard company health region should be visible').toBeVisible();
+
+  const viewport = page.viewportSize() ?? { width: 1440, height: 900 };
+  const layout = await page.evaluate(() => {
+    const visibleRect = (element: Element | null) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return {
+        top: Math.round(rect.top),
+        bottom: Math.round(rect.bottom),
+        left: Math.round(rect.left),
+        right: Math.round(rect.right),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        visible: style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0,
+      };
+    };
+
+    const health = document.querySelector('[data-testid="dashboard-company-health"]');
+    const svg = health?.querySelector('[data-testid="dashboard-company-health-svg"]') as SVGSVGElement | null;
+    const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]');
+    const points = Array.from(health?.querySelectorAll<SVGCircleElement>('[data-testid="dashboard-company-health-point"]') || []);
+    const viewBox = String(svg?.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+    const centerX = Number.isFinite(viewBox[2]) ? viewBox[2] / 2 : 0;
+    const centerY = Number.isFinite(viewBox[3]) ? viewBox[3] / 2 : 0;
+    const radii = points.map(point => {
+      const x = Number(point.getAttribute('cx'));
+      const y = Number(point.getAttribute('cy'));
+      return Math.hypot(x - centerX, y - centerY);
+    }).filter(Number.isFinite);
+
+    return {
+      label: health?.getAttribute('aria-label') || svg?.getAttribute('aria-label') || '',
+      health: visibleRect(health),
+      svg: visibleRect(svg),
+      compact: visibleRect(compact),
+      compactCards: compact?.querySelectorAll('a.rentcore-command-card').length || 0,
+      points: {
+        count: points.length,
+        radiusAverage: radii.length ? radii.reduce((sum, radius) => sum + radius, 0) / radii.length : 0,
+        radiusSpread: radii.length ? Math.max(...radii) - Math.min(...radii) : 0,
+      },
+    };
+  });
+
+  expect(layout.health?.visible, `dashboard company health region should have a visible box (${JSON.stringify(layout)})`).toBe(true);
+  expect(layout.label, 'dashboard company health region should expose an accessible label').toMatch(/Здоровье компании/);
+
+  if (viewport.width >= 1024) {
+    expect(layout.svg?.visible, `desktop dashboard company health should render SVG (${JSON.stringify(layout)})`).toBe(true);
+    expect(layout.svg?.width || 0, 'desktop company health SVG width should be substantial').toBeGreaterThanOrEqual(180);
+    expect(layout.svg?.height || 0, 'desktop company health SVG height should be substantial').toBeGreaterThanOrEqual(180);
+    const aspectDelta = Math.abs(((layout.svg?.width || 0) / Math.max(layout.svg?.height || 1, 1)) - 1);
+    expect(aspectDelta, `desktop company health SVG should stay circular (${JSON.stringify(layout.svg)})`).toBeLessThanOrEqual(0.05);
+    expect(layout.points.count, 'desktop company health should render direction points').toBeGreaterThanOrEqual(6);
+    expect(layout.points.radiusAverage, 'desktop company health points should sit away from the center').toBeGreaterThan(50);
+    expect(layout.points.radiusSpread, `desktop company health points should share one radius (${JSON.stringify(layout.points)})`).toBeLessThanOrEqual(1);
+    return;
+  }
+
+  expect(layout.compact?.visible, `tablet/mobile dashboard company health should render compact list (${JSON.stringify(layout)})`).toBe(true);
+  expect(layout.compactCards, 'tablet/mobile company health compact list should include all direction cards').toBeGreaterThanOrEqual(6);
+}
+
+async function expectNoHorizontalOverflow(page: Page, label: string) {
+  const overflow = await page.evaluate(() => {
+    const viewportWidth = document.documentElement.clientWidth;
+    const scrollWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+    const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
+      .filter(element => {
+        const style = window.getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && rect.right > viewportWidth + 1;
+      })
+      .slice(0, 8)
+      .map(element => {
+        const rect = element.getBoundingClientRect();
+        return {
+          tag: element.tagName.toLowerCase(),
+          testId: element.getAttribute('data-testid') || '',
+          className: String(element.className || '').slice(0, 120),
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          width: Math.round(rect.width),
+        };
+      });
+    return { viewportWidth, scrollWidth, overflowX: scrollWidth - viewportWidth, offenders };
+  });
+
+  expect(overflow.overflowX, `${label} should not scroll horizontally (${JSON.stringify(overflow)})`).toBeLessThanOrEqual(1);
+  expect(overflow.offenders, `${label} visible elements should stay inside the viewport`).toEqual([]);
 }
 
 async function elementRect(locator: Locator) {
@@ -401,6 +498,14 @@ async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: strin
   await expectExecutiveCockpitVisible(page);
   await page.screenshot({
     path: testInfo.outputPath('production-dashboard-cockpit-mobile.png'),
+    fullPage: true,
+  });
+
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
+  await expectExecutiveCockpitVisible(page);
+  await page.screenshot({
+    path: testInfo.outputPath('production-dashboard-cockpit-tablet.png'),
     fullPage: true,
   });
 

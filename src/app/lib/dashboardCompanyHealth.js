@@ -18,6 +18,23 @@ function clampPercent(value) {
   return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
 }
 
+function operationalLoadLabel(score) {
+  if (score > 85) return 'Критично';
+  if (score >= 70) return 'Высокая';
+  if (score >= 40) return 'Нормальная';
+  return 'Низкая';
+}
+
+function operationalLoadTone(score, criticalIssues = 0) {
+  if (safeCount(criticalIssues) > 0) {
+    return score > 85 || safeCount(criticalIssues) >= 5 ? 'danger' : 'warning';
+  }
+  if (score > 85) return 'danger';
+  if (score >= 70) return 'warning';
+  if (score >= 40) return 'default';
+  return 'success';
+}
+
 function contourStatus({ count = 0, risk = 0, critical = 0 }) {
   if (safeCount(count) <= 0) return 'no_data';
   if (safeCount(critical) > 0) return 'critical';
@@ -164,4 +181,52 @@ export function alertHasValidSource(alert) {
   if (!category || !detail || !link) return false;
   if (link === '/rentals/undefined' || link === '/rentals/null' || link === '/service/undefined') return false;
   return Boolean(entity || /^\/(clients|documents|equipment|rentals|service|deliveries)(\/|\?|$)/.test(link));
+}
+
+export function buildOperationalLoadModel(input = {}) {
+  const baseSignals = [
+    input.activeEquipment,
+    input.totalRentals,
+    input.totalServiceTickets,
+    input.totalDeliveries,
+    input.totalDocuments,
+    input.totalTasks,
+    input.totalAttentionActions,
+    input.totalDebtRows,
+  ].map(safeCount);
+  const hasSufficientData = baseSignals.some(value => value > 0);
+
+  if (!hasSufficientData) {
+    return {
+      score: null,
+      label: 'Недостаточно данных',
+      hint: 'Индекс N/A · недостаточно данных',
+      tone: 'default',
+      hasSufficientData: false,
+    };
+  }
+
+  const activeRentals = safeCount(input.activeRentals);
+  const openServiceTickets = safeCount(input.openServiceTickets);
+  const returnPressure = safeCount(input.returnPressure);
+  const deliveryPressure = safeCount(input.deliveryPressure);
+  const documentPressure = safeCount(input.documentPressure);
+  const taskPressure = safeCount(input.taskPressure);
+  const criticalIssues = safeCount(input.criticalIssues);
+  const score = clampPercent(Math.round(
+    Math.min(activeRentals, 35) * 0.7
+    + Math.min(openServiceTickets, 70) * 0.35
+    + Math.min(returnPressure, 24) * 1.1
+    + Math.min(deliveryPressure, 24) * 0.9
+    + Math.min(documentPressure, 28) * 0.7
+    + Math.min(taskPressure, 40) * 0.55,
+  ));
+
+  return {
+    score,
+    label: operationalLoadLabel(score),
+    hint: `Индекс ${score}/100 · критично ${criticalIssues}`,
+    tone: operationalLoadTone(score, criticalIssues),
+    hasSufficientData: true,
+  };
 }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { alertHasValidSource, buildCompanyHealthModel } from '../src/app/lib/dashboardCompanyHealth.js';
+import { alertHasValidSource, buildCompanyHealthModel, buildOperationalLoadModel } from '../src/app/lib/dashboardCompanyHealth.js';
 
 const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
 
@@ -75,4 +75,41 @@ test('dashboard source has no decorative fallback company health score', () => {
   assert.doesNotMatch(dashboardSource, /companyHealthDisplayScore\s*=\s*dashboardLooksDemoSafe[\s\S]*\?\s*68/);
   assert.doesNotMatch(dashboardSource, /companyHealthDisplayScore[\s\S]{0,120}\?\s*72/);
   assert.doesNotMatch(dashboardSource, /roleDashboardUtilizationPercent = activeEquipment > 0 \? utilization : 62/);
+});
+
+test('insufficient operational load data does not show a low management conclusion', () => {
+  const model = buildOperationalLoadModel({});
+
+  assert.equal(model.score, null);
+  assert.equal(model.label, 'Недостаточно данных');
+  assert.equal(model.hint, 'Индекс N/A · недостаточно данных');
+  assert.notEqual(model.label, 'Низкая');
+});
+
+test('valid empty operational load can show low only when calculation base exists', () => {
+  const model = buildOperationalLoadModel({
+    activeEquipment: 6,
+    totalRentals: 0,
+    totalServiceTickets: 0,
+    totalDeliveries: 0,
+    totalDocuments: 0,
+    totalTasks: 0,
+    totalAttentionActions: 0,
+    activeRentals: 0,
+    openServiceTickets: 0,
+    returnPressure: 0,
+    deliveryPressure: 0,
+    documentPressure: 0,
+    taskPressure: 0,
+    criticalIssues: 0,
+  });
+
+  assert.equal(model.score, 0);
+  assert.equal(model.label, 'Низкая');
+  assert.equal(model.hint, 'Индекс 0/100 · критично 0');
+});
+
+test('dashboard source renders N/A for uncalculated operational load index', () => {
+  assert.match(dashboardSource, /operationalLoadScore === null \? 'Индекс N\/A'/);
+  assert.doesNotMatch(dashboardSource, /hint: `Индекс \$\{operationalLoadScore\}\/100/);
 });

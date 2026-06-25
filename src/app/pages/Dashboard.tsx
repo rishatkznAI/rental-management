@@ -1355,8 +1355,7 @@ function CompanyHealthCommandCenter({
       data-card-density={cardDensity}
     >
       {isCompact ? (
-        <div className="rentcore-command-compact-list grid gap-2.5" data-testid="dashboard-company-health-compact-list">
-          <span className="sr-only" data-testid="dashboard-company-health-compact" />
+        <div className="rentcore-command-compact-list grid gap-2.5" data-testid="dashboard-company-health-compact">
           {allDirections.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
           <div className="rounded-[12px] border border-lime-300/18 bg-black/20 p-3">
             <div className="flex items-center justify-between gap-3">

@@ -49,6 +49,25 @@ test('dashboard company health uses compact list fallback below 900px container 
   assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="compact"\]\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
 });
 
+test('dashboard company health compact wrapper contains six anchor direction cards', () => {
+  const commandCenterBlock = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
+  const cardBlock = sourceBlock(dashboardSource, 'function CompanyHealthDirectionCard', 'function CompanyHealthCommandCenter');
+  const compactWrapperBlock = sourceBlock(commandCenterBlock, 'data-testid="dashboard-company-health-compact"', '<div className="rounded-[12px]');
+  const directionsBlock = sourceBlock(dashboardSource, 'const commandCenterDirections = [', '].filter(Boolean)');
+
+  assert.match(compactWrapperBlock, /allDirections\.map\(item => <CompanyHealthDirectionCard key=\{item\.id\} item=\{item\} \/>\)/);
+  assert.doesNotMatch(compactWrapperBlock, /sr-only/);
+  assert.match(cardBlock, /<Link[\s\S]*className="rentcore-command-card/);
+  assert.match(cardBlock, /title=\{title\}/);
+  assert.match(cardBlock, /rentcore-command-card-title[\s\S]*\{item\.title\}/);
+  assert.match(cardBlock, /rentcore-command-card-compact-value[\s\S]*\{item\.metrics\[0\]\?\.value \?\? ''\}/);
+
+  for (const label of ['Деньги', 'Парк техники', 'Сервис', 'Доставка', 'Документы', 'Возвраты']) {
+    assert.match(directionsBlock, new RegExp(`title: '${label}'`));
+  }
+  assert.equal(directionsBlock.match(/id: '/g)?.length, 6);
+});
+
 test('dashboard company health layout avoids horizontal overflow on narrow containers', () => {
   assert.match(themeSource, /\.rentcore-command-map\s*\{[\s\S]*width: min\(100%, var\(--rc-map-w\)\);/);
   assert.match(themeSource, /\.rentcore-command-column\s*\{[\s\S]*min-width: 0;/);

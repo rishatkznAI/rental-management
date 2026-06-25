@@ -1214,6 +1214,15 @@ type CompanyHealthDirection = {
   metrics: Array<{ label: string; value: string }>;
 };
 
+const healthSegmentColors: Record<DashboardTone, string> = {
+  default: '#78909c',
+  success: '#8fae74',
+  warning: '#b9975b',
+  danger: '#c97972',
+  info: '#6f9aa4',
+  violet: '#9a8ab6',
+};
+
 function polarToCartesian(centerX: number, centerY: number, radius: number, angleInDegrees: number) {
   const angleInRadians = (angleInDegrees - 90) * Math.PI / 180;
   return {
@@ -1222,20 +1231,35 @@ function polarToCartesian(centerX: number, centerY: number, radius: number, angl
   };
 }
 
+function describeArc(centerX: number, centerY: number, radius: number, startAngle: number, endAngle: number) {
+  const start = polarToCartesian(centerX, centerY, radius, endAngle);
+  const end = polarToCartesian(centerX, centerY, radius, startAngle);
+  const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+  return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArcFlag} 0 ${end.x} ${end.y}`;
+}
+
 function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) {
   const Icon = item.icon;
   const tone = toneStyles[item.tone];
+  const segmentColor = healthSegmentColors[item.tone] ?? healthSegmentColors.default;
   const title = [
     item.title,
     ...item.metrics.map(metric => `${metric.label}: ${metric.value}`),
   ].join('\n');
 
   return (
-    <Link key={item.id} to={item.href} title={title} className="rentcore-command-card group flex min-w-0 flex-col justify-between px-2.5 py-2">
+    <Link
+      key={item.id}
+      to={item.href}
+      title={title}
+      className="rentcore-command-card group flex min-w-0 flex-col justify-between px-2.5 py-2"
+      style={{ '--rc-health-segment-color': segmentColor } as React.CSSProperties}
+    >
       <div className="rentcore-command-card-head flex min-w-0 items-center gap-2">
         <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] border border-lime-300/18 bg-black/20 ring-1 ring-inset ring-lime-300/8 ${tone.accent}`}>
           <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
         </span>
+        <span className="rentcore-command-card-status" aria-hidden="true" />
         <span className="rentcore-command-card-copy min-w-0 flex-1">
           <span className="rentcore-command-card-title block truncate text-[11px] font-extrabold uppercase tracking-[0.06em] text-lime-200">{item.title}</span>
         </span>
@@ -1263,6 +1287,7 @@ function CompanyHealthCommandCenter({
   score,
   label,
   tone,
+  criticalSignals,
 }: {
   leftDirections: CompanyHealthDirection[];
   rightDirections: CompanyHealthDirection[];
@@ -1271,6 +1296,7 @@ function CompanyHealthCommandCenter({
   score: number;
   label: string;
   tone: DashboardTone;
+  criticalSignals: number;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -1297,13 +1323,23 @@ function CompanyHealthCommandCenter({
   const cardDensity = estimatedCardWidth > 0 && estimatedCardWidth < 180 ? 'icon-value' : 'full';
   const center = svgSize / 2;
   const radius = svgSize * 0.43;
+  const ringRadius = svgSize * 0.37;
+  const segmentStrokeWidth = Math.max(8, Math.min(12, svgSize * 0.038));
   const dotRadius = Math.max(3.5, svgSize * 0.016);
   const progress = clampPercent(score);
-  const circumference = 2 * Math.PI * (svgSize * 0.36);
-  const progressStroke = circumference * (progress / 100);
-  const toneColor = tone === 'danger' ? '#fb7185' : tone === 'warning' ? '#facc15' : '#a3e635';
+  const segmentAngle = 360 / Math.max(allDirections.length, 1);
+  const segmentGap = Math.min(8, segmentAngle * 0.18);
+  const segments = allDirections.map((item, index) => {
+    const startAngle = index * segmentAngle + segmentGap / 2;
+    const endAngle = (index + 1) * segmentAngle - segmentGap / 2;
+    return {
+      item,
+      color: healthSegmentColors[item.tone] ?? healthSegmentColors.default,
+      path: describeArc(center, center, ringRadius, startAngle, endAngle),
+    };
+  });
   const dots = allDirections.map((item, index) => {
-    const angle = -112 + (index * (224 / Math.max(allDirections.length - 1, 1)));
+    const angle = index * segmentAngle + segmentAngle / 2;
     return { item, angle, point: polarToCartesian(center, center, radius, angle) };
   });
 
@@ -1319,7 +1355,8 @@ function CompanyHealthCommandCenter({
       data-card-density={cardDensity}
     >
       {isCompact ? (
-        <div className="rentcore-command-compact-list grid gap-2.5" data-testid="dashboard-company-health-compact">
+        <div className="rentcore-command-compact-list grid gap-2.5" data-testid="dashboard-company-health-compact-list">
+          <span className="sr-only" data-testid="dashboard-company-health-compact" />
           {allDirections.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
           <div className="rounded-[12px] border border-lime-300/18 bg-black/20 p-3">
             <div className="flex items-center justify-between gap-3">
@@ -1349,20 +1386,31 @@ function CompanyHealthCommandCenter({
               data-testid="dashboard-company-health-svg"
               data-size-source="ResizeObserver"
             >
-              <circle cx={center} cy={center} r={svgSize * 0.46} fill="rgba(8,15,23,0.82)" stroke="rgba(190,242,100,0.16)" strokeWidth="1" />
-              <circle cx={center} cy={center} r={svgSize * 0.36} fill="none" stroke="rgba(148,163,184,0.22)" strokeWidth={Math.max(8, svgSize * 0.045)} />
-              <circle
-                cx={center}
-                cy={center}
-                r={svgSize * 0.36}
-                fill="none"
-                stroke={toneColor}
-                strokeWidth={Math.max(8, svgSize * 0.045)}
-                strokeLinecap="round"
-                strokeDasharray={`${progressStroke} ${circumference - progressStroke}`}
-                transform={`rotate(-90 ${center} ${center})`}
-              />
-              <circle cx={center} cy={center} r={svgSize * 0.25} fill="rgba(2,6,12,0.88)" stroke="rgba(190,242,100,0.1)" strokeWidth="1" />
+              <circle cx={center} cy={center} r={svgSize * 0.46} fill="rgba(8,13,19,0.78)" stroke="rgba(148,163,184,0.12)" strokeWidth="1" />
+              <circle cx={center} cy={center} r={svgSize * 0.43} fill="none" stroke="rgba(15,23,42,0.68)" strokeWidth="1" />
+              {segments.map(segment => (
+                <path
+                  key={`${segment.item.id}-track`}
+                  d={segment.path}
+                  fill="none"
+                  stroke="rgba(100,116,139,0.24)"
+                  strokeWidth={segmentStrokeWidth}
+                  strokeLinecap="round"
+                />
+              ))}
+              {segments.map(segment => (
+                <path
+                  key={segment.item.id}
+                  data-testid="dashboard-company-health-segment"
+                  d={segment.path}
+                  fill="none"
+                  stroke={segment.color}
+                  strokeWidth={segmentStrokeWidth}
+                  strokeLinecap="round"
+                  opacity={segment.item.tone === 'success' ? 0.78 : segment.item.tone === 'warning' ? 0.72 : segment.item.tone === 'danger' ? 0.76 : 0.64}
+                />
+              ))}
+              <circle cx={center} cy={center} r={svgSize * 0.25} fill="rgba(3,7,12,0.9)" stroke="rgba(148,163,184,0.14)" strokeWidth="1" />
               {dots.map(({ item, point }) => (
                 <circle
                   key={item.id}
@@ -1370,16 +1418,17 @@ function CompanyHealthCommandCenter({
                   cx={point.x}
                   cy={point.y}
                   r={dotRadius}
-                  fill={tone === 'danger' ? '#fb7185' : toneStyles[item.tone].dot.includes('red') ? '#fb7185' : toneStyles[item.tone].dot.includes('yellow') ? '#facc15' : '#a3e635'}
-                  stroke="rgba(2,6,12,0.92)"
-                  strokeWidth="2"
+                  fill={healthSegmentColors[item.tone] ?? healthSegmentColors.default}
+                  stroke="rgba(3,7,12,0.95)"
+                  strokeWidth="1.5"
                 />
               ))}
-              <foreignObject x={center - svgSize * 0.23} y={center - svgSize * 0.18} width={svgSize * 0.46} height={svgSize * 0.36}>
+              <foreignObject x={center - svgSize * 0.24} y={center - svgSize * 0.2} width={svgSize * 0.48} height={svgSize * 0.4}>
                 <div className="flex h-full flex-col items-center justify-center text-center">
-                  <p className="text-[8.5px] font-semibold uppercase tracking-[0.15em] text-slate-400">Здоровье компании</p>
-                  <p className="mt-1 text-[34px] font-extrabold leading-none text-white 2xl:text-[36px]">{progress}<span className="text-[13px] text-slate-500">/100</span></p>
-                  <p className={`mt-1 text-[11px] font-extrabold uppercase ${toneStyles[tone].accent}`}>{label}</p>
+                  <p className="text-[8px] font-semibold uppercase tracking-[0.14em] text-slate-400">Здоровье компании</p>
+                  <p className="mt-1 text-[32px] font-extrabold leading-none text-slate-50 2xl:text-[34px]">{progress}<span className="text-[13px] font-semibold text-slate-500">/100</span></p>
+                  <p className="mt-1 rounded-full border border-amber-300/12 bg-amber-300/7 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.04em] text-amber-200/85">{label}</p>
+                  <p className="rentcore-health-critical-caption mt-1 text-[9.5px] font-semibold text-slate-500">{criticalSignals} критических сигнала</p>
                 </div>
               </foreignObject>
             </svg>
@@ -4060,6 +4109,7 @@ export default function Dashboard() {
                   score={companyHealthDisplayScore}
                   label={companyHealthLabel}
                   tone={companyHealthTone}
+                  criticalSignals={riskSignalCounts.critical}
                 />
               </div>
             </div>
@@ -4803,6 +4853,7 @@ export default function Dashboard() {
                 score={companyHealthDisplayScore}
                 label={companyHealthLabel}
                 tone={companyHealthTone}
+                criticalSignals={riskSignalCounts.critical}
               />
             </div>
 

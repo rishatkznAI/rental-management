@@ -86,7 +86,7 @@ import { calculateRentalBilling, getRentalBillingAmount } from '../lib/rentalDow
 import { buildDashboardAttentionSummary } from '../lib/dashboardAttention.js';
 import { buildDocumentControl, isUnsignedDocument } from '../lib/documentControl.js';
 import { buildDebtCollectionDashboardSummary } from '../lib/debtCollectionPlans.js';
-import { alertHasValidSource, buildCompanyHealthModel } from '../lib/dashboardCompanyHealth.js';
+import { alertHasValidSource, buildCompanyHealthModel, buildOperationalLoadModel } from '../lib/dashboardCompanyHealth.js';
 import { taskPrioritySummaryLabel } from '../lib/tasksCenter.js';
 import { tasksCenterService } from '../services/tasks-center.service';
 import {
@@ -3592,43 +3592,32 @@ export default function Dashboard() {
       ? 'danger'
       : 'warning'
     : 'success';
-  const operationalLoadInputs = [
-    activeRentalsList.length,
-    openServiceTickets.length,
-    rentalsEndingToday.length + rentalsEndingTomorrow.length + overdueRentalsList.length,
-    todayDeliveries.length + overdueDeliveries.length + unassignedDeliveries.length,
-    unsignedDocumentsCount + documentControl.kpi.closedRentalsWithoutClosingDocs,
-    tasksWithoutResponsible.length + topAttentionActions.length,
-  ];
-  const operationalLoadScore = clampPercent(Math.round(
-    Math.min(activeRentalsList.length, 35) * 0.7
-    + Math.min(openServiceTickets.length, 70) * 0.35
-    + Math.min(rentalsEndingToday.length + rentalsEndingTomorrow.length + overdueRentalsList.length, 24) * 1.1
-    + Math.min(todayDeliveries.length + overdueDeliveries.length + unassignedDeliveries.length, 24) * 0.9
-    + Math.min(unsignedDocumentsCount + documentControl.kpi.closedRentalsWithoutClosingDocs, 28) * 0.7
-    + Math.min(tasksWithoutResponsible.length + topAttentionActions.length, 40) * 0.55,
-  ));
   const criticalOperationalIssues = overdueRentalsList.length
     + overdueDeliveries.length
     + overdueServiceTickets.length
     + unassignedServiceTickets.length
     + (actionAttention?.summary?.critical ?? 0);
-  const operationalLoadTone: DashboardTone = criticalOperationalIssues > 0
-    ? (operationalLoadScore > 85 || criticalOperationalIssues >= 5 ? 'danger' : 'warning')
-    : operationalLoadScore > 85
-      ? 'danger'
-      : operationalLoadScore >= 70
-        ? 'warning'
-        : operationalLoadScore >= 40
-          ? 'default'
-          : 'success';
-  const operationalLoadLabel = operationalLoadScore > 85
-    ? 'Критично'
-    : operationalLoadScore >= 70
-    ? 'Высокая'
-    : operationalLoadScore >= 40
-      ? 'Нормальная'
-      : 'Низкая';
+  const operationalLoadModel = buildOperationalLoadModel({
+    activeEquipment,
+    totalRentals: viewPlannerRentals.length || viewRentals.length,
+    totalServiceTickets: tickets.length,
+    totalDeliveries: deliveries.length,
+    totalDocuments: documents.length,
+    totalTasks: tasksCenterData?.tasks?.length,
+    totalAttentionActions: actionAttention?.summary?.total ?? topAttentionActions.length,
+    totalDebtRows: rentalDebtRows.length,
+    activeRentals: activeRentalsList.length,
+    openServiceTickets: openServiceTickets.length,
+    returnPressure: rentalsEndingToday.length + rentalsEndingTomorrow.length + overdueRentalsList.length,
+    deliveryPressure: todayDeliveries.length + overdueDeliveries.length + unassignedDeliveries.length,
+    documentPressure: unsignedDocumentsCount + documentControl.kpi.closedRentalsWithoutClosingDocs,
+    taskPressure: tasksWithoutResponsible.length + topAttentionActions.length,
+    criticalIssues: criticalOperationalIssues,
+  });
+  const operationalLoadScore = operationalLoadModel.score;
+  const operationalLoadLabel = operationalLoadModel.label;
+  const operationalLoadTone = operationalLoadModel.tone as DashboardTone;
+  const operationalLoadHint = operationalLoadModel.hint;
   const riskSignalCounts = {
     critical: actionAttention?.summary?.critical ?? criticalCount,
     high: actionAttention?.summary?.high ?? highCount,
@@ -3711,7 +3700,7 @@ export default function Dashboard() {
       id: 'executive-operational-load',
       label: 'Операционная нагрузка',
       value: operationalLoadLabel,
-      hint: `Индекс ${operationalLoadScore}/100 · критично ${criticalOperationalIssues}`,
+      hint: operationalLoadHint,
       icon: ListChecks,
       tone: operationalLoadTone,
       href: '/planner',
@@ -4477,7 +4466,9 @@ export default function Dashboard() {
                     <div className="mt-3 rounded-xl border border-amber-200/70 bg-white/55 p-2.5 dark:border-amber-200/10 dark:bg-white/[0.045]">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <p className="text-xl font-extrabold text-foreground">{operationalLoadScore} / 100</p>
+                          <p className="text-xl font-extrabold text-foreground">
+                            {operationalLoadScore === null ? 'Индекс N/A' : `${operationalLoadScore} / 100`}
+                          </p>
                           <p className={`text-xs font-semibold ${tone.accent}`}>{criticalOperationalIssues} критичных факторов</p>
                         </div>
                         <Badge variant={card.tone === 'danger' ? 'destructive' : card.tone === 'warning' ? 'warning' : 'default'}>

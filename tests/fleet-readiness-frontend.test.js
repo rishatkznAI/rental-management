@@ -56,10 +56,13 @@ test('readiness error state is safe and endpoint is centralized in service hook'
   assert.match(equipmentHookSource, /refetchOnReconnect: false/);
 });
 
-test('management action queue section renders on the equipment page', () => {
-  assert.match(equipmentPageSource, /function ManagementActionQueueSection/);
-  assert.match(equipmentPageSource, /data-testid="management-action-queue-section"/);
-  assert.match(equipmentPageSource, /Очередь управленческих действий/);
+test('equipment action required strip renders on the equipment page', () => {
+  assert.match(equipmentPageSource, /function ManagementActionRequiredStrip/);
+  assert.match(equipmentPageSource, /data-testid="equipment-action-required-strip"/);
+  assert.match(equipmentPageSource, /Требует действия/);
+  assert.match(equipmentPageSource, /Критичных действий по технике нет/);
+  assert.doesNotMatch(equipmentPageSource, /Очередь управленческих действий/);
+  assert.doesNotMatch(equipmentPageSource, /data-testid="management-action-queue-section"/);
   assert.match(equipmentPageSource, /useManagementActionQueue\(\)/);
 });
 
@@ -72,11 +75,22 @@ test('management action queue keeps assignees and write actions behind edit perm
   assert.match(equipmentPageSource, /canManageActions=\{canManageActionQueue\}/);
 });
 
-test('management action queue KPI cards render', () => {
-  assert.match(equipmentPageSource, /Без ответственного/);
-  assert.match(equipmentPageSource, /Просрочено/);
-  assert.match(equipmentPageSource, /Сегодня/);
-  assert.match(equipmentPageSource, /Зависли/);
+test('equipment action required strip replaces the large queue KPI cards', () => {
+  assert.match(equipmentPageSource, /actionRequiredTotal/);
+  assert.match(equipmentPageSource, /executionKpis\.critical/);
+  assert.match(equipmentPageSource, /executionKpis\.overdue/);
+  assert.match(equipmentPageSource, /executionKpis\.unassigned/);
+  assert.match(equipmentPageSource, /executionKpis\.stale/);
+  assert.match(equipmentPageSource, /Открыть очередь/);
+  assert.doesNotMatch(equipmentPageSource, /\{ label: 'Без ответственного', value: executionKpis\.unassigned/);
+  assert.doesNotMatch(equipmentPageSource, /sm:grid-cols-2 lg:grid-cols-4/);
+});
+
+test('equipment action required strip avoids mobile horizontal overflow', () => {
+  assert.match(equipmentPageSource, /<div className="space-y-3 overflow-x-hidden/);
+  assert.match(equipmentPageSource, /flex min-w-0 flex-col gap-3 sm:flex-row/);
+  assert.match(equipmentPageSource, /break-words text-xs/);
+  assert.match(equipmentPageSource, /className="w-full shrink-0 sm:w-auto"/);
 });
 
 test('management action queue filters include execution statuses, overdue, mine, priorities, and responsible areas', () => {
@@ -127,10 +141,13 @@ test('management action queue URL filters support dashboard attention shortcuts'
   assert.match(equipmentPageSource, /value: 'critical'/);
   assert.match(equipmentPageSource, /activeFilterLabel/);
   assert.match(equipmentPageSource, /Активный фильтр:/);
+  assert.match(equipmentPageSource, /setIsQueueOpen\(true\)/);
   assert.match(equipmentPageSource, /aria-pressed=\{filter === option\.value\}/);
 });
 
-test('management action queue table renders sorted API items without raw undefined states', () => {
+test('management action queue table is kept behind the compact strip disclosure', () => {
+  assert.match(equipmentPageSource, /isQueueOpen && !error/);
+  assert.match(equipmentPageSource, /data-testid="management-action-queue-panel"/);
   assert.match(equipmentPageSource, /Приоритет/);
   assert.match(equipmentPageSource, /Действие/);
   assert.match(equipmentPageSource, /Ответственный/);
@@ -172,7 +189,7 @@ test('management action queue execution controls render and call state endpoint'
 });
 
 test('management action queue empty and error states are safe', () => {
-  assert.match(equipmentPageSource, /Критичных действий нет/);
+  assert.match(equipmentPageSource, /Критичных действий по технике нет/);
   assert.match(equipmentPageSource, /Не удалось загрузить очередь действий/);
   assert.match(equipmentPageSource, /apiErrorMessage\(error, 'Проверьте доступ к \/api\/management\/action-queue\.'\)/);
   assert.match(equipmentServiceSource, /getManagementActionQueue: \(\): Promise<ManagementActionQueueResponse> =>\s*api\.get<ManagementActionQueueResponse>\('\/api\/management\/action-queue'\)/);

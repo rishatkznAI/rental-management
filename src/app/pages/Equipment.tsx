@@ -234,7 +234,7 @@ function readinessTopBlockerLabel(status?: FleetReadinessStatus | null) {
   return status ? labels[status] || '—' : '—';
 }
 
-function ManagementActionQueueSection({
+function ManagementActionRequiredStrip({
   items,
   summary,
   isLoading,
@@ -252,6 +252,7 @@ function ManagementActionQueueSection({
   initialFilter?: ManagementActionQueueFilter;
 }) {
   const [filter, setFilter] = React.useState<ManagementActionQueueFilter>(initialFilter);
+  const [isQueueOpen, setIsQueueOpen] = React.useState(initialFilter !== 'all');
   const [editingItem, setEditingItem] = React.useState<ManagementActionQueueItem | null>(null);
   const updateState = useUpdateManagementActionState();
   const assigneesQuery = useManagementActionAssignees({ enabled: canManageActions });
@@ -265,6 +266,7 @@ function ManagementActionQueueSection({
 
   React.useEffect(() => {
     setFilter(initialFilter);
+    if (initialFilter !== 'all') setIsQueueOpen(true);
   }, [initialFilter]);
 
   const openEditor = React.useCallback((item: ManagementActionQueueItem) => {
@@ -328,6 +330,7 @@ function ManagementActionQueueSection({
   }, [currentUser?.id, filter, items]);
 
   const executionKpis = React.useMemo(() => ({
+    critical: summary?.critical ?? items.filter(item => item.priority === 'critical').length,
     inProgress: summary?.inProgress ?? items.filter(item => item.executionStatus === 'in_progress').length,
     overdue: summary?.overdue ?? items.filter(item => item.isOverdue || item.executionOverdue).length,
     resolved: summary?.resolved ?? items.filter(item => item.executionStatus === 'resolved').length,
@@ -336,12 +339,7 @@ function ManagementActionQueueSection({
     stale: summary?.stale ?? items.filter(item => item.isStale).length,
   }), [items, summary]);
 
-  const kpis = [
-    { label: 'Без ответственного', value: executionKpis.unassigned, icon: PenLine, className: 'text-orange-400' },
-    { label: 'Просрочено', value: executionKpis.overdue, icon: AlertTriangle, className: 'text-red-400' },
-    { label: 'Сегодня', value: executionKpis.dueToday, icon: CalendarPlus, className: 'text-blue-400' },
-    { label: 'Зависли', value: executionKpis.stale, icon: ClipboardList, className: 'text-yellow-400' },
-  ];
+  const actionRequiredTotal = executionKpis.critical + executionKpis.overdue + executionKpis.unassigned + executionKpis.stale;
   const activeFilterLabel = ACTION_QUEUE_FILTERS.find(option => option.value === filter)?.label || 'Все';
 
   const formDaysUntilDue = React.useMemo(() => {
@@ -374,143 +372,171 @@ function ManagementActionQueueSection({
   }, [editingItem, form, updateState]);
 
   return (
-    <section className="app-panel overflow-hidden" data-testid="management-action-queue-section">
-      <div className="border-b border-border/80 px-5 py-5 sm:px-6">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="app-shell-title text-xl font-extrabold text-foreground">Очередь управленческих действий</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Контроль исполнения управленческих действий по готовности техники</p>
-          </div>
-          <div className="flex flex-wrap gap-2" aria-label="Фильтр очереди управленческих действий">
-            {ACTION_QUEUE_FILTERS.map(option => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={filter === option.value}
-                onClick={() => setFilter(option.value)}
-                className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
-                  filter === option.value
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-border bg-secondary text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="mt-3 text-xs font-semibold text-muted-foreground">Активный фильтр: {activeFilterLabel}</div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {kpis.map(({ label, value, icon: Icon, className }) => (
-            <div key={label} className="rounded-lg border border-border bg-secondary/50 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-muted-foreground">{label}</span>
-                <Icon className={`h-4 w-4 ${className}`} />
+    <section className="space-y-2" data-testid="equipment-action-required-strip">
+      <div className={`rounded-xl border px-4 py-3 shadow-[0_14px_34px_-32px_rgba(15,23,42,0.9)] ${
+        actionRequiredTotal > 0 || error
+          ? 'border-amber-400/25 bg-amber-500/8'
+          : 'border-emerald-400/20 bg-emerald-500/8'
+      }`}>
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-2 sm:items-center">
+            {actionRequiredTotal > 0 || error ? (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300 sm:mt-0" />
+            ) : (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300 sm:mt-0" />
+            )}
+            <div className="min-w-0 text-sm">
+              <div className="app-shell-title text-sm font-extrabold text-foreground">Требует действия</div>
+              <div className={`mt-0.5 break-words text-xs font-semibold ${
+                actionRequiredTotal > 0 || error ? 'text-amber-100/90' : 'text-emerald-100/90'
+              }`}>
+                {error
+                  ? `Не удалось загрузить очередь действий. ${apiErrorMessage(error, 'Проверьте доступ к /api/management/action-queue.')}`
+                  : isLoading
+                    ? 'Проверяем действия по технике…'
+                    : actionRequiredTotal === 0
+                      ? 'Критичных действий по технике нет'
+                      : `Требует действия: ${executionKpis.critical} критичных · ${executionKpis.overdue} просрочено · ${executionKpis.unassigned} без ответственного · ${executionKpis.stale} зависли`}
               </div>
-              <div className="mt-2 text-xl font-extrabold text-foreground">{isLoading ? '…' : value}</div>
             </div>
-          ))}
+          </div>
+          {!error && actionRequiredTotal > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full shrink-0 sm:w-auto"
+              onClick={() => setIsQueueOpen(open => !open)}
+              aria-expanded={isQueueOpen}
+            >
+              {isQueueOpen ? 'Скрыть очередь' : 'Открыть очередь'}
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      {error ? (
-        <div className="p-5 text-sm text-red-200">
-          Не удалось загрузить очередь действий. {apiErrorMessage(error, 'Проверьте доступ к /api/management/action-queue.')}
+      {isQueueOpen && !error ? (
+        <div className="overflow-hidden rounded-xl border border-border/85 bg-card/92" data-testid="management-action-queue-panel">
+          <div className="border-b border-border/80 px-4 py-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="app-shell-title text-base font-extrabold text-foreground">Очередь действий</h2>
+                <p className="mt-1 text-xs text-muted-foreground">Активный фильтр: {activeFilterLabel}</p>
+              </div>
+              <div className="flex flex-wrap gap-2" aria-label="Фильтр очереди действий по технике">
+                {ACTION_QUEUE_FILTERS.map(option => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={filter === option.value}
+                    onClick={() => setFilter(option.value)}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                      filter === option.value
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border bg-secondary text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          {filteredItems.length === 0 ? (
+            <div className="p-4 text-sm text-muted-foreground">
+              {isLoading ? 'Загружаем очередь действий…' : 'По выбранному фильтру действий нет'}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1180px] text-left text-sm">
+                <thead className="border-b border-border bg-secondary/60 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  <tr>
+                    <th className="px-5 py-3 font-medium">Приоритет</th>
+                    <th className="px-3 py-3 font-medium">Действие</th>
+                    <th className="px-3 py-3 font-medium">Ответственный</th>
+                    <th className="px-3 py-3 font-medium">Срок</th>
+                    <th className="px-3 py-3 font-medium">Статус исполнения</th>
+                    <th className="px-3 py-3 font-medium">Техника</th>
+                    <th className="px-3 py-3 font-medium">Ответственный блок</th>
+                    <th className="px-3 py-3 font-medium">Потеря</th>
+                    <th className="px-3 py-3 font-medium">Потеря/день</th>
+                    <th className="px-5 py-3 font-medium">Ссылка</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/80">
+                  {filteredItems.map(item => (
+                    <tr key={item.actionId} className={`align-top ${item.isOverdue ? 'bg-red-950/10' : ''}`}>
+                      <td className="px-5 py-3">
+                        <Badge variant={queuePriorityVariant(item.priority)}>{item.urgencyLabel || queuePriorityLabel(item.priority)}</Badge>
+                        <div className="mt-1 text-xs text-muted-foreground">{item.dueHint || 'Плановая проверка'}</div>
+                      </td>
+                      <td className="max-w-[360px] px-3 py-3">
+                        <div className="font-semibold text-foreground">{item.title || 'Уточнить действие'}</div>
+                        <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.description || item.recommendedAction || 'Проверьте блокер техники.'}</div>
+                        {canManageActions ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <Button size="sm" type="button" onClick={() => updateActionStatus(item, 'in_progress')} disabled={updateState.isPending}>
+                              В работу
+                            </Button>
+                            <Button size="sm" variant="outline" type="button" onClick={() => updateActionStatus(item, 'postponed')} disabled={updateState.isPending}>
+                              Отложить
+                            </Button>
+                            <Button size="sm" variant="secondary" type="button" onClick={() => updateActionStatus(item, 'resolved')} disabled={updateState.isPending}>
+                              Решено
+                            </Button>
+                            <Button size="sm" variant="ghost" type="button" onClick={() => openEditor(item)}>
+                              Изменить
+                            </Button>
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground">
+                        <div className="flex flex-col gap-1.5">
+                          <span className="font-semibold text-foreground">{item.assignedToName || 'Ответственный не назначен'}</span>
+                          {item.isUnassigned ? <Badge variant="warning">Без ответственного</Badge> : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground">
+                        <div className="flex flex-col gap-1.5">
+                          <span>{item.dueDate || 'Срок не задан'}</span>
+                          <span className="font-semibold text-foreground">{actionDueHintLabel(item.daysUntilDue, item.dueDate)}</span>
+                          {item.isOverdue ? <Badge variant="danger">Просрочено</Badge> : null}
+                          {item.isDueToday ? <Badge variant="info">Сегодня</Badge> : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground">
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge variant={executionStatusVariant(item.executionStatus)}>{executionStatusLabel(item.executionStatus, item.executionLabel)}</Badge>
+                            {item.isStale ? <Badge variant="warning">Зависло</Badge> : null}
+                          </div>
+                          <span>{item.accountabilityLabel || 'Открыто'}</span>
+                          {item.executionComment ? <span className="line-clamp-2 text-muted-foreground">{item.executionComment}</span> : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground">{item.equipmentId || 'Не указана'}</td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground">{responsibleAreaLabel(item.responsibleArea)}</td>
+                      <td className="px-3 py-3 text-xs font-semibold text-foreground">{readinessLossText(item.estimatedLoss, item.estimatedLoss && item.estimatedLoss > 0 ? ' оценочно' : '')}</td>
+                      <td className="px-3 py-3 text-xs font-semibold text-foreground">{readinessLossText(item.estimatedDailyLoss)}</td>
+                      <td className="px-5 py-3 text-xs">
+                        <div className="flex flex-wrap gap-2">
+                          <Link className="inline-flex items-center gap-1 text-primary hover:underline" to={item.links.equipment || `/equipment/${item.equipmentId}`}>
+                            Техника <ExternalLink className="h-3 w-3" />
+                          </Link>
+                          {item.links.serviceTicket ? <Link className="text-primary hover:underline" to={item.links.serviceTicket}>Сервис</Link> : null}
+                          {item.links.rental ? <Link className="text-primary hover:underline" to={item.links.rental}>Аренда</Link> : null}
+                          {item.links.delivery ? <Link className="text-primary hover:underline" to={item.links.delivery}>Доставка</Link> : null}
+                          {item.links.document ? <Link className="text-primary hover:underline" to={item.links.document}>Документ</Link> : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      ) : filteredItems.length === 0 ? (
-        <div className="p-5 text-sm text-muted-foreground">
-          {isLoading ? 'Загружаем очередь действий…' : 'Критичных действий нет'}
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] text-left text-sm">
-            <thead className="border-b border-border bg-secondary/60 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-              <tr>
-                <th className="px-5 py-3 font-medium">Приоритет</th>
-                <th className="px-3 py-3 font-medium">Действие</th>
-                <th className="px-3 py-3 font-medium">Ответственный</th>
-                <th className="px-3 py-3 font-medium">Срок</th>
-                <th className="px-3 py-3 font-medium">Статус исполнения</th>
-                <th className="px-3 py-3 font-medium">Техника</th>
-                <th className="px-3 py-3 font-medium">Ответственный блок</th>
-                <th className="px-3 py-3 font-medium">Потеря</th>
-                <th className="px-3 py-3 font-medium">Потеря/день</th>
-                <th className="px-5 py-3 font-medium">Ссылка</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/80">
-              {filteredItems.map(item => (
-                <tr key={item.actionId} className={`align-top ${item.isOverdue ? 'bg-red-950/10' : ''}`}>
-                  <td className="px-5 py-3">
-                    <Badge variant={queuePriorityVariant(item.priority)}>{item.urgencyLabel || queuePriorityLabel(item.priority)}</Badge>
-                    <div className="mt-1 text-xs text-muted-foreground">{item.dueHint || 'Плановая проверка'}</div>
-                  </td>
-                  <td className="max-w-[360px] px-3 py-3">
-                    <div className="font-semibold text-foreground">{item.title || 'Уточнить действие'}</div>
-                    <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.description || item.recommendedAction || 'Проверьте блокер техники.'}</div>
-                    {canManageActions ? (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        <Button size="sm" type="button" onClick={() => updateActionStatus(item, 'in_progress')} disabled={updateState.isPending}>
-                          В работу
-                        </Button>
-                        <Button size="sm" variant="outline" type="button" onClick={() => updateActionStatus(item, 'postponed')} disabled={updateState.isPending}>
-                          Отложить
-                        </Button>
-                        <Button size="sm" variant="secondary" type="button" onClick={() => updateActionStatus(item, 'resolved')} disabled={updateState.isPending}>
-                          Решено
-                        </Button>
-                        <Button size="sm" variant="ghost" type="button" onClick={() => openEditor(item)}>
-                          Изменить
-                        </Button>
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">
-                    <div className="flex flex-col gap-1.5">
-                      <span className="font-semibold text-foreground">{item.assignedToName || 'Ответственный не назначен'}</span>
-                      {item.isUnassigned ? <Badge variant="warning">Без ответственного</Badge> : null}
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">
-                    <div className="flex flex-col gap-1.5">
-                      <span>{item.dueDate || 'Срок не задан'}</span>
-                      <span className="font-semibold text-foreground">{actionDueHintLabel(item.daysUntilDue, item.dueDate)}</span>
-                      {item.isOverdue ? <Badge variant="danger">Просрочено</Badge> : null}
-                      {item.isDueToday ? <Badge variant="info">Сегодня</Badge> : null}
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">
-                    <div className="flex flex-col gap-1.5">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant={executionStatusVariant(item.executionStatus)}>{executionStatusLabel(item.executionStatus, item.executionLabel)}</Badge>
-                        {item.isStale ? <Badge variant="warning">Зависло</Badge> : null}
-                      </div>
-                      <span>{item.accountabilityLabel || 'Открыто'}</span>
-                      {item.executionComment ? <span className="line-clamp-2 text-muted-foreground">{item.executionComment}</span> : null}
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">{item.equipmentId || 'Не указана'}</td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">{responsibleAreaLabel(item.responsibleArea)}</td>
-                  <td className="px-3 py-3 text-xs font-semibold text-foreground">{readinessLossText(item.estimatedLoss, item.estimatedLoss && item.estimatedLoss > 0 ? ' оценочно' : '')}</td>
-                  <td className="px-3 py-3 text-xs font-semibold text-foreground">{readinessLossText(item.estimatedDailyLoss)}</td>
-                  <td className="px-5 py-3 text-xs">
-                    <div className="flex flex-wrap gap-2">
-                      <Link className="inline-flex items-center gap-1 text-primary hover:underline" to={item.links.equipment || `/equipment/${item.equipmentId}`}>
-                        Техника <ExternalLink className="h-3 w-3" />
-                      </Link>
-                      {item.links.serviceTicket ? <Link className="text-primary hover:underline" to={item.links.serviceTicket}>Сервис</Link> : null}
-                      {item.links.rental ? <Link className="text-primary hover:underline" to={item.links.rental}>Аренда</Link> : null}
-                      {item.links.delivery ? <Link className="text-primary hover:underline" to={item.links.delivery}>Доставка</Link> : null}
-                      {item.links.document ? <Link className="text-primary hover:underline" to={item.links.document}>Документ</Link> : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      ) : null}
       <Dialog open={Boolean(editingItem)} onOpenChange={(open) => !open && setEditingItem(null)}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
@@ -1873,6 +1899,16 @@ export default function Equipment() {
         error={readinessQuery.error}
       />
 
+      <ManagementActionRequiredStrip
+        items={actionQueueQuery.data?.items ?? []}
+        summary={actionQueueQuery.data?.summary}
+        isLoading={actionQueueQuery.isLoading}
+        error={actionQueueQuery.error}
+        currentUser={user}
+        canManageActions={canManageActionQueue}
+        initialFilter={initialActionQueueFilter}
+      />
+
       <div className="space-y-3 sm:hidden">
         {totalVisible === 0 ? (
           <EmptyState {...emptyState} />
@@ -1994,15 +2030,6 @@ export default function Equipment() {
         ) : null}
       </div>
 
-      <ManagementActionQueueSection
-        items={actionQueueQuery.data?.items ?? []}
-        summary={actionQueueQuery.data?.summary}
-        isLoading={actionQueueQuery.isLoading}
-        error={actionQueueQuery.error}
-        currentUser={user}
-        canManageActions={canManageActionQueue}
-        initialFilter={initialActionQueueFilter}
-      />
     </div>
   );
 }

@@ -554,7 +554,7 @@
 
   .rentcore-command-screen {
     position: relative;
-    min-height: calc(100vh - 3.5rem);
+    min-height: 0;
     overflow-x: hidden;
     --rc-command-text: #101b14;
     --rc-command-text-strong: #050c08;
@@ -574,7 +574,7 @@
 
   @media (min-width: 1024px) {
     .rentcore-command-screen {
-      min-height: calc(100vh - 4rem);
+      min-height: 0;
     }
   }
 
@@ -593,7 +593,7 @@
 
   .rentcore-command-shell {
     position: relative;
-    min-height: calc(100vh - 5.25rem);
+    min-height: 0;
     border: 1px solid color-mix(in srgb, var(--rc-command-panel-border) 76%, var(--rc-command-accent) 24%);
     border-radius: 14px;
     background:
@@ -620,15 +620,15 @@
   }
 
   body.rentcore-dashboard-reference-mode .rentcore-command-screen {
-    min-height: calc(100vh - 72px);
+    min-height: 0;
     background:
       radial-gradient(circle at 50% 16%, rgba(132, 204, 22, 0.032), transparent 27rem),
       linear-gradient(180deg, rgba(3, 8, 12, 0.98), rgba(1, 4, 6, 0.99));
   }
 
   body.rentcore-dashboard-reference-mode .rentcore-command-shell {
-    height: calc(100vh - 84px) !important;
-    min-height: calc(100vh - 84px) !important;
+    height: auto !important;
+    min-height: 0 !important;
     border-radius: 11px;
     border-color: rgba(160, 210, 138, 0.13);
     box-shadow:
@@ -884,6 +884,12 @@
     max-width: 100%;
   }
 
+  .rentcore-command-map[data-company-health-layout="compact-card"] {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    max-width: 100%;
+  }
+
   .rentcore-command-compact-list {
     min-width: 0;
     width: 100%;
@@ -964,6 +970,11 @@
 
   .rentcore-command-center {
     min-height: calc(var(--rc-orb-size) + 24px);
+  }
+
+  .rentcore-command-health-card {
+    align-content: start;
+    min-height: 0;
   }
 
   .rentcore-health-orb {
@@ -1139,12 +1150,12 @@
 
   @media (min-width: 1280px) and (max-height: 950px) {
     .rentcore-command-shell {
-      min-height: calc(100vh - 4.75rem) !important;
+      min-height: 0 !important;
     }
 
     body.rentcore-dashboard-reference-mode .rentcore-command-shell {
-      height: calc(100vh - 84px) !important;
-      min-height: calc(100vh - 84px) !important;
+      height: auto !important;
+      min-height: 0 !important;
     }
 
     .rentcore-command-header {
@@ -1166,10 +1177,8 @@
     }
 
     .rentcore-command-board {
-      flex: 0 0 auto !important;
       height: auto !important;
       max-height: none !important;
-      grid-template-rows: minmax(430px, auto) minmax(168px, auto) !important;
     }
 
     .rentcore-command-panel {
@@ -1177,7 +1186,7 @@
     }
 
     .rentcore-command-panel[data-testid="dashboard-operational-summary"] {
-      min-height: 430px !important;
+      min-height: 0 !important;
     }
 
     .rentcore-health-critical-caption {

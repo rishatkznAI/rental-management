@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -1305,158 +1305,46 @@ function CompanyHealthCommandCenter({
   subtitle: string;
   warning?: string;
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [containerWidth, setContainerWidth] = useState(0);
-
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node) return;
-    const measuredNode = node.parentElement ?? node;
-    const update = (width: number) => setContainerWidth(Math.round(width));
-    update(measuredNode.getBoundingClientRect().width);
-    const observer = new ResizeObserver(entries => {
-      const entry = entries[0];
-      if (entry) update(measuredNode.getBoundingClientRect().width);
-    });
-    observer.observe(measuredNode);
-    return () => observer.disconnect();
-  }, []);
-
-  const isCompact = containerWidth > 0 && containerWidth < 900;
-  const svgSize = Math.max(188, Math.min(300, Math.round((containerWidth || 900) * 0.28)));
-  const estimatedCardWidth = isCompact
-    ? containerWidth
-    : (containerWidth - svgSize - 32) / 2;
-  const cardDensity = estimatedCardWidth > 0 && estimatedCardWidth < 180 ? 'icon-value' : 'full';
-  const center = svgSize / 2;
-  const radius = svgSize * 0.43;
-  const ringRadius = svgSize * 0.37;
-  const segmentStrokeWidth = Math.max(8, Math.min(12, svgSize * 0.038));
-  const dotRadius = Math.max(3.5, svgSize * 0.016);
   const hasScore = typeof score === 'number';
   const progress = hasScore ? clampPercent(score) : 0;
-  const segmentAngle = 360 / Math.max(allDirections.length, 1);
-  const segmentGap = Math.min(8, segmentAngle * 0.18);
-  const segments = allDirections.map((item, index) => {
-    const startAngle = index * segmentAngle + segmentGap / 2;
-    const endAngle = (index + 1) * segmentAngle - segmentGap / 2;
-    return {
-      item,
-      color: healthSegmentColors[item.tone] ?? healthSegmentColors.default,
-      path: describeArc(center, center, ringRadius, startAngle, endAngle),
-    };
-  });
-  const dots = allDirections.map((item, index) => {
-    const angle = index * segmentAngle + segmentAngle / 2;
-    return { item, angle, point: polarToCartesian(center, center, radius, angle) };
-  });
+  const directions = allDirections.length > 0 ? allDirections : [...leftDirections, ...rightDirections];
 
   return (
     <div
-      ref={containerRef}
-      className="rentcore-command-map relative grid flex-1 gap-2.5 xl:mx-auto xl:w-full xl:items-center xl:justify-center"
-      style={{ '--rc-orb-size': `${svgSize}px` } as React.CSSProperties}
+      className="rentcore-command-map rentcore-command-health-card grid gap-3"
       role="region"
       aria-label={hasScore ? `Здоровье компании ${progress} из 100: ${label}` : `Здоровье компании: ${label}`}
       data-testid="dashboard-company-health"
-      data-company-health-layout={isCompact ? 'compact' : 'svg'}
-      data-card-density={cardDensity}
+      data-company-health-layout="compact-card"
     >
-      {isCompact ? (
-        <div className="rentcore-command-compact-list grid gap-2.5" data-testid="dashboard-company-health-compact">
-          {allDirections.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
-          <div className="rounded-[12px] border border-lime-300/18 bg-black/20 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle className="app-shell-title text-xl font-extrabold" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
-              <p className={`text-sm font-extrabold uppercase ${toneStyles[tone].accent}`}>{label}</p>
-            </div>
-            <p className="mt-1 text-3xl font-extrabold leading-none text-white">
-              {hasScore ? <>{progress}<span className="text-sm text-slate-500">/100</span></> : 'Нет данных'}
-            </p>
-            <p className="mt-1 text-xs font-semibold text-slate-400">{subtitle}</p>
-            {warning ? <p className="mt-2 rounded-lg border border-amber-300/18 bg-amber-300/8 px-2 py-1 text-xs font-bold text-amber-100">{warning}</p> : null}
-            <div className="mt-3">
-              <CompanyHealthBars items={bars} />
-            </div>
-          </div>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <CardTitle className="app-shell-title text-lg font-extrabold text-white" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
+          <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-400">
+            {hasScore ? subtitle : 'Недостаточно данных: показатели появятся после поступлений, аренд, сервисных заявок и доставок.'}
+          </p>
         </div>
-      ) : (
-        <>
-          <div className="rentcore-command-column grid gap-2.5 xl:justify-self-end">
-            {leftDirections.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
-          </div>
+        <div className="shrink-0 text-right">
+          <p className={`text-xs font-extrabold uppercase ${toneStyles[tone].accent}`}>{label}</p>
+          <p className="mt-1 text-3xl font-extrabold leading-none text-white">
+            {hasScore ? <>{progress}<span className="text-sm text-slate-500">/100</span></> : 'N/A'}
+          </p>
+        </div>
+      </div>
 
-          <div className="rentcore-command-center flex flex-col items-center justify-center text-center">
-            <svg
-              className="rentcore-health-svg overflow-visible"
-              width={svgSize}
-              height={svgSize}
-              viewBox={`0 0 ${svgSize} ${svgSize}`}
-              role="img"
-              aria-label={hasScore ? `Здоровье компании ${progress} из 100: ${label}` : `Здоровье компании: ${label}`}
-              data-testid="dashboard-company-health-svg"
-              data-size-source="ResizeObserver"
-            >
-              <circle cx={center} cy={center} r={svgSize * 0.46} fill="rgba(8,13,19,0.78)" stroke="rgba(148,163,184,0.12)" strokeWidth="1" />
-              <circle cx={center} cy={center} r={svgSize * 0.43} fill="none" stroke="rgba(15,23,42,0.68)" strokeWidth="1" />
-              {segments.map(segment => (
-                <path
-                  key={`${segment.item.id}-track`}
-                  d={segment.path}
-                  fill="none"
-                  stroke="rgba(100,116,139,0.24)"
-                  strokeWidth={segmentStrokeWidth}
-                  strokeLinecap="round"
-                />
-              ))}
-              {segments.map(segment => (
-                <path
-                  key={segment.item.id}
-                  data-testid="dashboard-company-health-segment"
-                  d={segment.path}
-                  fill="none"
-                  stroke={segment.color}
-                  strokeWidth={segmentStrokeWidth}
-                  strokeLinecap="round"
-                  opacity={segment.item.tone === 'success' ? 0.78 : segment.item.tone === 'warning' ? 0.72 : segment.item.tone === 'danger' ? 0.76 : 0.64}
-                />
-              ))}
-              <circle cx={center} cy={center} r={svgSize * 0.25} fill="rgba(3,7,12,0.9)" stroke="rgba(148,163,184,0.14)" strokeWidth="1" />
-              {dots.map(({ item, point }) => (
-                <circle
-                  key={item.id}
-                  data-testid="dashboard-company-health-point"
-                  cx={point.x}
-                  cy={point.y}
-                  r={dotRadius}
-                  fill={healthSegmentColors[item.tone] ?? healthSegmentColors.default}
-                  stroke="rgba(3,7,12,0.95)"
-                  strokeWidth="1.5"
-                />
-              ))}
-              <foreignObject x={center - svgSize * 0.24} y={center - svgSize * 0.2} width={svgSize * 0.48} height={svgSize * 0.4}>
-                <div className="flex h-full flex-col items-center justify-center text-center">
-                  <p className="text-[8px] font-semibold uppercase tracking-[0.14em] text-slate-400">Здоровье компании</p>
-                  <p className={`${hasScore ? 'mt-1 text-[32px] 2xl:text-[34px]' : 'mt-1 text-[18px] 2xl:text-[20px]'} font-extrabold leading-none text-slate-50`}>
-                    {hasScore ? <>{progress}<span className="text-[13px] font-semibold text-slate-500">/100</span></> : 'Нет данных'}
-                  </p>
-                  <p className={`mt-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.04em] ${hasScore ? 'border-amber-300/12 bg-amber-300/7 text-amber-200/85' : 'border-slate-400/12 bg-slate-400/7 text-slate-300'}`}>{label}</p>
-                  <p className="mt-1 line-clamp-2 px-2 text-[8.5px] font-semibold leading-tight text-slate-500">{subtitle}</p>
-                  {hasScore ? <p className="rentcore-health-critical-caption mt-1 text-[9.5px] font-semibold text-slate-500">{criticalSignals} критических сигнала</p> : null}
-                </div>
-              </foreignObject>
-            </svg>
-            {warning ? <p className="mt-2 rounded-lg border border-amber-300/18 bg-amber-300/8 px-3 py-1.5 text-xs font-bold text-amber-100">{warning}</p> : null}
-            <div className="mt-4 hidden w-full max-w-[330px]">
-              <CompanyHealthBars items={bars} />
-            </div>
-          </div>
+      {warning ? <p className="rounded-lg border border-amber-300/18 bg-amber-300/8 px-3 py-2 text-xs font-bold text-amber-100">{warning}</p> : null}
 
-          <div className="rentcore-command-column grid gap-2.5 xl:justify-self-start">
-            {rightDirections.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
-          </div>
-        </>
-      )}
+      <div className="grid gap-2 sm:grid-cols-2" data-testid="dashboard-company-health-compact">
+        {directions.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
+      </div>
+
+      <div>
+        <CompanyHealthBars items={bars} />
+      </div>
+
+      <p className="text-[11px] font-semibold text-slate-500">
+        {hasScore ? `${criticalSignals} критических сигналов в контурах` : 'Недостаточно данных'}
+      </p>
     </div>
   );
 }
@@ -4038,7 +3926,7 @@ export default function Dashboard() {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-lime-300/70 to-transparent" />
 
         <div className="rentcore-command-shell mx-0 flex h-full max-w-none flex-col gap-2 p-2 sm:p-2.5 min-[1360px]:min-h-0">
-          <header className="rentcore-command-header grid min-h-[72px] gap-2 rounded-[14px] px-4 py-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <header className="rentcore-command-header grid min-h-[72px] flex-none gap-2 rounded-[14px] px-4 py-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">
                 <span>{APP_BRAND_NAME}</span>
@@ -4117,40 +4005,8 @@ export default function Dashboard() {
             </div>
           </section>
 
-          <section className="rentcore-command-board grid min-h-0 flex-none gap-2.5 overflow-visible rounded-[16px] p-2 xl:flex-1 xl:grid-cols-12 xl:grid-rows-[minmax(420px,0.68fr)_minmax(218px,0.32fr)] xl:overflow-hidden min-[1600px]:grid-rows-[minmax(446px,0.68fr)_minmax(238px,0.32fr)]" data-testid="dashboard-command-board">
-            <div className="rentcore-command-panel relative min-h-[430px] overflow-hidden rounded-[14px] p-3.5 xl:col-span-12 xl:min-h-[500px] 2xl:col-span-8 2xl:min-h-0 min-[1600px]:p-4" data-testid="dashboard-operational-summary">
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(132,204,22,0.075),transparent_36%),linear-gradient(rgba(132,204,22,0.012)_1px,transparent_1px),linear-gradient(90deg,rgba(132,204,22,0.01)_1px,transparent_1px)] bg-[size:auto,56px_56px,56px_56px]" />
-
-              <div className="relative flex h-full flex-col">
-                <div className="mb-3 flex items-center justify-between gap-3 px-1">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">Операционный контроль</p>
-                    <h2 className="app-shell-title mt-0.5 text-xl font-extrabold text-white">Пульт состояния компании</h2>
-                  </div>
-                  <span className="hidden rounded-full border border-white/10 bg-white/[0.045] px-3 py-1 text-xs font-semibold text-slate-300 sm:inline-flex">
-                    {companyHealthModel.contourStates.length} контуров
-                  </span>
-                </div>
-                {companyHealthDisplayScore === null && companyHealthContourHint ? (
-                  <p className="mb-2 px-1 text-xs font-semibold text-slate-400">{companyHealthContourHint}</p>
-                ) : null}
-
-                <CompanyHealthCommandCenter
-                  leftDirections={commandCenterLeftDirections}
-                  rightDirections={commandCenterRightDirections}
-                  allDirections={commandCenterDirections}
-                  bars={companyHealthBars}
-                  score={companyHealthDisplayScore}
-                  label={companyHealthLabel}
-                  tone={companyHealthTone}
-                  criticalSignals={riskSignalCounts.critical}
-                  subtitle={companyHealthSubtitle}
-                  warning={companyHealthWarning}
-                />
-              </div>
-            </div>
-
-            <aside className="rentcore-command-panel flex min-h-[430px] flex-col overflow-hidden rounded-[14px] p-3.5 xl:col-span-4 xl:min-h-0 min-[1600px]:p-4" data-testid="dashboard-key-signals">
+          <section className="rentcore-command-board grid min-h-0 grid-cols-1 gap-3 overflow-visible rounded-[16px] p-2 md:grid-cols-2 xl:grid-cols-12" data-testid="dashboard-command-board">
+            <aside className="rentcore-command-panel flex min-h-[310px] flex-col overflow-hidden rounded-[14px] p-3.5 md:min-h-[340px] xl:col-span-4 xl:min-h-[360px] min-[1600px]:p-4" data-testid="dashboard-key-signals">
               <div data-testid="dashboard-key-signals-command" className="flex min-h-0 flex-1 flex-col">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -4163,8 +4019,8 @@ export default function Dashboard() {
                 </div>
                 <div className="mt-3 min-h-0 flex-1 space-y-1.5 overflow-hidden pr-1" data-testid="dashboard-legacy-attention-list">
                   {visibleAlerts.length === 0 ? (
-                    <div className="rounded-[14px] border border-lime-300/20 bg-lime-300/10 px-3 py-5 text-sm font-semibold text-lime-100">
-                      На текущий период нет задач для контроля.
+                    <div className="rounded-[14px] border border-lime-300/20 bg-lime-300/10 px-3 py-4 text-sm font-semibold text-lime-100">
+                      Нет критических сигналов.
                     </div>
                   ) : visibleAlerts.slice(0, 5).map((alert, index) => {
                     const Icon = alert.icon;
@@ -4217,14 +4073,14 @@ export default function Dashboard() {
               </div>
             </aside>
 
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-3 xl:col-span-3">
+            <div className="rentcore-command-analytics flex min-h-[310px] min-w-0 flex-col overflow-hidden p-3 md:min-h-[340px] xl:col-span-3 xl:min-h-[360px]" data-testid="dashboard-tasks">
               <div className="mb-0.5">
                 <h3 className="app-shell-title text-[17px] font-extrabold leading-tight text-white">Задачи</h3>
                 <p className="text-[11px] text-slate-400">Ближайший цикл</p>
               </div>
               <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden pt-1.5">
                 {commandCenterTasks.length === 0 ? (
-                  <div className="rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-4 text-sm text-lime-100">Критичных задач нет.</div>
+                  <div className="rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-4 text-sm text-lime-100">Нет сервисных задач.</div>
                 ) : commandCenterTasks.slice(0, 4).map(row => {
                   const tone = toneStyles[row.tone];
                   const isClear = row.tone === 'success';
@@ -4244,7 +4100,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-3 xl:col-span-3" data-testid="dashboard-month-dynamics">
+            <div className="rentcore-command-analytics flex min-h-[310px] min-w-0 flex-col overflow-hidden p-3 md:col-span-2 md:min-h-[340px] xl:col-span-5 xl:min-h-[360px]" data-testid="dashboard-month-dynamics">
               <div data-testid="dashboard-month-dynamics-command" className="flex min-h-0 flex-1 flex-col">
                 <div className="mb-2 flex items-start justify-between gap-3">
                   <div>
@@ -4284,13 +4140,13 @@ export default function Dashboard() {
                       </ComposedChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-white/10 text-xs text-slate-500">Нет данных за месяц.</div>
+                    <div className="flex h-full min-h-28 items-center justify-center rounded-xl border border-dashed border-white/10 px-3 text-center text-xs font-semibold text-slate-500">Нет поступлений за месяц.</div>
                   )}
                 </div>
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-3 xl:col-span-3">
+            <div className="rentcore-command-analytics flex min-h-[300px] min-w-0 flex-col overflow-hidden p-3 xl:col-span-4" data-testid="dashboard-fleet-utilization">
               <h3 className="app-shell-title text-lg font-extrabold text-white">Загрузка техники</h3>
               <p className="text-xs text-slate-400">{activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован'}</p>
               <div className="mt-3 grid min-h-0 flex-1 grid-cols-[96px_minmax(0,1fr)] items-center gap-3">
@@ -4330,7 +4186,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-w-0 flex-col overflow-hidden p-3 xl:col-span-3">
+            <div className="rentcore-command-analytics flex min-h-[300px] min-w-0 flex-col overflow-hidden p-3 xl:col-span-4" data-testid="dashboard-receivables-aging">
               <div className="mb-2 flex items-start justify-between gap-3">
                 <div>
                   <h3 className="app-shell-title text-lg font-extrabold text-white">Возраст дебиторки</h3>
@@ -4357,9 +4213,24 @@ export default function Dashboard() {
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-white/10 text-xs text-slate-500">Просрочки нет.</div>
+                  <div className="flex h-full min-h-28 items-center justify-center rounded-xl border border-dashed border-white/10 px-3 text-center text-xs font-semibold text-slate-500">Нет просроченной дебиторки.</div>
                 )}
               </div>
+            </div>
+
+            <div className="rentcore-command-analytics flex min-h-[300px] min-w-0 flex-col overflow-hidden p-3 xl:col-span-4" data-testid="dashboard-operational-summary">
+              <CompanyHealthCommandCenter
+                leftDirections={commandCenterLeftDirections}
+                rightDirections={commandCenterRightDirections}
+                allDirections={commandCenterDirections}
+                bars={companyHealthBars}
+                score={companyHealthDisplayScore}
+                label={companyHealthLabel}
+                tone={companyHealthTone}
+                criticalSignals={riskSignalCounts.critical}
+                subtitle={companyHealthSubtitle}
+                warning={companyHealthDisplayScore === null ? companyHealthContourHint || companyHealthWarning : companyHealthWarning}
+              />
             </div>
           </section>
         </div>

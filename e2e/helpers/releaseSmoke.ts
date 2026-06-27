@@ -378,49 +378,29 @@ async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Loc
     };
 
     const health = document.querySelector('[data-testid="dashboard-company-health"]');
-    const svg = health?.querySelector('[data-testid="dashboard-company-health-svg"]') as SVGSVGElement | null;
     const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]');
-    const points = Array.from(health?.querySelectorAll<SVGCircleElement>('[data-testid="dashboard-company-health-point"]') || []);
-    const viewBox = String(svg?.getAttribute('viewBox') || '').split(/\s+/).map(Number);
-    const centerX = Number.isFinite(viewBox[2]) ? viewBox[2] / 2 : 0;
-    const centerY = Number.isFinite(viewBox[3]) ? viewBox[3] / 2 : 0;
-    const radii = points.map(point => {
-      const x = Number(point.getAttribute('cx'));
-      const y = Number(point.getAttribute('cy'));
-      return Math.hypot(x - centerX, y - centerY);
-    }).filter(Number.isFinite);
+    const board = document.querySelector('[data-testid="dashboard-command-board"]');
+    const boardRect = board?.getBoundingClientRect();
+    const healthRect = health?.getBoundingClientRect();
 
     return {
-      label: health?.getAttribute('aria-label') || svg?.getAttribute('aria-label') || '',
+      label: health?.getAttribute('aria-label') || '',
       health: visibleRect(health),
-      svg: visibleRect(svg),
       compact: visibleRect(compact),
       compactCards: compact?.querySelectorAll('a.rentcore-command-card').length || 0,
-      points: {
-        count: points.length,
-        radiusAverage: radii.length ? radii.reduce((sum, radius) => sum + radius, 0) / radii.length : 0,
-        radiusSpread: radii.length ? Math.max(...radii) - Math.min(...radii) : 0,
-      },
+      healthSvgCount: health?.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length || 0,
+      healthWidthShare: healthRect && boardRect ? healthRect.width / Math.max(boardRect.width, 1) : 1,
     };
   });
 
   expect(layout.health?.visible, `dashboard company health region should have a visible box (${JSON.stringify(layout)})`).toBe(true);
   expect(layout.label, 'dashboard company health region should expose an accessible label').toMatch(/Здоровье компании/);
-
+  expect(layout.healthSvgCount, `dashboard company health should not render a dominant SVG circle (${JSON.stringify(layout)})`).toBe(0);
+  expect(layout.compact?.visible, `dashboard company health should render compact list (${JSON.stringify(layout)})`).toBe(true);
+  expect(layout.compactCards, 'dashboard company health compact list should include all direction cards').toBeGreaterThanOrEqual(6);
   if (viewport.width >= 1024) {
-    expect(layout.svg?.visible, `desktop dashboard company health should render SVG (${JSON.stringify(layout)})`).toBe(true);
-    expect(layout.svg?.width || 0, 'desktop company health SVG width should be substantial').toBeGreaterThanOrEqual(180);
-    expect(layout.svg?.height || 0, 'desktop company health SVG height should be substantial').toBeGreaterThanOrEqual(180);
-    const aspectDelta = Math.abs(((layout.svg?.width || 0) / Math.max(layout.svg?.height || 1, 1)) - 1);
-    expect(aspectDelta, `desktop company health SVG should stay circular (${JSON.stringify(layout.svg)})`).toBeLessThanOrEqual(0.05);
-    expect(layout.points.count, 'desktop company health should render direction points').toBeGreaterThanOrEqual(6);
-    expect(layout.points.radiusAverage, 'desktop company health points should sit away from the center').toBeGreaterThan(50);
-    expect(layout.points.radiusSpread, `desktop company health points should share one radius (${JSON.stringify(layout.points)})`).toBeLessThanOrEqual(1);
-    return;
+    expect(layout.healthWidthShare, `desktop company health should not dominate dashboard width (${JSON.stringify(layout)})`).toBeLessThanOrEqual(0.38);
   }
-
-  expect(layout.compact?.visible, `tablet/mobile dashboard company health should render compact list (${JSON.stringify(layout)})`).toBe(true);
-  expect(layout.compactCards, 'tablet/mobile company health compact list should include all direction cards').toBeGreaterThanOrEqual(6);
 }
 
 async function expectNoHorizontalOverflow(page: Page, label: string) {

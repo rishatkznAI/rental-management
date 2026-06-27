@@ -5,10 +5,19 @@ import path from 'node:path';
 import { buildDashboardAttentionSummary } from '../src/app/lib/dashboardAttention.js';
 
 const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
+const themeSource = fs.readFileSync(path.join(process.cwd(), 'src/styles/theme.css'), 'utf8');
 const documentsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Documents.tsx'), 'utf8');
 const documentsRouteSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/documents.js'), 'utf8');
 const equipmentServiceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/equipment.service.ts'), 'utf8');
 const equipmentHooksSource = fs.readFileSync(path.join(process.cwd(), 'src/app/hooks/useEquipment.ts'), 'utf8');
+
+function sourceBlock(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  assert.notEqual(start, -1, `start marker not found: ${startMarker}`);
+  const end = source.indexOf(endMarker, start);
+  assert.notEqual(end, -1, `end marker not found: ${endMarker}`);
+  return source.slice(start, end);
+}
 
 test('dashboard attention summary calculates daily risks without NaN values', () => {
   const summary = buildDashboardAttentionSummary({
@@ -126,13 +135,32 @@ test('dashboard executive cockpit renders adaptive KPI cards and compact risk si
   assert.equal(dashboardSource.match(/data-testid="dashboard-month-dynamics"/g)?.length, 1);
   assert.equal(dashboardSource.match(/data-testid="dashboard-company-health"/g)?.length, 1);
   assert.equal(dashboardSource.match(/<CardTitle className="app-shell-title text-xl font-extrabold">Динамика месяца<\/CardTitle>/g)?.length, 1);
-  assert.equal(dashboardSource.match(/<CardTitle className="app-shell-title text-xl font-extrabold" data-testid="dashboard-company-health-title">Здоровье компании<\/CardTitle>/g)?.length, 1);
+  assert.equal(dashboardSource.match(/<CardTitle className="app-shell-title text-lg font-extrabold text-white" data-testid="dashboard-company-health-title">Здоровье компании<\/CardTitle>/g)?.length, 1);
   assert.match(dashboardSource, /operationalLoadScore/);
   assert.match(dashboardSource, /operationalLoadTone/);
   assert.match(dashboardSource, /receivablesTone/);
   assert.match(dashboardSource, /utilizationTone/);
   assert.match(dashboardSource, /serviceTone/);
   assert.match(dashboardSource, /Прочие/);
+});
+
+test('dashboard command board uses enterprise grid without dominant company health circle', () => {
+  const commandScreenBlock = sourceBlock(dashboardSource, '<div className="rentcore-command-screen">', 'return (\n    <div className="space-y-4');
+
+  assert.match(commandScreenBlock, /data-testid="dashboard-command-board"/);
+  assert.match(commandScreenBlock, /md:grid-cols-2 xl:grid-cols-12/);
+  assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-key-signals"/);
+  assert.match(commandScreenBlock, /xl:col-span-3[\s\S]*data-testid="dashboard-tasks"/);
+  assert.match(commandScreenBlock, /xl:col-span-5[\s\S]*data-testid="dashboard-month-dynamics"/);
+  assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-fleet-utilization"/);
+  assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-receivables-aging"/);
+  assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-operational-summary"/);
+  assert.doesNotMatch(commandScreenBlock, /dashboard-company-health-svg/);
+  assert.doesNotMatch(commandScreenBlock, /xl:grid-rows-\[/);
+  assert.doesNotMatch(commandScreenBlock, /xl:overflow-hidden/);
+
+  assert.match(themeSource, /\.rentcore-command-screen\s*\{[\s\S]*min-height: 0;/);
+  assert.match(themeSource, /\.rentcore-command-shell\s*\{[\s\S]*min-height: 0;/);
 });
 
 test('dashboard signal strip renders counters, rows, empty and error states', () => {

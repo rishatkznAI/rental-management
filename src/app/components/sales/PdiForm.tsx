@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Camera, ImagePlus, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
 import { EQUIPMENT_KEYS } from '../../hooks/useEquipment';
 import { RENTAL_KEYS } from '../../hooks/useRentals';
@@ -12,7 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui
 import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
-type PdiResult = 'ready_for_sale' | 'needs_rework' | 'needs_repair' | 'hold_sale';
+type PdiResult = 'ready_for_sale' | 'ready_for_rent' | 'needs_rework' | 'needs_repair' | 'hold_sale';
 
 type PdiFormProps = {
   equipment: Equipment;
@@ -57,6 +58,7 @@ const PHOTO_LABELS = {
 
 const PDI_RESULT_LABELS: Record<PdiResult, string> = {
   ready_for_sale: 'Готова к продаже',
+  ready_for_rent: 'Готова к аренде',
   needs_rework: 'Нужна доработка',
   needs_repair: 'Нужен ремонт до продажи',
   hold_sale: 'Не продавать до решения проблемы',
@@ -70,8 +72,15 @@ function makeInitialFlags<T extends Record<string, string>>(labels: T): Record<k
 
 function statusFromResult(result: PdiResult, current: EquipmentSalePdiStatus): EquipmentSalePdiStatus {
   if (result === 'ready_for_sale') return 'ready';
+  if (result === 'ready_for_rent') return 'ready_for_rent';
   if (result === 'hold_sale' || result === 'needs_repair') return 'issues';
   return current === 'not_started' ? 'in_progress' : current;
+}
+
+function pdiSuccessMessage(status: EquipmentSalePdiStatus): string {
+  if (status === 'ready_for_rent') return 'PDI сохранён: техника готова к аренде';
+  if (status === 'ready') return 'PDI сохранён: техника готова к продаже';
+  return 'PDI сохранён';
 }
 
 export function PdiForm({ equipment, onCancel, onCreated, stickyActions = false }: PdiFormProps) {
@@ -258,6 +267,7 @@ export function PdiForm({ equipment, onCancel, onCreated, stickyActions = false 
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
       ]);
       await onCreated?.(createdTicket, nextStatus);
+      toast.success(pdiSuccessMessage(nextStatus));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Неизвестная ошибка';
       setSubmitError(`Не удалось сохранить PDI: ${message}`);
@@ -316,6 +326,7 @@ export function PdiForm({ equipment, onCancel, onCreated, stickyActions = false 
                 <SelectItem value="in_progress">В работе</SelectItem>
                 <SelectItem value="issues">Есть замечания</SelectItem>
                 <SelectItem value="ready">Готов к продаже</SelectItem>
+                <SelectItem value="ready_for_rent">Готов к аренде</SelectItem>
               </SelectContent>
             </Select>
           </div>

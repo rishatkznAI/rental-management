@@ -10,7 +10,7 @@ export type EquipmentOwnerType = 'own' | 'investor' | 'sublease';
 export type EquipmentCategory = 'own' | 'sold' | 'client' | 'partner';
 export type EquipmentPriority = 'low' | 'medium' | 'high' | 'critical';
 export type EquipmentSaleCondition = 'new' | 'used';
-export type EquipmentSalePdiStatus = 'not_started' | 'in_progress' | 'issues' | 'ready';
+export type EquipmentSalePdiStatus = 'not_started' | 'in_progress' | 'issues' | 'ready' | 'ready_for_rent';
 export type EquipmentSaleReceiptStatus =
   | 'planned_arrival'
   | 'arrived_waiting_acceptance'

@@ -44,7 +44,7 @@ export function EquipmentRegistryTable({
   getEquipmentGsmDisplay,
 }: EquipmentRegistryTableProps) {
   return (
-    <div className="app-scroll-fade-x overflow-x-auto">
+    <div className="app-scroll-fade-x min-w-0 overflow-x-auto">
       <table className="w-full min-w-[1480px] table-fixed border-separate border-spacing-0 text-left text-sm text-foreground">
         <thead className="sticky top-0 z-10 border-b border-border/90 bg-card/96 text-[10px] uppercase tracking-[0.14em] text-foreground/60 backdrop-blur">
           <tr>

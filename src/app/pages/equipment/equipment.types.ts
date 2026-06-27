@@ -62,6 +62,10 @@ export type EquipmentQuickViewPanelData = {
   mainPhoto?: string;
   statusLabel: string;
   statusClassName: string;
+  readinessBadge?: {
+    label: string;
+    className: string;
+  };
   inventoryNumber?: string;
   serialNumber?: string;
   quickActions: EquipmentPreviewQuickAction[];

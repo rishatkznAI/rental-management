@@ -1169,6 +1169,8 @@ test('PDI form contains presale fields and no service scenario selector', () => 
   assert.match(source, /Фото с 4 сторон/);
   assert.match(source, /Шильдик \/ серийный номер/);
   assert.match(source, /Готова к продаже/);
+  assert.match(source, /SelectItem value="ready_for_rent">Готов к аренде/);
+  assert.match(source, /ready_for_rent: 'Готова к аренде'/);
 
   assert.doesNotMatch(source, /Сценарий сервисной заявки/);
   assert.doesNotMatch(source, /option value="repair"/);
@@ -1190,6 +1192,24 @@ test('PDI payload is explicitly marked as sales PDI', () => {
   assert.match(source, /source: 'sales'/);
   assert.match(source, /saleMode: true/);
   assert.match(source, /pdiData/);
+  assert.match(source, /toast\.success\(pdiSuccessMessage\(nextStatus\)\)/);
+  assert.match(source, /PDI сохранён: техника готова к аренде/);
+  assert.doesNotMatch(source, /serviceKind: 'to'/);
+  assert.doesNotMatch(source, /status: 'available'/);
+});
+
+test('ready for rent PDI stays separate from equipment main status and appears in quick view', () => {
+  const pdiSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/sales/PdiForm.tsx'), 'utf8');
+  const equipmentSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
+  const detailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+  const quickViewSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/equipment/EquipmentQuickViewPanel.tsx'), 'utf8');
+
+  assert.match(pdiSource, /if \(result === 'ready_for_rent'\) return 'ready_for_rent'/);
+  assert.match(equipmentSource, /selectedEquipment\.salePdiStatus === 'ready_for_rent'/);
+  assert.match(equipmentSource, /label: 'Готова к аренде'/);
+  assert.match(quickViewSource, /readinessBadge/);
+  assert.match(detailSource, /\{ \.\.\.item, salePdiStatus: nextPdiStatus \}/);
+  assert.doesNotMatch(detailSource, /\{ \.\.\.item, salePdiStatus: nextPdiStatus, status: 'available'/);
 });
 
 test('ordinary service ticket form still keeps service scenarios', () => {

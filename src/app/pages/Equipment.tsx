@@ -704,6 +704,7 @@ function getPriorityLabel(priority: EquipmentEntity['priority']) {
 
 function getSalePdiAppearance(status: EquipmentSalePdiStatus = 'not_started') {
   if (status === 'ready') return 'bg-emerald-500/12 text-emerald-300';
+  if (status === 'ready_for_rent') return 'bg-emerald-500/12 text-emerald-300';
   if (status === 'in_progress') return 'bg-orange-500/12 text-orange-300';
   if (status === 'issues') return 'bg-red-500/12 text-red-300';
   return 'bg-secondary text-muted-foreground';
@@ -1290,6 +1291,7 @@ export default function Equipment() {
   const equipmentTypeCatalog = useEquipmentTypeCatalog();
   const [selectedEquipmentId, setSelectedEquipmentId] = React.useState<string | null>(null);
   const [activeQuickViewTab, setActiveQuickViewTab] = React.useState<EquipmentPreviewTab>('overview');
+  const [isMobileQuickView, setIsMobileQuickView] = React.useState(false);
   const investorBinding = React.useMemo(() => getInvestorBinding({
     role: normalizedRole,
     status: 'Активен',
@@ -1339,6 +1341,16 @@ export default function Equipment() {
   React.useEffect(() => {
     setActiveQuickViewTab('overview');
   }, [selectedEquipmentId]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const mediaQuery = window.matchMedia('(max-width: 639px)');
+    const syncMobileQuickView = () => setIsMobileQuickView(mediaQuery.matches);
+
+    syncMobileQuickView();
+    mediaQuery.addEventListener('change', syncMobileQuickView);
+    return () => mediaQuery.removeEventListener('change', syncMobileQuickView);
+  }, []);
 
   const locationOptions = React.useMemo(
     () => Array.from(new Set(enrichedEquipmentList.map((eq) => eq.location).filter(Boolean))).sort(),
@@ -1439,6 +1451,9 @@ export default function Equipment() {
     const mainPhoto = previewPhotos[0]?.src || equipmentPhotoSrc;
     const gsmDisplay = getEquipmentGsmDisplay(selectedEquipment);
     const statusLabel = getRegistryStatusLabel(selectedEquipment, activeRentalIndex);
+    const readinessBadge = selectedEquipment.salePdiStatus === 'ready_for_rent'
+      ? { label: 'Готова к аренде', className: 'app-status-success' }
+      : undefined;
     const equipmentTypeLabel = findEquipmentTypeLabel(selectedEquipment.type, equipmentTypeOptions);
     const driveLabel = getEquipmentDriveLabel(selectedEquipment.drive);
     const docsPath = `/documents?equipmentId=${encodeURIComponent(selectedEquipment.id)}&equipmentInv=${encodeURIComponent(selectedEquipment.inventoryNumber || '')}`;
@@ -1463,6 +1478,7 @@ export default function Equipment() {
       mainPhoto,
       statusLabel,
       statusClassName: getRegistryStatusAppearance(selectedEquipment, activeRentalIndex),
+      readinessBadge,
       inventoryNumber: selectedEquipment.inventoryNumber,
       serialNumber: selectedEquipment.serialNumber,
       quickActions,
@@ -1532,6 +1548,21 @@ export default function Equipment() {
     selectedShippingPhotos,
     serviceTickets,
   ]);
+
+  const renderQuickViewPanel = React.useCallback(() => {
+    if (!quickViewPanelData) return null;
+
+    return (
+      <EquipmentQuickViewPanel
+        selectedEquipment={selectedEquipment}
+        activeTab={activeQuickViewTab}
+        onTabChange={setActiveQuickViewTab}
+        onClose={() => setSelectedEquipmentId(null)}
+        mode="embedded"
+        {...quickViewPanelData}
+      />
+    );
+  }, [activeQuickViewTab, quickViewPanelData, selectedEquipment]);
 
   const filteredEquipment = React.useMemo(() => (
     enrichedEquipmentList
@@ -1909,80 +1940,73 @@ export default function Equipment() {
         initialFilter={initialActionQueueFilter}
       />
 
-      <div className="space-y-3 sm:hidden">
-        {totalVisible === 0 ? (
-          <EmptyState {...emptyState} />
-        ) : (
-          <EquipmentMobileCards
-            equipmentItems={paginatedEquipment}
-            isSaleTab={isSaleTab}
-            activeRentalIndex={activeRentalIndex}
-            getEquipmentDetailPath={getEquipmentDetailPath}
-            getEquipmentTypeLabel={(equipment) => findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
-            getEquipmentDriveLabel={getEquipmentDriveLabel}
-            getRegistryStatusLabel={getRegistryStatusLabel}
-            getRegistryStatusAppearance={getRegistryStatusAppearance}
-            getPriorityLabel={getPriorityLabel}
-            getPriorityAppearance={getPriorityAppearance}
-            getRegistryOwnerLabel={getRegistryOwnerLabel}
-            getEquipmentGsmDisplay={getEquipmentGsmDisplay}
-            getSalePdiAppearance={getSalePdiAppearance}
-            isSaleRegistryEquipment={isSaleRegistryEquipment}
-            salePdiLabels={EQUIPMENT_SALE_PDI_LABELS}
-            selectedEquipmentId={selectedEquipmentId}
-            onSelectEquipment={(equipment) => setSelectedEquipmentId(equipment.id)}
-          />
-        )}
-      </div>
-
-      <section className="hidden overflow-hidden rounded-2xl border border-border/85 bg-card/92 shadow-[0_18px_42px_-36px_rgba(15,23,42,0.9)] sm:block">
-        {totalVisible === 0 ? (
-          <div className="p-6"><EmptyState {...emptyState} /></div>
-        ) : (
-          <div className={`grid min-w-0 grid-cols-1 ${
-            quickViewPanelData ? 'xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px]' : ''
-          }`}>
-            <EquipmentRegistryTable
-              equipmentItems={paginatedEquipment}
-              activeRentalIndex={activeRentalIndex}
-              selectedEquipmentId={selectedEquipmentId}
-              onSelectEquipment={(equipment) => setSelectedEquipmentId(equipment.id)}
-              getEquipmentDetailPath={getEquipmentDetailPath}
-              getEquipmentTypeLabel={(equipment) => findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
-              getEquipmentDriveLabel={getEquipmentDriveLabel}
-              getRegistryStatusLabel={getRegistryStatusLabel}
-              getRegistryStatusAppearance={getRegistryStatusAppearance}
-              getEquipmentCategoryLabel={getEquipmentCategoryLabel}
-              getRegistryOwnerLabel={getRegistryOwnerLabel}
-              getPriorityLabel={getPriorityLabel}
-              getPriorityDotClass={getPriorityDotClass}
-              getEquipmentGsmDisplay={getEquipmentGsmDisplay}
-            />
-            {quickViewPanelData ? (
-              <div className="hidden xl:block">
-                <EquipmentQuickViewPanel
-                  selectedEquipment={selectedEquipment}
-                  activeTab={activeQuickViewTab}
-                  onTabChange={setActiveQuickViewTab}
-                  onClose={() => setSelectedEquipmentId(null)}
-                  mode="embedded"
-                  {...quickViewPanelData}
-                />
-              </div>
-            ) : null}
+      <div
+        data-testid="equipment-workspace-grid"
+        className={`equipment-workspace-grid grid min-w-0 grid-cols-1 gap-3 overflow-x-hidden ${
+          quickViewPanelData ? 'xl:grid-cols-[minmax(0,1fr)_minmax(360px,430px)]' : ''
+        }`}
+      >
+        <div className="min-w-0" data-testid="equipment-registry-workspace">
+          <div className="space-y-3 sm:hidden">
+            {totalVisible === 0 ? (
+              <EmptyState {...emptyState} />
+            ) : (
+              <EquipmentMobileCards
+                equipmentItems={paginatedEquipment}
+                isSaleTab={isSaleTab}
+                activeRentalIndex={activeRentalIndex}
+                getEquipmentDetailPath={getEquipmentDetailPath}
+                getEquipmentTypeLabel={(equipment) => findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
+                getEquipmentDriveLabel={getEquipmentDriveLabel}
+                getRegistryStatusLabel={getRegistryStatusLabel}
+                getRegistryStatusAppearance={getRegistryStatusAppearance}
+                getPriorityLabel={getPriorityLabel}
+                getPriorityAppearance={getPriorityAppearance}
+                getRegistryOwnerLabel={getRegistryOwnerLabel}
+                getEquipmentGsmDisplay={getEquipmentGsmDisplay}
+                getSalePdiAppearance={getSalePdiAppearance}
+                isSaleRegistryEquipment={isSaleRegistryEquipment}
+                salePdiLabels={EQUIPMENT_SALE_PDI_LABELS}
+                selectedEquipmentId={selectedEquipmentId}
+                onSelectEquipment={(equipment) => setSelectedEquipmentId(equipment.id)}
+                renderSelectedQuickView={isMobileQuickView ? renderQuickViewPanel : undefined}
+              />
+            )}
           </div>
-        )}
-      </section>
 
-      {quickViewPanelData ? (
-        <EquipmentQuickViewPanel
-          selectedEquipment={selectedEquipment}
-          activeTab={activeQuickViewTab}
-          onTabChange={setActiveQuickViewTab}
-          onClose={() => setSelectedEquipmentId(null)}
-          {...quickViewPanelData}
-        />
-      ) : null}
+          <section
+            className="hidden min-w-0 overflow-hidden rounded-2xl border border-border/85 bg-card/92 shadow-[0_18px_42px_-36px_rgba(15,23,42,0.9)] sm:block"
+            data-testid="equipment-registry-table-panel"
+          >
+            {totalVisible === 0 ? (
+              <div className="p-6"><EmptyState {...emptyState} /></div>
+            ) : (
+              <EquipmentRegistryTable
+                equipmentItems={paginatedEquipment}
+                activeRentalIndex={activeRentalIndex}
+                selectedEquipmentId={selectedEquipmentId}
+                onSelectEquipment={(equipment) => setSelectedEquipmentId(equipment.id)}
+                getEquipmentDetailPath={getEquipmentDetailPath}
+                getEquipmentTypeLabel={(equipment) => findEquipmentTypeLabel(equipment.type, equipmentTypeOptions)}
+                getEquipmentDriveLabel={getEquipmentDriveLabel}
+                getRegistryStatusLabel={getRegistryStatusLabel}
+                getRegistryStatusAppearance={getRegistryStatusAppearance}
+                getEquipmentCategoryLabel={getEquipmentCategoryLabel}
+                getRegistryOwnerLabel={getRegistryOwnerLabel}
+                getPriorityLabel={getPriorityLabel}
+                getPriorityDotClass={getPriorityDotClass}
+                getEquipmentGsmDisplay={getEquipmentGsmDisplay}
+              />
+            )}
+          </section>
+        </div>
+
+        {quickViewPanelData && !isMobileQuickView ? (
+          <div className="min-w-0 overflow-hidden xl:min-w-[360px] xl:max-w-[430px]" data-testid="equipment-quick-view-slot">
+            {renderQuickViewPanel()}
+          </div>
+        ) : null}
+      </div>
 
       <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
         <div>

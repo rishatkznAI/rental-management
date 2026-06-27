@@ -42,10 +42,11 @@ export const EQUIPMENT_PRIORITY_ORDER: Record<EquipmentPriority, number> = {
 };
 
 export const EQUIPMENT_SALE_PDI_LABELS: Record<EquipmentSalePdiStatus, string> = {
-  not_started: 'PDI не начат',
-  in_progress: 'PDI в работе',
-  issues: 'PDI есть замечания',
-  ready: 'PDI готов',
+  not_started: 'Не начат',
+  in_progress: 'В работе',
+  issues: 'Есть замечания',
+  ready: 'Готов к продаже',
+  ready_for_rent: 'Готов к аренде',
 };
 
 export const EQUIPMENT_SALE_RECEIPT_LABELS: Record<EquipmentSaleReceiptStatus, string> = {

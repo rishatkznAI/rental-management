@@ -21,6 +21,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { createAuditEntry } from '../lib/entity-history';
 import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS, EQUIPMENT_SALE_RECEIPT_LABELS } from '../lib/equipmentClassification';
 import { useEquipmentTypeCatalog } from '../lib/equipmentTypes';
+import type { EquipmentSalePdiStatus } from '../types';
 
 // ─── Вспомогательные компоненты ────────────────────────────────────────────
 
@@ -253,7 +254,7 @@ export default function EquipmentNew() {
       saleMode:              form.isForSale === 'yes',
       saleStatus:            form.isForSale === 'yes' ? 'На продаже' : undefined,
       saleCondition:         form.isForSale === 'yes' ? form.saleCondition as 'new' | 'used' : undefined,
-      salePdiStatus:         form.isForSale === 'yes' ? form.salePdiStatus as 'not_started' | 'in_progress' | 'issues' | 'ready' : undefined,
+      salePdiStatus:         form.isForSale === 'yes' ? form.salePdiStatus as EquipmentSalePdiStatus : undefined,
       saleReceiptStatus:     form.isForSale === 'yes' && form.saleCondition === 'new' ? form.saleReceiptStatus as 'planned_arrival' | 'arrived_waiting_acceptance' | 'acceptance_in_progress' | 'accepted' | 'acceptance_rejected' | 'cancelled' : undefined,
       plannedArrivalDate:    form.isForSale === 'yes' && form.saleCondition === 'new' ? form.plannedArrivalDate || undefined : undefined,
       salePrice1:            form.isForSale === 'yes' && form.salePrice1 ? Number(form.salePrice1) : undefined,
@@ -603,6 +604,7 @@ export default function EquipmentNew() {
                         { value: 'in_progress', label: EQUIPMENT_SALE_PDI_LABELS.in_progress },
                         { value: 'issues', label: EQUIPMENT_SALE_PDI_LABELS.issues },
                         { value: 'ready', label: EQUIPMENT_SALE_PDI_LABELS.ready },
+                        { value: 'ready_for_rent', label: EQUIPMENT_SALE_PDI_LABELS.ready_for_rent },
                       ]}
                       hint="Показывает, готова ли техника к продаже и передаче клиенту."
                     />

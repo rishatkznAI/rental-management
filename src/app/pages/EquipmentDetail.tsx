@@ -152,6 +152,7 @@ const SALE_READINESS_LABELS = {
   in_progress: 'В работе',
   issues: 'Есть замечания',
   ready: 'Готов',
+  ready_for_rent: 'Готов к аренде',
   problem: 'Проблема',
 } as const;
 
@@ -1992,14 +1993,17 @@ export default function EquipmentDetail() {
   const saleTitle = `${equipment.manufacturer} ${equipment.model}`.trim() || equipment.inventoryNumber || 'Техника на продажу';
   const saleStatusKindValue = saleStatusKind(equipment);
   const saleStatusText = saleStatusKindValue === 'in_deal' ? 'Зарезервирована' : saleStatusLabel(equipment);
-  const salePdiLabel = salePdiStatus === 'ready'
+  const salePdiReady = salePdiStatus === 'ready' || salePdiStatus === 'ready_for_rent';
+  const salePdiLabel = salePdiStatus === 'ready_for_rent'
+    ? 'PDI завершён: готова к аренде'
+    : salePdiStatus === 'ready'
     ? 'PDI завершён'
     : salePdiStatus === 'in_progress'
       ? 'PDI в процессе'
       : salePdiStatus === 'issues'
         ? 'PDI с замечаниями'
         : 'PDI не начат';
-  const salePdiProgress = salePdiStatus === 'ready' ? 100 : salePdiStatus === 'in_progress' ? 70 : salePdiStatus === 'issues' ? 55 : 20;
+  const salePdiProgress = salePdiReady ? 100 : salePdiStatus === 'in_progress' ? 70 : salePdiStatus === 'issues' ? 55 : 20;
   const saleMainPrice = equipment.salePrice1 || equipment.salePrice2 || equipment.salePrice3 || 0;
   const saleMinPrice = equipment.salePrice2 || 0;
   const saleCostPrice = equipment.salePrice3 || 0;
@@ -2019,7 +2023,7 @@ export default function EquipmentDetail() {
   const salePhotoReady = Boolean(equipment.photo);
   const salePriceReady = saleMainPrice > 0;
   const saleReadinessItems = [
-    { id: 'pdi', label: 'PDI', ready: salePdiStatus === 'ready' },
+    { id: 'pdi', label: 'PDI', ready: salePdiReady },
     { id: 'documents', label: 'Документы', ready: saleDocsReady },
     { id: 'photo', label: 'Фото', ready: salePhotoReady },
     { id: 'price', label: 'Цена', ready: salePriceReady },
@@ -2027,7 +2031,7 @@ export default function EquipmentDetail() {
   ];
   const saleReadinessPercent = Math.round((saleReadinessItems.filter(item => item.ready).length / saleReadinessItems.length) * 100);
   const saleBlockers = [
-    salePdiStatus !== 'ready' ? {
+    !salePdiReady ? {
       id: 'pdi',
       title: salePdiStatus === 'issues' ? 'PDI с замечаниями' : 'PDI не завершён',
       text: salePdiTickets.length > 0 ? 'Остались работы по предпродажной подготовке' : 'Создайте PDI-заявку после приёмки',
@@ -2193,7 +2197,7 @@ export default function EquipmentDetail() {
                   <Badge variant={saleCondition === 'used' ? 'warning' : 'info'}>
                     {saleCondition === 'used' ? 'Б/у' : 'Новая'}
                   </Badge>
-                  <Badge variant={salePdiStatus === 'ready' ? 'success' : salePdiStatus === 'issues' ? 'error' : salePdiStatus === 'in_progress' ? 'warning' : 'default'}>
+                  <Badge variant={salePdiReady ? 'success' : salePdiStatus === 'issues' ? 'error' : salePdiStatus === 'in_progress' ? 'warning' : 'default'}>
                     {salePdiLabel}
                   </Badge>
                 </div>
@@ -2320,7 +2324,7 @@ export default function EquipmentDetail() {
       {showLegacyEquipmentSections && !saleMode && <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className={`rounded-2xl border p-4 ${
           saleMode
-            ? salePdiStatus === 'ready'
+            ? salePdiReady
               ? 'border-emerald-500/25 bg-emerald-500/8'
               : salePdiStatus === 'in_progress'
               ? 'border-orange-500/25 bg-orange-500/8'
@@ -2613,7 +2617,7 @@ export default function EquipmentDetail() {
                       </div>
                     </div>
                     <SaleField label="Дата поступления" value={formatDate(equipment.actualArrivalDate || equipment.plannedArrivalDate)} />
-                    <SaleField label="Плановая готовность" value={salePdiStatus === 'ready' ? 'Готова' : formatDate(equipment.acceptedAt)} />
+                    <SaleField label="Плановая готовность" value={salePdiReady ? 'Готова' : formatDate(equipment.acceptedAt)} />
                   </div>
                   {equipment.acceptanceDefects?.length ? (
                     <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3">
@@ -2670,7 +2674,7 @@ export default function EquipmentDetail() {
                   <SaleStatusRow label="Гидравлика" value={equipment.acceptanceChecklist?.visualDamageFound ? 'Проверить' : 'Отлично'} tone={equipment.acceptanceChecklist?.visualDamageFound ? 'warning' : 'success'} />
                   <SaleStatusRow label="Электрика" value={salePdiStatus === 'issues' ? 'Есть замечания' : 'Отлично'} tone={salePdiStatus === 'issues' ? 'warning' : 'success'} />
                   <SaleStatusRow label="Кузов и окраска" value={equipment.acceptanceChecklist?.visualDamageFound ? 'Есть замечания' : 'Хорошо'} tone={equipment.acceptanceChecklist?.visualDamageFound ? 'warning' : 'success'} />
-                  <SaleStatusRow label="Общее состояние" value={salePdiStatus === 'ready' ? 'Готово' : 'Требует проверки'} tone={salePdiStatus === 'ready' ? 'success' : 'warning'} />
+                  <SaleStatusRow label="Общее состояние" value={salePdiReady ? 'Готово' : 'Требует проверки'} tone={salePdiReady ? 'success' : 'warning'} />
                 </SalePanel>
 
                 <SalePanel title="Логистика продажи">
@@ -2868,7 +2872,7 @@ export default function EquipmentDetail() {
 
               <div className="grid gap-4 xl:grid-cols-5">
                 <SalePanel title="PDI и приёмка">
-                  <SaleStatusRow label="Статус PDI" value={EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]} tone={salePdiStatus === 'ready' ? 'success' : 'warning'} />
+                  <SaleStatusRow label="Статус PDI" value={EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]} tone={salePdiReady ? 'success' : 'warning'} />
                   <SaleStatusRow label="Приёмка" value={saleReceiptStatus ? EQUIPMENT_SALE_RECEIPT_LABELS[saleReceiptStatus] : 'Не указана'} tone={saleReceiptStatus === 'accepted' ? 'success' : 'warning'} />
                   <SaleField label="Дата приёмки" value={formatDate(equipment.acceptedAt || equipment.actualArrivalDate)} />
                   <SaleField label="Ответственный" value={equipment.acceptedByName || '—'} />
@@ -3282,7 +3286,7 @@ export default function EquipmentDetail() {
             <CompactMetric label="Статус продажи" value={saleStatusText} tone={saleStatusKindValue === 'sold' ? 'success' : 'default'} />
             <CompactMetric label="Цена" value={canViewFinance ? (saleMainPrice ? formatCurrency(saleMainPrice) : 'Нет данных') : 'Скрыто правами'} />
             <CompactMetric label="Готовность" value={`${saleReadinessPercent}%`} tone={saleReadinessPercent === 100 ? 'success' : 'warning'} />
-            <CompactMetric label="PDI" value={salePdiLabel} tone={salePdiStatus === 'ready' ? 'success' : 'warning'} />
+            <CompactMetric label="PDI" value={salePdiLabel} tone={salePdiReady ? 'success' : 'warning'} />
           </div>
           <SalePanel title="Обзор продажи">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -3322,7 +3326,7 @@ export default function EquipmentDetail() {
               <SaleField label="Статус PDI" value={EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]} />
               <SaleField label="Ответственный" value={equipment.acceptedByName || '—'} />
               <SaleField label="План / факт" value={[formatDate(equipment.plannedArrivalDate), formatDate(equipment.actualArrivalDate || equipment.acceptedAt)].join(' / ')} />
-              <SaleField label="Результат" value={salePdiStatus === 'ready' ? 'Готова' : salePdiStatus === 'issues' ? 'Есть замечания' : 'В работе / не начат'} />
+              <SaleField label="Результат" value={salePdiStatus === 'ready_for_rent' ? 'Готова к аренде' : salePdiStatus === 'ready' ? 'Готова к продаже' : salePdiStatus === 'issues' ? 'Есть замечания' : 'В работе / не начат'} />
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <SaleCheckRow ready={Boolean(equipment.acceptanceChecklist?.serialNumberConfirmed)} label="SN / VIN подтверждён" />
@@ -3330,7 +3334,7 @@ export default function EquipmentDetail() {
               <SaleCheckRow ready={Boolean(equipment.acceptanceChecklist?.configurationChecked)} label="Комплектация проверена" />
               <SaleCheckRow ready={Boolean(equipment.acceptanceChecklist?.documentsReceived)} label="Документы получены" />
               <SaleCheckRow ready={!equipment.acceptanceChecklist?.visualDamageFound} label="Критичных дефектов не отмечено" />
-              <SaleCheckRow ready={salePdiStatus === 'ready'} label="PDI завершён" />
+              <SaleCheckRow ready={salePdiReady} label="PDI завершён" />
             </div>
             {equipment.acceptanceComment ? <p className="text-sm text-muted-foreground">{equipment.acceptanceComment}</p> : <p className="text-sm text-muted-foreground">Замечания PDI не заполнены.</p>}
           </SalePanel>
@@ -4289,7 +4293,7 @@ export default function EquipmentDetail() {
                 <div className="grid gap-3 md:grid-cols-3">
                   <CompactMetric label="PDI" value={EQUIPMENT_SALE_PDI_LABELS[salePdiStatus]} />
                   <CompactMetric label="Комплектация" value={equipment.notes ? 'Описана в комментарии' : 'Не описана'} />
-                  <CompactMetric label="Предпродажная готовность" value={salePdiStatus === 'ready' && equipment.photo ? 'Готова' : 'Требует проверки'} tone={salePdiStatus === 'ready' && equipment.photo ? 'success' : 'warning'} />
+                  <CompactMetric label="Предпродажная готовность" value={salePdiReady && equipment.photo ? 'Готова' : 'Требует проверки'} tone={salePdiReady && equipment.photo ? 'success' : 'warning'} />
                 </div>
               </CardContent>
             </Card>
@@ -5047,7 +5051,7 @@ export default function EquipmentDetail() {
                 </Dialog.Title>
                 <Dialog.Description className="mt-1 text-sm leading-6 text-slate-500 dark:text-gray-400">
                   {saleMode
-                    ? 'Запись будет показана в карточке продажи как PDI, без вывода обычной очереди ТО.'
+                    ? 'Запись будет показана в карточке техники/продажи как результат PDI. Если техника отмечена готовой к аренде, она будет отображаться как доступная для сдачи после проверки.'
                     : 'Заявка будет создана сразу для текущего подъемника.'}
                 </Dialog.Description>
               </div>
@@ -5677,6 +5681,7 @@ function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
     in_progress: 'warning',
     issues: 'error',
     ready: 'success',
+    ready_for_rent: 'success',
   };
   return <Badge variant={variants[status]}>{EQUIPMENT_SALE_PDI_LABELS[status]}</Badge>;
 }
@@ -6137,6 +6142,7 @@ function EditEquipmentModal({
                           { value: 'in_progress', label: EQUIPMENT_SALE_PDI_LABELS.in_progress },
                           { value: 'issues', label: EQUIPMENT_SALE_PDI_LABELS.issues },
                           { value: 'ready', label: EQUIPMENT_SALE_PDI_LABELS.ready },
+                          { value: 'ready_for_rent', label: EQUIPMENT_SALE_PDI_LABELS.ready_for_rent },
                         ]}
                         disabled={!canEditSaleFields}
                         disabledReason={saleDisabledReason}

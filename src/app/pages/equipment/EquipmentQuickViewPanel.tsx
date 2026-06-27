@@ -78,6 +78,7 @@ export function EquipmentQuickViewPanel({
   mainPhoto,
   statusLabel,
   statusClassName,
+  readinessBadge,
   inventoryNumber,
   serialNumber,
   quickActions,
@@ -96,7 +97,7 @@ export function EquipmentQuickViewPanel({
     <aside
       data-testid="equipment-quick-view-panel"
       className={mode === 'embedded'
-        ? 'flex h-full min-h-[560px] w-full flex-col overflow-hidden border-l border-border/90 bg-card/92'
+        ? 'pointer-events-auto flex max-h-[calc(100vh-2rem)] min-h-[560px] w-full min-w-0 max-w-full flex-col overflow-hidden rounded-2xl border border-border/90 bg-card/92 shadow-[0_18px_42px_-36px_rgba(15,23,42,0.9)] xl:min-w-[360px] xl:max-w-[430px]'
         : 'fixed inset-x-0 bottom-0 z-50 flex max-h-[82vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border/90 bg-background shadow-2xl xl:hidden'
       }
     >
@@ -122,6 +123,11 @@ export function EquipmentQuickViewPanel({
                 <span className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-medium ${statusClassName}`}>
                   {statusLabel}
                 </span>
+                {readinessBadge ? (
+                  <span className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-medium ${readinessBadge.className}`}>
+                    {readinessBadge.label}
+                  </span>
+                ) : null}
                 <span className="inline-flex max-w-full rounded-full border border-border/70 bg-secondary/75 px-2.5 py-1 font-mono text-xs text-foreground/66">
                   <span className="truncate">INV {inventoryNumber || '—'}</span>
                 </span>

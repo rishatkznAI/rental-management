@@ -47,14 +47,16 @@ function getSalePdiBadge(status: EquipmentSalePdiStatus = 'not_started') {
     in_progress: 'warning',
     issues: 'error',
     ready: 'success',
+    ready_for_rent: 'success',
   };
   return <Badge variant={variants[status]}>{EQUIPMENT_SALE_PDI_LABELS[status]}</Badge>;
 }
 
 function getSaleReadinessBadge(status: EquipmentSalePdiStatus = 'not_started') {
+  const ready = status === 'ready' || status === 'ready_for_rent';
   return (
-    <Badge variant={status === 'ready' ? 'success' : 'warning'}>
-      {status === 'ready' ? 'PDI готов' : status === 'issues' ? 'PDI с замечаниями' : 'PDI не готов'}
+    <Badge variant={ready ? 'success' : 'warning'}>
+      {status === 'ready_for_rent' ? 'Готова к аренде' : status === 'ready' ? 'PDI готов' : status === 'issues' ? 'PDI с замечаниями' : 'PDI не готов'}
     </Badge>
   );
 }
@@ -1119,6 +1121,7 @@ export default function Sales() {
                 <option value="in_progress">{EQUIPMENT_SALE_PDI_LABELS.in_progress}</option>
                 <option value="issues">{EQUIPMENT_SALE_PDI_LABELS.issues}</option>
                 <option value="ready">{EQUIPMENT_SALE_PDI_LABELS.ready}</option>
+                <option value="ready_for_rent">{EQUIPMENT_SALE_PDI_LABELS.ready_for_rent}</option>
               </select>
             </FilterField>
             <FilterField label="Поступление">

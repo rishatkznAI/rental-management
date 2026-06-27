@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const releaseSmokeSource = readFileSync(new URL('../e2e/helpers/releaseSmoke.ts', import.meta.url), 'utf8');
 const deployWorkflowSource = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
+const productionUiSelectorSmokeSource = readFileSync(new URL('../e2e/production-ui-selector-smoke.spec.ts', import.meta.url), 'utf8');
 
 test('production release smoke checks app.disabled before authenticated smoke', () => {
   assert.match(releaseSmokeSource, /type VersionInfo = \{/);
@@ -98,6 +99,25 @@ test('production release smoke allows backend drift only for frontend-only and d
   assert.match(releaseSmokeSource, /expectedDriftReleaseType\(details\.releaseType\)/);
   assert.match(releaseSmokeSource, /releaseType: normalizeReleaseType\(String\(config\.releaseType \|\| ''\)\)/);
   assert.match(releaseSmokeSource, /releaseType: normalizedConfig\.releaseType/);
+});
+
+test('production UI selector smoke passes frontend marker release type into release smoke', () => {
+  assert.match(productionUiSelectorSmokeSource, /async function readPublicFrontendBuildMarker/);
+  assert.match(productionUiSelectorSmokeSource, /frontend marker should match expected release commit before selector smoke preflight/);
+  assert.match(productionUiSelectorSmokeSource, /releaseType: String\(marker\?\.releaseType \|\| ''\)\.trim\(\) \|\| 'full-stack'/);
+  assert.match(productionUiSelectorSmokeSource, /const frontendMarker = await readPublicFrontendBuildMarker\(page, frontendUrl, apiUrl, expectedCommit\)/);
+  assert.match(productionUiSelectorSmokeSource, /releaseType: frontendMarker\.releaseType/);
+  assert.match(productionUiSelectorSmokeSource, /label: 'Техника'/);
+  assert.match(productionUiSelectorSmokeSource, /route: '\/equipment'/);
+  assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('actionQueueEmpty', \{ allowed: true \}\)/);
+  assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('actionQueueRowsEmpty', \{ allowed: true \}\)/);
+  assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('clientCardCrmHiddenSkipped', \{ reason: 'no_client_card_link' \}\)/);
+  assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('legacyAttentionBelowFoldSkipped', \{ reason: 'covered_by_deploy_visual_smoke'/);
+  assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('dashboardAttentionSkipped', \{ reason: 'covered_by_deploy_visual_smoke' \}\)/);
+  assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('equipmentActionQueueSkipped', \{ reason: 'section_not_rendered' \}\)/);
+  assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('equipmentReadinessVisible', \{ mode: 'kpi-strip' \}\)/);
+  assert.match(productionUiSelectorSmokeSource, /fleet readiness KPI/);
+  assert.match(productionUiSelectorSmokeSource, /if \(actionRowCount > 0\)/);
 });
 
 test('deploy workflow embeds release_type into frontend build metadata', () => {

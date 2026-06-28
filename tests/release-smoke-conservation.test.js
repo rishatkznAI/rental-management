@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { backendCommitGateResult } from '../scripts/release-preflight.mjs';
 
 const releaseSmokeSource = readFileSync(new URL('../e2e/helpers/releaseSmoke.ts', import.meta.url), 'utf8');
 const deployWorkflowSource = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
 const productionUiSelectorSmokeSource = readFileSync(new URL('../e2e/production-ui-selector-smoke.spec.ts', import.meta.url), 'utf8');
+const financeProductionSmokeSource = readFileSync(new URL('../e2e/finance-production-smoke.spec.ts', import.meta.url), 'utf8');
+const financeProductionSmokeWorkflowSource = readFileSync(new URL('../.github/workflows/finance-production-smoke.yml', import.meta.url), 'utf8');
 
 test('production release smoke checks app.disabled before authenticated smoke', () => {
   assert.match(releaseSmokeSource, /type VersionInfo = \{/);
@@ -118,6 +121,44 @@ test('production UI selector smoke passes frontend marker release type into rele
   assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('equipmentReadinessVisible', \{ mode: 'kpi-strip' \}\)/);
   assert.match(productionUiSelectorSmokeSource, /fleet readiness KPI/);
   assert.match(productionUiSelectorSmokeSource, /if \(actionRowCount > 0\)/);
+});
+
+test('finance production smoke uses release type policy for backend commit drift', () => {
+  assert.match(financeProductionSmokeSource, /backendCommitGateResult\(\{/);
+  assert.match(financeProductionSmokeSource, /env: 'production'/);
+  assert.match(financeProductionSmokeSource, /resolveFinanceSmokeReleaseType/);
+  assert.match(financeProductionSmokeSource, /envReleaseType: String\(process\.env\.RELEASE_TYPE \|\| ''\)/);
+  assert.match(financeProductionSmokeSource, /frontendReleaseType: frontendBuild\?\.releaseType/);
+  assert.match(financeProductionSmokeSource, /backendReleaseType: backendBuild\?\.releaseType/);
+  assert.match(financeProductionSmokeSource, /safeSmokeLog\('backendCommitDrift'/);
+  assert.match(financeProductionSmokeSource, /expect\(gate\.status, `\$\{input\.label\}: \$\{gate\.message\}`\)\.toBe\('pass'\)/);
+});
+
+test('finance production smoke release policy warns only for frontend and deploy tooling drift', () => {
+  const backendBuild = { commitFull: '3b445384ab16263c620a08db3a84a0316d7c3719' };
+  const expectedCommit = '287e2127a7efd14ddc37c09b4092dba67cd00e6a';
+
+  for (const releaseType of ['frontend-only', 'deploy-tooling', 'frontend-deploy-tooling']) {
+    const result = backendCommitGateResult({ env: 'production', releaseType, backendBuild, expectedCommit });
+    assert.equal(result.status, 'warn', `${releaseType} backend drift should warn`);
+    assert.match(result.message, new RegExp(`expected for ${releaseType === 'frontend-only' ? 'frontend-only' : releaseType} release`));
+  }
+
+  for (const releaseType of ['backend', 'full-stack']) {
+    const result = backendCommitGateResult({ env: 'production', releaseType, backendBuild, expectedCommit });
+    assert.equal(result.status, 'fail', `${releaseType} backend drift should fail`);
+  }
+});
+
+test('finance production smoke workflow passes release type with auto default', () => {
+  assert.match(financeProductionSmokeWorkflowSource, /release_type:/);
+  assert.match(financeProductionSmokeWorkflowSource, /default: auto/);
+  assert.match(financeProductionSmokeWorkflowSource, /- frontend-only/);
+  assert.match(financeProductionSmokeWorkflowSource, /- backend/);
+  assert.match(financeProductionSmokeWorkflowSource, /- full-stack/);
+  assert.match(financeProductionSmokeWorkflowSource, /- deploy-tooling/);
+  assert.match(financeProductionSmokeWorkflowSource, /- frontend-deploy-tooling/);
+  assert.match(financeProductionSmokeWorkflowSource, /RELEASE_TYPE: \$\{\{ inputs\.release_type \}\}/);
 });
 
 test('deploy workflow embeds release_type into frontend build metadata', () => {

@@ -6,7 +6,7 @@ const settingsSource = readFileSync(new URL('../src/app/pages/Settings.tsx', imp
 
 function systemControlSource() {
   const start = settingsSource.indexOf('function SystemControlCenterSection()');
-  const end = settingsSource.indexOf('function ProductionDiagnosticsSection()');
+  const end = settingsSource.indexOf('function ProductionDiagnosticsSection');
   assert.ok(start > -1, 'SystemControlCenterSection must exist');
   assert.ok(end > start, 'SystemControlCenterSection must be before ProductionDiagnosticsSection');
   return settingsSource.slice(start, end);
@@ -21,7 +21,7 @@ test('Admin settings page opens Контроль системы inside the detai
   assert.match(settingsSource, /<button type="button" onClick=\{\(\) => openDetailSection\('system-control'\)\} className="hover:text-primary">О системе<\/button>/);
   assert.match(settingsSource, /diagnostics: \{\s+title: 'Диагностика'/);
   assert.match(settingsSource, /'system-control': \{\s+title: 'Контроль системы'/);
-  assert.match(settingsSource, /<TabsContent value="diagnostics">\s+<ProductionDiagnosticsSection \/>/);
+  assert.match(settingsSource, /<TabsContent value="diagnostics">\s+<ProductionDiagnosticsSection appSettings=\{appSettings\} \/>/);
   assert.match(settingsSource, /<TabsContent value="system-control">\s+<SystemControlCenterSection \/>/);
   assert.doesNotMatch(settingsSource, /admin-detail-sections/);
   assert.doesNotMatch(settingsSource, /scrollIntoView/);

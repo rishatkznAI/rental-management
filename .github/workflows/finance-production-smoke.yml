@@ -7,6 +7,18 @@ on:
         description: Expected production commit hash
         required: true
         default: a984b035f8c674213ca1416e7e1cea36ed8eedac
+      release_type:
+        description: Release type for backend/frontend commit drift policy
+        required: false
+        type: choice
+        default: auto
+        options:
+          - auto
+          - frontend-only
+          - backend
+          - full-stack
+          - deploy-tooling
+          - frontend-deploy-tooling
 
 permissions:
   contents: read
@@ -25,6 +37,7 @@ jobs:
       PRODUCTION_ADMIN_EMAIL: ${{ secrets.PRODUCTION_ADMIN_EMAIL }}
       PRODUCTION_ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
       EXPECTED_RELEASE_COMMIT: ${{ inputs.expected_release_commit }}
+      RELEASE_TYPE: ${{ inputs.release_type }}
       CI: true
 
     steps:

@@ -164,6 +164,22 @@ test('release preflight allows frontend-deploy-tooling safe file scope and repor
   assert.match(backendGate.message, /Backend commit differs from frontend commit: expected for frontend-deploy-tooling release/);
 });
 
+test('release preflight allows dashboard layout e2e coverage for frontend-deploy-tooling only', () => {
+  const changedFiles = [
+    'e2e/dashboard-layout.spec.ts',
+    'src/app/pages/Dashboard.tsx',
+  ];
+
+  const scope = assertFrontendDeployToolingReleaseScope({ releaseType: 'frontend-deploy-tooling', changedFiles });
+  assert.equal(scope.checked, true);
+  assert.deepEqual(scope.disallowedChangedFiles, []);
+
+  const classified = classifyReleaseChangedFiles(changedFiles);
+  assert.equal(classified.allowed, true);
+  assert.equal(classified.releaseType, 'frontend-deploy-tooling');
+  assert.deepEqual(classified.blockedFiles, []);
+});
+
 test('release preflight blocks frontend-only when server routes changed', () => {
   assert.throws(
     () => assertFrontendOnlyReleaseScope({

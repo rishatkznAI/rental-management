@@ -41,6 +41,9 @@ const DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
   /^docs\/(?:release-runbook|deploy-checklist|production-smoke-checklist)\.md$/,
   /^docs\/.*(?:release|deploy|smoke|preflight).*\.md$/,
 ];
+const FRONTEND_DEPLOY_TOOLING_COVERAGE_FILE_PATTERNS = [
+  /^e2e\/dashboard-layout\.spec\.ts$/,
+];
 const FRONTEND_DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
   /^src\//,
   /^public\//,
@@ -53,6 +56,7 @@ const FRONTEND_DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
   /^package\.json$/,
   /^package-lock\.json$/,
   /^scripts\/vite-build\.mjs$/,
+  ...FRONTEND_DEPLOY_TOOLING_COVERAGE_FILE_PATTERNS,
   ...DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS,
 ];
 const FRONTEND_RUNTIME_FILE_PATTERNS = [
@@ -324,6 +328,10 @@ export function isFrontendRuntimeChangedFile(file = '') {
   return matchesAnyPattern(file, FRONTEND_RUNTIME_FILE_PATTERNS);
 }
 
+export function isFrontendDeployToolingCoverageChangedFile(file = '') {
+  return matchesAnyPattern(file, FRONTEND_DEPLOY_TOOLING_COVERAGE_FILE_PATTERNS);
+}
+
 export function frontendDeployToolingDisallowedChangedFiles(changedFiles = []) {
   return normalizedChangedFiles(changedFiles).filter(file =>
     isReleaseCriticalChangedFile(file) || !isFrontendDeployToolingAllowedChangedFile(file),
@@ -348,7 +356,8 @@ export function assertFrontendDeployToolingReleaseScope({ releaseType = '', chan
   );
 
   assertOk(
-    files.some(isFrontendRuntimeChangedFile) && files.some(isDeployToolingAllowedChangedFile),
+    files.some(isFrontendRuntimeChangedFile) &&
+      files.some(file => isDeployToolingAllowedChangedFile(file) || isFrontendDeployToolingCoverageChangedFile(file)),
     'release_type=frontend-deploy-tooling requires both frontend runtime and deploy/preflight/smoke tooling changes',
   );
 
@@ -359,7 +368,7 @@ export function classifyReleaseChangedFiles(changedFiles = []) {
   const files = normalizedChangedFiles(changedFiles);
   const blocked = files.filter(file => isReleaseCriticalChangedFile(file) || !isFrontendDeployToolingAllowedChangedFile(file));
   const hasFrontendRuntime = files.some(isFrontendRuntimeChangedFile);
-  const hasDeployTooling = files.some(isDeployToolingAllowedChangedFile);
+  const hasDeployTooling = files.some(file => isDeployToolingAllowedChangedFile(file) || isFrontendDeployToolingCoverageChangedFile(file));
 
   if (blocked.length > 0) {
     return { allowed: false, releaseType: '', changedFiles: files, blockedFiles: blocked, hasFrontendRuntime, hasDeployTooling };

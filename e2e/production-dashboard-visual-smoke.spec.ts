@@ -6,7 +6,6 @@ test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 type ViewportCase = {
   name: 'desktop' | 'tablet' | 'mobile';
   viewport: { width: number; height: number };
-  expectedLayout: 'svg' | 'compact';
 };
 
 type UiIssue = {
@@ -19,10 +18,14 @@ type UiIssue = {
 
 type DashboardLayoutSnapshot = {
   dashboardOpened: boolean;
-  svgVisible: boolean;
-  svgWidth: number;
-  svgHeight: number;
-  svgAspectDelta: number;
+  blockVisible: Record<string, boolean>;
+  overlaps: Array<{ a: string; b: string; x: number; y: number }>;
+  screenBelowAppHeader: boolean;
+  cockpitBelowCommandHeader: boolean;
+  healthVisible: boolean;
+  healthWidth: number;
+  healthWidthShare: number;
+  healthSvgCount: number;
   compactVisible: boolean;
   compactCards: number;
   overflowX: number;
@@ -37,9 +40,9 @@ type DashboardLayoutSnapshot = {
 };
 
 const VIEWPORT_CASES: ViewportCase[] = [
-  { name: 'desktop', viewport: { width: 1440, height: 900 }, expectedLayout: 'svg' },
-  { name: 'tablet', viewport: { width: 768, height: 1024 }, expectedLayout: 'compact' },
-  { name: 'mobile', viewport: { width: 390, height: 844 }, expectedLayout: 'compact' },
+  { name: 'desktop', viewport: { width: 1440, height: 900 } },
+  { name: 'tablet', viewport: { width: 768, height: 1024 } },
+  { name: 'mobile', viewport: { width: 390, height: 844 } },
 ];
 
 function productionAppUrl(frontendUrl: string, route = '/') {
@@ -146,6 +149,20 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
       const rect = element.getBoundingClientRect();
       return { width: Math.round(rect.width), height: Math.round(rect.height) };
     };
+    const fullRectOf = (element: Element | null) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return {
+        top: Math.round(rect.top),
+        bottom: Math.round(rect.bottom),
+        left: Math.round(rect.left),
+        right: Math.round(rect.right),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        visible: style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0,
+      };
+    };
 
     const viewportWidth = document.documentElement.clientWidth;
     const scrollWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
@@ -170,17 +187,51 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
       });
 
     const health = document.querySelector('[data-testid="dashboard-company-health"]');
-    const svg = health?.querySelector('[data-testid="dashboard-company-health-svg"]') ?? null;
+    const board = document.querySelector('[data-testid="dashboard-command-board"]');
     const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]') ?? null;
-    const svgRect = rectOf(svg);
+    const healthRect = rectOf(health ?? null);
+    const boardRect = rectOf(board);
     const compactCards = compact?.querySelectorAll('a.rentcore-command-card').length || 0;
+    const blockSelectors = {
+      keySignals: '[data-testid="dashboard-key-signals"]',
+      tasks: '[data-testid="dashboard-tasks"]',
+      monthDynamics: '[data-testid="dashboard-month-dynamics"]',
+      fleet: '[data-testid="dashboard-fleet-utilization"]',
+      receivables: '[data-testid="dashboard-receivables-aging"]',
+      health: '[data-testid="dashboard-company-health"]',
+    };
+    const blockRects = Object.fromEntries(
+      Object.entries(blockSelectors).map(([key, selector]) => [key, fullRectOf(document.querySelector(selector))]),
+    ) as Record<string, ReturnType<typeof fullRectOf>>;
+    const blockNames = Object.keys(blockSelectors);
+    const overlaps: DashboardLayoutSnapshot['overlaps'] = [];
+    for (let index = 0; index < blockNames.length; index += 1) {
+      for (let nextIndex = index + 1; nextIndex < blockNames.length; nextIndex += 1) {
+        const aName = blockNames[index];
+        const bName = blockNames[nextIndex];
+        const a = blockRects[aName];
+        const b = blockRects[bName];
+        if (!a || !b) continue;
+        const x = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+        const y = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+        if (x > 1 && y > 1) overlaps.push({ a: aName, b: bName, x, y });
+      }
+    }
+    const appHeader = fullRectOf(document.querySelector('body > div header'));
+    const commandHeader = fullRectOf(document.querySelector('.rentcore-command-header'));
+    const screen = fullRectOf(document.querySelector('.rentcore-command-screen'));
+    const cockpit = fullRectOf(document.querySelector('[data-testid="dashboard-top-cockpit"]'));
 
     return {
       dashboardOpened: Boolean(document.querySelector('[data-testid="dashboard-executive-cockpit"]')),
-      svgVisible: isVisible(svg),
-      svgWidth: svgRect.width,
-      svgHeight: svgRect.height,
-      svgAspectDelta: Math.abs((svgRect.width / Math.max(svgRect.height, 1)) - 1),
+      blockVisible: Object.fromEntries(Object.entries(blockRects).map(([key, rect]) => [key, Boolean(rect?.visible)])),
+      overlaps,
+      screenBelowAppHeader: Boolean(screen && appHeader && screen.top >= appHeader.bottom - 1),
+      cockpitBelowCommandHeader: Boolean(cockpit && commandHeader && cockpit.top >= commandHeader.bottom - 1),
+      healthVisible: isVisible(health ?? null),
+      healthWidth: healthRect.width,
+      healthWidthShare: healthRect.width / Math.max(boardRect.width, 1),
+      healthSvgCount: health?.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length || 0,
       compactVisible: isVisible(compact),
       compactCards,
       overflowX: scrollWidth - viewportWidth,
@@ -216,17 +267,26 @@ async function expectDashboardContract(
     return value;
   });
 
-  await withStage(state, `${viewportCase.name}: ${viewportCase.expectedLayout} assertions`, async () => {
+  await withStage(state, `${viewportCase.name}: dashboard layout assertions`, async () => {
     expect(snapshot.dashboardOpened, `${viewportCase.name}: authenticated Dashboard should be open`).toBe(true);
-    if (viewportCase.expectedLayout === 'svg') {
-      expect(snapshot.svgVisible, `${viewportCase.name}: company health SVG should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.svgWidth, `${viewportCase.name}: SVG width should be substantial`).toBeGreaterThanOrEqual(180);
-      expect(snapshot.svgHeight, `${viewportCase.name}: SVG height should be substantial`).toBeGreaterThanOrEqual(180);
-      expect(snapshot.svgAspectDelta, `${viewportCase.name}: SVG/ring should be square, not oval (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(0.05);
-      return;
-    }
+    expect(snapshot.blockVisible, `${viewportCase.name}: production-critical Dashboard blocks should be visible`).toEqual({
+      keySignals: true,
+      tasks: true,
+      monthDynamics: true,
+      fleet: true,
+      receivables: true,
+      health: true,
+    });
+    expect(snapshot.overlaps, `${viewportCase.name}: production-critical Dashboard blocks should not overlap`).toEqual([]);
+    expect(snapshot.screenBelowAppHeader, `${viewportCase.name}: Dashboard screen should start below app header`).toBe(true);
+    expect(snapshot.cockpitBelowCommandHeader, `${viewportCase.name}: KPI row should start below command header`).toBe(true);
+    expect(snapshot.healthVisible, `${viewportCase.name}: company health compact card should be visible (${JSON.stringify(snapshot)})`).toBe(true);
+    expect(snapshot.healthSvgCount, `${viewportCase.name}: company health should not render dominant SVG circle (${JSON.stringify(snapshot)})`).toBe(0);
     expect(snapshot.compactVisible, `${viewportCase.name}: compact wrapper should be visible (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.compactCards, `${viewportCase.name}: compact wrapper should contain six direction cards`).toBeGreaterThanOrEqual(6);
+    if (viewportCase.name === 'desktop') {
+      expect(snapshot.healthWidthShare, `${viewportCase.name}: company health should not dominate dashboard width`).toBeLessThanOrEqual(0.38);
+    }
   });
 
   await withStage(state, `${viewportCase.name}: overflow checked`, async () => {

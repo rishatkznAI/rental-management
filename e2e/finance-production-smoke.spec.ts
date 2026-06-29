@@ -11,6 +11,10 @@ import {
   hasUnsafeFinanceSmokeText,
 } from '../scripts/finance-smoke-checks.mjs';
 import { backendCommitGateResult } from '../scripts/release-preflight.mjs';
+import {
+  describeEquipmentCandidate,
+  discoverRentalModeEquipment,
+} from '../scripts/finance-smoke-equipment-discovery.mjs';
 
 type BuildInfo = {
   commit?: string;
@@ -32,6 +36,16 @@ type EquipmentRecord = {
   salesStatus?: string;
   tag?: string;
   tags?: unknown[];
+};
+
+type EquipmentDiscovery = {
+  selected: EquipmentRecord | null;
+  diagnostics: {
+    strategy: string;
+    requests: unknown[];
+    fetched: Record<string, unknown>;
+    selected: Record<string, unknown> | null;
+  };
 };
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
@@ -120,57 +134,6 @@ async function responseJson(response: APIResponse) {
   return response.json().catch(() => null);
 }
 
-function normalizedText(value: unknown) {
-  return String(value ?? '').trim().toLowerCase();
-}
-
-function hasEquipmentSaleMarker(value: unknown) {
-  return [
-    'sale',
-    'sales',
-    'for_sale',
-    'for-sale',
-    'on_sale',
-    'on-sale',
-    'на продаже',
-    'на продажу',
-    'продажа',
-    'продается',
-    'продаётся',
-    'reserved',
-    'резерв',
-    'in_deal',
-    'deal',
-    'в сделке',
-    'sold',
-    'продана',
-    'продано',
-    'removed',
-    'withdrawn',
-    'снята с продажи',
-    'снято с продажи',
-  ].includes(normalizedText(value));
-}
-
-function isSaleModeEquipmentRecord(equipment: EquipmentRecord) {
-  if (equipment.saleMode === true || hasEquipmentSaleMarker(equipment.saleMode)) return true;
-  if (equipment.isForSale === true || equipment.forSale === true) return true;
-  if (String(equipment.saleStatus || '').trim()) return true;
-  if (String(equipment.salesStatus || '').trim()) return true;
-  if (hasEquipmentSaleMarker(equipment.status)) return true;
-  if (hasEquipmentSaleMarker(equipment.category)) return true;
-  if (hasEquipmentSaleMarker(equipment.tag)) return true;
-  return Array.isArray(equipment.tags) && equipment.tags.some(hasEquipmentSaleMarker);
-}
-
-function isRentalModeEquipmentRecord(equipment: EquipmentRecord) {
-  if (!String(equipment.id || '').trim()) return false;
-  if (isSaleModeEquipmentRecord(equipment)) return false;
-  const category = normalizedText(equipment.category);
-  const status = normalizedText(equipment.status);
-  return category !== 'client' && category !== 'partner' && status !== 'in_service';
-}
-
 async function installProductionReadOnlyGuard(page: Page) {
   const blocked: string[] = [];
 
@@ -233,33 +196,32 @@ async function expectSafeVisibleText(page: Page, label: string) {
   expect(hasUnsafeFinanceSmokeText(text), `${label} should not render undefined/null/object placeholders`).toBe(false);
 }
 
-async function getRentalModeEquipmentForEconomicsTab(apiUrl: string, token: string): Promise<EquipmentRecord | null> {
+async function getRentalModeEquipmentForEconomicsTab(apiUrl: string, token: string): Promise<EquipmentDiscovery> {
   const api = await playwrightRequest.newContext({
     baseURL: apiUrl,
     extraHTTPHeaders: { Authorization: `Bearer ${token}` },
   });
   try {
-    const response = await api.get('/api/equipment');
-    if (!response.ok()) return null;
-    const payload = await responseJson(response);
-    const list = Array.isArray(payload)
-      ? payload
-      : Array.isArray((payload as { items?: unknown[] } | null)?.items)
-        ? (payload as { items: unknown[] }).items
-        : [];
-    const equipmentList = list.filter(item => item && typeof item === 'object') as EquipmentRecord[];
-    const rentalModeEquipment = equipmentList.find(isRentalModeEquipmentRecord) || null;
-    safeSmokeLog('equipmentEconomicsCandidate', {
-      selected: rentalModeEquipment?.id || null,
-      totalEquipment: equipmentList.length,
-      rentalModeCandidates: equipmentList.filter(isRentalModeEquipmentRecord).length,
-      skippedSaleMode: equipmentList.filter(isSaleModeEquipmentRecord).length,
-      skippedRepairMode: equipmentList.filter(item => (
-        !isSaleModeEquipmentRecord(item)
-        && (['client', 'partner'].includes(normalizedText(item.category)) || normalizedText(item.status) === 'in_service')
-      )).length,
+    const discovery = await discoverRentalModeEquipment({
+      getJson: async (path: string) => {
+        const response = await api.get(path);
+        if (!response.ok()) {
+          return {
+            items: [],
+            error: `GET ${path} returned ${response.status()}`,
+          };
+        }
+        return responseJson(response);
+      },
+      log: safeSmokeLog,
     });
-    return rentalModeEquipment;
+    safeSmokeLog('equipmentEconomicsCandidate', {
+      selected: discovery.selected?.id || null,
+      selectedDetails: describeEquipmentCandidate(discovery.selected),
+      ...discovery.diagnostics.fetched,
+      requests: discovery.diagnostics.requests,
+    });
+    return discovery as EquipmentDiscovery;
   } finally {
     await api.dispose();
   }
@@ -393,7 +355,8 @@ test('production finance smoke stays read-only', async ({ page }, testInfo) => {
     baseURL: apiUrl,
     extraHTTPHeaders: { Authorization: `Bearer ${token}` },
   });
-  let equipment = await getRentalModeEquipmentForEconomicsTab(apiUrl, token);
+  let equipmentDiscovery = await getRentalModeEquipmentForEconomicsTab(apiUrl, token);
+  let equipment = equipmentDiscovery.selected;
   try {
     const cashFlow = await authedApi.get('/api/finance/cash-flow?includeDepreciation=true');
     expect(cashFlow.ok(), 'authenticated cash-flow request should return 200').toBeTruthy();
@@ -467,7 +430,8 @@ test('production finance smoke stays read-only', async ({ page }, testInfo) => {
   await expectSafeVisibleText(page, 'Finance VAT');
 
   if (!equipment?.id) {
-    equipment = await getRentalModeEquipmentForEconomicsTab(apiUrl, token);
+    equipmentDiscovery = await getRentalModeEquipmentForEconomicsTab(apiUrl, token);
+    equipment = equipmentDiscovery.selected;
   }
   if (equipment?.id) {
     await page.goto(productionAppUrl(frontendUrl, `/equipment/${encodeURIComponent(equipment.id)}`), { waitUntil: 'domcontentloaded' });
@@ -481,7 +445,7 @@ test('production finance smoke stays read-only', async ({ page }, testInfo) => {
     assertEquipmentEconomicsUiStateSafe(await economicsPanel.innerText());
     await expectSafeVisibleText(page, 'Equipment Economics');
   } else {
-    throw new Error('Finance production smoke could not find rental-mode equipment with an economics tab candidate');
+    throw new Error(`Finance production smoke could not find rental-mode equipment with an economics tab candidate: ${JSON.stringify(equipmentDiscovery.diagnostics)}`);
   }
 
   expect(blockedWrites, 'finance production smoke must not attempt protected write endpoints').toEqual([]);

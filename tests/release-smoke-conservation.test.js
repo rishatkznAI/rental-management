@@ -2,12 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { backendCommitGateResult } from '../scripts/release-preflight.mjs';
+import {
+  discoverRentalModeEquipment,
+  isRentalModeEquipmentRecord,
+  summarizeEquipmentCandidates,
+} from '../scripts/finance-smoke-equipment-discovery.mjs';
 
 const releaseSmokeSource = readFileSync(new URL('../e2e/helpers/releaseSmoke.ts', import.meta.url), 'utf8');
 const deployWorkflowSource = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
 const productionUiSelectorSmokeSource = readFileSync(new URL('../e2e/production-ui-selector-smoke.spec.ts', import.meta.url), 'utf8');
 const financeProductionSmokeSource = readFileSync(new URL('../e2e/finance-production-smoke.spec.ts', import.meta.url), 'utf8');
 const financeProductionSmokeWorkflowSource = readFileSync(new URL('../.github/workflows/finance-production-smoke.yml', import.meta.url), 'utf8');
+const financeEquipmentDiscoverySource = readFileSync(new URL('../scripts/finance-smoke-equipment-discovery.mjs', import.meta.url), 'utf8');
 
 test('production release smoke checks app.disabled before authenticated smoke', () => {
   assert.match(releaseSmokeSource, /type VersionInfo = \{/);
@@ -162,8 +168,10 @@ test('finance production smoke workflow passes release type with auto default', 
 });
 
 test('finance production smoke opens a rental-mode equipment economics tab with diagnostics', () => {
-  assert.match(financeProductionSmokeSource, /function isRentalModeEquipmentRecord/);
   assert.match(financeProductionSmokeSource, /getRentalModeEquipmentForEconomicsTab/);
+  assert.match(financeProductionSmokeSource, /discoverRentalModeEquipment\(\{/);
+  assert.match(financeEquipmentDiscoverySource, /saleState=available_for_rent/);
+  assert.match(financeEquipmentDiscoverySource, /equipmentEconomicsDiscoveryPage/);
   assert.match(financeProductionSmokeSource, /safeSmokeLog\('equipmentEconomicsCandidate'/);
   assert.match(financeProductionSmokeSource, /getByTestId\('equipment-economics-tab'\)/);
   assert.match(financeProductionSmokeSource, /getByTestId\('equipment-economics-panel'\)/);
@@ -177,8 +185,79 @@ test('finance production smoke opens a rental-mode equipment economics tab with 
 test('finance production smoke keeps equipment economics content assertions strong', () => {
   assert.match(financeProductionSmokeSource, /EQUIPMENT_ECONOMICS_UI_STATE_PATTERN/);
   assert.match(financeProductionSmokeSource, /assertEquipmentEconomicsUiStateSafe\(await economicsPanel\.innerText\(\)\)/);
-  assert.match(financeProductionSmokeSource, /throw new Error\('Finance production smoke could not find rental-mode equipment with an economics tab candidate'\)/);
+  assert.match(financeProductionSmokeSource, /throw new Error\(`Finance production smoke could not find rental-mode equipment with an economics tab candidate: \$\{JSON\.stringify\(equipmentDiscovery\.diagnostics\)\}`\)/);
   assert.doesNotMatch(financeProductionSmokeSource, /equipmentEconomicsChecked: Boolean\(equipment\?\.id\)[\s\S]*return/);
+});
+
+test('finance equipment discovery does not choose sale-mode equipment for rental economics', async () => {
+  const result = await discoverRentalModeEquipment({
+    getJson: async () => ({ items: [{ id: 'sale-1', status: 'available', saleMode: true }], pagination: { hasNextPage: false } }),
+  });
+
+  assert.equal(result.selected, null);
+  assert.equal(result.diagnostics.fetched.totalEquipment, 1);
+  assert.equal(result.diagnostics.fetched.skippedSaleMode, 1);
+  assert.equal(result.diagnostics.fetched.rentalModeCandidates, 0);
+});
+
+test('finance equipment discovery scans beyond the first sale-mode page', async () => {
+  const responses = new Map([
+    ['/api/equipment?paginated=true&page=1&pageSize=100&saleState=available_for_rent&sortBy=inventoryNumber&sortDir=asc', {
+      items: [{ id: 'sale-1', status: 'available', saleMode: true }],
+      pagination: { page: 1, pageSize: 100, total: 2, totalPages: 2, hasNextPage: true },
+    }],
+    ['/api/equipment?paginated=true&page=2&pageSize=100&saleState=available_for_rent&sortBy=inventoryNumber&sortDir=asc', {
+      items: [{ id: 'rent-1', status: 'available', category: 'own', inventoryNumber: '002' }],
+      pagination: { page: 2, pageSize: 100, total: 2, totalPages: 2, hasNextPage: false },
+    }],
+  ]);
+  const requested = [];
+
+  const result = await discoverRentalModeEquipment({
+    getJson: async (path) => {
+      requested.push(path);
+      return responses.get(path) || [];
+    },
+  });
+
+  assert.equal(result.selected.id, 'rent-1');
+  assert.deepEqual(requested, [...responses.keys()]);
+  assert.equal(result.diagnostics.strategy, 'paginated_available_for_rent');
+});
+
+test('finance equipment discovery reports explicit diagnostics when rental-mode equipment is absent', async () => {
+  const result = await discoverRentalModeEquipment({
+    getJson: async (path) => path.includes('paginated=true')
+      ? {
+          items: [{ id: 'sale-1', status: 'available', saleStatus: 'removed' }],
+          pagination: { page: 1, pageSize: 100, total: 1, totalPages: 1, hasNextPage: false },
+        }
+      : [{ id: 'sale-1', status: 'available', saleStatus: 'removed' }],
+  });
+
+  assert.equal(result.selected, null);
+  assert.equal(result.diagnostics.strategy, 'not_found');
+  assert.equal(result.diagnostics.requests.length, 2);
+  assert.equal(result.diagnostics.fetched.totalEquipment, 1);
+  assert.equal(result.diagnostics.fetched.skippedSaleMode, 1);
+  assert.equal(result.diagnostics.fetched.rentalModeCandidates, 0);
+});
+
+test('finance equipment discovery rental-mode classifier excludes repair and sale records', () => {
+  assert.equal(isRentalModeEquipmentRecord({ id: 'sale', saleMode: true, status: 'available' }), false);
+  assert.equal(isRentalModeEquipmentRecord({ id: 'repair', category: 'client', status: 'available' }), false);
+  assert.equal(isRentalModeEquipmentRecord({ id: 'service', category: 'own', status: 'in_service' }), false);
+  assert.equal(isRentalModeEquipmentRecord({ id: 'rental', category: 'own', status: 'available' }), true);
+  assert.deepEqual(summarizeEquipmentCandidates([
+    { id: 'sale', saleMode: true },
+    { id: 'repair', category: 'client' },
+    { id: 'rental', category: 'own', status: 'available' },
+  ]), {
+    totalEquipment: 3,
+    rentalModeCandidates: 1,
+    skippedSaleMode: 1,
+    skippedRepairMode: 1,
+  });
 });
 
 test('deploy workflow embeds release_type into frontend build metadata', () => {

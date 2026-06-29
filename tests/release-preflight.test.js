@@ -100,6 +100,7 @@ test('release preflight allows deploy-tooling safe file scope and reports backen
   const changedFiles = [
     '.github/workflows/deploy.yml',
     'scripts/release-preflight.mjs',
+    'scripts/finance-smoke-equipment-discovery.mjs',
     'e2e/helpers/auth.ts',
     'e2e/helpers/releaseSmoke.ts',
     'e2e/smoke.spec.ts',
@@ -241,6 +242,7 @@ test('release classifier allows deploy-tooling only', () => {
   const result = classifyReleaseChangedFiles([
     '.github/workflows/deploy.yml',
     'scripts/release-preflight.mjs',
+    'scripts/finance-smoke-equipment-discovery.mjs',
     'e2e/helpers/auth.ts',
     'e2e/smoke.spec.ts',
     'e2e/auth-login.spec.ts',
@@ -271,6 +273,7 @@ test('release classifier allows frontend runtime with deploy tooling as GitHub P
     'e2e/animation-smoke.spec.ts',
     'e2e/production-smoke.spec.ts',
     'e2e/production-ui-selector-smoke.spec.ts',
+    'scripts/finance-smoke-equipment-discovery.mjs',
     'tests/release-smoke-conservation.test.js',
     'src/app/pages/Dashboard.tsx',
   ]);

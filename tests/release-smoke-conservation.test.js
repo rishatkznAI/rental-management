@@ -264,6 +264,7 @@ test('deploy workflow embeds release_type into frontend build metadata', () => {
   assert.match(deployWorkflowSource, /release_type: \$\{\{ steps\.classify\.outputs\.release_type \}\}/);
   assert.match(deployWorkflowSource, /VITE_GIT_COMMIT_SHA: \$\{\{ github\.sha \}\}/);
   assert.match(deployWorkflowSource, /VITE_RELEASE_TYPE: \$\{\{ needs\.classify-release\.outputs\.release_type \}\}/);
+  assert.match(deployWorkflowSource, /scripts\/finance-smoke-equipment-discovery\\\.mjs/);
 });
 
 test('deploy workflow writes backend release marker metadata', () => {

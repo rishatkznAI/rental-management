@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { backendCommitGateResult } from '../scripts/release-preflight.mjs';
 import {
   discoverRentalModeEquipment,
+  financeSmokeFixtureDiagnostic,
+  isFinanceSmokeFixtureRecord,
   isRentalModeEquipmentRecord,
   summarizeEquipmentCandidates,
 } from '../scripts/finance-smoke-equipment-discovery.mjs';
@@ -13,6 +15,8 @@ const deployWorkflowSource = readFileSync(new URL('../.github/workflows/deploy.y
 const productionUiSelectorSmokeSource = readFileSync(new URL('../e2e/production-ui-selector-smoke.spec.ts', import.meta.url), 'utf8');
 const financeProductionSmokeSource = readFileSync(new URL('../e2e/finance-production-smoke.spec.ts', import.meta.url), 'utf8');
 const financeProductionSmokeWorkflowSource = readFileSync(new URL('../.github/workflows/finance-production-smoke.yml', import.meta.url), 'utf8');
+const productionDashboardVisualSmokeSource = readFileSync(new URL('../e2e/production-dashboard-visual-smoke.spec.ts', import.meta.url), 'utf8');
+const productionDashboardVisualSmokeWorkflowSource = readFileSync(new URL('../.github/workflows/production-dashboard-visual-smoke.yml', import.meta.url), 'utf8');
 const financeEquipmentDiscoverySource = readFileSync(new URL('../scripts/finance-smoke-equipment-discovery.mjs', import.meta.url), 'utf8');
 
 test('production release smoke checks app.disabled before authenticated smoke', () => {
@@ -167,12 +171,44 @@ test('finance production smoke workflow passes release type with auto default', 
   assert.match(financeProductionSmokeWorkflowSource, /RELEASE_TYPE: \$\{\{ inputs\.release_type \}\}/);
 });
 
+test('production dashboard visual smoke uses release type policy for backend commit drift', () => {
+  assert.match(productionDashboardVisualSmokeSource, /backendCommitGateResult\(\{/);
+  assert.match(productionDashboardVisualSmokeSource, /env: 'production'/);
+  assert.match(productionDashboardVisualSmokeSource, /resolveDashboardSmokeReleaseType/);
+  assert.match(productionDashboardVisualSmokeSource, /envReleaseType: String\(process\.env\.RELEASE_TYPE \|\| ''\)/);
+  assert.match(productionDashboardVisualSmokeSource, /frontendReleaseType: marker\?\.releaseType/);
+  assert.match(productionDashboardVisualSmokeSource, /backendReleaseType: backendBuild\?\.releaseType/);
+  assert.match(productionDashboardVisualSmokeSource, /logStage\('backendCommitDrift'/);
+  assert.match(productionDashboardVisualSmokeSource, /expect\(gate\.status, `\$\{input\.label\}: \$\{gate\.message\}`\)\.toBe\('pass'\)/);
+  assert.ok(
+    productionDashboardVisualSmokeSource.indexOf('frontendReleaseType: marker?.releaseType') <
+      productionDashboardVisualSmokeSource.indexOf("label: 'backend expected release commit'"),
+    'dashboard smoke should resolve auto release type from frontend marker before backend expected-commit gate',
+  );
+});
+
+test('production dashboard visual smoke workflow passes release type with auto default', () => {
+  assert.match(productionDashboardVisualSmokeWorkflowSource, /release_type:/);
+  assert.match(productionDashboardVisualSmokeWorkflowSource, /default: auto/);
+  assert.match(productionDashboardVisualSmokeWorkflowSource, /- frontend-only/);
+  assert.match(productionDashboardVisualSmokeWorkflowSource, /- backend/);
+  assert.match(productionDashboardVisualSmokeWorkflowSource, /- full-stack/);
+  assert.match(productionDashboardVisualSmokeWorkflowSource, /- deploy-tooling/);
+  assert.match(productionDashboardVisualSmokeWorkflowSource, /- frontend-deploy-tooling/);
+  assert.match(productionDashboardVisualSmokeWorkflowSource, /RELEASE_TYPE: \$\{\{ inputs\.release_type \}\}/);
+});
+
 test('finance production smoke opens a rental-mode equipment economics tab with diagnostics', () => {
   assert.match(financeProductionSmokeSource, /getRentalModeEquipmentForEconomicsTab/);
   assert.match(financeProductionSmokeSource, /discoverRentalModeEquipment\(\{/);
   assert.match(financeEquipmentDiscoverySource, /saleState=available_for_rent/);
+  assert.match(financeEquipmentDiscoverySource, /FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER = 'SMOKE-RENTAL-001'/);
+  assert.match(financeEquipmentDiscoverySource, /Production data contract violation: \$\{FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER\}/);
   assert.match(financeEquipmentDiscoverySource, /equipmentEconomicsDiscoveryPage/);
+  assert.match(financeEquipmentDiscoverySource, /productionFixture/);
   assert.match(financeProductionSmokeSource, /safeSmokeLog\('equipmentEconomicsCandidate'/);
+  assert.match(financeProductionSmokeSource, /pagesFetched: discovery\.diagnostics\.requests\.length/);
+  assert.match(financeProductionSmokeSource, /safeSmokeLog\('productionFixtureWarning'/);
   assert.match(financeProductionSmokeSource, /getByTestId\('equipment-economics-tab'\)/);
   assert.match(financeProductionSmokeSource, /getByTestId\('equipment-economics-panel'\)/);
   assert.match(financeProductionSmokeSource, /scrollIntoViewIfNeeded\(\)/);
@@ -180,6 +216,7 @@ test('finance production smoke opens a rental-mode equipment economics tab with 
   assert.match(financeProductionSmokeSource, /safeSmokeLog\('equipmentEconomicsTabBeforeClick'/);
   assert.match(financeProductionSmokeSource, /safeSmokeLog\('equipmentEconomicsTabClickFailed'/);
   assert.match(financeProductionSmokeSource, /attachSmokeScreenshot\(page, testInfo, 'finance-smoke-equipment-economics-before-click'\)/);
+  assert.match(financeProductionSmokeSource, /attachSmokeScreenshot\(page, testInfo, 'finance-smoke-equipment-economics-opened'\)/);
 });
 
 test('finance production smoke keeps equipment economics content assertions strong', () => {
@@ -241,6 +278,34 @@ test('finance equipment discovery reports explicit diagnostics when rental-mode 
   assert.equal(result.diagnostics.fetched.totalEquipment, 1);
   assert.equal(result.diagnostics.fetched.skippedSaleMode, 1);
   assert.equal(result.diagnostics.fetched.rentalModeCandidates, 0);
+  assert.equal(result.diagnostics.productionFixture.page1.present, false);
+  assert.match(result.diagnostics.productionFixture.page1.warning, /Production data contract violation: SMOKE-RENTAL-001/);
+});
+
+test('finance smoke fixture contract requires available own rental-mode equipment', () => {
+  const fixture = {
+    id: 'eq-smoke',
+    inventoryNumber: 'SMOKE-RENTAL-001',
+    serialNumber: 'SMOKE-RENTAL-001',
+    status: 'available',
+    category: 'own',
+    saleMode: null,
+    saleStatus: null,
+    salesStatus: null,
+  };
+
+  assert.equal(isFinanceSmokeFixtureRecord(fixture), true);
+  assert.equal(isFinanceSmokeFixtureRecord({ ...fixture, saleMode: true }), false);
+  assert.equal(isFinanceSmokeFixtureRecord({ ...fixture, category: 'client' }), false);
+  assert.equal(isFinanceSmokeFixtureRecord({ ...fixture, status: 'in_service' }), false);
+
+  const diagnostic = financeSmokeFixtureDiagnostic([fixture], { source: 'test' });
+  assert.equal(diagnostic.present, true);
+  assert.equal(diagnostic.warning, '');
+
+  const missing = financeSmokeFixtureDiagnostic([], { source: 'test' });
+  assert.equal(missing.present, false);
+  assert.match(missing.warning, /Production data contract violation: SMOKE-RENTAL-001/);
 });
 
 test('finance equipment discovery rental-mode classifier excludes repair and sale records', () => {

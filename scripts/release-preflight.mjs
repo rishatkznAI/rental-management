@@ -27,7 +27,7 @@ const FRONTEND_ONLY_FORBIDDEN_FILE_PATTERNS = [
   /^(server|api|backend)\.(config|env)\./,
 ];
 const DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
-  /^\.github\/workflows\/.+/,
+  /^\.github\/workflows\/(?:deploy|.*smoke)\.yml$/,
   /^scripts\/release-preflight\.mjs$/,
   /^scripts\/frontend-build-marker\.mjs$/,
   /^scripts\/backend-release-marker\.mjs$/,

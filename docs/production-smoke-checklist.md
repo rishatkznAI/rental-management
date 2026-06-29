@@ -116,7 +116,26 @@ Open these screens with appropriate roles:
 - GSM page;
 - MAX bot admin/status page for admin only.
 
-## 11. Pass/Fail Decision
+## 11. Finance Production Smoke Fixture
+
+Finance Production Smoke depends on a read-only production data contract for one safe rental-mode equipment card. The fixture is not created by normal smoke workflows.
+
+Required fixture:
+
+- `inventoryNumber=SMOKE-RENTAL-001`;
+- `serialNumber=SMOKE-RENTAL-001`;
+- `status=available`;
+- `category=own`;
+- `saleMode` absent, `null` or `false`;
+- `saleStatus` absent or `null`;
+- `salesStatus` absent or `null`;
+- not repair-mode: not `category=client`, not `category=partner`, not `status=in_service`;
+- visible to the dedicated production smoke user;
+- returned by `/api/equipment?paginated=true&page=1&pageSize=100&saleState=available_for_rent`.
+
+If Finance Production Smoke logs `productionFixtureWarning`, treat it as a production data contract violation even if a fallback rental-mode equipment candidate lets the UI economics check continue. Restore the fixture through a separate operational workflow or approved manual run after a fresh production data backup. Do not auto-create or mutate the fixture from the read-only smoke workflow.
+
+## 12. Pass/Fail Decision
 
 Pass only if:
 
@@ -125,6 +144,7 @@ Pass only if:
 - frontend loads from GitHub Pages;
 - expected build identity is confirmed;
 - all role smoke checks pass;
+- Finance Production Smoke has no production fixture warning;
 - no secrets are exposed;
 - no critical screen is blank or throwing runtime errors.
 

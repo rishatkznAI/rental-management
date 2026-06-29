@@ -32,6 +32,13 @@ const {
   itemMatchesSearch,
   wantsPaginatedResponse,
 } = require('../lib/pagination');
+const {
+  SYSTEM_FIXTURE_PROTECTED_CODE,
+  SYSTEM_FIXTURE_PROTECTED_MESSAGE,
+  assertProductionSmokeFixtureMutationAllowed,
+  createSystemFixtureProtectedError,
+  isProductionSmokeEquipmentFixture,
+} = require('../lib/protected-fixtures');
 
 const AUDIT_COLLECTION = 'audit_logs';
 const RENTAL_AUDIT_LIMIT = 20;
@@ -73,6 +80,32 @@ const RENTAL_AUDIT_FIELD_LABELS = {
   serviceTicketId: 'Сервисная заявка',
   equipmentStatus: 'Статус техники',
 };
+
+function sendSystemFixtureProtectedError(req, res, auditLog, error) {
+  auditLog?.(req, {
+    action: `equipment.${error?.action || 'mutation'}.blocked`,
+    entityType: 'equipment',
+    entityId: error?.equipmentId,
+    metadata: {
+      reason: 'blocked_system_fixture_mutation',
+      equipmentId: error?.equipmentId,
+      userEmail: req.user?.email || null,
+      attemptedFields: Array.isArray(error?.attemptedFields) ? error.attemptedFields : [],
+      violations: Array.isArray(error?.violations) ? error.violations : [],
+    },
+  });
+  return res.status(409).json({
+    ok: false,
+    code: SYSTEM_FIXTURE_PROTECTED_CODE,
+    error: SYSTEM_FIXTURE_PROTECTED_MESSAGE,
+    attemptedFields: Array.isArray(error?.attemptedFields) ? error.attemptedFields : [],
+    violations: Array.isArray(error?.violations) ? error.violations : [],
+  });
+}
+
+function isTerminalRentalStatus(status) {
+  return ['returned', 'closed', 'cancelled'].includes(String(status || '').trim().toLowerCase());
+}
 
 const RENTAL_PAGINATION_CONFIG = {
   searchFields: ['id', 'client', 'clientName', 'clientId', 'equipmentInv', 'equipment', 'manager', 'managerName', 'objectName', 'contractNumber'],
@@ -839,6 +872,9 @@ function registerRentalRoutes(deps) {
       if (!equipment) {
         return { ok: false, status: 409, error: 'Не удалось однозначно определить технику для восстановления аренды.' };
       }
+      if (isProductionSmokeEquipmentFixture(equipment)) {
+        return { ok: false, status: 409, code: SYSTEM_FIXTURE_PROTECTED_CODE, equipmentId: equipment.id };
+      }
       if (equipment.status === 'inactive') {
         return { ok: false, status: 409, error: 'Нельзя восстановить аренду: техника списана или неактивна.' };
       }
@@ -853,6 +889,26 @@ function registerRentalRoutes(deps) {
         };
       }
       return { ok: true, equipment };
+    }
+
+    function rentalTargetsProductionSmokeFixture(rental) {
+      if (!rental || isTerminalRentalStatus(rental.status)) return null;
+      const equipmentList = readData('equipment') || [];
+      return equipmentList.find(item => {
+        if (!isProductionSmokeEquipmentFixture(item)) return false;
+        return rentalMatchesEquipment(rental, item, equipmentList);
+      }) || null;
+    }
+
+    function assertRentalDoesNotTargetProductionSmokeFixture(rental, action) {
+      const target = rentalTargetsProductionSmokeFixture(rental);
+      if (!target) return;
+      throw createSystemFixtureProtectedError({
+        action,
+        equipmentId: target.id,
+        attemptedFields: ['equipmentId'],
+        violations: ['rentalLink'],
+      });
     }
 
     function syncEquipmentForRestoredRental(previousRental, nextRental, author) {
@@ -1465,6 +1521,14 @@ function registerRentalRoutes(deps) {
       if (!validation.ok) {
         return res.status(validation.status).json({ ok: false, error: validation.error });
       }
+      try {
+        assertRentalDoesNotTargetProductionSmokeFixture(newItem, `${collection}.create`);
+      } catch (error) {
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, auditLog, error);
+        }
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+      }
 
       if (collection === 'gantt_rentals') {
         newItem = normalizeGanttRentalStatus(newItem);
@@ -1689,6 +1753,14 @@ function registerRentalRoutes(deps) {
 
         const createdRequests = createApprovalRequests(previousRental, approvalChanges, meta, req);
         let nextItem = immediateValidation.nextItem;
+        try {
+          assertRentalDoesNotTargetProductionSmokeFixture(nextItem, 'rentals.update');
+        } catch (error) {
+          if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+            return sendSystemFixtureProtectedError(req, res, auditLog, error);
+          }
+          return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        }
         const appliedFields = Object.keys(immediateValidation.patch || {});
         const pendingHistoryEntries = buildRentalPendingApprovalHistoryEntries(createdRequests, req.user.userName);
         if (appliedFields.length > 0) {
@@ -1757,8 +1829,24 @@ function registerRentalRoutes(deps) {
         }
         const restoreValidation = validateRentalRestore(data[idx], nextItem);
         if (!restoreValidation.ok) {
+          if (restoreValidation.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+            return sendSystemFixtureProtectedError(req, res, auditLog, createSystemFixtureProtectedError({
+              action: 'rental_restore',
+              equipmentId: restoreValidation.equipmentId,
+              attemptedFields: ['status'],
+              violations: ['rentalLink'],
+            }));
+          }
           return res.status(restoreValidation.status || 409).json({ ok: false, error: restoreValidation.error });
         }
+      }
+      try {
+        assertRentalDoesNotTargetProductionSmokeFixture(nextItem, `${collection}.update`);
+      } catch (error) {
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, auditLog, error);
+        }
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
 
       if (collection === 'gantt_rentals') {
@@ -2358,6 +2446,18 @@ function registerRentalRoutes(deps) {
             ],
           };
         });
+        try {
+          assertProductionSmokeFixtureMutationAllowed({
+            action: 'rental_return',
+            existingList: equipmentList,
+            nextList: nextEquipment,
+          });
+        } catch (error) {
+          if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+            return sendSystemFixtureProtectedError(req, res, auditLog, error);
+          }
+          return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        }
 
         writeData(collection, nextRentals);
         writeData('gantt_rentals', nextGanttRentals);
@@ -2424,6 +2524,16 @@ function registerRentalRoutes(deps) {
         return res.status(400).json({ ok: false, error: 'Expected array' });
       }
       try {
+        for (const item of list) {
+          assertRentalDoesNotTargetProductionSmokeFixture(item, `${collection}.bulk_replace`);
+        }
+      } catch (error) {
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, auditLog, error);
+        }
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+      }
+      try {
         accessControl.assertSafeAdminBulkReplaceInput(collection, list);
       } catch (error) {
         return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
@@ -2461,7 +2571,13 @@ function registerRentalRoutes(deps) {
       try {
         const existingById = new Map((readData(collection) || []).map(item => [String(item?.id || ''), item]));
         nextList = nextList.map(item => normalizeRentalRelationLinks(item, existingById.get(String(item?.id || '')) || null));
+        for (const item of nextList) {
+          assertRentalDoesNotTargetProductionSmokeFixture(item, `${collection}.bulk_replace`);
+        }
       } catch (error) {
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, auditLog, error);
+        }
         return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
 

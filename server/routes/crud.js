@@ -51,6 +51,14 @@ const {
   normalizeEquipmentStoragePatch,
   normalizeEquipmentStorageRecord,
 } = require('../lib/equipment-classification');
+const {
+  SYSTEM_FIXTURE_PROTECTED_CODE,
+  SYSTEM_FIXTURE_PROTECTED_MESSAGE,
+  assertProductionSmokeFixtureMutationAllowed,
+  createSystemFixtureProtectedError,
+  isAvailableForRentEquipment,
+  isProductionSmokeEquipmentFixture,
+} = require('../lib/protected-fixtures');
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 
 function registerCrudRoutes(deps) {
@@ -491,6 +499,77 @@ function registerCrudRoutes(deps) {
       code: error?.code,
       field: error?.field,
       conflictEquipment: error?.conflictEquipment,
+    });
+  }
+
+  function auditBlockedSystemFixtureMutation(req, error) {
+    auditLog?.(req, {
+      action: `equipment.${error?.action || 'mutation'}.blocked`,
+      entityType: 'equipment',
+      entityId: error?.equipmentId,
+      metadata: {
+        reason: 'blocked_system_fixture_mutation',
+        equipmentId: error?.equipmentId,
+        userEmail: req.user?.email || null,
+        attemptedFields: Array.isArray(error?.attemptedFields) ? error.attemptedFields : [],
+        violations: Array.isArray(error?.violations) ? error.violations : [],
+      },
+    });
+  }
+
+  function sendSystemFixtureProtectedError(req, res, error) {
+    auditBlockedSystemFixtureMutation(req, error);
+    return res.status(409).json({
+      ok: false,
+      code: SYSTEM_FIXTURE_PROTECTED_CODE,
+      error: SYSTEM_FIXTURE_PROTECTED_MESSAGE,
+      attemptedFields: Array.isArray(error?.attemptedFields) ? error.attemptedFields : [],
+      violations: Array.isArray(error?.violations) ? error.violations : [],
+    });
+  }
+
+  function assertNoRawProductionSmokeFixturePatch(previous, patch) {
+    if (!isProductionSmokeEquipmentFixture(previous)) return;
+    const protectedFields = [
+      'inventoryNumber',
+      'serialNumber',
+      'saleMode',
+      'forSale',
+      'isForSale',
+      'saleStatus',
+      'salesStatus',
+      'category',
+      'status',
+      'activeInFleet',
+    ];
+    const attemptedFields = protectedFields.filter(field => Object.prototype.hasOwnProperty.call(patch || {}, field));
+    if (!attemptedFields.length) return;
+    throw createSystemFixtureProtectedError({
+      action: 'update',
+      equipmentId: previous?.id,
+      attemptedFields,
+      violations: attemptedFields,
+    });
+  }
+
+  function serviceTicketTargetsProductionSmokeFixture(ticket = {}) {
+    const equipmentList = readData('equipment') || [];
+    return equipmentList.find(item => {
+      if (!isProductionSmokeEquipmentFixture(item)) return false;
+      return (ticket.equipmentId && String(ticket.equipmentId) === String(item.id))
+        || (ticket.inventoryNumber && String(ticket.inventoryNumber).trim() === String(item.inventoryNumber || '').trim())
+        || (ticket.serialNumber && String(ticket.serialNumber).trim() === String(item.serialNumber || '').trim());
+    }) || null;
+  }
+
+  function assertServiceTicketDoesNotTargetProductionSmokeFixture(ticket = {}, action = 'service_update') {
+    const target = serviceTicketTargetsProductionSmokeFixture(ticket);
+    if (!target) return;
+    throw createSystemFixtureProtectedError({
+      action,
+      equipmentId: target.id,
+      attemptedFields: ['service'],
+      violations: ['serviceMode'],
     });
   }
 
@@ -1018,7 +1097,7 @@ function registerCrudRoutes(deps) {
         saleState: (item, value) => {
           if (value === 'for_sale') return Boolean(item.saleMode || item.forSale || item.isForSale) && item.saleStatus !== 'sold';
           if (value === 'sold') return item.saleStatus === 'sold' || item.status === 'sold';
-          if (value === 'available_for_rent') return item.status === 'available' && !item.saleMode && !item.forSale && !item.isForSale;
+          if (value === 'available_for_rent') return isAvailableForRentEquipment(item);
           return true;
         },
       },
@@ -1474,6 +1553,7 @@ function registerCrudRoutes(deps) {
             isCreate: true,
             nowIso,
           });
+          assertServiceTicketDoesNotTargetProductionSmokeFixture(newItem, 'service_create');
         }
         if (collection === 'equipment_downtimes') {
           newItem = normalizeEquipmentDowntimeRecord(newItem, null, { user: req.user, nowIso });
@@ -1487,6 +1567,10 @@ function registerCrudRoutes(deps) {
         }
         if (collection === 'equipment') {
           validateEquipmentRecord(newItem, data);
+          assertProductionSmokeFixtureMutationAllowed({
+            action: 'create',
+            next: newItem,
+          });
         }
         if (collection === 'users') {
           newItem = normalizeUserPasswordForWrite(newItem);
@@ -1564,6 +1648,9 @@ function registerCrudRoutes(deps) {
         if (collection === 'equipment' && error?.code?.startsWith('EQUIPMENT_')) {
           return sendEquipmentValidationError(res, error);
         }
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, error);
+        }
         if (error?.status) return sendAccessError(res, error);
         return res.status(400).json({ ok: false, error: error.message });
       }
@@ -1597,7 +1684,13 @@ function registerCrudRoutes(deps) {
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       try {
         accessControl.assertCanUpdateEntity(collection, data[idx], req.user);
+        if (collection === 'equipment') {
+          assertNoRawProductionSmokeFixturePatch(data[idx], req.body);
+        }
       } catch (error) {
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, error);
+        }
         return sendAccessError(res, error);
       }
       const knowledgeProgressForbiddenReason = knowledgeBaseProgressForbiddenReason(req, collection, 'PATCH', data[idx]);
@@ -1703,6 +1796,7 @@ function registerCrudRoutes(deps) {
               isCreate: false,
               nowIso,
             });
+            assertServiceTicketDoesNotTargetProductionSmokeFixture(nextItem, 'service_update');
           }
           if (collection === 'clients') {
             assertClientInnUnique(data, nextItem, data[idx].id);
@@ -1724,6 +1818,11 @@ function registerCrudRoutes(deps) {
           }
           if (collection === 'equipment') {
             nextItem = normalizeEquipmentStorageRecord(nextItem);
+            assertProductionSmokeFixtureMutationAllowed({
+              action: 'update',
+              previous: data[idx],
+              next: nextItem,
+            });
           }
           data[idx] = collection === 'clients' || collection === 'equipment'
             ? mergeEntityHistory(collection, data[idx], nextItem, req.user.userName)
@@ -1789,6 +1888,9 @@ function registerCrudRoutes(deps) {
         if (collection === 'equipment' && error?.code?.startsWith('EQUIPMENT_')) {
           return sendEquipmentValidationError(res, error);
         }
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, error);
+        }
         return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
     });
@@ -1836,6 +1938,19 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
       }
       const removedItem = data[idx];
+      try {
+        if (collection === 'equipment') {
+          assertProductionSmokeFixtureMutationAllowed({
+            action: 'delete',
+            previous: removedItem,
+          });
+        }
+      } catch (error) {
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, error);
+        }
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+      }
       if (collection === 'clients') {
         const linkedRentals = findClientLinkedRentals(removedItem);
         if (linkedRentals.length > 0) {
@@ -2010,6 +2125,21 @@ function registerCrudRoutes(deps) {
       if (!Array.isArray(list)) {
         return res.status(400).json({ ok: false, error: 'Expected array' });
       }
+      if (collection === 'equipment') {
+        try {
+          assertProductionSmokeFixtureMutationAllowed({
+            action: 'bulk_replace',
+            existingList: readData('equipment') || [],
+            nextList: list,
+            buildPaginatedCollectionResponse,
+          });
+        } catch (error) {
+          if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+            return sendSystemFixtureProtectedError(req, res, error);
+          }
+          return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        }
+      }
       try {
         accessControl.assertCanBulkReplace(collection, req.user);
         accessControl.assertSafeAdminBulkReplaceInput(collection, list);
@@ -2160,8 +2290,24 @@ function registerCrudRoutes(deps) {
 
       const normalizedList = list.map(item => {
         const linked = withClientLink(collection, item);
-        return normalizeClientDomainRecord(collection, linked);
+        const normalized = normalizeClientDomainRecord(collection, linked);
+        return collection === 'equipment' ? normalizeEquipmentStorageRecord(normalized) : normalized;
       });
+      try {
+        if (collection === 'equipment') {
+          assertProductionSmokeFixtureMutationAllowed({
+            action: 'bulk_replace',
+            existingList: readData('equipment') || [],
+            nextList: normalizedList,
+            buildPaginatedCollectionResponse,
+          });
+        }
+      } catch (error) {
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, error);
+        }
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+      }
       writeData(collection, normalizedList);
       if (collection === 'clients') {
         normalizeStoredClientLinksAfterClientWrite();

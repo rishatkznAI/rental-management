@@ -47,6 +47,9 @@ test('redactAuditValue keeps only safe top-level fields', () => {
     id: 'D-1',
     number: 'DOC-1',
     fileUrl: 'https://example.test/file.pdf',
+    attemptedFields: ['saleStatus'],
+    violations: ['saleStatus'],
+    userEmail: 'admin@example.test',
     password: 'secret',
     customUnsafeField: 'drop-me',
   });
@@ -54,5 +57,8 @@ test('redactAuditValue keeps only safe top-level fields', () => {
   assert.deepEqual(result, {
     id: 'D-1',
     number: 'DOC-1',
+    attemptedFields: ['saleStatus'],
+    violations: ['saleStatus'],
+    userEmail: 'admin@example.test',
   });
 });

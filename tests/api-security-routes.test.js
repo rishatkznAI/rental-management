@@ -8,6 +8,7 @@ const express = serverRequire('express');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { createServiceAuditLog } = require('../server/lib/service-audit-log.js');
+const { assertProductionSmokeFixtureMutationAllowed } = require('../server/lib/protected-fixtures.js');
 const { normalizeRole } = require('../server/lib/role-groups.js');
 const { registerAuthRoutes } = require('../server/routes/auth.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
@@ -444,6 +445,26 @@ function assertNoCommercialFields(value) {
   }
 
   walk(value);
+}
+
+function smokeFixture(overrides = {}) {
+  return {
+    id: 'EQ-smoke',
+    manufacturer: 'Skytech',
+    model: 'Production smoke rental fixture',
+    inventoryNumber: 'SMOKE-RENTAL-001',
+    serialNumber: 'SMOKE-RENTAL-001',
+    status: 'available',
+    category: 'own',
+    activeInFleet: true,
+    ...overrides,
+  };
+}
+
+function assertSystemFixtureProtected(response) {
+  assert.equal(response.status, 409);
+  assert.equal(response.body.code, 'SYSTEM_FIXTURE_PROTECTED');
+  assert.match(response.body.error, /SMOKE-RENTAL-001/);
 }
 
 function clientPayload(overrides = {}) {
@@ -3057,4 +3078,132 @@ test('/api/manager/my-plan is read-only and does not expose secret-like fields',
   });
 
   assert.equal(JSON.stringify(state), before);
+});
+
+test('production smoke equipment fixture is readable and protected from dangerous CRUD mutations', async () => {
+  const { app, state, auditEntries } = createSecurityApp();
+  state.equipment.push(
+    smokeFixture(),
+    { id: 'EQ-normal', manufacturer: 'Skytech', model: 'Normal lift', inventoryNumber: 'NORMAL-001', serialNumber: 'NORMAL-SN', status: 'available', category: 'own', activeInFleet: true },
+  );
+
+  await withServer(app, async baseUrl => {
+    const read = await request(baseUrl, 'GET', '/api/equipment/EQ-smoke', 'admin-token');
+    assert.equal(read.status, 200);
+    assert.equal(read.body.inventoryNumber, 'SMOKE-RENTAL-001');
+
+    const available = await request(baseUrl, 'GET', '/api/equipment?paginated=true&page=1&pageSize=100&saleState=available_for_rent&sortBy=inventoryNumber&sortDir=asc', 'admin-token');
+    assert.equal(available.status, 200);
+    assert.equal(available.body.items.some(item => item.id === 'EQ-smoke'), true);
+
+    for (const patch of [
+      { inventoryNumber: 'RENAMED' },
+      { serialNumber: 'RENAMED' },
+      { saleMode: true },
+      { saleStatus: 'on_sale' },
+      { salesStatus: 'on_sale' },
+      { category: 'client' },
+      { activeInFleet: false },
+    ]) {
+      assertSystemFixtureProtected(await request(baseUrl, 'PATCH', '/api/equipment/EQ-smoke', 'admin-token', patch));
+    }
+
+    assertSystemFixtureProtected(await request(baseUrl, 'DELETE', '/api/equipment/EQ-smoke', 'admin-token'));
+
+    const ordinaryPatch = await request(baseUrl, 'PATCH', '/api/equipment/EQ-normal', 'admin-token', { category: 'client' });
+    assert.equal(ordinaryPatch.status, 200);
+    assert.equal(ordinaryPatch.body.category, 'client');
+
+    const ordinaryDelete = await request(baseUrl, 'DELETE', '/api/equipment/EQ-normal', 'admin-token');
+    assert.equal(ordinaryDelete.status, 200);
+  });
+
+  assert.equal(state.equipment.some(item => item.id === 'EQ-smoke'), true);
+  assert.equal(auditEntries.some(entry => entry.metadata?.reason === 'blocked_system_fixture_mutation'), true);
+});
+
+test('production smoke equipment fixture is protected from bulk replace and sale-status endpoint drift', async () => {
+  const { app, state } = createSecurityApp();
+  state.equipment = [
+    smokeFixture(),
+    { id: 'EQ-sale-status', manufacturer: 'Skytech', model: 'Sale drift', inventoryNumber: 'SALE-001', serialNumber: 'SALE-SN', status: 'available', category: 'own', saleStatus: 'on_sale', activeInFleet: true },
+    { id: 'EQ-sales-status', manufacturer: 'Skytech', model: 'Sales drift', inventoryNumber: 'SALES-001', serialNumber: 'SALES-SN', status: 'available', category: 'own', salesStatus: 'on_sale', activeInFleet: true },
+  ];
+
+  await withServer(app, async baseUrl => {
+    const available = await request(baseUrl, 'GET', '/api/equipment?paginated=true&page=1&pageSize=100&saleState=available_for_rent&sortBy=inventoryNumber&sortDir=asc', 'admin-token');
+    assert.equal(available.status, 200);
+    assert.equal(available.body.items.some(item => item.id === 'EQ-smoke'), true);
+    assert.equal(available.body.items.some(item => item.id === 'EQ-sale-status'), false);
+    assert.equal(available.body.items.some(item => item.id === 'EQ-sales-status'), false);
+
+    assertSystemFixtureProtected(await request(baseUrl, 'PUT', '/api/equipment', 'admin-token', state.equipment.filter(item => item.id !== 'EQ-smoke')));
+    assertSystemFixtureProtected(await request(baseUrl, 'PUT', '/api/equipment', 'admin-token', state.equipment.map(item => item.id === 'EQ-smoke' ? { ...item, saleStatus: 'on_sale' } : item)));
+    assertSystemFixtureProtected(await request(baseUrl, 'PUT', '/api/equipment', 'admin-token', state.equipment.map(item => {
+      if (item.id !== 'EQ-smoke') return item;
+      const { category: _category, ...withoutCategory } = item;
+      return withoutCategory;
+    })));
+  });
+});
+
+test('production smoke equipment fixture guard covers bot workflow status changes', () => {
+  const existingList = [smokeFixture()];
+
+  assert.throws(() => assertProductionSmokeFixtureMutationAllowed({
+    action: 'bot_receiving',
+    existingList,
+    nextList: existingList.map(item => ({ ...item, status: 'in_service' })),
+  }), /SYSTEM_FIXTURE_PROTECTED/);
+
+  assert.throws(() => assertProductionSmokeFixtureMutationAllowed({
+    action: 'bot_shipping',
+    existingList,
+    nextList: existingList.map(item => ({ ...item, status: 'rented' })),
+  }), /SYSTEM_FIXTURE_PROTECTED/);
+});
+
+test('production smoke equipment fixture is protected from service and rental workflow links', async () => {
+  const { app, state } = createSecurityApp();
+  state.equipment.push(smokeFixture());
+
+  await withServer(app, async baseUrl => {
+    const serviceCreate = await request(baseUrl, 'POST', '/api/service', 'admin-token', {
+      equipmentId: 'EQ-smoke',
+      inventoryNumber: 'SMOKE-RENTAL-001',
+      serialNumber: 'SMOKE-RENTAL-001',
+      status: 'new',
+      reason: 'Accidental repair',
+    });
+    assertSystemFixtureProtected(serviceCreate);
+    assert.equal(state.service.some(item => item.equipmentId === 'EQ-smoke'), false);
+
+    const rentalCreate = await request(baseUrl, 'POST', '/api/rentals', 'admin-token', {
+      id: 'R-smoke',
+      client: 'ООО Клиент',
+      equipmentId: 'EQ-smoke',
+      equipmentInv: 'SMOKE-RENTAL-001',
+      startDate: '2026-06-01',
+      plannedReturnDate: '2026-06-10',
+      status: 'active',
+    });
+    assertSystemFixtureProtected(rentalCreate);
+    assert.equal(state.rentals.some(item => item.id === 'R-smoke'), false);
+
+    const ganttBulk = await request(baseUrl, 'PUT', '/api/gantt_rentals', 'admin-token', [
+      ...state.gantt_rentals,
+      {
+        id: 'GR-smoke',
+        rentalId: 'R-smoke',
+        client: 'ООО Клиент',
+        equipmentId: 'EQ-smoke',
+        equipmentInv: 'SMOKE-RENTAL-001',
+        startDate: '2026-06-01',
+        endDate: '2026-06-10',
+        status: 'active',
+      },
+    ]);
+    assertSystemFixtureProtected(ganttBulk);
+    assert.equal(state.gantt_rentals.some(item => item.id === 'GR-smoke'), false);
+  });
 });

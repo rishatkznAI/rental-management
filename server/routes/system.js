@@ -25,6 +25,11 @@ const { buildRentalLinkDiagnostics } = require('../lib/rental-link-diagnostics')
 const { buildDataIntegrityDiagnostics } = require('../lib/data-integrity-diagnostics');
 const { buildServiceRepairQualityView } = require('../lib/service-repeat-breakdowns');
 const {
+  SYSTEM_FIXTURE_PROTECTED_CODE,
+  SYSTEM_FIXTURE_PROTECTED_MESSAGE,
+  assertProductionSmokeFixtureMutationAllowed,
+} = require('../lib/protected-fixtures');
+const {
   envFlagDisabled,
   envFlagEnabled,
   getBotDisabledConfig,
@@ -172,6 +177,28 @@ const SYSTEM_DATA_COLLECTIONS = [
 
 function nonEmptyString(...values) {
   return values.map(value => String(value || '').trim()).find(Boolean) || '';
+}
+
+function sendSystemFixtureProtectedError(req, res, auditLog, error) {
+  auditLog?.(req, {
+    action: `equipment.${error?.action || 'mutation'}.blocked`,
+    entityType: 'equipment',
+    entityId: error?.equipmentId,
+    metadata: {
+      reason: 'blocked_system_fixture_mutation',
+      equipmentId: error?.equipmentId,
+      userEmail: req.user?.email || null,
+      attemptedFields: Array.isArray(error?.attemptedFields) ? error.attemptedFields : [],
+      violations: Array.isArray(error?.violations) ? error.violations : [],
+    },
+  });
+  return res.status(409).json({
+    ok: false,
+    code: SYSTEM_FIXTURE_PROTECTED_CODE,
+    error: SYSTEM_FIXTURE_PROTECTED_MESSAGE,
+    attemptedFields: Array.isArray(error?.attemptedFields) ? error.attemptedFields : [],
+    violations: Array.isArray(error?.violations) ? error.violations : [],
+  });
 }
 
 function runtimeEnvironment(env = process.env) {
@@ -1187,6 +1214,13 @@ function registerSystemRoutes(app, deps) {
       if (Array.isArray(normalizedClients)) {
         assertClientInnWriteAllowed(prev.clients || [], normalizedClients);
       }
+      if (Array.isArray(equipment)) {
+        assertProductionSmokeFixtureMutationAllowed({
+          action: 'legacy_sync',
+          existingList: prev.equipment || [],
+          nextList: equipment,
+        });
+      }
       const syncPayload = {
         equipment,
         rentals,
@@ -1206,7 +1240,6 @@ function registerSystemRoutes(app, deps) {
           assertSafeAdminBulkReplaceInput(collection, value, 'legacy sync');
         }
       }
-
       if (equipment) writeData('equipment', equipment);
       if (rentals) writeData('rentals', rentals);
       if (gantt_rentals) writeData('gantt_rentals', gantt_rentals);
@@ -1287,6 +1320,9 @@ function registerSystemRoutes(app, deps) {
         after: { collections: Object.keys(req.body || {}), notifications: notifications.length },
       });
     } catch (err) {
+      if (err?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+        return sendSystemFixtureProtectedError(req, res, auditLog, err);
+      }
       console.error('[SYNC] Ошибка:', err.message);
       res.status(err?.status || 500).json({ ok: false, error: err.message });
     }
@@ -1661,6 +1697,22 @@ function registerSystemRoutes(app, deps) {
   });
 
   app.post('/api/admin/system-data/import/dry-run', requireAuth, requireAdmin, (req, res) => {
+    const importEquipment = req.body?.collections?.equipment;
+    if (Array.isArray(importEquipment)) {
+      try {
+        assertProductionSmokeFixtureMutationAllowed({
+          action: 'system_import',
+          existingList: readData('equipment') || [],
+          nextList: importEquipment,
+        });
+      } catch (error) {
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, auditLog, error);
+        }
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+      }
+    }
+
     const analysis = analyzeSystemDataImport(req.body, readData);
     const { sanitizedCollections, ...publicAnalysis } = analysis;
     return res.status(analysis.ok ? 200 : 400).json(publicAnalysis);
@@ -1669,6 +1721,22 @@ function registerSystemRoutes(app, deps) {
   app.post('/api/admin/system-data/import', requireAuth, requireAdmin, (req, res) => {
     if (req.body?.confirm !== true) {
       return res.status(400).json({ ok: false, error: 'Import requires confirm: true after dry-run.' });
+    }
+
+    const importEquipment = req.body?.collections?.equipment;
+    if (Array.isArray(importEquipment)) {
+      try {
+        assertProductionSmokeFixtureMutationAllowed({
+          action: 'system_import',
+          existingList: readData('equipment') || [],
+          nextList: importEquipment,
+        });
+      } catch (error) {
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, auditLog, error);
+        }
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+      }
     }
 
     const analysis = analyzeSystemDataImport(req.body, readData);
@@ -1682,6 +1750,20 @@ function registerSystemRoutes(app, deps) {
       const nextList = collection === 'users'
         ? mergeImportedUsers(list, readData('users') || [])
         : list;
+      if (collection === 'equipment') {
+        try {
+          assertProductionSmokeFixtureMutationAllowed({
+            action: 'system_import',
+            existingList: readData('equipment') || [],
+            nextList,
+          });
+        } catch (error) {
+          if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+            return sendSystemFixtureProtectedError(req, res, auditLog, error);
+          }
+          return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        }
+      }
       writeData(collection, nextList);
       imported[collection] = nextList.length;
     }

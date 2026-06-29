@@ -230,6 +230,7 @@ async function getRentalModeEquipmentForEconomicsTab(apiUrl: string, token: stri
     const fixtureWarning = discovery.diagnostics.productionFixture?.page1?.warning || discovery.diagnostics.productionFixture?.fetched?.warning;
     if (fixtureWarning) {
       safeSmokeLog('productionFixtureWarning', { warning: fixtureWarning });
+      throw new Error(fixtureWarning);
     }
     return discovery as EquipmentDiscovery;
   } finally {

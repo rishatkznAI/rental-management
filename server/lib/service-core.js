@@ -3,6 +3,7 @@ const { isUniqueInventoryNumber } = require('./equipment-matching');
 const { resolveCurrentUserAsMechanic } = require('./service-assignment');
 const { isPdiServiceTicket } = require('./service-ticket-kind');
 const { normalizeServiceTicketForWrite, serviceCreatedAtValue } = require('./service-dto');
+const { assertProductionSmokeFixtureMutationAllowed } = require('./protected-fixtures');
 
 function createServiceCore(deps) {
   const {
@@ -121,6 +122,11 @@ function createServiceCore(deps) {
       };
     });
 
+    assertProductionSmokeFixtureMutationAllowed({
+      action: 'service_create',
+      existingList: equipmentList,
+      nextList: nextEquipment,
+    });
     writeData('equipment', nextEquipment);
     writeData('gantt_rentals', nextRentals);
   }
@@ -206,6 +212,11 @@ function createServiceCore(deps) {
       return { ...item, status: nextStatus };
     });
 
+    assertProductionSmokeFixtureMutationAllowed({
+      action: 'service_update',
+      existingList: equipmentList,
+      nextList: nextEquipment,
+    });
     writeData('equipment', nextEquipment);
   }
 

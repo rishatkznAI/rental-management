@@ -289,6 +289,7 @@ test('finance smoke fixture contract requires available own rental-mode equipmen
     serialNumber: 'SMOKE-RENTAL-001',
     status: 'available',
     category: 'own',
+    activeInFleet: true,
     saleMode: null,
     saleStatus: null,
     salesStatus: null,
@@ -298,6 +299,7 @@ test('finance smoke fixture contract requires available own rental-mode equipmen
   assert.equal(isFinanceSmokeFixtureRecord({ ...fixture, saleMode: true }), false);
   assert.equal(isFinanceSmokeFixtureRecord({ ...fixture, category: 'client' }), false);
   assert.equal(isFinanceSmokeFixtureRecord({ ...fixture, status: 'in_service' }), false);
+  assert.equal(isFinanceSmokeFixtureRecord({ ...fixture, activeInFleet: false }), false);
 
   const diagnostic = financeSmokeFixtureDiagnostic([fixture], { source: 'test' });
   assert.equal(diagnostic.present, true);

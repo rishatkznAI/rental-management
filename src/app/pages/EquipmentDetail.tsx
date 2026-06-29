@@ -65,6 +65,12 @@ import {
 import { getEffectivePaidAmount } from '../lib/finance';
 import { deriveSignalState } from '../lib/gsm';
 import { getGsmCoordinateStatus } from '../lib/gsmEquipmentLabel.js';
+import {
+  PRODUCTION_SMOKE_FIXTURE_PROTECTED_MESSAGE,
+  isProductionSmokeEquipmentFixture,
+  productionSmokeFixtureErrorMessage,
+  stripProductionSmokeFixtureProtectedPatch,
+} from '../lib/productionSmokeFixture';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -1056,6 +1062,7 @@ export default function EquipmentDetail() {
     currentClient: rawEquipment.currentClient || activeRental?.client,
     returnDate: rawEquipment.returnDate || activeRental?.endDate,
   } : null;
+  const isProtectedSmokeFixture = isProductionSmokeEquipmentFixture(equipment);
   const saleMode = isSaleModeEquipment(equipment, {
     salesContext: routeContext === 'sales',
     context: routeContext,
@@ -2227,7 +2234,17 @@ export default function EquipmentDetail() {
                   <Badge variant={equipment.priority === 'critical' || equipment.priority === 'high' ? 'error' : equipment.priority === 'medium' ? 'default' : 'success'}>
                     Приоритет: {EQUIPMENT_PRIORITY_LABELS[equipment.priority]}
                   </Badge>
+                  {isProtectedSmokeFixture && (
+                    <Badge variant="info" title={PRODUCTION_SMOKE_FIXTURE_PROTECTED_MESSAGE}>
+                      Системная запись
+                    </Badge>
+                  )}
                 </div>
+                {isProtectedSmokeFixture && (
+                  <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+                    {PRODUCTION_SMOKE_FIXTURE_PROTECTED_MESSAGE}
+                  </p>
+                )}
               </>
             )}
           </div>
@@ -5120,6 +5137,7 @@ export default function EquipmentDetail() {
         canEditOperationalFields={canEditOperationalEquipmentFields}
         canEditSaleFields={canEditSaleEquipmentFields}
         canEditAdminOnlyFields={canEditAdminOnlyEquipmentFields}
+        isProtectedSmokeFixture={isProtectedSmokeFixture}
         isSaving={isSavingEquipment}
         saveError={equipmentSaveError}
         onOpenChange={(nextOpen) => {
@@ -5135,7 +5153,10 @@ export default function EquipmentDetail() {
             gsmSimNumber: updated.gsmSimNumber || null,
             gsmStatus: updated.gsmStatus || 'unknown',
           };
-          const patch = buildEquipmentEditPatch(equipment, normalizedUpdated);
+          const rawPatch = buildEquipmentEditPatch(equipment, normalizedUpdated);
+          const patch = isProtectedSmokeFixture
+            ? stripProductionSmokeFixtureProtectedPatch(rawPatch)
+            : rawPatch;
           const historyEntries = buildFieldDiffHistory(
             equipment,
             { ...equipment, ...patch },
@@ -5168,7 +5189,7 @@ export default function EquipmentDetail() {
             toast.success('Карточка техники сохранена');
             setShowEditModal(false);
           } catch (error) {
-            const message = error instanceof Error ? error.message : 'Не удалось сохранить карточку техники';
+            const message = productionSmokeFixtureErrorMessage(error);
             console.error('Failed to update equipment card', error);
             setEquipmentSaveError(message);
             toast.error(message);
@@ -5723,7 +5744,7 @@ function createEquipmentEditForm(equipment: Equipment): Equipment {
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 function EditEquipmentModal({
-  open, equipment, canViewFinance, canEditOperationalFields, canEditSaleFields, canEditAdminOnlyFields, isSaving, saveError, onOpenChange, onSave,
+  open, equipment, canViewFinance, canEditOperationalFields, canEditSaleFields, canEditAdminOnlyFields, isProtectedSmokeFixture, isSaving, saveError, onOpenChange, onSave,
 }: {
   open: boolean;
   equipment: Equipment;
@@ -5731,6 +5752,7 @@ function EditEquipmentModal({
   canEditOperationalFields: boolean;
   canEditSaleFields: boolean;
   canEditAdminOnlyFields: boolean;
+  isProtectedSmokeFixture: boolean;
   isSaving: boolean;
   saveError: string | null;
   onOpenChange: (v: boolean) => void;
@@ -5756,6 +5778,7 @@ function EditEquipmentModal({
   const operationalDisabledReason = canEditOperationalFields ? undefined : 'Это поле доступно администратору или офис-менеджеру.';
   const saleDisabledReason = canEditSaleFields ? undefined : 'Продажные поля доступны администратору, офис-менеджеру или менеджеру продаж.';
   const adminOnlyDisabledReason = canEditAdminOnlyFields ? undefined : 'Это поле может изменить только администратор.';
+  const protectedDisabledReason = isProtectedSmokeFixture ? PRODUCTION_SMOKE_FIXTURE_PROTECTED_MESSAGE : undefined;
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -5788,8 +5811,8 @@ function EditEquipmentModal({
                     value={form.inventoryNumber || ''}
                     onChange={setStr('inventoryNumber')}
                     placeholder="Например: 044, ПП-12"
-                    disabled={!canEditAdminOnlyFields}
-                    disabledReason={adminOnlyDisabledReason}
+                    disabled={isProtectedSmokeFixture || !canEditAdminOnlyFields}
+                    disabledReason={protectedDisabledReason || adminOnlyDisabledReason}
                   />
                 </FormField>
 
@@ -5801,8 +5824,8 @@ function EditEquipmentModal({
                     value={form.serialNumber || ''}
                     onChange={setStr('serialNumber')}
                     placeholder="Например: B200063919"
-                    disabled={!canEditOperationalFields}
-                    disabledReason={operationalDisabledReason}
+                    disabled={isProtectedSmokeFixture || !canEditOperationalFields}
+                    disabledReason={protectedDisabledReason || operationalDisabledReason}
                   />
                 </FormField>
 
@@ -5857,8 +5880,8 @@ function EditEquipmentModal({
                       { value: 'diesel',   label: '⛽ Дизельный' },
                       { value: 'electric', label: '⚡ Электрический' },
                     ]}
-                    disabled={!canEditOperationalFields}
-                    disabledReason={operationalDisabledReason}
+                    disabled={isProtectedSmokeFixture || !canEditOperationalFields}
+                    disabledReason={protectedDisabledReason || operationalDisabledReason}
                   />
                 </FormField>
 
@@ -5994,8 +6017,8 @@ function EditEquipmentModal({
                       { value: 'client', label: EQUIPMENT_CATEGORY_LABELS.client },
                       { value: 'partner', label: EQUIPMENT_CATEGORY_LABELS.partner },
                     ]}
-                    disabled={!canEditOperationalFields}
-                    disabledReason={operationalDisabledReason}
+                    disabled={isProtectedSmokeFixture || !canEditOperationalFields}
+                    disabledReason={protectedDisabledReason || operationalDisabledReason}
                   />
                 </FormField>
 
@@ -6113,8 +6136,8 @@ function EditEquipmentModal({
                       { value: 'no', label: 'Нет' },
                       { value: 'yes', label: 'Да' },
                     ]}
-                    disabled={!canEditSaleFields}
-                    disabledReason={saleDisabledReason}
+                    disabled={isProtectedSmokeFixture || !canEditSaleFields}
+                    disabledReason={protectedDisabledReason || saleDisabledReason}
                   />
                 </FormField>
 
@@ -6128,8 +6151,8 @@ function EditEquipmentModal({
                           { value: 'new', label: 'Новая' },
                           { value: 'used', label: 'Б/у из арендного парка' },
                         ]}
-                        disabled={!canEditSaleFields}
-                        disabledReason={saleDisabledReason}
+                        disabled={isProtectedSmokeFixture || !canEditSaleFields}
+                        disabledReason={protectedDisabledReason || saleDisabledReason}
                       />
                     </FormField>
 
@@ -6144,8 +6167,8 @@ function EditEquipmentModal({
                           { value: 'ready', label: EQUIPMENT_SALE_PDI_LABELS.ready },
                           { value: 'ready_for_rent', label: EQUIPMENT_SALE_PDI_LABELS.ready_for_rent },
                         ]}
-                        disabled={!canEditSaleFields}
-                        disabledReason={saleDisabledReason}
+                        disabled={isProtectedSmokeFixture || !canEditSaleFields}
+                        disabledReason={protectedDisabledReason || saleDisabledReason}
                       />
                     </FormField>
 
@@ -6156,8 +6179,8 @@ function EditEquipmentModal({
                             value={form.saleReceiptStatus || 'planned_arrival'}
                             onValueChange={setStr('saleReceiptStatus')}
                             options={EQUIPMENT_SALE_RECEIPT_OPTIONS}
-                            disabled={!canEditSaleFields}
-                            disabledReason={saleDisabledReason}
+                            disabled={isProtectedSmokeFixture || !canEditSaleFields}
+                            disabledReason={protectedDisabledReason || saleDisabledReason}
                           />
                         </FormField>
                         <FormField label="Плановая дата поступления">
@@ -6165,8 +6188,8 @@ function EditEquipmentModal({
                             type="date"
                             value={String(form.plannedArrivalDate || '')}
                             onChange={setStr('plannedArrivalDate')}
-                            disabled={!canEditSaleFields}
-                            disabledReason={saleDisabledReason}
+                            disabled={isProtectedSmokeFixture || !canEditSaleFields}
+                            disabledReason={protectedDisabledReason || saleDisabledReason}
                           />
                         </FormField>
                         <FormField label="Фактическая дата поступления">
@@ -6174,8 +6197,8 @@ function EditEquipmentModal({
                             type="date"
                             value={String(form.actualArrivalDate || '')}
                             onChange={setStr('actualArrivalDate')}
-                            disabled={!canEditSaleFields}
-                            disabledReason={saleDisabledReason}
+                            disabled={isProtectedSmokeFixture || !canEditSaleFields}
+                            disabledReason={protectedDisabledReason || saleDisabledReason}
                           />
                         </FormField>
                         <FormField label="Комментарий приёмки">
@@ -6184,8 +6207,8 @@ function EditEquipmentModal({
                             value={form.acceptanceComment || ''}
                             onChange={event => set('acceptanceComment', event.target.value)}
                             placeholder="Что важно знать менеджеру продаж или PDI"
-                            disabled={!canEditSaleFields}
-                            title={!canEditSaleFields ? saleDisabledReason : undefined}
+                            disabled={isProtectedSmokeFixture || !canEditSaleFields}
+                            title={protectedDisabledReason || (!canEditSaleFields ? saleDisabledReason : undefined)}
                           />
                         </FormField>
                       </>
@@ -6199,8 +6222,8 @@ function EditEquipmentModal({
                             value={String(form.salePrice1 ?? '')}
                             onChange={setNum('salePrice1')}
                             placeholder="Например: 4950000"
-                            disabled={!canEditAdminOnlyFields}
-                            disabledReason={adminOnlyDisabledReason}
+                            disabled={isProtectedSmokeFixture || !canEditAdminOnlyFields}
+                            disabledReason={protectedDisabledReason || adminOnlyDisabledReason}
                           />
                         </FormField>
 
@@ -6210,8 +6233,8 @@ function EditEquipmentModal({
                             value={String(form.salePrice2 ?? '')}
                             onChange={setNum('salePrice2')}
                             placeholder="Например: 4750000"
-                            disabled={!canEditAdminOnlyFields}
-                            disabledReason={adminOnlyDisabledReason}
+                            disabled={isProtectedSmokeFixture || !canEditAdminOnlyFields}
+                            disabledReason={protectedDisabledReason || adminOnlyDisabledReason}
                           />
                         </FormField>
 
@@ -6221,8 +6244,8 @@ function EditEquipmentModal({
                             value={String(form.salePrice3 ?? '')}
                             onChange={setNum('salePrice3')}
                             placeholder="Например: 4550000"
-                            disabled={!canEditAdminOnlyFields}
-                            disabledReason={adminOnlyDisabledReason}
+                            disabled={isProtectedSmokeFixture || !canEditAdminOnlyFields}
+                            disabledReason={protectedDisabledReason || adminOnlyDisabledReason}
                           />
                         </FormField>
                       </>

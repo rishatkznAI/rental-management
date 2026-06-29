@@ -80,3 +80,31 @@ test('sales PDI creation does not move equipment into ordinary service', () => {
   assert.equal(state.gantt_rentals[0].status, 'active');
   assert.deepEqual(state.gantt_rentals[0].comments, []);
 });
+
+test('production smoke fixture cannot be moved into service by service creation side effects', () => {
+  const { state, core } = createMemoryServiceCore();
+  state.service = [];
+  state.equipment = [{
+    id: 'EQ-smoke',
+    manufacturer: 'Skytech',
+    model: 'Production smoke rental fixture',
+    inventoryNumber: 'SMOKE-RENTAL-001',
+    serialNumber: 'SMOKE-RENTAL-001',
+    status: 'available',
+    category: 'own',
+    activeInFleet: true,
+  }];
+
+  assert.throws(() => core.applyServiceTicketCreationEffects({
+    id: 'S-smoke',
+    equipmentId: 'EQ-smoke',
+    inventoryNumber: 'SMOKE-RENTAL-001',
+    serialNumber: 'SMOKE-RENTAL-001',
+    status: 'new',
+    reason: 'Случайная сервисная заявка',
+  }, 'Оператор'), /SYSTEM_FIXTURE_PROTECTED/);
+
+  assert.equal(state.equipment[0].status, 'available');
+  assert.equal(state.equipment[0].category, 'own');
+  assert.equal(state.equipment[0].inventoryNumber, 'SMOKE-RENTAL-001');
+});

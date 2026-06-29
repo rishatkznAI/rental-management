@@ -30,6 +30,7 @@ export const FINANCE_SMOKE_FIXTURE_CONTRACT = {
   serialNumber: FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER,
   status: 'available',
   category: 'own',
+  activeInFleet: true,
   saleMode: 'absent/null/false',
   saleStatus: 'absent/null',
   salesStatus: 'absent/null',
@@ -73,33 +74,59 @@ function emptyLike(value) {
   return value === undefined || value === null || value === false || String(value).trim() === '';
 }
 
+export function financeSmokeFixtureViolations(equipment = {}, { returnedByAvailableForRent = true } = {}) {
+  if (!equipment || typeof equipment !== 'object') return ['missing'];
+  const violations = [];
+  if (String(equipment.inventoryNumber || '').trim() !== FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER) violations.push('inventoryNumber');
+  if (String(equipment.serialNumber || '').trim() !== FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER) violations.push('serialNumber');
+  if (normalizedEquipmentText(equipment.status) !== 'available') violations.push('status');
+  if (normalizedEquipmentText(equipment.category) !== 'own') violations.push('category');
+  if (equipment.activeInFleet !== true) violations.push('activeInFleet');
+  if (!emptyLike(equipment.saleMode)) violations.push('saleMode');
+  if (!emptyLike(equipment.forSale)) violations.push('forSale');
+  if (!emptyLike(equipment.isForSale)) violations.push('isForSale');
+  if (!emptyLike(equipment.saleStatus)) violations.push('saleStatus');
+  if (!emptyLike(equipment.salesStatus)) violations.push('salesStatus');
+  if (isRepairModeEquipmentRecord(equipment)) violations.push('repairMode');
+  if (!returnedByAvailableForRent) violations.push('available_for_rent_page_1');
+  return [...new Set(violations)];
+}
+
 export function isFinanceSmokeFixtureRecord(equipment = {}) {
   if (!equipment || typeof equipment !== 'object') return false;
   if (String(equipment.inventoryNumber || '').trim() !== FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER) return false;
   if (String(equipment.serialNumber || '').trim() !== FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER) return false;
   if (normalizedEquipmentText(equipment.status) !== 'available') return false;
   if (normalizedEquipmentText(equipment.category) !== 'own') return false;
+  if (equipment.activeInFleet !== true) return false;
   if (!emptyLike(equipment.saleMode)) return false;
   if (!emptyLike(equipment.saleStatus)) return false;
   if (!emptyLike(equipment.salesStatus)) return false;
   return isRentalModeEquipmentRecord(equipment);
 }
 
-export function financeSmokeFixtureDiagnostic(items = [], { source = 'unknown' } = {}) {
+export function financeSmokeFixtureDiagnostic(items = [], { source = 'unknown', returnedByAvailableForRent = true } = {}) {
   const equipmentList = Array.isArray(items) ? items.filter(item => item && typeof item === 'object') : [];
   const matchingInventory = equipmentList.filter(item =>
     String(item.inventoryNumber || '').trim() === FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER ||
     String(item.serialNumber || '').trim() === FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER,
   );
-  const valid = matchingInventory.find(isFinanceSmokeFixtureRecord) || null;
+  const validByFields = matchingInventory.find(isFinanceSmokeFixtureRecord) || null;
+  const valid = returnedByAvailableForRent ? validByFields : null;
+  const violations = valid
+    ? []
+    : matchingInventory.length
+      ? [...new Set(matchingInventory.flatMap(item => financeSmokeFixtureViolations(item, { returnedByAvailableForRent })))]
+      : ['missing'];
   return {
     source,
     expected: FINANCE_SMOKE_FIXTURE_CONTRACT,
     present: Boolean(valid),
+    violations,
     matchingRecords: matchingInventory.map(describeEquipmentCandidate),
     warning: valid
       ? ''
-      : `Production data contract violation: ${FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER} must exist as available own rental-mode equipment visible to finance smoke.`,
+      : `Production data contract violation: ${FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER} must exist as available own rental-mode equipment visible to finance smoke. violations=${violations.join(',')}`,
   };
 }
 

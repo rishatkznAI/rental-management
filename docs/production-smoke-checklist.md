@@ -116,7 +116,7 @@ Open these screens with appropriate roles:
 - GSM page;
 - MAX bot admin/status page for admin only.
 
-## 11. Finance Production Smoke Fixture
+## 11. Protected Finance Production Smoke Fixture
 
 Finance Production Smoke depends on a read-only production data contract for one safe rental-mode equipment card. The fixture is not created by normal smoke workflows.
 
@@ -126,6 +126,7 @@ Required fixture:
 - `serialNumber=SMOKE-RENTAL-001`;
 - `status=available`;
 - `category=own`;
+- `activeInFleet=true`;
 - `saleMode` absent, `null` or `false`;
 - `saleStatus` absent or `null`;
 - `salesStatus` absent or `null`;
@@ -133,7 +134,9 @@ Required fixture:
 - visible to the dedicated production smoke user;
 - returned by `/api/equipment?paginated=true&page=1&pageSize=100&saleState=available_for_rent`.
 
-If Finance Production Smoke logs `productionFixtureWarning`, treat it as a production data contract violation even if a fallback rental-mode equipment candidate lets the UI economics check continue. Restore the fixture through a separate operational workflow or approved manual run after a fresh production data backup. Do not auto-create or mutate the fixture from the read-only smoke workflow.
+Standard UI/API operations must not delete this fixture, rename its inventory or serial number, convert it to sale/client/partner/repair mode, or otherwise remove it from the first page of the dedicated `available_for_rent` endpoint. Blocked write attempts return `409 SYSTEM_FIXTURE_PROTECTED`.
+
+Finance Production Smoke treats `productionFixtureWarning` as a hard failure. Expected diagnostics include missing fixture, `saleMode=true`, non-empty `saleStatus` / `salesStatus`, repair/client/partner mode, and absence from the first `available_for_rent` page. Restore the fixture only through a separate operational workflow or approved manual run after a fresh production data backup. Do not auto-create or mutate the fixture from the read-only smoke workflow.
 
 ## 12. Pass/Fail Decision
 

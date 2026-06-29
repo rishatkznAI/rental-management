@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const detailSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/EquipmentDetail.tsx'), 'utf8');
+const productionSmokeFixtureSource = fs.readFileSync(path.join(process.cwd(), 'src/app/lib/productionSmokeFixture.ts'), 'utf8');
+const protectedFixtureUiSource = `${detailSource}\n${productionSmokeFixtureSource}`;
 
 test('equipment detail renders rental fleet mode tabs and restored data blocks', () => {
   assert.match(detailSource, /cardMode === 'rental'/);
@@ -83,4 +85,14 @@ test('equipment detail hides money for roles without finance permission', () => 
   assert.match(detailSource, /Финансовые показатели скрыты правами роли/);
   assert.match(detailSource, /canViewFinance \? formatCurrency\(getEffectivePaidAmount\(payment\)\) : 'Сумма скрыта правами'/);
   assert.match(detailSource, /canViewFinance && \(partsCost > 0 \|\| worksCost > 0\)/);
+});
+
+test('equipment detail marks and guards production smoke system fixture', () => {
+  assert.match(protectedFixtureUiSource, /isProductionSmokeEquipmentFixture/);
+  assert.match(protectedFixtureUiSource, /Системная запись/);
+  assert.match(protectedFixtureUiSource, /Используется для production smoke-проверок/);
+  assert.match(protectedFixtureUiSource, /stripProductionSmokeFixtureProtectedPatch/);
+  assert.match(protectedFixtureUiSource, /productionSmokeFixtureErrorMessage/);
+  assert.match(protectedFixtureUiSource, /isProtectedSmokeFixture \|\| !canEditSaleFields/);
+  assert.match(protectedFixtureUiSource, /isProtectedSmokeFixture \|\| !canEditOperationalFields/);
 });

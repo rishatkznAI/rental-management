@@ -10,6 +10,9 @@ import {
   findUnsafeFinanceSmokePayloadViolations,
   hasUnsafeFinanceSmokeText,
 } from '../scripts/finance-smoke-checks.mjs';
+import {
+  financeSmokeFixtureDiagnostic,
+} from '../scripts/finance-smoke-equipment-discovery.mjs';
 
 function cashFlowPayload(overrides = {}) {
   return {
@@ -144,4 +147,25 @@ test('safe tax settings response passes', () => {
     inputVatEnabled: false,
     outputVatEnabled: false,
   }));
+});
+
+test('production smoke fixture diagnostics identify exact contract violations', () => {
+  const validFixture = {
+    id: 'EQ-smoke',
+    inventoryNumber: 'SMOKE-RENTAL-001',
+    serialNumber: 'SMOKE-RENTAL-001',
+    status: 'available',
+    category: 'own',
+    activeInFleet: true,
+  };
+
+  assert.deepEqual(financeSmokeFixtureDiagnostic([], { source: 'page1' }).violations, ['missing']);
+  assert.equal(financeSmokeFixtureDiagnostic([validFixture], { source: 'page1' }).warning, '');
+  assert.deepEqual(financeSmokeFixtureDiagnostic([{ ...validFixture, saleMode: true }], { source: 'page1' }).violations, ['saleMode']);
+  assert.deepEqual(financeSmokeFixtureDiagnostic([{ ...validFixture, saleStatus: 'on_sale' }], { source: 'page1' }).violations, ['saleStatus']);
+  assert.deepEqual(financeSmokeFixtureDiagnostic([{ ...validFixture, salesStatus: 'on_sale' }], { source: 'page1' }).violations, ['salesStatus']);
+  assert.match(
+    financeSmokeFixtureDiagnostic([validFixture], { source: 'fetched', returnedByAvailableForRent: false }).warning,
+    /available_for_rent_page_1/,
+  );
 });

@@ -485,6 +485,47 @@ test('/api/sync rejects dangerous fields when legacy sync is explicitly enabled'
   }
 });
 
+test('/api/sync protects production smoke equipment fixture when legacy sync is explicitly enabled', async () => {
+  const previousEnabled = process.env.ENABLE_LEGACY_SYNC;
+  process.env.ENABLE_LEGACY_SYNC = '1';
+  const fixture = {
+    id: 'EQ-smoke',
+    manufacturer: 'Skytech',
+    model: 'Production smoke rental fixture',
+    inventoryNumber: 'SMOKE-RENTAL-001',
+    serialNumber: 'SMOKE-RENTAL-001',
+    status: 'available',
+    category: 'own',
+    activeInFleet: true,
+  };
+  const collections = { equipment: [fixture] };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    getSnapshot: () => ({ equipment: collections.equipment }),
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/sync', {
+        equipment: [{ ...fixture, saleStatus: 'on_sale' }],
+      });
+
+      assert.equal(response.status, 409);
+      assert.equal(response.body.code, 'SYSTEM_FIXTURE_PROTECTED');
+      assert.equal(collections.equipment[0].saleStatus, undefined);
+      assert.equal(writes.length, 0);
+    });
+  } finally {
+    if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;
+    else process.env.ENABLE_LEGACY_SYNC = previousEnabled;
+  }
+});
+
 test('system control center interprets conservation flags and unknown DB isolation honestly', () => {
   const status = buildSystemControlCenterStatus({
     dbPath: '/app/storage/app.sqlite',
@@ -2129,6 +2170,42 @@ test('/api/admin/system-data/import requires confirmation and preserves existing
     assert.equal(collections.users[0].password, 'existing-password');
     assert.equal(collections.users[0].tokenVersion, 3);
     assert.doesNotMatch(JSON.stringify(imported.body), /incoming-password|existing-password/);
+  });
+});
+
+test('/api/admin/system-data/import protects production smoke equipment fixture', async () => {
+  const fixture = {
+    id: 'EQ-smoke',
+    manufacturer: 'Skytech',
+    model: 'Production smoke rental fixture',
+    inventoryNumber: 'SMOKE-RENTAL-001',
+    serialNumber: 'SMOKE-RENTAL-001',
+    status: 'available',
+    category: 'own',
+    activeInFleet: true,
+  };
+  const collections = { equipment: [fixture] };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        equipment: [{ ...fixture, serialNumber: 'RENAMED' }],
+      },
+    });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'SYSTEM_FIXTURE_PROTECTED');
+    assert.equal(collections.equipment[0].serialNumber, 'SMOKE-RENTAL-001');
+    assert.equal(writes.length, 0);
   });
 });
 

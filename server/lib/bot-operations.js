@@ -2,6 +2,7 @@ const { assertRepairItemsAdmin } = require('./service-audit-log');
 const { calculateWorkAmount, normalizePayType } = require('./mechanic-workload');
 const { linkedRentalIds } = require('./gantt-rental-link-guard');
 const { normalizeServiceTicketForWrite } = require('./service-dto');
+const { assertProductionSmokeFixtureMutationAllowed } = require('./protected-fixtures');
 
 function createBotOperations(deps) {
   const {
@@ -855,6 +856,11 @@ function createBotOperations(deps) {
         returnDate: undefined,
       };
     });
+    assertProductionSmokeFixtureMutationAllowed({
+      action: `bot_${operation.type}`,
+      existingList: equipmentList,
+      nextList: nextEquipment,
+    });
     writeData('equipment', nextEquipment);
 
     const nextRentals = rentals.map(rental => {
@@ -955,6 +961,11 @@ function createBotOperations(deps) {
         currentClient: undefined,
         returnDate: undefined,
       };
+    });
+    assertProductionSmokeFixtureMutationAllowed({
+      action: `bot_${type}`,
+      existingList: equipmentList,
+      nextList: nextEquipment,
     });
     writeData('equipment', nextEquipment);
 

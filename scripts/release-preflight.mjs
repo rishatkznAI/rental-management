@@ -31,6 +31,7 @@ const DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
   /^scripts\/release-preflight\.mjs$/,
   /^scripts\/frontend-build-marker\.mjs$/,
   /^scripts\/backend-release-marker\.mjs$/,
+  /^scripts\/finance-smoke-equipment-discovery\.mjs$/,
   /^e2e\/helpers\/auth\.ts$/,
   /^e2e\/helpers\/releaseSmoke\.ts$/,
   /^e2e\/.*smoke\.spec\.ts$/,

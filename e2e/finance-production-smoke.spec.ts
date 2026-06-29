@@ -44,6 +44,10 @@ type EquipmentDiscovery = {
     strategy: string;
     requests: unknown[];
     fetched: Record<string, unknown>;
+    productionFixture?: {
+      page1?: { warning?: string };
+      fetched?: { warning?: string };
+    };
     selected: Record<string, unknown> | null;
   };
 };
@@ -218,9 +222,15 @@ async function getRentalModeEquipmentForEconomicsTab(apiUrl: string, token: stri
     safeSmokeLog('equipmentEconomicsCandidate', {
       selected: discovery.selected?.id || null,
       selectedDetails: describeEquipmentCandidate(discovery.selected),
+      pagesFetched: discovery.diagnostics.requests.length,
       ...discovery.diagnostics.fetched,
+      productionFixture: discovery.diagnostics.productionFixture,
       requests: discovery.diagnostics.requests,
     });
+    const fixtureWarning = discovery.diagnostics.productionFixture?.page1?.warning || discovery.diagnostics.productionFixture?.fetched?.warning;
+    if (fixtureWarning) {
+      safeSmokeLog('productionFixtureWarning', { warning: fixtureWarning });
+    }
     return discovery as EquipmentDiscovery;
   } finally {
     await api.dispose();
@@ -286,6 +296,7 @@ async function openEquipmentEconomicsTab(page: Page, testInfo: TestInfo) {
   safeSmokeLog('equipmentEconomicsTabOpened', {
     panel: await locatorDiagnostics(economicsPanel),
   });
+  await attachSmokeScreenshot(page, testInfo, 'finance-smoke-equipment-economics-opened');
   return economicsPanel;
 }
 

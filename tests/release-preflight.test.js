@@ -256,6 +256,14 @@ test('release classifier allows deploy-tooling only', () => {
   assert.deepEqual(result.blockedFiles, []);
 });
 
+test('release classifier does not treat backend workflows as deploy-tooling', () => {
+  const result = classifyReleaseChangedFiles(['.github/workflows/backend-deploy.yml']);
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.releaseType, '');
+  assert.deepEqual(result.blockedFiles, ['.github/workflows/backend-deploy.yml']);
+});
+
 test('release classifier allows frontend runtime only as frontend deploy', () => {
   const result = classifyReleaseChangedFiles(['src/app/pages/Dashboard.tsx']);
 

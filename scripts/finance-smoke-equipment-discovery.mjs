@@ -23,6 +23,19 @@ const SALE_MARKERS = new Set([
   'снята с продажи',
   'снято с продажи',
 ]);
+export const FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER = 'SMOKE-RENTAL-001';
+
+export const FINANCE_SMOKE_FIXTURE_CONTRACT = {
+  inventoryNumber: FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER,
+  serialNumber: FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER,
+  status: 'available',
+  category: 'own',
+  saleMode: 'absent/null/false',
+  saleStatus: 'absent/null',
+  salesStatus: 'absent/null',
+  repairMode: false,
+  endpoint: '/api/equipment?paginated=true&page=1&pageSize=100&saleState=available_for_rent',
+};
 
 export function normalizedEquipmentText(value) {
   return String(value ?? '').trim().toLowerCase();
@@ -54,6 +67,40 @@ export function isRepairModeEquipmentRecord(equipment = {}) {
 export function isRentalModeEquipmentRecord(equipment = {}) {
   if (!String(equipment?.id || '').trim()) return false;
   return !isSaleModeEquipmentRecord(equipment) && !isRepairModeEquipmentRecord(equipment);
+}
+
+function emptyLike(value) {
+  return value === undefined || value === null || value === false || String(value).trim() === '';
+}
+
+export function isFinanceSmokeFixtureRecord(equipment = {}) {
+  if (!equipment || typeof equipment !== 'object') return false;
+  if (String(equipment.inventoryNumber || '').trim() !== FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER) return false;
+  if (String(equipment.serialNumber || '').trim() !== FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER) return false;
+  if (normalizedEquipmentText(equipment.status) !== 'available') return false;
+  if (normalizedEquipmentText(equipment.category) !== 'own') return false;
+  if (!emptyLike(equipment.saleMode)) return false;
+  if (!emptyLike(equipment.saleStatus)) return false;
+  if (!emptyLike(equipment.salesStatus)) return false;
+  return isRentalModeEquipmentRecord(equipment);
+}
+
+export function financeSmokeFixtureDiagnostic(items = [], { source = 'unknown' } = {}) {
+  const equipmentList = Array.isArray(items) ? items.filter(item => item && typeof item === 'object') : [];
+  const matchingInventory = equipmentList.filter(item =>
+    String(item.inventoryNumber || '').trim() === FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER ||
+    String(item.serialNumber || '').trim() === FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER,
+  );
+  const valid = matchingInventory.find(isFinanceSmokeFixtureRecord) || null;
+  return {
+    source,
+    expected: FINANCE_SMOKE_FIXTURE_CONTRACT,
+    present: Boolean(valid),
+    matchingRecords: matchingInventory.map(describeEquipmentCandidate),
+    warning: valid
+      ? ''
+      : `Production data contract violation: ${FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER} must exist as available own rental-mode equipment visible to finance smoke.`,
+  };
 }
 
 export function summarizeEquipmentCandidates(items = []) {
@@ -117,6 +164,7 @@ export async function discoverRentalModeEquipment({
 
   const fetched = [];
   const requests = [];
+  let firstPageFixtureDiagnostic = null;
 
   for (let page = 1; page <= maxPages; page += 1) {
     const path = `/api/equipment?paginated=true&page=${page}&pageSize=${pageSize}&saleState=available_for_rent&sortBy=inventoryNumber&sortDir=asc`;
@@ -125,6 +173,7 @@ export async function discoverRentalModeEquipment({
     const pagination = payloadPagination(payload);
     mergeUniqueEquipment(fetched, items);
     const summary = summarizeEquipmentCandidates(items);
+    const fixture = financeSmokeFixtureDiagnostic(items, { source: 'paginated_available_for_rent' });
     const request = {
       path,
       source: 'paginated_available_for_rent',
@@ -139,7 +188,14 @@ export async function discoverRentalModeEquipment({
         hasNextPage: Boolean(pagination.hasNextPage),
       } : null,
       ...summary,
+      fixture: {
+        expectedInventoryNumber: FINANCE_SMOKE_FIXTURE_INVENTORY_NUMBER,
+        present: fixture.present,
+      },
     };
+    if (page === 1) {
+      firstPageFixtureDiagnostic = financeSmokeFixtureDiagnostic(items, { source: 'paginated_available_for_rent_page_1' });
+    }
     requests.push(request);
     log('equipmentEconomicsDiscoveryPage', request);
 
@@ -151,6 +207,10 @@ export async function discoverRentalModeEquipment({
           strategy: 'paginated_available_for_rent',
           requests,
           fetched: summarizeEquipmentCandidates(fetched),
+          productionFixture: {
+            page1: firstPageFixtureDiagnostic,
+            fetched: financeSmokeFixtureDiagnostic(fetched, { source: 'fetched' }),
+          },
           selected: describeEquipmentCandidate(selectedFromPage),
         },
       };
@@ -180,6 +240,10 @@ export async function discoverRentalModeEquipment({
       strategy: selected ? 'combined' : 'not_found',
       requests,
       fetched: summarizeEquipmentCandidates(fetched),
+      productionFixture: {
+        page1: firstPageFixtureDiagnostic,
+        fetched: financeSmokeFixtureDiagnostic(fetched, { source: 'fetched' }),
+      },
       selected: describeEquipmentCandidate(selected),
     },
   };

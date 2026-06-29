@@ -1,5 +1,6 @@
 import { expect, request as playwrightRequest, test, type Page, type TestInfo } from '@playwright/test';
 import { requiredEnv } from './helpers/releaseSmoke';
+import { backendCommitGateResult } from '../scripts/release-preflight.mjs';
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
@@ -39,6 +40,12 @@ type DashboardLayoutSnapshot = {
   }>;
 };
 
+type BuildInfo = {
+  commit?: string;
+  commitFull?: string;
+  releaseType?: string;
+};
+
 const VIEWPORT_CASES: ViewportCase[] = [
   { name: 'desktop', viewport: { width: 1440, height: 900 } },
   { name: 'tablet', viewport: { width: 768, height: 1024 } },
@@ -58,6 +65,49 @@ function commitsMatch(actual = '', expected = '') {
   const left = String(actual || '').trim();
   const right = String(expected || '').trim();
   return Boolean(left && right && (left.startsWith(right) || right.startsWith(left)));
+}
+
+function normalizeDashboardSmokeReleaseType(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'auto') return '';
+  return normalized;
+}
+
+function resolveDashboardSmokeReleaseType(input: {
+  envReleaseType?: string;
+  frontendReleaseType?: string;
+  backendReleaseType?: string;
+}) {
+  return normalizeDashboardSmokeReleaseType(input.envReleaseType)
+    || normalizeDashboardSmokeReleaseType(input.frontendReleaseType)
+    || normalizeDashboardSmokeReleaseType(input.backendReleaseType)
+    || 'full-stack';
+}
+
+function assertBackendCommitMatchesPolicy(input: {
+  backendBuild: BuildInfo | null;
+  expectedCommit: string;
+  releaseType: string;
+  label: string;
+}) {
+  const gate = backendCommitGateResult({
+    env: 'production',
+    releaseType: input.releaseType,
+    backendBuild: input.backendBuild || {},
+    expectedCommit: input.expectedCommit,
+  });
+  if (gate.status === 'warn') {
+    logStage('backendCommitDrift', {
+      label: input.label,
+      releaseType: input.releaseType,
+      expectedCommit: shortCommit(input.expectedCommit),
+      backendCommit: gate.backendCommit,
+      status: 'warn',
+    });
+    return gate;
+  }
+  expect(gate.status, `${input.label}: ${gate.message}`).toBe('pass');
+  return gate;
 }
 
 function sanitize(text = '', limit = 800) {
@@ -324,19 +374,29 @@ test('production authenticated dashboard visual smoke', async ({ page }, testInf
 
   const api = await playwrightRequest.newContext({ baseURL: apiUrl });
   let token = '';
+  let backendBuild: BuildInfo | null = null;
   let backendCommit = '';
+  let releaseType = resolveDashboardSmokeReleaseType({
+    envReleaseType: String(process.env.RELEASE_TYPE || ''),
+  });
   try {
     await withStage(state, 'production preflight', async () => {
       const versionResponse = await api.get('/api/version', { timeout: 15_000 });
       expect(versionResponse.ok(), `production /api/version should return 200: ${versionResponse.status()}`).toBeTruthy();
       const version = await versionResponse.json() as {
         ok?: boolean;
-        build?: { commit?: string; commitFull?: string };
+        build?: BuildInfo;
         app?: { disabled?: boolean };
       };
       expect(version.ok, 'production /api/version should report ok=true').toBe(true);
       expect(version.app?.disabled, 'production app.disabled should be false for authenticated visual smoke').toBe(false);
+      backendBuild = version.build || null;
       backendCommit = version.build?.commitFull || version.build?.commit || '';
+      releaseType = resolveDashboardSmokeReleaseType({
+        envReleaseType: String(process.env.RELEASE_TYPE || ''),
+        backendReleaseType: backendBuild?.releaseType,
+      });
+      logStage('releaseType', { releaseType });
     });
 
     await withStage(state, 'login done', async () => {
@@ -383,12 +443,31 @@ test('production authenticated dashboard visual smoke', async ({ page }, testInf
         const marker = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
         frontendCommit = marker?.commit || frontendCommit;
         frontendApiBaseUrl = marker?.apiBaseUrl || frontendApiBaseUrl;
+        releaseType = resolveDashboardSmokeReleaseType({
+          envReleaseType: String(process.env.RELEASE_TYPE || ''),
+          frontendReleaseType: marker?.releaseType,
+          backendReleaseType: backendBuild?.releaseType,
+        });
         expect(marker?.apiBaseUrl, 'frontend marker should point at production API').toBe(apiUrl);
         if (expectedCommit) {
           expect(
             commitsMatch(marker?.commit || '', shortCommit(expectedCommit)),
             `frontend marker should match expected production commit: expected=${shortCommit(expectedCommit)} frontend=${marker?.commit || 'missing'}`,
           ).toBeTruthy();
+          assertBackendCommitMatchesPolicy({
+            backendBuild,
+            expectedCommit,
+            releaseType,
+            label: 'backend expected release commit',
+          });
+        }
+        if (marker?.commit && backendBuild?.commit) {
+          assertBackendCommitMatchesPolicy({
+            backendBuild,
+            expectedCommit: marker.commit,
+            releaseType,
+            label: 'frontend/backend commit match',
+          });
         }
       });
 
@@ -403,6 +482,7 @@ test('production authenticated dashboard visual smoke', async ({ page }, testInf
       expectedCommit: shortCommit(expectedCommit),
       frontendCommit,
       backendCommit,
+      releaseType,
       apiBaseUrl: frontendApiBaseUrl,
       compactCards: {
         tablet: snapshots.tablet?.compactCards ?? 0,

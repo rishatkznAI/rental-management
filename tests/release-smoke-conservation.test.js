@@ -161,6 +161,26 @@ test('finance production smoke workflow passes release type with auto default', 
   assert.match(financeProductionSmokeWorkflowSource, /RELEASE_TYPE: \$\{\{ inputs\.release_type \}\}/);
 });
 
+test('finance production smoke opens a rental-mode equipment economics tab with diagnostics', () => {
+  assert.match(financeProductionSmokeSource, /function isRentalModeEquipmentRecord/);
+  assert.match(financeProductionSmokeSource, /getRentalModeEquipmentForEconomicsTab/);
+  assert.match(financeProductionSmokeSource, /safeSmokeLog\('equipmentEconomicsCandidate'/);
+  assert.match(financeProductionSmokeSource, /getByTestId\('equipment-economics-tab'\)/);
+  assert.match(financeProductionSmokeSource, /getByTestId\('equipment-economics-panel'\)/);
+  assert.match(financeProductionSmokeSource, /scrollIntoViewIfNeeded\(\)/);
+  assert.match(financeProductionSmokeSource, /toBeEnabled\(\)/);
+  assert.match(financeProductionSmokeSource, /safeSmokeLog\('equipmentEconomicsTabBeforeClick'/);
+  assert.match(financeProductionSmokeSource, /safeSmokeLog\('equipmentEconomicsTabClickFailed'/);
+  assert.match(financeProductionSmokeSource, /attachSmokeScreenshot\(page, testInfo, 'finance-smoke-equipment-economics-before-click'\)/);
+});
+
+test('finance production smoke keeps equipment economics content assertions strong', () => {
+  assert.match(financeProductionSmokeSource, /EQUIPMENT_ECONOMICS_UI_STATE_PATTERN/);
+  assert.match(financeProductionSmokeSource, /assertEquipmentEconomicsUiStateSafe\(await economicsPanel\.innerText\(\)\)/);
+  assert.match(financeProductionSmokeSource, /throw new Error\('Finance production smoke could not find rental-mode equipment with an economics tab candidate'\)/);
+  assert.doesNotMatch(financeProductionSmokeSource, /equipmentEconomicsChecked: Boolean\(equipment\?\.id\)[\s\S]*return/);
+});
+
 test('deploy workflow embeds release_type into frontend build metadata', () => {
   assert.match(deployWorkflowSource, /release_type: \$\{\{ steps\.classify\.outputs\.release_type \}\}/);
   assert.match(deployWorkflowSource, /VITE_GIT_COMMIT_SHA: \$\{\{ github\.sha \}\}/);

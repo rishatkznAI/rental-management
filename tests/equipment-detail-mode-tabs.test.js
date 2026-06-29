@@ -10,6 +10,8 @@ test('equipment detail renders rental fleet mode tabs and restored data blocks',
   for (const label of ['Обзор', 'Приёмка', 'Аренды', 'Экономика', 'Сервис', 'Документы', 'История']) {
     assert.match(detailSource, new RegExp(label));
   }
+  assert.match(detailSource, /data-testid="equipment-economics-tab"/);
+  assert.match(detailSource, /data-testid="equipment-economics-panel"/);
   assert.match(detailSource, /const acceptanceRecords = \[/);
   assert.match(detailSource, /equipment\.acceptancePhotos/);
   assert.match(detailSource, /shippingPhotos[\s\S]*getShippingPhotoOperationKind\(event[\s\S]*=== 'receiving'/);

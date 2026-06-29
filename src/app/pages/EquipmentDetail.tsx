@@ -2982,7 +2982,7 @@ export default function EquipmentDetail() {
                 <TabsTrigger value="overview" className={tabTriggerClass}>Обзор</TabsTrigger>
                 <TabsTrigger value="acceptance" className={tabTriggerClass}>Приёмка</TabsTrigger>
                 {canViewRentals && <TabsTrigger value="rentals" className={tabTriggerClass}>Аренды</TabsTrigger>}
-                <TabsTrigger value="economics" className={tabTriggerClass}>Экономика</TabsTrigger>
+                <TabsTrigger value="economics" className={tabTriggerClass} data-testid="equipment-economics-tab">Экономика</TabsTrigger>
                 {canViewService && <TabsTrigger value="service" className={tabTriggerClass}>Сервис</TabsTrigger>}
                 {canViewDocuments && <TabsTrigger value="documents" className={tabTriggerClass}>Документы</TabsTrigger>}
                 <TabsTrigger value="history" className={tabTriggerClass}>История</TabsTrigger>
@@ -3193,7 +3193,7 @@ export default function EquipmentDetail() {
           </TabsContent>
         )}
 
-        <TabsContent value="economics" className="space-y-4">
+        <TabsContent value="economics" className="space-y-4" data-testid="equipment-economics-panel">
           {canViewFinance ? (
             <>
               <div className="grid gap-4 md:grid-cols-4">

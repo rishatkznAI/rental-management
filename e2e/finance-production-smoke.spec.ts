@@ -1,4 +1,4 @@
-import { expect, request as playwrightRequest, test, type APIResponse, type Page } from '@playwright/test';
+import { expect, request as playwrightRequest, test, type APIResponse, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { requiredEnv } from './helpers/releaseSmoke';
 import {
   assertDepreciationIsNonCash,
@@ -23,6 +23,15 @@ type EquipmentRecord = {
   id?: string;
   inventoryNumber?: string;
   serialNumber?: string;
+  category?: string;
+  status?: string;
+  saleMode?: unknown;
+  isForSale?: boolean;
+  forSale?: boolean;
+  saleStatus?: string;
+  salesStatus?: string;
+  tag?: string;
+  tags?: unknown[];
 };
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
@@ -111,6 +120,57 @@ async function responseJson(response: APIResponse) {
   return response.json().catch(() => null);
 }
 
+function normalizedText(value: unknown) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function hasEquipmentSaleMarker(value: unknown) {
+  return [
+    'sale',
+    'sales',
+    'for_sale',
+    'for-sale',
+    'on_sale',
+    'on-sale',
+    'на продаже',
+    'на продажу',
+    'продажа',
+    'продается',
+    'продаётся',
+    'reserved',
+    'резерв',
+    'in_deal',
+    'deal',
+    'в сделке',
+    'sold',
+    'продана',
+    'продано',
+    'removed',
+    'withdrawn',
+    'снята с продажи',
+    'снято с продажи',
+  ].includes(normalizedText(value));
+}
+
+function isSaleModeEquipmentRecord(equipment: EquipmentRecord) {
+  if (equipment.saleMode === true || hasEquipmentSaleMarker(equipment.saleMode)) return true;
+  if (equipment.isForSale === true || equipment.forSale === true) return true;
+  if (String(equipment.saleStatus || '').trim()) return true;
+  if (String(equipment.salesStatus || '').trim()) return true;
+  if (hasEquipmentSaleMarker(equipment.status)) return true;
+  if (hasEquipmentSaleMarker(equipment.category)) return true;
+  if (hasEquipmentSaleMarker(equipment.tag)) return true;
+  return Array.isArray(equipment.tags) && equipment.tags.some(hasEquipmentSaleMarker);
+}
+
+function isRentalModeEquipmentRecord(equipment: EquipmentRecord) {
+  if (!String(equipment.id || '').trim()) return false;
+  if (isSaleModeEquipmentRecord(equipment)) return false;
+  const category = normalizedText(equipment.category);
+  const status = normalizedText(equipment.status);
+  return category !== 'client' && category !== 'partner' && status !== 'in_service';
+}
+
 async function installProductionReadOnlyGuard(page: Page) {
   const blocked: string[] = [];
 
@@ -173,7 +233,7 @@ async function expectSafeVisibleText(page: Page, label: string) {
   expect(hasUnsafeFinanceSmokeText(text), `${label} should not render undefined/null/object placeholders`).toBe(false);
 }
 
-async function getFirstEquipment(apiUrl: string, token: string): Promise<EquipmentRecord | null> {
+async function getRentalModeEquipmentForEconomicsTab(apiUrl: string, token: string): Promise<EquipmentRecord | null> {
   const api = await playwrightRequest.newContext({
     baseURL: apiUrl,
     extraHTTPHeaders: { Authorization: `Bearer ${token}` },
@@ -187,13 +247,87 @@ async function getFirstEquipment(apiUrl: string, token: string): Promise<Equipme
       : Array.isArray((payload as { items?: unknown[] } | null)?.items)
         ? (payload as { items: unknown[] }).items
         : [];
-    return (list.find(item => item && typeof item === 'object' && String((item as EquipmentRecord).id || '').trim()) as EquipmentRecord | undefined) || null;
+    const equipmentList = list.filter(item => item && typeof item === 'object') as EquipmentRecord[];
+    const rentalModeEquipment = equipmentList.find(isRentalModeEquipmentRecord) || null;
+    safeSmokeLog('equipmentEconomicsCandidate', {
+      selected: rentalModeEquipment?.id || null,
+      totalEquipment: equipmentList.length,
+      rentalModeCandidates: equipmentList.filter(isRentalModeEquipmentRecord).length,
+      skippedSaleMode: equipmentList.filter(isSaleModeEquipmentRecord).length,
+      skippedRepairMode: equipmentList.filter(item => (
+        !isSaleModeEquipmentRecord(item)
+        && (['client', 'partner'].includes(normalizedText(item.category)) || normalizedText(item.status) === 'in_service')
+      )).length,
+    });
+    return rentalModeEquipment;
   } finally {
     await api.dispose();
   }
 }
 
-test('production finance smoke stays read-only', async ({ page }) => {
+async function attachSmokeScreenshot(page: Page, testInfo: TestInfo, name: string) {
+  try {
+    await testInfo.attach(name, {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: 'image/png',
+    });
+  } catch (error) {
+    safeSmokeLog('screenshotSkipped', { name, reason: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function locatorDiagnostics(locator: Locator) {
+  const count = await locator.count();
+  const details = [];
+  for (let index = 0; index < Math.min(count, 5); index += 1) {
+    const item = locator.nth(index);
+    details.push({
+      index,
+      visible: await item.isVisible().catch(() => false),
+      enabled: await item.isEnabled().catch(() => false),
+      text: (await item.innerText().catch(() => '')).trim(),
+      box: await item.boundingBox().catch(() => null),
+    });
+  }
+  return { count, details };
+}
+
+async function openEquipmentEconomicsTab(page: Page, testInfo: TestInfo) {
+  const main = page.locator('main');
+  const economicsTab = main.getByTestId('equipment-economics-tab');
+  const fallbackEconomicsTab = main.getByRole('tab', { name: /^Экономика$/ });
+
+  await expect(economicsTab, 'Equipment detail rental economics tab marker should exist').toHaveCount(1, { timeout: 15_000 });
+  await economicsTab.scrollIntoViewIfNeeded();
+  await expect(economicsTab, 'Equipment economics tab should be visible before click').toBeVisible();
+  await expect(economicsTab, 'Equipment economics tab should be enabled before click').toBeEnabled();
+  safeSmokeLog('equipmentEconomicsTabBeforeClick', {
+    marker: await locatorDiagnostics(economicsTab),
+    roleFallback: await locatorDiagnostics(fallbackEconomicsTab),
+  });
+  await attachSmokeScreenshot(page, testInfo, 'finance-smoke-equipment-economics-before-click');
+
+  try {
+    await economicsTab.click({ timeout: 15_000 });
+  } catch (error) {
+    safeSmokeLog('equipmentEconomicsTabClickFailed', {
+      marker: await locatorDiagnostics(economicsTab),
+      roleFallback: await locatorDiagnostics(fallbackEconomicsTab),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await attachSmokeScreenshot(page, testInfo, 'finance-smoke-equipment-economics-click-failed');
+    throw error;
+  }
+
+  const economicsPanel = main.getByTestId('equipment-economics-panel');
+  await expect(economicsPanel, 'Equipment economics tab panel should be visible').toBeVisible({ timeout: 15_000 });
+  safeSmokeLog('equipmentEconomicsTabOpened', {
+    panel: await locatorDiagnostics(economicsPanel),
+  });
+  return economicsPanel;
+}
+
+test('production finance smoke stays read-only', async ({ page }, testInfo) => {
   test.setTimeout(180_000);
 
   const apiUrl = requiredEnv('PRODUCTION_API_URL', 'finance production smoke').replace(/\/$/, '');
@@ -259,7 +393,7 @@ test('production finance smoke stays read-only', async ({ page }) => {
     baseURL: apiUrl,
     extraHTTPHeaders: { Authorization: `Bearer ${token}` },
   });
-  let equipment = await getFirstEquipment(apiUrl, token);
+  let equipment = await getRentalModeEquipmentForEconomicsTab(apiUrl, token);
   try {
     const cashFlow = await authedApi.get('/api/finance/cash-flow?includeDepreciation=true');
     expect(cashFlow.ok(), 'authenticated cash-flow request should return 200').toBeTruthy();
@@ -333,14 +467,12 @@ test('production finance smoke stays read-only', async ({ page }) => {
   await expectSafeVisibleText(page, 'Finance VAT');
 
   if (!equipment?.id) {
-    equipment = await getFirstEquipment(apiUrl, token);
+    equipment = await getRentalModeEquipmentForEconomicsTab(apiUrl, token);
   }
   if (equipment?.id) {
     await page.goto(productionAppUrl(frontendUrl, `/equipment/${encodeURIComponent(equipment.id)}`), { waitUntil: 'domcontentloaded' });
     await expect(page.locator('main'), 'Equipment detail main should be visible').toBeVisible();
-    await page.getByRole('tab', { name: 'Экономика' }).click();
-    const economicsPanel = page.getByRole('tabpanel', { name: 'Экономика' });
-    await expect(economicsPanel, 'Equipment economics tab panel should be visible').toBeVisible();
+    const economicsPanel = await openEquipmentEconomicsTab(page, testInfo);
     await expect(economicsPanel.getByText(/Экономика техники|Амортизация/i).first()).toBeVisible();
     await expect(
       economicsPanel.getByText(EQUIPMENT_ECONOMICS_UI_STATE_PATTERN).first(),
@@ -348,6 +480,8 @@ test('production finance smoke stays read-only', async ({ page }) => {
     ).toBeVisible();
     assertEquipmentEconomicsUiStateSafe(await economicsPanel.innerText());
     await expectSafeVisibleText(page, 'Equipment Economics');
+  } else {
+    throw new Error('Finance production smoke could not find rental-mode equipment with an economics tab candidate');
   }
 
   expect(blockedWrites, 'finance production smoke must not attempt protected write endpoints').toEqual([]);

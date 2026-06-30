@@ -1282,6 +1282,155 @@ function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) 
   );
 }
 
+function radialShortLabel(label: string) {
+  if (label === 'Парк техники') return 'Парк';
+  return label;
+}
+
+function CompanyHealthRadialOverview({
+  directions,
+  score,
+  label,
+  tone,
+  criticalSignals,
+}: {
+  directions: CompanyHealthDirection[];
+  score: number | null;
+  label: string;
+  tone: DashboardTone;
+  criticalSignals: number;
+}) {
+  const hasScore = typeof score === 'number';
+  const progress = hasScore ? clampPercent(score) : 0;
+  const center = 120;
+  const nodeRadius = 88;
+  const segmentRadius = 76;
+  const segmentStrokeWidth = 13;
+  const segmentAngle = 360 / Math.max(directions.length, 1);
+  const segmentGap = Math.min(10, segmentAngle * 0.2);
+  const segments = directions.map((item, index) => {
+    const startAngle = index * segmentAngle + segmentGap / 2;
+    const endAngle = (index + 1) * segmentAngle - segmentGap / 2;
+    return {
+      item,
+      color: healthSegmentColors[item.tone] ?? healthSegmentColors.default,
+      path: describeArc(center, center, segmentRadius, startAngle, endAngle),
+    };
+  });
+  const nodes = directions.map((item, index) => {
+    const angle = index * segmentAngle + segmentAngle / 2;
+    const point = polarToCartesian(center, center, nodeRadius, angle);
+    return {
+      item,
+      point,
+      color: healthSegmentColors[item.tone] ?? healthSegmentColors.default,
+    };
+  });
+  const shouldShowEmpty = !hasScore || directions.length === 0;
+  const emptyGuideNodes = Array.from({ length: 6 }, (_, index) => {
+    const angle = index * 60 + 30;
+    return polarToCartesian(center, center, nodeRadius, angle);
+  });
+
+  return (
+    <div
+      className="rentcore-radial-overview mx-auto w-full"
+      data-testid="dashboard-radial-overview"
+      data-radial-state={shouldShowEmpty ? 'empty' : progress === 0 ? 'zero' : 'ready'}
+    >
+      <svg
+        className="rentcore-health-svg h-full w-full"
+        viewBox="0 0 240 240"
+        role="img"
+        aria-label={hasScore ? `Радиальный обзор здоровья компании: ${progress} из 100` : 'Радиальный обзор здоровья компании: недостаточно данных'}
+      >
+        <defs>
+          <radialGradient id="dashboardRadialCoreGlow" cx="50%" cy="44%" r="62%">
+            <stop offset="0%" stopColor="#bef264" stopOpacity={hasScore ? '0.22' : '0.10'} />
+            <stop offset="58%" stopColor="#22d3ee" stopOpacity="0.08" />
+            <stop offset="100%" stopColor="#020617" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+        <circle cx={center} cy={center} r="104" fill="url(#dashboardRadialCoreGlow)" />
+        <circle cx={center} cy={center} r="92" fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth="1.5" strokeDasharray="2 7" />
+        <circle cx={center} cy={center} r={segmentRadius} fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth={segmentStrokeWidth} />
+
+        {segments.map(segment => (
+          <path
+            key={segment.item.id}
+            d={segment.path}
+            fill="none"
+            stroke={shouldShowEmpty ? '#64748b' : segment.color}
+            strokeOpacity={shouldShowEmpty ? 0.34 : 0.88}
+            strokeWidth={segmentStrokeWidth}
+            strokeLinecap="round"
+          />
+        ))}
+
+        {nodes.map(node => (
+          <g key={node.item.id} data-testid="dashboard-radial-node" data-node-id={node.item.id}>
+            <circle cx={node.point.x} cy={node.point.y} r="9" fill={shouldShowEmpty ? '#0f172a' : node.color} stroke="rgba(226,232,240,0.72)" strokeWidth="1.5" />
+            <circle cx={node.point.x} cy={node.point.y} r="3" fill="rgba(255,255,255,0.88)" />
+            <text
+              x={Math.max(28, Math.min(212, node.point.x))}
+              y={Math.max(18, Math.min(222, node.point.y + (node.point.y < center ? -14 : 22)))}
+              textAnchor="middle"
+              className="rentcore-radial-node-label"
+            >
+              {radialShortLabel(node.item.title)}
+            </text>
+          </g>
+        ))}
+
+        {nodes.length === 0 ? emptyGuideNodes.map((point, index) => (
+          <circle
+            key={index}
+            data-testid="dashboard-radial-node"
+            cx={point.x}
+            cy={point.y}
+            r="6"
+            fill="#0f172a"
+            stroke="rgba(148,163,184,0.55)"
+            strokeWidth="1.5"
+          />
+        )) : null}
+
+        <g data-testid="dashboard-radial-core">
+          <circle cx={center} cy={center} r="52" fill="rgba(2,6,23,0.72)" stroke="rgba(226,232,240,0.16)" strokeWidth="1.5" />
+          <circle
+            cx={center}
+            cy={center}
+            r="43"
+            fill="none"
+            stroke={shouldShowEmpty ? 'rgba(148,163,184,0.42)' : healthSegmentColors[tone]}
+            strokeWidth="5"
+            strokeLinecap="round"
+            pathLength={100}
+            strokeDasharray={hasScore ? `${progress} 100` : '24 100'}
+            transform={`rotate(-90 ${center} ${center})`}
+          />
+          <text x={center} y={hasScore ? 116 : 112} textAnchor="middle" className="rentcore-radial-core-value">
+            {hasScore ? `${progress}%` : 'N/A'}
+          </text>
+          <text x={center} y={hasScore ? 135 : 132} textAnchor="middle" className="rentcore-radial-core-label">
+            {hasScore ? label : 'Недостаточно данных'}
+          </text>
+        </g>
+      </svg>
+
+      {shouldShowEmpty ? (
+        <div className="rentcore-radial-empty" data-testid="dashboard-radial-empty">
+          Недостаточно данных
+        </div>
+      ) : (
+        <div className="rentcore-radial-empty" aria-hidden="true">
+          {criticalSignals} критичных
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CompanyHealthCommandCenter({
   leftDirections,
   rightDirections,
@@ -1333,6 +1482,14 @@ function CompanyHealthCommandCenter({
       </div>
 
       {warning ? <p className="rounded-lg border border-amber-300/18 bg-amber-300/8 px-3 py-2 text-xs font-bold text-amber-100">{warning}</p> : null}
+
+      <CompanyHealthRadialOverview
+        directions={directions}
+        score={score}
+        label={label}
+        tone={tone}
+        criticalSignals={criticalSignals}
+      />
 
       <div className="grid gap-2 sm:grid-cols-2" data-testid="dashboard-company-health-compact">
         {directions.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}

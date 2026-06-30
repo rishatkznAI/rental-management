@@ -14,31 +14,39 @@ function sourceBlock(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-test('dashboard company health renders a compact status card without dominant SVG', () => {
+test('dashboard company health renders radial overview with stable selectors', () => {
   const block = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
+  const radialBlock = sourceBlock(dashboardSource, 'function CompanyHealthRadialOverview', 'function CompanyHealthCommandCenter');
 
   assert.match(block, /role="region"/);
   assert.match(block, /aria-label=\{hasScore \? `Здоровье компании \$\{progress\} из 100: \$\{label\}` : `Здоровье компании: \$\{label\}`\}/);
   assert.match(block, /data-testid="dashboard-company-health"/);
   assert.match(block, /data-company-health-layout="compact-card"/);
+  assert.match(block, /<CompanyHealthRadialOverview/);
+  assert.match(radialBlock, /data-testid="dashboard-radial-overview"/);
+  assert.match(radialBlock, /data-testid="dashboard-radial-core"/);
+  assert.match(radialBlock, /data-testid="dashboard-radial-node"/);
+  assert.match(radialBlock, /data-testid="dashboard-radial-empty"/);
+  assert.match(radialBlock, /viewBox="0 0 240 240"/);
   assert.match(block, /data-testid="dashboard-company-health-compact"/);
   assert.match(block, /Недостаточно данных: показатели появятся после поступлений, аренд, сервисных заявок и доставок\./);
   assert.match(block, /<CompanyHealthBars items=\{bars\} \/>/);
-  assert.doesNotMatch(block, /data-testid="dashboard-company-health-svg"/);
   assert.doesNotMatch(block, /new ResizeObserver/);
   assert.doesNotMatch(block, /window\.innerWidth/);
 });
 
-test('dashboard company health compact card does not position contour points manually', () => {
-  const block = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
+test('dashboard radial overview positions nodes mathematically inside the SVG container', () => {
+  const radialBlock = sourceBlock(dashboardSource, 'function CompanyHealthRadialOverview', 'function CompanyHealthCommandCenter');
 
   assert.match(dashboardSource, /function polarToCartesian/);
-  assert.doesNotMatch(block, /polarToCartesian\(center, center, radius, angle\)/);
-  assert.doesNotMatch(block, /data-testid="dashboard-company-health-point"/);
-  assert.doesNotMatch(block, /\btop\b|\bleft\b/);
+  assert.match(radialBlock, /polarToCartesian\(center, center, nodeRadius, angle\)/);
+  assert.match(radialBlock, /Math\.max\(28, Math\.min\(212, node\.point\.x\)\)/);
+  assert.match(radialBlock, /Math\.max\(18, Math\.min\(222, node\.point\.y/);
+  assert.match(radialBlock, /radialShortLabel\(node\.item\.title\)/);
+  assert.doesNotMatch(radialBlock, /\btop\b|\bleft\b/);
 });
 
-test('dashboard company health always uses compact list layout', () => {
+test('dashboard company health keeps compact direction cards alongside radial overview', () => {
   const block = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
 
   assert.match(block, /const directions = allDirections\.length > 0 \? allDirections : \[\.\.\.leftDirections, \.\.\.rightDirections\]/);
@@ -46,6 +54,18 @@ test('dashboard company health always uses compact list layout', () => {
   assert.match(block, /data-testid="dashboard-company-health-compact"/);
   assert.match(block, /data-testid="dashboard-company-health-title"/);
   assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="compact-card"\]\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
+});
+
+test('dashboard radial overview has empty and zero-value states without removing the shell', () => {
+  const radialBlock = sourceBlock(dashboardSource, 'function CompanyHealthRadialOverview', 'function CompanyHealthCommandCenter');
+
+  assert.match(radialBlock, /const hasScore = typeof score === 'number'/);
+  assert.match(radialBlock, /const progress = hasScore \? clampPercent\(score\) : 0/);
+  assert.match(radialBlock, /const shouldShowEmpty = !hasScore \|\| directions\.length === 0/);
+  assert.match(radialBlock, /data-radial-state=\{shouldShowEmpty \? 'empty' : progress === 0 \? 'zero' : 'ready'\}/);
+  assert.match(radialBlock, /\{hasScore \? `\$\{progress\}%` : 'N\/A'\}/);
+  assert.match(radialBlock, /\{hasScore \? label : 'Недостаточно данных'\}/);
+  assert.match(radialBlock, /Array\.from\(\{ length: 6 \}/);
 });
 
 test('dashboard company health compact wrapper contains six anchor direction cards', () => {
@@ -71,7 +91,10 @@ test('dashboard company health layout avoids horizontal overflow on narrow conta
   assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="compact-card"\]\s*\{[\s\S]*width: 100%;/);
   assert.match(themeSource, /\.rentcore-command-column\s*\{[\s\S]*min-width: 0;/);
   assert.match(themeSource, /\.rentcore-command-compact-list\s*\{[\s\S]*width: 100%;/);
-  assert.match(themeSource, /\.rentcore-command-health-card\s*\{[\s\S]*min-height: 0;/);
+  assert.match(themeSource, /\.rentcore-command-health-card\s*\{[\s\S]*container-type: inline-size;[\s\S]*min-height: 0;/);
+  assert.match(themeSource, /\.rentcore-radial-overview\s*\{[\s\S]*width: min\(100%, clamp\(220px, 54cqw, 360px\)\);[\s\S]*aspect-ratio: 1 \/ 1;[\s\S]*overflow: hidden;/);
+  assert.match(themeSource, /\.rentcore-radial-node-label\s*\{[\s\S]*letter-spacing: 0;/);
+  assert.match(themeSource, /\.rentcore-radial-empty\s*\{[\s\S]*text-overflow: ellipsis;[\s\S]*white-space: nowrap;/);
   assert.doesNotMatch(dashboardSource, /estimatedCardWidth > 0 && estimatedCardWidth < 180/);
   assert.doesNotMatch(dashboardSource, /data-card-density=\{cardDensity\}/);
   assert.match(themeSource, /\.rentcore-command-map\[data-card-density="icon-value"\] \.rentcore-command-card-compact-value\s*\{[\s\S]*display: inline-flex !important;/);

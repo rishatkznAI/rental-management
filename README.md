@@ -14,6 +14,7 @@ The CRM module remains in the codebase and data model for compatibility and futu
 - `AGENTS.md` — project instructions for AI agents/Codex
 - `docs/business-rules.md` — core business rules and invariants
 - `docs/code-review.md` — pre-commit review checklist
+- `docs/dashboard-design-standard.md` — Dashboard design standard
 - `docs/processes-and-interface.md` — business process and interface map in Russian
 - `docs/gprs-gateway.md` — local GSM/GPRS gateway test steps
 

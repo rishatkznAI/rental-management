@@ -21,6 +21,7 @@ import {
   User, Target, FileText, CreditCard, RefreshCw, CheckCircle, Truck,
   ShieldAlert, Clock, Ban, ArrowRight, ChevronDown, ChevronUp,
   PackageX, ClipboardX, Zap, ListChecks, Activity, Phone, MapPin, MessageSquare,
+  FileCheck2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
@@ -135,6 +136,44 @@ function isDiagnosticServiceTicket(ticket: ServiceTicket) {
     ticket.serviceKind,
   ].filter(Boolean).join(' ').toLowerCase();
   return text.includes('диагност') || text.includes('diagnost');
+}
+
+function estimateServiceTicketHours(ticket: ServiceTicket) {
+  const text = [
+    ticket.reason,
+    ticket.description,
+    ticket.type,
+    ticket.scenario,
+    ticket.serviceKind,
+  ].filter(Boolean).join(' ').toLowerCase();
+  let hours = 4;
+  if (text.includes('диагност') || text.includes('diagnost')) hours = 1.5;
+  else if (text.includes('пто') || text.includes('что')) hours = 4;
+  else if (text.includes('то') || text.includes('maintenance')) hours = 3;
+  else if (text.includes('pdi')) hours = 4;
+  else if (text.includes('рекламац') || text.includes('warranty')) hours = 5;
+  else if (text.includes('сроч') || text.includes('critical') || text.includes('авари')) hours = 8;
+  else if (text.includes('ремонт') || text.includes('repair')) hours = 6;
+  if (text.includes('выезд') || text.includes('field') || text.includes('site')) hours += 2;
+  return hours;
+}
+
+function servicePriorityMultiplier(priority?: string | null) {
+  const normalized = String(priority || '').toLowerCase();
+  if (normalized === 'critical' || normalized.includes('крит')) return 1.6;
+  if (normalized === 'high' || normalized.includes('выс')) return 1.3;
+  if (normalized === 'low' || normalized.includes('низ')) return 0.8;
+  return 1;
+}
+
+function serviceOverdueMultiplier(ticket: ServiceTicket, todayKey: string) {
+  const deadline = toDateKey(ticket.dueDate || ticket.deadline || ticket.plannedDate || ticket.scheduledDate || ticket.targetDate);
+  if (!deadline || deadline > todayKey) return 1;
+  if (deadline === todayKey) return 1.15;
+  const days = Math.max(1, Math.ceil((new Date(`${todayKey}T00:00:00`).getTime() - new Date(`${deadline}T00:00:00`).getTime()) / 86400000));
+  if (days <= 2) return 1.3;
+  if (days <= 5) return 1.5;
+  return 1.8;
 }
 
 function toDateKey(value?: string | null) {
@@ -1488,7 +1527,7 @@ function CompanyHealthCommandCenter({
         <div className="shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-right">
           <p className={`text-xs font-extrabold ${toneStyles[tone].accent}`}>{label}</p>
           <p className="mt-1 text-2xl font-extrabold leading-none text-foreground">
-            {hasScore ? <>{progress}<span className="text-sm text-muted-foreground">/100</span></> : 'Нет данных'}
+            {hasScore ? <>{progress}<span className="text-sm text-muted-foreground">/100</span></> : 'Не участвует'}
           </p>
         </div>
       </div>
@@ -2590,11 +2629,34 @@ export default function Dashboard() {
   const todayDeliveries = activeDeliveries.filter(delivery =>
     toDateKey(delivery.transportDate || delivery.neededBy) === todayKey,
   );
+  const deliveryPlanToday = deliveries.filter(delivery =>
+    delivery.status !== 'cancelled' && toDateKey(delivery.transportDate || delivery.neededBy) === todayKey,
+  );
+  const deliveryCompletedToday = deliveryPlanToday.filter(delivery => delivery.status === 'completed');
+  const deliveryInProgressToday = deliveryPlanToday.filter(delivery => ['sent', 'accepted', 'in_transit'].includes(delivery.status));
+  const deliveryNotStartedToday = deliveryPlanToday.filter(delivery => delivery.status === 'new');
   const overdueDeliveries = activeDeliveries.filter(delivery => {
     const deliveryDate = toDateKey(delivery.transportDate || delivery.neededBy);
     return Boolean(deliveryDate) && deliveryDate < todayKey;
   });
   const unassignedDeliveries = activeDeliveries.filter(delivery => !delivery.carrierId && !delivery.carrierName);
+  const overdueDeliveriesToday = overdueDeliveries.filter(delivery =>
+    Boolean(toDateKey(delivery.transportDate || delivery.neededBy)),
+  );
+  const unacceptedDeliveriesToday = deliveryPlanToday.filter(delivery =>
+    delivery.status === 'sent' || (!delivery.carrierId && !delivery.carrierName),
+  );
+  const deliveryTodayRiskLabel = overdueDeliveriesToday.length > 0 || unacceptedDeliveriesToday.length > 0
+    ? [
+        overdueDeliveriesToday.length > 0 ? `${overdueDeliveriesToday.length} просрочено` : '',
+        unacceptedDeliveriesToday.length > 0 ? `${unacceptedDeliveriesToday.length} не принято/без перевозчика` : '',
+      ].filter(Boolean).join(' · ')
+    : deliveryPlanToday.length > 0
+      ? `${deliveryInProgressToday.length} в пути · ${deliveryNotStartedToday.length} не начато`
+      : deliveries.length > 0
+        ? 'На сегодня доставок не запланировано'
+        : 'Нет записей доставок';
+  const deliveryTodayValue = `${deliveryCompletedToday.length}/${deliveryPlanToday.length}`;
   const todayPaymentRows = canViewMoney
     ? rentalDebtRows.filter(row => {
         if (!row.outstanding) return false;
@@ -2757,18 +2819,16 @@ export default function Dashboard() {
       detail: rentalsEndingToday[0]?.client || 'План возвратов пуст',
       href: '/rentals',
       tone: rentalsEndingToday.length > 0 ? 'warning' : 'success',
+      icon: RefreshCw,
     },
     canViewDeliveries && {
       id: 'today-deliveries',
       label: 'Доставки сегодня',
-      value: String(todayDeliveries.length),
-      detail: overdueDeliveries.length > 0
-        ? `Просрочено ${overdueDeliveries.length}`
-        : unassignedDeliveries.length > 0
-          ? `Без перевозчика ${unassignedDeliveries.length}`
-          : 'Без срочных блокеров',
+      value: deliveryTodayValue,
+      detail: deliveryTodayRiskLabel,
       href: '/deliveries',
-      tone: overdueDeliveries.length > 0 ? 'danger' : unassignedDeliveries.length > 0 ? 'warning' : 'default',
+      tone: overdueDeliveriesToday.length > 0 ? 'danger' : unacceptedDeliveriesToday.length > 0 ? 'warning' : deliveryPlanToday.length > 0 ? 'info' : 'success',
+      icon: Truck,
     },
     canViewMoney && {
       id: 'today-payments',
@@ -2779,6 +2839,7 @@ export default function Dashboard() {
         : 'Ожидаемых оплат нет',
       href: '/payments',
       tone: todayPaymentRows.length > 0 ? 'warning' : 'success',
+      icon: CreditCard,
     },
     canViewService && {
       id: 'today-service',
@@ -2791,14 +2852,16 @@ export default function Dashboard() {
           : 'Без срочных закрытий',
       href: '/service',
       tone: readyServiceTickets.length + ticketsWaitingParts.length > 0 ? 'warning' : 'default',
+      icon: Wrench,
     },
-    canViewTasksCenter && {
-      id: 'unassigned-tasks',
-      label: 'Без ответственного',
-      value: String(tasksWithoutResponsible.length),
-      detail: tasksWithoutResponsible[0]?.title || 'Очередь распределена',
-      href: '/tasks',
-      tone: tasksWithoutResponsible.length > 0 ? 'warning' : 'success',
+    canViewDocuments && {
+      id: 'today-documents',
+      label: 'Документы сегодня',
+      value: String(unsignedDocumentsCount),
+      detail: unsignedDocumentsCount > 0 ? 'Ждут подписи или закрывающих материалов' : 'Документы без срочного контроля',
+      href: unsignedDocumentsHref,
+      tone: unsignedDocumentsCount > 0 ? 'warning' : 'success',
+      icon: FileCheck2,
     },
   ].filter(Boolean) as Array<{
     id: string;
@@ -2806,7 +2869,8 @@ export default function Dashboard() {
     value: string;
     detail: string;
     href: string;
-    tone: 'default' | 'warning' | 'danger' | 'success';
+    tone: DashboardTone;
+    icon: React.ElementType;
   }>;
 
   const quickActions = [
@@ -3347,6 +3411,40 @@ export default function Dashboard() {
     serviceLoadRowsTotal,
     1,
   );
+  const serviceCapacityHours = adminMechanicRows.length * 6;
+  const serviceEstimatedHours = openServiceTickets.reduce((sum, ticket) => {
+    if (ticket.status === 'waiting_parts') return sum;
+    return sum + estimateServiceTicketHours(ticket) * servicePriorityMultiplier(ticket.priority) * serviceOverdueMultiplier(ticket, todayKey);
+  }, 0);
+  const serviceLoadPercent = serviceCapacityHours > 0
+    ? Math.min(140, Math.round((serviceEstimatedHours / serviceCapacityHours) * 100))
+    : serviceLoadTotal > 0
+      ? null
+      : 0;
+  const serviceRiskStatus = serviceLoadPercent === null
+    ? 'Нет мощности'
+    : serviceLoadTotal === 0
+      ? 'Нет заявок'
+      : serviceLoadPercent > 110
+        ? 'Критично'
+        : serviceLoadPercent > 90
+          ? 'Перегруз'
+          : serviceLoadPercent > 70
+            ? 'Высокая нагрузка'
+            : serviceLoadPercent > 30
+              ? 'Рабочая загрузка'
+              : 'Сервис свободен';
+  const serviceLoadDisplayValue = serviceLoadPercent === null ? 'Нет мощности' : `${serviceLoadPercent}%`;
+  const serviceLoadHoursLabel = serviceCapacityHours > 0
+    ? `${serviceEstimatedHours.toFixed(serviceEstimatedHours >= 10 ? 0 : 1)} ч / ${serviceCapacityHours} ч`
+    : serviceLoadTotal > 0
+      ? 'Мощность не настроена'
+      : 'Мощность свободна';
+  const serviceLoadLocalState = serviceLoadTotal === 0
+    ? 'Активных сервисных заявок нет. Мощность сервиса свободна.'
+    : serviceCapacityHours === 0
+      ? 'Расчёт приближённый: есть заявки, но не видна мощность механиков.'
+      : 'Расчёт приближённый: используются дефолтные часы и коэффициенты риска.';
   const canToggleOfficeUpd = isAdminRole;
   const dashboardUpdatedLabel = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   const rentalsScopeLabel = isManagerRole ? 'По моим сделкам' : 'Показатели компании';
@@ -3775,14 +3873,38 @@ export default function Dashboard() {
     canViewService && {
       id: 'executive-service-load',
       label: 'Загрузка сервиса',
-      value: hasServiceSourceData ? `${serviceLoadTotal} ${formatCountLabel(serviceLoadTotal, 'заявка', 'заявки', 'заявок')}` : 'Нет данных',
+      value: hasServiceSourceData ? serviceLoadDisplayValue : 'Нет заявок',
       hint: hasServiceSourceData
-        ? `${unassignedServiceTickets.length} без механика · ${ticketsWaitingParts.length} ждут запчасти`
-        : 'Нет заявок service: контур сервиса не участвует в health',
+        ? `${serviceRiskStatus} · ${serviceLoadHoursLabel} · ${unassignedServiceTickets.length} без механика`
+        : serviceLoadLocalState,
       icon: Wrench,
       tone: serviceTone,
       href: '/service',
       cta: 'Открыть сервис',
+    },
+    canViewDeliveries && {
+      id: 'executive-delivery-today',
+      label: 'Доставки сегодня',
+      value: deliveryTodayValue,
+      hint: deliveryPlanToday.length > 0 ? deliveryTodayRiskLabel : 'Нет задач: на сегодня доставок не запланировано',
+      icon: Truck,
+      tone: overdueDeliveriesToday.length > 0 ? 'danger' : unacceptedDeliveriesToday.length > 0 ? 'warning' : deliveryPlanToday.length > 0 ? 'info' : 'success',
+      href: '/deliveries',
+      cta: 'Открыть логистику',
+    },
+    canViewRentals && {
+      id: 'executive-returns-today',
+      label: 'Возвраты сегодня',
+      value: `${Math.max(0, rentalsEndingToday.length - overdueRentalsList.length)}/${rentalsEndingToday.length}`,
+      hint: overdueRentalsList.length > 0
+        ? `${overdueRentalsList.length} просрочено · нужен контроль`
+        : rentalsEndingToday.length > 0
+          ? 'Проверьте закрытие и приёмку техники'
+          : 'На сегодня возвратов не запланировано',
+      icon: RefreshCw,
+      tone: overdueRentalsList.length > 0 ? 'danger' : rentalsEndingToday.length > 0 ? 'warning' : 'success',
+      href: '/rentals',
+      cta: 'Проверить возвраты',
     },
     (canViewDocuments || canViewTasksCenter) && {
       id: 'executive-operational-load',
@@ -4201,11 +4323,13 @@ export default function Dashboard() {
           </header>
 
           <section data-testid="dashboard-top-cockpit">
-            <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5" data-testid="dashboard-executive-cockpit">
+            <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-7" data-testid="dashboard-executive-cockpit">
               {executiveSummaryCards.map(card => {
               const Icon = card.icon;
               const tone = toneStyles[card.tone ?? 'default'];
               const testId = EXECUTIVE_KPI_TEST_IDS[card.id];
+              const isServiceCard = card.id === 'executive-service-load';
+              const isDeliveryCard = card.id === 'executive-delivery-today';
               const trend = card.id === 'executive-overdue-receivables'
                 ? overdueReceivablesTrendData
                 : card.id === 'executive-fleet-utilization'
@@ -4221,23 +4345,51 @@ export default function Dashboard() {
                     ? '#a3e635'
                     : '#54d4c2';
               const content = (
-                <div className="relative z-10 flex h-full min-h-[78px] flex-col justify-between">
+                <div className="relative z-10 flex h-full min-h-[96px] flex-col justify-between">
                   <div className="flex items-start justify-between gap-2.5">
                     <div className="min-w-0">
                       <p className="line-clamp-1 min-h-[13px] text-xs font-bold leading-none text-muted-foreground">{card.label}</p>
-                      <p className="mt-2 break-words text-[24px] font-extrabold leading-none text-foreground min-[1500px]:text-[26px]">{card.value}</p>
+                      <p className="mt-2 break-words text-[28px] font-extrabold leading-none text-foreground min-[1500px]:text-[30px]">{card.value}</p>
                     </div>
-                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-border bg-background ${tone.accent}`}>
+                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-border bg-background ${tone.accent}`}>
                       <Icon className="h-4 w-4" />
                     </span>
                   </div>
-                  <div className="mt-2 grid grid-cols-[minmax(0,1fr)_82px] items-end gap-2">
+                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_82px] items-end gap-2">
                     <p className={`min-w-0 line-clamp-2 text-xs font-bold leading-4 ${tone.accent}`}>{card.hint}</p>
                     <MiniSparkline data={trend} stroke={stroke} className="h-5 opacity-60" />
                   </div>
+                  {isServiceCard ? (
+                    <div className="mt-2 grid grid-cols-3 gap-1.5 text-[10px]">
+                      {[
+                        { label: 'активно', value: serviceLoadTotal },
+                        { label: 'проср.', value: overdueServiceTickets.length },
+                        { label: 'запчасти', value: ticketsWaitingParts.length },
+                      ].map(item => (
+                        <span key={item.label} className="rounded-[7px] border border-border bg-background px-1.5 py-1">
+                          <span className="block text-muted-foreground">{item.label}</span>
+                          <span className="block text-sm font-extrabold text-foreground">{item.value}</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {isDeliveryCard ? (
+                    <div className="mt-2 grid grid-cols-3 gap-1.5 text-[10px]">
+                      {[
+                        { label: 'в пути', value: deliveryInProgressToday.length },
+                        { label: 'не нач.', value: deliveryNotStartedToday.length },
+                        { label: 'риск', value: overdueDeliveriesToday.length + unacceptedDeliveriesToday.length },
+                      ].map(item => (
+                        <span key={item.label} className="rounded-[7px] border border-border bg-background px-1.5 py-1">
+                          <span className="block text-muted-foreground">{item.label}</span>
+                          <span className="block text-sm font-extrabold text-foreground">{item.value}</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               );
-              const className = "rentcore-command-kpi group p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35";
+              const className = "rentcore-command-kpi group p-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35";
               if (card.href) return <Link key={card.id} to={card.href} data-testid={testId} className={className}>{content}</Link>;
               if (card.onClick) return <button key={card.id} type="button" onClick={card.onClick} data-testid={testId} className={className}>{content}</button>;
               return <div key={card.id} data-testid={testId} className={className}>{content}</div>;
@@ -4251,7 +4403,8 @@ export default function Dashboard() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold text-muted-foreground">Критические сигналы</p>
-                    <h3 className="app-shell-title mt-1 text-lg font-extrabold text-foreground">Что требует внимания сейчас</h3>
+                    <h3 className="app-shell-title mt-1 text-lg font-extrabold text-foreground">Главные сигналы сегодня</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Что требует внимания сейчас</p>
                   </div>
                   <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-bold text-muted-foreground">
                     {criticalCount + highCount || 'OK'}
@@ -4315,7 +4468,8 @@ export default function Dashboard() {
 
             <div className="rentcore-command-analytics flex min-h-[310px] min-w-0 flex-col overflow-hidden p-3 md:min-h-[340px] xl:col-span-3 xl:min-h-[360px]" data-testid="dashboard-tasks">
               <div className="mb-0.5">
-                <h3 className="app-shell-title text-[17px] font-extrabold leading-tight text-foreground">Задачи</h3>
+                <p className="text-xs font-semibold text-muted-foreground">Задачи</p>
+                <h3 className="app-shell-title text-[17px] font-extrabold leading-tight text-foreground">Задачи сегодня</h3>
                 <p className="text-xs text-muted-foreground">Сегодняшний цикл: возвраты, доставки, платежи, сервис и документы</p>
               </div>
               <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden pt-1.5">
@@ -4323,13 +4477,13 @@ export default function Dashboard() {
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-4 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-200">
                     Критичных задач на сегодня нет. Источник: аренды, доставки, платежи, сервис, документы и очередь действий. Откройте очередь, чтобы проверить задачи без владельца.
                   </div>
-                ) : commandCenterTasks.slice(0, 4).map(row => {
+                ) : commandCenterTasks.slice(0, 5).map(row => {
                   const tone = toneStyles[row.tone];
-                  const isClear = row.tone === 'success';
+                  const Icon = row.icon;
                   return (
-                    <Link key={row.id} to={row.href} className="flex min-h-[44px] items-center gap-2 rounded-[8px] border border-border bg-background px-2.5 py-2 transition hover:border-primary/35 hover:bg-accent/30">
-                      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${isClear ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/25 dark:text-emerald-200' : 'border-border bg-muted'}`}>
-                        {isClear ? <CheckCircle className="h-2.5 w-2.5" /> : null}
+                    <Link key={row.id} to={row.href} className="flex min-h-[52px] items-center gap-2.5 rounded-[8px] border border-border bg-background px-2.5 py-2 transition hover:border-primary/35 hover:bg-accent/30">
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-border bg-muted ${tone.accent}`}>
+                        <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs font-extrabold leading-tight text-foreground">{row.label}</span>
@@ -4382,8 +4536,13 @@ export default function Dashboard() {
                       </ComposedChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="flex h-full min-h-28 items-center justify-center rounded-xl border border-dashed border-border bg-background px-3 text-center text-sm font-semibold text-muted-foreground">
-                      Нет поступлений за месяц. Проверьте раздел Платежи, связь платежей с клиентами/арендами и выбранный период.
+                    <div className="flex h-full min-h-28 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-background px-3 text-center text-sm font-semibold text-muted-foreground">
+                      <span>Нет поступлений за месяц. Проверьте раздел Платежи, связь платежей с клиентами/арендами и выбранный период.</span>
+                      <span className="inline-flex flex-wrap items-center justify-center gap-1.5 text-[10px] font-extrabold uppercase text-muted-foreground">
+                        {['Платежи', 'Аренды', 'Клиенты'].map(source => (
+                          <span key={source} className="rounded-full border border-border bg-muted px-2 py-0.5">{source}</span>
+                        ))}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -4392,7 +4551,13 @@ export default function Dashboard() {
 
             <div className="rentcore-command-analytics flex min-h-[300px] min-w-0 flex-col overflow-hidden p-3 xl:col-span-4" data-testid="dashboard-fleet-utilization">
               <h3 className="app-shell-title text-lg font-extrabold text-foreground">Загрузка техники</h3>
-              <p className="text-xs text-muted-foreground">{activeEquipment > 0 ? `${utilization}% текущей загрузки` : 'Активный парк не сформирован'}</p>
+              <p className="text-xs text-muted-foreground">
+                {activeEquipment > 0
+                  ? activeRentalsList.length > 0
+                    ? `${utilization}% текущей загрузки`
+                    : 'Парк есть, активных аренд сейчас нет. Проверьте свободные единицы и ближайшие брони.'
+                  : 'Активный парк не сформирован'}
+              </p>
               <div className="mt-3 grid min-h-0 flex-1 grid-cols-[96px_minmax(0,1fr)] items-center gap-3">
                 <div className="relative h-[90px] w-[90px]">
                   {hasFleetDonutData ? (
@@ -4459,7 +4624,7 @@ export default function Dashboard() {
                 ) : (
                   <div className="flex h-full min-h-28 items-center justify-center rounded-xl border border-dashed border-border bg-background px-3 text-center text-sm font-semibold text-muted-foreground">
                     {hasDebtSourceData
-                      ? 'Просроченной дебиторки нет. Проверено по строкам задолженности на дату дашборда.'
+                      ? 'Просроченной дебиторки нет. Финансовый контур чистый: проверено по строкам задолженности на дату дашборда.'
                       : 'Нет данных по дебиторке. Просрочка не считается: нет строк задолженности. Проверьте начисления, закрытие аренд и финансовую синхронизацию.'}
                   </div>
                 )}

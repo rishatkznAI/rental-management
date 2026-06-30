@@ -29,7 +29,7 @@ test('dashboard company health renders radial overview with stable selectors', (
   assert.match(radialBlock, /data-testid="dashboard-radial-empty"/);
   assert.match(radialBlock, /viewBox="0 0 240 240"/);
   assert.match(block, /data-testid="dashboard-company-health-compact"/);
-  assert.match(block, /Недостаточно данных: показатели появятся после поступлений, аренд, сервисных заявок и доставок\./);
+  assert.match(block, /Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок\./);
   assert.match(block, /<CompanyHealthBars items=\{bars\} \/>/);
   assert.doesNotMatch(block, /new ResizeObserver/);
   assert.doesNotMatch(block, /window\.innerWidth/);
@@ -63,9 +63,10 @@ test('dashboard radial overview has empty and zero-value states without removing
   assert.match(radialBlock, /const progress = hasScore \? clampPercent\(score\) : 0/);
   assert.match(radialBlock, /const shouldShowEmpty = !hasScore \|\| directions\.length === 0/);
   assert.match(radialBlock, /data-radial-state=\{shouldShowEmpty \? 'empty' : progress === 0 \? 'zero' : 'ready'\}/);
-  assert.match(radialBlock, /\{hasScore \? `\$\{progress\}%` : 'N\/A'\}/);
+  assert.match(radialBlock, /\{hasScore \? `\$\{progress\}%` : 'Нет'\}/);
   assert.match(radialBlock, /\{hasScore \? label : 'Недостаточно данных'\}/);
   assert.match(radialBlock, /Array\.from\(\{ length: 6 \}/);
+  assert.doesNotMatch(radialBlock, /'N\/A'/);
 });
 
 test('dashboard company health compact wrapper contains six anchor direction cards', () => {
@@ -78,6 +79,9 @@ test('dashboard company health compact wrapper contains six anchor direction car
   assert.doesNotMatch(compactWrapperBlock, /sr-only/);
   assert.match(cardBlock, /<Link[\s\S]*className="rentcore-command-card/);
   assert.match(cardBlock, /title=\{title\}/);
+  assert.match(cardBlock, /Статус: \$\{item\.stateLabel \|\| 'Нет данных'\}/);
+  assert.match(cardBlock, /Источник: \$\{item\.source\}/);
+  assert.match(cardBlock, /Действие: \$\{item\.action\}/);
   assert.match(cardBlock, /rentcore-command-card-title[\s\S]*\{item\.title\}/);
   assert.match(cardBlock, /rentcore-command-card-compact-value[\s\S]*\{item\.metrics\[0\]\?\.value \?\? ''\}/);
 
@@ -85,6 +89,8 @@ test('dashboard company health compact wrapper contains six anchor direction car
     assert.match(directionsBlock, new RegExp(`title: '${label}'`));
   }
   assert.equal(directionsBlock.match(/id: '/g)?.length, 6);
+  assert.equal(directionsBlock.match(/source: '/g)?.length, 6);
+  assert.equal(directionsBlock.match(/action: /g)?.length, 6);
 });
 
 test('dashboard company health layout avoids horizontal overflow on narrow containers', () => {
@@ -92,9 +98,9 @@ test('dashboard company health layout avoids horizontal overflow on narrow conta
   assert.match(themeSource, /\.rentcore-command-column\s*\{[\s\S]*min-width: 0;/);
   assert.match(themeSource, /\.rentcore-command-compact-list\s*\{[\s\S]*width: 100%;/);
   assert.match(themeSource, /\.rentcore-command-health-card\s*\{[\s\S]*container-type: inline-size;[\s\S]*min-height: 0;/);
-  assert.match(themeSource, /\.rentcore-radial-overview\s*\{[\s\S]*width: min\(100%, clamp\(220px, 54cqw, 360px\)\);[\s\S]*aspect-ratio: 1 \/ 1;[\s\S]*overflow: hidden;/);
+  assert.match(themeSource, /\.rentcore-radial-overview\s*\{[\s\S]*width: 100%;[\s\S]*min-height: 54px;[\s\S]*aspect-ratio: auto;[\s\S]*overflow: hidden;/);
   assert.match(themeSource, /\.rentcore-radial-node-label\s*\{[\s\S]*letter-spacing: 0;/);
-  assert.match(themeSource, /\.rentcore-radial-empty\s*\{[\s\S]*text-overflow: ellipsis;[\s\S]*white-space: nowrap;/);
+  assert.match(themeSource, /\.rentcore-radial-empty\s*\{[\s\S]*text-overflow: ellipsis;[\s\S]*white-space: normal;/);
   assert.doesNotMatch(dashboardSource, /estimatedCardWidth > 0 && estimatedCardWidth < 180/);
   assert.doesNotMatch(dashboardSource, /data-card-density=\{cardDensity\}/);
   assert.match(themeSource, /\.rentcore-command-map\[data-card-density="icon-value"\] \.rentcore-command-card-compact-value\s*\{[\s\S]*display: inline-flex !important;/);

@@ -119,7 +119,7 @@ test('dashboard renders executive signal strip from compact action queue API', (
 });
 
 test('dashboard executive cockpit renders adaptive KPI cards and compact risk signals', () => {
-  for (const label of ['Операционная нагрузка', 'Индекс нагрузки компании', 'Открыть обзор', 'Утилизация парка', 'Загрузка сервиса', 'Здоровье компании']) {
+  for (const label of ['Операционная нагрузка', 'Индекс нагрузки компании', 'Открыть обзор', 'Утилизация парка', 'Загрузка сервиса', 'Поступления месяца', 'Здоровье компании']) {
     assert.match(dashboardSource, new RegExp(label));
   }
   for (const helper of ['OperationalLoadGauge', 'UtilizationGauge', 'StatusBars', 'CompanyHealthBars', 'RiskSignalStrip']) {
@@ -132,16 +132,20 @@ test('dashboard executive cockpit renders adaptive KPI cards and compact risk si
   assert.match(dashboardSource, /data-testid="dashboard-month-dynamics"/);
   assert.match(dashboardSource, /data-testid="dashboard-company-health"/);
   assert.match(dashboardSource, /data-testid="dashboard-operational-summary"/);
+  assert.match(dashboardSource, /dashboard-kpi-month-payments/);
   assert.equal(dashboardSource.match(/data-testid="dashboard-month-dynamics"/g)?.length, 1);
   assert.equal(dashboardSource.match(/data-testid="dashboard-company-health"/g)?.length, 1);
-  assert.equal(dashboardSource.match(/<CardTitle className="app-shell-title text-xl font-extrabold">Динамика месяца<\/CardTitle>/g)?.length, 1);
-  assert.equal(dashboardSource.match(/<CardTitle className="app-shell-title text-lg font-extrabold text-white" data-testid="dashboard-company-health-title">Здоровье компании<\/CardTitle>/g)?.length, 1);
+  assert.equal(dashboardSource.match(/<h3 className="app-shell-title whitespace-nowrap text-lg font-extrabold text-foreground">Динамика месяца<\/h3>/g)?.length, 1);
+  assert.equal(dashboardSource.match(/<CardTitle className="app-shell-title text-lg font-extrabold text-foreground" data-testid="dashboard-company-health-title">Здоровье компании<\/CardTitle>/g)?.length, 1);
   assert.match(dashboardSource, /operationalLoadScore/);
   assert.match(dashboardSource, /operationalLoadTone/);
   assert.match(dashboardSource, /receivablesTone/);
   assert.match(dashboardSource, /utilizationTone/);
   assert.match(dashboardSource, /serviceTone/);
   assert.match(dashboardSource, /Прочие/);
+  assert.match(dashboardSource, /hasDebtSourceData/);
+  assert.match(dashboardSource, /hasPaymentsSourceData/);
+  assert.match(dashboardSource, /hasServiceSourceData/);
 });
 
 test('dashboard command board uses enterprise grid without dominant company health circle', () => {
@@ -156,11 +160,25 @@ test('dashboard command board uses enterprise grid without dominant company heal
   assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-receivables-aging"/);
   assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-operational-summary"/);
   assert.doesNotMatch(commandScreenBlock, /dashboard-company-health-svg/);
+  assert.doesNotMatch(commandScreenBlock, /text-5xl[\s\S]*N\/A|text-6xl[\s\S]*N\/A|text-7xl[\s\S]*N\/A/);
   assert.doesNotMatch(commandScreenBlock, /xl:grid-rows-\[/);
   assert.doesNotMatch(commandScreenBlock, /xl:overflow-hidden/);
 
   assert.match(themeSource, /\.rentcore-command-screen\s*\{[\s\S]*min-height: 0;/);
   assert.match(themeSource, /\.rentcore-command-shell\s*\{[\s\S]*min-height: 0;/);
+});
+
+test('dashboard empty states explain source and action instead of showing generic blanks', () => {
+  for (const label of [
+    'Нет поступлений за месяц. Проверьте раздел Платежи, связь платежей с клиентами/арендами и выбранный период.',
+    'Нет данных по дебиторке. Просрочка не считается: нет строк задолженности. Проверьте начисления, закрытие аренд и финансовую синхронизацию.',
+    'Критичных задач на сегодня нет. Источник: аренды, доставки, платежи, сервис, документы и очередь действий.',
+    'Критичных действий на сегодня нет. Источник: очередь внимания техники, доставки, сервиса, документов и платежей.',
+    'Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок.',
+  ]) {
+    assert.match(dashboardSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.doesNotMatch(dashboardSource, /Недостаточно данных для графика\./);
 });
 
 test('dashboard signal strip renders counters, rows, empty and error states', () => {

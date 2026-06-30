@@ -27,6 +27,10 @@ type DashboardLayoutSnapshot = {
   healthWidth: number;
   healthWidthShare: number;
   healthSvgCount: number;
+  radialVisible: boolean;
+  radialCoreVisible: boolean;
+  radialNodeCount: number;
+  radialNodesInside: boolean;
   compactVisible: boolean;
   compactCards: number;
   overflowX: number;
@@ -239,8 +243,19 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
     const health = document.querySelector('[data-testid="dashboard-company-health"]');
     const board = document.querySelector('[data-testid="dashboard-command-board"]');
     const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]') ?? null;
+    const radial = health?.querySelector('[data-testid="dashboard-radial-overview"]') ?? null;
+    const radialCore = health?.querySelector('[data-testid="dashboard-radial-core"]') ?? null;
     const healthRect = rectOf(health ?? null);
     const boardRect = rectOf(board);
+    const radialRect = radial?.getBoundingClientRect();
+    const radialNodes = Array.from(health?.querySelectorAll('[data-testid="dashboard-radial-node"]') ?? []);
+    const radialNodesInside = radialRect ? radialNodes.every((node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.left >= radialRect.left - 1
+        && rect.right <= radialRect.right + 1
+        && rect.top >= radialRect.top - 1
+        && rect.bottom <= radialRect.bottom + 1;
+    }) : false;
     const compactCards = compact?.querySelectorAll('a.rentcore-command-card').length || 0;
     const blockSelectors = {
       keySignals: '[data-testid="dashboard-key-signals"]',
@@ -282,6 +297,10 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
       healthWidth: healthRect.width,
       healthWidthShare: healthRect.width / Math.max(boardRect.width, 1),
       healthSvgCount: health?.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length || 0,
+      radialVisible: isVisible(radial),
+      radialCoreVisible: isVisible(radialCore),
+      radialNodeCount: radialNodes.length,
+      radialNodesInside,
       compactVisible: isVisible(compact),
       compactCards,
       overflowX: scrollWidth - viewportWidth,
@@ -332,6 +351,10 @@ async function expectDashboardContract(
     expect(snapshot.cockpitBelowCommandHeader, `${viewportCase.name}: KPI row should start below command header`).toBe(true);
     expect(snapshot.healthVisible, `${viewportCase.name}: company health compact card should be visible (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.healthSvgCount, `${viewportCase.name}: company health should not render dominant SVG circle (${JSON.stringify(snapshot)})`).toBe(0);
+    expect(snapshot.radialVisible, `${viewportCase.name}: radial overview should be visible (${JSON.stringify(snapshot)})`).toBe(true);
+    expect(snapshot.radialCoreVisible, `${viewportCase.name}: radial core should be visible (${JSON.stringify(snapshot)})`).toBe(true);
+    expect(snapshot.radialNodeCount, `${viewportCase.name}: radial overview should render business contour nodes`).toBeGreaterThanOrEqual(6);
+    expect(snapshot.radialNodesInside, `${viewportCase.name}: radial nodes should stay inside overview (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.compactVisible, `${viewportCase.name}: compact wrapper should be visible (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.compactCards, `${viewportCase.name}: compact wrapper should contain six direction cards`).toBeGreaterThanOrEqual(6);
     if (viewportCase.name === 'desktop') {

@@ -974,7 +974,69 @@
 
   .rentcore-command-health-card {
     align-content: start;
+    container-type: inline-size;
     min-height: 0;
+  }
+
+  .rentcore-radial-overview {
+    position: relative;
+    min-width: 0;
+    width: min(100%, clamp(220px, 54cqw, 360px));
+    min-height: clamp(220px, 54cqw, 360px);
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    border-radius: 24px;
+    border: 1px solid rgba(190, 242, 100, 0.14);
+    background:
+      radial-gradient(circle at 50% 42%, rgba(190, 242, 100, 0.10), transparent 34%),
+      linear-gradient(145deg, rgba(2, 6, 23, 0.44), rgba(15, 23, 42, 0.18));
+  }
+
+  .rentcore-radial-overview[data-radial-state="empty"],
+  .rentcore-radial-overview[data-radial-state="zero"] {
+    border-color: rgba(148, 163, 184, 0.18);
+    background:
+      radial-gradient(circle at 50% 42%, rgba(148, 163, 184, 0.10), transparent 34%),
+      linear-gradient(145deg, rgba(2, 6, 23, 0.42), rgba(15, 23, 42, 0.16));
+  }
+
+  .rentcore-radial-overview .rentcore-health-svg {
+    aspect-ratio: 1 / 1;
+    min-height: 220px;
+  }
+
+  .rentcore-radial-node-label {
+    fill: rgba(226, 232, 240, 0.72);
+    font-size: 8.5px;
+    font-weight: 800;
+    letter-spacing: 0;
+  }
+
+  .rentcore-radial-core-value {
+    fill: #ffffff;
+    font-size: 24px;
+    font-weight: 900;
+    letter-spacing: 0;
+  }
+
+  .rentcore-radial-core-label {
+    fill: rgba(203, 213, 225, 0.78);
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0;
+  }
+
+  .rentcore-radial-empty {
+    position: absolute;
+    inset-inline: 14px;
+    bottom: 12px;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 800;
+    color: rgba(203, 213, 225, 0.78);
   }
 
   .rentcore-health-orb {

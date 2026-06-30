@@ -379,14 +379,29 @@ async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Loc
 
     const health = document.querySelector('[data-testid="dashboard-company-health"]');
     const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]');
+    const radial = health?.querySelector('[data-testid="dashboard-radial-overview"]');
+    const radialCore = health?.querySelector('[data-testid="dashboard-radial-core"]');
     const board = document.querySelector('[data-testid="dashboard-command-board"]');
     const boardRect = board?.getBoundingClientRect();
     const healthRect = health?.getBoundingClientRect();
+    const radialRect = radial?.getBoundingClientRect();
+    const radialNodes = Array.from(health?.querySelectorAll('[data-testid="dashboard-radial-node"]') ?? []);
+    const radialNodesInside = radialRect ? radialNodes.every((node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.left >= radialRect.left - 1
+        && rect.right <= radialRect.right + 1
+        && rect.top >= radialRect.top - 1
+        && rect.bottom <= radialRect.bottom + 1;
+    }) : false;
 
     return {
       label: health?.getAttribute('aria-label') || '',
       health: visibleRect(health),
       compact: visibleRect(compact),
+      radial: visibleRect(radial ?? null),
+      radialCore: visibleRect(radialCore ?? null),
+      radialNodeCount: radialNodes.length,
+      radialNodesInside,
       compactCards: compact?.querySelectorAll('a.rentcore-command-card').length || 0,
       healthSvgCount: health?.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length || 0,
       healthWidthShare: healthRect && boardRect ? healthRect.width / Math.max(boardRect.width, 1) : 1,
@@ -396,6 +411,10 @@ async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Loc
   expect(layout.health?.visible, `dashboard company health region should have a visible box (${JSON.stringify(layout)})`).toBe(true);
   expect(layout.label, 'dashboard company health region should expose an accessible label').toMatch(/Здоровье компании/);
   expect(layout.healthSvgCount, `dashboard company health should not render a dominant SVG circle (${JSON.stringify(layout)})`).toBe(0);
+  expect(layout.radial?.visible, `dashboard radial overview should be visible (${JSON.stringify(layout)})`).toBe(true);
+  expect(layout.radialCore?.visible, `dashboard radial core should be visible (${JSON.stringify(layout)})`).toBe(true);
+  expect(layout.radialNodeCount, `dashboard radial overview should render contour nodes (${JSON.stringify(layout)})`).toBeGreaterThanOrEqual(6);
+  expect(layout.radialNodesInside, `dashboard radial nodes should stay inside overview (${JSON.stringify(layout)})`).toBe(true);
   expect(layout.compact?.visible, `dashboard company health should render compact list (${JSON.stringify(layout)})`).toBe(true);
   expect(layout.compactCards, 'dashboard company health compact list should include all direction cards').toBeGreaterThanOrEqual(6);
   if (viewport.width >= 1024) {

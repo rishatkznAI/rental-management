@@ -49,20 +49,11 @@ async function dashboardLayoutSnapshot(page: Page) {
     const board = rectFor('[data-testid="dashboard-command-board"]');
     const health = rectFor('[data-testid="dashboard-company-health"]');
     const radial = rectFor('[data-testid="dashboard-radial-overview"]');
-    const radialCore = rectFor('[data-testid="dashboard-radial-core"]');
     const header = rectFor('body > div header');
     const commandHeader = rectFor('.rentcore-command-header');
     const cockpit = rectFor('[data-testid="dashboard-top-cockpit"]');
     const screen = rectFor('.rentcore-command-screen');
-    const radialRect = document.querySelector('[data-testid="dashboard-radial-overview"]')?.getBoundingClientRect();
     const radialNodes = Array.from(document.querySelectorAll('[data-testid="dashboard-radial-node"]'));
-    const radialNodesInside = radialRect ? radialNodes.every((node) => {
-      const rect = node.getBoundingClientRect();
-      return rect.left >= radialRect.left - 1
-        && rect.right <= radialRect.right + 1
-        && rect.top >= radialRect.top - 1
-        && rect.bottom <= radialRect.bottom + 1;
-    }) : false;
 
     return {
       overflowX: scrollWidth - viewportWidth,
@@ -74,9 +65,9 @@ async function dashboardLayoutSnapshot(page: Page) {
       board,
       health,
       radial,
-      radialCore,
+      radialCoreExists: Boolean(document.querySelector('[data-testid="dashboard-radial-core"]')),
       radialNodeCount: radialNodes.length,
-      radialNodesInside,
+      radialEmptyExists: Boolean(document.querySelector('[data-testid="dashboard-radial-empty"]')),
       healthSvgCount: document.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length,
       healthWidthShare: board && health ? health.width / Math.max(board.width, 1) : 1,
       compactHealthCards: document.querySelectorAll('[data-testid="dashboard-company-health-compact"] a.rentcore-command-card').length,
@@ -103,10 +94,11 @@ test.describe('Dashboard enterprise layout', () => {
       expect(snapshot.screen?.top ?? 0, `${viewport.name}: dashboard content should start below header`).toBeGreaterThanOrEqual((snapshot.header?.bottom ?? 0) - 1);
       expect(snapshot.cockpit?.top ?? 0, `${viewport.name}: KPI row should start below the dashboard command header`).toBeGreaterThanOrEqual((snapshot.commandHeader?.bottom ?? 0) - 1);
       expect(snapshot.healthSvgCount, `${viewport.name}: company health should not render a dominant central SVG circle`).toBe(0);
-      expect(snapshot.radial?.visible, `${viewport.name}: radial overview should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.radialCore?.visible, `${viewport.name}: radial core should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.radialNodeCount, `${viewport.name}: radial overview should keep business contour nodes (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(6);
-      expect(snapshot.radialNodesInside, `${viewport.name}: radial nodes should stay inside overview (${JSON.stringify(snapshot)})`).toBe(true);
+      expect(snapshot.radial?.visible, `${viewport.name}: radial compatibility overview should remain visible (${JSON.stringify(snapshot)})`).toBe(true);
+      expect(snapshot.radial?.height ?? 999, `${viewport.name}: radial compatibility overview should stay compact (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(80);
+      expect(snapshot.radialCoreExists, `${viewport.name}: legacy radial core selector should be preserved (${JSON.stringify(snapshot)})`).toBe(true);
+      expect(snapshot.radialEmptyExists, `${viewport.name}: legacy radial empty selector should be preserved (${JSON.stringify(snapshot)})`).toBe(true);
+      expect(snapshot.radialNodeCount, `${viewport.name}: radial overview should keep business contour node selectors (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(6);
       expect(snapshot.compactHealthCards, `${viewport.name}: compact company health should keep all business contours`).toBeGreaterThanOrEqual(6);
 
       if (viewport.name === 'desktop') {

@@ -27,6 +27,8 @@ type DashboardLayoutSnapshot = {
   healthWidth: number;
   healthWidthShare: number;
   healthSvgCount: number;
+  radialWidthShare: number;
+  radialCoreText: string;
   radialVisible: boolean;
   radialCoreVisible: boolean;
   radialNodeCount: number;
@@ -255,6 +257,7 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
     const radialCore = health?.querySelector('[data-testid="dashboard-radial-core"]') ?? null;
     const healthRect = rectOf(health ?? null);
     const boardRect = rectOf(board);
+    const radialBox = rectOf(radial);
     const radialRect = radial?.getBoundingClientRect();
     const radialNodes = Array.from(health?.querySelectorAll('[data-testid="dashboard-radial-node"]') ?? []);
     const radialNodesInside = radialRect ? radialNodes.every((node) => {
@@ -319,6 +322,8 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
       healthWidth: healthRect.width,
       healthWidthShare: healthRect.width / Math.max(boardRect.width, 1),
       healthSvgCount: health?.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length || 0,
+      radialWidthShare: radialBox.width / Math.max(healthRect.width, 1),
+      radialCoreText: radialCore?.textContent?.trim() || '',
       radialVisible: isVisible(radial),
       radialCoreVisible: isVisible(radialCore),
       radialNodeCount: radialNodes.length,
@@ -378,6 +383,7 @@ async function expectDashboardContract(
     expect(snapshot.healthSvgCount, `${viewportCase.name}: company health should not render dominant SVG circle (${JSON.stringify(snapshot)})`).toBe(0);
     expect(snapshot.radialVisible, `${viewportCase.name}: radial overview should be visible (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.radialCoreVisible, `${viewportCase.name}: radial core should be visible (${JSON.stringify(snapshot)})`).toBe(true);
+    expect(snapshot.radialCoreText, `${viewportCase.name}: radial core should not show a huge Нет placeholder`).not.toContain('Нет');
     expect(snapshot.radialNodeCount, `${viewportCase.name}: radial overview should render business contour nodes`).toBeGreaterThanOrEqual(6);
     expect(snapshot.radialNodesInside, `${viewportCase.name}: radial nodes should stay inside overview (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.compactVisible, `${viewportCase.name}: compact wrapper should be visible (${JSON.stringify(snapshot)})`).toBe(true);
@@ -387,6 +393,7 @@ async function expectDashboardContract(
     expect(snapshot.kpiReadability.filter(item => item.wordBreak === 'break-all' || item.overflowWrap === 'anywhere'), `${viewportCase.name}: KPI values should not force letter wrapping`).toEqual([]);
     if (viewportCase.name === 'desktop') {
       expect(snapshot.healthWidthShare, `${viewportCase.name}: company health should be an executive-width module`).toBeGreaterThanOrEqual(0.75);
+      expect(snapshot.radialWidthShare, `${viewportCase.name}: radial visual should not dominate company health (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(0.36);
       expect(Math.min(...snapshot.kpiReadability.map(item => item.cardWidth)), `${viewportCase.name}: KPI cards should keep readable width`).toBeGreaterThanOrEqual(220);
     }
   });

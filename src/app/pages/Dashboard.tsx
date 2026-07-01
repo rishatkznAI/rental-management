@@ -1458,7 +1458,7 @@ function CompanyHealthRadialOverview({
             transform={`rotate(-90 ${center} ${center})`}
           />
           <text x={center} y={hasScore ? 116 : 112} textAnchor="middle" className="rentcore-radial-core-value">
-            {hasScore ? `${progress}%` : 'Нет'}
+            {hasScore ? `${progress}/100` : '—'}
           </text>
           <text x={center} y={hasScore ? 135 : 132} textAnchor="middle" className="rentcore-radial-core-label">
             {hasScore ? label : 'Недостаточно данных'}
@@ -1523,13 +1523,13 @@ function CompanyHealthCommandCenter({
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <span className="rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold text-foreground">
-            {hasScore ? <>{progress}<span className="text-sm text-muted-foreground">/100</span></> : 'Не участвует'}
+            {hasScore ? <>{progress}<span className="text-sm text-muted-foreground">/100</span></> : 'Недостаточно данных'}
           </span>
           <span className={`rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold ${toneStyles[tone].accent}`}>{label}</span>
         </div>
       </div>
 
-      <div className="rentcore-company-health-main grid gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(0,1.1fr)] lg:items-center">
+      <div className="rentcore-company-health-main grid gap-4 lg:grid-cols-[minmax(220px,0.52fr)_minmax(0,1.48fr)] lg:items-center">
         <CompanyHealthRadialOverview
           directions={directions}
           score={score}

@@ -60,10 +60,14 @@ test('admin route keeps the common app shell around dashboard content', () => {
   assert.doesNotMatch(settingsSource, /<aside\b/);
 });
 
-test('dashboard reference mode keeps sidebar global search visible', () => {
+test('dashboard reference mode does not restyle the global shell or sidebar', () => {
   assert.match(sidebarSource, /data-sidebar-search/);
-  assert.match(themeCssSource, /rentcore-dashboard-reference-mode[\s\S]*\[data-sidebar-search\]/);
-  assert.doesNotMatch(themeCssSource, /rentcore-dashboard-reference-mode[\s\S]{0,160}aside > div > div:nth-child\(2\)[\s\S]{0,80}display:\s*none/);
+  assert.doesNotMatch(themeCssSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}rentcore-industrial-shell/);
+  assert.doesNotMatch(themeCssSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}>\s*aside/);
+  assert.doesNotMatch(themeCssSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}>\s*header/);
+  assert.doesNotMatch(themeCssSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}>\s*main/);
+  assert.doesNotMatch(themeCssSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}\[data-sidebar-search\]/);
+  assert.doesNotMatch(themeCssSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}app-shell-title/);
 });
 
 test('admin dashboard overview uses theme-aware surfaces and controls', () => {

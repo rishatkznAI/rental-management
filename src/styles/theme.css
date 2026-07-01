@@ -336,186 +336,6 @@
     min-width: 0;
   }
 
-  @media (min-width: 640px) {
-    body.rentcore-dashboard-reference-mode {
-      background:
-        radial-gradient(circle at 50% 8%, rgba(69, 147, 213, 0.08), transparent 28rem),
-        linear-gradient(180deg, #03070b 0%, #050b10 54%, #020406 100%);
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell {
-      background:
-        radial-gradient(circle at 52% 4%, rgba(58, 137, 199, 0.08), transparent 28rem),
-        radial-gradient(circle at 92% 50%, rgba(132, 204, 22, 0.045), transparent 32rem),
-        linear-gradient(180deg, #03070b 0%, #050a0e 48%, #020405 100%);
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside {
-      width: 248px !important;
-      border-right-color: rgba(130, 170, 120, 0.12);
-      background:
-        linear-gradient(180deg, rgba(3, 8, 13, 0.98), rgba(4, 12, 18, 0.96) 46%, rgba(2, 6, 9, 0.99)),
-        #03070b !important;
-      box-shadow:
-        22px 0 72px -62px rgba(0, 0, 0, 0.95),
-        inset -1px 0 0 rgba(255, 255, 255, 0.025);
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:first-child {
-      min-height: 72px;
-      padding: 18px 24px;
-      border-bottom-color: rgba(214, 255, 183, 0.075);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0.006));
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:first-child svg {
-      display: none;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:first-child > :first-child {
-      display: none;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:first-child .app-shell-title {
-      font-size: 22px;
-      letter-spacing: -0.01em;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:first-child .app-shell-title::first-letter {
-      color: #f8fafc;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:first-child button {
-      display: none;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside [data-sidebar-search] {
-      display: block;
-      padding: 12px 14px 8px;
-      border-bottom: 1px solid rgba(214, 255, 183, 0.06);
-      background: rgba(255, 255, 255, 0.012);
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside [data-sidebar-search] input {
-      height: 36px;
-      border-color: rgba(214, 255, 183, 0.12);
-      background: rgba(255, 255, 255, 0.055);
-      color: #eef7e7;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside [data-sidebar-search] input::placeholder {
-      color: rgba(226, 232, 240, 0.42);
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav {
-      padding: 18px 14px 10px;
-      scrollbar-width: thin;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav > div {
-      margin-bottom: 3px;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav > div > div:first-child {
-      display: none;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav button {
-      min-height: 34px;
-      border-radius: 7px;
-      padding: 8px 12px;
-      color: rgba(226, 232, 240, 0.7);
-      font-size: 13px;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav button:hover {
-      background: rgba(183, 242, 58, 0.08);
-      color: #eef7e7;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav button[class*="before:absolute"] {
-      border: 1px solid rgba(183, 242, 58, 0.24);
-      background:
-        linear-gradient(90deg, rgba(183, 242, 58, 0.18), rgba(183, 242, 58, 0.055)),
-        rgba(183, 242, 58, 0.075) !important;
-      color: #d9f99d !important;
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.06),
-        0 16px 36px -32px rgba(183, 242, 58, 0.5) !important;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav button[class*="before:absolute"]::before {
-      width: 2px !important;
-      height: 22px !important;
-      left: -1px !important;
-      background: #b7f23a !important;
-      box-shadow: 0 0 14px rgba(183, 242, 58, 0.42);
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:last-child {
-      margin: 0 10px 10px;
-      border: 1px solid rgba(214, 255, 183, 0.08);
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.035);
-      padding: 8px;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:last-child button {
-      min-height: 42px;
-      border-radius: 9px;
-      background: rgba(183, 242, 58, 0.055) !important;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden {
-      left: 248px !important;
-      height: 72px;
-      padding: 0 24px;
-      border-bottom-color: rgba(214, 255, 183, 0.09);
-      background:
-        linear-gradient(180deg, rgba(7, 17, 25, 0.94), rgba(5, 11, 16, 0.9)),
-        rgba(4, 9, 14, 0.92) !important;
-      box-shadow:
-        0 20px 60px -52px rgba(0, 0, 0, 0.95),
-        inset 0 -1px 0 rgba(255, 255, 255, 0.025);
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden > div:first-child p {
-      display: none;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden > div:first-child .app-shell-title {
-      font-size: 21px;
-      line-height: 1;
-      color: #f8fafc;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden button {
-      border-radius: 11px;
-      border-color: rgba(214, 255, 183, 0.1);
-      background-color: rgba(255, 255, 255, 0.045);
-      box-shadow: none;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden button[aria-label="Создать"] {
-      border-color: rgba(183, 242, 58, 0.34);
-      background: #b7f23a;
-      color: #071006;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden button[aria-haspopup="menu"] {
-      min-height: 46px;
-      border-radius: 14px;
-      padding: 7px 14px;
-      background: rgba(255, 255, 255, 0.055);
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > main {
-      margin-left: 248px !important;
-      padding-top: 72px !important;
-      background: transparent;
-    }
-  }
-
   .app-page-shell {
     @apply mx-auto w-full max-w-[1600px] space-y-5 px-4 py-4 sm:space-y-6 sm:px-6 sm:py-6 lg:px-8;
   }
@@ -679,75 +499,6 @@
       font-size: 9px !important;
       line-height: 1.2;
     }
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode {
-    background: #eef4ea;
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-industrial-shell {
-    background:
-      radial-gradient(circle at 80% 8%, rgba(130, 201, 30, 0.14), transparent 28rem),
-      linear-gradient(180deg, #f3f8ef 0%, #e8f0e3 100%);
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside {
-    border-right-color: rgba(71, 85, 70, 0.18);
-    background:
-      linear-gradient(180deg, rgba(250, 253, 247, 0.98), rgba(239, 246, 235, 0.96)) !important;
-    color: #172117;
-    box-shadow:
-      18px 0 60px -54px rgba(38, 57, 38, 0.3),
-      inset -1px 0 0 rgba(255, 255, 255, 0.7);
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:first-child {
-    border-bottom-color: rgba(71, 85, 70, 0.14);
-    background: rgba(255, 255, 255, 0.52);
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav button {
-    color: rgba(23, 33, 23, 0.72);
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav button:hover {
-    background: rgba(130, 201, 30, 0.1);
-    color: #172117;
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav button[class*="before:absolute"] {
-    border-color: rgba(111, 179, 24, 0.3);
-    background:
-      linear-gradient(90deg, rgba(130, 201, 30, 0.2), rgba(130, 201, 30, 0.08)),
-      rgba(130, 201, 30, 0.08) !important;
-    color: #264113 !important;
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:last-child {
-    border-color: rgba(71, 85, 70, 0.14);
-    background: rgba(255, 255, 255, 0.58);
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:last-child button {
-    background: rgba(130, 201, 30, 0.1) !important;
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden {
-    border-bottom-color: rgba(71, 85, 70, 0.14);
-    background:
-      linear-gradient(180deg, rgba(250, 253, 247, 0.96), rgba(239, 246, 235, 0.9)) !important;
-    box-shadow:
-      0 18px 54px -48px rgba(38, 57, 38, 0.38),
-      inset 0 -1px 0 rgba(255, 255, 255, 0.72);
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden > div:first-child .app-shell-title {
-    color: #172117;
-  }
-
-  html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden button {
-    border-color: rgba(71, 85, 70, 0.14);
-    background-color: rgba(255, 255, 255, 0.76);
   }
 
   .rentcore-command-header,
@@ -943,15 +694,15 @@
   .rentcore-command-health-card {
     align-content: start;
     container-type: inline-size;
-    min-height: 520px;
+    min-height: 420px;
     padding: clamp(16px, 1.5vw, 24px);
   }
 
   .rentcore-radial-overview {
     position: relative;
     min-width: 0;
-    width: 100%;
-    min-height: clamp(280px, 24vw, 380px);
+    width: min(100%, 260px);
+    min-height: clamp(210px, 18vw, 260px);
     aspect-ratio: 1 / 1;
     overflow: hidden;
     border-radius: 8px;
@@ -972,7 +723,7 @@
   .rentcore-radial-overview .rentcore-health-svg {
     aspect-ratio: 1 / 1;
     height: 100%;
-    min-height: 280px;
+    min-height: clamp(210px, 18vw, 260px);
     opacity: 1;
   }
 
@@ -985,7 +736,7 @@
 
   .rentcore-radial-core-value {
     fill: #ffffff;
-    font-size: 24px;
+    font-size: 20px;
     font-weight: 900;
     letter-spacing: 0;
   }
@@ -1518,72 +1269,6 @@
 
   .dark .rentcore-command-screen .bg-slate-950\/60 {
     background-color: rgba(2, 6, 23, 0.6) !important;
-  }
-
-  @media (min-width: 640px) {
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside {
-      width: 220px !important;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden {
-      left: 220px !important;
-      height: 70px;
-      padding-left: 22px;
-      padding-right: 22px;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > main {
-      margin-left: 220px !important;
-      padding-top: 70px !important;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:first-child {
-      min-height: 70px;
-      padding-left: 22px;
-      padding-right: 18px;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside > div > div:first-child .app-shell-title {
-      font-size: 20px;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav {
-      padding: 16px 10px 10px;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav button {
-      min-height: 37px;
-      border-radius: 6px;
-      padding: 8px 14px;
-      background: transparent !important;
-      border: 1px solid transparent;
-      color: rgba(226, 232, 240, 0.66);
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > aside nav button[class*="before:absolute"] {
-      border-color: rgba(183, 242, 58, 0.18);
-      background:
-        linear-gradient(90deg, rgba(183, 242, 58, 0.14), rgba(183, 242, 58, 0.055) 62%, transparent),
-        rgba(183, 242, 58, 0.04) !important;
-      color: #bdf36b !important;
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.035),
-        0 14px 34px -32px rgba(183, 242, 58, 0.38) !important;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden button[aria-haspopup="menu"] {
-      min-width: 44px;
-      width: 44px;
-      min-height: 44px;
-      padding: 0;
-      border-radius: 999px;
-      justify-content: center;
-    }
-
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden button[aria-haspopup="menu"] > span:not(:first-child),
-    body.rentcore-dashboard-reference-mode .rentcore-industrial-shell > header.hidden button[aria-haspopup="menu"] > svg {
-      display: none;
-    }
   }
 
   body.rentcore-dashboard-reference-mode .rentcore-command-screen {
@@ -2338,8 +2023,8 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
 
 .rentcore-radial-overview,
 .dark .rentcore-radial-overview {
-  width: 100% !important;
-  min-height: clamp(280px, 24vw, 380px) !important;
+  width: min(100%, 260px) !important;
+  min-height: clamp(210px, 18vw, 260px) !important;
   aspect-ratio: 1 / 1 !important;
   overflow: hidden !important;
   border-radius: 8px !important;
@@ -2354,7 +2039,7 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
 .rentcore-radial-overview .rentcore-health-svg,
 .dark .rentcore-radial-overview .rentcore-health-svg {
   height: 100% !important;
-  min-height: 280px !important;
+  min-height: clamp(210px, 18vw, 260px) !important;
   opacity: 1 !important;
 }
 

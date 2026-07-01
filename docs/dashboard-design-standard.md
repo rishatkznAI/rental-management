@@ -351,6 +351,18 @@ Navigation items may include:
 
 The active Dashboard item must be clearly highlighted with a premium lime/green accent.
 
+### 10.1. Global App Shell / Sidebar Standard
+
+The App Shell is global product identity, not part of the Dashboard content redesign.
+
+The sidebar, RentCore logo/icon/text, top navigation shell, theme controls and user controls are shared app-level UI. They must remain visually consistent across Dashboard, Equipment, Rentals, Service, Payments, Finance, Admin and other sections.
+
+Dashboard changes must not redefine, fork, restyle, resize, hide, replace or visually override the global sidebar, logo or header shell. Dashboard visual work may affect only the Dashboard content area unless a separate global shell redesign is explicitly approved with cross-page scope.
+
+The RentCore logo/icon/text must remain the same across all modules. The active item highlight may differ only because the active route changes, not because Dashboard adds page-specific shell layout or CSS.
+
+Sidebar/logo consistency is a production acceptance criterion. Any global shell redesign requires explicit approval, cross-page visual review and smoke coverage for Dashboard, Equipment, Rentals, Service, Payments, Finance, Admin and other affected sections.
+
 ---
 
 ## 11. Header / Hero Standard

@@ -65,9 +65,10 @@ test('dashboard radial overview has empty and zero-value states without removing
   assert.match(radialBlock, /const progress = hasScore \? clampPercent\(score\) : 0/);
   assert.match(radialBlock, /const shouldShowEmpty = !hasScore \|\| directions\.length === 0/);
   assert.match(radialBlock, /data-radial-state=\{shouldShowEmpty \? 'empty' : progress === 0 \? 'zero' : 'ready'\}/);
-  assert.match(radialBlock, /\{hasScore \? `\$\{progress\}%` : 'Нет'\}/);
+  assert.match(radialBlock, /\{hasScore \? `\$\{progress\}\/100` : '—'\}/);
   assert.match(radialBlock, /\{hasScore \? label : 'Недостаточно данных'\}/);
   assert.match(radialBlock, /Array\.from\(\{ length: 6 \}/);
+  assert.doesNotMatch(radialBlock, /'Нет'/);
   assert.doesNotMatch(radialBlock, /'N\/A'/);
 });
 
@@ -99,12 +100,20 @@ test('dashboard company health layout avoids horizontal overflow on narrow conta
   assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*width: 100%;/);
   assert.match(themeSource, /\.rentcore-command-column\s*\{[\s\S]*min-width: 0;/);
   assert.match(themeSource, /\.rentcore-command-compact-list\s*\{[\s\S]*width: 100%;/);
-  assert.match(themeSource, /\.rentcore-command-health-card\s*\{[\s\S]*container-type: inline-size;[\s\S]*min-height: 520px;/);
-  assert.match(themeSource, /\.rentcore-radial-overview\s*\{[\s\S]*width: 100%;[\s\S]*min-height: clamp\(280px, 24vw, 380px\);[\s\S]*aspect-ratio: 1 \/ 1;[\s\S]*overflow: hidden;/);
+  assert.match(themeSource, /\.rentcore-command-health-card\s*\{[\s\S]*container-type: inline-size;[\s\S]*min-height: 420px;/);
+  assert.match(themeSource, /\.rentcore-radial-overview\s*\{[\s\S]*width: min\(100%, 260px\);[\s\S]*min-height: clamp\(210px, 18vw, 260px\);[\s\S]*aspect-ratio: 1 \/ 1;[\s\S]*overflow: hidden;/);
   assert.match(themeSource, /\.rentcore-radial-node-label\s*\{[\s\S]*letter-spacing: 0;/);
   assert.match(themeSource, /\.rentcore-radial-empty\s*\{[\s\S]*text-overflow: ellipsis;[\s\S]*white-space: normal;/);
   assert.doesNotMatch(dashboardSource, /estimatedCardWidth > 0 && estimatedCardWidth < 180/);
   assert.doesNotMatch(dashboardSource, /data-card-density=\{cardDensity\}/);
+});
+
+test('dashboard reference mode cannot override global app shell sidebar or logo', () => {
+  assert.doesNotMatch(themeSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}rentcore-industrial-shell/);
+  assert.doesNotMatch(themeSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}>\s*aside/);
+  assert.doesNotMatch(themeSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}>\s*header/);
+  assert.doesNotMatch(themeSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}>\s*main/);
+  assert.doesNotMatch(themeSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}app-shell-title/);
 });
 
 test('dashboard KPI cards prefer readable wrapping over compression', () => {

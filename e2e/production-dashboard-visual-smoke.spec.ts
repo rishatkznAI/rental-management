@@ -33,6 +33,14 @@ type DashboardLayoutSnapshot = {
   radialNodesInside: boolean;
   compactVisible: boolean;
   compactCards: number;
+  setupBannerCount: number;
+  kpiReadability: Array<{
+    text: string;
+    cardWidth: number;
+    clipped: boolean;
+    wordBreak: string;
+    overflowWrap: string;
+  }>;
   overflowX: number;
   overflowOffenders: Array<{
     tag: string;
@@ -286,6 +294,20 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
     const commandHeader = fullRectOf(document.querySelector('.rentcore-command-header'));
     const screen = fullRectOf(document.querySelector('.rentcore-command-screen'));
     const cockpit = fullRectOf(document.querySelector('[data-testid="dashboard-top-cockpit"]'));
+    const kpiCards = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="dashboard-executive-cockpit"] .rentcore-command-kpi'));
+    const kpiReadability = kpiCards.map((card) => {
+      const value = card.querySelector<HTMLElement>('.dashboard-kpi-value');
+      const cardRect = card.getBoundingClientRect();
+      const valueRect = value?.getBoundingClientRect();
+      const style = value ? window.getComputedStyle(value) : null;
+      return {
+        text: value?.textContent?.trim() || '',
+        cardWidth: Math.round(cardRect.width),
+        clipped: Boolean(valueRect && (valueRect.left < cardRect.left - 1 || valueRect.right > cardRect.right + 1)),
+        wordBreak: style?.wordBreak || '',
+        overflowWrap: style?.overflowWrap || '',
+      };
+    });
 
     return {
       dashboardOpened: Boolean(document.querySelector('[data-testid="dashboard-executive-cockpit"]')),
@@ -303,6 +325,8 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
       radialNodesInside,
       compactVisible: isVisible(compact),
       compactCards,
+      setupBannerCount: Array.from(document.body.querySelectorAll('*')).filter(element => element.textContent?.includes('Дашборд ещё собирает управленческую картину')).length,
+      kpiReadability,
       overflowX: scrollWidth - viewportWidth,
       overflowOffenders: offenders,
     };
@@ -349,7 +373,8 @@ async function expectDashboardContract(
     expect(snapshot.overlaps, `${viewportCase.name}: production-critical Dashboard blocks should not overlap`).toEqual([]);
     expect(snapshot.screenBelowAppHeader, `${viewportCase.name}: Dashboard screen should start below app header`).toBe(true);
     expect(snapshot.cockpitBelowCommandHeader, `${viewportCase.name}: KPI row should start below command header`).toBe(true);
-    expect(snapshot.healthVisible, `${viewportCase.name}: company health compact card should be visible (${JSON.stringify(snapshot)})`).toBe(true);
+    expect(snapshot.setupBannerCount, `${viewportCase.name}: removed setup banner should not be visible`).toBe(0);
+    expect(snapshot.healthVisible, `${viewportCase.name}: company health executive module should be visible (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.healthSvgCount, `${viewportCase.name}: company health should not render dominant SVG circle (${JSON.stringify(snapshot)})`).toBe(0);
     expect(snapshot.radialVisible, `${viewportCase.name}: radial overview should be visible (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.radialCoreVisible, `${viewportCase.name}: radial core should be visible (${JSON.stringify(snapshot)})`).toBe(true);
@@ -357,8 +382,12 @@ async function expectDashboardContract(
     expect(snapshot.radialNodesInside, `${viewportCase.name}: radial nodes should stay inside overview (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.compactVisible, `${viewportCase.name}: compact wrapper should be visible (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.compactCards, `${viewportCase.name}: compact wrapper should contain six direction cards`).toBeGreaterThanOrEqual(6);
+    expect(snapshot.kpiReadability, `${viewportCase.name}: KPI values should render`).not.toEqual([]);
+    expect(snapshot.kpiReadability.filter(item => item.clipped), `${viewportCase.name}: KPI values should not clip`).toEqual([]);
+    expect(snapshot.kpiReadability.filter(item => item.wordBreak === 'break-all' || item.overflowWrap === 'anywhere'), `${viewportCase.name}: KPI values should not force letter wrapping`).toEqual([]);
     if (viewportCase.name === 'desktop') {
-      expect(snapshot.healthWidthShare, `${viewportCase.name}: company health should not dominate dashboard width`).toBeLessThanOrEqual(0.38);
+      expect(snapshot.healthWidthShare, `${viewportCase.name}: company health should be an executive-width module`).toBeGreaterThanOrEqual(0.75);
+      expect(Math.min(...snapshot.kpiReadability.map(item => item.cardWidth)), `${viewportCase.name}: KPI cards should keep readable width`).toBeGreaterThanOrEqual(220);
     }
   });
 

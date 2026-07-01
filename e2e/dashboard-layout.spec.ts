@@ -54,8 +54,24 @@ async function dashboardLayoutSnapshot(page: Page) {
     const cockpit = rectFor('[data-testid="dashboard-top-cockpit"]');
     const screen = rectFor('.rentcore-command-screen');
     const radialNodes = Array.from(document.querySelectorAll('[data-testid="dashboard-radial-node"]'));
+    const kpiCards = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="dashboard-executive-cockpit"] .rentcore-command-kpi'));
+    const kpiReadability = kpiCards.map((card) => {
+      const value = card.querySelector<HTMLElement>('.dashboard-kpi-value');
+      const cardRect = card.getBoundingClientRect();
+      const valueRect = value?.getBoundingClientRect();
+      const style = value ? window.getComputedStyle(value) : null;
+      return {
+        text: value?.textContent?.trim() || '',
+        cardWidth: Math.round(cardRect.width),
+        valueWidth: Math.round(valueRect?.width || 0),
+        clipped: Boolean(valueRect && (valueRect.left < cardRect.left - 1 || valueRect.right > cardRect.right + 1)),
+        wordBreak: style?.wordBreak || '',
+        overflowWrap: style?.overflowWrap || '',
+      };
+    });
 
     return {
+      setupBannerCount: Array.from(document.body.querySelectorAll('*')).filter(element => element.textContent?.includes('Дашборд ещё собирает управленческую картину')).length,
       overflowX: scrollWidth - viewportWidth,
       offenders,
       header,
@@ -71,6 +87,7 @@ async function dashboardLayoutSnapshot(page: Page) {
       healthSvgCount: document.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length,
       healthWidthShare: board && health ? health.width / Math.max(board.width, 1) : 1,
       compactHealthCards: document.querySelectorAll('[data-testid="dashboard-company-health-compact"] a.rentcore-command-card').length,
+      kpiReadability,
     };
   });
 }
@@ -89,20 +106,25 @@ test.describe('Dashboard enterprise layout', () => {
 
       const snapshot = await dashboardLayoutSnapshot(page);
 
+      expect(snapshot.setupBannerCount, `${viewport.name}: removed setup banner should not be visible`).toBe(0);
       expect(snapshot.overflowX, `${viewport.name}: document should not scroll horizontally (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
       expect(snapshot.offenders, `${viewport.name}: visible elements should stay inside viewport`).toEqual([]);
       expect(snapshot.screen?.top ?? 0, `${viewport.name}: dashboard content should start below header`).toBeGreaterThanOrEqual((snapshot.header?.bottom ?? 0) - 1);
       expect(snapshot.cockpit?.top ?? 0, `${viewport.name}: KPI row should start below the dashboard command header`).toBeGreaterThanOrEqual((snapshot.commandHeader?.bottom ?? 0) - 1);
       expect(snapshot.healthSvgCount, `${viewport.name}: company health should not render a dominant central SVG circle`).toBe(0);
-      expect(snapshot.radial?.visible, `${viewport.name}: radial compatibility overview should remain visible (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.radial?.height ?? 999, `${viewport.name}: radial compatibility overview should stay compact (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(80);
+      expect(snapshot.radial?.visible, `${viewport.name}: executive health visual should remain visible (${JSON.stringify(snapshot)})`).toBe(true);
+      expect(snapshot.radial?.height ?? 0, `${viewport.name}: executive health visual should not collapse (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(220);
       expect(snapshot.radialCoreExists, `${viewport.name}: legacy radial core selector should be preserved (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.radialEmptyExists, `${viewport.name}: legacy radial empty selector should be preserved (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.radialNodeCount, `${viewport.name}: radial overview should keep business contour node selectors (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(6);
-      expect(snapshot.compactHealthCards, `${viewport.name}: compact company health should keep all business contours`).toBeGreaterThanOrEqual(6);
+      expect(snapshot.compactHealthCards, `${viewport.name}: company health should keep all business contours`).toBeGreaterThanOrEqual(6);
+      expect(snapshot.kpiReadability, `${viewport.name}: KPI values should render`).not.toEqual([]);
+      expect(snapshot.kpiReadability.filter(item => item.clipped), `${viewport.name}: KPI values should not clip`).toEqual([]);
+      expect(snapshot.kpiReadability.filter(item => item.wordBreak === 'break-all' || item.overflowWrap === 'anywhere'), `${viewport.name}: KPI values should not force letter wrapping`).toEqual([]);
 
       if (viewport.name === 'desktop') {
-        expect(snapshot.healthWidthShare, `${viewport.name}: company health should not dominate dashboard width`).toBeLessThanOrEqual(0.38);
+        expect(snapshot.healthWidthShare, `${viewport.name}: company health should be an executive-width module`).toBeGreaterThanOrEqual(0.75);
+        expect(Math.min(...snapshot.kpiReadability.map(item => item.cardWidth)), `${viewport.name}: KPI cards should keep readable width (${JSON.stringify(snapshot.kpiReadability)})`).toBeGreaterThanOrEqual(220);
       }
     });
   }

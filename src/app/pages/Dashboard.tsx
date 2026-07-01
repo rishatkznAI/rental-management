@@ -1318,9 +1318,6 @@ function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) 
         </span>
       </div>
       <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">{item.reason}</p>
-      <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
-        <span className="font-semibold text-foreground">Источник:</span> {item.source}. <span className="font-semibold text-foreground">Действие:</span> {item.action}
-      </p>
       <div className="rentcore-command-card-metrics grid gap-1 text-xs leading-none">
         {item.metrics.map(metric => (
           <span key={metric.label} title={`${metric.label}: ${metric.value}`} className="flex min-w-0 items-center justify-between gap-3">
@@ -1511,48 +1508,53 @@ function CompanyHealthCommandCenter({
 
   return (
     <div
-      className="rentcore-command-map rentcore-command-health-card grid gap-3"
+      className="rentcore-command-map rentcore-command-health-card grid gap-4"
       role="region"
       aria-label={hasScore ? `Здоровье компании ${progress} из 100: ${label}` : `Здоровье компании: ${label}`}
       data-testid="dashboard-company-health"
-      data-company-health-layout="compact-card"
+      data-company-health-layout="executive"
     >
-      <div className="flex min-w-0 items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <CardTitle className="app-shell-title text-lg font-extrabold text-foreground" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
-          <p className="mt-1 text-sm leading-5 text-muted-foreground">
+          <CardTitle className="app-shell-title text-xl font-extrabold text-foreground" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
+          <p className="mt-1 max-w-[68ch] text-sm leading-5 text-muted-foreground">
             {hasScore ? subtitle : 'Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок.'}
           </p>
         </div>
-        <div className="shrink-0 rounded-lg border border-border bg-background px-3 py-2 text-right">
-          <p className={`text-xs font-extrabold ${toneStyles[tone].accent}`}>{label}</p>
-          <p className="mt-1 text-2xl font-extrabold leading-none text-foreground">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <span className="rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold text-foreground">
             {hasScore ? <>{progress}<span className="text-sm text-muted-foreground">/100</span></> : 'Не участвует'}
-          </p>
+          </span>
+          <span className={`rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold ${toneStyles[tone].accent}`}>{label}</span>
         </div>
       </div>
 
-      {warning ? <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-200">{warning}</p> : null}
+      <div className="rentcore-company-health-main grid gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(0,1.1fr)] lg:items-center">
+        <CompanyHealthRadialOverview
+          directions={directions}
+          score={score}
+          label={label}
+          tone={tone}
+          criticalSignals={criticalSignals}
+        />
 
-      <CompanyHealthRadialOverview
-        directions={directions}
-        score={score}
-        label={label}
-        tone={tone}
-        criticalSignals={criticalSignals}
-      />
-
-      <div className="grid gap-2 sm:grid-cols-2" data-testid="dashboard-company-health-compact">
-        {directions.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
+        <div className="grid gap-3">
+          <div className="grid gap-2 sm:grid-cols-2" data-testid="dashboard-company-health-compact">
+            {directions.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
+          </div>
+          <CompanyHealthBars items={bars} />
+        </div>
       </div>
 
-      <div>
-        <CompanyHealthBars items={bars} />
-      </div>
-
-      <p className="text-xs font-semibold text-muted-foreground">
-        {hasScore ? `${criticalSignals} критических сигналов в контурах. Откройте карточку направления, чтобы проверить источник.` : 'Индекс появится после заполнения источников данных.'}
-      </p>
+      {warning ? (
+        <p className="rounded-full border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-200">
+          {warning.replace(/^Health рассчитан по доступным данным\. /, '').replace(/\.$/, '')}
+        </p>
+      ) : (
+        <p className="text-xs font-semibold text-muted-foreground">
+          {hasScore ? `${criticalSignals} критических сигналов в контурах.` : 'Индекс появится после заполнения источников данных.'}
+        </p>
+      )}
     </div>
   );
 }
@@ -3875,7 +3877,7 @@ export default function Dashboard() {
       label: 'Загрузка сервиса',
       value: hasServiceSourceData ? serviceLoadDisplayValue : 'Нет заявок',
       hint: hasServiceSourceData
-        ? `${serviceRiskStatus} · ${serviceLoadHoursLabel} · ${unassignedServiceTickets.length} без механика`
+        ? `${serviceRiskStatus} · ${serviceLoadTotal} активных · ${overdueServiceTickets.length} просрочено`
         : serviceLoadLocalState,
       icon: Wrench,
       tone: serviceTone,
@@ -3885,8 +3887,8 @@ export default function Dashboard() {
     canViewDeliveries && {
       id: 'executive-delivery-today',
       label: 'Доставки сегодня',
-      value: deliveryTodayValue,
-      hint: deliveryPlanToday.length > 0 ? deliveryTodayRiskLabel : 'Нет задач: на сегодня доставок не запланировано',
+      value: deliveryPlanToday.length > 0 ? deliveryTodayValue : 'Нет задач',
+      hint: deliveryPlanToday.length > 0 ? deliveryTodayRiskLabel : 'На сегодня доставок нет',
       icon: Truck,
       tone: overdueDeliveriesToday.length > 0 ? 'danger' : unacceptedDeliveriesToday.length > 0 ? 'warning' : deliveryPlanToday.length > 0 ? 'info' : 'success',
       href: '/deliveries',
@@ -3908,7 +3910,7 @@ export default function Dashboard() {
     },
     (canViewDocuments || canViewTasksCenter) && {
       id: 'executive-operational-load',
-      label: 'Операционная нагрузка',
+      label: 'Нагрузка',
       value: operationalLoadLabel,
       hint: operationalLoadHint,
       icon: ListChecks,
@@ -4061,6 +4063,9 @@ export default function Dashboard() {
     tone: DashboardTone;
     href: string;
     stateLabel?: string;
+    reason: string;
+    source: string;
+    action: string;
     metrics: Array<{ label: string; value: string }>;
   }>;
   const commandCenterLeftDirections = ['money', 'fleet', 'service']
@@ -4323,13 +4328,11 @@ export default function Dashboard() {
           </header>
 
           <section data-testid="dashboard-top-cockpit">
-            <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-7" data-testid="dashboard-executive-cockpit">
+            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] min-[1440px]:[grid-template-columns:repeat(auto-fit,minmax(230px,1fr))]" data-testid="dashboard-executive-cockpit">
               {executiveSummaryCards.map(card => {
               const Icon = card.icon;
               const tone = toneStyles[card.tone ?? 'default'];
               const testId = EXECUTIVE_KPI_TEST_IDS[card.id];
-              const isServiceCard = card.id === 'executive-service-load';
-              const isDeliveryCard = card.id === 'executive-delivery-today';
               const trend = card.id === 'executive-overdue-receivables'
                 ? overdueReceivablesTrendData
                 : card.id === 'executive-fleet-utilization'
@@ -4345,51 +4348,23 @@ export default function Dashboard() {
                     ? '#a3e635'
                     : '#54d4c2';
               const content = (
-                <div className="relative z-10 flex h-full min-h-[96px] flex-col justify-between">
+                <div className="relative z-10 flex h-full min-h-[124px] flex-col justify-between">
                   <div className="flex items-start justify-between gap-2.5">
                     <div className="min-w-0">
                       <p className="line-clamp-1 min-h-[13px] text-xs font-bold leading-none text-muted-foreground">{card.label}</p>
-                      <p className="mt-2 break-words text-[28px] font-extrabold leading-none text-foreground min-[1500px]:text-[30px]">{card.value}</p>
+                      <p className="dashboard-kpi-value mt-3 text-[28px] font-extrabold leading-none text-foreground min-[1500px]:text-[30px]">{card.value}</p>
                     </div>
                     <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-border bg-background ${tone.accent}`}>
                       <Icon className="h-4 w-4" />
                     </span>
                   </div>
-                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_82px] items-end gap-2">
-                    <p className={`min-w-0 line-clamp-2 text-xs font-bold leading-4 ${tone.accent}`}>{card.hint}</p>
+                  <div className="mt-4 grid grid-cols-[minmax(0,1fr)_82px] items-end gap-3">
+                    <p className={`min-w-0 text-xs font-bold leading-4 ${tone.accent}`}>{card.hint}</p>
                     <MiniSparkline data={trend} stroke={stroke} className="h-5 opacity-60" />
                   </div>
-                  {isServiceCard ? (
-                    <div className="mt-2 grid grid-cols-3 gap-1.5 text-[10px]">
-                      {[
-                        { label: 'активно', value: serviceLoadTotal },
-                        { label: 'проср.', value: overdueServiceTickets.length },
-                        { label: 'запчасти', value: ticketsWaitingParts.length },
-                      ].map(item => (
-                        <span key={item.label} className="rounded-[7px] border border-border bg-background px-1.5 py-1">
-                          <span className="block text-muted-foreground">{item.label}</span>
-                          <span className="block text-sm font-extrabold text-foreground">{item.value}</span>
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  {isDeliveryCard ? (
-                    <div className="mt-2 grid grid-cols-3 gap-1.5 text-[10px]">
-                      {[
-                        { label: 'в пути', value: deliveryInProgressToday.length },
-                        { label: 'не нач.', value: deliveryNotStartedToday.length },
-                        { label: 'риск', value: overdueDeliveriesToday.length + unacceptedDeliveriesToday.length },
-                      ].map(item => (
-                        <span key={item.label} className="rounded-[7px] border border-border bg-background px-1.5 py-1">
-                          <span className="block text-muted-foreground">{item.label}</span>
-                          <span className="block text-sm font-extrabold text-foreground">{item.value}</span>
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
                 </div>
               );
-              const className = "rentcore-command-kpi group p-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35";
+              const className = "rentcore-command-kpi group min-w-[220px] p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35";
               if (card.href) return <Link key={card.id} to={card.href} data-testid={testId} className={className}>{content}</Link>;
               if (card.onClick) return <button key={card.id} type="button" onClick={card.onClick} data-testid={testId} className={className}>{content}</button>;
               return <div key={card.id} data-testid={testId} className={className}>{content}</div>;
@@ -4407,7 +4382,7 @@ export default function Dashboard() {
                     <p className="mt-0.5 text-xs text-muted-foreground">Что требует внимания сейчас</p>
                   </div>
                   <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-bold text-muted-foreground">
-                    {criticalCount + highCount || 'OK'}
+                    {criticalCount + highCount ? `${criticalCount + highCount} всего` : 'OK'}
                   </span>
                 </div>
                 <div className="mt-3 min-h-0 flex-1 space-y-1.5 overflow-hidden pr-1" data-testid="dashboard-legacy-attention-list">
@@ -4631,7 +4606,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-h-[300px] min-w-0 flex-col overflow-hidden p-3 xl:col-span-4" data-testid="dashboard-operational-summary">
+            <div className="rentcore-command-analytics flex min-h-[560px] min-w-0 flex-col overflow-visible p-3 xl:col-span-12" data-testid="dashboard-operational-summary">
               <CompanyHealthCommandCenter
                 leftDirections={commandCenterLeftDirections}
                 rightDirections={commandCenterRightDirections}
@@ -5216,7 +5191,7 @@ export default function Dashboard() {
               {showAllAlerts || alertItems.length <= ALERTS_PREVIEW ? null : (
                 <Button type="button" variant="secondary" size="sm" className="mt-3 w-full" onClick={() => setShowAllAlerts(true)}>
                   Все сигналы
-                  <Badge variant="danger" className="ml-2">{alertItems.length}</Badge>
+                  <Badge variant="danger" className="ml-2">{alertItems.length} всего</Badge>
                 </Button>
               )}
             </div>

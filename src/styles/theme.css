@@ -769,10 +769,17 @@
     overflow: hidden;
     border: 1px solid var(--rc-command-panel-border);
     border-radius: 8px;
-    min-height: 84px;
+    min-height: 132px;
     background: var(--rc-command-panel-bg);
     box-shadow: 0 16px 48px -42px rgba(15, 23, 42, 0.5);
     transition: border-color var(--motion-duration-fast) var(--motion-ease-standard), background var(--motion-duration-fast) var(--motion-ease-standard), transform var(--motion-duration-fast) var(--motion-ease-standard);
+  }
+
+  .dashboard-kpi-value {
+    word-break: normal;
+    overflow-wrap: normal;
+    hyphens: none;
+    max-width: 100%;
   }
 
   .rentcore-command-kpi::after,
@@ -847,7 +854,7 @@
     max-width: 100%;
   }
 
-  .rentcore-command-map[data-company-health-layout="compact-card"] {
+  .rentcore-command-map[data-company-health-layout="executive"] {
     grid-template-columns: minmax(0, 1fr);
     width: 100%;
     max-width: 100%;
@@ -936,19 +943,24 @@
   .rentcore-command-health-card {
     align-content: start;
     container-type: inline-size;
-    min-height: 0;
+    min-height: 520px;
+    padding: clamp(16px, 1.5vw, 24px);
   }
 
   .rentcore-radial-overview {
     position: relative;
     min-width: 0;
     width: 100%;
-    min-height: 54px;
-    aspect-ratio: auto;
+    min-height: clamp(280px, 24vw, 380px);
+    aspect-ratio: 1 / 1;
     overflow: hidden;
     border-radius: 8px;
     border: 1px solid hsl(var(--border));
-    background: hsl(var(--muted) / 0.34);
+    background:
+      radial-gradient(circle at 50% 42%, rgba(163, 255, 53, 0.16), transparent 46%),
+      radial-gradient(circle at 50% 50%, rgba(69, 240, 208, 0.08), transparent 63%),
+      linear-gradient(145deg, rgba(24, 38, 39, 0.92), rgba(7, 16, 18, 0.94));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
   }
 
   .rentcore-radial-overview[data-radial-state="empty"],
@@ -959,9 +971,9 @@
 
   .rentcore-radial-overview .rentcore-health-svg {
     aspect-ratio: 1 / 1;
-    height: 0;
-    min-height: 0;
-    opacity: 0;
+    height: 100%;
+    min-height: 280px;
+    opacity: 1;
   }
 
   .rentcore-radial-node-label {
@@ -986,15 +998,20 @@
   }
 
   .rentcore-radial-empty {
-    position: static;
-    padding: 12px;
+    position: absolute;
+    inset-inline: 18px;
+    bottom: 16px;
+    padding: 8px 10px;
     overflow: hidden;
-    text-align: left;
+    text-align: center;
     text-overflow: ellipsis;
     white-space: normal;
     font-size: 12px;
     font-weight: 800;
-    color: hsl(var(--muted-foreground));
+    color: rgba(242, 247, 244, 0.82);
+    border: 1px solid rgba(163, 255, 53, 0.13);
+    border-radius: 999px;
+    background: rgba(7, 16, 18, 0.72);
   }
 
   .rentcore-health-orb {
@@ -2322,11 +2339,13 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
 .rentcore-radial-overview,
 .dark .rentcore-radial-overview {
   width: 100% !important;
-  min-height: 54px !important;
-  aspect-ratio: auto !important;
+  min-height: clamp(280px, 24vw, 380px) !important;
+  aspect-ratio: 1 / 1 !important;
   overflow: hidden !important;
   border-radius: 8px !important;
   background:
+    radial-gradient(circle at 50% 42%, rgba(163, 255, 53, 0.16), transparent 46%),
+    radial-gradient(circle at 50% 50%, rgba(69, 240, 208, 0.08), transparent 63%),
     linear-gradient(135deg, rgba(69, 240, 208, 0.10), rgba(163, 255, 53, 0.075)),
     rgba(18, 29, 30, 0.76) !important;
   border: 1px solid rgba(163, 255, 53, 0.12) !important;
@@ -2334,9 +2353,9 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
 
 .rentcore-radial-overview .rentcore-health-svg,
 .dark .rentcore-radial-overview .rentcore-health-svg {
-  height: 64px !important;
-  min-height: 64px !important;
-  opacity: 0.34 !important;
+  height: 100% !important;
+  min-height: 280px !important;
+  opacity: 1 !important;
 }
 
 @keyframes app-card-reveal {

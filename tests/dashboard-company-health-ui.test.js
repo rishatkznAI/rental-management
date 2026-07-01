@@ -21,7 +21,7 @@ test('dashboard company health renders radial overview with stable selectors', (
   assert.match(block, /role="region"/);
   assert.match(block, /aria-label=\{hasScore \? `Здоровье компании \$\{progress\} из 100: \$\{label\}` : `Здоровье компании: \$\{label\}`\}/);
   assert.match(block, /data-testid="dashboard-company-health"/);
-  assert.match(block, /data-company-health-layout="compact-card"/);
+  assert.match(block, /data-company-health-layout="executive"/);
   assert.match(block, /<CompanyHealthRadialOverview/);
   assert.match(radialBlock, /data-testid="dashboard-radial-overview"/);
   assert.match(radialBlock, /data-testid="dashboard-radial-core"/);
@@ -33,6 +33,7 @@ test('dashboard company health renders radial overview with stable selectors', (
   assert.match(block, /<CompanyHealthBars items=\{bars\} \/>/);
   assert.doesNotMatch(block, /new ResizeObserver/);
   assert.doesNotMatch(block, /window\.innerWidth/);
+  assert.doesNotMatch(dashboardSource, /Дашборд ещё собирает управленческую картину/);
 });
 
 test('dashboard radial overview positions nodes mathematically inside the SVG container', () => {
@@ -46,14 +47,15 @@ test('dashboard radial overview positions nodes mathematically inside the SVG co
   assert.doesNotMatch(radialBlock, /\btop\b|\bleft\b/);
 });
 
-test('dashboard company health keeps compact direction cards alongside radial overview', () => {
+test('dashboard company health keeps executive direction summary alongside radial overview', () => {
   const block = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
 
   assert.match(block, /const directions = allDirections\.length > 0 \? allDirections : \[\.\.\.leftDirections, \.\.\.rightDirections\]/);
-  assert.match(block, /data-company-health-layout="compact-card"/);
+  assert.match(block, /data-company-health-layout="executive"/);
   assert.match(block, /data-testid="dashboard-company-health-compact"/);
   assert.match(block, /data-testid="dashboard-company-health-title"/);
-  assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="compact-card"\]\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(block, /rentcore-company-health-main/);
+  assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
 });
 
 test('dashboard radial overview has empty and zero-value states without removing the shell', () => {
@@ -69,14 +71,14 @@ test('dashboard radial overview has empty and zero-value states without removing
   assert.doesNotMatch(radialBlock, /'N\/A'/);
 });
 
-test('dashboard company health compact wrapper contains six anchor direction cards', () => {
+test('dashboard company health direction wrapper contains six anchor direction cards', () => {
   const commandCenterBlock = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
   const cardBlock = sourceBlock(dashboardSource, 'function CompanyHealthDirectionCard', 'function CompanyHealthCommandCenter');
-  const compactWrapperBlock = sourceBlock(commandCenterBlock, 'data-testid="dashboard-company-health-compact"', '<div>');
   const directionsBlock = sourceBlock(dashboardSource, 'const commandCenterDirections = [', '].filter(Boolean)');
 
-  assert.match(compactWrapperBlock, /directions\.map\(item => <CompanyHealthDirectionCard key=\{item\.id\} item=\{item\} \/>\)/);
-  assert.doesNotMatch(compactWrapperBlock, /sr-only/);
+  assert.match(commandCenterBlock, /data-testid="dashboard-company-health-compact"/);
+  assert.match(commandCenterBlock, /directions\.map\(item => <CompanyHealthDirectionCard key=\{item\.id\} item=\{item\} \/>\)/);
+  assert.doesNotMatch(commandCenterBlock, /sr-only/);
   assert.match(cardBlock, /<Link[\s\S]*className="rentcore-command-card/);
   assert.match(cardBlock, /title=\{title\}/);
   assert.match(cardBlock, /Статус: \$\{item\.stateLabel \|\| 'Нет данных'\}/);
@@ -94,15 +96,22 @@ test('dashboard company health compact wrapper contains six anchor direction car
 });
 
 test('dashboard company health layout avoids horizontal overflow on narrow containers', () => {
-  assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="compact-card"\]\s*\{[\s\S]*width: 100%;/);
+  assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*width: 100%;/);
   assert.match(themeSource, /\.rentcore-command-column\s*\{[\s\S]*min-width: 0;/);
   assert.match(themeSource, /\.rentcore-command-compact-list\s*\{[\s\S]*width: 100%;/);
-  assert.match(themeSource, /\.rentcore-command-health-card\s*\{[\s\S]*container-type: inline-size;[\s\S]*min-height: 0;/);
-  assert.match(themeSource, /\.rentcore-radial-overview\s*\{[\s\S]*width: 100%;[\s\S]*min-height: 54px;[\s\S]*aspect-ratio: auto;[\s\S]*overflow: hidden;/);
+  assert.match(themeSource, /\.rentcore-command-health-card\s*\{[\s\S]*container-type: inline-size;[\s\S]*min-height: 520px;/);
+  assert.match(themeSource, /\.rentcore-radial-overview\s*\{[\s\S]*width: 100%;[\s\S]*min-height: clamp\(280px, 24vw, 380px\);[\s\S]*aspect-ratio: 1 \/ 1;[\s\S]*overflow: hidden;/);
   assert.match(themeSource, /\.rentcore-radial-node-label\s*\{[\s\S]*letter-spacing: 0;/);
   assert.match(themeSource, /\.rentcore-radial-empty\s*\{[\s\S]*text-overflow: ellipsis;[\s\S]*white-space: normal;/);
   assert.doesNotMatch(dashboardSource, /estimatedCardWidth > 0 && estimatedCardWidth < 180/);
   assert.doesNotMatch(dashboardSource, /data-card-density=\{cardDensity\}/);
-  assert.match(themeSource, /\.rentcore-command-map\[data-card-density="icon-value"\] \.rentcore-command-card-compact-value\s*\{[\s\S]*display: inline-flex !important;/);
-  assert.match(themeSource, /@container \(max-width: 179px\)/);
+});
+
+test('dashboard KPI cards prefer readable wrapping over compression', () => {
+  assert.match(dashboardSource, /repeat\(auto-fit,minmax\(220px,1fr\)\)/);
+  assert.match(dashboardSource, /min-w-\[220px\]/);
+  assert.match(dashboardSource, /dashboard-kpi-value/);
+  assert.match(themeSource, /\.dashboard-kpi-value\s*\{[\s\S]*word-break: normal;[\s\S]*overflow-wrap: normal;[\s\S]*hyphens: none;/);
+  assert.doesNotMatch(dashboardSource, /xl:grid-cols-7/);
+  assert.doesNotMatch(sourceBlock(dashboardSource, 'data-testid="dashboard-executive-cockpit"', '<section className="rentcore-command-board'), /break-words/);
 });

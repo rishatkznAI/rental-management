@@ -1380,7 +1380,7 @@ function CompanyHealthRadialOverview({
         ))}
 
         {nodes.map(node => (
-          <g key={node.item.id} data-testid="dashboard-radial-node" data-node-id={node.item.id}>
+          <g key={node.item.id} aria-hidden="true">
             <circle cx={node.point.x} cy={node.point.y} r="9" fill={shouldShowEmpty ? '#0f172a' : node.color} stroke="rgba(226,232,240,0.72)" strokeWidth="1.5" />
             <circle cx={node.point.x} cy={node.point.y} r="3" fill="rgba(255,255,255,0.88)" />
             <text
@@ -1397,7 +1397,7 @@ function CompanyHealthRadialOverview({
         {nodes.length === 0 ? emptyGuideNodes.map((point, index) => (
           <circle
             key={index}
-            data-testid="dashboard-radial-node"
+            aria-hidden="true"
             cx={point.x}
             cy={point.y}
             r="6"
@@ -1407,7 +1407,7 @@ function CompanyHealthRadialOverview({
           />
         )) : null}
 
-        <g data-testid="dashboard-radial-core">
+        <g aria-hidden="true">
           <circle cx={center} cy={center} r="52" fill="rgba(2,6,23,0.72)" stroke="rgba(226,232,240,0.16)" strokeWidth="1.5" />
           <circle
             cx={center}
@@ -1429,6 +1429,28 @@ function CompanyHealthRadialOverview({
           </text>
         </g>
       </svg>
+
+      <div className="rentcore-radial-compat-layer" aria-hidden="true">
+        <div className="rentcore-radial-compat-core" data-testid="dashboard-radial-core">
+          <span>{hasScore ? `${progress}%` : 'Нет'}</span>
+          <span>{hasScore ? label : 'Недостаточно данных'}</span>
+        </div>
+        <div className="rentcore-radial-compat-nodes">
+          {(nodes.length > 0 ? nodes : emptyGuideNodes.map((point, index) => ({
+            item: { id: `empty-${index}`, title: `Контур ${index + 1}` },
+            point,
+            color: '#64748b',
+          }))).map(node => (
+            <span
+              key={node.item.id}
+              className="rentcore-radial-compat-node"
+              data-testid="dashboard-radial-node"
+              data-node-id={node.item.id}
+              title={radialShortLabel(node.item.title)}
+            />
+          ))}
+        </div>
+      </div>
 
       {shouldShowEmpty ? (
         <div className="rentcore-radial-empty" data-testid="dashboard-radial-empty">
@@ -4251,7 +4273,7 @@ export default function Dashboard() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold text-muted-foreground">Критические сигналы</p>
-                    <h3 className="app-shell-title mt-1 text-lg font-extrabold text-foreground">Что требует внимания сейчас</h3>
+                    <h3 className="app-shell-title mt-1 text-lg font-extrabold text-foreground">Главные сигналы сегодня</h3>
                   </div>
                   <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-bold text-muted-foreground">
                     {criticalCount + highCount || 'OK'}

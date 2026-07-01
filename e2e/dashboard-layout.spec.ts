@@ -53,7 +53,16 @@ async function dashboardLayoutSnapshot(page: Page) {
     const commandHeader = rectFor('.rentcore-command-header');
     const cockpit = rectFor('[data-testid="dashboard-top-cockpit"]');
     const screen = rectFor('.rentcore-command-screen');
+    const radialOverview = document.querySelector('[data-testid="dashboard-radial-overview"]');
+    const radialRect = radialOverview?.getBoundingClientRect();
     const radialNodes = Array.from(document.querySelectorAll('[data-testid="dashboard-radial-node"]'));
+    const radialNodesInside = radialRect ? radialNodes.every((node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.left >= radialRect.left - 1
+        && rect.right <= radialRect.right + 1
+        && rect.top >= radialRect.top - 1
+        && rect.bottom <= radialRect.bottom + 1;
+    }) : false;
 
     return {
       overflowX: scrollWidth - viewportWidth,
@@ -68,6 +77,7 @@ async function dashboardLayoutSnapshot(page: Page) {
       radialCoreExists: Boolean(document.querySelector('[data-testid="dashboard-radial-core"]')),
       radialNodeCount: radialNodes.length,
       radialEmptyExists: Boolean(document.querySelector('[data-testid="dashboard-radial-empty"]')),
+      radialNodesInside,
       healthSvgCount: document.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length,
       healthWidthShare: board && health ? health.width / Math.max(board.width, 1) : 1,
       compactHealthCards: document.querySelectorAll('[data-testid="dashboard-company-health-compact"] a.rentcore-command-card').length,
@@ -99,6 +109,7 @@ test.describe('Dashboard enterprise layout', () => {
       expect(snapshot.radialCoreExists, `${viewport.name}: legacy radial core selector should be preserved (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.radialEmptyExists, `${viewport.name}: legacy radial empty selector should be preserved (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.radialNodeCount, `${viewport.name}: radial overview should keep business contour node selectors (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(6);
+      expect(snapshot.radialNodesInside, `${viewport.name}: radial compatibility nodes should stay inside overview (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.compactHealthCards, `${viewport.name}: compact company health should keep all business contours`).toBeGreaterThanOrEqual(6);
 
       if (viewport.name === 'desktop') {

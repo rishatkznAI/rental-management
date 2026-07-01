@@ -69,6 +69,18 @@ test('dashboard radial overview has empty and zero-value states without removing
   assert.doesNotMatch(radialBlock, /'N\/A'/);
 });
 
+test('dashboard radial compatibility selectors are descendants of the overview', () => {
+  const radialBlock = sourceBlock(dashboardSource, 'function CompanyHealthRadialOverview', 'function CompanyHealthCommandCenter');
+  const overviewContent = sourceBlock(radialBlock, 'data-testid="dashboard-radial-overview"', '</div>\n  );');
+
+  assert.match(overviewContent, /data-testid="dashboard-radial-core"/);
+  assert.match(overviewContent, /data-testid="dashboard-radial-node"/);
+  assert.match(overviewContent, /data-testid="dashboard-radial-empty"/);
+  assert.match(overviewContent, /className="rentcore-radial-compat-layer"/);
+  assert.match(overviewContent, /className="rentcore-radial-compat-node"/);
+  assert.doesNotMatch(overviewContent, /data-testid="dashboard-company-health-svg"/);
+});
+
 test('dashboard company health compact wrapper contains six anchor direction cards', () => {
   const commandCenterBlock = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
   const cardBlock = sourceBlock(dashboardSource, 'function CompanyHealthDirectionCard', 'function CompanyHealthCommandCenter');

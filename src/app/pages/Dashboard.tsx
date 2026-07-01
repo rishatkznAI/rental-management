@@ -1516,10 +1516,15 @@ function CompanyHealthCommandCenter({
   const directions = allDirections.length > 0 ? allDirections : [...leftDirections, ...rightDirections];
   const availableBars = bars.filter(item => item.value > 0);
   const missingBars = bars.filter(item => item.value <= 0);
+  const riskDirections = directions.filter(item => item.tone === 'danger' || item.tone === 'warning');
+  const noDataDirections = directions.filter(item => /нет данных/i.test(item.stateLabel || ''));
   const completenessText = [
     availableBars.length > 0 ? `Есть: ${availableBars.map(item => item.label).join(', ')}` : '',
     missingBars.length > 0 ? `Нет: ${missingBars.map(item => item.label).join(', ')}` : '',
   ].filter(Boolean).join(' · ') || 'Контуры ожидают данных';
+  const missingCount = noDataDirections.length || missingBars.length;
+  const riskCount = riskDirections.length || criticalSignals;
+  const insufficientDataTitle = 'Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок.';
 
   return (
     <div
@@ -1533,18 +1538,46 @@ function CompanyHealthCommandCenter({
         <div className="min-w-0">
           <CardTitle className="app-shell-title text-xl font-extrabold text-foreground" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
           <p className="mt-1 max-w-[68ch] text-sm leading-5 text-muted-foreground">
-            {hasScore ? subtitle : 'Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок.'}
+            Расчёт по доступным операционным данным
           </p>
         </div>
         <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:shrink-0">
+          <span className={`min-w-0 max-w-full rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold ${toneStyles[tone].accent}`}>{label}</span>
           <span className="min-w-0 max-w-full rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold text-foreground">
             {hasScore ? <>{progress}<span className="text-sm text-muted-foreground">/100</span></> : 'Недостаточно данных'}
           </span>
-          <span className={`min-w-0 max-w-full rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold ${toneStyles[tone].accent}`}>{label}</span>
         </div>
       </div>
 
-      <div className="rentcore-company-health-main grid min-w-0 gap-4 lg:grid-cols-[minmax(280px,0.4fr)_minmax(0,0.6fr)] lg:items-stretch">
+      <div className="rentcore-company-health-main grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.45fr)_minmax(0,2.2fr)] lg:items-stretch">
+        <div
+          className="grid min-w-0 content-between gap-4 rounded-[8px] border border-border/70 bg-background/35 p-4"
+          data-testid="dashboard-company-health-score"
+          title={hasScore ? `${progress}/100 · ${label}` : insufficientDataTitle}
+        >
+          <div className="min-w-0">
+            <div className="text-3xl font-black tracking-normal text-foreground sm:text-4xl">
+              {hasScore ? <>{progress}<span className="text-xl text-muted-foreground">/100</span></> : '—'}
+            </div>
+            <div className={`mt-2 text-sm font-extrabold ${toneStyles[tone].accent}`}>{label}</div>
+            <div className="mt-4 grid gap-2 text-sm font-semibold text-muted-foreground">
+              <span>{riskCount} {riskCount === 1 ? 'риск' : 'риска'}</span>
+              <span>{missingCount} нет данных</span>
+            </div>
+          </div>
+          <div className="min-w-0">
+            <div className="h-2 overflow-hidden rounded-full bg-muted/60">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{ width: `${hasScore ? progress : 12}%`, backgroundColor: healthSegmentColors[tone] }}
+              />
+            </div>
+            <p className="mt-2 text-xs font-semibold leading-5 text-muted-foreground">
+              {hasScore ? `${criticalSignals} критических сигналов` : 'Индекс появится после заполнения источников'}
+            </p>
+          </div>
+        </div>
+
         <div
           className="grid min-w-0 content-center gap-3 rounded-[8px] border border-border/70 bg-background/35 p-4"
           data-testid="dashboard-company-health-visual"
@@ -1566,29 +1599,20 @@ function CompanyHealthCommandCenter({
           </div>
         </div>
 
-        <div className="grid min-w-0 gap-3" data-testid="dashboard-company-health-directions">
+        <div className="grid min-w-0 gap-3 md:col-span-2 lg:col-span-1" data-testid="dashboard-company-health-directions">
           <div className="grid min-w-0 gap-2 sm:grid-cols-2" data-testid="dashboard-company-health-compact">
             {directions.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
-          </div>
-          <div
-            className="min-w-0 rounded-[8px] border border-border/70 bg-background/35 px-3 py-2 text-xs font-semibold leading-5 text-muted-foreground"
-            data-testid="dashboard-company-health-completeness"
-            title={completenessText}
-          >
-            {completenessText}
           </div>
         </div>
       </div>
 
-      {warning ? (
-        <p className="rounded-full border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-200">
-          {warning.replace(/^Health рассчитан по доступным данным\. /, '').replace(/\.$/, '')}
-        </p>
-      ) : (
-        <p className="text-xs font-semibold text-muted-foreground">
-          {hasScore ? `${criticalSignals} критических сигналов в контурах.` : 'Индекс появится после заполнения источников данных.'}
-        </p>
-      )}
+      <div
+        className="min-w-0 rounded-[8px] border border-border/70 bg-background/35 px-3 py-2 text-xs font-semibold leading-5 text-muted-foreground"
+        data-testid="dashboard-company-health-completeness"
+        title={warning ? warning.replace(/^Health рассчитан по доступным данным\. /, '').replace(/\.$/, '') : completenessText}
+      >
+        {completenessText}
+      </div>
     </div>
   );
 }

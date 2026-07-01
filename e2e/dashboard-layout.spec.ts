@@ -50,6 +50,32 @@ async function dashboardLayoutSnapshot(page: Page) {
     const health = rectFor('[data-testid="dashboard-company-health"]');
     const radial = rectFor('[data-testid="dashboard-radial-overview"]');
     const radialCore = document.querySelector('[data-testid="dashboard-radial-core"]');
+    const healthElement = document.querySelector('[data-testid="dashboard-company-health"]');
+    const healthRect = healthElement?.getBoundingClientRect();
+    const companyHealthOffenders = Array.from(healthElement?.querySelectorAll<HTMLElement>('*') ?? [])
+      .filter((element) => {
+        const style = window.getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0
+          && rect.height > 0
+          && (
+            rect.right > viewportWidth + 1
+            || (healthRect ? rect.right > healthRect.right + 1 : false)
+          );
+      })
+      .slice(0, 8)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          tag: element.tagName.toLowerCase(),
+          testId: element.getAttribute('data-testid') || '',
+          className: String(element.className || '').slice(0, 120),
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          width: Math.round(rect.width),
+        };
+      });
     const header = rectFor('body > div header');
     const commandHeader = rectFor('.rentcore-command-header');
     const cockpit = rectFor('[data-testid="dashboard-top-cockpit"]');
@@ -87,6 +113,7 @@ async function dashboardLayoutSnapshot(page: Page) {
       radialEmptyExists: Boolean(document.querySelector('[data-testid="dashboard-radial-empty"]')),
       healthSvgCount: document.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length,
       healthWidthShare: board && health ? health.width / Math.max(board.width, 1) : 1,
+      companyHealthOffenders,
       radialWidthShare: health && radial ? radial.width / Math.max(health.width, 1) : 1,
       radialCoreText: radialCore?.textContent?.trim() || '',
       compactHealthCards: document.querySelectorAll('[data-testid="dashboard-company-health-compact"] a.rentcore-command-card').length,
@@ -112,6 +139,7 @@ test.describe('Dashboard enterprise layout', () => {
       expect(snapshot.setupBannerCount, `${viewport.name}: removed setup banner should not be visible`).toBe(0);
       expect(snapshot.overflowX, `${viewport.name}: document should not scroll horizontally (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
       expect(snapshot.offenders, `${viewport.name}: visible elements should stay inside viewport`).toEqual([]);
+      expect(snapshot.companyHealthOffenders, `${viewport.name}: company health children should stay inside card and viewport`).toEqual([]);
       expect(snapshot.screen?.top ?? 0, `${viewport.name}: dashboard content should start below header`).toBeGreaterThanOrEqual((snapshot.header?.bottom ?? 0) - 1);
       expect(snapshot.cockpit?.top ?? 0, `${viewport.name}: KPI row should start below the dashboard command header`).toBeGreaterThanOrEqual((snapshot.commandHeader?.bottom ?? 0) - 1);
       expect(snapshot.healthSvgCount, `${viewport.name}: company health should not render a dominant central SVG circle`).toBe(0);

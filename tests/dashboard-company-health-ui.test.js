@@ -28,9 +28,13 @@ test('dashboard company health renders radial overview with stable selectors', (
   assert.match(radialBlock, /data-testid="dashboard-radial-node"/);
   assert.match(radialBlock, /data-testid="dashboard-radial-empty"/);
   assert.match(radialBlock, /viewBox="0 0 240 240"/);
+  assert.match(block, /data-testid="dashboard-company-health-visual"/);
+  assert.match(block, /data-testid="dashboard-company-health-directions"/);
+  assert.match(block, /data-testid="dashboard-company-health-completeness"/);
   assert.match(block, /data-testid="dashboard-company-health-compact"/);
   assert.match(block, /Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок\./);
-  assert.match(block, /<CompanyHealthBars items=\{bars\} \/>/);
+  assert.match(block, /const completenessText = \[/);
+  assert.doesNotMatch(block, /<CompanyHealthBars items=\{bars\} \/>/);
   assert.doesNotMatch(block, /new ResizeObserver/);
   assert.doesNotMatch(block, /window\.innerWidth/);
   assert.doesNotMatch(dashboardSource, /Дашборд ещё собирает управленческую картину/);
@@ -52,7 +56,11 @@ test('dashboard company health keeps executive direction summary alongside radia
 
   assert.match(block, /const directions = allDirections\.length > 0 \? allDirections : \[\.\.\.leftDirections, \.\.\.rightDirections\]/);
   assert.match(block, /data-company-health-layout="executive"/);
+  assert.match(block, /lg:grid-cols-\[minmax\(280px,0\.4fr\)_minmax\(0,0\.6fr\)\]/);
+  assert.match(block, /data-testid="dashboard-company-health-visual"/);
+  assert.match(block, /data-testid="dashboard-company-health-directions"/);
   assert.match(block, /data-testid="dashboard-company-health-compact"/);
+  assert.match(block, /data-testid="dashboard-company-health-completeness"/);
   assert.match(block, /data-testid="dashboard-company-health-title"/);
   assert.match(block, /rentcore-company-health-main/);
   assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
@@ -86,7 +94,10 @@ test('dashboard company health direction wrapper contains six anchor direction c
   assert.match(cardBlock, /Источник: \$\{item\.source\}/);
   assert.match(cardBlock, /Действие: \$\{item\.action\}/);
   assert.match(cardBlock, /rentcore-command-card-title[\s\S]*\{item\.title\}/);
-  assert.match(cardBlock, /rentcore-command-card-compact-value[\s\S]*\{item\.metrics\[0\]\?\.value \?\? ''\}/);
+  assert.match(cardBlock, /const primaryMetric = item\.metrics\[0\]/);
+  assert.match(cardBlock, /const secondaryMetrics = item\.metrics\.slice\(1, 3\)/);
+  assert.match(cardBlock, /rentcore-command-card-compact-value[\s\S]*\{primaryMetric\.value\}/);
+  assert.match(cardBlock, /secondaryMetrics\.map\(metric =>/);
 
   for (const label of ['Деньги', 'Парк техники', 'Сервис', 'Доставка', 'Документы', 'Возвраты']) {
     assert.match(directionsBlock, new RegExp(`title: '${label}'`));

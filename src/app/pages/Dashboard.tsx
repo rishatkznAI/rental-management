@@ -1287,6 +1287,8 @@ function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) 
   const Icon = item.icon;
   const tone = toneStyles[item.tone];
   const segmentColor = healthSegmentColors[item.tone] ?? healthSegmentColors.default;
+  const primaryMetric = item.metrics[0];
+  const secondaryMetrics = item.metrics.slice(1, 3);
   const title = [
     item.title,
     `Статус: ${item.stateLabel || 'Нет данных'}`,
@@ -1301,7 +1303,7 @@ function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) 
       key={item.id}
       to={item.href}
       title={title}
-      className="rentcore-command-card group flex min-w-0 flex-col justify-between gap-2 px-3 py-3"
+      className="rentcore-command-card group grid min-w-0 gap-2 px-3 py-3"
       style={{ '--rc-health-segment-color': segmentColor } as React.CSSProperties}
     >
       <div className="rentcore-command-card-head flex min-w-0 items-center gap-2">
@@ -1313,16 +1315,23 @@ function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) 
           <span className="rentcore-command-card-title block truncate text-sm font-extrabold text-foreground">{item.title}</span>
           {item.stateLabel ? <span className={`block truncate text-xs font-bold ${tone.accent}`}>{item.stateLabel}</span> : null}
         </span>
-        <span className={`rentcore-command-card-compact-value hidden shrink-0 text-sm font-extrabold ${tone.accent}`}>
-          {item.metrics[0]?.value ?? ''}
-        </span>
+        {primaryMetric ? (
+          <span className={`rentcore-command-card-compact-value hidden shrink-0 text-sm font-extrabold ${tone.accent}`}>
+            {primaryMetric.value}
+          </span>
+        ) : null}
       </div>
       <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">{item.reason}</p>
-      <div className="rentcore-command-card-metrics grid gap-1 text-xs leading-none">
-        {item.metrics.map(metric => (
-          <span key={metric.label} title={`${metric.label}: ${metric.value}`} className="flex min-w-0 items-center justify-between gap-3">
-            <span className="min-w-0 truncate text-muted-foreground">{metric.label}</span>
-            <span className={`shrink-0 font-extrabold ${commandMetricToneClass[item.tone]}`}>{metric.value}</span>
+      <div className="rentcore-command-card-metrics flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5">
+        {primaryMetric ? (
+          <span title={`${primaryMetric.label}: ${primaryMetric.value}`} className="min-w-0 truncate">
+            <span className="text-muted-foreground">{primaryMetric.label}: </span>
+            <span className={`font-extrabold ${commandMetricToneClass[item.tone]}`}>{primaryMetric.value}</span>
+          </span>
+        ) : null}
+        {secondaryMetrics.map(metric => (
+          <span key={metric.label} title={`${metric.label}: ${metric.value}`} className="min-w-0 truncate text-muted-foreground">
+            {metric.label}: <span className="font-bold text-foreground">{metric.value}</span>
           </span>
         ))}
       </div>
@@ -1505,6 +1514,12 @@ function CompanyHealthCommandCenter({
   const hasScore = typeof score === 'number';
   const progress = hasScore ? clampPercent(score) : 0;
   const directions = allDirections.length > 0 ? allDirections : [...leftDirections, ...rightDirections];
+  const availableBars = bars.filter(item => item.value > 0);
+  const missingBars = bars.filter(item => item.value <= 0);
+  const completenessText = [
+    availableBars.length > 0 ? `Есть: ${availableBars.map(item => item.label).join(', ')}` : '',
+    missingBars.length > 0 ? `Нет: ${missingBars.map(item => item.label).join(', ')}` : '',
+  ].filter(Boolean).join(' · ') || 'Контуры ожидают данных';
 
   return (
     <div
@@ -1529,20 +1544,39 @@ function CompanyHealthCommandCenter({
         </div>
       </div>
 
-      <div className="rentcore-company-health-main grid gap-4 lg:grid-cols-[minmax(220px,0.52fr)_minmax(0,1.48fr)] lg:items-center">
-        <CompanyHealthRadialOverview
-          directions={directions}
-          score={score}
-          label={label}
-          tone={tone}
-          criticalSignals={criticalSignals}
-        />
+      <div className="rentcore-company-health-main grid min-w-0 gap-4 lg:grid-cols-[minmax(280px,0.4fr)_minmax(0,0.6fr)] lg:items-stretch">
+        <div
+          className="grid min-w-0 content-center gap-3 rounded-[8px] border border-border/70 bg-background/35 p-4"
+          data-testid="dashboard-company-health-visual"
+        >
+          <CompanyHealthRadialOverview
+            directions={directions}
+            score={score}
+            label={label}
+            tone={tone}
+            criticalSignals={criticalSignals}
+          />
+          <div className="grid gap-1 text-center">
+            <div className={`text-sm font-extrabold ${toneStyles[tone].accent}`}>
+              {hasScore ? `${progress}/100 · ${label}` : label}
+            </div>
+            <p className="text-xs font-semibold text-muted-foreground">
+              {hasScore ? `${criticalSignals} критических сигналов` : 'Индекс появится после заполнения источников'}
+            </p>
+          </div>
+        </div>
 
-        <div className="grid gap-3">
-          <div className="grid gap-2 sm:grid-cols-2" data-testid="dashboard-company-health-compact">
+        <div className="grid min-w-0 gap-3" data-testid="dashboard-company-health-directions">
+          <div className="grid min-w-0 gap-2 sm:grid-cols-2" data-testid="dashboard-company-health-compact">
             {directions.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
           </div>
-          <CompanyHealthBars items={bars} />
+          <div
+            className="min-w-0 rounded-[8px] border border-border/70 bg-background/35 px-3 py-2 text-xs font-semibold leading-5 text-muted-foreground"
+            data-testid="dashboard-company-health-completeness"
+            title={completenessText}
+          >
+            {completenessText}
+          </div>
         </div>
       </div>
 

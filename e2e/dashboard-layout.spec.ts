@@ -48,6 +48,9 @@ async function dashboardLayoutSnapshot(page: Page) {
 
     const board = rectFor('[data-testid="dashboard-command-board"]');
     const health = rectFor('[data-testid="dashboard-company-health"]');
+    const healthVisual = rectFor('[data-testid="dashboard-company-health-visual"]');
+    const healthDirections = rectFor('[data-testid="dashboard-company-health-directions"]');
+    const healthCompleteness = rectFor('[data-testid="dashboard-company-health-completeness"]');
     const radial = rectFor('[data-testid="dashboard-radial-overview"]');
     const radialCore = document.querySelector('[data-testid="dashboard-radial-core"]');
     const healthElement = document.querySelector('[data-testid="dashboard-company-health"]');
@@ -81,6 +84,15 @@ async function dashboardLayoutSnapshot(page: Page) {
     const cockpit = rectFor('[data-testid="dashboard-top-cockpit"]');
     const screen = rectFor('.rentcore-command-screen');
     const radialNodes = Array.from(document.querySelectorAll('[data-testid="dashboard-radial-node"]'));
+    const radialElement = document.querySelector('[data-testid="dashboard-radial-overview"]');
+    const radialRect = radialElement?.getBoundingClientRect();
+    const radialNodesInside = Boolean(radialRect) && radialNodes.every((node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.left >= radialRect.left - 1
+        && rect.right <= radialRect.right + 1
+        && rect.top >= radialRect.top - 1
+        && rect.bottom <= radialRect.bottom + 1;
+    });
     const kpiCards = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="dashboard-executive-cockpit"] .rentcore-command-kpi'));
     const kpiReadability = kpiCards.map((card) => {
       const value = card.querySelector<HTMLElement>('.dashboard-kpi-value');
@@ -107,13 +119,18 @@ async function dashboardLayoutSnapshot(page: Page) {
       screen,
       board,
       health,
+      healthVisual,
+      healthDirections,
+      healthCompleteness,
       radial,
       radialCoreExists: Boolean(document.querySelector('[data-testid="dashboard-radial-core"]')),
       radialNodeCount: radialNodes.length,
+      radialNodesInside,
       radialEmptyExists: Boolean(document.querySelector('[data-testid="dashboard-radial-empty"]')),
       healthSvgCount: document.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length,
       healthWidthShare: board && health ? health.width / Math.max(board.width, 1) : 1,
       companyHealthOffenders,
+      healthVisualWidthShare: health && healthVisual ? healthVisual.width / Math.max(health.width, 1) : 1,
       radialWidthShare: health && radial ? radial.width / Math.max(health.width, 1) : 1,
       radialCoreText: radialCore?.textContent?.trim() || '',
       compactHealthCards: document.querySelectorAll('[data-testid="dashboard-company-health-compact"] a.rentcore-command-card').length,
@@ -143,12 +160,16 @@ test.describe('Dashboard enterprise layout', () => {
       expect(snapshot.screen?.top ?? 0, `${viewport.name}: dashboard content should start below header`).toBeGreaterThanOrEqual((snapshot.header?.bottom ?? 0) - 1);
       expect(snapshot.cockpit?.top ?? 0, `${viewport.name}: KPI row should start below the dashboard command header`).toBeGreaterThanOrEqual((snapshot.commandHeader?.bottom ?? 0) - 1);
       expect(snapshot.healthSvgCount, `${viewport.name}: company health should not render a dominant central SVG circle`).toBe(0);
+      expect(snapshot.healthVisual?.visible, `${viewport.name}: company health executive visual should be visible (${JSON.stringify(snapshot)})`).toBe(true);
+      expect(snapshot.healthDirections?.visible, `${viewport.name}: company health direction summary should be visible (${JSON.stringify(snapshot)})`).toBe(true);
+      expect(snapshot.healthCompleteness?.visible, `${viewport.name}: company health completeness strip should be visible (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.radial?.visible, `${viewport.name}: executive health visual should remain visible (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.radial?.height ?? 0, `${viewport.name}: executive health visual should not collapse (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(200);
       expect(snapshot.radialCoreText, `${viewport.name}: empty radial core must not show a huge Нет placeholder`).not.toContain('Нет');
       expect(snapshot.radialCoreExists, `${viewport.name}: legacy radial core selector should be preserved (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.radialEmptyExists, `${viewport.name}: legacy radial empty selector should be preserved (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.radialNodeCount, `${viewport.name}: radial overview should keep business contour node selectors (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(6);
+      expect(snapshot.radialNodesInside, `${viewport.name}: radial nodes should stay inside radial overview (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.compactHealthCards, `${viewport.name}: company health should keep all business contours`).toBeGreaterThanOrEqual(6);
       expect(snapshot.kpiReadability, `${viewport.name}: KPI values should render`).not.toEqual([]);
       expect(snapshot.kpiReadability.filter(item => item.clipped), `${viewport.name}: KPI values should not clip`).toEqual([]);
@@ -156,6 +177,8 @@ test.describe('Dashboard enterprise layout', () => {
 
       if (viewport.name === 'desktop') {
         expect(snapshot.healthWidthShare, `${viewport.name}: company health should be an executive-width module`).toBeGreaterThanOrEqual(0.75);
+        expect(snapshot.healthVisualWidthShare, `${viewport.name}: company health visual should use executive-width balance (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.32);
+        expect(snapshot.healthVisualWidthShare, `${viewport.name}: company health visual should leave room for direction summary (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(0.48);
         expect(snapshot.radialWidthShare, `${viewport.name}: radial visual should not dominate company health (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(0.36);
         expect(Math.min(...snapshot.kpiReadability.map(item => item.cardWidth)), `${viewport.name}: KPI cards should keep readable width (${JSON.stringify(snapshot.kpiReadability)})`).toBeGreaterThanOrEqual(220);
       }

@@ -769,10 +769,17 @@
     overflow: hidden;
     border: 1px solid var(--rc-command-panel-border);
     border-radius: 8px;
-    min-height: 84px;
+    min-height: 132px;
     background: var(--rc-command-panel-bg);
     box-shadow: 0 16px 48px -42px rgba(15, 23, 42, 0.5);
     transition: border-color var(--motion-duration-fast) var(--motion-ease-standard), background var(--motion-duration-fast) var(--motion-ease-standard), transform var(--motion-duration-fast) var(--motion-ease-standard);
+  }
+
+  .dashboard-kpi-value {
+    word-break: normal;
+    overflow-wrap: normal;
+    hyphens: none;
+    max-width: 100%;
   }
 
   .rentcore-command-kpi::after,
@@ -847,7 +854,7 @@
     max-width: 100%;
   }
 
-  .rentcore-command-map[data-company-health-layout="compact-card"] {
+  .rentcore-command-map[data-company-health-layout="executive"] {
     grid-template-columns: minmax(0, 1fr);
     width: 100%;
     max-width: 100%;
@@ -936,19 +943,24 @@
   .rentcore-command-health-card {
     align-content: start;
     container-type: inline-size;
-    min-height: 0;
+    min-height: 520px;
+    padding: clamp(16px, 1.5vw, 24px);
   }
 
   .rentcore-radial-overview {
     position: relative;
     min-width: 0;
     width: 100%;
-    min-height: 54px;
-    aspect-ratio: auto;
+    min-height: clamp(280px, 24vw, 380px);
+    aspect-ratio: 1 / 1;
     overflow: hidden;
     border-radius: 8px;
     border: 1px solid hsl(var(--border));
-    background: hsl(var(--muted) / 0.34);
+    background:
+      radial-gradient(circle at 50% 42%, rgba(163, 255, 53, 0.16), transparent 46%),
+      radial-gradient(circle at 50% 50%, rgba(69, 240, 208, 0.08), transparent 63%),
+      linear-gradient(145deg, rgba(24, 38, 39, 0.92), rgba(7, 16, 18, 0.94));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
   }
 
   .rentcore-radial-overview[data-radial-state="empty"],
@@ -959,9 +971,9 @@
 
   .rentcore-radial-overview .rentcore-health-svg {
     aspect-ratio: 1 / 1;
-    height: 0;
-    min-height: 0;
-    opacity: 0;
+    height: 100%;
+    min-height: 280px;
+    opacity: 1;
   }
 
   .rentcore-radial-node-label {
@@ -986,15 +998,20 @@
   }
 
   .rentcore-radial-empty {
-    position: static;
-    padding: 12px;
+    position: absolute;
+    inset-inline: 18px;
+    bottom: 16px;
+    padding: 8px 10px;
     overflow: hidden;
-    text-align: left;
+    text-align: center;
     text-overflow: ellipsis;
     white-space: normal;
     font-size: 12px;
     font-weight: 800;
-    color: hsl(var(--muted-foreground));
+    color: rgba(242, 247, 244, 0.82);
+    border: 1px solid rgba(163, 255, 53, 0.13);
+    border-radius: 999px;
+    background: rgba(7, 16, 18, 0.72);
   }
 
   .rentcore-health-orb {
@@ -2224,27 +2241,39 @@
 .rentcore-command-screen,
 .dark .rentcore-command-screen,
 body.rentcore-dashboard-reference-mode .rentcore-command-screen {
-  background: hsl(var(--background)) !important;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(69, 240, 208, 0.09), transparent 28rem),
+    radial-gradient(circle at 82% 4%, rgba(163, 255, 53, 0.075), transparent 30rem),
+    linear-gradient(135deg, #07100f 0%, #0a1418 44%, #08101a 100%) !important;
 }
 
 .rentcore-command-screen::before,
 .dark .rentcore-command-screen::before {
-  background: none !important;
-  opacity: 0 !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 22rem),
+    radial-gradient(circle at 50% 18%, rgba(93, 220, 255, 0.055), transparent 34rem) !important;
+  opacity: 1 !important;
 }
 
 .rentcore-command-shell,
 .dark .rentcore-command-shell,
 body.rentcore-dashboard-reference-mode .rentcore-command-shell {
-  background: hsl(var(--background)) !important;
-  box-shadow: none !important;
+  background:
+    linear-gradient(145deg, rgba(12, 25, 27, 0.76), rgba(5, 11, 17, 0.82)) !important;
+  border-color: rgba(163, 255, 53, 0.13) !important;
+  box-shadow:
+    0 34px 100px -72px rgba(0, 0, 0, 0.98),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(18px) !important;
 }
 
 .rentcore-command-board,
 .dark .rentcore-command-board,
 body.rentcore-dashboard-reference-mode .rentcore-command-board {
-  background: hsl(var(--muted) / 0.28) !important;
-  box-shadow: none !important;
+  background:
+    linear-gradient(135deg, rgba(21, 38, 39, 0.48), rgba(8, 17, 24, 0.62)) !important;
+  border-color: rgba(163, 255, 53, 0.11) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
 }
 
 .rentcore-command-header,
@@ -2257,9 +2286,29 @@ body.rentcore-dashboard-reference-mode .rentcore-command-header,
 body.rentcore-dashboard-reference-mode .rentcore-command-panel,
 body.rentcore-dashboard-reference-mode .rentcore-command-analytics {
   border-radius: 8px !important;
-  background: hsl(var(--card)) !important;
-  box-shadow: 0 18px 54px -48px rgba(15, 23, 42, 0.45) !important;
-  backdrop-filter: none !important;
+  background:
+    linear-gradient(145deg, rgba(24, 38, 39, 0.88), rgba(11, 20, 27, 0.92)) !important;
+  border: 1px solid rgba(226, 255, 232, 0.09) !important;
+  box-shadow:
+    0 24px 70px -58px rgba(0, 0, 0, 0.86),
+    inset 0 1px 0 rgba(255, 255, 255, 0.065) !important;
+  backdrop-filter: blur(14px) !important;
+}
+
+.rentcore-command-header,
+.dark .rentcore-command-header,
+body.rentcore-dashboard-reference-mode .rentcore-command-header {
+  background:
+    radial-gradient(circle at 18% 0%, rgba(69, 240, 208, 0.14), transparent 34%),
+    linear-gradient(135deg, rgba(26, 44, 43, 0.9), rgba(9, 17, 25, 0.94)) !important;
+}
+
+.rentcore-command-panel,
+.dark .rentcore-command-panel,
+body.rentcore-dashboard-reference-mode .rentcore-command-panel {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(255, 107, 107, 0.11), transparent 34%),
+    linear-gradient(145deg, rgba(25, 36, 39, 0.9), rgba(11, 18, 24, 0.94)) !important;
 }
 
 .rentcore-command-kpi,
@@ -2272,30 +2321,41 @@ body.rentcore-dashboard-reference-mode .rentcore-command-kpi,
 body.rentcore-dashboard-reference-mode .rentcore-command-card,
 body.rentcore-dashboard-reference-mode .rentcore-command-signal {
   border-radius: 8px !important;
-  background: hsl(var(--card)) !important;
-  box-shadow: none !important;
+  background:
+    linear-gradient(145deg, rgba(30, 47, 48, 0.88), rgba(13, 23, 30, 0.9)) !important;
+  border: 1px solid rgba(226, 255, 232, 0.085) !important;
+  box-shadow:
+    0 18px 50px -44px rgba(0, 0, 0, 0.82),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
 }
 
 .rentcore-command-kpi::after,
 .rentcore-command-card::after,
 .rentcore-command-signal::after {
-  display: none !important;
+  display: block !important;
+  opacity: 0.45 !important;
 }
 
 .rentcore-radial-overview,
 .dark .rentcore-radial-overview {
   width: 100% !important;
-  min-height: 54px !important;
-  aspect-ratio: auto !important;
+  min-height: clamp(280px, 24vw, 380px) !important;
+  aspect-ratio: 1 / 1 !important;
+  overflow: hidden !important;
   border-radius: 8px !important;
-  background: hsl(var(--muted) / 0.34) !important;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(163, 255, 53, 0.16), transparent 46%),
+    radial-gradient(circle at 50% 50%, rgba(69, 240, 208, 0.08), transparent 63%),
+    linear-gradient(135deg, rgba(69, 240, 208, 0.10), rgba(163, 255, 53, 0.075)),
+    rgba(18, 29, 30, 0.76) !important;
+  border: 1px solid rgba(163, 255, 53, 0.12) !important;
 }
 
 .rentcore-radial-overview .rentcore-health-svg,
 .dark .rentcore-radial-overview .rentcore-health-svg {
-  height: 0 !important;
-  min-height: 0 !important;
-  opacity: 0 !important;
+  height: 100% !important;
+  min-height: 280px !important;
+  opacity: 1 !important;
 }
 
 @keyframes app-card-reveal {

@@ -119,7 +119,7 @@ test('dashboard renders executive signal strip from compact action queue API', (
 });
 
 test('dashboard executive cockpit renders adaptive KPI cards and compact risk signals', () => {
-  for (const label of ['Операционная нагрузка', 'Индекс нагрузки компании', 'Открыть обзор', 'Утилизация парка', 'Загрузка сервиса', 'Поступления месяца', 'Здоровье компании']) {
+  for (const label of ['Нагрузка', 'Индекс нагрузки компании', 'Открыть обзор', 'Утилизация парка', 'Загрузка сервиса', 'Поступления месяца', 'Здоровье компании']) {
     assert.match(dashboardSource, new RegExp(label));
   }
   for (const helper of ['OperationalLoadGauge', 'UtilizationGauge', 'StatusBars', 'CompanyHealthBars', 'RiskSignalStrip']) {
@@ -136,7 +136,7 @@ test('dashboard executive cockpit renders adaptive KPI cards and compact risk si
   assert.equal(dashboardSource.match(/data-testid="dashboard-month-dynamics"/g)?.length, 1);
   assert.equal(dashboardSource.match(/data-testid="dashboard-company-health"/g)?.length, 1);
   assert.equal(dashboardSource.match(/<h3 className="app-shell-title whitespace-nowrap text-lg font-extrabold text-foreground">Динамика месяца<\/h3>/g)?.length, 1);
-  assert.equal(dashboardSource.match(/<CardTitle className="app-shell-title text-lg font-extrabold text-foreground" data-testid="dashboard-company-health-title">Здоровье компании<\/CardTitle>/g)?.length, 1);
+  assert.match(dashboardSource, /data-testid="dashboard-company-health-title">Здоровье компании<\/CardTitle>/);
   assert.match(dashboardSource, /operationalLoadScore/);
   assert.match(dashboardSource, /operationalLoadTone/);
   assert.match(dashboardSource, /receivablesTone/);
@@ -146,6 +146,10 @@ test('dashboard executive cockpit renders adaptive KPI cards and compact risk si
   assert.match(dashboardSource, /hasDebtSourceData/);
   assert.match(dashboardSource, /hasPaymentsSourceData/);
   assert.match(dashboardSource, /hasServiceSourceData/);
+});
+
+test('dashboard does not render the removed global setup banner', () => {
+  assert.doesNotMatch(dashboardSource, /Дашборд ещё собирает управленческую картину/);
 });
 
 test('dashboard command board uses enterprise grid without dominant company health circle', () => {
@@ -218,7 +222,7 @@ test('dashboard cockpit renders executive KPI grid with fleet and service analyt
     'Ожидают запчасти',
     'Готовы к закрытию',
     'Открыть сервис',
-    'Операционная нагрузка',
+    'Нагрузка',
     'Индекс нагрузки компании',
     'Открыть обзор',
     'Проверить долги',

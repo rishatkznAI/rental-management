@@ -307,7 +307,7 @@ async function expectExecutiveCockpitVisible(page: Page) {
     { testId: 'dashboard-kpi-overdue-debt', label: 'Просроченная дебиторка' },
     { testId: 'dashboard-kpi-fleet-utilization', label: 'Утилизация парка' },
     { testId: 'dashboard-kpi-service-load', label: 'Загрузка сервиса' },
-    { testId: 'dashboard-kpi-operational-load', label: 'Операционная нагрузка' },
+    { testId: 'dashboard-kpi-operational-load', label: 'Нагрузка' },
   ];
 
   for (const item of kpiChecks) {
@@ -418,7 +418,7 @@ async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Loc
   expect(layout.compact?.visible, `dashboard company health should render compact list (${JSON.stringify(layout)})`).toBe(true);
   expect(layout.compactCards, 'dashboard company health compact list should include all direction cards').toBeGreaterThanOrEqual(6);
   if (viewport.width >= 1024) {
-    expect(layout.healthWidthShare, `desktop company health should not dominate dashboard width (${JSON.stringify(layout)})`).toBeLessThanOrEqual(0.38);
+    expect(layout.healthWidthShare, `desktop company health should be an executive-width module (${JSON.stringify(layout)})`).toBeGreaterThanOrEqual(0.75);
   }
 }
 

@@ -252,7 +252,34 @@ Bad example:
 small unreadable explanation somewhere below
 ```
 
-### 8.2. Hierarchy
+### 8.2. KPI readability and wrapping
+
+KPI values must never wrap letter-by-letter or become unreadable because the card is too narrow.
+
+Forbidden examples:
+
+```text
+Нет
+данн
+ых
+```
+
+```text
+Низк
+ая
+```
+
+Forbidden KPI behavior:
+
+- value clipped by the card;
+- value stacked vertically by letters;
+- value compressed into an unreadable block;
+- important status hidden in tiny text;
+- long labels forced into a card instead of allowing layout wrap.
+
+If a KPI card is too narrow, the layout must wrap the card to the next row, increase the card min-width, or use a shorter approved label/value. Readability is more important than fitting all KPI cards into one line.
+
+### 8.3. Hierarchy
 
 Every block must have a clear hierarchy:
 
@@ -261,7 +288,7 @@ Every block must have a clear hierarchy:
 3. Short explanation.
 4. Action or source.
 
-### 8.3. Small text
+### 8.4. Small text
 
 Small text is allowed only for supporting metadata.
 
@@ -379,7 +406,9 @@ The Dashboard should support these KPI cards:
 7. Возвраты сегодня.
 8. Просроченные ТО / критические задачи.
 
-The visible count may adapt to screen width, but desktop should show the most important 5–7 cards.
+The Dashboard may support 8 KPI cards, but it must not force all of them into one row.
+
+At 1440px, KPI cards must keep a readable minimum width. If needed, KPI cards must wrap to a second row. The preferred first visual row contains the most important 5–7 cards, but readability and premium appearance are more important than fitting every KPI into one line.
 
 ### KPI card requirements
 
@@ -419,6 +448,8 @@ Do not:
 - make the card look broken;
 - use tiny text for important meaning;
 - make normal, risky and missing states visually identical;
+- force 8 KPI cards into one row when it causes unreadable text;
+- allow KPI values to wrap by letters or become clipped;
 - calculate service load by request count only;
 - calculate delivery status by total records only without daily plan/completion/risk.
 
@@ -835,6 +866,22 @@ Example:
 Действие: откройте Платежи и проверьте ввод оплат
 ```
 
+### Executive visual area
+
+Company Health must include a visible executive visual area. It is not enough to show only compact text cards.
+
+The executive visual area should include one of the following meaningful visuals:
+
+- health score / risk score with a premium visual treatment;
+- trend line or compact area chart;
+- executive risk trend;
+- polished radial/progress visual if it adds meaning;
+- combined score + direction summary layout.
+
+This visual must be visible, meaningful and integrated into the design. It must not look like a tiny debug widget or a hidden production-smoke compatibility artifact.
+
+Compatibility radial selectors may be attached to real elements of the new health visual, but they must remain inside the `dashboard-radial-overview` bounds and must not damage the premium visual appearance.
+
 ### Visual requirements
 
 This block must look like an executive control panel, not a debug table.
@@ -842,10 +889,12 @@ This block must look like an executive control panel, not a debug table.
 Use:
 
 - compact direction cards;
+- visible executive chart/score area;
 - scan-friendly structure;
 - clear badges;
 - strong but restrained accents;
-- premium surface and depth.
+- premium surface and depth;
+- enough height and spacing so the module is not clipped on desktop 1440.
 
 ### Forbidden
 
@@ -854,7 +903,9 @@ Do not use:
 - huge central `N/A`;
 - large decorative radial without purpose;
 - text-heavy paragraphs;
-- tiny text for key meaning.
+- tiny text for key meaning;
+- visible compatibility radial elements that look like technical/debug artifacts;
+- clipped lower content on desktop 1440.
 
 ---
 
@@ -1078,20 +1129,21 @@ A Dashboard PR can be accepted only if all of the following are true:
 1. Dashboard looks like premium B2B SaaS.
 2. Dashboard sells rentCore as a serious product.
 3. KPI cards are visually strong and readable.
-4. Empty states look like smart onboarding, not errors.
-5. Company Health looks like an executive module.
-6. No huge `N/A` is used as the main visual element.
-7. No empty black holes are left on the screen.
-8. No noisy sci-fi visuals are used.
-9. The screen does not look like a cheap admin panel.
-10. Responsive layout works at 1440 / 768 / 390.
-11. Horizontal overflow = 0.
-12. Production selectors are preserved.
-13. `radialNodesInside = true`.
-14. Backend/API/RBAC/db/schema/storage are untouched unless explicitly approved.
-15. Unrelated pages are not broken.
-16. Business meaning is not hidden in tiny text.
-17. Dashboard remains operationally useful, not only visually attractive.
+4. KPI values do not wrap letter-by-letter, do not clip, and do not become unreadable at 1440 / 768 / 390.
+5. Empty states are local, compact, action-oriented and placed inside the relevant business block, not shown as a wide global setup banner.
+6. Company Health looks like an executive module.
+7. No huge `N/A` is used as the main visual element.
+8. No empty black holes are left on the screen.
+9. No noisy sci-fi visuals are used.
+10. The screen does not look like a cheap admin panel.
+11. Responsive layout works at 1440 / 768 / 390.
+12. Horizontal overflow = 0.
+13. Production selectors are preserved.
+14. `radialNodesInside = true`.
+15. Backend/API/RBAC/db/schema/storage are untouched unless explicitly approved.
+16. Unrelated pages are not broken.
+17. Business meaning is not hidden in tiny text.
+18. Dashboard remains operationally useful, not only visually attractive.
 
 ---
 
@@ -1124,7 +1176,7 @@ Design improvements:
 - Fleet load:
 - Receivables:
 - Company health:
-- Empty-data/setup mode:
+- Local empty states:
 
 Production compatibility:
 - dashboard-radial-overview:

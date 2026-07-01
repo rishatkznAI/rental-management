@@ -1521,11 +1521,11 @@ function CompanyHealthCommandCenter({
             {hasScore ? subtitle : 'Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок.'}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <span className="rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold text-foreground">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:shrink-0">
+          <span className="min-w-0 max-w-full rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold text-foreground">
             {hasScore ? <>{progress}<span className="text-sm text-muted-foreground">/100</span></> : 'Недостаточно данных'}
           </span>
-          <span className={`rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold ${toneStyles[tone].accent}`}>{label}</span>
+          <span className={`min-w-0 max-w-full rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold ${toneStyles[tone].accent}`}>{label}</span>
         </div>
       </div>
 

@@ -96,6 +96,15 @@ test('dashboard company health direction wrapper contains six anchor direction c
   assert.equal(directionsBlock.match(/action: /g)?.length, 6);
 });
 
+test('dashboard company health header pills can shrink and wrap on mobile', () => {
+  const commandCenterBlock = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
+
+  assert.match(commandCenterBlock, /className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:shrink-0"/);
+  assert.match(commandCenterBlock, /className="min-w-0 max-w-full rounded-full border border-border bg-background px-3 py-1\.5 text-sm font-extrabold text-foreground"/);
+  assert.match(commandCenterBlock, /`min-w-0 max-w-full rounded-full border border-border bg-background px-3 py-1\.5 text-sm font-extrabold \$\{toneStyles\[tone\]\.accent\}`/);
+  assert.doesNotMatch(commandCenterBlock, /className="flex shrink-0 flex-wrap items-center gap-2"/);
+});
+
 test('dashboard company health layout avoids horizontal overflow on narrow containers', () => {
   assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*width: 100%;/);
   assert.match(themeSource, /\.rentcore-command-column\s*\{[\s\S]*min-width: 0;/);

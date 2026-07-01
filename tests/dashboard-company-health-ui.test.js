@@ -23,6 +23,7 @@ test('dashboard company health renders radial overview with stable selectors', (
   assert.match(block, /data-testid="dashboard-company-health"/);
   assert.match(block, /data-company-health-layout="executive"/);
   assert.match(block, /<CompanyHealthRadialOverview/);
+  assert.match(block, /data-testid="dashboard-company-health-score"/);
   assert.match(radialBlock, /data-testid="dashboard-radial-overview"/);
   assert.match(radialBlock, /data-testid="dashboard-radial-core"/);
   assert.match(radialBlock, /data-testid="dashboard-radial-node"/);
@@ -32,7 +33,7 @@ test('dashboard company health renders radial overview with stable selectors', (
   assert.match(block, /data-testid="dashboard-company-health-directions"/);
   assert.match(block, /data-testid="dashboard-company-health-completeness"/);
   assert.match(block, /data-testid="dashboard-company-health-compact"/);
-  assert.match(block, /Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок\./);
+  assert.match(block, /Расчёт по доступным операционным данным/);
   assert.match(block, /const completenessText = \[/);
   assert.doesNotMatch(block, /<CompanyHealthBars items=\{bars\} \/>/);
   assert.doesNotMatch(block, /new ResizeObserver/);
@@ -56,7 +57,8 @@ test('dashboard company health keeps executive direction summary alongside radia
 
   assert.match(block, /const directions = allDirections\.length > 0 \? allDirections : \[\.\.\.leftDirections, \.\.\.rightDirections\]/);
   assert.match(block, /data-company-health-layout="executive"/);
-  assert.match(block, /lg:grid-cols-\[minmax\(280px,0\.4fr\)_minmax\(0,0\.6fr\)\]/);
+  assert.match(block, /lg:grid-cols-\[minmax\(0,1fr\)_minmax\(0,1\.45fr\)_minmax\(0,2\.2fr\)\]/);
+  assert.match(block, /data-testid="dashboard-company-health-score"/);
   assert.match(block, /data-testid="dashboard-company-health-visual"/);
   assert.match(block, /data-testid="dashboard-company-health-directions"/);
   assert.match(block, /data-testid="dashboard-company-health-compact"/);
@@ -64,6 +66,24 @@ test('dashboard company health keeps executive direction summary alongside radia
   assert.match(block, /data-testid="dashboard-company-health-title"/);
   assert.match(block, /rentcore-company-health-main/);
   assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
+});
+
+test('dashboard company health renders score, visual, directions and local data strip as one executive module', () => {
+  const block = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
+  const radialBlock = sourceBlock(dashboardSource, 'function CompanyHealthRadialOverview', 'function CompanyHealthCommandCenter');
+
+  assert.match(block, /data-testid="dashboard-company-health-title">Здоровье компании<\/CardTitle>/);
+  assert.match(block, /Расчёт по доступным операционным данным/);
+  assert.match(block, /data-testid="dashboard-company-health-score"/);
+  assert.match(block, /data-testid="dashboard-company-health-visual"/);
+  assert.match(block, /data-testid="dashboard-company-health-directions"/);
+  assert.match(block, /data-testid="dashboard-company-health-completeness"/);
+  assert.match(block, /\{hasScore \? <>\{progress\}<span className="text-xl text-muted-foreground">\/100<\/span><\/> : '—'\}/);
+  assert.match(block, /\{riskCount\} \{riskCount === 1 \? 'риск' : 'риска'\}/);
+  assert.match(block, /\{missingCount\} нет данных/);
+  assert.match(block, /directions\.map\(item => <CompanyHealthDirectionCard key=\{item\.id\} item=\{item\} \/>\)/);
+  assert.match(block, /title=\{warning \? warning\.replace/);
+  assert.doesNotMatch(radialBlock, />Нет</);
 });
 
 test('dashboard radial overview has empty and zero-value states without removing the shell', () => {

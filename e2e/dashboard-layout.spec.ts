@@ -48,6 +48,7 @@ async function dashboardLayoutSnapshot(page: Page) {
 
     const board = rectFor('[data-testid="dashboard-command-board"]');
     const health = rectFor('[data-testid="dashboard-company-health"]');
+    const healthScore = rectFor('[data-testid="dashboard-company-health-score"]');
     const healthVisual = rectFor('[data-testid="dashboard-company-health-visual"]');
     const healthDirections = rectFor('[data-testid="dashboard-company-health-directions"]');
     const healthCompleteness = rectFor('[data-testid="dashboard-company-health-completeness"]');
@@ -119,6 +120,7 @@ async function dashboardLayoutSnapshot(page: Page) {
       screen,
       board,
       health,
+      healthScore,
       healthVisual,
       healthDirections,
       healthCompleteness,
@@ -130,7 +132,9 @@ async function dashboardLayoutSnapshot(page: Page) {
       healthSvgCount: document.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length,
       healthWidthShare: board && health ? health.width / Math.max(board.width, 1) : 1,
       companyHealthOffenders,
+      healthScoreWidthShare: health && healthScore ? healthScore.width / Math.max(health.width, 1) : 1,
       healthVisualWidthShare: health && healthVisual ? healthVisual.width / Math.max(health.width, 1) : 1,
+      healthDirectionsWidthShare: health && healthDirections ? healthDirections.width / Math.max(health.width, 1) : 1,
       radialWidthShare: health && radial ? radial.width / Math.max(health.width, 1) : 1,
       radialCoreText: radialCore?.textContent?.trim() || '',
       compactHealthCards: document.querySelectorAll('[data-testid="dashboard-company-health-compact"] a.rentcore-command-card').length,
@@ -160,6 +164,7 @@ test.describe('Dashboard enterprise layout', () => {
       expect(snapshot.screen?.top ?? 0, `${viewport.name}: dashboard content should start below header`).toBeGreaterThanOrEqual((snapshot.header?.bottom ?? 0) - 1);
       expect(snapshot.cockpit?.top ?? 0, `${viewport.name}: KPI row should start below the dashboard command header`).toBeGreaterThanOrEqual((snapshot.commandHeader?.bottom ?? 0) - 1);
       expect(snapshot.healthSvgCount, `${viewport.name}: company health should not render a dominant central SVG circle`).toBe(0);
+      expect(snapshot.healthScore?.visible, `${viewport.name}: company health score summary should be visible (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.healthVisual?.visible, `${viewport.name}: company health executive visual should be visible (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.healthDirections?.visible, `${viewport.name}: company health direction summary should be visible (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.healthCompleteness?.visible, `${viewport.name}: company health completeness strip should be visible (${JSON.stringify(snapshot)})`).toBe(true);
@@ -177,8 +182,11 @@ test.describe('Dashboard enterprise layout', () => {
 
       if (viewport.name === 'desktop') {
         expect(snapshot.healthWidthShare, `${viewport.name}: company health should be an executive-width module`).toBeGreaterThanOrEqual(0.75);
-        expect(snapshot.healthVisualWidthShare, `${viewport.name}: company health visual should use executive-width balance (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.32);
-        expect(snapshot.healthVisualWidthShare, `${viewport.name}: company health visual should leave room for direction summary (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(0.48);
+        expect(snapshot.healthScoreWidthShare, `${viewport.name}: score summary should occupy a compact left zone (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.16);
+        expect(snapshot.healthScoreWidthShare, `${viewport.name}: score summary should not become an empty oversized left zone (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(0.25);
+        expect(snapshot.healthVisualWidthShare, `${viewport.name}: company health visual should use executive-width balance (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.25);
+        expect(snapshot.healthVisualWidthShare, `${viewport.name}: company health visual should leave room for direction summary (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(0.38);
+        expect(snapshot.healthDirectionsWidthShare, `${viewport.name}: direction summary should remain the primary right-side information zone (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.4);
         expect(snapshot.radialWidthShare, `${viewport.name}: radial visual should not dominate company health (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(0.36);
         expect(Math.min(...snapshot.kpiReadability.map(item => item.cardWidth)), `${viewport.name}: KPI cards should keep readable width (${JSON.stringify(snapshot.kpiReadability)})`).toBeGreaterThanOrEqual(220);
       }

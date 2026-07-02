@@ -469,6 +469,8 @@ Do not:
 
 ## 13. Data Completeness / Setup Banner Rule
 
+Company Health detailed layout is defined in `docs/company-health-design-spec.md`; future changes to `Здоровье компании` must follow that spec.
+
 ### 13.1. Decision
 
 The Dashboard must **not** show a separate wide information banner with the text:

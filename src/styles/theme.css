@@ -624,8 +624,8 @@
 
   .rentcore-command-map .rentcore-command-card {
     --rc-health-segment-color: #78909c;
-    min-height: 132px;
-    padding: 12px;
+    min-height: 72px;
+    padding: 8px 12px;
   }
 
   .rentcore-command-map .rentcore-command-card::before {
@@ -694,19 +694,19 @@
   .rentcore-command-health-card {
     align-content: start;
     container-type: inline-size;
-    min-height: 420px;
-    padding: clamp(16px, 1.5vw, 24px);
+    min-height: 300px;
+    padding: 16px;
   }
 
   .rentcore-radial-overview {
     position: relative;
     min-width: 0;
-    width: min(100%, 260px);
-    min-height: clamp(210px, 18vw, 260px);
+    width: min(100%, 200px);
+    min-height: 200px;
     aspect-ratio: 1 / 1;
     overflow: hidden;
     border-radius: 8px;
-    border: 1px solid hsl(var(--border));
+    border: 0;
     background:
       radial-gradient(circle at 50% 42%, rgba(163, 255, 53, 0.16), transparent 46%),
       radial-gradient(circle at 50% 50%, rgba(69, 240, 208, 0.08), transparent 63%),
@@ -723,7 +723,7 @@
   .rentcore-radial-overview .rentcore-health-svg {
     aspect-ratio: 1 / 1;
     height: 100%;
-    min-height: clamp(210px, 18vw, 260px);
+    min-height: 200px;
     opacity: 1;
   }
 
@@ -2023,8 +2023,8 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
 
 .rentcore-radial-overview,
 .dark .rentcore-radial-overview {
-  width: min(100%, 260px) !important;
-  min-height: clamp(210px, 18vw, 260px) !important;
+  width: min(100%, 200px) !important;
+  min-height: 200px !important;
   aspect-ratio: 1 / 1 !important;
   overflow: hidden !important;
   border-radius: 8px !important;
@@ -2033,13 +2033,13 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
     radial-gradient(circle at 50% 50%, rgba(69, 240, 208, 0.08), transparent 63%),
     linear-gradient(135deg, rgba(69, 240, 208, 0.10), rgba(163, 255, 53, 0.075)),
     rgba(18, 29, 30, 0.76) !important;
-  border: 1px solid rgba(163, 255, 53, 0.12) !important;
+  border: 0 !important;
 }
 
 .rentcore-radial-overview .rentcore-health-svg,
 .dark .rentcore-radial-overview .rentcore-health-svg {
   height: 100% !important;
-  min-height: clamp(210px, 18vw, 260px) !important;
+  min-height: 200px !important;
   opacity: 1 !important;
 }
 

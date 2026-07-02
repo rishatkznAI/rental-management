@@ -55,15 +55,21 @@ test('dashboard radial overview positions nodes mathematically inside the SVG co
 test('dashboard company health keeps executive direction summary alongside radial overview', () => {
   const block = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
 
-  assert.match(block, /const directions = allDirections\.length > 0 \? allDirections : \[\.\.\.leftDirections, \.\.\.rightDirections\]/);
+  assert.match(block, /const directionOrder = \['money', 'fleet', 'service', 'documents', 'delivery', 'returns'\]/);
+  assert.match(block, /\.sort\(\(a, b\) => directionOrder\.indexOf\(a\.id\) - directionOrder\.indexOf\(b\.id\)\)/);
   assert.match(block, /data-company-health-layout="executive"/);
-  assert.match(block, /lg:grid-cols-\[minmax\(0,1fr\)_minmax\(0,1\.45fr\)_minmax\(0,2\.2fr\)\]/);
+  assert.match(block, /lg:grid-cols-\[220px_minmax\(280px,340px\)_minmax\(0,1fr\)\]/);
   assert.match(block, /data-testid="dashboard-company-health-score"/);
   assert.match(block, /data-testid="dashboard-company-health-visual"/);
   assert.match(block, /data-testid="dashboard-company-health-directions"/);
   assert.match(block, /data-testid="dashboard-company-health-compact"/);
   assert.match(block, /data-testid="dashboard-company-health-completeness"/);
   assert.match(block, /data-testid="dashboard-company-health-title"/);
+  assert.match(block, /company-health-header/);
+  assert.match(block, /company-health-score-panel/);
+  assert.match(block, /company-health-visual-panel/);
+  assert.match(block, /company-health-direction-summary/);
+  assert.match(block, /company-health-completeness-strip/);
   assert.match(block, /rentcore-company-health-main/);
   assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
 });
@@ -115,9 +121,9 @@ test('dashboard company health direction wrapper contains six anchor direction c
   assert.match(cardBlock, /Действие: \$\{item\.action\}/);
   assert.match(cardBlock, /rentcore-command-card-title[\s\S]*\{item\.title\}/);
   assert.match(cardBlock, /const primaryMetric = item\.metrics\[0\]/);
-  assert.match(cardBlock, /const secondaryMetrics = item\.metrics\.slice\(1, 3\)/);
   assert.match(cardBlock, /rentcore-command-card-compact-value[\s\S]*\{primaryMetric\.value\}/);
-  assert.match(cardBlock, /secondaryMetrics\.map\(metric =>/);
+  assert.doesNotMatch(cardBlock, /secondaryMetrics/);
+  assert.match(cardBlock, /line-clamp-1/);
 
   for (const label of ['Деньги', 'Парк техники', 'Сервис', 'Доставка', 'Документы', 'Возвраты']) {
     assert.match(directionsBlock, new RegExp(`title: '${label}'`));
@@ -140,8 +146,8 @@ test('dashboard company health layout avoids horizontal overflow on narrow conta
   assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*width: 100%;/);
   assert.match(themeSource, /\.rentcore-command-column\s*\{[\s\S]*min-width: 0;/);
   assert.match(themeSource, /\.rentcore-command-compact-list\s*\{[\s\S]*width: 100%;/);
-  assert.match(themeSource, /\.rentcore-command-health-card\s*\{[\s\S]*container-type: inline-size;[\s\S]*min-height: 420px;/);
-  assert.match(themeSource, /\.rentcore-radial-overview\s*\{[\s\S]*width: min\(100%, 260px\);[\s\S]*min-height: clamp\(210px, 18vw, 260px\);[\s\S]*aspect-ratio: 1 \/ 1;[\s\S]*overflow: hidden;/);
+  assert.match(themeSource, /\.rentcore-command-health-card\s*\{[\s\S]*container-type: inline-size;[\s\S]*min-height: 300px;/);
+  assert.match(themeSource, /\.rentcore-radial-overview\s*\{[\s\S]*width: min\(100%, 200px\);[\s\S]*min-height: 200px;[\s\S]*aspect-ratio: 1 \/ 1;[\s\S]*overflow: hidden;/);
   assert.match(themeSource, /\.rentcore-radial-node-label\s*\{[\s\S]*letter-spacing: 0;/);
   assert.match(themeSource, /\.rentcore-radial-empty\s*\{[\s\S]*text-overflow: ellipsis;[\s\S]*white-space: normal;/);
   assert.doesNotMatch(dashboardSource, /estimatedCardWidth > 0 && estimatedCardWidth < 180/);

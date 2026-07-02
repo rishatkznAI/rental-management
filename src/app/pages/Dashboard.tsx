@@ -1288,7 +1288,6 @@ function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) 
   const tone = toneStyles[item.tone];
   const segmentColor = healthSegmentColors[item.tone] ?? healthSegmentColors.default;
   const primaryMetric = item.metrics[0];
-  const secondaryMetrics = item.metrics.slice(1, 3);
   const title = [
     item.title,
     `Статус: ${item.stateLabel || 'Нет данных'}`,
@@ -1303,11 +1302,11 @@ function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) 
       key={item.id}
       to={item.href}
       title={title}
-      className="rentcore-command-card group grid min-w-0 gap-2 px-3 py-3"
+      className="rentcore-command-card group grid min-w-0 gap-1.5 px-3 py-2"
       style={{ '--rc-health-segment-color': segmentColor } as React.CSSProperties}
     >
       <div className="rentcore-command-card-head flex min-w-0 items-center gap-2">
-        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-border bg-background ${tone.accent}`}>
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-border bg-background ${tone.accent}`}>
           <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
         </span>
         <span className="rentcore-command-card-status" aria-hidden="true" />
@@ -1316,25 +1315,12 @@ function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) 
           {item.stateLabel ? <span className={`block truncate text-xs font-bold ${tone.accent}`}>{item.stateLabel}</span> : null}
         </span>
         {primaryMetric ? (
-          <span className={`rentcore-command-card-compact-value hidden shrink-0 text-sm font-extrabold ${tone.accent}`}>
+          <span className={`rentcore-command-card-compact-value min-w-0 shrink-0 truncate text-[11px] font-extrabold leading-4 ${tone.accent}`} title={`${primaryMetric.label}: ${primaryMetric.value}`}>
             {primaryMetric.value}
           </span>
         ) : null}
       </div>
-      <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">{item.reason}</p>
-      <div className="rentcore-command-card-metrics flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5">
-        {primaryMetric ? (
-          <span title={`${primaryMetric.label}: ${primaryMetric.value}`} className="min-w-0 truncate">
-            <span className="text-muted-foreground">{primaryMetric.label}: </span>
-            <span className={`font-extrabold ${commandMetricToneClass[item.tone]}`}>{primaryMetric.value}</span>
-          </span>
-        ) : null}
-        {secondaryMetrics.map(metric => (
-          <span key={metric.label} title={`${metric.label}: ${metric.value}`} className="min-w-0 truncate text-muted-foreground">
-            {metric.label}: <span className="font-bold text-foreground">{metric.value}</span>
-          </span>
-        ))}
-      </div>
+      <p className="line-clamp-1 text-xs leading-4 text-muted-foreground">{item.reason}</p>
     </Link>
   );
 }
@@ -1513,7 +1499,10 @@ function CompanyHealthCommandCenter({
 }) {
   const hasScore = typeof score === 'number';
   const progress = hasScore ? clampPercent(score) : 0;
-  const directions = allDirections.length > 0 ? allDirections : [...leftDirections, ...rightDirections];
+  const directionOrder = ['money', 'fleet', 'service', 'documents', 'delivery', 'returns'];
+  const directions = (allDirections.length > 0 ? allDirections : [...leftDirections, ...rightDirections])
+    .slice()
+    .sort((a, b) => directionOrder.indexOf(a.id) - directionOrder.indexOf(b.id));
   const availableBars = bars.filter(item => item.value > 0);
   const missingBars = bars.filter(item => item.value <= 0);
   const riskDirections = directions.filter(item => item.tone === 'danger' || item.tone === 'warning');
@@ -1528,13 +1517,13 @@ function CompanyHealthCommandCenter({
 
   return (
     <div
-      className="rentcore-command-map rentcore-command-health-card grid gap-4"
+      className="rentcore-command-map rentcore-command-health-card flex shrink-0 flex-col gap-3"
       role="region"
       aria-label={hasScore ? `Здоровье компании ${progress} из 100: ${label}` : `Здоровье компании: ${label}`}
       data-testid="dashboard-company-health"
       data-company-health-layout="executive"
     >
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+      <div className="company-health-header flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <CardTitle className="app-shell-title text-xl font-extrabold text-foreground" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
           <p className="mt-1 max-w-[68ch] text-sm leading-5 text-muted-foreground">
@@ -1549,9 +1538,9 @@ function CompanyHealthCommandCenter({
         </div>
       </div>
 
-      <div className="rentcore-company-health-main grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.45fr)_minmax(0,2.2fr)] lg:items-stretch">
+      <div className="rentcore-company-health-main grid min-w-0 gap-4 lg:grid-cols-[220px_minmax(280px,340px)_minmax(0,1fr)] lg:items-stretch">
         <div
-          className="grid min-w-0 content-between gap-4 rounded-[8px] border border-border/70 bg-background/35 p-4"
+          className="company-health-score-panel grid min-w-0 content-between gap-3 rounded-[8px] border border-border/70 bg-background/35 p-3"
           data-testid="dashboard-company-health-score"
           title={hasScore ? `${progress}/100 · ${label}` : insufficientDataTitle}
         >
@@ -1579,7 +1568,7 @@ function CompanyHealthCommandCenter({
         </div>
 
         <div
-          className="grid min-w-0 content-center gap-3 rounded-[8px] border border-border/70 bg-background/35 p-4"
+          className="company-health-visual-panel grid min-w-0 content-center justify-items-center rounded-[8px] border border-border/70 bg-background/35 p-3"
           data-testid="dashboard-company-health-visual"
         >
           <CompanyHealthRadialOverview
@@ -1589,25 +1578,17 @@ function CompanyHealthCommandCenter({
             tone={tone}
             criticalSignals={criticalSignals}
           />
-          <div className="grid gap-1 text-center">
-            <div className={`text-sm font-extrabold ${toneStyles[tone].accent}`}>
-              {hasScore ? `${progress}/100 · ${label}` : label}
-            </div>
-            <p className="text-xs font-semibold text-muted-foreground">
-              {hasScore ? `${criticalSignals} критических сигналов` : 'Индекс появится после заполнения источников'}
-            </p>
-          </div>
         </div>
 
-        <div className="grid min-w-0 gap-3 md:col-span-2 lg:col-span-1" data-testid="dashboard-company-health-directions">
-          <div className="grid min-w-0 gap-2 sm:grid-cols-2" data-testid="dashboard-company-health-compact">
+        <div className="company-health-direction-summary grid min-w-0 gap-3 lg:col-span-1" data-testid="dashboard-company-health-directions">
+          <div className="grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-rows-3" data-testid="dashboard-company-health-compact">
             {directions.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
           </div>
         </div>
       </div>
 
       <div
-        className="min-w-0 rounded-[8px] border border-border/70 bg-background/35 px-3 py-2 text-xs font-semibold leading-5 text-muted-foreground"
+        className="company-health-completeness-strip min-w-0 rounded-[8px] border border-border/70 bg-background/35 px-3 py-1.5 text-xs font-semibold leading-5 text-muted-foreground"
         data-testid="dashboard-company-health-completeness"
         title={warning ? warning.replace(/^Health рассчитан по доступным данным\. /, '').replace(/\.$/, '') : completenessText}
       >

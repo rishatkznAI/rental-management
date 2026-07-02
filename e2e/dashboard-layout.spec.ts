@@ -55,6 +55,9 @@ async function dashboardLayoutSnapshot(page: Page) {
     const radial = rectFor('[data-testid="dashboard-radial-overview"]');
     const radialCore = document.querySelector('[data-testid="dashboard-radial-core"]');
     const healthElement = document.querySelector('[data-testid="dashboard-company-health"]');
+    const healthMain = healthElement?.querySelector<HTMLElement>('.rentcore-company-health-main') ?? null;
+    const healthVisualElement = document.querySelector('[data-testid="dashboard-company-health-visual"]');
+    const healthVisualRect = healthVisualElement?.getBoundingClientRect();
     const healthRect = healthElement?.getBoundingClientRect();
     const companyHealthOffenders = Array.from(healthElement?.querySelectorAll<HTMLElement>('*') ?? [])
       .filter((element) => {
@@ -66,6 +69,7 @@ async function dashboardLayoutSnapshot(page: Page) {
           && (
             rect.right > viewportWidth + 1
             || (healthRect ? rect.right > healthRect.right + 1 : false)
+            || (healthRect ? rect.bottom > healthRect.bottom + 1 : false)
           );
       })
       .slice(0, 8)
@@ -77,6 +81,7 @@ async function dashboardLayoutSnapshot(page: Page) {
           className: String(element.className || '').slice(0, 120),
           left: Math.round(rect.left),
           right: Math.round(rect.right),
+          bottom: Math.round(rect.bottom),
           width: Math.round(rect.width),
         };
       });
@@ -136,6 +141,12 @@ async function dashboardLayoutSnapshot(page: Page) {
       healthVisualWidthShare: health && healthVisual ? healthVisual.width / Math.max(health.width, 1) : 1,
       healthDirectionsWidthShare: health && healthDirections ? healthDirections.width / Math.max(health.width, 1) : 1,
       radialWidthShare: health && radial ? radial.width / Math.max(health.width, 1) : 1,
+      healthMainGridColumns: healthMain ? window.getComputedStyle(healthMain).gridTemplateColumns : '',
+      radialInsideVisual: Boolean(radialRect && healthVisualRect
+        && radialRect.left >= healthVisualRect.left - 1
+        && radialRect.right <= healthVisualRect.right + 1
+        && radialRect.top >= healthVisualRect.top - 1
+        && radialRect.bottom <= healthVisualRect.bottom + 1),
       radialCoreText: radialCore?.textContent?.trim() || '',
       compactHealthCards: document.querySelectorAll('[data-testid="dashboard-company-health-compact"] a.rentcore-command-card').length,
       kpiReadability,
@@ -175,6 +186,7 @@ test.describe('Dashboard enterprise layout', () => {
       expect(snapshot.radialEmptyExists, `${viewport.name}: legacy radial empty selector should be preserved (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.radialNodeCount, `${viewport.name}: radial overview should keep business contour node selectors (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(6);
       expect(snapshot.radialNodesInside, `${viewport.name}: radial nodes should stay inside radial overview (${JSON.stringify(snapshot)})`).toBe(true);
+      expect(snapshot.radialInsideVisual, `${viewport.name}: radial overview should stay inside the health visual panel (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.compactHealthCards, `${viewport.name}: company health should keep all business contours`).toBeGreaterThanOrEqual(6);
       expect(snapshot.kpiReadability, `${viewport.name}: KPI values should render`).not.toEqual([]);
       expect(snapshot.kpiReadability.filter(item => item.clipped), `${viewport.name}: KPI values should not clip`).toEqual([]);
@@ -182,6 +194,8 @@ test.describe('Dashboard enterprise layout', () => {
 
       if (viewport.name === 'desktop') {
         expect(snapshot.healthWidthShare, `${viewport.name}: company health should be an executive-width module`).toBeGreaterThanOrEqual(0.75);
+        expect(snapshot.health?.height ?? 0, `${viewport.name}: company health should stay within executive card height target (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(390);
+        expect(snapshot.healthMainGridColumns, `${viewport.name}: company health should use exact executive columns (${JSON.stringify(snapshot)})`).toMatch(/^220px 3[0-4]\dpx /);
         expect(snapshot.healthScoreWidthShare, `${viewport.name}: score summary should occupy a compact left zone (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.16);
         expect(snapshot.healthScoreWidthShare, `${viewport.name}: score summary should not become an empty oversized left zone (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(0.25);
         expect(snapshot.healthVisualWidthShare, `${viewport.name}: company health visual should use executive-width balance (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.25);
@@ -189,6 +203,12 @@ test.describe('Dashboard enterprise layout', () => {
         expect(snapshot.healthDirectionsWidthShare, `${viewport.name}: direction summary should remain the primary right-side information zone (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.4);
         expect(snapshot.radialWidthShare, `${viewport.name}: radial visual should not dominate company health (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(0.36);
         expect(Math.min(...snapshot.kpiReadability.map(item => item.cardWidth)), `${viewport.name}: KPI cards should keep readable width (${JSON.stringify(snapshot.kpiReadability)})`).toBeGreaterThanOrEqual(220);
+      } else if (viewport.name === 'tablet') {
+        expect(snapshot.healthScore?.top ?? 0, `${viewport.name}: score should start the body (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual((snapshot.healthVisual?.top ?? 0) + 1);
+        expect(snapshot.healthDirections?.top ?? 0, `${viewport.name}: directions should sit below score/visual row (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual((snapshot.healthVisual?.bottom ?? 0) - 1);
+      } else {
+        expect(snapshot.healthScore?.bottom ?? 0, `${viewport.name}: score should stack before visual (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual((snapshot.healthVisual?.top ?? 0) + 1);
+        expect(snapshot.healthVisual?.bottom ?? 0, `${viewport.name}: visual should stack before directions (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual((snapshot.healthDirections?.top ?? 0) + 1);
       }
     });
   }

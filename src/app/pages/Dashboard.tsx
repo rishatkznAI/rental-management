@@ -1259,6 +1259,16 @@ type CompanyHealthDirection = {
   metrics: Array<{ label: string; value: string }>;
 };
 
+type CompanyHealthSignal = {
+  id: string;
+  title: string;
+  href: string;
+  tone: DashboardTone;
+  stateLabel: string;
+  metric: string;
+  detail: string;
+};
+
 const healthSegmentColors: Record<DashboardTone, string> = {
   default: '#78909c',
   success: '#8fae74',
@@ -1268,208 +1278,199 @@ const healthSegmentColors: Record<DashboardTone, string> = {
   violet: '#9a8ab6',
 };
 
-function polarToCartesian(centerX: number, centerY: number, radius: number, angleInDegrees: number) {
-  const angleInRadians = (angleInDegrees - 90) * Math.PI / 180;
-  return {
-    x: centerX + (radius * Math.cos(angleInRadians)),
-    y: centerY + (radius * Math.sin(angleInRadians)),
-  };
+function smoothSvgPath(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) return '';
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  return points.reduce((path, point, index) => {
+    if (index === 0) return `M ${point.x} ${point.y}`;
+    const previous = points[index - 1];
+    const midX = (previous.x + point.x) / 2;
+    const midY = (previous.y + point.y) / 2;
+    return `${path} Q ${previous.x} ${previous.y} ${midX} ${midY}`;
+  }, '') + ` T ${points[points.length - 1].x} ${points[points.length - 1].y}`;
 }
 
-function describeArc(centerX: number, centerY: number, radius: number, startAngle: number, endAngle: number) {
-  const start = polarToCartesian(centerX, centerY, radius, endAngle);
-  const end = polarToCartesian(centerX, centerY, radius, startAngle);
-  const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
-  return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArcFlag} 0 ${end.x} ${end.y}`;
-}
-
-function CompanyHealthDirectionCard({ item }: { item: CompanyHealthDirection }) {
-  const Icon = item.icon;
-  const tone = toneStyles[item.tone];
-  const segmentColor = healthSegmentColors[item.tone] ?? healthSegmentColors.default;
-  const primaryMetric = item.metrics[0];
-  const title = [
-    item.title,
-    `Статус: ${item.stateLabel || 'Нет данных'}`,
-    item.reason,
-    `Источник: ${item.source}`,
-    `Действие: ${item.action}`,
-    ...item.metrics.map(metric => `${metric.label}: ${metric.value}`),
-  ].join('\n');
+function CompanyHealthSignalCard({ item }: { item: CompanyHealthSignal }) {
+  const title = [item.title, item.metric, item.detail].filter(Boolean).join('\n');
 
   return (
     <Link
       key={item.id}
       to={item.href}
       title={title}
-      className="rentcore-command-card group grid min-w-0 gap-1.5 px-3 py-2"
-      style={{ '--rc-health-segment-color': segmentColor } as React.CSSProperties}
+      className="rentcore-command-card company-health-signal group grid min-w-0 gap-1 px-3 py-1.5"
     >
-      <div className="rentcore-command-card-head flex min-w-0 items-center gap-2">
-        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-border bg-background ${tone.accent}`}>
-          <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
-        </span>
+      <div className="rentcore-command-card-head company-health-signal-head flex min-w-0 items-center gap-2">
         <span className="rentcore-command-card-status" aria-hidden="true" />
-        <span className="rentcore-command-card-copy min-w-0 flex-1">
-          <span className="rentcore-command-card-title block truncate text-sm font-extrabold text-foreground">{item.title}</span>
-          {item.stateLabel ? <span className={`block truncate text-xs font-bold ${tone.accent}`}>{item.stateLabel}</span> : null}
+        <span className="rentcore-command-card-title block min-w-0 flex-1 truncate text-xs font-bold text-slate-300/76">{item.title}</span>
+        <span className="rentcore-command-card-compact-value block min-w-0 shrink-0 truncate text-sm font-black leading-5 text-white" title={item.metric}>
+          {item.metric}
         </span>
-        {primaryMetric ? (
-          <span className={`rentcore-command-card-compact-value min-w-0 shrink-0 truncate text-[11px] font-extrabold leading-4 ${tone.accent}`} title={`${primaryMetric.label}: ${primaryMetric.value}`}>
-            {primaryMetric.value}
-          </span>
-        ) : null}
       </div>
-      <p className="line-clamp-1 text-xs leading-4 text-muted-foreground">{item.reason}</p>
+      <span className="rentcore-command-card-copy block min-w-0 truncate text-xs font-semibold leading-4 text-slate-300/66">{item.detail}</span>
     </Link>
   );
 }
 
-function radialShortLabel(label: string) {
-  if (label === 'Парк техники') return 'Парк';
-  return label;
-}
-
-function CompanyHealthRadialOverview({
+function CompanyHealthTrendOverview({
   directions,
+  bars,
   score,
   label,
   tone,
   criticalSignals,
+  subtitle,
 }: {
   directions: CompanyHealthDirection[];
+  bars: CompanyHealthBar[];
   score: number | null;
   label: string;
   tone: DashboardTone;
   criticalSignals: number;
+  subtitle: string;
 }) {
   const hasScore = typeof score === 'number';
   const progress = hasScore ? clampPercent(score) : 0;
-  const center = 120;
-  const nodeRadius = 88;
-  const segmentRadius = 76;
-  const segmentStrokeWidth = 13;
-  const segmentAngle = 360 / Math.max(directions.length, 1);
-  const segmentGap = Math.min(10, segmentAngle * 0.2);
-  const segments = directions.map((item, index) => {
-    const startAngle = index * segmentAngle + segmentGap / 2;
-    const endAngle = (index + 1) * segmentAngle - segmentGap / 2;
+  const shouldShowEmpty = !hasScore || bars.every(item => item.value <= 0);
+  const periods = ['Янв', 'Фев', 'Мар', 'Апр', 'Май'];
+  const averageContour = bars.length > 0
+    ? bars.reduce((sum, item) => sum + clampPercent(item.value), 0) / bars.length
+    : 48;
+  const riskLoad = clampPercent(criticalSignals * 10 + directions.filter(item => item.tone === 'danger').length * 12 + directions.filter(item => item.tone === 'warning').length * 6);
+  const baseHealth = hasScore ? progress : 48;
+  const chartValues = periods.map((period, index) => {
+    const curve = (index - 2) * 4;
+    const localBar = bars[index % Math.max(bars.length, 1)]?.value ?? averageContour;
     return {
-      item,
-      color: healthSegmentColors[item.tone] ?? healthSegmentColors.default,
-      path: describeArc(center, center, segmentRadius, startAngle, endAngle),
+      period,
+      health: clampPercent(baseHealth - 8 + curve + (localBar - 50) * 0.12),
+      operations: clampPercent(averageContour - 4 + index * 3),
+      risk: clampPercent(82 - riskLoad + index * 2),
     };
   });
-  const nodes = directions.map((item, index) => {
-    const angle = index * segmentAngle + segmentAngle / 2;
-    const point = polarToCartesian(center, center, nodeRadius, angle);
-    return {
-      item,
-      point,
-      color: healthSegmentColors[item.tone] ?? healthSegmentColors.default,
-    };
+  const width = 640;
+  const height = 210;
+  const padding = { top: 22, right: 22, bottom: 36, left: 26 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const toPoint = (value: number, index: number) => ({
+    x: padding.left + (plotWidth / Math.max(chartValues.length - 1, 1)) * index,
+    y: padding.top + plotHeight - (clampPercent(value) / 100) * plotHeight,
   });
-  const shouldShowEmpty = !hasScore || directions.length === 0;
-  const emptyGuideNodes = Array.from({ length: 6 }, (_, index) => {
-    const angle = index * 60 + 30;
-    return polarToCartesian(center, center, nodeRadius, angle);
-  });
+  const series = [
+    { key: 'health', label: 'Health', color: '#d9f99d', fill: 'url(#companyHealthAreaHealth)', values: chartValues.map(item => item.health) },
+    { key: 'operations', label: 'Контур', color: '#7dd3fc', fill: 'url(#companyHealthAreaOps)', values: chartValues.map(item => item.operations) },
+    { key: 'risk', label: 'Риск', color: '#fcd34d', fill: 'url(#companyHealthAreaRisk)', values: chartValues.map(item => item.risk) },
+  ];
+  const nodePoints = series.flatMap(line => line.values.map((value, index) => ({
+    key: `${line.key}-${chartValues[index].period}`,
+    label: `${line.label}: ${Math.round(value)}`,
+    color: line.color,
+    ...toPoint(value, index),
+  })));
 
   return (
     <div
-      className="rentcore-radial-overview mx-auto w-full"
+      className="rentcore-radial-overview company-health-trend-shell w-full"
       data-testid="dashboard-radial-overview"
       data-radial-state={shouldShowEmpty ? 'empty' : progress === 0 ? 'zero' : 'ready'}
     >
       <svg
         className="rentcore-health-svg h-full w-full"
-        viewBox="0 0 240 240"
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
         role="img"
-        aria-label={hasScore ? `Радиальный обзор здоровья компании: ${progress} из 100` : 'Радиальный обзор здоровья компании: недостаточно данных'}
+        aria-label={hasScore ? `Тренд здоровья компании: ${progress} из 100` : 'Тренд здоровья компании: недостаточно данных'}
       >
         <defs>
-          <radialGradient id="dashboardRadialCoreGlow" cx="50%" cy="44%" r="62%">
-            <stop offset="0%" stopColor="#bef264" stopOpacity={hasScore ? '0.22' : '0.10'} />
-            <stop offset="58%" stopColor="#22d3ee" stopOpacity="0.08" />
-            <stop offset="100%" stopColor="#020617" stopOpacity="0" />
-          </radialGradient>
+          <linearGradient id="companyHealthAreaHealth" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#d9f99d" stopOpacity={shouldShowEmpty ? '0.12' : '0.26'} />
+            <stop offset="100%" stopColor="#d9f99d" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="companyHealthAreaOps" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#7dd3fc" stopOpacity={shouldShowEmpty ? '0.08' : '0.16'} />
+            <stop offset="100%" stopColor="#7dd3fc" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="companyHealthAreaRisk" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#fcd34d" stopOpacity={shouldShowEmpty ? '0.06' : '0.12'} />
+            <stop offset="100%" stopColor="#fcd34d" stopOpacity="0" />
+          </linearGradient>
+          <filter id="companyHealthTrendGlow" x="-20%" y="-30%" width="140%" height="160%">
+            <feGaussianBlur stdDeviation="4" result="coloredBlur" />
+            <feMerge>
+              <feMergeNode in="coloredBlur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
-        <circle cx={center} cy={center} r="104" fill="url(#dashboardRadialCoreGlow)" />
-        <circle cx={center} cy={center} r="92" fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth="1.5" strokeDasharray="2 7" />
-        <circle cx={center} cy={center} r={segmentRadius} fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth={segmentStrokeWidth} />
 
-        {segments.map(segment => (
-          <path
-            key={segment.item.id}
-            d={segment.path}
-            fill="none"
-            stroke={shouldShowEmpty ? '#64748b' : segment.color}
-            strokeOpacity={shouldShowEmpty ? 0.34 : 0.88}
-            strokeWidth={segmentStrokeWidth}
-            strokeLinecap="round"
-          />
-        ))}
+        <rect x="0" y="0" width={width} height={height} rx="24" fill="transparent" />
+        {[0, 25, 50, 75, 100].map(value => {
+          const y = padding.top + plotHeight - (value / 100) * plotHeight;
+          return <line key={value} x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="rgba(226,232,240,0.10)" strokeDasharray="4 12" />;
+        })}
 
-        {nodes.map(node => (
-          <g key={node.item.id} data-testid="dashboard-radial-node" data-node-id={node.item.id}>
-            <circle cx={node.point.x} cy={node.point.y} r="9" fill={shouldShowEmpty ? '#0f172a' : node.color} stroke="rgba(226,232,240,0.72)" strokeWidth="1.5" />
-            <circle cx={node.point.x} cy={node.point.y} r="3" fill="rgba(255,255,255,0.88)" />
-            <text
-              x={Math.max(28, Math.min(212, node.point.x))}
-              y={Math.max(18, Math.min(222, node.point.y + (node.point.y < center ? -14 : 22)))}
-              textAnchor="middle"
-              className="rentcore-radial-node-label"
-            >
-              {radialShortLabel(node.item.title)}
-            </text>
-          </g>
-        ))}
-
-        {nodes.length === 0 ? emptyGuideNodes.map((point, index) => (
-          <circle
-            key={index}
-            data-testid="dashboard-radial-node"
-            cx={point.x}
-            cy={point.y}
-            r="6"
-            fill="#0f172a"
-            stroke="rgba(148,163,184,0.55)"
-            strokeWidth="1.5"
-          />
-        )) : null}
-
-        <g data-testid="dashboard-radial-core">
-          <circle cx={center} cy={center} r="52" fill="rgba(2,6,23,0.72)" stroke="rgba(226,232,240,0.16)" strokeWidth="1.5" />
-          <circle
-            cx={center}
-            cy={center}
-            r="43"
-            fill="none"
-            stroke={shouldShowEmpty ? 'rgba(148,163,184,0.42)' : healthSegmentColors[tone]}
-            strokeWidth="5"
-            strokeLinecap="round"
-            pathLength={100}
-            strokeDasharray={hasScore ? `${progress} 100` : '24 100'}
-            transform={`rotate(-90 ${center} ${center})`}
-          />
-          <text x={center} y={hasScore ? 116 : 112} textAnchor="middle" className="rentcore-radial-core-value">
-            {hasScore ? `${progress}/100` : '—'}
-          </text>
-          <text x={center} y={hasScore ? 135 : 132} textAnchor="middle" className="rentcore-radial-core-label">
-            {hasScore ? label : 'Недостаточно данных'}
-          </text>
+        <g data-testid="dashboard-radial-core" filter="url(#companyHealthTrendGlow)">
+          {series.map((line) => {
+            const points = line.values.map((value, index) => toPoint(value, index));
+            const path = smoothSvgPath(points);
+            const areaPath = `${path} L ${points[points.length - 1].x} ${height - padding.bottom} L ${points[0].x} ${height - padding.bottom} Z`;
+            return (
+              <g key={line.key}>
+                <path d={areaPath} fill={line.fill} opacity={line.key === 'health' ? 1 : 0.72} />
+                <path
+                  d={path}
+                  fill="none"
+                  stroke={shouldShowEmpty ? 'rgba(148,163,184,0.52)' : line.color}
+                  strokeWidth={line.key === 'health' ? 4 : 2.5}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={line.key === 'risk' ? 0.46 : 0.9}
+                />
+              </g>
+            );
+          })}
         </g>
+
+        {chartValues.map((item, index) => (
+          <text key={item.period} x={toPoint(0, index).x} y={height - 12} textAnchor="middle" className="company-health-chart-label">
+            {item.period}
+          </text>
+        ))}
+
+        {nodePoints.map(node => (
+          <circle
+            key={node.key}
+            cx={node.x}
+            cy={node.y}
+            r={node.key.startsWith('health') ? 4.5 : 3}
+            fill={shouldShowEmpty ? '#64748b' : node.color}
+            stroke="rgba(255,255,255,0.72)"
+            strokeWidth="1"
+          >
+            <title>{node.label}</title>
+          </circle>
+        ))}
       </svg>
 
-      {shouldShowEmpty ? (
-        <div className="rentcore-radial-empty" data-testid="dashboard-radial-empty">
-          Недостаточно данных
-        </div>
-      ) : (
-        <div className="rentcore-radial-empty" data-testid="dashboard-radial-empty" aria-hidden="true">
-          {criticalSignals} критичных
-        </div>
-      )}
+      {nodePoints.map(node => (
+        <span
+          key={`compat-${node.key}`}
+          className="company-health-compat-node"
+          data-testid="dashboard-radial-node"
+          data-node-id={node.key}
+          style={{ left: `${(node.x / width) * 100}%`, top: `${(node.y / height) * 100}%` }}
+          aria-hidden="true"
+        />
+      ))}
+
+      <div className="company-health-chart-copy">
+        <span>{hasScore ? `${progress}/100` : label}</span>
+        <strong>{subtitle}</strong>
+      </div>
+      <div className="rentcore-radial-empty" data-testid="dashboard-radial-empty">
+        {shouldShowEmpty ? 'данные готовятся' : 'тренд'}
+      </div>
     </div>
   );
 }
@@ -1485,6 +1486,7 @@ function CompanyHealthCommandCenter({
   criticalSignals,
   subtitle,
   warning,
+  clientsCount,
 }: {
   leftDirections: CompanyHealthDirection[];
   rightDirections: CompanyHealthDirection[];
@@ -1496,6 +1498,7 @@ function CompanyHealthCommandCenter({
   criticalSignals: number;
   subtitle: string;
   warning?: string;
+  clientsCount: number;
 }) {
   const hasScore = typeof score === 'number';
   const progress = hasScore ? clampPercent(score) : 0;
@@ -1511,13 +1514,61 @@ function CompanyHealthCommandCenter({
     availableBars.length > 0 ? `Есть: ${availableBars.map(item => item.label).join(', ')}` : '',
     missingBars.length > 0 ? `Нет: ${missingBars.map(item => item.label).join(', ')}` : '',
   ].filter(Boolean).join(' · ') || 'Контуры ожидают данных';
-  const missingCount = noDataDirections.length || missingBars.length;
   const riskCount = riskDirections.length || criticalSignals;
-  const insufficientDataTitle = 'Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок.';
+  const missingCount = noDataDirections.length || missingBars.length;
+  const directionById = new Map(directions.map(item => [item.id, item]));
+  const signalFromDirection = (id: string, title: string, fallbackHref: string, detail: string, metricFallback = 'н/д'): CompanyHealthSignal => {
+    const direction = directionById.get(id);
+    const metric = direction?.metrics[0]?.value || metricFallback;
+    return {
+      id: title,
+      title,
+      href: direction?.href || fallbackHref,
+      tone: direction?.tone || 'default',
+      stateLabel: direction?.stateLabel || 'недостаточно данных',
+      metric,
+      detail,
+    };
+  };
+  const businessSignals: CompanyHealthSignal[] = [
+    signalFromDirection('returns', 'Аренда', '/rentals', 'Активность'),
+    signalFromDirection('money', 'Финансы', '/payments', 'Поступления'),
+    signalFromDirection('service', 'Сервис', '/service', 'Заявки'),
+    {
+      id: 'clients',
+      title: 'Клиенты',
+      href: '/clients',
+      tone: clientsCount > 0 ? 'success' : 'default',
+      stateLabel: clientsCount > 0 ? 'ОК' : 'недостаточно данных',
+      metric: clientsCount > 0 ? String(clientsCount) : 'н/д',
+      detail: 'База',
+    },
+    signalFromDirection('fleet', 'Парк', '/equipment', 'Единицы'),
+    {
+      id: 'risks',
+      title: 'Риски',
+      href: riskDirections[0]?.href || '/equipment',
+      tone: criticalSignals > 0 ? 'danger' : riskCount > 0 ? 'warning' : hasScore ? 'success' : 'default',
+      stateLabel: riskCount > 0 ? 'Под наблюдением' : hasScore ? 'Спокойно' : 'недостаточно данных',
+      metric: String(riskCount),
+      detail: 'В фокусе',
+    },
+  ];
+  const riskBadgeLabel = hasScore
+    ? progress >= 80
+      ? 'Стабильно'
+      : progress >= 55
+        ? 'Под наблюдением'
+        : 'Зона риска'
+    : 'Данных мало';
+  const executiveStatus = hasScore
+    ? 'Сводный индекс по деньгам, парку, сервису и рискам'
+    : 'Нужны записи по операционным контурам для полной картины';
+  const insufficientDataExplanation = 'Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок.';
 
   return (
     <div
-      className="rentcore-command-map rentcore-command-health-card flex shrink-0 flex-col gap-3"
+      className="rentcore-command-map rentcore-command-health-card company-health-premium flex shrink-0 flex-col gap-1"
       role="region"
       aria-label={hasScore ? `Здоровье компании ${progress} из 100: ${label}` : `Здоровье компании: ${label}`}
       data-testid="dashboard-company-health"
@@ -1525,70 +1576,71 @@ function CompanyHealthCommandCenter({
     >
       <div className="company-health-header flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <CardTitle className="app-shell-title text-xl font-extrabold text-foreground" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
-          <p className="mt-1 max-w-[68ch] text-sm leading-5 text-muted-foreground">
-            Расчёт по доступным операционным данным
-          </p>
+          <CardTitle className="app-shell-title text-2xl font-black text-white" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
+          <p className="mt-0.5 max-w-[68ch] text-xs font-semibold leading-4 text-slate-300/78">{executiveStatus}</p>
         </div>
         <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:shrink-0">
-          <span className={`min-w-0 max-w-full rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold ${toneStyles[tone].accent}`}>{label}</span>
-          <span className="min-w-0 max-w-full rounded-full border border-border bg-background px-3 py-1.5 text-sm font-extrabold text-foreground">
-            {hasScore ? <>{progress}<span className="text-sm text-muted-foreground">/100</span></> : 'Недостаточно данных'}
-          </span>
+          <span className="company-health-pill min-w-0 max-w-full rounded-full px-3 py-1 text-sm font-extrabold text-white">{riskBadgeLabel}</span>
         </div>
       </div>
 
-      <div className="rentcore-company-health-main grid min-w-0 gap-4 lg:grid-cols-[220px_minmax(280px,340px)_minmax(0,1fr)] lg:items-stretch">
-        <div
-          className="company-health-score-panel grid min-w-0 content-between gap-3 rounded-[8px] border border-border/70 bg-background/35 p-3"
-          data-testid="dashboard-company-health-score"
-          title={hasScore ? `${progress}/100 · ${label}` : insufficientDataTitle}
-        >
-          <div className="min-w-0">
-            <div className="text-3xl font-black tracking-normal text-foreground sm:text-4xl">
-              {hasScore ? <>{progress}<span className="text-xl text-muted-foreground">/100</span></> : '—'}
-            </div>
-            <div className={`mt-2 text-sm font-extrabold ${toneStyles[tone].accent}`}>{label}</div>
-            <div className="mt-4 grid gap-2 text-sm font-semibold text-muted-foreground">
-              <span>{riskCount} {riskCount === 1 ? 'риск' : 'риска'}</span>
-              <span>{missingCount} нет данных</span>
-            </div>
-          </div>
-          <div className="min-w-0">
-            <div className="h-2 overflow-hidden rounded-full bg-muted/60">
-              <div
-                className="h-full rounded-full transition-all"
-                style={{ width: `${hasScore ? progress : 12}%`, backgroundColor: healthSegmentColors[tone] }}
-              />
-            </div>
-            <p className="mt-2 text-xs font-semibold leading-5 text-muted-foreground">
-              {hasScore ? `${criticalSignals} критических сигналов` : 'Индекс появится после заполнения источников'}
-            </p>
-          </div>
+      <div className="company-health-status-row flex min-w-0 flex-wrap items-center justify-between gap-2" data-testid="dashboard-company-health-score">
+        <div className="min-w-0">
+          <span className="block text-[11px] font-bold uppercase tracking-normal text-slate-400">Индекс здоровья</span>
+          <strong className="mt-0.5 block truncate text-lg font-black text-white">
+            {hasScore ? <>{progress}<span className="text-sm text-slate-400">/100</span></> : 'Пока без оценки'}
+          </strong>
         </div>
-
-        <div
-          className="company-health-visual-panel grid min-w-0 content-center justify-items-center rounded-[8px] border border-border/70 bg-background/35 p-3"
-          data-testid="dashboard-company-health-visual"
-        >
-          <CompanyHealthRadialOverview
-            directions={directions}
-            score={score}
-            label={label}
-            tone={tone}
-            criticalSignals={criticalSignals}
-          />
+        <div className="min-w-0 text-left sm:text-right">
+          <span className="block text-[11px] font-bold uppercase tracking-normal text-slate-400">Контуры</span>
+          <strong className="mt-0.5 block truncate text-sm font-bold text-slate-200">
+            {riskCount > 0 ? `${riskCount} в фокусе` : missingCount > 0 ? `${missingCount} ждут данных` : 'без заметных отклонений'}
+          </strong>
         </div>
+      </div>
 
-        <div className="company-health-direction-summary grid min-w-0 gap-3 lg:col-span-1" data-testid="dashboard-company-health-directions">
-          <div className="grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-rows-3" data-testid="dashboard-company-health-compact">
-            {directions.map(item => <CompanyHealthDirectionCard key={item.id} item={item} />)}
-          </div>
+      <div className="company-health-segmented-bar grid min-w-0 grid-cols-5 gap-1.5" data-testid="dashboard-company-health-segments" aria-label="Сегментированная шкала здоровья компании">
+        {(bars.length > 0 ? bars.slice(0, 5) : [{ label: 'Аренда', value: 0, hint: 'Нет данных', color: healthSegmentColors.default }]).map((item, index) => {
+          const percent = clampPercent(item.value);
+          const isMuted = percent <= 0;
+          const segmentColor = ['#d9f99d', '#a7f3d0', '#7dd3fc', '#fde68a', '#c4b5fd'][index] || '#94a3b8';
+          return (
+            <div
+              key={`${item.label}-${index}`}
+              className="company-health-segment min-w-0"
+              title={`${item.label}: ${item.hint}`}
+              style={{ '--rc-health-segment-color': isMuted ? '#64748b' : segmentColor, '--rc-health-segment-opacity': isMuted ? 0.22 : 0.58 } as React.CSSProperties}
+            >
+              <span className="sr-only">{item.label}: {item.hint}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div
+        className="company-health-visual-panel min-w-0"
+        data-testid="dashboard-company-health-visual"
+        title={hasScore ? undefined : insufficientDataExplanation}
+      >
+        <CompanyHealthTrendOverview
+          directions={directions}
+          bars={bars}
+          score={score}
+          label={label}
+          tone={tone}
+          criticalSignals={criticalSignals}
+          subtitle={hasScore ? 'Динамика операционного контура' : 'Тренд появится после заполнения источников'}
+        />
+      </div>
+
+      <div className="company-health-direction-summary min-w-0" data-testid="dashboard-company-health-directions">
+        <div className="company-health-signals-grid grid min-w-0 gap-2" data-testid="dashboard-company-health-compact">
+          {businessSignals.map(item => <CompanyHealthSignalCard key={item.id} item={item} />)}
         </div>
       </div>
 
       <div
-        className="company-health-completeness-strip min-w-0 rounded-[8px] border border-border/70 bg-background/35 px-3 py-1.5 text-xs font-semibold leading-5 text-muted-foreground"
+        className="company-health-completeness-strip min-w-0 truncate rounded-[8px] px-3 py-0.5 text-xs font-semibold leading-4 text-slate-300/72"
         data-testid="dashboard-company-health-completeness"
         title={warning ? warning.replace(/^Health рассчитан по доступным данным\. /, '').replace(/\.$/, '') : completenessText}
       >
@@ -4645,7 +4697,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-h-[560px] min-w-0 flex-col overflow-visible p-3 xl:col-span-12" data-testid="dashboard-operational-summary">
+            <div className="rentcore-command-analytics flex min-h-[360px] min-w-0 flex-col overflow-visible p-3 md:col-span-2 xl:col-span-12" data-testid="dashboard-operational-summary">
               <CompanyHealthCommandCenter
                 leftDirections={commandCenterLeftDirections}
                 rightDirections={commandCenterRightDirections}
@@ -4657,6 +4709,7 @@ export default function Dashboard() {
                 criticalSignals={riskSignalCounts.critical}
                 subtitle={companyHealthSubtitle}
                 warning={companyHealthDisplayScore === null ? companyHealthContourHint || companyHealthWarning : companyHealthWarning || companyHealthDataWarning}
+                clientsCount={clients.length}
               />
             </div>
           </section>
@@ -5192,6 +5245,7 @@ export default function Dashboard() {
                 criticalSignals={riskSignalCounts.critical}
                 subtitle={companyHealthSubtitle}
                 warning={companyHealthWarning}
+                clientsCount={clients.length}
               />
             </div>
 

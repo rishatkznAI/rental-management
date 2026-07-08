@@ -381,10 +381,17 @@ async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Loc
     const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]');
     const radial = health?.querySelector('[data-testid="dashboard-radial-overview"]');
     const radialCore = health?.querySelector('[data-testid="dashboard-radial-core"]');
+    const radialEmpty = health?.querySelector('[data-testid="dashboard-radial-empty"]');
     const board = document.querySelector('[data-testid="dashboard-command-board"]');
+    const fleet = document.querySelector('[data-testid="dashboard-fleet-utilization"]');
+    const receivables = document.querySelector('[data-testid="dashboard-receivables-aging"]');
     const boardRect = board?.getBoundingClientRect();
     const healthRect = health?.getBoundingClientRect();
+    const fleetRect = fleet?.getBoundingClientRect();
+    const receivablesRect = receivables?.getBoundingClientRect();
     const radialRect = radial?.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth;
+    const scrollWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
     const radialNodes = Array.from(health?.querySelectorAll('[data-testid="dashboard-radial-node"]') ?? []);
     const radialNodesInside = radialRect ? radialNodes.every((node) => {
       const rect = node.getBoundingClientRect();
@@ -405,6 +412,13 @@ async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Loc
       compactCards: compact?.querySelectorAll('a.rentcore-command-card').length || 0,
       healthSvgCount: health?.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length || 0,
       healthWidthShare: healthRect && boardRect ? healthRect.width / Math.max(boardRect.width, 1) : 1,
+      lowerGridAlignment: healthRect && fleetRect && receivablesRect ? {
+        leftDelta: Math.round(Math.abs(healthRect.left - fleetRect.left)),
+        rightDelta: Math.round(Math.abs(healthRect.right - receivablesRect.right)),
+        widthDelta: Math.round(Math.abs(healthRect.width - (receivablesRect.right - fleetRect.left))),
+      } : null,
+      overflowX: scrollWidth - viewportWidth,
+      radialEmptyExists: Boolean(radialEmpty),
     };
   });
 
@@ -413,12 +427,21 @@ async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Loc
   expect(layout.healthSvgCount, `dashboard company health should not render a dominant SVG circle (${JSON.stringify(layout)})`).toBe(0);
   expect(layout.radial?.visible, `dashboard radial overview should be visible (${JSON.stringify(layout)})`).toBe(true);
   expect(layout.radialCore?.visible, `dashboard radial core should be visible (${JSON.stringify(layout)})`).toBe(true);
+  expect(layout.radialEmptyExists, `dashboard radial empty compatibility selector should exist (${JSON.stringify(layout)})`).toBe(true);
   expect(layout.radialNodeCount, `dashboard radial overview should render contour nodes (${JSON.stringify(layout)})`).toBeGreaterThanOrEqual(6);
   expect(layout.radialNodesInside, `dashboard radial nodes should stay inside overview (${JSON.stringify(layout)})`).toBe(true);
   expect(layout.compact?.visible, `dashboard company health should render compact list (${JSON.stringify(layout)})`).toBe(true);
-  expect(layout.compactCards, 'dashboard company health compact list should include all direction cards').toBeGreaterThanOrEqual(6);
+  expect(layout.compactCards, 'dashboard company health compact list should include all six direction cards').toBe(6);
+  expect(layout.overflowX, `dashboard company health layout should not create horizontal overflow (${JSON.stringify(layout)})`).toBe(0);
   if (viewport.width >= 1024) {
-    expect(layout.healthWidthShare, `desktop company health should be an executive-width module (${JSON.stringify(layout)})`).toBeGreaterThanOrEqual(0.75);
+    expect(layout.health?.width ?? 0, `desktop company health should use compact lower-grid width (${JSON.stringify(layout)})`).toBeGreaterThanOrEqual(740);
+    expect(layout.health?.width ?? 0, `desktop company health should not exceed compact lower-grid width (${JSON.stringify(layout)})`).toBeLessThanOrEqual(900);
+    expect(layout.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `desktop company health should align with the lower grid left edge (${JSON.stringify(layout)})`).toBeLessThanOrEqual(2);
+    expect(
+      (layout.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY) <= 2
+        || (layout.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY) <= 2,
+      `desktop company health should align with the lower grid right edge or span width (${JSON.stringify(layout)})`,
+    ).toBe(true);
   }
 }
 

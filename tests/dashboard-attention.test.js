@@ -162,7 +162,8 @@ test('dashboard command board uses enterprise grid without dominant company heal
   assert.match(commandScreenBlock, /xl:col-span-5[\s\S]*data-testid="dashboard-month-dynamics"/);
   assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-fleet-utilization"/);
   assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-receivables-aging"/);
-  assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-operational-summary"/);
+  assert.match(commandScreenBlock, /xl:col-span-8[\s\S]*data-testid="dashboard-operational-summary"/);
+  assert.doesNotMatch(commandScreenBlock, /xl:justify-center[\s\S]*data-testid="dashboard-operational-summary"/);
   assert.doesNotMatch(commandScreenBlock, /dashboard-company-health-svg/);
   assert.doesNotMatch(commandScreenBlock, /text-5xl[\s\S]*N\/A|text-6xl[\s\S]*N\/A|text-7xl[\s\S]*N\/A/);
   assert.doesNotMatch(commandScreenBlock, /xl:grid-rows-\[/);

@@ -611,6 +611,12 @@
     max-width: 100%;
   }
 
+  @media (min-width: 1280px) {
+    .rentcore-command-map[data-company-health-layout="executive"] {
+      max-width: 900px;
+    }
+  }
+
   .rentcore-command-compact-list {
     min-width: 0;
     width: 100%;
@@ -1193,6 +1199,17 @@
 
     .rentcore-command-analytics {
       min-height: 0 !important;
+    }
+
+    .rentcore-command-board > [data-testid="dashboard-key-signals"],
+    .rentcore-command-board > [data-testid="dashboard-tasks"],
+    .rentcore-command-board > [data-testid="dashboard-month-dynamics"] {
+      min-height: 300px !important;
+    }
+
+    .rentcore-command-board > [data-testid="dashboard-fleet-utilization"],
+    .rentcore-command-board > [data-testid="dashboard-receivables-aging"] {
+      min-height: 300px !important;
     }
 
     .rentcore-command-map {

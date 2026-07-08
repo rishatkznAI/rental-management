@@ -21,7 +21,7 @@ import {
   User, Target, FileText, CreditCard, RefreshCw, CheckCircle, Truck,
   ShieldAlert, Clock, Ban, ArrowRight, ChevronDown, ChevronUp,
   PackageX, ClipboardX, Zap, ListChecks, Activity, Phone, MapPin, MessageSquare,
-  FileCheck2,
+  FileCheck2, X,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
@@ -1269,6 +1269,27 @@ type CompanyHealthSignal = {
   detail: string;
 };
 
+type CompanyHealthScoreDirection = {
+  key: string;
+  title: string;
+  score: number;
+  weight: number;
+  weightedContribution: number;
+  weightedDeficit?: number;
+  primaryMetric: string;
+  shortReason: string;
+  insufficientData?: boolean;
+};
+
+type CompanyHealthScoreBreakdown = {
+  totalScore: number;
+  maxScore: number;
+  directions: CompanyHealthScoreDirection[];
+  weakestDirections: CompanyHealthScoreDirection[];
+  strongestDirections: CompanyHealthScoreDirection[];
+  focusDirections?: CompanyHealthScoreDirection[];
+};
+
 const healthSegmentColors: Record<DashboardTone, string> = {
   default: '#78909c',
   success: '#8fae74',
@@ -1277,6 +1298,14 @@ const healthSegmentColors: Record<DashboardTone, string> = {
   info: '#6f9aa4',
   violet: '#9a8ab6',
 };
+
+function formatHealthWeight(weight: number) {
+  return `${Math.round(weight * 100)}%`;
+}
+
+function formatHealthContribution(value: number) {
+  return Number.isFinite(value) ? value.toFixed(1) : '0.0';
+}
 
 function smoothSvgPath(points: Array<{ x: number; y: number }>) {
   if (points.length === 0) return '';
@@ -1487,6 +1516,7 @@ function CompanyHealthCommandCenter({
   subtitle,
   warning,
   clientsCount,
+  scoreBreakdown,
 }: {
   leftDirections: CompanyHealthDirection[];
   rightDirections: CompanyHealthDirection[];
@@ -1499,7 +1529,10 @@ function CompanyHealthCommandCenter({
   subtitle: string;
   warning?: string;
   clientsCount: number;
+  scoreBreakdown?: CompanyHealthScoreBreakdown | null;
 }) {
+  const [isExplanationOpen, setIsExplanationOpen] = useState(false);
+  const explanationId = React.useId();
   const hasScore = typeof score === 'number';
   const progress = hasScore ? clampPercent(score) : 0;
   const directionOrder = ['money', 'fleet', 'service', 'documents', 'delivery', 'returns'];
@@ -1565,6 +1598,13 @@ function CompanyHealthCommandCenter({
     ? 'Сводный индекс по деньгам, парку, сервису и рискам'
     : 'Нужны записи по операционным контурам для полной картины';
   const insufficientDataExplanation = 'Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок.';
+  const explanationDirections = scoreBreakdown?.directions ?? [];
+  const focusDirections = ((scoreBreakdown?.focusDirections?.length ? scoreBreakdown.focusDirections : scoreBreakdown?.weakestDirections) ?? [])
+    .slice(0, 2);
+  const focusText = focusDirections.length > 0 ? focusDirections.map(item => item.title).join(' и ') : 'данные';
+  const formulaSummary = explanationDirections.length > 0
+    ? explanationDirections.map(item => `${item.title} ${formatHealthWeight(item.weight)}`).join(' + ')
+    : 'Финансы 30% + Аренда 25% + Риски 20% + Сервис 15% + Клиенты 7% + Парк 3%';
 
   return (
     <div
@@ -1591,13 +1631,76 @@ function CompanyHealthCommandCenter({
             {hasScore ? <>{progress}<span className="text-sm text-slate-400">/100</span></> : 'Пока без оценки'}
           </strong>
         </div>
-        <div className="min-w-0 text-left sm:text-right">
-          <span className="block text-[11px] font-bold uppercase tracking-normal text-slate-400">Контуры</span>
-          <strong className="mt-0.5 block truncate text-sm font-bold text-slate-200">
-            {riskCount > 0 ? `${riskCount} в фокусе` : missingCount > 0 ? `${missingCount} ждут данных` : 'без заметных отклонений'}
-          </strong>
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-left sm:justify-end sm:text-right">
+          <button
+            type="button"
+            className="company-health-explain-button shrink-0 rounded-full px-2.5 py-1 text-[11px] font-extrabold text-lime-100"
+            aria-expanded={isExplanationOpen}
+            aria-controls={explanationId}
+            data-testid="dashboard-company-health-explanation-toggle"
+            onClick={() => setIsExplanationOpen(value => !value)}
+          >
+            Расшифровка
+          </button>
+          <div className="min-w-0">
+            <span className="block text-[11px] font-bold uppercase tracking-normal text-slate-400">Контуры</span>
+            <strong className="mt-0.5 block truncate text-sm font-bold text-slate-200">
+              {riskCount > 0 ? `${riskCount} в фокусе` : missingCount > 0 ? `${missingCount} ждут данных` : 'без заметных отклонений'}
+            </strong>
+          </div>
         </div>
       </div>
+
+      {isExplanationOpen ? (
+        <div
+          id={explanationId}
+          className="company-health-explanation-popover"
+          data-testid="dashboard-company-health-explanation"
+          role="region"
+          aria-label="Расшифровка индекса здоровья компании"
+        >
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-black uppercase tracking-normal text-lime-200">Почему {hasScore ? `${progress}/100` : 'нет оценки'}</p>
+              <p className="mt-1 text-xs font-semibold leading-4 text-slate-300/78">{formulaSummary}</p>
+              <p className="mt-1 text-xs font-extrabold leading-4 text-slate-100" data-testid="dashboard-company-health-explanation-focus">Сначала исправить: {focusText}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <strong className="text-sm font-black text-white" data-testid="dashboard-company-health-explanation-total">
+                {hasScore ? `${progress}/100` : 'нет оценки'}
+              </strong>
+              <button
+                type="button"
+                className="company-health-explanation-close inline-flex h-6 w-6 items-center justify-center rounded-full"
+                aria-label="Закрыть расшифровку"
+                data-testid="dashboard-company-health-explanation-close"
+                onClick={() => setIsExplanationOpen(false)}
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+          <div className="mt-2 grid gap-1.5" data-testid="dashboard-company-health-explanation-breakdown">
+            {explanationDirections.map(direction => (
+              <div key={direction.key} className="company-health-explanation-row min-w-0 rounded-[8px] px-2 py-1.5" data-testid={`dashboard-company-health-explanation-${direction.key}`}>
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-xs font-extrabold text-slate-100">{direction.title}</span>
+                  <span className="shrink-0 text-[11px] font-black text-slate-200">
+                    {Math.round(direction.score)}/100 × {formatHealthWeight(direction.weight)} = {formatHealthContribution(direction.weightedContribution)}
+                  </span>
+                </div>
+                <p className="mt-0.5 truncate text-[11px] font-semibold leading-4 text-slate-300/70" title={`${direction.primaryMetric}. ${direction.shortReason}`}>
+                  {direction.insufficientData ? 'Недостаточно данных · ' : ''}{direction.primaryMetric} · {direction.shortReason}
+                </p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2 text-xs font-extrabold text-slate-200">
+            <span>Итого: {hasScore ? `${progress}/100` : 'недостаточно данных'}</span>
+            <span>Фокус по весовому влиянию</span>
+          </div>
+        </div>
+      ) : null}
 
       <div className="company-health-segmented-bar grid min-w-0 grid-cols-5 gap-1.5" data-testid="dashboard-company-health-segments" aria-label="Сегментированная шкала здоровья компании">
         {(bars.length > 0 ? bars.slice(0, 5) : [{ label: 'Аренда', value: 0, hint: 'Нет данных', color: healthSegmentColors.default }]).map((item, index) => {
@@ -3886,6 +3989,7 @@ export default function Dashboard() {
     serviceCount: tickets.length,
     documentsCount: documents.length,
     deliveriesCount: deliveries.length,
+    clientsCount: clients.length,
     utilization,
     noActiveFleetCritical: totalEquipment > 0 && activeEquipment === 0 ? 1 : 0,
     lowUtilizationRisk: activeEquipment > 0 && utilization < 40 ? 1 : 0,
@@ -3908,6 +4012,7 @@ export default function Dashboard() {
   const companyHealthSubtitle = companyHealthModel.subtitle;
   const companyHealthTone = companyHealthModel.tone as DashboardTone;
   const companyHealthWarning = companyHealthModel.warning;
+  const companyHealthScoreBreakdown = companyHealthModel.scoreDetails as CompanyHealthScoreBreakdown;
   const companyHealthContourById = new Map(companyHealthModel.contourStates.map(item => [item.id, item]));
   const companyHealthContourHint = [
     companyHealthModel.availableContours.length > 0 ? `Есть: ${companyHealthModel.availableContours.join(', ')}` : '',
@@ -4710,6 +4815,7 @@ export default function Dashboard() {
                 subtitle={companyHealthSubtitle}
                 warning={companyHealthDisplayScore === null ? companyHealthContourHint || companyHealthWarning : companyHealthWarning || companyHealthDataWarning}
                 clientsCount={clients.length}
+                scoreBreakdown={companyHealthScoreBreakdown}
               />
             </div>
 
@@ -5248,6 +5354,7 @@ export default function Dashboard() {
                 subtitle={companyHealthSubtitle}
                 warning={companyHealthWarning}
                 clientsCount={clients.length}
+                scoreBreakdown={companyHealthScoreBreakdown}
               />
             </div>
 

@@ -9,6 +9,24 @@ const CONTOUR_LABELS = {
 
 const OPERATIONAL_CONTOURS = ['rentals', 'payments', 'service', 'documents', 'deliveries'];
 
+export const COMPANY_HEALTH_WEIGHTS = Object.freeze({
+  finance: 0.30,
+  rental: 0.25,
+  risks: 0.20,
+  service: 0.15,
+  clients: 0.07,
+  fleet: 0.03,
+});
+
+const COMPANY_HEALTH_DIRECTIONS = [
+  { key: 'finance', title: 'Финансы' },
+  { key: 'rental', title: 'Аренда' },
+  { key: 'risks', title: 'Риски' },
+  { key: 'service', title: 'Сервис' },
+  { key: 'clients', title: 'Клиенты' },
+  { key: 'fleet', title: 'Парк' },
+];
+
 function safeCount(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
@@ -63,6 +81,62 @@ function contourScore(status, healthyValue, riskValue = 58, criticalValue = 32) 
   return null;
 }
 
+function formatCountMetric(count, one, few, many) {
+  const abs = Math.abs(count) % 100;
+  const last = abs % 10;
+  const label = abs > 10 && abs < 20 ? many : last === 1 ? one : last > 1 && last < 5 ? few : many;
+  return `${count} ${label}`;
+}
+
+function directionInput(key, score, primaryMetric, shortReason, options = {}) {
+  return {
+    key,
+    score,
+    primaryMetric,
+    shortReason,
+    insufficientData: Boolean(options.insufficientData),
+  };
+}
+
+export function calculateCompanyHealthScore(directionScores = []) {
+  const byKey = new Map(directionScores.map(item => [item?.key, item]).filter(([key]) => key));
+  const directions = COMPANY_HEALTH_DIRECTIONS.map(({ key, title }) => {
+    const source = byKey.get(key) || {};
+    const numericScore = Number(source.score);
+    const hasScore = source.score !== null && source.score !== undefined && source.score !== '' && Number.isFinite(numericScore);
+    const insufficientData = Boolean(source.insufficientData || !hasScore);
+    const score = clampPercent(hasScore ? numericScore : 50);
+    const weight = COMPANY_HEALTH_WEIGHTS[key];
+    const weightedContribution = Number((score * weight).toFixed(4));
+    const weightedDeficit = Number(((100 - score) * weight).toFixed(4));
+
+    return {
+      key,
+      title,
+      score,
+      weight,
+      weightedContribution,
+      weightedDeficit,
+      primaryMetric: source.primaryMetric || 'Недостаточно данных',
+      shortReason: insufficientData ? source.shortReason || 'Недостаточно данных' : source.shortReason || '',
+      insufficientData,
+    };
+  });
+  const total = directions.reduce((sum, item) => sum + item.weightedContribution, 0);
+  const byWeakest = (left, right) => left.score - right.score || right.weight - left.weight || left.title.localeCompare(right.title, 'ru');
+  const byStrongest = (left, right) => right.score - left.score || right.weight - left.weight || left.title.localeCompare(right.title, 'ru');
+  const byFixImpact = (left, right) => right.weightedDeficit - left.weightedDeficit || byWeakest(left, right);
+
+  return {
+    totalScore: clampPercent(Math.round(total)),
+    maxScore: 100,
+    directions,
+    weakestDirections: directions.slice().sort(byWeakest),
+    strongestDirections: directions.slice().sort(byStrongest),
+    focusDirections: directions.slice().sort(byFixImpact),
+  };
+}
+
 function buildContourInput(input = {}) {
   return {
     equipment: {
@@ -98,6 +172,113 @@ function buildContourInput(input = {}) {
   };
 }
 
+function buildCompanyHealthDirectionInputs(input, contours, hasScoreBase) {
+  const utilization = clampPercent(safeCount(input.utilization));
+  const financeStatus = contours.payments.count > 0 ? contourStatus(contours.payments) : 'no_data';
+  const rentalStatus = contours.rentals.count > 0 ? contourStatus(contours.rentals) : 'no_data';
+  const serviceStatus = contours.service.count > 0 ? contourStatus(contours.service) : 'no_data';
+  const fleetStatus = contours.equipment.count > 0 ? contourStatus(contours.equipment) : 'no_data';
+  const clientsCount = safeCount(input.clientsCount);
+  const criticalRiskSignals = safeCount(input.criticalSignals)
+    + safeCount(input.invalidCriticalSignals)
+    + safeCount(input.noActiveFleetCritical)
+    + safeCount(input.overdueReturnsCount)
+    + safeCount(input.oldDebtCount)
+    + safeCount(input.serviceCriticalCount)
+    + safeCount(input.overdueDocumentsCount)
+    + safeCount(input.overdueDeliveriesCount);
+  const warningRiskSignals = safeCount(input.lowUtilizationRisk)
+    + safeCount(input.returnsTodayCount)
+    + safeCount(input.overdueReceivablesCount)
+    + safeCount(input.serviceRiskCount)
+    + safeCount(input.unsignedDocumentsCount)
+    + safeCount(input.unassignedDeliveriesCount);
+  const riskSignals = criticalRiskSignals + warningRiskSignals;
+  const risksHaveSource = hasScoreBase || riskSignals > 0;
+  const riskScore = risksHaveSource
+    ? clampPercent(96 - Math.min(96, criticalRiskSignals * 18 + warningRiskSignals * 7))
+    : null;
+
+  return [
+    directionInput(
+      'finance',
+      contourScore(financeStatus, 92, 62, 34),
+      contours.payments.count > 0 ? formatCountMetric(contours.payments.count, 'платёж', 'платежа', 'платежей') : 'Нет платежей',
+      financeStatus === 'no_data'
+        ? 'Недостаточно данных'
+        : financeStatus === 'critical'
+          ? 'Старый долг или критичная просрочка давят на индекс.'
+          : financeStatus === 'risk'
+            ? 'Есть просроченная дебиторка, нужен контроль оплат.'
+            : 'Платежи заведены, критичной просрочки по доступным данным нет.',
+      { insufficientData: financeStatus === 'no_data' },
+    ),
+    directionInput(
+      'rental',
+      rentalStatus === 'no_data' ? null : safeCount(input.overdueReturnsCount) > 0 ? 35 : safeCount(input.returnsTodayCount) > 0 ? 65 : 90,
+      contours.rentals.count > 0 ? formatCountMetric(contours.rentals.count, 'аренда', 'аренды', 'аренд') : 'Нет аренд',
+      rentalStatus === 'no_data'
+        ? 'Недостаточно данных'
+        : safeCount(input.overdueReturnsCount) > 0
+          ? 'Есть просроченные возвраты.'
+          : safeCount(input.returnsTodayCount) > 0
+            ? 'Есть возвраты сегодня, нужен операционный контроль.'
+            : 'Активность аренды не создаёт срочных отклонений.',
+      { insufficientData: rentalStatus === 'no_data' },
+    ),
+    directionInput(
+      'risks',
+      riskScore,
+      riskSignals > 0 ? formatCountMetric(riskSignals, 'сигнал', 'сигнала', 'сигналов') : risksHaveSource ? '0 сигналов' : 'Нет сигналов',
+      !risksHaveSource
+        ? 'Недостаточно данных'
+        : criticalRiskSignals > 0
+          ? 'Есть критичные сигналы по срокам, долгам, сервису или данным.'
+          : warningRiskSignals > 0
+            ? 'Есть предупреждения, которые снижают запас устойчивости.'
+            : 'Критичных рисков по доступным данным нет.',
+      { insufficientData: !risksHaveSource },
+    ),
+    directionInput(
+      'service',
+      contourScore(serviceStatus, 88, 58, 28),
+      contours.service.count > 0 ? formatCountMetric(contours.service.count, 'заявка', 'заявки', 'заявок') : 'Нет заявок',
+      serviceStatus === 'no_data'
+        ? 'Недостаточно данных'
+        : serviceStatus === 'critical'
+          ? 'Критичные или просроченные заявки блокируют технику.'
+          : serviceStatus === 'risk'
+            ? 'Есть заявки без механика, ожидание запчастей или другие блокеры.'
+            : 'Сервисные заявки не создают критичных блокеров.',
+      { insufficientData: serviceStatus === 'no_data' },
+    ),
+    directionInput(
+      'clients',
+      clientsCount > 0 ? 88 : null,
+      clientsCount > 0 ? formatCountMetric(clientsCount, 'клиент', 'клиента', 'клиентов') : 'Нет клиентов',
+      clientsCount > 0
+        ? 'Клиентская база доступна для связки с арендами и платежами.'
+        : 'Недостаточно данных',
+      { insufficientData: clientsCount <= 0 },
+    ),
+    directionInput(
+      'fleet',
+      fleetStatus === 'no_data' ? null : safeCount(input.noActiveFleetCritical) > 0 ? 25 : utilization >= 60 ? 90 : utilization >= 40 ? 65 : 38,
+      fleetStatus === 'no_data' ? 'Нет техники' : `${Math.round(utilization)}% загрузка`,
+      fleetStatus === 'no_data'
+        ? 'Недостаточно данных'
+        : safeCount(input.noActiveFleetCritical) > 0
+          ? 'Парк есть, но активной техники в работе нет.'
+          : utilization < 40
+            ? 'Низкая загрузка парка снижает индекс.'
+            : utilization < 60
+              ? 'Загрузка ниже целевой зоны.'
+              : 'Парк работает в целевой зоне загрузки.',
+      { insufficientData: fleetStatus === 'no_data' },
+    ),
+  ];
+}
+
 export function buildCompanyHealthModel(input = {}) {
   const contours = buildContourInput(input);
   const contourStates = Object.entries(contours).map(([id, facts]) => {
@@ -118,6 +299,8 @@ export function buildCompanyHealthModel(input = {}) {
   const isEmpty = contourStates.every(item => item.count <= 0);
   const criticalSignals = safeCount(input.criticalSignals);
   const invalidCriticalSignals = safeCount(input.invalidCriticalSignals);
+  const hasScoreBase = hasEquipment && hasOperationalData;
+  const scoreDetails = calculateCompanyHealthScore(buildCompanyHealthDirectionInputs(input, contours, hasScoreBase));
 
   if (isEmpty) {
     return {
@@ -128,6 +311,7 @@ export function buildCompanyHealthModel(input = {}) {
       availableContours,
       missingContours,
       contourStates,
+      scoreDetails,
       warning: criticalSignals > 0 || invalidCriticalSignals > 0 ? 'Есть сигналы без полного расчёта' : '',
     };
   }
@@ -141,34 +325,28 @@ export function buildCompanyHealthModel(input = {}) {
       availableContours,
       missingContours,
       contourStates,
+      scoreDetails,
       warning: criticalSignals > 0 || invalidCriticalSignals > 0 ? 'Есть сигналы без полного расчёта' : '',
     };
   }
 
-  const utilization = clampPercent(safeCount(input.utilization));
-  const scores = [
-    utilization >= 60 ? 90 : utilization >= 40 ? 65 : 38,
-    contourScore(contours.rentals.count > 0 ? contourStatus(contours.rentals) : 'no_data', 88),
-    contourScore(contours.payments.count > 0 ? contourStatus(contours.payments) : 'no_data', 92, 62, 34),
-    contourScore(contours.service.count > 0 ? contourStatus(contours.service) : 'no_data', 88, 58, 28),
-    contourScore(contours.documents.count > 0 ? contourStatus(contours.documents) : 'no_data', 90, 58, 34),
-    contourScore(contours.deliveries.count > 0 ? contourStatus(contours.deliveries) : 'no_data', 88, 60, 32),
-  ].filter(value => value !== null);
-
-  const signalPenalty = Math.min(22, criticalSignals * 4 + invalidCriticalSignals * 6);
-  const score = clampPercent(Math.round(
-    scores.reduce((sum, value) => sum + value, 0) / Math.max(scores.length, 1) - signalPenalty,
-  ));
+  const score = scoreDetails.totalScore;
+  const missingDirections = scoreDetails.directions.filter(item => item.insufficientData).map(item => item.title);
 
   return {
     score,
     label: score >= 80 ? 'Хорошо' : score >= 55 ? 'Зона внимания' : 'Критично',
-    subtitle: 'Расчёт по доступным операционным данным',
+    subtitle: 'Формула: финансы 30%, аренда 25%, риски 20%, сервис 15%, клиенты 7%, парк 3%',
     tone: score >= 80 ? 'success' : score >= 55 ? 'warning' : 'danger',
     availableContours,
     missingContours,
     contourStates,
-    warning: invalidCriticalSignals > 0 ? 'Есть сигналы без полного расчёта' : '',
+    scoreDetails,
+    warning: invalidCriticalSignals > 0
+      ? 'Есть сигналы без полного расчёта'
+      : missingDirections.length > 0
+        ? `Недостаточно данных: ${missingDirections.join(', ')}`
+        : '',
   };
 }
 

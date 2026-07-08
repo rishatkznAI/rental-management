@@ -53,6 +53,7 @@ async function dashboardLayoutSnapshot(page: Page) {
     const healthVisual = rectFor('[data-testid="dashboard-company-health-visual"]');
     const healthDirections = rectFor('[data-testid="dashboard-company-health-directions"]');
     const healthCompleteness = rectFor('[data-testid="dashboard-company-health-completeness"]');
+    const healthExplanation = rectFor('[data-testid="dashboard-company-health-explanation"]');
     const radial = rectFor('[data-testid="dashboard-radial-overview"]');
     const fleet = rectFor('[data-testid="dashboard-fleet-utilization"]');
     const receivables = rectFor('[data-testid="dashboard-receivables-aging"]');
@@ -166,6 +167,7 @@ async function dashboardLayoutSnapshot(page: Page) {
       healthVisual,
       healthDirections,
       healthCompleteness,
+      healthExplanation,
       fleet,
       receivables,
       operationalSummary,
@@ -275,6 +277,28 @@ test.describe('Dashboard enterprise layout', () => {
         expect(snapshot.healthSegments?.bottom ?? 0, `${viewport.name}: segmented bar should stack before visual (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual((snapshot.healthVisual?.top ?? 0) + 1);
         expect(snapshot.healthVisual?.bottom ?? 0, `${viewport.name}: visual should stack before directions (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual((snapshot.healthDirections?.top ?? 0) + 1);
       }
+
+      await page.getByTestId('dashboard-company-health-explanation-toggle').click();
+      const explanation = page.getByTestId('dashboard-company-health-explanation');
+      await expect(explanation, `${viewport.name}: company health explanation should open`).toBeVisible();
+      const explanationText = await explanation.innerText();
+      for (const part of ['Финансы 30%', 'Аренда 25%', 'Риски 20%', 'Сервис 15%', 'Клиенты 7%', 'Парк 3%']) {
+        expect(explanationText, `${viewport.name}: explanation should show ${part}`).toContain(part);
+      }
+      expect(explanationText, `${viewport.name}: explanation should show weighted finance contribution`).toMatch(/Финансы[\s\S]*\/100 × 30% = \d/);
+      expect(explanationText, `${viewport.name}: explanation should show final score`).toMatch(/Итого: (?:\d+\/100|недостаточно данных)/);
+      expect(explanationText, `${viewport.name}: explanation should show focus directions`).toMatch(/Сначала исправить: \S/);
+
+      const openSnapshot = await dashboardLayoutSnapshot(page);
+      expect(openSnapshot.overflowX, `${viewport.name}: open explanation should not create horizontal overflow (${JSON.stringify(openSnapshot)})`).toBeLessThanOrEqual(1);
+      expect(openSnapshot.offenders, `${viewport.name}: open explanation should stay inside viewport`).toEqual([]);
+      expect(openSnapshot.healthExplanation?.visible, `${viewport.name}: open explanation shell should be visible (${JSON.stringify(openSnapshot)})`).toBe(true);
+      expect(openSnapshot.healthExplanation?.left ?? 0, `${viewport.name}: open explanation should stay inside company health left edge (${JSON.stringify(openSnapshot)})`).toBeGreaterThanOrEqual((openSnapshot.health?.left ?? 0) - 1);
+      expect(openSnapshot.healthExplanation?.right ?? 0, `${viewport.name}: open explanation should stay inside company health right edge (${JSON.stringify(openSnapshot)})`).toBeLessThanOrEqual((openSnapshot.health?.right ?? 0) + 1);
+      expect(openSnapshot.healthExplanation?.bottom ?? 0, `${viewport.name}: open explanation should stay inside company health bottom edge (${JSON.stringify(openSnapshot)})`).toBeLessThanOrEqual((openSnapshot.health?.bottom ?? 0) + 1);
+      expect(openSnapshot.compactHealthCards, `${viewport.name}: open explanation should keep six business signals`).toBe(6);
+      expect(openSnapshot.radialCoreExists, `${viewport.name}: open explanation should preserve radial core selector`).toBe(true);
+      await page.getByTestId('dashboard-company-health-explanation-close').click();
     });
   }
 

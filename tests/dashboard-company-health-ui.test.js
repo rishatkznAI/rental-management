@@ -103,6 +103,31 @@ test('dashboard company health renders status row, segmented bar, chart, signals
   assert.doesNotMatch(trendBlock, />Нет</);
 });
 
+test('dashboard company health exposes weighted score explanation', () => {
+  const block = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
+
+  assert.match(block, /data-testid="dashboard-company-health-explanation-toggle"/);
+  assert.match(block, /aria-expanded=\{isExplanationOpen\}/);
+  assert.match(block, /Расшифровка/);
+  assert.match(block, /data-testid="dashboard-company-health-explanation"/);
+  assert.match(block, /data-testid="dashboard-company-health-explanation-close"/);
+  assert.match(block, /data-testid="dashboard-company-health-explanation-total"/);
+  assert.match(block, /data-testid="dashboard-company-health-explanation-breakdown"/);
+  assert.match(block, /data-testid=\{`dashboard-company-health-explanation-\$\{direction\.key\}`\}/);
+  assert.match(block, /\{Math\.round\(direction\.score\)\}\/100 × \{formatHealthWeight\(direction\.weight\)\} = \{formatHealthContribution\(direction\.weightedContribution\)\}/);
+  assert.match(block, /Недостаточно данных · /);
+  assert.match(block, /data-testid="dashboard-company-health-explanation-focus"/);
+  assert.match(block, /Сначала исправить:/);
+  assert.match(block, /focusDirections/);
+
+  for (const formulaPart of ['Финансы 30%', 'Аренда 25%', 'Риски 20%', 'Сервис 15%', 'Клиенты 7%', 'Парк 3%']) {
+    assert.match(block, new RegExp(formulaPart));
+  }
+
+  assert.match(themeSource, /\.company-health-explanation-popover\s*\{[\s\S]*position: absolute;[\s\S]*bottom: 9px;[\s\S]*overflow: auto;/);
+  assert.match(themeSource, /@container \(max-width: 520px\)\s*\{[\s\S]*\.company-health-explanation-popover\s*\{[\s\S]*top: 148px;[\s\S]*bottom: 9px;/);
+});
+
 test('dashboard trend overview has empty and zero-value states without letting empty copy dominate', () => {
   const trendBlock = sourceBlock(dashboardSource, 'function CompanyHealthTrendOverview', 'function CompanyHealthCommandCenter');
 

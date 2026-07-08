@@ -26,6 +26,15 @@ type DashboardLayoutSnapshot = {
   healthVisible: boolean;
   healthWidth: number;
   healthWidthShare: number;
+  lowerGridAlignment: null | {
+    leftDelta: number;
+    rightDelta: number;
+    widthDelta: number;
+  };
+  lowerGridWhitespace: null | {
+    left: number;
+    right: number;
+  };
   healthSvgCount: number;
   healthScoreVisible: boolean;
   healthScoreWidthShare: number;
@@ -270,6 +279,7 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
     const radialCore = health?.querySelector('[data-testid="dashboard-radial-core"]') ?? null;
     const healthRect = rectOf(health ?? null);
     const boardRect = rectOf(board);
+    const boardFullRect = fullRectOf(board);
     const radialBox = rectOf(radial);
     const radialRect = radial?.getBoundingClientRect();
     const radialNodes = Array.from(health?.querySelectorAll('[data-testid="dashboard-radial-node"]') ?? []);
@@ -334,6 +344,15 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
       healthVisible: isVisible(health ?? null),
       healthWidth: healthRect.width,
       healthWidthShare: healthRect.width / Math.max(boardRect.width, 1),
+      lowerGridAlignment: blockRects.fleet && blockRects.receivables && blockRects.health ? {
+        leftDelta: Math.abs(blockRects.health.left - blockRects.fleet.left),
+        rightDelta: Math.abs(blockRects.health.right - blockRects.receivables.right),
+        widthDelta: Math.abs(blockRects.health.width - (blockRects.receivables.right - blockRects.fleet.left)),
+      } : null,
+      lowerGridWhitespace: blockRects.health && boardFullRect ? {
+        left: Math.max(0, blockRects.health.left - boardFullRect.left),
+        right: Math.max(0, boardFullRect.right - blockRects.health.right),
+      } : null,
       healthSvgCount: health?.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length || 0,
       healthScoreVisible: isVisible(healthScore),
       healthScoreWidthShare: rectOf(healthScore).width / Math.max(healthRect.width, 1),
@@ -413,12 +432,19 @@ async function expectDashboardContract(
     expect(snapshot.radialNodeCount, `${viewportCase.name}: radial overview should render business contour nodes`).toBeGreaterThanOrEqual(6);
     expect(snapshot.radialNodesInside, `${viewportCase.name}: radial nodes should stay inside overview (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.compactVisible, `${viewportCase.name}: compact wrapper should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.compactCards, `${viewportCase.name}: compact wrapper should contain six direction cards`).toBeGreaterThanOrEqual(6);
+    expect(snapshot.compactCards, `${viewportCase.name}: compact wrapper should contain six direction cards`).toBe(6);
     expect(snapshot.kpiReadability, `${viewportCase.name}: KPI values should render`).not.toEqual([]);
     expect(snapshot.kpiReadability.filter(item => item.clipped), `${viewportCase.name}: KPI values should not clip`).toEqual([]);
     expect(snapshot.kpiReadability.filter(item => item.wordBreak === 'break-all' || item.overflowWrap === 'anywhere'), `${viewportCase.name}: KPI values should not force letter wrapping`).toEqual([]);
     if (viewportCase.name === 'desktop') {
-      expect(snapshot.healthWidthShare, `${viewportCase.name}: company health should be an executive-width module`).toBeGreaterThanOrEqual(0.75);
+      expect(snapshot.healthWidth, `${viewportCase.name}: company health should be a compact executive-width module`).toBeGreaterThanOrEqual(760);
+      expect(snapshot.healthWidth, `${viewportCase.name}: company health should be a compact executive-width module`).toBeLessThanOrEqual(900);
+      expect(snapshot.healthWidthShare, `${viewportCase.name}: company health should use the lower two-card grid width, not the full board`).toBeLessThan(0.75);
+      expect(snapshot.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should align with fleet card left edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+      expect(snapshot.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should align with receivables card right edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+      expect(snapshot.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should span the fleet plus receivables grid width (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+      expect(snapshot.lowerGridWhitespace?.left ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should not float in a centered empty row (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(16);
+      expect(snapshot.healthWidthShare, `${viewportCase.name}: company health should remain compact inside the lower grid`).toBeGreaterThan(0.6);
       expect(snapshot.healthScoreWidthShare, `${viewportCase.name}: status row should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
       expect(snapshot.healthVisualWidthShare, `${viewportCase.name}: health chart should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
       expect(snapshot.healthDirectionsWidthShare, `${viewportCase.name}: business signals should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);

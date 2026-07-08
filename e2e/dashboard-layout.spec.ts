@@ -54,11 +54,47 @@ async function dashboardLayoutSnapshot(page: Page) {
     const healthDirections = rectFor('[data-testid="dashboard-company-health-directions"]');
     const healthCompleteness = rectFor('[data-testid="dashboard-company-health-completeness"]');
     const radial = rectFor('[data-testid="dashboard-radial-overview"]');
+    const fleet = rectFor('[data-testid="dashboard-fleet-utilization"]');
+    const receivables = rectFor('[data-testid="dashboard-receivables-aging"]');
+    const operationalSummary = rectFor('[data-testid="dashboard-operational-summary"]');
     const radialCore = document.querySelector('[data-testid="dashboard-radial-core"]');
     const healthElement = document.querySelector('[data-testid="dashboard-company-health"]');
     const healthVisualElement = document.querySelector('[data-testid="dashboard-company-health-visual"]');
     const healthVisualRect = healthVisualElement?.getBoundingClientRect();
     const healthRect = healthElement?.getBoundingClientRect();
+    const overlapArea = (a: DOMRect, b: DOMRect) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
+      * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+    const hasFixedAncestor = (element: HTMLElement) => {
+      for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+        if (window.getComputedStyle(current).position === 'fixed') return true;
+      }
+      return false;
+    };
+    const companyHealthOverlaps = healthElement && healthRect
+      ? Array.from(document.body.querySelectorAll<HTMLElement>('*'))
+        .filter((element) => {
+          if (element === healthElement || healthElement.contains(element) || element.contains(healthElement)) return false;
+          const style = window.getComputedStyle(element);
+          if (style.display === 'none' || style.visibility === 'hidden' || hasFixedAncestor(element)) return false;
+          const rect = element.getBoundingClientRect();
+          if (rect.width < 6 || rect.height < 6) return false;
+          return overlapArea(healthRect, rect) > 1;
+        })
+        .slice(0, 8)
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            tag: element.tagName.toLowerCase(),
+            testId: element.getAttribute('data-testid') || '',
+            text: element.textContent?.trim().slice(0, 80) || '',
+            className: String(element.className || '').slice(0, 120),
+            left: Math.round(rect.left),
+            top: Math.round(rect.top),
+            right: Math.round(rect.right),
+            bottom: Math.round(rect.bottom),
+          };
+        })
+      : [];
     const companyHealthOffenders = Array.from(healthElement?.querySelectorAll<HTMLElement>('*') ?? [])
       .filter((element) => {
         const style = window.getComputedStyle(element);
@@ -130,6 +166,9 @@ async function dashboardLayoutSnapshot(page: Page) {
       healthVisual,
       healthDirections,
       healthCompleteness,
+      fleet,
+      receivables,
+      operationalSummary,
       radial,
       radialCoreExists: Boolean(document.querySelector('[data-testid="dashboard-radial-core"]')),
       radialNodeCount: radialNodes.length,
@@ -137,6 +176,16 @@ async function dashboardLayoutSnapshot(page: Page) {
       radialEmptyExists: Boolean(document.querySelector('[data-testid="dashboard-radial-empty"]')),
       healthSvgCount: document.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length,
       healthWidthShare: board && health ? health.width / Math.max(board.width, 1) : 1,
+      lowerGridAlignment: health && fleet && receivables ? {
+        leftDelta: Math.abs(health.left - fleet.left),
+        rightDelta: Math.abs(health.right - receivables.right),
+        widthDelta: Math.abs(health.width - (receivables.right - fleet.left)),
+      } : null,
+      lowerGridWhitespace: board && health ? {
+        left: Math.max(0, health.left - board.left),
+        right: Math.max(0, board.right - health.right),
+      } : null,
+      companyHealthOverlaps,
       companyHealthOffenders,
       healthScoreWidthShare: health && healthScore ? healthScore.width / Math.max(health.width, 1) : 1,
       healthVisualWidthShare: health && healthVisual ? healthVisual.width / Math.max(health.width, 1) : 1,
@@ -166,14 +215,23 @@ test.describe('Dashboard enterprise layout', () => {
         await expect(page.getByText(label, { exact: true }).first(), `${label} should be visible`).toBeVisible();
       }
 
+      const topSnapshot = await dashboardLayoutSnapshot(page);
+
+      expect(topSnapshot.setupBannerCount, `${viewport.name}: removed setup banner should not be visible`).toBe(0);
+      expect(topSnapshot.overflowX, `${viewport.name}: document should not scroll horizontally (${JSON.stringify(topSnapshot)})`).toBeLessThanOrEqual(1);
+      expect(topSnapshot.offenders, `${viewport.name}: visible elements should stay inside viewport`).toEqual([]);
+      expect(topSnapshot.companyHealthOverlaps, `${viewport.name}: company health should not cover other dashboard content`).toEqual([]);
+      expect(topSnapshot.screen?.top ?? 0, `${viewport.name}: dashboard content should start below header`).toBeGreaterThanOrEqual((topSnapshot.header?.bottom ?? 0) - 1);
+      expect(topSnapshot.cockpit?.top ?? 0, `${viewport.name}: KPI row should start below the dashboard command header`).toBeGreaterThanOrEqual((topSnapshot.commandHeader?.bottom ?? 0) - 1);
+
+      await page.getByTestId('dashboard-company-health').scrollIntoViewIfNeeded();
+      await page.waitForTimeout(100);
       const snapshot = await dashboardLayoutSnapshot(page);
 
-      expect(snapshot.setupBannerCount, `${viewport.name}: removed setup banner should not be visible`).toBe(0);
-      expect(snapshot.overflowX, `${viewport.name}: document should not scroll horizontally (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-      expect(snapshot.offenders, `${viewport.name}: visible elements should stay inside viewport`).toEqual([]);
+      expect(snapshot.overflowX, `${viewport.name}: document should not scroll horizontally after scrolling to company health (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+      expect(snapshot.offenders, `${viewport.name}: visible elements should stay inside viewport after scrolling to company health`).toEqual([]);
+      expect(snapshot.companyHealthOverlaps, `${viewport.name}: company health should not cover other dashboard content after scrolling`).toEqual([]);
       expect(snapshot.companyHealthOffenders, `${viewport.name}: company health children should stay inside card and viewport`).toEqual([]);
-      expect(snapshot.screen?.top ?? 0, `${viewport.name}: dashboard content should start below header`).toBeGreaterThanOrEqual((snapshot.header?.bottom ?? 0) - 1);
-      expect(snapshot.cockpit?.top ?? 0, `${viewport.name}: KPI row should start below the dashboard command header`).toBeGreaterThanOrEqual((snapshot.commandHeader?.bottom ?? 0) - 1);
       expect(snapshot.healthSvgCount, `${viewport.name}: company health should not render a dominant central SVG circle`).toBe(0);
       expect(snapshot.healthScore?.visible, `${viewport.name}: company health score summary should be visible (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.healthSegments?.visible, `${viewport.name}: company health segmented bar should be visible (${JSON.stringify(snapshot)})`).toBe(true);
@@ -188,15 +246,21 @@ test.describe('Dashboard enterprise layout', () => {
       expect(snapshot.radialNodeCount, `${viewport.name}: radial overview should keep business contour node selectors (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(6);
       expect(snapshot.radialNodesInside, `${viewport.name}: radial nodes should stay inside radial overview (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.radialInsideVisual, `${viewport.name}: radial overview should stay inside the health visual panel (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.compactHealthCards, `${viewport.name}: company health should keep all business contours`).toBeGreaterThanOrEqual(6);
+      expect(snapshot.compactHealthCards, `${viewport.name}: company health should keep exactly six business contours`).toBe(6);
       expect(snapshot.kpiReadability, `${viewport.name}: KPI values should render`).not.toEqual([]);
       expect(snapshot.kpiReadability.filter(item => item.clipped), `${viewport.name}: KPI values should not clip`).toEqual([]);
       expect(snapshot.kpiReadability.filter(item => item.wordBreak === 'break-all' || item.overflowWrap === 'anywhere'), `${viewport.name}: KPI values should not force letter wrapping`).toEqual([]);
 
       if (viewport.name === 'desktop') {
-        expect(snapshot.healthWidthShare, `${viewport.name}: company health should be an executive-width module`).toBeGreaterThanOrEqual(0.75);
+        expect(snapshot.health?.width ?? 0, `${viewport.name}: company health should be a compact executive-width module (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(760);
+        expect(snapshot.health?.width ?? 0, `${viewport.name}: company health should be a compact executive-width module (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(900);
+        expect(snapshot.healthWidthShare, `${viewport.name}: company health should use the lower two-card grid width, not the full board (${JSON.stringify(snapshot)})`).toBeLessThan(0.75);
+        expect(snapshot.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should align with fleet card left edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+        expect(snapshot.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should align with receivables card right edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+        expect(snapshot.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should span the fleet plus receivables grid width (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+        expect(snapshot.lowerGridWhitespace?.left ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should not float in a centered empty row (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(16);
         expect(snapshot.health?.height ?? 0, `${viewport.name}: company health should stay within premium card height target (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(360);
-        expect(snapshot.health?.height ?? 0, `${viewport.name}: company health should stay within premium card height target (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(390);
+        expect(snapshot.health?.height ?? 0, `${viewport.name}: company health should stay compact inside the lower grid (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(470);
         expect(snapshot.healthScoreWidthShare, `${viewport.name}: status row should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
         expect(snapshot.healthVisualWidthShare, `${viewport.name}: chart should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
         expect(snapshot.healthDirectionsWidthShare, `${viewport.name}: signal row should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);

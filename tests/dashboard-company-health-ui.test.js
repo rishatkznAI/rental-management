@@ -83,6 +83,7 @@ test('dashboard company health is one integrated executive analytics card', () =
   assert.doesNotMatch(block, /company-health-score-panel/);
   assert.doesNotMatch(block, /lg:grid-cols-\[220px_minmax/);
   assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(themeSource, /@media \(min-width: 1280px\)\s*\{[\s\S]*\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*max-width: 900px;/);
 });
 
 test('dashboard company health renders status row, segmented bar, chart, signals and local data strip', () => {

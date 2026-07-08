@@ -4697,7 +4697,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-h-[360px] min-w-0 flex-col overflow-visible p-3 md:col-span-2 xl:col-span-12" data-testid="dashboard-operational-summary">
+            <div className="flex min-w-0 md:col-span-2 xl:col-span-8 xl:w-[calc(100%+1px)]" data-testid="dashboard-operational-summary">
               <CompanyHealthCommandCenter
                 leftDirections={commandCenterLeftDirections}
                 rightDirections={commandCenterRightDirections}
@@ -4712,6 +4712,7 @@ export default function Dashboard() {
                 clientsCount={clients.length}
               />
             </div>
+
           </section>
         </div>
       </div>
@@ -4872,10 +4873,11 @@ export default function Dashboard() {
                   lossPerDay={attentionLossLabel(actionAttention?.summary?.totalDailyLoss ?? 0)}
                 />
               </div>
-            )}
-          </div>
-          </div>
-        </section>
+                )}
+              </div>
+            </div>
+
+          </section>
       )}
 
       {showRoleDashboardCards && (

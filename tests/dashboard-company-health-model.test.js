@@ -89,6 +89,150 @@ test('company health formula marks missing directions with explicit neutral fall
   assert.equal(rental?.shortReason, 'Недостаточно данных');
 });
 
+test('company health directions expose weighted sub-metric methodology', () => {
+  const model = buildCompanyHealthModel({
+    equipmentCount: 10,
+    activeEquipment: 9,
+    availableEquipment: 2,
+    equipmentInServiceCount: 1,
+    inactiveEquipmentCount: 1,
+    rentalsCount: 6,
+    paymentsCount: 5,
+    serviceCount: 3,
+    documentsCount: 2,
+    deliveriesCount: 2,
+    clientsCount: 8,
+    utilization: 78,
+    monthlyRevenue: 1_000_000,
+    monthlyPaidAmount: 920_000,
+    overdueReceivablesAmount: 20_000,
+    totalDebt: 80_000,
+    debt30PlusAmount: 0,
+    debt60PlusAmount: 0,
+    largestProblemDebtAmount: 20_000,
+    problemClientCount: 1,
+    hasDebtSourceData: true,
+    rentalRevenueActual: 900_000,
+    rentalRevenuePlan: 1_000_000,
+    rentalStartsThisMonth: 4,
+    rentalReturnsThisMonth: 2,
+    reservedRentalsCount: 2,
+    openServiceTicketsCount: 3,
+    overdueServiceTicketsCount: 0,
+    repeatServiceFailuresCount: 0,
+    averageServiceDays: 2,
+    serviceLoadPercent: 64,
+    newClientsThisMonth: 2,
+    activeClientsCount: 4,
+    repeatClientsCount: 3,
+    agedEquipmentCount: 1,
+    highHoursEquipmentCount: 0,
+    equipmentWithPlannedRevenueCount: 8,
+    fleetTopTypeShare: 40,
+  });
+
+  const expectedSubMetricCounts = {
+    finance: 4,
+    rental: 4,
+    risks: 4,
+    service: 5,
+    clients: 4,
+    fleet: 4,
+  };
+
+  for (const direction of model.scoreDetails.directions) {
+    assert.equal(direction.totalWeight, COMPANY_HEALTH_WEIGHTS[direction.key]);
+    assert.equal(direction.weightedContribution, Number((direction.score * direction.weight).toFixed(4)));
+    assert.equal(direction.subMetrics.length, expectedSubMetricCounts[direction.key]);
+    assert.ok(direction.reason);
+    assert.ok(direction.recommendedAction);
+    assert.match(direction.riskLevel, /^(critical|risk|stable|good|excellent)$/);
+
+    const subMetricScore = Math.round(direction.subMetrics.reduce((sum, metric) => sum + metric.contribution, 0));
+    assert.equal(direction.score, subMetricScore);
+    for (const metric of direction.subMetrics) {
+      assert.ok(metric.key);
+      assert.ok(metric.title);
+      assert.ok(metric.score >= 0 && metric.score <= 100);
+      assert.ok(metric.weight > 0 && metric.weight <= 1);
+      assert.equal(metric.contribution, Number((metric.score * metric.weight).toFixed(4)));
+      assert.match(metric.sourceStatus, /^(real|derived|missing)$/);
+      assert.ok(metric.reason);
+    }
+  }
+});
+
+test('company health missing sub-metrics use explicit neutral 50 fallback', () => {
+  const model = buildCompanyHealthModel({
+    equipmentCount: 4,
+    rentalsCount: 2,
+    paymentsCount: 1,
+    serviceCount: 1,
+    documentsCount: 1,
+    deliveriesCount: 1,
+    utilization: 55,
+  });
+  const finance = model.scoreDetails.directions.find(item => item.key === 'finance');
+  const costPressure = finance?.subMetrics.find(metric => metric.key === 'finance_cost_pressure');
+
+  assert.equal(typeof model.score, 'number');
+  assert.equal(finance?.hasMissingSubMetrics, true);
+  assert.equal(costPressure?.sourceStatus, 'missing');
+  assert.equal(costPressure?.score, 50);
+  assert.match(costPressure?.reason || '', /используется нейтральная оценка 50/);
+});
+
+test('company health risk score is strict for one large overdue debtor', () => {
+  const model = buildCompanyHealthModel({
+    equipmentCount: 10,
+    activeEquipment: 10,
+    availableEquipment: 2,
+    equipmentInServiceCount: 1,
+    rentalsCount: 5,
+    paymentsCount: 4,
+    serviceCount: 2,
+    documentsCount: 1,
+    deliveriesCount: 1,
+    clientsCount: 6,
+    utilization: 75,
+    monthlyRevenue: 1_000_000,
+    monthlyPaidAmount: 700_000,
+    overdueReceivablesAmount: 650_000,
+    totalDebt: 800_000,
+    debt30PlusAmount: 0,
+    debt60PlusAmount: 0,
+    largestProblemDebtAmount: 650_000,
+    problemClientCount: 1,
+    hasDebtSourceData: true,
+    rentalRevenueActual: 800_000,
+    rentalRevenuePlan: 1_000_000,
+    rentalStartsThisMonth: 1,
+    rentalReturnsThisMonth: 1,
+    reservedRentalsCount: 1,
+    openServiceTicketsCount: 2,
+    overdueServiceTicketsCount: 0,
+    repeatServiceFailuresCount: 0,
+    averageServiceDays: 2,
+    serviceLoadPercent: 60,
+    newClientsThisMonth: 1,
+    activeClientsCount: 3,
+    repeatClientsCount: 2,
+    agedEquipmentCount: 1,
+    highHoursEquipmentCount: 0,
+    equipmentWithPlannedRevenueCount: 8,
+    fleetTopTypeShare: 40,
+  });
+  const risks = model.scoreDetails.directions.find(item => item.key === 'risks');
+  const overdue = risks?.subMetrics.find(metric => metric.key === 'risks_overdue_receivables');
+  const concentration = risks?.subMetrics.find(metric => metric.key === 'risks_problem_clients');
+
+  assert.ok((risks?.score ?? 100) <= 40);
+  assert.equal(risks?.riskLevel, 'risk');
+  assert.ok((overdue?.score ?? 100) <= 10);
+  assert.ok((concentration?.score ?? 100) <= 20);
+  assert.match(risks?.recommendedAction || '', /новые отгрузки/i);
+});
+
 test('empty dashboard data does not calculate a numeric company health score', () => {
   const model = buildCompanyHealthModel({});
 

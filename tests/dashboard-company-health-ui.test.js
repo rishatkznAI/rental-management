@@ -116,6 +116,11 @@ test('dashboard company health exposes weighted score explanation', () => {
   assert.match(block, /data-testid=\{`dashboard-company-health-explanation-\$\{direction\.key\}`\}/);
   assert.match(block, /\{Math\.round\(direction\.score\)\}\/100 × \{formatHealthWeight\(direction\.weight\)\} = \{formatHealthContribution\(direction\.weightedContribution\)\}/);
   assert.match(block, /Недостаточно данных · /);
+  assert.match(block, /direction\.subMetrics\?\.length/);
+  assert.match(block, /formatHealthSourceStatus\(metric\.sourceStatus\)/);
+  assert.match(dashboardSource, /нет данных, 50/);
+  assert.match(block, /direction\.recommendedAction/);
+  assert.match(block, /Действие:/);
   assert.match(block, /data-testid="dashboard-company-health-explanation-focus"/);
   assert.match(block, /Сначала исправить:/);
   assert.match(block, /focusDirections/);

@@ -74,54 +74,175 @@ function contourStateLabel(status) {
   return 'Нет данных';
 }
 
-function contourScore(status, healthyValue, riskValue = 58, criticalValue = 32) {
-  if (status === 'ok') return healthyValue;
-  if (status === 'risk') return riskValue;
-  if (status === 'critical') return criticalValue;
+function hasOwn(input, key) {
+  return Object.prototype.hasOwnProperty.call(input || {}, key);
+}
+
+function hasFiniteInput(input, key) {
+  if (!hasOwn(input, key)) return false;
+  const numeric = Number(input[key]);
+  return Number.isFinite(numeric);
+}
+
+function firstFiniteInput(input, keys) {
+  for (const key of keys) {
+    if (hasFiniteInput(input, key)) return Number(input[key]);
+  }
   return null;
 }
 
-function formatCountMetric(count, one, few, many) {
-  const abs = Math.abs(count) % 100;
-  const last = abs % 10;
-  const label = abs > 10 && abs < 20 ? many : last === 1 ? one : last > 1 && last < 5 ? few : many;
-  return `${count} ${label}`;
+function hasAnyFiniteInput(input, keys) {
+  return keys.some(key => hasFiniteInput(input, key));
 }
 
-function directionInput(key, score, primaryMetric, shortReason, options = {}) {
+function nonNegative(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+}
+
+function ratioScore(ratio, bands) {
+  const safeRatio = Number.isFinite(ratio) ? ratio : 0;
+  const match = bands.find(([limit]) => safeRatio <= limit);
+  return match ? match[1] : bands[bands.length - 1]?.[1] ?? 50;
+}
+
+function planPerformanceScore(actual, plan) {
+  if (plan <= 0) return null;
+  const ratio = actual / plan;
+  if (ratio >= 1) return 100;
+  if (ratio >= 0.9) return 92;
+  if (ratio >= 0.75) return 78;
+  if (ratio >= 0.6) return 62;
+  if (ratio >= 0.4) return 42;
+  return 20;
+}
+
+function overduePressureScore(overdueAmount, baseAmount, strict = false) {
+  if (overdueAmount <= 0) return 100;
+  const base = Math.max(baseAmount, overdueAmount, 1);
+  const ratio = overdueAmount / base;
+  return ratioScore(ratio, strict
+    ? [[0.03, 88], [0.08, 72], [0.15, 52], [0.30, 30], [0.50, 14], [Infinity, 5]]
+    : [[0.05, 90], [0.15, 74], [0.30, 52], [0.50, 30], [Infinity, 12]]);
+}
+
+function countAgainstTargetScore(count, target) {
+  if (target <= 0) return 50;
+  const ratio = count / target;
+  if (ratio >= 1) return 100;
+  if (ratio >= 0.75) return 82;
+  if (ratio >= 0.5) return 65;
+  if (ratio > 0) return 42;
+  return 24;
+}
+
+function riskLevelForScore(score) {
+  if (score <= 30) return 'critical';
+  if (score <= 55) return 'risk';
+  if (score <= 75) return 'stable';
+  if (score <= 90) return 'good';
+  return 'excellent';
+}
+
+function missingReason(reason = 'Недостаточно данных') {
+  return `${reason}; используется нейтральная оценка 50`;
+}
+
+function buildSubMetric({ key, title, score, weight, sourceStatus = 'derived', reason }) {
+  const status = sourceStatus === 'real' || sourceStatus === 'derived' || sourceStatus === 'missing'
+    ? sourceStatus
+    : 'derived';
+  const resolvedScore = status === 'missing'
+    ? 50
+    : clampPercent(Math.round(Number.isFinite(Number(score)) ? Number(score) : 50));
   return {
     key,
-    score,
-    primaryMetric,
-    shortReason,
-    insufficientData: Boolean(options.insufficientData),
+    title,
+    score: resolvedScore,
+    weight,
+    contribution: Number((resolvedScore * weight).toFixed(4)),
+    sourceStatus: status,
+    reason: status === 'missing' ? missingReason(reason) : reason || '',
   };
+}
+
+function weakestSubMetric(subMetrics) {
+  return subMetrics
+    .slice()
+    .sort((left, right) => left.score - right.score || right.weight - left.weight || left.title.localeCompare(right.title, 'ru'))[0];
+}
+
+function buildDirection({ key, title, subMetrics, reason, recommendedAction }) {
+  const score = clampPercent(Math.round(subMetrics.reduce((sum, metric) => sum + metric.contribution, 0)));
+  const weight = COMPANY_HEALTH_WEIGHTS[key];
+  const weakest = weakestSubMetric(subMetrics);
+  const allMissing = subMetrics.every(metric => metric.sourceStatus === 'missing');
+  const hasMissingSubMetrics = subMetrics.some(metric => metric.sourceStatus === 'missing');
+  const fallbackReason = allMissing
+    ? 'Недостаточно данных'
+    : weakest?.score <= 55
+      ? weakest.reason
+      : 'Отклонения по доступным данным в допустимой зоне.';
+  const safeReason = reason || fallbackReason;
+
+  return {
+    key,
+    title,
+    score,
+    weight,
+    totalWeight: weight,
+    weightedContribution: Number((score * weight).toFixed(4)),
+    weightedDeficit: Number(((100 - score) * weight).toFixed(4)),
+    subMetrics,
+    primaryMetric: weakest ? `${weakest.title}: ${weakest.score}/100` : 'Недостаточно данных',
+    shortReason: safeReason,
+    reason: safeReason,
+    recommendedAction: recommendedAction || 'Проверьте направление и уточните исходные данные.',
+    riskLevel: riskLevelForScore(score),
+    insufficientData: allMissing,
+    hasMissingSubMetrics,
+  };
+}
+
+function normalizeLegacyDirection(key, title, source = {}) {
+  const numericScore = Number(source.score);
+  const hasScore = source.score !== null && source.score !== undefined && source.score !== '' && Number.isFinite(numericScore);
+  const subMetric = buildSubMetric({
+    key: `${key}_legacy_score`,
+    title: source.primaryMetric || title,
+    score: hasScore ? numericScore : 50,
+    weight: 1,
+    sourceStatus: source.insufficientData || !hasScore ? 'missing' : 'derived',
+    reason: source.shortReason || (hasScore ? 'Оценка из доступных сигналов' : 'Недостаточно данных'),
+  });
+
+  return buildDirection({
+    key,
+    title,
+    subMetrics: [subMetric],
+    reason: source.insufficientData || !hasScore ? source.shortReason || 'Недостаточно данных' : source.shortReason || '',
+    recommendedAction: source.recommendedAction,
+  });
+}
+
+function normalizeDirection(key, title, source = {}) {
+  if (Array.isArray(source.subMetrics) && source.subMetrics.length > 0) {
+    const subMetrics = source.subMetrics.map(metric => buildSubMetric(metric));
+    return buildDirection({
+      key,
+      title,
+      subMetrics,
+      reason: source.reason || source.shortReason,
+      recommendedAction: source.recommendedAction,
+    });
+  }
+
+  return normalizeLegacyDirection(key, title, source);
 }
 
 export function calculateCompanyHealthScore(directionScores = []) {
   const byKey = new Map(directionScores.map(item => [item?.key, item]).filter(([key]) => key));
-  const directions = COMPANY_HEALTH_DIRECTIONS.map(({ key, title }) => {
-    const source = byKey.get(key) || {};
-    const numericScore = Number(source.score);
-    const hasScore = source.score !== null && source.score !== undefined && source.score !== '' && Number.isFinite(numericScore);
-    const insufficientData = Boolean(source.insufficientData || !hasScore);
-    const score = clampPercent(hasScore ? numericScore : 50);
-    const weight = COMPANY_HEALTH_WEIGHTS[key];
-    const weightedContribution = Number((score * weight).toFixed(4));
-    const weightedDeficit = Number(((100 - score) * weight).toFixed(4));
-
-    return {
-      key,
-      title,
-      score,
-      weight,
-      weightedContribution,
-      weightedDeficit,
-      primaryMetric: source.primaryMetric || 'Недостаточно данных',
-      shortReason: insufficientData ? source.shortReason || 'Недостаточно данных' : source.shortReason || '',
-      insufficientData,
-    };
-  });
+  const directions = COMPANY_HEALTH_DIRECTIONS.map(({ key, title }) => normalizeDirection(key, title, byKey.get(key) || {}));
   const total = directions.reduce((sum, item) => sum + item.weightedContribution, 0);
   const byWeakest = (left, right) => left.score - right.score || right.weight - left.weight || left.title.localeCompare(right.title, 'ru');
   const byStrongest = (left, right) => right.score - left.score || right.weight - left.weight || left.title.localeCompare(right.title, 'ru');
@@ -135,6 +256,902 @@ export function calculateCompanyHealthScore(directionScores = []) {
     strongestDirections: directions.slice().sort(byStrongest),
     focusDirections: directions.slice().sort(byFixImpact),
   };
+}
+
+function buildFinanceDirection(input, contours) {
+  const paymentsCount = contours.payments.count;
+  const monthlyPaidAmount = firstFiniteInput(input, ['monthlyPaidAmount', 'paidAmount', 'paymentsAmount']);
+  const monthlyRevenue = firstFiniteInput(input, ['financeRevenuePlan', 'monthlyRevenuePlan', 'monthlyRevenue', 'expectedMonthlyRevenue']);
+  const overdueAmount = firstFiniteInput(input, ['overdueReceivablesAmount', 'overdueDebtAmount']);
+  const totalDebt = firstFiniteInput(input, ['totalDebt', 'receivablesAmount']);
+  const expenseAmount = firstFiniteInput(input, ['monthlyExpenseAmount', 'monthlyCostAmount']);
+  const expensePlan = firstFiniteInput(input, ['monthlyExpensePlan', 'monthlyCostPlan']);
+  const hasDebtSource = Boolean(input.hasDebtSourceData)
+    || hasAnyFiniteInput(input, ['overdueReceivablesAmount', 'overdueDebtAmount', 'totalDebt', 'receivablesAmount', 'overdueReceivablesCount'])
+    || paymentsCount > 0;
+
+  const receiptsScore = monthlyRevenue !== null && monthlyRevenue > 0 && monthlyPaidAmount !== null
+    ? planPerformanceScore(nonNegative(monthlyPaidAmount), nonNegative(monthlyRevenue))
+    : null;
+  const receiptsMetric = receiptsScore !== null
+    ? buildSubMetric({
+        key: 'finance_receipts_to_plan',
+        title: 'Поступления к плану',
+        score: receiptsScore,
+        weight: 0.40,
+        sourceStatus: 'real',
+        reason: receiptsScore < 75
+          ? 'Низкие поступления к плану'
+          : `Поступления ${Math.round((nonNegative(monthlyPaidAmount) / Math.max(nonNegative(monthlyRevenue), 1)) * 100)}% к плану`,
+      })
+    : paymentsCount > 0
+      ? buildSubMetric({
+          key: 'finance_receipts_to_plan',
+          title: 'Поступления к плану',
+          score: monthlyPaidAmount !== null && monthlyPaidAmount > 0 ? 82 : 72,
+          weight: 0.40,
+          sourceStatus: 'derived',
+          reason: monthlyPaidAmount !== null && monthlyPaidAmount > 0
+            ? 'Поступления есть, но план сравнения не задан'
+            : 'Есть платежный контур, но план поступлений не задан',
+        })
+      : buildSubMetric({
+          key: 'finance_receipts_to_plan',
+          title: 'Поступления к плану',
+          weight: 0.40,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по плану и поступлениям',
+        });
+
+  const overdueMetric = overdueAmount !== null
+    ? buildSubMetric({
+        key: 'finance_overdue_receivables',
+        title: 'Просроченная дебиторка',
+        score: overduePressureScore(nonNegative(overdueAmount), Math.max(nonNegative(totalDebt), nonNegative(monthlyRevenue), nonNegative(overdueAmount))),
+        weight: 0.30,
+        sourceStatus: 'real',
+        reason: overdueAmount > 0 ? 'Высокая просроченная дебиторка' : 'Просроченная дебиторка не выявлена',
+      })
+    : hasFiniteInput(input, 'overdueReceivablesCount')
+      ? buildSubMetric({
+          key: 'finance_overdue_receivables',
+          title: 'Просроченная дебиторка',
+          score: safeCount(input.overdueReceivablesCount) > 0 ? 52 : 100,
+          weight: 0.30,
+          sourceStatus: 'derived',
+          reason: safeCount(input.overdueReceivablesCount) > 0 ? 'Есть просроченная дебиторка' : 'Просрочка не зафиксирована по доступным сигналам',
+        })
+      : hasDebtSource
+        ? buildSubMetric({
+            key: 'finance_overdue_receivables',
+            title: 'Просроченная дебиторка',
+            score: 100,
+            weight: 0.30,
+            sourceStatus: 'derived',
+            reason: 'Просрочка не зафиксирована по доступным сигналам',
+          })
+        : buildSubMetric({
+            key: 'finance_overdue_receivables',
+            title: 'Просроченная дебиторка',
+            weight: 0.30,
+            sourceStatus: 'missing',
+            reason: 'Недостаточно данных по дебиторке',
+          });
+
+  const cashFlowMetric = monthlyRevenue !== null && monthlyRevenue > 0 && monthlyPaidAmount !== null
+    ? (() => {
+        const revenue = nonNegative(monthlyRevenue);
+        const paid = nonNegative(monthlyPaidAmount);
+        const overdue = nonNegative(overdueAmount);
+        const pressure = (Math.max(0, revenue - paid) + overdue * 0.7) / Math.max(revenue, 1);
+        return buildSubMetric({
+          key: 'finance_cash_flow',
+          title: 'Денежный поток',
+          score: ratioScore(pressure, [[0.05, 98], [0.20, 84], [0.40, 62], [0.65, 38], [Infinity, 18]]),
+          weight: 0.20,
+          sourceStatus: 'real',
+          reason: pressure > 0.4 ? 'Кассовый поток под давлением' : 'Кассовый поток выдерживает текущий план',
+        });
+      })()
+    : paymentsCount > 0 || hasDebtSource
+      ? buildSubMetric({
+          key: 'finance_cash_flow',
+          title: 'Денежный поток',
+          score: safeCount(input.overdueReceivablesCount) > 0 || nonNegative(overdueAmount) > 0 ? 55 : 78,
+          weight: 0.20,
+          sourceStatus: 'derived',
+          reason: safeCount(input.overdueReceivablesCount) > 0 || nonNegative(overdueAmount) > 0
+            ? 'Кассовый поток под давлением из-за просрочки'
+            : 'Нет полного плана cash-flow, используется платежный контур',
+        })
+      : buildSubMetric({
+          key: 'finance_cash_flow',
+          title: 'Денежный поток',
+          weight: 0.20,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по cash-flow',
+        });
+
+  const costMetric = expenseAmount !== null && expensePlan !== null && expensePlan > 0
+    ? (() => {
+        const ratio = nonNegative(expenseAmount) / Math.max(nonNegative(expensePlan), 1);
+        return buildSubMetric({
+          key: 'finance_cost_pressure',
+          title: 'Расходы к плану',
+          score: ratioScore(ratio, [[0.8, 95], [1.0, 84], [1.15, 66], [1.30, 45], [Infinity, 24]]),
+          weight: 0.10,
+          sourceStatus: 'real',
+          reason: ratio > 1.15 ? 'Расходы выше безопасного уровня' : 'Расходы в пределах безопасного уровня',
+        });
+      })()
+    : expenseAmount !== null && monthlyRevenue !== null && monthlyRevenue > 0
+      ? (() => {
+          const ratio = nonNegative(expenseAmount) / Math.max(nonNegative(monthlyRevenue), 1);
+          return buildSubMetric({
+            key: 'finance_cost_pressure',
+            title: 'Расходы к плану',
+            score: ratioScore(ratio, [[0.35, 88], [0.50, 72], [0.70, 48], [Infinity, 26]]),
+            weight: 0.10,
+            sourceStatus: 'derived',
+            reason: ratio > 0.5 ? 'Расходы выше безопасного уровня' : 'Расходы оценены относительно выручки',
+          });
+        })()
+      : buildSubMetric({
+          key: 'finance_cost_pressure',
+          title: 'Расходы к плану',
+          weight: 0.10,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по расходам',
+        });
+
+  const subMetrics = [receiptsMetric, overdueMetric, cashFlowMetric, costMetric];
+  const weakest = weakestSubMetric(subMetrics);
+  const actionByMetric = {
+    finance_receipts_to_plan: 'Сверьте план начислений и ускорьте подтверждение оплат.',
+    finance_overdue_receivables: 'Разберите просроченную дебиторку и закрепите следующий шаг взыскания.',
+    finance_cash_flow: 'Соберите ближайшие поступления и перенесите необязательные платежи.',
+    finance_cost_pressure: 'Проверьте крупные расходы и лимиты закупок.',
+  };
+
+  return buildDirection({
+    key: 'finance',
+    title: 'Финансы',
+    subMetrics,
+    reason: weakest?.score <= 55 || weakest?.sourceStatus === 'missing' ? weakest.reason : 'Финансовый контур в рабочей зоне по доступным данным.',
+    recommendedAction: actionByMetric[weakest?.key] || 'Проверьте финансовые отклонения.',
+  });
+}
+
+function utilizationScore(utilization) {
+  const value = clampPercent(utilization);
+  if (value >= 75 && value <= 90) return 100;
+  if (value > 90) return 92;
+  if (value >= 65) return 88;
+  if (value >= 50) return 72;
+  if (value >= 35) return 50;
+  if (value > 0) return 32;
+  return 20;
+}
+
+function buildRentalDirection(input, contours) {
+  const rentalsCount = contours.rentals.count;
+  const utilization = firstFiniteInput(input, ['utilization']);
+  const activeEquipment = firstFiniteInput(input, ['activeEquipment', 'activeFleetCount']);
+  const availableEquipment = firstFiniteInput(input, ['availableEquipment']);
+  const rentalRevenueActual = firstFiniteInput(input, ['rentalRevenueActual', 'monthlyRevenue']);
+  const rentalRevenuePlan = firstFiniteInput(input, ['rentalRevenuePlan', 'fleetMonthlyRevenuePlan']);
+  const starts = firstFiniteInput(input, ['rentalStartsThisMonth', 'newRentalsCount']);
+  const returns = firstFiniteInput(input, ['rentalReturnsThisMonth', 'rentalsReturningThisMonth']);
+  const extensions = firstFiniteInput(input, ['rentalExtensionsThisMonth', 'extendedRentalsCount']);
+  const reservations = firstFiniteInput(input, ['reservedRentalsCount']);
+
+  const utilizationMetric = utilization !== null
+    ? buildSubMetric({
+        key: 'rental_utilization',
+        title: 'Загрузка техники',
+        score: utilizationScore(utilization),
+        weight: 0.50,
+        sourceStatus: contours.equipment.count > 0 ? 'real' : 'derived',
+        reason: utilization < 60 ? 'Загрузка ниже целевого уровня' : 'Загрузка техники в целевой зоне',
+      })
+    : buildSubMetric({
+        key: 'rental_utilization',
+        title: 'Загрузка техники',
+        weight: 0.50,
+        sourceStatus: 'missing',
+        reason: 'Недостаточно данных по загрузке техники',
+      });
+
+  const revenueMetric = rentalRevenuePlan !== null && rentalRevenuePlan > 0 && rentalRevenueActual !== null
+    ? buildSubMetric({
+        key: 'rental_revenue_to_plan',
+        title: 'Выручка аренды к плану',
+        score: planPerformanceScore(nonNegative(rentalRevenueActual), nonNegative(rentalRevenuePlan)),
+        weight: 0.25,
+        sourceStatus: 'derived',
+        reason: nonNegative(rentalRevenueActual) < nonNegative(rentalRevenuePlan) * 0.75
+          ? 'Выручка аренды ниже плана'
+          : 'Выручка аренды близка к плану',
+      })
+    : rentalRevenueActual !== null && rentalRevenueActual > 0
+      ? buildSubMetric({
+          key: 'rental_revenue_to_plan',
+          title: 'Выручка аренды к плану',
+          score: 82,
+          weight: 0.25,
+          sourceStatus: 'derived',
+          reason: 'Выручка аренды есть, но план сравнения не задан',
+        })
+      : buildSubMetric({
+          key: 'rental_revenue_to_plan',
+          title: 'Выручка аренды к плану',
+          weight: 0.25,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по плану выручки аренды',
+        });
+
+  const idleMetric = activeEquipment !== null && activeEquipment > 0 && availableEquipment !== null
+    ? (() => {
+        const idleRatio = nonNegative(availableEquipment) / Math.max(nonNegative(activeEquipment), 1);
+        return buildSubMetric({
+          key: 'rental_idle_fleet',
+          title: 'Простои',
+          score: ratioScore(idleRatio, [[0.10, 96], [0.25, 82], [0.40, 62], [0.60, 38], [Infinity, 18]]),
+          weight: 0.15,
+          sourceStatus: 'real',
+          reason: idleRatio > 0.4 ? 'Много свободной техники' : 'Свободный парк в допустимых пределах',
+        });
+      })()
+    : utilization !== null
+      ? buildSubMetric({
+          key: 'rental_idle_fleet',
+          title: 'Простои',
+          score: ratioScore(1 - clampPercent(utilization) / 100, [[0.10, 92], [0.25, 78], [0.40, 58], [0.60, 34], [Infinity, 18]]),
+          weight: 0.15,
+          sourceStatus: 'derived',
+          reason: utilization < 60 ? 'Много свободной техники' : 'Простой оценен через загрузку',
+        })
+      : buildSubMetric({
+          key: 'rental_idle_fleet',
+          title: 'Простои',
+          weight: 0.15,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по свободной технике',
+        });
+
+  const hasMovementSource = [starts, returns, extensions, reservations].some(value => value !== null);
+  const movementMetric = hasMovementSource
+    ? (() => {
+        const incoming = nonNegative(starts) + nonNegative(extensions) + nonNegative(reservations) * 0.5;
+        const outgoing = nonNegative(returns);
+        const score = outgoing <= 0
+          ? incoming > 0 ? 100 : 78
+          : ratioScore(incoming / Math.max(outgoing, 1), [[0.25, 32], [0.6, 55], [0.9, 76], [Infinity, 94]]);
+        return buildSubMetric({
+          key: 'rental_movement',
+          title: 'Движение аренды',
+          score,
+          weight: 0.10,
+          sourceStatus: 'real',
+          reason: outgoing > incoming ? 'Возвраты опережают новые выдачи' : 'Возвраты, продления и новые выдачи сбалансированы',
+        });
+      })()
+    : rentalsCount > 0
+      ? buildSubMetric({
+          key: 'rental_movement',
+          title: 'Движение аренды',
+          score: safeCount(input.overdueReturnsCount) > 0 ? 45 : safeCount(input.returnsTodayCount) > 0 ? 68 : 80,
+          weight: 0.10,
+          sourceStatus: 'derived',
+          reason: safeCount(input.overdueReturnsCount) > 0
+            ? 'Возвраты требуют контроля'
+            : 'Движение аренды оценено по возвратам и активным записям',
+        })
+      : buildSubMetric({
+          key: 'rental_movement',
+          title: 'Движение аренды',
+          weight: 0.10,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по движению аренды',
+        });
+
+  const subMetrics = [utilizationMetric, revenueMetric, idleMetric, movementMetric];
+  const weakest = weakestSubMetric(subMetrics);
+  const actionByMetric = {
+    rental_utilization: 'Проверьте свободные единицы и ближайшие брони.',
+    rental_revenue_to_plan: 'Сверьте план выручки и приоритетные сделки месяца.',
+    rental_idle_fleet: 'Разберите свободную технику по типам и направьте в продажи аренды.',
+    rental_movement: 'Сбалансируйте возвраты, продления и новые выдачи.',
+  };
+
+  return buildDirection({
+    key: 'rental',
+    title: 'Аренда',
+    subMetrics,
+    reason: weakest?.score <= 55 || weakest?.sourceStatus === 'missing' ? weakest.reason : 'Арендный контур работает без критичных отклонений.',
+    recommendedAction: actionByMetric[weakest?.key] || 'Проверьте аренды и загрузку.',
+  });
+}
+
+function buildRisksDirection(input, contours, hasScoreBase) {
+  const overdueAmount = firstFiniteInput(input, ['overdueReceivablesAmount', 'overdueDebtAmount']);
+  const totalDebt = firstFiniteInput(input, ['totalDebt', 'receivablesAmount']);
+  const monthlyRevenue = firstFiniteInput(input, ['monthlyRevenue', 'financeRevenuePlan']);
+  const debt30Plus = firstFiniteInput(input, ['debt30PlusAmount']);
+  const debt60Plus = firstFiniteInput(input, ['debt60PlusAmount']);
+  const debt90Plus = firstFiniteInput(input, ['debt90PlusAmount']);
+  const largestDebt = firstFiniteInput(input, ['largestProblemDebtAmount', 'largestClientDebtAmount']);
+  const problemClients = firstFiniteInput(input, ['problemClientCount', 'overdueReceivablesClients']);
+  const criticalRiskSignals = safeCount(input.criticalSignals)
+    + safeCount(input.invalidCriticalSignals)
+    + safeCount(input.noActiveFleetCritical)
+    + safeCount(input.overdueReturnsCount)
+    + safeCount(input.oldDebtCount)
+    + safeCount(input.serviceCriticalCount)
+    + safeCount(input.overdueDocumentsCount)
+    + safeCount(input.overdueDeliveriesCount);
+  const warningRiskSignals = safeCount(input.lowUtilizationRisk)
+    + safeCount(input.returnsTodayCount)
+    + safeCount(input.overdueReceivablesCount)
+    + safeCount(input.serviceRiskCount)
+    + safeCount(input.unsignedDocumentsCount)
+    + safeCount(input.unassignedDeliveriesCount);
+  const riskSignals = criticalRiskSignals + warningRiskSignals;
+  const hasDebtSource = Boolean(input.hasDebtSourceData)
+    || hasAnyFiniteInput(input, ['overdueReceivablesAmount', 'totalDebt', 'debt30PlusAmount', 'debt60PlusAmount', 'debt90PlusAmount', 'largestProblemDebtAmount'])
+    || contours.payments.count > 0;
+
+  const overdueMetric = overdueAmount !== null
+    ? buildSubMetric({
+        key: 'risks_overdue_receivables',
+        title: 'Просроченная дебиторка',
+        score: overduePressureScore(nonNegative(overdueAmount), Math.max(nonNegative(totalDebt), nonNegative(monthlyRevenue), nonNegative(overdueAmount)), true),
+        weight: 0.45,
+        sourceStatus: 'real',
+        reason: overdueAmount > 0 ? 'Высокая просроченная дебиторка' : 'Просроченная дебиторка не выявлена',
+      })
+    : hasFiniteInput(input, 'overdueReceivablesCount')
+      ? buildSubMetric({
+          key: 'risks_overdue_receivables',
+          title: 'Просроченная дебиторка',
+          score: safeCount(input.overdueReceivablesCount) > 0 ? 35 : 100,
+          weight: 0.45,
+          sourceStatus: 'derived',
+          reason: safeCount(input.overdueReceivablesCount) > 0 ? 'Есть просроченная дебиторка' : 'Просрочка не зафиксирована',
+        })
+      : hasDebtSource
+        ? buildSubMetric({
+            key: 'risks_overdue_receivables',
+            title: 'Просроченная дебиторка',
+            score: 100,
+            weight: 0.45,
+            sourceStatus: 'derived',
+            reason: 'Просрочка не зафиксирована',
+          })
+        : buildSubMetric({
+            key: 'risks_overdue_receivables',
+            title: 'Просроченная дебиторка',
+            weight: 0.45,
+            sourceStatus: 'missing',
+            reason: 'Недостаточно данных по просрочке',
+          });
+
+  const ageMetric = [debt30Plus, debt60Plus, debt90Plus].some(value => value !== null)
+    ? (() => {
+        const base = Math.max(nonNegative(totalDebt), nonNegative(overdueAmount), nonNegative(debt30Plus), nonNegative(debt60Plus), nonNegative(debt90Plus), 1);
+        const pressure = (nonNegative(debt30Plus) * 0.45 + nonNegative(debt60Plus) * 0.75 + nonNegative(debt90Plus)) / base;
+        return buildSubMetric({
+          key: 'risks_old_debt',
+          title: 'Долги старше 30/60/90 дней',
+          score: ratioScore(pressure, [[0.03, 92], [0.10, 72], [0.20, 48], [0.40, 26], [Infinity, 8]]),
+          weight: 0.25,
+          sourceStatus: 'real',
+          reason: nonNegative(debt90Plus) > 0 || nonNegative(debt60Plus) > 0
+            ? 'Долг старше 30 дней'
+            : nonNegative(debt30Plus) > 0
+              ? 'Есть долг старше 30 дней'
+              : 'Старые долги не выявлены',
+        });
+      })()
+    : safeCount(input.oldDebtCount) > 0
+      ? buildSubMetric({
+          key: 'risks_old_debt',
+          title: 'Долги старше 30/60/90 дней',
+          score: 30,
+          weight: 0.25,
+          sourceStatus: 'derived',
+          reason: 'Долг старше 30 дней',
+        })
+      : hasDebtSource
+        ? buildSubMetric({
+            key: 'risks_old_debt',
+            title: 'Долги старше 30/60/90 дней',
+            score: 100,
+            weight: 0.25,
+            sourceStatus: 'derived',
+            reason: 'Старые долги не выявлены',
+          })
+        : buildSubMetric({
+            key: 'risks_old_debt',
+            title: 'Долги старше 30/60/90 дней',
+            weight: 0.25,
+            sourceStatus: 'missing',
+            reason: 'Недостаточно данных по возрасту долга',
+          });
+
+  const concentrationMetric = largestDebt !== null || problemClients !== null
+    ? (() => {
+        const base = Math.max(nonNegative(totalDebt), nonNegative(overdueAmount), nonNegative(largestDebt), 1);
+        const concentration = nonNegative(largestDebt) / base;
+        const count = nonNegative(problemClients);
+        const score = nonNegative(largestDebt) > 0
+          ? ratioScore(concentration, [[0.15, 88], [0.30, 64], [0.50, 38], [Infinity, 16]])
+          : count > 0
+            ? 62
+            : 100;
+        return buildSubMetric({
+          key: 'risks_problem_clients',
+          title: 'Крупные проблемные клиенты',
+          score,
+          weight: 0.20,
+          sourceStatus: largestDebt !== null ? 'real' : 'derived',
+          reason: nonNegative(largestDebt) > 0 && concentration >= 0.3
+            ? 'Есть крупный проблемный долг'
+            : count > 0
+              ? 'Есть проблемные клиенты'
+              : 'Крупных проблемных клиентов не выявлено',
+        });
+      })()
+    : hasDebtSource
+      ? buildSubMetric({
+          key: 'risks_problem_clients',
+          title: 'Крупные проблемные клиенты',
+          score: 100,
+          weight: 0.20,
+          sourceStatus: 'derived',
+          reason: 'Крупная концентрация риска не выявлена',
+        })
+      : buildSubMetric({
+          key: 'risks_problem_clients',
+          title: 'Крупные проблемные клиенты',
+          weight: 0.20,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по концентрации риска',
+        });
+
+  const operationalMetric = hasScoreBase || riskSignals > 0
+    ? buildSubMetric({
+        key: 'risks_critical_events',
+        title: 'Критические операционные события',
+        score: clampPercent(100 - Math.min(100, criticalRiskSignals * 20 + warningRiskSignals * 8)),
+        weight: 0.10,
+        sourceStatus: 'derived',
+        reason: criticalRiskSignals > 0
+          ? 'Нужны ограничения по новым отгрузкам'
+          : warningRiskSignals > 0
+            ? 'Есть операционные предупреждения'
+            : 'Критические операционные события не выявлены',
+      })
+    : buildSubMetric({
+        key: 'risks_critical_events',
+        title: 'Критические операционные события',
+        weight: 0.10,
+        sourceStatus: 'missing',
+        reason: 'Недостаточно данных по операционным событиям',
+      });
+
+  const subMetrics = [overdueMetric, ageMetric, concentrationMetric, operationalMetric];
+  const weakest = weakestSubMetric(subMetrics);
+  const actionByMetric = {
+    risks_overdue_receivables: 'Остановите новые отгрузки клиентам с просрочкой до плана оплаты.',
+    risks_old_debt: 'Назначьте план взыскания по долгам 30+ и 60+ дней.',
+    risks_problem_clients: 'Разберите крупнейшего должника и проверьте кредитные лимиты.',
+    risks_critical_events: 'Закройте критические операционные события до новых отгрузок.',
+  };
+
+  return buildDirection({
+    key: 'risks',
+    title: 'Риски',
+    subMetrics,
+    reason: weakest?.score <= 55 || weakest?.sourceStatus === 'missing' ? weakest.reason : 'Критичных рисков по доступным данным нет.',
+    recommendedAction: actionByMetric[weakest?.key] || 'Проверьте риски перед новыми отгрузками.',
+  });
+}
+
+function buildServiceDirection(input, contours) {
+  const activeEquipment = firstFiniteInput(input, ['activeEquipment', 'activeFleetCount']);
+  const inServiceEquipment = firstFiniteInput(input, ['equipmentInServiceCount']);
+  const openTickets = firstFiniteInput(input, ['openServiceTicketsCount']);
+  const overdueTickets = firstFiniteInput(input, ['overdueServiceTicketsCount']);
+  const repeatFailures = firstFiniteInput(input, ['repeatServiceFailuresCount']);
+  const averageDays = firstFiniteInput(input, ['averageServiceDays']);
+  const serviceLoadPercent = firstFiniteInput(input, ['serviceLoadPercent']);
+  const serviceCount = contours.service.count;
+  const hasServiceSource = serviceCount > 0 || openTickets !== null;
+
+  const readinessMetric = activeEquipment !== null && activeEquipment > 0 && inServiceEquipment !== null
+    ? (() => {
+        const readyRatio = Math.max(0, activeEquipment - nonNegative(inServiceEquipment)) / Math.max(nonNegative(activeEquipment), 1);
+        return buildSubMetric({
+          key: 'service_fleet_readiness',
+          title: 'Готовность техники',
+          score: ratioScore(1 - readyRatio, [[0.05, 96], [0.15, 82], [0.30, 58], [0.50, 34], [Infinity, 14]]),
+          weight: 0.40,
+          sourceStatus: 'real',
+          reason: readyRatio < 0.75 ? 'Готовность техники ниже нормы' : 'Готовность техники в рабочей зоне',
+        });
+      })()
+    : buildSubMetric({
+        key: 'service_fleet_readiness',
+        title: 'Готовность техники',
+        weight: 0.40,
+        sourceStatus: 'missing',
+        reason: 'Недостаточно данных по готовности техники',
+      });
+
+  const overdueMetric = openTickets !== null && overdueTickets !== null
+    ? (() => {
+        const ratio = openTickets > 0 ? nonNegative(overdueTickets) / Math.max(nonNegative(openTickets), 1) : 0;
+        return buildSubMetric({
+          key: 'service_overdue_repairs',
+          title: 'Просроченные ремонты',
+          score: ratioScore(ratio, [[0, 100], [0.05, 88], [0.15, 66], [0.30, 42], [Infinity, 18]]),
+          weight: 0.25,
+          sourceStatus: 'real',
+          reason: overdueTickets > 0 ? 'Есть просроченные ремонты' : 'Просроченные ремонты не выявлены',
+        });
+      })()
+    : hasServiceSource
+      ? buildSubMetric({
+          key: 'service_overdue_repairs',
+          title: 'Просроченные ремонты',
+          score: safeCount(input.serviceCriticalCount) > 0 ? 42 : 100,
+          weight: 0.25,
+          sourceStatus: 'derived',
+          reason: safeCount(input.serviceCriticalCount) > 0 ? 'Есть просроченные ремонты' : 'Просроченные ремонты не выявлены',
+        })
+      : buildSubMetric({
+          key: 'service_overdue_repairs',
+          title: 'Просроченные ремонты',
+          weight: 0.25,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по просроченным ремонтам',
+        });
+
+  const repeatMetric = repeatFailures !== null
+    ? buildSubMetric({
+        key: 'service_repeat_repairs',
+        title: 'Повторные ремонты',
+        score: ratioScore(nonNegative(repeatFailures), [[0, 100], [1, 78], [3, 52], [6, 28], [Infinity, 12]]),
+        weight: 0.15,
+        sourceStatus: 'real',
+        reason: repeatFailures > 0 ? 'Повторные ремонты растут' : 'Повторные ремонты не выявлены',
+      })
+    : buildSubMetric({
+        key: 'service_repeat_repairs',
+        title: 'Повторные ремонты',
+        weight: 0.15,
+        sourceStatus: 'missing',
+        reason: 'Недостаточно данных по повторным ремонтам',
+      });
+
+  const durationMetric = averageDays !== null
+    ? buildSubMetric({
+        key: 'service_average_duration',
+        title: 'Средний срок ремонта',
+        score: ratioScore(nonNegative(averageDays), [[2, 96], [4, 82], [7, 62], [14, 34], [Infinity, 14]]),
+        weight: 0.10,
+        sourceStatus: 'real',
+        reason: averageDays > 7 ? 'Средний срок ремонта выше безопасного уровня' : 'Средний срок ремонта в допустимой зоне',
+      })
+    : hasServiceSource
+      ? buildSubMetric({
+          key: 'service_average_duration',
+          title: 'Средний срок ремонта',
+          score: 78,
+          weight: 0.10,
+          sourceStatus: 'derived',
+          reason: 'Срок ремонта оценен без полной детализации',
+        })
+      : buildSubMetric({
+          key: 'service_average_duration',
+          title: 'Средний срок ремонта',
+          weight: 0.10,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по срокам ремонта',
+        });
+
+  const loadMetric = serviceLoadPercent !== null
+    ? buildSubMetric({
+        key: 'service_sla_load',
+        title: 'SLA / загрузка механиков',
+        score: ratioScore(nonNegative(serviceLoadPercent) / 100, [[0.35, 92], [0.75, 86], [0.95, 72], [1.10, 52], [Infinity, 28]]),
+        weight: 0.10,
+        sourceStatus: 'derived',
+        reason: serviceLoadPercent > 100 ? 'SLA под давлением из-за загрузки механиков' : 'Загрузка механиков в рабочей зоне',
+      })
+    : hasServiceSource
+      ? buildSubMetric({
+          key: 'service_sla_load',
+          title: 'SLA / загрузка механиков',
+          score: safeCount(input.serviceRiskCount) > 0 ? 58 : 86,
+          weight: 0.10,
+          sourceStatus: 'derived',
+          reason: safeCount(input.serviceRiskCount) > 0 ? 'SLA под давлением из-за блокеров' : 'Загрузка механиков без критичных блокеров',
+        })
+      : buildSubMetric({
+          key: 'service_sla_load',
+          title: 'SLA / загрузка механиков',
+          weight: 0.10,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по SLA и загрузке механиков',
+        });
+
+  const subMetrics = [readinessMetric, overdueMetric, repeatMetric, durationMetric, loadMetric];
+  const weakest = weakestSubMetric(subMetrics);
+  const actionByMetric = {
+    service_fleet_readiness: 'Освободите технику из сервиса, которая блокирует аренды.',
+    service_overdue_repairs: 'Назначьте ответственных и сроки по просроченным ремонтам.',
+    service_repeat_repairs: 'Проверьте причины повторов и качество закрытия работ.',
+    service_average_duration: 'Разберите длинные ремонты и ожидание запчастей.',
+    service_sla_load: 'Перераспределите очередь между механиками.',
+  };
+
+  return buildDirection({
+    key: 'service',
+    title: 'Сервис',
+    subMetrics,
+    reason: weakest?.score <= 55 || weakest?.sourceStatus === 'missing' ? weakest.reason : 'Сервисный контур без критичных блокеров.',
+    recommendedAction: actionByMetric[weakest?.key] || 'Проверьте сервисные блокеры.',
+  });
+}
+
+function buildClientsDirection(input) {
+  const clientsCount = firstFiniteInput(input, ['clientsCount']);
+  const newLeads = firstFiniteInput(input, ['newLeadsCount', 'crmNewLeadsCount']);
+  const newClients = firstFiniteInput(input, ['newClientsThisMonth']);
+  const activeClients = firstFiniteInput(input, ['activeClientsCount']);
+  const repeatClients = firstFiniteInput(input, ['repeatClientsCount']);
+  const wonDeals = firstFiniteInput(input, ['wonDealsCount', 'convertedDealsCount']);
+  const dealsCount = firstFiniteInput(input, ['crmDealsCount', 'qualifiedDealsCount']);
+  const clientBase = Math.max(nonNegative(clientsCount), 1);
+
+  const demandTarget = Math.max(3, Math.ceil(clientBase * 0.05));
+  const demandMetric = newLeads !== null
+    ? buildSubMetric({
+        key: 'clients_new_demand',
+        title: 'Новые лиды',
+        score: countAgainstTargetScore(nonNegative(newLeads), demandTarget),
+        weight: 0.30,
+        sourceStatus: 'real',
+        reason: newLeads < demandTarget ? 'Недостаточно новых лидов' : 'Новые лиды поддерживают будущую выручку',
+      })
+    : newClients !== null
+      ? buildSubMetric({
+          key: 'clients_new_demand',
+          title: 'Новые лиды',
+          score: countAgainstTargetScore(nonNegative(newClients), Math.max(2, Math.ceil(clientBase * 0.04))),
+          weight: 0.30,
+          sourceStatus: 'derived',
+          reason: newClients <= 0 ? 'Недостаточно новых лидов' : 'Новый спрос оценен по новым клиентам',
+        })
+      : buildSubMetric({
+          key: 'clients_new_demand',
+          title: 'Новые лиды',
+          weight: 0.30,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по новым лидам',
+        });
+
+  const activeMetric = clientsCount !== null && activeClients !== null
+    ? (() => {
+        const ratio = nonNegative(activeClients) / Math.max(nonNegative(clientsCount), 1);
+        return buildSubMetric({
+          key: 'clients_active_clients',
+          title: 'Активные клиенты',
+          score: ratioScore(1 - ratio, [[0.35, 92], [0.55, 76], [0.70, 58], [0.85, 36], [Infinity, 20]]),
+          weight: 0.25,
+          sourceStatus: 'real',
+          reason: ratio < 0.3 ? 'Мало активных клиентов' : 'Активная клиентская база поддерживает аренду',
+        });
+      })()
+    : clientsCount !== null && clientsCount > 0
+      ? buildSubMetric({
+          key: 'clients_active_clients',
+          title: 'Активные клиенты',
+          score: 78,
+          weight: 0.25,
+          sourceStatus: 'derived',
+          reason: 'Активность клиентов оценена по наличию клиентской базы',
+        })
+      : buildSubMetric({
+          key: 'clients_active_clients',
+          title: 'Активные клиенты',
+          weight: 0.25,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по активным клиентам',
+        });
+
+  const repeatMetric = clientsCount !== null && repeatClients !== null
+    ? (() => {
+        const ratio = nonNegative(repeatClients) / Math.max(nonNegative(clientsCount), 1);
+        return buildSubMetric({
+          key: 'clients_repeat_clients',
+          title: 'Повторные клиенты',
+          score: ratioScore(1 - ratio, [[0.45, 92], [0.65, 76], [0.80, 54], [0.92, 34], [Infinity, 18]]),
+          weight: 0.25,
+          sourceStatus: 'real',
+          reason: ratio < 0.2 ? 'Слабая повторная база' : 'Повторная клиентская база есть',
+        });
+      })()
+    : buildSubMetric({
+        key: 'clients_repeat_clients',
+        title: 'Повторные клиенты',
+        weight: 0.25,
+        sourceStatus: 'missing',
+        reason: 'Недостаточно данных по повторным клиентам',
+      });
+
+  const conversionMetric = wonDeals !== null && dealsCount !== null && dealsCount > 0
+    ? (() => {
+        const ratio = nonNegative(wonDeals) / Math.max(nonNegative(dealsCount), 1);
+        return buildSubMetric({
+          key: 'clients_conversion',
+          title: 'Конверсия в сделку',
+          score: ratioScore(1 - ratio, [[0.45, 94], [0.65, 76], [0.80, 52], [0.92, 32], [Infinity, 16]]),
+          weight: 0.20,
+          sourceStatus: 'real',
+          reason: ratio < 0.2 ? 'Конверсия ниже нормы' : 'Конверсия поддерживает воронку',
+        });
+      })()
+    : buildSubMetric({
+        key: 'clients_conversion',
+        title: 'Конверсия в сделку',
+        weight: 0.20,
+        sourceStatus: 'missing',
+        reason: 'Недостаточно данных по CRM-конверсии',
+      });
+
+  const subMetrics = [demandMetric, activeMetric, repeatMetric, conversionMetric];
+  const weakest = weakestSubMetric(subMetrics);
+  const actionByMetric = {
+    clients_new_demand: 'Запустите добор лидов и проверьте источники обращений.',
+    clients_active_clients: 'Верните в работу клиентов без активных сделок.',
+    clients_repeat_clients: 'Соберите предложения для повторных клиентов.',
+    clients_conversion: 'Разберите причины потерь в CRM-воронке.',
+  };
+
+  return buildDirection({
+    key: 'clients',
+    title: 'Клиенты',
+    subMetrics,
+    reason: weakest?.score <= 55 || weakest?.sourceStatus === 'missing' ? weakest.reason : 'Клиентский контур поддерживает будущую выручку.',
+    recommendedAction: actionByMetric[weakest?.key] || 'Проверьте клиентскую воронку.',
+  });
+}
+
+function buildFleetDirection(input, contours) {
+  const equipmentCount = contours.equipment.count || firstFiniteInput(input, ['equipmentCount']);
+  const activeEquipment = firstFiniteInput(input, ['activeEquipment', 'activeFleetCount']);
+  const inServiceEquipment = firstFiniteInput(input, ['equipmentInServiceCount']);
+  const inactiveEquipment = firstFiniteInput(input, ['inactiveEquipmentCount']);
+  const agedEquipment = firstFiniteInput(input, ['agedEquipmentCount', 'oldEquipmentCount']);
+  const highHoursEquipment = firstFiniteInput(input, ['highHoursEquipmentCount']);
+  const plannedRevenueEquipment = firstFiniteInput(input, ['equipmentWithPlannedRevenueCount']);
+  const topTypeShare = firstFiniteInput(input, ['fleetTopTypeShare']);
+  const utilization = firstFiniteInput(input, ['utilization']);
+
+  const healthMetric = equipmentCount !== null && equipmentCount > 0
+    ? (() => {
+        const blocked = nonNegative(inServiceEquipment) + nonNegative(inactiveEquipment);
+        const base = Math.max(nonNegative(activeEquipment) || nonNegative(equipmentCount), 1);
+        const unavailableRatio = blocked / base;
+        const score = activeEquipment !== null || inServiceEquipment !== null || inactiveEquipment !== null
+          ? ratioScore(unavailableRatio, [[0.05, 96], [0.15, 82], [0.30, 58], [0.50, 34], [Infinity, 16]])
+          : safeCount(input.noActiveFleetCritical) > 0
+            ? 24
+            : utilization !== null
+              ? utilizationScore(utilization)
+              : 78;
+        return buildSubMetric({
+          key: 'fleet_health',
+          title: 'Исправность парка',
+          score,
+          weight: 0.40,
+          sourceStatus: activeEquipment !== null || inServiceEquipment !== null || inactiveEquipment !== null ? 'real' : 'derived',
+          reason: score < 60 ? 'Часть парка недоступна' : 'Исправность парка в рабочей зоне',
+        });
+      })()
+    : buildSubMetric({
+        key: 'fleet_health',
+        title: 'Исправность парка',
+        weight: 0.40,
+        sourceStatus: 'missing',
+        reason: 'Недостаточно данных по парку',
+      });
+
+  const ageMetric = equipmentCount !== null && equipmentCount > 0 && (agedEquipment !== null || highHoursEquipment !== null)
+    ? (() => {
+        const pressure = (nonNegative(agedEquipment) + nonNegative(highHoursEquipment) * 0.6) / Math.max(nonNegative(equipmentCount), 1);
+        return buildSubMetric({
+          key: 'fleet_age_wear',
+          title: 'Возраст / износ',
+          score: ratioScore(pressure, [[0.10, 94], [0.25, 78], [0.45, 56], [0.65, 34], [Infinity, 16]]),
+          weight: 0.25,
+          sourceStatus: 'derived',
+          reason: pressure > 0.45 ? 'Есть риск по возрасту и износу парка' : 'Возраст и износ без критичного давления',
+        });
+      })()
+    : buildSubMetric({
+        key: 'fleet_age_wear',
+        title: 'Возраст / износ',
+        weight: 0.25,
+        sourceStatus: 'missing',
+        reason: 'Недостаточно данных по возрасту и износу',
+      });
+
+  const liquidityMetric = equipmentCount !== null && equipmentCount > 0 && plannedRevenueEquipment !== null
+    ? (() => {
+        const ratio = nonNegative(plannedRevenueEquipment) / Math.max(nonNegative(activeEquipment) || nonNegative(equipmentCount), 1);
+        return buildSubMetric({
+          key: 'fleet_liquidity',
+          title: 'Ликвидность техники',
+          score: ratioScore(1 - ratio, [[0.10, 92], [0.25, 78], [0.45, 56], [0.70, 34], [Infinity, 18]]),
+          weight: 0.20,
+          sourceStatus: 'derived',
+          reason: ratio < 0.55 ? 'Низкая ликвидность части техники' : 'Ликвидность оценена по плановой выручке техники',
+        });
+      })()
+    : buildSubMetric({
+        key: 'fleet_liquidity',
+        title: 'Ликвидность техники',
+        weight: 0.20,
+        sourceStatus: 'missing',
+        reason: 'Недостаточно данных по ликвидности техники',
+      });
+
+  const concentrationMetric = equipmentCount !== null && equipmentCount > 0 && topTypeShare !== null
+    ? buildSubMetric({
+        key: 'fleet_structure',
+        title: 'Структура парка',
+        score: ratioScore(clampPercent(topTypeShare) / 100, [[0.35, 94], [0.50, 82], [0.65, 62], [0.80, 40], [Infinity, 22]]),
+        weight: 0.15,
+        sourceStatus: 'derived',
+        reason: topTypeShare > 65 ? 'Есть риск по структуре парка' : 'Структура парка без высокой концентрации',
+      })
+    : equipmentCount !== null && equipmentCount > 0
+      ? buildSubMetric({
+          key: 'fleet_structure',
+          title: 'Структура парка',
+          score: 70,
+          weight: 0.15,
+          sourceStatus: 'derived',
+          reason: 'Парк есть, но его вклад ограничен без загрузки',
+        })
+      : buildSubMetric({
+          key: 'fleet_structure',
+          title: 'Структура парка',
+          weight: 0.15,
+          sourceStatus: 'missing',
+          reason: 'Недостаточно данных по структуре парка',
+        });
+
+  const subMetrics = [healthMetric, ageMetric, liquidityMetric, concentrationMetric];
+  const weakest = weakestSubMetric(subMetrics);
+  const actionByMetric = {
+    fleet_health: 'Верните недоступную технику в готовый парк.',
+    fleet_age_wear: 'Проверьте старые и высоконаработанные единицы на замену или ремонт.',
+    fleet_liquidity: 'Проверьте технику без плановой выручки и низколиквидные позиции.',
+    fleet_structure: 'Сверьте структуру парка с текущим спросом.',
+  };
+
+  return buildDirection({
+    key: 'fleet',
+    title: 'Парк',
+    subMetrics,
+    reason: weakest?.score <= 55 || weakest?.sourceStatus === 'missing' ? weakest.reason : 'Парк поддерживает операционную устойчивость.',
+    recommendedAction: actionByMetric[weakest?.key] || 'Проверьте структуру и готовность парка.',
+  });
 }
 
 function buildContourInput(input = {}) {
@@ -173,109 +1190,13 @@ function buildContourInput(input = {}) {
 }
 
 function buildCompanyHealthDirectionInputs(input, contours, hasScoreBase) {
-  const utilization = clampPercent(safeCount(input.utilization));
-  const financeStatus = contours.payments.count > 0 ? contourStatus(contours.payments) : 'no_data';
-  const rentalStatus = contours.rentals.count > 0 ? contourStatus(contours.rentals) : 'no_data';
-  const serviceStatus = contours.service.count > 0 ? contourStatus(contours.service) : 'no_data';
-  const fleetStatus = contours.equipment.count > 0 ? contourStatus(contours.equipment) : 'no_data';
-  const clientsCount = safeCount(input.clientsCount);
-  const criticalRiskSignals = safeCount(input.criticalSignals)
-    + safeCount(input.invalidCriticalSignals)
-    + safeCount(input.noActiveFleetCritical)
-    + safeCount(input.overdueReturnsCount)
-    + safeCount(input.oldDebtCount)
-    + safeCount(input.serviceCriticalCount)
-    + safeCount(input.overdueDocumentsCount)
-    + safeCount(input.overdueDeliveriesCount);
-  const warningRiskSignals = safeCount(input.lowUtilizationRisk)
-    + safeCount(input.returnsTodayCount)
-    + safeCount(input.overdueReceivablesCount)
-    + safeCount(input.serviceRiskCount)
-    + safeCount(input.unsignedDocumentsCount)
-    + safeCount(input.unassignedDeliveriesCount);
-  const riskSignals = criticalRiskSignals + warningRiskSignals;
-  const risksHaveSource = hasScoreBase || riskSignals > 0;
-  const riskScore = risksHaveSource
-    ? clampPercent(96 - Math.min(96, criticalRiskSignals * 18 + warningRiskSignals * 7))
-    : null;
-
   return [
-    directionInput(
-      'finance',
-      contourScore(financeStatus, 92, 62, 34),
-      contours.payments.count > 0 ? formatCountMetric(contours.payments.count, 'платёж', 'платежа', 'платежей') : 'Нет платежей',
-      financeStatus === 'no_data'
-        ? 'Недостаточно данных'
-        : financeStatus === 'critical'
-          ? 'Старый долг или критичная просрочка давят на индекс.'
-          : financeStatus === 'risk'
-            ? 'Есть просроченная дебиторка, нужен контроль оплат.'
-            : 'Платежи заведены, критичной просрочки по доступным данным нет.',
-      { insufficientData: financeStatus === 'no_data' },
-    ),
-    directionInput(
-      'rental',
-      rentalStatus === 'no_data' ? null : safeCount(input.overdueReturnsCount) > 0 ? 35 : safeCount(input.returnsTodayCount) > 0 ? 65 : 90,
-      contours.rentals.count > 0 ? formatCountMetric(contours.rentals.count, 'аренда', 'аренды', 'аренд') : 'Нет аренд',
-      rentalStatus === 'no_data'
-        ? 'Недостаточно данных'
-        : safeCount(input.overdueReturnsCount) > 0
-          ? 'Есть просроченные возвраты.'
-          : safeCount(input.returnsTodayCount) > 0
-            ? 'Есть возвраты сегодня, нужен операционный контроль.'
-            : 'Активность аренды не создаёт срочных отклонений.',
-      { insufficientData: rentalStatus === 'no_data' },
-    ),
-    directionInput(
-      'risks',
-      riskScore,
-      riskSignals > 0 ? formatCountMetric(riskSignals, 'сигнал', 'сигнала', 'сигналов') : risksHaveSource ? '0 сигналов' : 'Нет сигналов',
-      !risksHaveSource
-        ? 'Недостаточно данных'
-        : criticalRiskSignals > 0
-          ? 'Есть критичные сигналы по срокам, долгам, сервису или данным.'
-          : warningRiskSignals > 0
-            ? 'Есть предупреждения, которые снижают запас устойчивости.'
-            : 'Критичных рисков по доступным данным нет.',
-      { insufficientData: !risksHaveSource },
-    ),
-    directionInput(
-      'service',
-      contourScore(serviceStatus, 88, 58, 28),
-      contours.service.count > 0 ? formatCountMetric(contours.service.count, 'заявка', 'заявки', 'заявок') : 'Нет заявок',
-      serviceStatus === 'no_data'
-        ? 'Недостаточно данных'
-        : serviceStatus === 'critical'
-          ? 'Критичные или просроченные заявки блокируют технику.'
-          : serviceStatus === 'risk'
-            ? 'Есть заявки без механика, ожидание запчастей или другие блокеры.'
-            : 'Сервисные заявки не создают критичных блокеров.',
-      { insufficientData: serviceStatus === 'no_data' },
-    ),
-    directionInput(
-      'clients',
-      clientsCount > 0 ? 88 : null,
-      clientsCount > 0 ? formatCountMetric(clientsCount, 'клиент', 'клиента', 'клиентов') : 'Нет клиентов',
-      clientsCount > 0
-        ? 'Клиентская база доступна для связки с арендами и платежами.'
-        : 'Недостаточно данных',
-      { insufficientData: clientsCount <= 0 },
-    ),
-    directionInput(
-      'fleet',
-      fleetStatus === 'no_data' ? null : safeCount(input.noActiveFleetCritical) > 0 ? 25 : utilization >= 60 ? 90 : utilization >= 40 ? 65 : 38,
-      fleetStatus === 'no_data' ? 'Нет техники' : `${Math.round(utilization)}% загрузка`,
-      fleetStatus === 'no_data'
-        ? 'Недостаточно данных'
-        : safeCount(input.noActiveFleetCritical) > 0
-          ? 'Парк есть, но активной техники в работе нет.'
-          : utilization < 40
-            ? 'Низкая загрузка парка снижает индекс.'
-            : utilization < 60
-              ? 'Загрузка ниже целевой зоны.'
-              : 'Парк работает в целевой зоне загрузки.',
-      { insufficientData: fleetStatus === 'no_data' },
-    ),
+    buildFinanceDirection(input, contours),
+    buildRentalDirection(input, contours),
+    buildRisksDirection(input, contours, hasScoreBase),
+    buildServiceDirection(input, contours),
+    buildClientsDirection(input),
+    buildFleetDirection(input, contours),
   ];
 }
 

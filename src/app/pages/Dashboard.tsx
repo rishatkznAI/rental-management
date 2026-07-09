@@ -1274,11 +1274,25 @@ type CompanyHealthScoreDirection = {
   title: string;
   score: number;
   weight: number;
+  totalWeight?: number;
   weightedContribution: number;
   weightedDeficit?: number;
   primaryMetric: string;
   shortReason: string;
+  reason?: string;
+  recommendedAction?: string;
+  riskLevel?: 'critical' | 'risk' | 'stable' | 'good' | 'excellent';
   insufficientData?: boolean;
+  hasMissingSubMetrics?: boolean;
+  subMetrics?: Array<{
+    key: string;
+    title: string;
+    score: number;
+    weight: number;
+    contribution: number;
+    sourceStatus: 'real' | 'derived' | 'missing';
+    reason: string;
+  }>;
 };
 
 type CompanyHealthScoreBreakdown = {
@@ -1305,6 +1319,13 @@ function formatHealthWeight(weight: number) {
 
 function formatHealthContribution(value: number) {
   return Number.isFinite(value) ? value.toFixed(1) : '0.0';
+}
+
+function formatHealthSourceStatus(status?: 'real' | 'derived' | 'missing') {
+  if (status === 'real') return 'факт';
+  if (status === 'derived') return 'расчёт';
+  if (status === 'missing') return 'нет данных, 50';
+  return 'источник не задан';
 }
 
 function smoothSvgPath(points: Array<{ x: number; y: number }>) {
@@ -1692,6 +1713,24 @@ function CompanyHealthCommandCenter({
                 <p className="mt-0.5 truncate text-[11px] font-semibold leading-4 text-slate-300/70" title={`${direction.primaryMetric}. ${direction.shortReason}`}>
                   {direction.insufficientData ? 'Недостаточно данных · ' : ''}{direction.primaryMetric} · {direction.shortReason}
                 </p>
+                {direction.subMetrics?.length ? (
+                  <div className="mt-1 grid min-w-0 gap-0.5">
+                    {direction.subMetrics.map(metric => (
+                      <p
+                        key={metric.key}
+                        className="truncate text-[10.5px] font-semibold leading-3 text-slate-300/62"
+                        title={`${metric.title}: ${metric.score}/100 × ${formatHealthWeight(metric.weight)} = ${formatHealthContribution(metric.contribution)}. ${formatHealthSourceStatus(metric.sourceStatus)}. ${metric.reason}`}
+                      >
+                        {metric.title}: {metric.score}/100 · {formatHealthSourceStatus(metric.sourceStatus)} · {metric.reason}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+                {direction.recommendedAction ? (
+                  <p className="mt-1 truncate text-[10.5px] font-bold leading-3 text-lime-100/82" title={direction.recommendedAction}>
+                    Действие: {direction.recommendedAction}
+                  </p>
+                ) : null}
               </div>
             ))}
           </div>
@@ -3925,6 +3964,28 @@ export default function Dashboard() {
   const debt60PlusAmount = clientDebtAgingRows
     .filter(row => row.ageBucket === '60_plus')
     .reduce((sum, row) => sum + row.debt, 0);
+  const debt30PlusAmount = clientDebtAgingRows
+    .filter(row => row.ageBucket === '31_60' || row.ageBucket === '60_plus')
+    .reduce((sum, row) => sum + row.debt, 0);
+  const largestProblemDebtAmount = clientDebtAgingRows.reduce((max, row) => Math.max(max, row.debt || 0), 0);
+  const fleetMonthlyRevenuePlan = activeRentalFleetLookup.activeFleet.reduce((sum, item) => sum + (Number(item.plannedMonthlyRevenue) || 0), 0);
+  const equipmentWithPlannedRevenueCount = activeRentalFleetLookup.activeFleet.filter(item => Number(item.plannedMonthlyRevenue) > 0).length;
+  const agedEquipmentCount = equipmentList.filter(item => {
+    const year = Number(item.year);
+    return Number.isFinite(year) && today.getFullYear() - year >= 8;
+  }).length;
+  const highHoursEquipmentCount = equipmentList.filter(item => Number(item.hours) >= 3000).length;
+  const fleetTypeCounts = equipmentList.reduce((map, item) => {
+    const type = String(item.type || 'unknown');
+    map.set(type, (map.get(type) || 0) + 1);
+    return map;
+  }, new Map<string, number>());
+  const fleetTopTypeShare = totalEquipment > 0
+    ? Math.round((Math.max(0, ...fleetTypeCounts.values()) / totalEquipment) * 100)
+    : 0;
+  const newClientsThisMonth = computedClients.filter(client => isDateInRange(client.createdAt, monthStart, monthEnd)).length;
+  const activeClientIds = new Set(activeRentalsList.map(rental => rental.clientId).filter(Boolean));
+  const repeatClientsCount = clientFinancials.filter(row => row.totalRentals > 1).length;
   const hasDebtSourceData = rentalDebtRows.length > 0 || clientDebtAgingRows.length > 0;
   const hasPaymentsSourceData = payments.length > 0;
   const hasServiceSourceData = tickets.length > 0;
@@ -3990,7 +4051,39 @@ export default function Dashboard() {
     documentsCount: documents.length,
     deliveriesCount: deliveries.length,
     clientsCount: clients.length,
+    activeEquipment,
+    availableEquipment,
+    equipmentInServiceCount: equipmentInServiceList.length,
+    inactiveEquipmentCount: inactiveEquipment,
+    agedEquipmentCount,
+    highHoursEquipmentCount,
+    equipmentWithPlannedRevenueCount,
+    fleetTopTypeShare,
     utilization,
+    monthlyRevenue,
+    monthlyPaidAmount,
+    rentalRevenueActual: monthlyRevenue,
+    rentalRevenuePlan: fleetMonthlyRevenuePlan,
+    fleetMonthlyRevenuePlan,
+    totalDebt,
+    overdueReceivablesAmount,
+    debt30PlusAmount,
+    debt60PlusAmount,
+    largestProblemDebtAmount,
+    problemClientCount: clientDebtAgingRows.length,
+    overdueReceivablesClients,
+    hasDebtSourceData,
+    rentalStartsThisMonth: rentalsStartedThisMonth.length,
+    rentalReturnsThisMonth: rentalsReturningThisMonth.length,
+    reservedRentalsCount: reservedRentalsList.length,
+    newClientsThisMonth,
+    activeClientsCount: activeClientIds.size,
+    repeatClientsCount,
+    openServiceTicketsCount: openServiceTickets.length,
+    overdueServiceTicketsCount: overdueServiceTickets.length,
+    repeatServiceFailuresCount: Array.isArray(mechanicWorkload?.repeatFailures) ? repeatFailureRows.length : undefined,
+    averageServiceDays,
+    serviceLoadPercent: serviceLoadPercent ?? undefined,
     noActiveFleetCritical: totalEquipment > 0 && activeEquipment === 0 ? 1 : 0,
     lowUtilizationRisk: activeEquipment > 0 && utilization < 40 ? 1 : 0,
     overdueReturnsCount: overdueRentalsList.length,

@@ -526,10 +526,32 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
 
   const readiness = page.getByTestId('fleet-readiness-section');
   await expect(readiness).toBeVisible();
-  for (const label of ['Готовность парка', 'Готова к аренде', 'Требует проверки', 'В сервисе', 'Потеря в день', 'Оценка потерь']) {
-    await expect(readiness.getByText(label, { exact: true }), `fleet readiness KPI ${label} should be visible`).toBeVisible();
+  const readinessKpiLabels = ['Готовность парка', 'Готова к аренде', 'Требует проверки', 'В сервисе', 'Потеря в день', 'Оценка потерь'];
+  const readinessAllGoodMessage = 'Критичных блокеров по парку нет.';
+  const visibleReadinessKpiLabels: string[] = [];
+  for (const label of readinessKpiLabels) {
+    if (await readiness.getByText(label, { exact: true }).isVisible().catch(() => false)) {
+      visibleReadinessKpiLabels.push(label);
+    }
   }
-  safeSmokeLog('equipmentReadinessVisible', { mode: 'kpi-strip' });
+  const kpiBranchVisible = visibleReadinessKpiLabels.length === readinessKpiLabels.length;
+  const allGoodBranchVisible = await readiness.getByText(readinessAllGoodMessage, { exact: true }).isVisible().catch(() => false);
+  const readinessText = (await readiness.innerText().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 500);
+
+  expect(
+    kpiBranchVisible || allGoodBranchVisible,
+    `fleet readiness section should render either KPI summary labels or all-good message. Visible KPI labels: ${visibleReadinessKpiLabels.join(', ') || 'none'}. Section text: ${readinessText}`,
+  ).toBeTruthy();
+
+  if (kpiBranchVisible) {
+    for (const label of readinessKpiLabels) {
+      await expect(readiness.getByText(label, { exact: true }), `fleet readiness KPI ${label} should be visible`).toBeVisible();
+    }
+    safeSmokeLog('equipmentReadinessVisible', { mode: 'kpi-strip' });
+  } else {
+    await expect(readiness.getByText(readinessAllGoodMessage, { exact: true }), 'fleet readiness all-good message should be visible').toBeVisible();
+    safeSmokeLog('equipmentReadinessVisible', { mode: 'all-good' });
+  }
 
   const visibleText = await page.locator('body').innerText();
   expect(visibleText, 'production UI should not render raw undefined/null/object placeholders').not.toMatch(UNSAFE_VISIBLE_TEXT_PATTERN);

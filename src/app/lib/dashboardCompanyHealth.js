@@ -40,17 +40,30 @@ export const COMPANY_HEALTH_CRITICAL_METRICS = new Set([
 
 export const MIN_DIRECTION_COVERAGE_PERCENT = 30;
 export const MIN_FINANCE_COVERAGE_PERCENT = 50;
+export const MIN_RISKS_COVERAGE_PERCENT = 55;
+export const DERIVED_SEVERE_OVER90_ABSOLUTE_THRESHOLD = 50_000;
 
 export function isDirectionEligible(direction = {}) {
   const hasScoreAndCoverage = direction.score !== null
     && direction.score !== undefined
     && Number(direction.rawCoveragePercent) >= (direction.key === 'finance'
       ? MIN_FINANCE_COVERAGE_PERCENT
-      : MIN_DIRECTION_COVERAGE_PERCENT);
+      : direction.key === 'risks'
+        ? MIN_RISKS_COVERAGE_PERCENT
+        : MIN_DIRECTION_COVERAGE_PERCENT);
   if (!hasScoreAndCoverage) return false;
-  if (direction.key !== 'finance') return true;
-  return direction.financeEligibility?.actualReceiptsAvailable === true
-    && direction.financeEligibility?.overdueReceivablesAvailable === true;
+  if (direction.key === 'finance') {
+    return direction.financeEligibility?.actualReceiptsAvailable === true
+      && direction.financeEligibility?.overdueReceivablesAvailable === true;
+  }
+  if (direction.key === 'risks') {
+    // Legacy/custom direction inputs have no eligibility metadata. The production
+    // builder always supplies it, so compatibility callers keep their old behavior.
+    if (!direction.risksEligibility) return true;
+    return direction.risksEligibility?.overdueReceivablesAvailable === true
+      && direction.risksEligibility?.debtAgingReliable === true;
+  }
+  return true;
 }
 
 function isCriticalMetricGap(metric, subMetrics) {
@@ -325,21 +338,26 @@ function normalizeDirection(key, title, source = {}) {
     const normalized = {
       ...direction,
       financeEligibility: source.financeEligibility,
+      risksEligibility: source.risksEligibility,
+      riskPriorityOverride: source.riskPriorityOverride === true,
+      hasSevereOldDebt: source.hasSevereOldDebt === true,
       missingCriticalSources: Array.isArray(source.missingCriticalSources) ? source.missingCriticalSources : [],
     };
     normalized.isEligible = isDirectionEligible(normalized);
-    if (key === 'finance' && !normalized.isEligible) {
+    if ((key === 'finance' || key === 'risks') && !normalized.isEligible) {
       normalized.availableDataScore = normalized.score;
       normalized.score = null;
       normalized.weightedContribution = 0;
       normalized.weightedDeficit = 0;
       normalized.riskLevel = 'insufficient';
       normalized.label = 'Недостаточно данных';
-      normalized.shortReason = normalized.missingCriticalSources.length > 0
-        ? `Недостаточно данных: ${normalized.missingCriticalSources.map(item => item.title).join(', ')}`
-        : normalized.rawCoveragePercent < MIN_FINANCE_COVERAGE_PERCENT
-          ? `Покрытие финансовых данных ниже ${MIN_FINANCE_COVERAGE_PERCENT}%`
-          : normalized.shortReason;
+      normalized.shortReason = key === 'risks' && normalized.risksEligibility?.debtAgingReliable !== true
+        ? 'Недостаточно надёжных данных по срокам задолженности'
+        : normalized.missingCriticalSources.length > 0
+          ? `Недостаточно данных: ${normalized.missingCriticalSources.map(item => item.title).join(', ')}`
+          : normalized.rawCoveragePercent < (key === 'finance' ? MIN_FINANCE_COVERAGE_PERCENT : MIN_RISKS_COVERAGE_PERCENT)
+            ? `Покрытие данных ниже ${key === 'finance' ? MIN_FINANCE_COVERAGE_PERCENT : MIN_RISKS_COVERAGE_PERCENT}%`
+            : normalized.shortReason;
       normalized.reason = normalized.shortReason;
     }
     return normalized;
@@ -349,16 +367,23 @@ function normalizeDirection(key, title, source = {}) {
   const normalized = {
     ...direction,
     financeEligibility: source.financeEligibility,
+    risksEligibility: source.risksEligibility,
+    riskPriorityOverride: source.riskPriorityOverride === true,
+    hasSevereOldDebt: source.hasSevereOldDebt === true,
     missingCriticalSources: Array.isArray(source.missingCriticalSources) ? source.missingCriticalSources : [],
   };
   normalized.isEligible = isDirectionEligible(normalized);
-  if (key === 'finance' && !normalized.isEligible) {
+  if ((key === 'finance' || key === 'risks') && !normalized.isEligible) {
     normalized.availableDataScore = normalized.score;
     normalized.score = null;
     normalized.weightedContribution = 0;
     normalized.weightedDeficit = 0;
     normalized.riskLevel = 'insufficient';
     normalized.label = 'Недостаточно данных';
+    if (key === 'risks' && normalized.risksEligibility?.debtAgingReliable !== true) {
+      normalized.shortReason = 'Недостаточно надёжных данных по срокам задолженности';
+      normalized.reason = normalized.shortReason;
+    }
   }
   return normalized;
 }
@@ -410,7 +435,9 @@ export function calculateCompanyHealthScore(directionScores = []) {
           : 'Критично';
   const byWeakest = (left, right) => (left.score ?? 101) - (right.score ?? 101) || right.weight - left.weight || left.title.localeCompare(right.title, 'ru');
   const byStrongest = (left, right) => (right.score ?? -1) - (left.score ?? -1) || right.weight - left.weight || left.title.localeCompare(right.title, 'ru');
-  const byFixImpact = (left, right) => right.weightedDeficit - left.weightedDeficit || byWeakest(left, right);
+  const byFixImpact = (left, right) => Number(right.riskPriorityOverride === true) - Number(left.riskPriorityOverride === true)
+    || right.weightedDeficit - left.weightedDeficit
+    || byWeakest(left, right);
 
   return {
     totalScore,
@@ -750,150 +777,120 @@ function buildRentalDirection(input, contours) {
 }
 
 function buildRisksDirection(input, contours, hasScoreBase) {
-  const overdueAmount = firstFiniteInput(input, ['overdueReceivablesAmount', 'overdueDebtAmount']);
-  const totalDebt = firstFiniteInput(input, ['totalDebt', 'receivablesAmount']);
-  const monthlyRevenue = firstFiniteInput(input, ['monthlyRevenue', 'financeRevenuePlan']);
-  const debt30Plus = firstFiniteInput(input, ['debt30PlusAmount']);
-  const debt60Plus = firstFiniteInput(input, ['debt60PlusAmount']);
-  const debt90Plus = firstFiniteInput(input, ['debt90PlusAmount']);
-  const largestDebt = firstFiniteInput(input, ['largestProblemDebtAmount', 'largestClientDebtAmount']);
-  const problemClients = firstFiniteInput(input, ['problemClientCount', 'overdueReceivablesClients']);
+  const aging = input.debtAging && typeof input.debtAging === 'object' ? input.debtAging : null;
+  const agingSourceAvailable = aging?.sourceStatus !== 'missing' && aging !== null;
+  const debtAgingReliable = aging?.debtAgingReliable === true;
+  const overdueReceivablesAvailable = aging?.overdueReceivablesAvailable === true && debtAgingReliable;
+  const totalDebt = debtAgingReliable ? nonNegative(aging.totalOutstandingAmount) : null;
+  const overdueAmount = overdueReceivablesAvailable ? nonNegative(aging.overdueOutstandingAmount) : null;
+  const actualReceipts = input.actualReceiptsAvailable === true
+    ? firstFiniteInput(input, ['actualReceiptsAmount'])
+    : null;
+  const bucket1to30 = debtAgingReliable ? nonNegative(aging.bucket1to30Amount) : null;
+  const bucket31to60 = debtAgingReliable ? nonNegative(aging.bucket31to60Amount) : null;
+  const bucket61to90 = debtAgingReliable ? nonNegative(aging.bucket61to90Amount) : null;
+  const bucketOver90 = debtAgingReliable ? nonNegative(aging.bucketOver90Amount) : null;
+  const largestDebt = debtAgingReliable && aging.largestClientConcentrationAvailable === true
+    ? nonNegative(aging.largestClientOverdueAmount)
+    : null;
   const criticalRiskSignals = safeCount(input.criticalSignals)
     + safeCount(input.invalidCriticalSignals)
     + safeCount(input.noActiveFleetCritical)
     + safeCount(input.overdueReturnsCount)
-    + safeCount(input.oldDebtCount)
     + safeCount(input.serviceCriticalCount)
     + safeCount(input.overdueDocumentsCount)
     + safeCount(input.overdueDeliveriesCount);
   const warningRiskSignals = safeCount(input.lowUtilizationRisk)
     + safeCount(input.returnsTodayCount)
-    + safeCount(input.overdueReceivablesCount)
     + safeCount(input.serviceRiskCount)
     + safeCount(input.unsignedDocumentsCount)
     + safeCount(input.unassignedDeliveriesCount);
   const riskSignals = criticalRiskSignals + warningRiskSignals;
-  const hasDebtSource = Boolean(input.hasDebtSourceData)
-    || hasAnyFiniteInput(input, ['overdueReceivablesAmount', 'totalDebt', 'debt30PlusAmount', 'debt60PlusAmount', 'debt90PlusAmount', 'largestProblemDebtAmount'])
-    || contours.payments.count > 0;
+  const agingDetails = [
+    `Общая дебиторка: ${formatFinanceAmount(aging?.totalOutstandingAmount)}`,
+    `Просроченная дебиторка: ${formatFinanceAmount(aging?.overdueOutstandingAmount)}`,
+    `Не наступил срок: ${formatFinanceAmount(aging?.currentAmount)}`,
+    `1–30 дней: ${formatFinanceAmount(aging?.bucket1to30Amount)}`,
+    `31–60 дней: ${formatFinanceAmount(aging?.bucket31to60Amount)}`,
+    `61–90 дней: ${formatFinanceAmount(aging?.bucket61to90Amount)}`,
+    `Более 90 дней: ${formatFinanceAmount(aging?.bucketOver90Amount)}`,
+    `Исключено из расчёта из-за неоднозначной даты: ${formatFinanceAmount(aging?.excludedAmbiguousAmount)} (${safeCount(aging?.excludedAmbiguousCount)})`,
+    largestDebt !== null ? `Крупнейшая концентрация риска: ${formatFinanceAmount(largestDebt)}` : 'Крупнейшая концентрация риска: недостаточно данных',
+    `Источник aging: ${aging?.sourceStatus || 'missing'}`,
+    `Доверие: ${aging?.sourceConfidence || 'low'}`,
+  ];
 
-  const overdueMetric = overdueAmount !== null
+  const overdueMetric = overdueReceivablesAvailable
     ? buildSubMetric({
         key: 'risks_overdue_receivables',
         title: 'Просроченная дебиторка',
-        score: overduePressureScore(nonNegative(overdueAmount), Math.max(nonNegative(totalDebt), nonNegative(monthlyRevenue), nonNegative(overdueAmount)), true),
+        score: overduePressureScore(overdueAmount, Math.max(totalDebt, nonNegative(actualReceipts), overdueAmount), true),
         weight: 0.45,
         sourceStatus: 'derived',
+        details: agingDetails,
         reason: overdueAmount > 0 ? 'Высокая просроченная дебиторка' : 'Просроченная дебиторка не выявлена',
       })
-    : hasDebtSource && hasFiniteInput(input, 'overdueReceivablesCount')
-      ? buildSubMetric({
-          key: 'risks_overdue_receivables',
-          title: 'Просроченная дебиторка',
-          score: safeCount(input.overdueReceivablesCount) > 0 ? 35 : 100,
-          weight: 0.45,
+    : buildSubMetric({
+        key: 'risks_overdue_receivables',
+        title: 'Просроченная дебиторка',
+        weight: 0.45,
+        sourceStatus: agingSourceAvailable ? 'ambiguous' : 'missing',
+        details: agingDetails,
+        reason: 'Недостаточно надёжных данных по срокам задолженности',
+      });
+
+  const ageMetric = debtAgingReliable
+    ? (() => {
+        const overdueBase = Math.max(overdueAmount, 1);
+        const severity = overdueAmount > 0
+          ? (bucket1to30 * 0.20 + bucket31to60 * 0.50 + bucket61to90 * 0.80 + bucketOver90) / overdueBase
+          : 0;
+        return buildSubMetric({
+          key: 'risks_old_debt',
+          title: 'Возраст просроченной задолженности',
+          score: clampPercent(Math.round(100 * (1 - Math.min(1, severity)))),
+          weight: 0.25,
           sourceStatus: 'derived',
-          reason: safeCount(input.overdueReceivablesCount) > 0 ? 'Есть просроченная дебиторка' : 'Просрочка не зафиксирована',
-        })
-      : hasDebtSource
-        ? buildSubMetric({
-            key: 'risks_overdue_receivables',
-            title: 'Просроченная дебиторка',
-            score: 100,
-            weight: 0.45,
-            sourceStatus: 'ambiguous',
-            reason: 'Просрочка не зафиксирована',
-          })
-        : buildSubMetric({
-            key: 'risks_overdue_receivables',
-            title: 'Просроченная дебиторка',
-            weight: 0.45,
-            sourceStatus: 'missing',
-            reason: 'Недостаточно данных по просрочке',
-          });
-
-  const ageMetric = [debt30Plus, debt60Plus, debt90Plus].some(value => value !== null)
-    ? (() => {
-        const base = Math.max(nonNegative(totalDebt), nonNegative(overdueAmount), nonNegative(debt30Plus), nonNegative(debt60Plus), nonNegative(debt90Plus), 1);
-        const pressure = (nonNegative(debt30Plus) * 0.45 + nonNegative(debt60Plus) * 0.75 + nonNegative(debt90Plus)) / base;
-        return buildSubMetric({
-          key: 'risks_old_debt',
-          title: 'Долги старше 30/60/90 дней',
-          score: ratioScore(pressure, [[0.03, 92], [0.10, 72], [0.20, 48], [0.40, 26], [Infinity, 8]]),
-          weight: 0.25,
-          sourceStatus: 'ambiguous',
-          reason: nonNegative(debt90Plus) > 0 || nonNegative(debt60Plus) > 0
-            ? 'Долг старше 30 дней'
-            : nonNegative(debt30Plus) > 0
-              ? 'Есть долг старше 30 дней'
-              : 'Старые долги не выявлены',
+          reason: bucketOver90 > 0
+            ? 'Есть подтверждённый долг старше 90 дней'
+            : bucket61to90 > 0
+              ? 'Есть подтверждённый долг 61–90 дней'
+              : overdueAmount > 0
+                ? 'Возраст долга рассчитан по взаимоисключающим bucket'
+                : 'Подтверждённая просрочка не выявлена',
         });
       })()
-    : safeCount(input.oldDebtCount) > 0
-      ? buildSubMetric({
-          key: 'risks_old_debt',
-          title: 'Долги старше 30/60/90 дней',
-          score: 30,
-          weight: 0.25,
-          sourceStatus: 'ambiguous',
-          reason: 'Долг старше 30 дней',
-        })
-      : hasDebtSource
-        ? buildSubMetric({
-            key: 'risks_old_debt',
-            title: 'Долги старше 30/60/90 дней',
-            score: 100,
-            weight: 0.25,
-            sourceStatus: 'ambiguous',
-            reason: 'Старые долги не выявлены',
-          })
-        : buildSubMetric({
-            key: 'risks_old_debt',
-            title: 'Долги старше 30/60/90 дней',
-            weight: 0.25,
-            sourceStatus: 'missing',
-            reason: 'Недостаточно данных по возрасту долга',
-          });
+    : buildSubMetric({
+        key: 'risks_old_debt',
+        title: 'Возраст просроченной задолженности',
+        weight: 0.25,
+        sourceStatus: agingSourceAvailable ? 'ambiguous' : 'missing',
+        reason: 'Недостаточно надёжных данных по срокам задолженности',
+      });
 
-  const concentrationMetric = largestDebt !== null || problemClients !== null
+  const concentrationMetric = largestDebt !== null
     ? (() => {
-        const base = Math.max(nonNegative(totalDebt), nonNegative(overdueAmount), nonNegative(largestDebt), 1);
-        const concentration = nonNegative(largestDebt) / base;
-        const count = nonNegative(problemClients);
-        const score = nonNegative(largestDebt) > 0
-          ? ratioScore(concentration, [[0.15, 88], [0.30, 64], [0.50, 38], [Infinity, 16]])
-          : count > 0
-            ? 62
-            : 100;
+        const concentration = overdueAmount > 0 ? largestDebt / overdueAmount : 0;
         return buildSubMetric({
           key: 'risks_problem_clients',
           title: 'Крупные проблемные клиенты',
-          score,
+          score: largestDebt > 0
+            ? ratioScore(concentration, [[0.15, 88], [0.30, 64], [0.50, 38], [Infinity, 16]])
+            : 100,
           weight: 0.20,
-          sourceStatus: 'ambiguous',
-          reason: nonNegative(largestDebt) > 0 && concentration >= 0.3
-            ? 'Есть крупный проблемный долг'
-            : count > 0
-              ? 'Есть проблемные клиенты'
-              : 'Крупных проблемных клиентов не выявлено',
+          sourceStatus: 'derived',
+          reason: largestDebt > 0 && concentration >= 0.30
+            ? 'Есть крупная концентрация подтверждённой просрочки'
+            : 'Крупная концентрация просрочки не выявлена',
         });
       })()
-    : hasDebtSource
-      ? buildSubMetric({
-          key: 'risks_problem_clients',
-          title: 'Крупные проблемные клиенты',
-          score: 100,
-          weight: 0.20,
-          sourceStatus: 'ambiguous',
-          reason: 'Крупная концентрация риска не выявлена',
-        })
-      : buildSubMetric({
-          key: 'risks_problem_clients',
-          title: 'Крупные проблемные клиенты',
-          weight: 0.20,
-          sourceStatus: 'missing',
-          reason: 'Недостаточно данных по концентрации риска',
-        });
+    : buildSubMetric({
+        key: 'risks_problem_clients',
+        title: 'Крупные проблемные клиенты',
+        weight: 0.20,
+        sourceStatus: agingSourceAvailable ? 'ambiguous' : 'missing',
+        reason: 'Недостаточно надёжных данных по концентрации просрочки',
+      });
 
   const operationalMetric = hasScoreBase || riskSignals > 0
     ? buildSubMetric({
@@ -920,18 +917,45 @@ function buildRisksDirection(input, contours, hasScoreBase) {
   const weakest = weakestSubMetric(subMetrics);
   const actionByMetric = {
     risks_overdue_receivables: 'Остановите новые отгрузки клиентам с просрочкой до плана оплаты.',
-    risks_old_debt: 'Назначьте план взыскания по долгам 30+ и 60+ дней.',
+    risks_old_debt: 'Назначьте план взыскания по подтверждённой возрастной просрочке.',
     risks_problem_clients: 'Разберите крупнейшего должника и проверьте кредитные лимиты.',
     risks_critical_events: 'Закройте критические операционные события до новых отгрузок.',
   };
 
-  return buildDirection({
+  const direction = buildDirection({
     key: 'risks',
     title: 'Риски',
     subMetrics,
-    reason: weakest?.score <= 55 || weakest?.sourceStatus === 'missing' ? weakest.reason : 'Критичных рисков по доступным данным нет.',
+    reason: !debtAgingReliable
+      ? 'Недостаточно надёжных данных по срокам задолженности'
+      : weakest?.score <= 55 || weakest?.sourceStatus === 'missing'
+        ? weakest.reason
+        : 'Критичных рисков по доступным данным нет.',
     recommendedAction: actionByMetric[weakest?.key] || 'Проверьте риски перед новыми отгрузками.',
   });
+  const severeOver90Threshold = Math.max(
+    DERIVED_SEVERE_OVER90_ABSOLUTE_THRESHOLD,
+    nonNegative(actualReceipts) * 0.05,
+  );
+  const hasSevereOldDebt = debtAgingReliable && bucketOver90 >= severeOver90Threshold;
+  const hasLargeConfirmedDebtor = debtAgingReliable
+    && overdueAmount > 0
+    && largestDebt >= DERIVED_SEVERE_OVER90_ABSOLUTE_THRESHOLD
+    && largestDebt / overdueAmount >= 0.50;
+
+  return {
+    ...direction,
+    risksEligibility: {
+      overdueReceivablesAvailable,
+      debtAgingReliable,
+    },
+    isEligible: direction.score !== null
+      && direction.rawCoveragePercent >= MIN_RISKS_COVERAGE_PERCENT
+      && overdueReceivablesAvailable
+      && debtAgingReliable,
+    hasSevereOldDebt,
+    riskPriorityOverride: hasSevereOldDebt || hasLargeConfirmedDebtor,
+  };
 }
 
 function buildServiceDirection(input, contours) {

@@ -1272,31 +1272,47 @@ type CompanyHealthSignal = {
 type CompanyHealthScoreDirection = {
   key: string;
   title: string;
-  score: number;
+  score: number | null;
   weight: number;
+  availableWeight?: number;
   totalWeight?: number;
+  rawCoveragePercent?: number;
+  coveragePercent?: number;
+  dataConfidence?: 'high' | 'medium' | 'low' | 'insufficient';
+  isEligible?: boolean;
+  coverageAdjustedScore?: number | null;
   weightedContribution: number;
   weightedDeficit?: number;
   primaryMetric: string;
   shortReason: string;
   reason?: string;
   recommendedAction?: string;
-  riskLevel?: 'critical' | 'risk' | 'stable' | 'good' | 'excellent';
+  riskLevel?: 'critical' | 'risk' | 'stable' | 'good' | 'excellent' | 'insufficient';
   insufficientData?: boolean;
   hasMissingSubMetrics?: boolean;
   subMetrics?: Array<{
     key: string;
     title: string;
-    score: number;
+    score: number | null;
+    isScorable: boolean;
     weight: number;
     contribution: number;
-    sourceStatus: 'real' | 'derived' | 'missing';
+    sourceStatus: 'real' | 'derived' | 'missing' | 'ambiguous';
     reason: string;
   }>;
 };
 
 type CompanyHealthScoreBreakdown = {
-  totalScore: number;
+  totalScore: number | null;
+  rawScore?: number | null;
+  adjustedScore?: number | null;
+  rawTotalCoveragePercent?: number;
+  totalCoveragePercent?: number;
+  confidence?: 'high' | 'medium' | 'low' | 'insufficient';
+  isPreliminary?: boolean;
+  displayLabel?: string;
+  excludedDirections?: string[];
+  missingCriticalMetrics?: Array<{ key: string; title: string; direction: string; sourceStatus: 'real' | 'derived' | 'missing' | 'ambiguous' }>;
   maxScore: number;
   directions: CompanyHealthScoreDirection[];
   weakestDirections: CompanyHealthScoreDirection[];
@@ -1321,11 +1337,19 @@ function formatHealthContribution(value: number) {
   return Number.isFinite(value) ? value.toFixed(1) : '0.0';
 }
 
-function formatHealthSourceStatus(status?: 'real' | 'derived' | 'missing') {
-  if (status === 'real') return 'факт';
-  if (status === 'derived') return 'расчёт';
-  if (status === 'missing') return 'нет данных, 50';
+function formatHealthSourceStatus(status?: 'real' | 'derived' | 'missing' | 'ambiguous') {
+  if (status === 'real') return 'Реальные данные';
+  if (status === 'derived') return 'Расчётные данные';
+  if (status === 'missing') return 'Нет данных';
+  if (status === 'ambiguous') return 'Неоднозначный источник';
   return 'источник не задан';
+}
+
+function formatHealthConfidence(confidence?: 'high' | 'medium' | 'low' | 'insufficient') {
+  if (confidence === 'high') return 'высокое';
+  if (confidence === 'medium') return 'среднее';
+  if (confidence === 'low') return 'низкое';
+  return 'недостаточно данных';
 }
 
 function smoothSvgPath(points: Array<{ x: number; y: number }>) {
@@ -1350,6 +1374,7 @@ function CompanyHealthSignalCard({ item }: { item: CompanyHealthSignal }) {
       title={title}
       className="rentcore-command-card company-health-signal group grid min-w-0 gap-1 px-3 py-1.5"
     >
+      <span className="sr-only">{item.stateLabel}</span>
       <div className="rentcore-command-card-head company-health-signal-head flex min-w-0 items-center gap-2">
         <span className="rentcore-command-card-status" aria-hidden="true" />
         <span className="rentcore-command-card-title block min-w-0 flex-1 truncate text-xs font-bold text-slate-300/76">{item.title}</span>
@@ -1584,42 +1609,53 @@ function CompanyHealthCommandCenter({
       detail,
     };
   };
-  const businessSignals: CompanyHealthSignal[] = [
-    signalFromDirection('returns', 'Аренда', '/rentals', 'Активность'),
-    signalFromDirection('money', 'Финансы', '/payments', 'Поступления'),
-    signalFromDirection('service', 'Сервис', '/service', 'Заявки'),
-    {
-      id: 'clients',
-      title: 'Клиенты',
-      href: '/clients',
-      tone: clientsCount > 0 ? 'success' : 'default',
-      stateLabel: clientsCount > 0 ? 'ОК' : 'недостаточно данных',
-      metric: clientsCount > 0 ? String(clientsCount) : 'н/д',
-      detail: 'База',
-    },
-    signalFromDirection('fleet', 'Парк', '/equipment', 'Единицы'),
-    {
-      id: 'risks',
-      title: 'Риски',
-      href: riskDirections[0]?.href || '/equipment',
-      tone: criticalSignals > 0 ? 'danger' : riskCount > 0 ? 'warning' : hasScore ? 'success' : 'default',
-      stateLabel: riskCount > 0 ? 'Под наблюдением' : hasScore ? 'Спокойно' : 'недостаточно данных',
-      metric: String(riskCount),
-      detail: 'В фокусе',
-    },
-  ];
-  const riskBadgeLabel = hasScore
+  const scoreDirections = scoreBreakdown?.directions ?? [];
+  const scoreDirectionConfig: Record<string, { title: string; href: string }> = {
+    rental: { title: 'Аренда', href: '/rentals' },
+    finance: { title: 'Финансы', href: '/payments' },
+    service: { title: 'Сервис', href: '/service' },
+    clients: { title: 'Клиенты', href: '/clients' },
+    fleet: { title: 'Парк', href: '/equipment' },
+    risks: { title: 'Риски', href: '/payments' },
+  };
+  const scoreDirectionOrder = ['rental', 'finance', 'service', 'clients', 'fleet', 'risks'];
+  const businessSignals: CompanyHealthSignal[] = scoreDirectionOrder.map(key => {
+    const direction = scoreDirections.find(item => item.key === key);
+    const config = scoreDirectionConfig[key];
+    const isEligible = Boolean(direction?.isEligible && direction.score !== null);
+    const directionScore = direction?.score ?? null;
+    const tone: DashboardTone = !isEligible
+      ? 'default'
+      : directionScore! >= 80
+        ? 'success'
+        : directionScore! >= 55
+          ? 'warning'
+          : 'danger';
+    return {
+      id: key,
+      title: config.title,
+      href: config.href,
+      tone,
+      stateLabel: isEligible ? `${directionScore}/100` : 'Недостаточно данных',
+      metric: isEligible ? `${directionScore}/100` : '—',
+      detail: `Покрытие ${direction?.coveragePercent ?? 0}%`,
+    };
+  });
+  const riskBadgeLabel = scoreBreakdown?.isPreliminary
+    ? scoreBreakdown.displayLabel || 'Предварительная оценка'
+    : hasScore
     ? progress >= 80
       ? 'Стабильно'
       : progress >= 55
         ? 'Под наблюдением'
         : 'Зона риска'
-    : 'Данных мало';
+    : scoreBreakdown?.displayLabel || 'Данных мало';
+  const coverageSummary = `Покрытие ${scoreBreakdown?.totalCoveragePercent ?? 0}% · доверие ${formatHealthConfidence(scoreBreakdown?.confidence)}`;
   const executiveStatus = hasScore
     ? 'Сводный индекс по деньгам, парку, сервису и рискам'
     : 'Нужны записи по операционным контурам для полной картины';
   const insufficientDataExplanation = 'Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок.';
-  const explanationDirections = scoreBreakdown?.directions ?? [];
+  const explanationDirections = scoreDirections;
   const focusDirections = ((scoreBreakdown?.focusDirections?.length ? scoreBreakdown.focusDirections : scoreBreakdown?.weakestDirections) ?? [])
     .slice(0, 2);
   const focusText = focusDirections.length > 0 ? focusDirections.map(item => item.title).join(' и ') : 'данные';
@@ -1641,7 +1677,7 @@ function CompanyHealthCommandCenter({
           <p className="mt-0.5 max-w-[68ch] text-xs font-semibold leading-4 text-slate-300/78">{executiveStatus}</p>
         </div>
         <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:shrink-0">
-          <span className="company-health-pill min-w-0 max-w-full rounded-full px-3 py-1 text-sm font-extrabold text-white">{riskBadgeLabel}</span>
+          <span className="company-health-pill min-w-0 max-w-full rounded-full px-3 py-1 text-sm font-extrabold text-white" data-testid="dashboard-company-health-status">{riskBadgeLabel}</span>
         </div>
       </div>
 
@@ -1665,8 +1701,8 @@ function CompanyHealthCommandCenter({
           </button>
           <div className="min-w-0">
             <span className="block text-[11px] font-bold uppercase tracking-normal text-slate-400">Контуры</span>
-            <strong className="mt-0.5 block truncate text-sm font-bold text-slate-200">
-              {riskCount > 0 ? `${riskCount} в фокусе` : missingCount > 0 ? `${missingCount} ждут данных` : 'без заметных отклонений'}
+            <strong className="mt-0.5 block truncate text-sm font-bold text-slate-200" data-testid="dashboard-company-health-coverage">
+              {coverageSummary}
             </strong>
           </div>
         </div>
@@ -1684,6 +1720,12 @@ function CompanyHealthCommandCenter({
             <div className="min-w-0">
               <p className="text-[11px] font-black uppercase tracking-normal text-lime-200">Почему {hasScore ? `${progress}/100` : 'нет оценки'}</p>
               <p className="mt-1 text-xs font-semibold leading-4 text-slate-300/78">{formulaSummary}</p>
+              <p className="mt-1 text-xs font-semibold leading-4 text-slate-300/78" data-testid="dashboard-company-health-explanation-coverage">
+                Оценка по доступным данным: {scoreBreakdown?.rawScore ?? '—'}/100 · Покрытие данных: {scoreBreakdown?.totalCoveragePercent ?? 0}% · Доверие к оценке: {formatHealthConfidence(scoreBreakdown?.confidence)}
+              </p>
+              <p className="mt-1 text-xs font-extrabold leading-4 text-lime-100" data-testid="dashboard-company-health-explanation-adjusted">
+                Итоговая оценка с учётом покрытия: {scoreBreakdown?.adjustedScore ?? '—'}/100
+              </p>
               <p className="mt-1 text-xs font-extrabold leading-4 text-slate-100" data-testid="dashboard-company-health-explanation-focus">Сначала исправить: {focusText}</p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -1701,13 +1743,25 @@ function CompanyHealthCommandCenter({
               </button>
             </div>
           </div>
+          {scoreBreakdown?.missingCriticalMetrics?.length ? (
+            <div className="mt-2 rounded-[8px] border border-amber-400/30 bg-amber-950/20 px-2 py-1.5 text-[11px] font-semibold leading-4 text-amber-100" data-testid="dashboard-company-health-missing-critical">
+              Критические метрики без оценки: {scoreBreakdown.missingCriticalMetrics.map(item => `${item.direction}: ${item.title}`).join('; ')}
+            </div>
+          ) : null}
+          {scoreBreakdown?.excludedDirections?.length ? (
+            <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-300/70" data-testid="dashboard-company-health-excluded-directions">
+              Не участвуют из-за покрытия ниже 30%: {scoreBreakdown.excludedDirections.map(key => explanationDirections.find(item => item.key === key)?.title || key).join(', ')}
+            </p>
+          ) : null}
           <div className="mt-2 grid gap-1.5" data-testid="dashboard-company-health-explanation-breakdown">
             {explanationDirections.map(direction => (
               <div key={direction.key} className="company-health-explanation-row min-w-0 rounded-[8px] px-2 py-1.5" data-testid={`dashboard-company-health-explanation-${direction.key}`}>
                 <div className="flex min-w-0 items-center justify-between gap-2">
                   <span className="min-w-0 truncate text-xs font-extrabold text-slate-100">{direction.title}</span>
                   <span className="shrink-0 text-[11px] font-black text-slate-200">
-                    {Math.round(direction.score)}/100 × {formatHealthWeight(direction.weight)} = {formatHealthContribution(direction.weightedContribution)}
+                    {direction.isEligible && direction.score !== null
+                      ? `${Math.round(direction.score)}/100 × ${formatHealthWeight(direction.weight)} = ${formatHealthContribution(direction.weightedContribution)}`
+                      : `— · покрытие ${direction.coveragePercent ?? 0}%`}
                   </span>
                 </div>
                 <p className="mt-0.5 truncate text-[11px] font-semibold leading-4 text-slate-300/70" title={`${direction.primaryMetric}. ${direction.shortReason}`}>
@@ -1719,9 +1773,10 @@ function CompanyHealthCommandCenter({
                       <p
                         key={metric.key}
                         className="truncate text-[10.5px] font-semibold leading-3 text-slate-300/62"
-                        title={`${metric.title}: ${metric.score}/100 × ${formatHealthWeight(metric.weight)} = ${formatHealthContribution(metric.contribution)}. ${formatHealthSourceStatus(metric.sourceStatus)}. ${metric.reason}`}
+                        title={`${metric.title}: ${metric.score ?? '—'}/100 × ${formatHealthWeight(metric.weight)} = ${formatHealthContribution(metric.contribution)}. ${formatHealthSourceStatus(metric.sourceStatus)}. ${metric.reason}`}
+                        data-source-status={metric.sourceStatus}
                       >
-                        {metric.title}: {metric.score}/100 · {formatHealthSourceStatus(metric.sourceStatus)} · {metric.reason}
+                        {metric.title}: {metric.score ?? '—'}/100 · {formatHealthSourceStatus(metric.sourceStatus)} · {metric.reason}
                       </p>
                     ))}
                   </div>

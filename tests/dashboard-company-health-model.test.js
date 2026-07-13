@@ -4,13 +4,29 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   COMPANY_HEALTH_WEIGHTS,
+  MIN_DIRECTION_COVERAGE_PERCENT,
   alertHasValidSource,
   buildCompanyHealthModel,
   buildOperationalLoadModel,
   calculateCompanyHealthScore,
+  isDirectionEligible,
 } from '../src/app/lib/dashboardCompanyHealth.js';
 
 const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
+
+function testMetric(key, score, weight = 1, sourceStatus = 'derived') {
+  return { key, title: key, score, weight, sourceStatus, reason: `${key} source` };
+}
+
+function testDirection(key, subMetrics) {
+  return { key, subMetrics, shortReason: `${key} reason` };
+}
+
+const directionKeys = Object.keys(COMPANY_HEALTH_WEIGHTS);
+
+function completeDirections(score = 80) {
+  return directionKeys.map(key => testDirection(key, [testMetric(`${key}_complete`, score)]));
+}
 
 test('company health weights are explicit and sum to 1.0', () => {
   assert.deepEqual(COMPANY_HEALTH_WEIGHTS, {
@@ -24,6 +40,157 @@ test('company health weights are explicit and sum to 1.0', () => {
   const sum = Object.values(COMPANY_HEALTH_WEIGHTS).reduce((total, value) => total + value, 0);
 
   assert.equal(Number(sum.toFixed(2)), 1);
+});
+
+test('direction eligibility threshold is explicit and uses raw unrounded coverage', () => {
+  assert.equal(MIN_DIRECTION_COVERAGE_PERCENT, 30);
+  assert.equal(isDirectionEligible({ score: 50, rawCoveragePercent: 29.49 }), false);
+  assert.equal(isDirectionEligible({ score: 50, rawCoveragePercent: 29.99 }), false);
+  assert.equal(isDirectionEligible({ score: 50, rawCoveragePercent: 30.00 }), true);
+  assert.equal(isDirectionEligible({ score: 50, rawCoveragePercent: 30.01 }), true);
+  assert.equal(isDirectionEligible({ score: null, rawCoveragePercent: 100 }), false);
+});
+
+test('rounding display coverage cannot make a 29.99 percent direction eligible', () => {
+  const model = calculateCompanyHealthScore([
+    testDirection('finance', [
+      testMetric('available', 80, 0.2999),
+      testMetric('missing', null, 0.7001, 'missing'),
+    ]),
+  ]);
+  const finance = model.directions.find(item => item.key === 'finance');
+
+  assert.equal(finance.coveragePercent, 30);
+  assert.ok(finance.rawCoveragePercent < 30);
+  assert.equal(finance.isEligible, false);
+  assert.ok(model.excludedDirections.includes('finance'));
+});
+
+test('coverage-adjusted score returns raw and adjusted values', () => {
+  const model = calculateCompanyHealthScore(completeDirections(84));
+
+  assert.equal(model.rawScore, 84);
+  assert.equal(model.adjustedScore, 84);
+  assert.equal(model.totalScore, 84);
+  assert.equal(model.totalCoveragePercent, 100);
+  assert.ok(model.adjustedScore <= model.rawScore);
+});
+
+test('low-scoring metric becoming missing cannot increase displayed score', () => {
+  const baseline = calculateCompanyHealthScore([
+    testDirection('finance', [testMetric('high', 90, 0.5), testMetric('low', 10, 0.5)]),
+    ...completeDirections(90).filter(item => item.key !== 'finance'),
+  ]);
+  const missing = calculateCompanyHealthScore([
+    testDirection('finance', [testMetric('high', 90, 0.5), testMetric('low', null, 0.5, 'missing')]),
+    ...completeDirections(90).filter(item => item.key !== 'finance'),
+  ]);
+
+  assert.ok(missing.totalScore <= baseline.totalScore);
+  assert.ok(missing.totalCoveragePercent < baseline.totalCoveragePercent);
+});
+
+test('high-scoring metric becoming ambiguous cannot increase displayed score', () => {
+  const baseline = calculateCompanyHealthScore([
+    testDirection('finance', [testMetric('high', 90, 0.5), testMetric('low', 10, 0.5)]),
+    ...completeDirections(70).filter(item => item.key !== 'finance'),
+  ]);
+  const missing = calculateCompanyHealthScore([
+    testDirection('finance', [testMetric('high', null, 0.5, 'ambiguous'), testMetric('low', 10, 0.5)]),
+    ...completeDirections(70).filter(item => item.key !== 'finance'),
+  ]);
+
+  assert.ok(missing.totalScore <= baseline.totalScore);
+});
+
+test('low-scoring direction becoming missing cannot increase displayed score', () => {
+  const baselineDirections = completeDirections(90).map(item => item.key === 'clients'
+    ? testDirection('clients', [testMetric('clients_low', 0)])
+    : item);
+  const missingDirections = baselineDirections.map(item => item.key === 'clients'
+    ? testDirection('clients', [testMetric('clients_low', null, 1, 'missing')])
+    : item);
+  const baseline = calculateCompanyHealthScore(baselineDirections);
+  const missing = calculateCompanyHealthScore(missingDirections);
+
+  assert.equal(baseline.totalScore, 84);
+  assert.equal(missing.totalScore, 84);
+  assert.ok(missing.rawScore > baseline.rawScore);
+});
+
+test('high-scoring direction becoming missing cannot increase displayed score', () => {
+  const baseline = calculateCompanyHealthScore(completeDirections(80));
+  const missing = calculateCompanyHealthScore(completeDirections(80).map(item => item.key === 'rental'
+    ? testDirection('rental', [testMetric('rental_high', null, 1, 'missing')])
+    : item));
+
+  assert.ok(missing.totalScore < baseline.totalScore);
+});
+
+test('multiple missing directions cannot increase displayed score', () => {
+  const baseline = calculateCompanyHealthScore(completeDirections(75));
+  const missing = calculateCompanyHealthScore(completeDirections(75).map(item => ['clients', 'fleet'].includes(item.key)
+    ? testDirection(item.key, [testMetric(`${item.key}_missing`, null, 1, 'missing')])
+    : item));
+
+  assert.ok(missing.totalScore <= baseline.totalScore);
+});
+
+test('lower coverage reduces or preserves adjusted score while raw score stays explanatory', () => {
+  const full = calculateCompanyHealthScore(completeDirections(90));
+  const partial = calculateCompanyHealthScore(completeDirections(90).map(item => item.key === 'clients'
+    ? testDirection('clients', [testMetric('clients_missing', null, 1, 'missing')])
+    : item));
+
+  assert.equal(partial.rawScore, 90);
+  assert.ok(partial.adjustedScore < full.adjustedScore);
+  assert.ok(partial.adjustedScore <= partial.rawScore);
+});
+
+test('coverage below 60 is preliminary and below 30 has no management score', () => {
+  const preliminary = calculateCompanyHealthScore([
+    testDirection('finance', [testMetric('finance', 80)]),
+    testDirection('rental', [testMetric('rental', 80)]),
+  ]);
+  const insufficient = calculateCompanyHealthScore([
+    testDirection('fleet', [testMetric('fleet', 80)]),
+  ]);
+
+  assert.equal(preliminary.totalCoveragePercent, 55);
+  assert.equal(preliminary.isPreliminary, true);
+  assert.equal(preliminary.displayLabel, 'Предварительная оценка');
+  assert.equal(insufficient.totalCoveragePercent, 3);
+  assert.equal(insufficient.totalScore, null);
+  assert.equal(insufficient.displayLabel, 'Недостаточно данных для оценки');
+});
+
+test('missing critical source caps high coverage confidence at low', () => {
+  const directions = completeDirections(80);
+  directions[0] = testDirection('finance', [
+    testMetric('finance_receipts_to_plan', null, 0.1, 'missing'),
+    testMetric('finance_other', 80, 0.9),
+  ]);
+  const model = calculateCompanyHealthScore(directions);
+
+  assert.equal(model.totalCoveragePercent, 97);
+  assert.equal(model.confidence, 'low');
+  assert.deepEqual(model.missingCriticalMetrics.map(item => item.key), ['finance_receipts_to_plan']);
+});
+
+test('missing and ambiguous metrics have null score, are unscorable, and contribute zero', () => {
+  const model = calculateCompanyHealthScore([
+    testDirection('finance', [
+      testMetric('missing', 100, 0.5, 'missing'),
+      testMetric('ambiguous', 100, 0.5, 'ambiguous'),
+    ]),
+  ]);
+  const metrics = model.directions.find(item => item.key === 'finance').subMetrics;
+
+  for (const metric of metrics) {
+    assert.equal(metric.score, null);
+    assert.equal(metric.isScorable, false);
+    assert.equal(metric.contribution, 0);
+  }
 });
 
 test('company health formula calculates weighted total and contributions', () => {
@@ -76,15 +243,17 @@ test('company health weakest and strongest directions are sorted by normalized s
   assert.deepEqual(model.focusDirections.slice(0, 2).map(item => item.key), ['finance', 'risks']);
 });
 
-test('company health formula marks missing directions with explicit neutral fallback', () => {
+test('company health formula gives missing directions zero adjusted contribution', () => {
   const model = calculateCompanyHealthScore([
     { key: 'finance', score: 80, primaryMetric: 'платежи', shortReason: 'есть данные' },
   ]);
   const rental = model.directions.find(item => item.key === 'rental');
 
   assert.equal(model.directions.length, 6);
-  assert.equal(model.totalScore, 59);
-  assert.equal(rental?.score, 50);
+  assert.equal(model.rawScore, 80);
+  assert.equal(model.totalScore, 24);
+  assert.equal(rental?.score, null);
+  assert.equal(rental?.weightedContribution, 0);
   assert.equal(rental?.insufficientData, true);
   assert.equal(rental?.shortReason, 'Недостаточно данных');
 });
@@ -141,28 +310,32 @@ test('company health directions expose weighted sub-metric methodology', () => {
   };
 
   for (const direction of model.scoreDetails.directions) {
-    assert.equal(direction.totalWeight, COMPANY_HEALTH_WEIGHTS[direction.key]);
-    assert.equal(direction.weightedContribution, Number((direction.score * direction.weight).toFixed(4)));
+    assert.equal(direction.weight, COMPANY_HEALTH_WEIGHTS[direction.key]);
+    assert.equal(direction.totalWeight, 1);
+    assert.equal(direction.weightedContribution, direction.score === null ? 0 : Number((direction.score * direction.weight).toFixed(4)));
     assert.equal(direction.subMetrics.length, expectedSubMetricCounts[direction.key]);
     assert.ok(direction.reason);
     assert.ok(direction.recommendedAction);
-    assert.match(direction.riskLevel, /^(critical|risk|stable|good|excellent)$/);
+    assert.match(direction.riskLevel, /^(critical|risk|stable|good|excellent|insufficient)$/);
 
-    const subMetricScore = Math.round(direction.subMetrics.reduce((sum, metric) => sum + metric.contribution, 0));
+    const availableWeight = direction.subMetrics.filter(metric => metric.isScorable).reduce((sum, metric) => sum + metric.weight, 0);
+    const subMetricScore = availableWeight > 0
+      ? Math.round(direction.subMetrics.reduce((sum, metric) => sum + metric.contribution, 0) / availableWeight)
+      : null;
     assert.equal(direction.score, subMetricScore);
     for (const metric of direction.subMetrics) {
       assert.ok(metric.key);
       assert.ok(metric.title);
-      assert.ok(metric.score >= 0 && metric.score <= 100);
+      assert.equal(metric.score === null || (metric.score >= 0 && metric.score <= 100), true);
       assert.ok(metric.weight > 0 && metric.weight <= 1);
-      assert.equal(metric.contribution, Number((metric.score * metric.weight).toFixed(4)));
-      assert.match(metric.sourceStatus, /^(real|derived|missing)$/);
+      assert.equal(metric.contribution, metric.isScorable ? Number((metric.score * metric.weight).toFixed(4)) : 0);
+      assert.match(metric.sourceStatus, /^(real|derived|missing|ambiguous)$/);
       assert.ok(metric.reason);
     }
   }
 });
 
-test('company health missing sub-metrics use explicit neutral 50 fallback', () => {
+test('company health missing sub-metrics have null score and zero contribution', () => {
   const model = buildCompanyHealthModel({
     equipmentCount: 4,
     rentalsCount: 2,
@@ -175,11 +348,12 @@ test('company health missing sub-metrics use explicit neutral 50 fallback', () =
   const finance = model.scoreDetails.directions.find(item => item.key === 'finance');
   const costPressure = finance?.subMetrics.find(metric => metric.key === 'finance_cost_pressure');
 
-  assert.equal(typeof model.score, 'number');
   assert.equal(finance?.hasMissingSubMetrics, true);
   assert.equal(costPressure?.sourceStatus, 'missing');
-  assert.equal(costPressure?.score, 50);
-  assert.match(costPressure?.reason || '', /используется нейтральная оценка 50/);
+  assert.equal(costPressure?.score, null);
+  assert.equal(costPressure?.isScorable, false);
+  assert.equal(costPressure?.contribution, 0);
+  assert.doesNotMatch(costPressure?.reason || '', /нейтральная оценка 50/);
 });
 
 test('company health risk score is strict for one large overdue debtor', () => {
@@ -227,17 +401,20 @@ test('company health risk score is strict for one large overdue debtor', () => {
   const concentration = risks?.subMetrics.find(metric => metric.key === 'risks_problem_clients');
 
   assert.ok((risks?.score ?? 100) <= 40);
-  assert.equal(risks?.riskLevel, 'risk');
+  assert.match(risks?.riskLevel || '', /^(critical|risk)$/);
   assert.ok((overdue?.score ?? 100) <= 10);
-  assert.ok((concentration?.score ?? 100) <= 20);
-  assert.match(risks?.recommendedAction || '', /новые отгрузки/i);
+  assert.equal(concentration?.sourceStatus, 'ambiguous');
+  assert.equal(concentration?.score, null);
+  assert.equal(concentration?.isScorable, false);
+  assert.equal(concentration?.contribution, 0);
+  assert.match(risks?.recommendedAction || '', /план взыскания/i);
 });
 
 test('empty dashboard data does not calculate a numeric company health score', () => {
   const model = buildCompanyHealthModel({});
 
   assert.equal(model.score, null);
-  assert.equal(model.label, 'Нет данных');
+  assert.equal(model.label, 'Недостаточно данных для оценки');
   assert.equal(model.subtitle, 'Недостаточно данных для расчёта здоровья компании');
   assert.equal(model.contourStates.every(item => item.status === 'no_data'), true);
   assert.equal(model.scoreDetails.directions.length, 6);
@@ -251,11 +428,11 @@ test('equipment-only dashboard data is still insufficient for company health', (
   });
 
   assert.equal(model.score, null);
-  assert.equal(model.label, 'Недостаточно данных');
+  assert.equal(model.label, 'Недостаточно данных для оценки');
   assert.deepEqual(model.availableContours, ['Техника']);
   assert.ok(model.missingContours.includes('Аренды'));
   assert.ok(model.missingContours.includes('Платежи'));
-  assert.equal(model.scoreDetails.directions.find(item => item.key === 'fleet')?.insufficientData, false);
+  assert.equal(model.scoreDetails.directions.find(item => item.key === 'fleet')?.isEligible, false);
   assert.equal(model.scoreDetails.directions.find(item => item.key === 'finance')?.insufficientData, true);
 });
 
@@ -266,15 +443,15 @@ test('empty contours are not counted as healthy', () => {
     utilization: 67,
   });
 
-  assert.equal(typeof model.score, 'number');
+  assert.equal(model.score, null);
   assert.equal(model.contourStates.find(item => item.id === 'payments')?.status, 'no_data');
   assert.equal(model.contourStates.find(item => item.id === 'service')?.stateLabel, 'Нет данных');
   assert.notEqual(model.contourStates.find(item => item.id === 'payments')?.tone, 'success');
-  assert.equal(model.scoreDetails.directions.find(item => item.key === 'finance')?.score, 50);
+  assert.equal(model.scoreDetails.directions.find(item => item.key === 'finance')?.score, null);
   assert.equal(model.scoreDetails.directions.find(item => item.key === 'finance')?.insufficientData, true);
 });
 
-test('real operational and financial data calculates a numeric company health score', () => {
+test('sparse operational contours do not manufacture a numeric company health score', () => {
   const model = buildCompanyHealthModel({
     equipmentCount: 8,
     rentalsCount: 5,
@@ -285,9 +462,8 @@ test('real operational and financial data calculates a numeric company health sc
     utilization: 75,
   });
 
-  assert.equal(typeof model.score, 'number');
-  assert.ok(model.score >= 80);
-  assert.equal(model.label, 'Хорошо');
+  assert.equal(model.score, null);
+  assert.equal(model.label, 'Недостаточно данных для оценки');
   assert.deepEqual(model.scoreDetails.directions.map(item => item.key), ['finance', 'rental', 'risks', 'service', 'clients', 'fleet']);
 });
 
@@ -302,7 +478,7 @@ test('critical signals without source are excluded and can produce a warning', (
     invalidCriticalSignals: 1,
   });
 
-  assert.equal(model.warning, 'Есть сигналы без полного расчёта');
+  assert.match(model.warning, /Есть сигналы без полного расчёта/);
 });
 
 test('dashboard source has no decorative fallback company health score', () => {

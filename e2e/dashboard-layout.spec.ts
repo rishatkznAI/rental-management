@@ -207,7 +207,7 @@ async function dashboardLayoutSnapshot(page: Page) {
 
 test.describe('Dashboard enterprise layout', () => {
   for (const viewport of VIEWPORTS) {
-    test(`${viewport.name} keeps dashboard aligned and readable`, async ({ page }) => {
+    test(`${viewport.name} keeps dashboard aligned and readable`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await loginAsAdmin(page);
       await navigateInApp(page, '/');
@@ -220,7 +220,7 @@ test.describe('Dashboard enterprise layout', () => {
       const topSnapshot = await dashboardLayoutSnapshot(page);
 
       expect(topSnapshot.setupBannerCount, `${viewport.name}: removed setup banner should not be visible`).toBe(0);
-      expect(topSnapshot.overflowX, `${viewport.name}: document should not scroll horizontally (${JSON.stringify(topSnapshot)})`).toBeLessThanOrEqual(1);
+      expect(topSnapshot.overflowX, `${viewport.name}: document should not scroll horizontally (${JSON.stringify(topSnapshot)})`).toBe(0);
       expect(topSnapshot.offenders, `${viewport.name}: visible elements should stay inside viewport`).toEqual([]);
       expect(topSnapshot.companyHealthOverlaps, `${viewport.name}: company health should not cover other dashboard content`).toEqual([]);
       expect(topSnapshot.screen?.top ?? 0, `${viewport.name}: dashboard content should start below header`).toBeGreaterThanOrEqual((topSnapshot.header?.bottom ?? 0) - 1);
@@ -230,7 +230,7 @@ test.describe('Dashboard enterprise layout', () => {
       await page.waitForTimeout(100);
       const snapshot = await dashboardLayoutSnapshot(page);
 
-      expect(snapshot.overflowX, `${viewport.name}: document should not scroll horizontally after scrolling to company health (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+      expect(snapshot.overflowX, `${viewport.name}: document should not scroll horizontally after scrolling to company health (${JSON.stringify(snapshot)})`).toBe(0);
       expect(snapshot.offenders, `${viewport.name}: visible elements should stay inside viewport after scrolling to company health`).toEqual([]);
       expect(snapshot.companyHealthOverlaps, `${viewport.name}: company health should not cover other dashboard content after scrolling`).toEqual([]);
       expect(snapshot.companyHealthOffenders, `${viewport.name}: company health children should stay inside card and viewport`).toEqual([]);
@@ -249,6 +249,13 @@ test.describe('Dashboard enterprise layout', () => {
       expect(snapshot.radialNodesInside, `${viewport.name}: radial nodes should stay inside radial overview (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.radialInsideVisual, `${viewport.name}: radial overview should stay inside the health visual panel (${JSON.stringify(snapshot)})`).toBe(true);
       expect(snapshot.compactHealthCards, `${viewport.name}: company health should keep exactly six business contours`).toBe(6);
+      await expect(page.getByTestId('dashboard-company-health-status'), `${viewport.name}: honest preliminary or insufficient state should be visible`)
+        .toHaveText(/Предварительная оценка|Недостаточно данных для оценки/);
+      await expect(page.getByTestId('dashboard-company-health-coverage'), `${viewport.name}: data coverage and confidence should be visible`)
+        .toHaveText(/Покрытие \d+% · доверие (?:высокое|среднее|низкое|недостаточно данных)/);
+      const insufficientSignals = page.getByTestId('dashboard-company-health-compact').locator('a').filter({ hasText: 'Недостаточно данных' });
+      expect(await insufficientSignals.count(), `${viewport.name}: low-coverage directions should remain visibly insufficient`).toBeGreaterThan(0);
+      await expect(insufficientSignals.first(), `${viewport.name}: an insufficient direction must not show a fake numeric score`).toContainText('—');
       expect(snapshot.kpiReadability, `${viewport.name}: KPI values should render`).not.toEqual([]);
       expect(snapshot.kpiReadability.filter(item => item.clipped), `${viewport.name}: KPI values should not clip`).toEqual([]);
       expect(snapshot.kpiReadability.filter(item => item.wordBreak === 'break-all' || item.overflowWrap === 'anywhere'), `${viewport.name}: KPI values should not force letter wrapping`).toEqual([]);
@@ -278,6 +285,10 @@ test.describe('Dashboard enterprise layout', () => {
         expect(snapshot.healthVisual?.bottom ?? 0, `${viewport.name}: visual should stack before directions (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual((snapshot.healthDirections?.top ?? 0) + 1);
       }
 
+      await page.getByTestId('dashboard-company-health').screenshot({
+        path: testInfo.outputPath(`company-health-${viewport.name}-closed.png`),
+      });
+
       await page.getByTestId('dashboard-company-health-explanation-toggle').click();
       const explanation = page.getByTestId('dashboard-company-health-explanation');
       await expect(explanation, `${viewport.name}: company health explanation should open`).toBeVisible();
@@ -288,9 +299,15 @@ test.describe('Dashboard enterprise layout', () => {
       expect(explanationText, `${viewport.name}: explanation should show weighted finance contribution`).toMatch(/Финансы[\s\S]*\/100 × 30% = \d/);
       expect(explanationText, `${viewport.name}: explanation should show final score`).toMatch(/Итого: (?:\d+\/100|недостаточно данных)/);
       expect(explanationText, `${viewport.name}: explanation should show focus directions`).toMatch(/Сначала исправить: \S/);
+      expect(explanationText, `${viewport.name}: explanation should show raw score, coverage and confidence`).toMatch(/Оценка по доступным данным: (?:\d+|—)\/100 · Покрытие данных: \d+% · Доверие к оценке:/);
+      expect(explanationText, `${viewport.name}: explanation should show the coverage-adjusted score`).toMatch(/Итоговая оценка с учётом покрытия: (?:\d+|—)\/100/);
+      await expect(page.getByTestId('dashboard-company-health-missing-critical'), `${viewport.name}: missing critical metrics should be explicit`).toBeVisible();
+      await expect(page.getByTestId('dashboard-company-health-excluded-directions'), `${viewport.name}: excluded directions should be explicit`).toBeVisible();
+      await expect(explanation.locator('[data-source-status="missing"]').first(), `${viewport.name}: missing source provenance should be visible`).toContainText('Нет данных');
+      await expect(explanation.locator('[data-source-status="ambiguous"]').first(), `${viewport.name}: ambiguous source provenance should be visible`).toContainText('Неоднозначный источник');
 
       const openSnapshot = await dashboardLayoutSnapshot(page);
-      expect(openSnapshot.overflowX, `${viewport.name}: open explanation should not create horizontal overflow (${JSON.stringify(openSnapshot)})`).toBeLessThanOrEqual(1);
+      expect(openSnapshot.overflowX, `${viewport.name}: open explanation should not create horizontal overflow (${JSON.stringify(openSnapshot)})`).toBe(0);
       expect(openSnapshot.offenders, `${viewport.name}: open explanation should stay inside viewport`).toEqual([]);
       expect(openSnapshot.healthExplanation?.visible, `${viewport.name}: open explanation shell should be visible (${JSON.stringify(openSnapshot)})`).toBe(true);
       expect(openSnapshot.healthExplanation?.left ?? 0, `${viewport.name}: open explanation should stay inside company health left edge (${JSON.stringify(openSnapshot)})`).toBeGreaterThanOrEqual((openSnapshot.health?.left ?? 0) - 1);
@@ -298,6 +315,9 @@ test.describe('Dashboard enterprise layout', () => {
       expect(openSnapshot.healthExplanation?.bottom ?? 0, `${viewport.name}: open explanation should stay inside company health bottom edge (${JSON.stringify(openSnapshot)})`).toBeLessThanOrEqual((openSnapshot.health?.bottom ?? 0) + 1);
       expect(openSnapshot.compactHealthCards, `${viewport.name}: open explanation should keep six business signals`).toBe(6);
       expect(openSnapshot.radialCoreExists, `${viewport.name}: open explanation should preserve radial core selector`).toBe(true);
+      await explanation.screenshot({
+        path: testInfo.outputPath(`company-health-${viewport.name}-open.png`),
+      });
       await page.getByTestId('dashboard-company-health-explanation-close').click();
     });
   }

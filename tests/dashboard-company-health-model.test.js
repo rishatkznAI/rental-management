@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   COMPANY_HEALTH_WEIGHTS,
   MIN_DIRECTION_COVERAGE_PERCENT,
+  MIN_FINANCE_COVERAGE_PERCENT,
   alertHasValidSource,
   buildCompanyHealthModel,
   buildOperationalLoadModel,
@@ -18,8 +19,16 @@ function testMetric(key, score, weight = 1, sourceStatus = 'derived') {
   return { key, title: key, score, weight, sourceStatus, reason: `${key} source` };
 }
 
-function testDirection(key, subMetrics) {
-  return { key, subMetrics, shortReason: `${key} reason` };
+function testDirection(key, subMetrics, overrides = {}) {
+  return {
+    key,
+    subMetrics,
+    shortReason: `${key} reason`,
+    ...(key === 'finance'
+      ? { financeEligibility: { actualReceiptsAvailable: true, overdueReceivablesAvailable: true } }
+      : {}),
+    ...overrides,
+  };
 }
 
 const directionKeys = Object.keys(COMPANY_HEALTH_WEIGHTS);
@@ -49,6 +58,19 @@ test('direction eligibility threshold is explicit and uses raw unrounded coverag
   assert.equal(isDirectionEligible({ score: 50, rawCoveragePercent: 30.00 }), true);
   assert.equal(isDirectionEligible({ score: 50, rawCoveragePercent: 30.01 }), true);
   assert.equal(isDirectionEligible({ score: null, rawCoveragePercent: 100 }), false);
+  assert.equal(MIN_FINANCE_COVERAGE_PERCENT, 50);
+  assert.equal(isDirectionEligible({
+    key: 'finance',
+    score: 50,
+    rawCoveragePercent: 49.999,
+    financeEligibility: { actualReceiptsAvailable: true, overdueReceivablesAvailable: true },
+  }), false);
+  assert.equal(isDirectionEligible({
+    key: 'finance',
+    score: 50,
+    rawCoveragePercent: 50,
+    financeEligibility: { actualReceiptsAvailable: true, overdueReceivablesAvailable: true },
+  }), true);
 });
 
 test('rounding display coverage cannot make a 29.99 percent direction eligible', () => {
@@ -164,17 +186,20 @@ test('coverage below 60 is preliminary and below 30 has no management score', ()
   assert.equal(insufficient.displayLabel, 'Недостаточно данных для оценки');
 });
 
-test('missing critical source caps high coverage confidence at low', () => {
+test('missing critical Finance receipts source caps high coverage confidence at low', () => {
   const directions = completeDirections(80);
   directions[0] = testDirection('finance', [
     testMetric('finance_receipts_to_plan', null, 0.1, 'missing'),
     testMetric('finance_other', 80, 0.9),
-  ]);
+  ], {
+    financeEligibility: { actualReceiptsAvailable: false, overdueReceivablesAvailable: true },
+    missingCriticalSources: [{ key: 'finance_actual_receipts', title: 'Фактические поступления', sourceStatus: 'missing' }],
+  });
   const model = calculateCompanyHealthScore(directions);
 
   assert.equal(model.totalCoveragePercent, 97);
   assert.equal(model.confidence, 'low');
-  assert.deepEqual(model.missingCriticalMetrics.map(item => item.key), ['finance_receipts_to_plan']);
+  assert.deepEqual(model.missingCriticalMetrics.map(item => item.key), ['finance_actual_receipts']);
 });
 
 test('missing and ambiguous metrics have null score, are unscorable, and contribute zero', () => {
@@ -195,7 +220,7 @@ test('missing and ambiguous metrics have null score, are unscorable, and contrib
 
 test('company health formula calculates weighted total and contributions', () => {
   const model = calculateCompanyHealthScore([
-    { key: 'finance', score: 8, primaryMetric: 'долг', shortReason: 'просрочка' },
+    { key: 'finance', score: 8, primaryMetric: 'долг', shortReason: 'просрочка', financeEligibility: { actualReceiptsAvailable: true, overdueReceivablesAvailable: true } },
     { key: 'rental', score: 35, primaryMetric: 'аренды', shortReason: 'возвраты' },
     { key: 'risks', score: 10, primaryMetric: 'риски', shortReason: 'сигналы' },
     { key: 'service', score: 30, primaryMetric: 'сервис', shortReason: 'блокеры' },
@@ -215,7 +240,7 @@ test('company health formula calculates weighted total and contributions', () =>
 
 test('company health formula clamps direction scores before weighting', () => {
   const model = calculateCompanyHealthScore([
-    { key: 'finance', score: -20, primaryMetric: 'долг', shortReason: 'ниже нуля' },
+    { key: 'finance', score: -20, primaryMetric: 'долг', shortReason: 'ниже нуля', financeEligibility: { actualReceiptsAvailable: true, overdueReceivablesAvailable: true } },
     { key: 'rental', score: 140, primaryMetric: 'аренды', shortReason: 'выше ста' },
     { key: 'risks', score: 100, primaryMetric: 'риски', shortReason: 'чисто' },
     { key: 'service', score: 30, primaryMetric: 'сервис', shortReason: 'блокеры' },
@@ -230,7 +255,7 @@ test('company health formula clamps direction scores before weighting', () => {
 
 test('company health weakest and strongest directions are sorted by normalized score', () => {
   const model = calculateCompanyHealthScore([
-    { key: 'finance', score: 8, primaryMetric: 'долг', shortReason: 'просрочка' },
+    { key: 'finance', score: 8, primaryMetric: 'долг', shortReason: 'просрочка', financeEligibility: { actualReceiptsAvailable: true, overdueReceivablesAvailable: true } },
     { key: 'rental', score: 35, primaryMetric: 'аренды', shortReason: 'возвраты' },
     { key: 'risks', score: 10, primaryMetric: 'риски', shortReason: 'сигналы' },
     { key: 'service', score: 30, primaryMetric: 'сервис', shortReason: 'блокеры' },
@@ -245,7 +270,7 @@ test('company health weakest and strongest directions are sorted by normalized s
 
 test('company health formula gives missing directions zero adjusted contribution', () => {
   const model = calculateCompanyHealthScore([
-    { key: 'finance', score: 80, primaryMetric: 'платежи', shortReason: 'есть данные' },
+    { key: 'finance', score: 80, primaryMetric: 'платежи', shortReason: 'есть данные', financeEligibility: { actualReceiptsAvailable: true, overdueReceivablesAvailable: true } },
   ]);
   const rental = model.directions.find(item => item.key === 'rental');
 
@@ -354,6 +379,144 @@ test('company health missing sub-metrics have null score and zero contribution',
   assert.equal(costPressure?.isScorable, false);
   assert.equal(costPressure?.contribution, 0);
   assert.doesNotMatch(costPressure?.reason || '', /нейтральная оценка 50/);
+});
+
+test('Finance never treats accrued revenue, forecast, or invoiced amount as an approved receipts plan', () => {
+  const model = buildCompanyHealthModel({
+    paymentsCount: 2,
+    actualReceiptsAmount: 400_000,
+    actualReceiptsAvailable: true,
+    accruedRentalRevenueAmount: 900_000,
+    invoicedAmount: 850_000,
+    expectedMonthlyRevenue: 800_000,
+    monthlyRevenuePlan: 800_000,
+    forecastRevenueAmount: 800_000,
+    overdueReceivablesAmount: 100_000,
+    overdueReceivablesAvailable: true,
+    totalDebt: 300_000,
+  });
+  const finance = model.scoreDetails.directions.find(item => item.key === 'finance');
+  const receipts = finance?.subMetrics.find(metric => metric.key === 'finance_receipts_to_plan');
+
+  assert.equal(receipts?.score, null);
+  assert.equal(receipts?.isScorable, false);
+  assert.equal(receipts?.sourceStatus, 'missing');
+  assert.equal(receipts?.reason, 'Утверждённый план поступлений не задан');
+  assert.ok(receipts?.details.includes('Поступило: 400 000 ₽'));
+  assert.ok(receipts?.details.includes('Начислено: 900 000 ₽'));
+  assert.ok(receipts?.details.includes('Выставлено: 850 000 ₽'));
+});
+
+test('invoiced amount cannot substitute for actual receipts', () => {
+  const model = buildCompanyHealthModel({
+    paymentsCount: 1,
+    invoicedAmount: 500_000,
+    approvedRevenuePlanAmount: 600_000,
+    overdueReceivablesAmount: 0,
+    overdueReceivablesAvailable: true,
+  });
+  const finance = model.scoreDetails.directions.find(item => item.key === 'finance');
+  const receipts = finance?.subMetrics.find(metric => metric.key === 'finance_receipts_to_plan');
+
+  assert.equal(receipts?.score, null);
+  assert.equal(receipts?.reason, 'Нет фактических поступлений за текущий период');
+  assert.equal(finance?.financeEligibility.actualReceiptsAvailable, false);
+  assert.equal(finance?.isEligible, false);
+});
+
+test('missing approved expense plan is explicitly unscorable even when actual expenses exist', () => {
+  const model = buildCompanyHealthModel({
+    actualExpenseAmount: 120_000,
+    actualExpensesAvailable: true,
+  });
+  const cost = model.scoreDetails.directions
+    .find(item => item.key === 'finance')
+    ?.subMetrics.find(metric => metric.key === 'finance_cost_pressure');
+
+  assert.equal(cost?.score, null);
+  assert.equal(cost?.isScorable, false);
+  assert.equal(cost?.reason, 'Утверждённый план расходов не задан');
+  assert.ok(cost?.details.includes('Расходы: 120 000 ₽'));
+});
+
+test('cash-flow score requires both factual operating inflows and factual operating outflows', () => {
+  const complete = buildCompanyHealthModel({
+    actualOperatingInflowsAmount: 500_000,
+    actualOperatingInflowsAvailable: true,
+    actualOperatingOutflowsAmount: 350_000,
+    actualOperatingOutflowsAvailable: true,
+  }).scoreDetails.directions.find(item => item.key === 'finance')
+    ?.subMetrics.find(metric => metric.key === 'finance_cash_flow');
+  const receiptsOnly = buildCompanyHealthModel({
+    actualOperatingInflowsAmount: 500_000,
+    actualOperatingInflowsAvailable: true,
+  }).scoreDetails.directions.find(item => item.key === 'finance')
+    ?.subMetrics.find(metric => metric.key === 'finance_cash_flow');
+
+  assert.equal(complete?.isScorable, true);
+  assert.equal(complete?.sourceStatus, 'derived');
+  assert.ok(complete?.details.includes('Денежный поток: 150 000 ₽'));
+  assert.equal(receiptsOnly?.score, null);
+  assert.equal(receiptsOnly?.isScorable, false);
+  assert.equal(receiptsOnly?.reason, 'Нет данных об операционных расходах для расчёта денежного потока');
+  assert.ok(receiptsOnly?.details.includes('Денежный поток: недостаточно данных'));
+});
+
+test('overdue receivables alone give 30 percent raw Finance coverage but cannot make Finance eligible or show 100', () => {
+  const finance = buildCompanyHealthModel({
+    overdueReceivablesAmount: 0,
+    overdueReceivablesAvailable: true,
+    totalDebt: 0,
+  }).scoreDetails.directions.find(item => item.key === 'finance');
+
+  assert.ok(Math.abs((finance?.rawCoveragePercent ?? 0) - 30) < 1e-9);
+  assert.equal(finance?.coveragePercent, 30);
+  assert.equal(finance?.availableDataScore, 100);
+  assert.equal(finance?.score, null);
+  assert.equal(finance?.isEligible, false);
+});
+
+test('Finance becomes eligible only with both critical sources and at least 50 percent raw coverage', () => {
+  const shared = {
+    actualReceiptsAmount: 500_000,
+    actualReceiptsAvailable: true,
+    overdueReceivablesAmount: 100_000,
+    overdueReceivablesAvailable: true,
+    totalDebt: 600_000,
+    actualOperatingInflowsAmount: 500_000,
+    actualOperatingInflowsAvailable: true,
+    actualOperatingOutflowsAmount: 300_000,
+    actualOperatingOutflowsAvailable: true,
+  };
+  const eligible = buildCompanyHealthModel(shared).scoreDetails.directions.find(item => item.key === 'finance');
+  const missingReceipts = buildCompanyHealthModel({ ...shared, actualReceiptsAvailable: false })
+    .scoreDetails.directions.find(item => item.key === 'finance');
+  const missingOverdue = buildCompanyHealthModel({ ...shared, overdueReceivablesAvailable: false })
+    .scoreDetails.directions.find(item => item.key === 'finance');
+
+  assert.ok(Math.abs((eligible?.rawCoveragePercent ?? 0) - 50) < 1e-9);
+  assert.equal(eligible?.isEligible, true);
+  assert.notEqual(eligible?.score, null);
+  assert.equal(missingReceipts?.isEligible, false);
+  assert.equal(missingReceipts?.score, null);
+  assert.equal(missingOverdue?.isEligible, false);
+  assert.equal(missingOverdue?.score, null);
+});
+
+test('missing or ineligible Finance data cannot increase the displayed Company Health score', () => {
+  const baseline = calculateCompanyHealthScore(completeDirections(80));
+  const missingFinance = calculateCompanyHealthScore([
+    testDirection('finance', [
+      testMetric('finance_receipts_to_plan', null, 0.4, 'missing'),
+      testMetric('finance_overdue_receivables', 100, 0.3),
+      testMetric('finance_cash_flow', null, 0.2, 'missing'),
+      testMetric('finance_cost_pressure', null, 0.1, 'missing'),
+    ]),
+    ...completeDirections(80).filter(item => item.key !== 'finance'),
+  ]);
+
+  assert.equal(missingFinance.directions.find(item => item.key === 'finance')?.score, null);
+  assert.ok(missingFinance.totalScore < baseline.totalScore);
 });
 
 test('company health risk score is strict for one large overdue debtor', () => {

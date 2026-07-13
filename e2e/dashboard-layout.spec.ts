@@ -296,7 +296,9 @@ test.describe('Dashboard enterprise layout', () => {
       for (const part of ['Финансы 30%', 'Аренда 25%', 'Риски 20%', 'Сервис 15%', 'Клиенты 7%', 'Парк 3%']) {
         expect(explanationText, `${viewport.name}: explanation should show ${part}`).toContain(part);
       }
-      expect(explanationText, `${viewport.name}: explanation should show weighted finance contribution`).toMatch(/Финансы[\s\S]*\/100 × 30% = \d/);
+      expect(explanationText, `${viewport.name}: explanation should show eligible Finance contribution or an explicit insufficient-data state`).toMatch(
+        /Финансы[\s\S]*(?:\/100 × 30% = \d|— · покрытие \d+%)/,
+      );
       expect(explanationText, `${viewport.name}: explanation should show final score`).toMatch(/Итого: (?:\d+\/100|недостаточно данных)/);
       expect(explanationText, `${viewport.name}: explanation should show focus directions`).toMatch(/Сначала исправить: \S/);
       expect(explanationText, `${viewport.name}: explanation should show raw score, coverage and confidence`).toMatch(/Оценка по доступным данным: (?:\d+|—)\/100 · Покрытие данных: \d+% · Доверие к оценке:/);

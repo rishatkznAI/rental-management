@@ -1299,6 +1299,7 @@ type CompanyHealthScoreDirection = {
     contribution: number;
     sourceStatus: 'real' | 'derived' | 'missing' | 'ambiguous';
     reason: string;
+    details?: string[];
   }>;
 };
 
@@ -1750,7 +1751,7 @@ function CompanyHealthCommandCenter({
           ) : null}
           {scoreBreakdown?.excludedDirections?.length ? (
             <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-300/70" data-testid="dashboard-company-health-excluded-directions">
-              Не участвуют из-за покрытия ниже 30%: {scoreBreakdown.excludedDirections.map(key => explanationDirections.find(item => item.key === key)?.title || key).join(', ')}
+              Не участвуют из-за недостаточного покрытия или обязательных источников: {scoreBreakdown.excludedDirections.map(key => explanationDirections.find(item => item.key === key)?.title || key).join(', ')}
             </p>
           ) : null}
           <div className="mt-2 grid gap-1.5" data-testid="dashboard-company-health-explanation-breakdown">
@@ -1773,12 +1774,17 @@ function CompanyHealthCommandCenter({
                       <p
                         key={metric.key}
                         className="truncate text-[10.5px] font-semibold leading-3 text-slate-300/62"
-                        title={`${metric.title}: ${metric.score ?? '—'}/100 × ${formatHealthWeight(metric.weight)} = ${formatHealthContribution(metric.contribution)}. ${formatHealthSourceStatus(metric.sourceStatus)}. ${metric.reason}`}
+                        title={`${metric.title}: ${metric.score ?? '—'}/100 × ${formatHealthWeight(metric.weight)} = ${formatHealthContribution(metric.contribution)}. ${formatHealthSourceStatus(metric.sourceStatus)}. ${metric.reason}${metric.details?.length ? `. ${metric.details.join('. ')}` : ''}`}
                         data-source-status={metric.sourceStatus}
                       >
                         {metric.title}: {metric.score ?? '—'}/100 · {formatHealthSourceStatus(metric.sourceStatus)} · {metric.reason}
                       </p>
                     ))}
+                    {direction.subMetrics.flatMap(metric => metric.details ?? []).length ? (
+                      <p className="text-[10.5px] font-semibold leading-3 text-slate-200/75" data-testid={`dashboard-company-health-explanation-${direction.key}-facts`}>
+                        {direction.subMetrics.flatMap(metric => metric.details ?? []).join(' · ')}
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
                 {direction.recommendedAction ? (
@@ -1940,6 +1946,7 @@ export default function Dashboard() {
   const canViewPlanner = can('view', 'planner');
   const canViewDeliveries = can('view', 'deliveries');
   const canViewTasksCenter = can('view', 'tasks_center');
+  const canReadFinanceOperations = canReadCollection('finance_operations');
   const canViewManagerMyPlan = Boolean(
     canViewRentals && (
       user?.role === 'Менеджер по аренде'
@@ -1955,8 +1962,10 @@ export default function Dashboard() {
   const { data: rawTickets = [] } = useServiceTicketsList({ enabled: canViewService });
   const tickets = useMemo(() => rawTickets.filter(isRegularServiceTicket), [rawTickets]);
   const { data: clients = [] }    = useClientsList({ enabled: canViewClients });
-  const { data: payments = [] }   = usePaymentsList({ enabled: canViewMoney });
-  const { data: paymentAllocations = [] } = usePaymentAllocationsList({ enabled: canViewMoney });
+  const paymentsQuery = usePaymentsList({ enabled: canViewMoney });
+  const payments = paymentsQuery.data ?? [];
+  const paymentAllocationsQuery = usePaymentAllocationsList({ enabled: canViewMoney });
+  const paymentAllocations = paymentAllocationsQuery.data ?? [];
   const { data: documents = [] }  = useDocumentsList({ enabled: canViewDocuments });
   const { data: debtCollectionPlansResponse } = useDebtCollectionPlans({ enabled: canViewMoney });
   const debtCollectionPlans = debtCollectionPlansResponse?.plans ?? [];
@@ -1976,7 +1985,28 @@ export default function Dashboard() {
   const actionAttentionQuery = useManagementActionAttention({
     enabled: canViewAttentionBlock && canViewEquipment,
   });
-  const { data: ganttRentals = [] } = useGanttData({ enabled: canViewRentals || canViewPlanner });
+  const ganttRentalsQuery = useGanttData({ enabled: canViewRentals || canViewPlanner });
+  const ganttRentals = ganttRentalsQuery.data ?? [];
+  const companyHealthCashFlowMonth = monthKey(new Date());
+  const companyHealthCashFlowQuery = useQuery({
+    queryKey: ['finance', 'cash-flow', 'company-health', companyHealthCashFlowMonth],
+    queryFn: () => {
+      const current = new Date();
+      const dateFrom = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-01`;
+      const lastDay = new Date(current.getFullYear(), current.getMonth() + 1, 0).getDate();
+      const dateTo = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+      return financeService.getCashFlow({
+        dateFrom,
+        dateTo,
+        groupBy: 'month',
+        mode: 'factual',
+        includeVat: true,
+        includeDepreciation: false,
+      });
+    },
+    enabled: canViewFinance && canReadFinanceOperations,
+    staleTime: 1000 * 60 * 2,
+  });
   const { data: deliveries = [] } = useQuery<Delivery[]>({
     queryKey: ['deliveries', 'dashboard'],
     queryFn: deliveriesService.getAll,
@@ -2983,6 +3013,26 @@ export default function Dashboard() {
     isDateInRange(payment.paidDate || payment.dueDate, monthStart, monthEnd),
   );
   const monthlyPaidAmount = monthlyPayments.reduce((sum, payment) => sum + getDashboardPaidAmount(payment), 0);
+  const actualReceiptPayments = payments.filter(payment =>
+    Boolean(payment.paidDate) && isDateInRange(payment.paidDate, monthStart, monthEnd) && getDashboardPaidAmount(payment) > 0,
+  );
+  const actualReceiptsAmount = actualReceiptPayments.reduce((sum, payment) => sum + getDashboardPaidAmount(payment), 0);
+  const hasUndatedActualReceipts = payments.some(payment => getDashboardPaidAmount(payment) > 0 && !payment.paidDate);
+  const actualReceiptsAvailable = paymentsQuery.isSuccess && !hasUndatedActualReceipts;
+  const overdueReceivablesAvailable = paymentsQuery.isSuccess
+    && paymentAllocationsQuery.isSuccess
+    && ganttRentalsQuery.isSuccess;
+  const factualCashFlowItems = companyHealthCashFlowQuery.data?.items ?? [];
+  const factualManualInflows = factualCashFlowItems
+    .filter(item => item.direction === 'incoming' && item.source === 'finance_operations')
+    .reduce((sum, item) => sum + Math.max(0, Number(item.amount) || 0), 0);
+  const factualOperatingOutflows = factualCashFlowItems
+    .filter(item => item.direction === 'outgoing')
+    .reduce((sum, item) => sum + Math.max(0, Number(item.amount) || 0), 0);
+  const hasRecordedOperatingOutflow = factualCashFlowItems.some(item => item.direction === 'outgoing');
+  const actualOperatingInflowsAmount = actualReceiptsAmount + factualManualInflows;
+  const actualOperatingInflowsAvailable = actualReceiptsAvailable && companyHealthCashFlowQuery.isSuccess;
+  const actualOperatingOutflowsAvailable = companyHealthCashFlowQuery.isSuccess && hasRecordedOperatingOutflow;
   const monthlyDebtAmount = rentalsWithDebtThisMonth.reduce((sum, row) => sum + row.outstanding, 0);
   const serviceCreatedThisMonth = tickets.filter(ticket => isDateInRange(ticket.createdAt, monthStart, monthEnd));
   const serviceClosedThisMonth = tickets.filter(ticket =>
@@ -4117,11 +4167,21 @@ export default function Dashboard() {
     utilization,
     monthlyRevenue,
     monthlyPaidAmount,
+    accruedRentalRevenueAmount: monthlyRevenue,
+    actualReceiptsAmount,
+    actualReceiptsAvailable,
+    actualOperatingInflowsAmount,
+    actualOperatingInflowsAvailable,
+    actualOperatingOutflowsAmount: factualOperatingOutflows,
+    actualOperatingOutflowsAvailable,
+    actualExpenseAmount: factualOperatingOutflows,
+    actualExpensesAvailable: actualOperatingOutflowsAvailable,
     rentalRevenueActual: monthlyRevenue,
     rentalRevenuePlan: fleetMonthlyRevenuePlan,
     fleetMonthlyRevenuePlan,
     totalDebt,
     overdueReceivablesAmount,
+    overdueReceivablesAvailable,
     debt30PlusAmount,
     debt60PlusAmount,
     largestProblemDebtAmount,
@@ -4296,8 +4356,8 @@ export default function Dashboard() {
       source: 'Платежи и строки дебиторки',
       action: !hasPaymentsSourceData ? 'Откройте Платежи и проверьте ввод или импорт оплат' : 'Проверьте просрочки и связь платежей с клиентами/арендами',
       metrics: [
-        { label: 'Поступления за месяц', value: formatCurrency(monthlyPaidAmount) },
-        { label: 'Ожидается', value: formatCurrency(Math.max(0, monthlyRevenue - monthlyPaidAmount)) },
+        { label: 'Поступило', value: actualReceiptsAvailable ? formatCurrency(actualReceiptsAmount) : 'Недостаточно данных' },
+        { label: 'Начислено', value: formatCurrency(monthlyRevenue) },
         { label: 'Просрочено', value: formatCurrency(overdueReceivablesAmount) },
       ],
     },

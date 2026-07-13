@@ -30,7 +30,6 @@ const COMPANY_HEALTH_DIRECTIONS = [
 // Provenance classifications come from docs/company-health-data-audit.md.
 // Ambiguous sources remain visible for explanation, but are deliberately not scorable.
 export const COMPANY_HEALTH_CRITICAL_METRICS = new Set([
-  'finance_receipts_to_plan',
   'finance_overdue_receivables',
   'rental_utilization',
   'risks_overdue_receivables',
@@ -40,11 +39,18 @@ export const COMPANY_HEALTH_CRITICAL_METRICS = new Set([
 ]);
 
 export const MIN_DIRECTION_COVERAGE_PERCENT = 30;
+export const MIN_FINANCE_COVERAGE_PERCENT = 50;
 
 export function isDirectionEligible(direction = {}) {
-  return direction.score !== null
+  const hasScoreAndCoverage = direction.score !== null
     && direction.score !== undefined
-    && Number(direction.rawCoveragePercent) >= MIN_DIRECTION_COVERAGE_PERCENT;
+    && Number(direction.rawCoveragePercent) >= (direction.key === 'finance'
+      ? MIN_FINANCE_COVERAGE_PERCENT
+      : MIN_DIRECTION_COVERAGE_PERCENT);
+  if (!hasScoreAndCoverage) return false;
+  if (direction.key !== 'finance') return true;
+  return direction.financeEligibility?.actualReceiptsAvailable === true
+    && direction.financeEligibility?.overdueReceivablesAvailable === true;
 }
 
 function isCriticalMetricGap(metric, subMetrics) {
@@ -130,6 +136,11 @@ function nonNegative(value) {
   return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
 }
 
+function formatFinanceAmount(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return 'нет данных';
+  return `${Math.round(Number(value)).toLocaleString('ru-RU')} ₽`;
+}
+
 function ratioScore(ratio, bands) {
   const safeRatio = Number.isFinite(ratio) ? ratio : 0;
   const match = bands.find(([limit]) => safeRatio <= limit);
@@ -174,7 +185,7 @@ function riskLevelForScore(score) {
   return 'excellent';
 }
 
-function buildSubMetric({ key, title, score, weight, sourceStatus = 'derived', reason, isScorable }) {
+function buildSubMetric({ key, title, score, weight, sourceStatus = 'derived', reason, isScorable, details }) {
   const status = ['real', 'derived', 'missing', 'ambiguous'].includes(sourceStatus)
     ? sourceStatus
     : 'ambiguous';
@@ -193,6 +204,7 @@ function buildSubMetric({ key, title, score, weight, sourceStatus = 'derived', r
     contribution: scorable ? Number((resolvedScore * weight).toFixed(4)) : 0,
     sourceStatus: status,
     reason: reason || (status === 'missing' ? 'Недостаточно данных' : 'Источник требует проверки'),
+    details: Array.isArray(details) ? details.filter(Boolean) : [],
   };
 }
 
@@ -303,16 +315,52 @@ function normalizeLegacyDirection(key, title, source = {}) {
 function normalizeDirection(key, title, source = {}) {
   if (Array.isArray(source.subMetrics) && source.subMetrics.length > 0) {
     const subMetrics = source.subMetrics.map(metric => buildSubMetric(metric));
-    return buildDirection({
+    const direction = buildDirection({
       key,
       title,
       subMetrics,
       reason: source.reason || source.shortReason,
       recommendedAction: source.recommendedAction,
     });
+    const normalized = {
+      ...direction,
+      financeEligibility: source.financeEligibility,
+      missingCriticalSources: Array.isArray(source.missingCriticalSources) ? source.missingCriticalSources : [],
+    };
+    normalized.isEligible = isDirectionEligible(normalized);
+    if (key === 'finance' && !normalized.isEligible) {
+      normalized.availableDataScore = normalized.score;
+      normalized.score = null;
+      normalized.weightedContribution = 0;
+      normalized.weightedDeficit = 0;
+      normalized.riskLevel = 'insufficient';
+      normalized.label = 'Недостаточно данных';
+      normalized.shortReason = normalized.missingCriticalSources.length > 0
+        ? `Недостаточно данных: ${normalized.missingCriticalSources.map(item => item.title).join(', ')}`
+        : normalized.rawCoveragePercent < MIN_FINANCE_COVERAGE_PERCENT
+          ? `Покрытие финансовых данных ниже ${MIN_FINANCE_COVERAGE_PERCENT}%`
+          : normalized.shortReason;
+      normalized.reason = normalized.shortReason;
+    }
+    return normalized;
   }
 
-  return normalizeLegacyDirection(key, title, source);
+  const direction = normalizeLegacyDirection(key, title, source);
+  const normalized = {
+    ...direction,
+    financeEligibility: source.financeEligibility,
+    missingCriticalSources: Array.isArray(source.missingCriticalSources) ? source.missingCriticalSources : [],
+  };
+  normalized.isEligible = isDirectionEligible(normalized);
+  if (key === 'finance' && !normalized.isEligible) {
+    normalized.availableDataScore = normalized.score;
+    normalized.score = null;
+    normalized.weightedContribution = 0;
+    normalized.weightedDeficit = 0;
+    normalized.riskLevel = 'insufficient';
+    normalized.label = 'Недостаточно данных';
+  }
+  return normalized;
 }
 
 export function calculateCompanyHealthScore(directionScores = []) {
@@ -336,9 +384,17 @@ export function calculateCompanyHealthScore(directionScores = []) {
         0,
       )))
     : null;
-  const missingCriticalMetrics = directions.flatMap(direction => direction.subMetrics
-    .filter(metric => isCriticalMetricGap(metric, direction.subMetrics))
-    .map(metric => ({ key: metric.key, title: metric.title, direction: direction.title, sourceStatus: metric.sourceStatus })));
+  const missingCriticalMetrics = directions.flatMap(direction => [
+    ...direction.subMetrics
+      .filter(metric => isCriticalMetricGap(metric, direction.subMetrics))
+      .map(metric => ({ key: metric.key, title: metric.title, direction: direction.title, sourceStatus: metric.sourceStatus })),
+    ...(direction.missingCriticalSources || []).map(metric => ({
+      key: metric.key,
+      title: metric.title,
+      direction: direction.title,
+      sourceStatus: metric.sourceStatus || 'missing',
+    })),
+  ]);
   const hasCriticalMissing = missingCriticalMetrics.length > 0;
   const confidence = confidenceForCoverage(rawTotalCoveragePercent, hasCriticalMissing);
   const isPreliminary = rawTotalCoveragePercent < 60;
@@ -377,19 +433,30 @@ export function calculateCompanyHealthScore(directionScores = []) {
 }
 
 function buildFinanceDirection(input, contours) {
-  const paymentsCount = contours.payments.count;
-  const monthlyPaidAmount = firstFiniteInput(input, ['monthlyPaidAmount', 'paidAmount', 'paymentsAmount']);
-  const monthlyRevenue = firstFiniteInput(input, ['financeRevenuePlan', 'monthlyRevenuePlan', 'expectedMonthlyRevenue']);
+  const actualReceipts = firstFiniteInput(input, ['actualReceiptsAmount']);
+  const accruedRevenue = firstFiniteInput(input, ['accruedRentalRevenueAmount']);
+  const invoicedAmount = firstFiniteInput(input, ['invoicedAmount']);
+  const approvedRevenuePlan = firstFiniteInput(input, ['approvedRevenuePlanAmount']);
   const overdueAmount = firstFiniteInput(input, ['overdueReceivablesAmount', 'overdueDebtAmount']);
   const totalDebt = firstFiniteInput(input, ['totalDebt', 'receivablesAmount']);
-  const expenseAmount = firstFiniteInput(input, ['monthlyExpenseAmount', 'monthlyCostAmount']);
-  const expensePlan = firstFiniteInput(input, ['monthlyExpensePlan', 'monthlyCostPlan']);
-  const hasDebtSource = Boolean(input.hasDebtSourceData)
-    || hasAnyFiniteInput(input, ['overdueReceivablesAmount', 'overdueDebtAmount', 'totalDebt', 'receivablesAmount', 'overdueReceivablesCount'])
-    || paymentsCount > 0;
+  const operatingInflows = firstFiniteInput(input, ['actualOperatingInflowsAmount']);
+  const operatingOutflows = firstFiniteInput(input, ['actualOperatingOutflowsAmount']);
+  const actualExpenses = firstFiniteInput(input, ['actualExpenseAmount', 'actualOperatingOutflowsAmount']);
+  const approvedExpensePlan = firstFiniteInput(input, ['approvedExpensePlanAmount']);
+  const actualReceiptsAvailable = input.actualReceiptsAvailable === true && actualReceipts !== null;
+  const overdueReceivablesAvailable = input.overdueReceivablesAvailable === true && overdueAmount !== null;
+  const operatingInflowsAvailable = input.actualOperatingInflowsAvailable === true && operatingInflows !== null;
+  const operatingOutflowsAvailable = input.actualOperatingOutflowsAvailable === true && operatingOutflows !== null;
+  const actualExpensesAvailable = input.actualExpensesAvailable === true && actualExpenses !== null;
 
-  const receiptsScore = monthlyRevenue !== null && monthlyRevenue > 0 && monthlyPaidAmount !== null
-    ? planPerformanceScore(nonNegative(monthlyPaidAmount), nonNegative(monthlyRevenue))
+  const receiptsDetails = [
+    `Поступило: ${actualReceiptsAvailable ? formatFinanceAmount(actualReceipts) : 'недостаточно данных'}`,
+    `Начислено: ${formatFinanceAmount(accruedRevenue)}`,
+    invoicedAmount !== null ? `Выставлено: ${formatFinanceAmount(invoicedAmount)}` : '',
+    `План поступлений: ${approvedRevenuePlan !== null && approvedRevenuePlan > 0 ? formatFinanceAmount(approvedRevenuePlan) : 'не задан'}`,
+  ];
+  const receiptsScore = actualReceiptsAvailable && approvedRevenuePlan !== null && approvedRevenuePlan > 0
+    ? planPerformanceScore(nonNegative(actualReceipts), nonNegative(approvedRevenuePlan))
     : null;
   const receiptsMetric = receiptsScore !== null
     ? buildSubMetric({
@@ -398,145 +465,136 @@ function buildFinanceDirection(input, contours) {
         score: receiptsScore,
         weight: 0.40,
         sourceStatus: 'derived',
+        details: receiptsDetails,
         reason: receiptsScore < 75
           ? 'Низкие поступления к плану'
-          : `Поступления ${Math.round((nonNegative(monthlyPaidAmount) / Math.max(nonNegative(monthlyRevenue), 1)) * 100)}% к плану`,
+          : `Поступления ${Math.round((nonNegative(actualReceipts) / Math.max(nonNegative(approvedRevenuePlan), 1)) * 100)}% к утверждённому плану`,
       })
-    : paymentsCount > 0
-      ? buildSubMetric({
-          key: 'finance_receipts_to_plan',
-          title: 'Поступления к плану',
-          weight: 0.40,
-          sourceStatus: 'missing',
-          reason: monthlyPaidAmount !== null && monthlyPaidAmount > 0
-            ? 'Поступления есть, но план сравнения не задан'
-            : 'Есть платежный контур, но план поступлений не задан',
-        })
-      : buildSubMetric({
-          key: 'finance_receipts_to_plan',
-          title: 'Поступления к плану',
-          weight: 0.40,
-          sourceStatus: 'missing',
-          reason: 'Недостаточно данных по плану и поступлениям',
-        });
+    : buildSubMetric({
+        key: 'finance_receipts_to_plan',
+        title: 'Поступления к плану',
+        weight: 0.40,
+        sourceStatus: 'missing',
+        details: receiptsDetails,
+        reason: approvedRevenuePlan === null || approvedRevenuePlan <= 0
+          ? 'Утверждённый план поступлений не задан'
+          : 'Нет фактических поступлений за текущий период',
+      });
 
-  const overdueMetric = overdueAmount !== null
+  const overdueMetric = overdueReceivablesAvailable
     ? buildSubMetric({
         key: 'finance_overdue_receivables',
         title: 'Просроченная дебиторка',
-        score: overduePressureScore(nonNegative(overdueAmount), Math.max(nonNegative(totalDebt), nonNegative(monthlyRevenue), nonNegative(overdueAmount))),
+        score: overduePressureScore(nonNegative(overdueAmount), Math.max(nonNegative(totalDebt), nonNegative(accruedRevenue), nonNegative(overdueAmount))),
         weight: 0.30,
         sourceStatus: 'derived',
+        details: [`Просрочено: ${formatFinanceAmount(overdueAmount)}`],
         reason: overdueAmount > 0 ? 'Высокая просроченная дебиторка' : 'Просроченная дебиторка не выявлена',
       })
-    : hasDebtSource && hasFiniteInput(input, 'overdueReceivablesCount')
-      ? buildSubMetric({
-          key: 'finance_overdue_receivables',
-          title: 'Просроченная дебиторка',
-          score: safeCount(input.overdueReceivablesCount) > 0 ? 52 : 100,
-          weight: 0.30,
-          sourceStatus: 'derived',
-          reason: safeCount(input.overdueReceivablesCount) > 0 ? 'Есть просроченная дебиторка' : 'Просрочка не зафиксирована по доступным сигналам',
-        })
-      : hasDebtSource
-        ? buildSubMetric({
-            key: 'finance_overdue_receivables',
-            title: 'Просроченная дебиторка',
-            score: 100,
-            weight: 0.30,
-            sourceStatus: 'ambiguous',
-            reason: 'Просрочка не зафиксирована по доступным сигналам',
-          })
-        : buildSubMetric({
-            key: 'finance_overdue_receivables',
-            title: 'Просроченная дебиторка',
-            weight: 0.30,
-            sourceStatus: 'missing',
-            reason: 'Недостаточно данных по дебиторке',
-          });
+    : buildSubMetric({
+        key: 'finance_overdue_receivables',
+        title: 'Просроченная дебиторка',
+        weight: 0.30,
+        sourceStatus: overdueAmount !== null ? 'ambiguous' : 'missing',
+        details: [`Просрочено: ${overdueAmount !== null ? formatFinanceAmount(overdueAmount) : 'недостаточно данных'}`],
+        reason: 'Источник просроченной дебиторской задолженности недоступен или неоднозначен',
+      });
 
-  const cashFlowMetric = monthlyRevenue !== null && monthlyRevenue > 0 && monthlyPaidAmount !== null
+  const cashFlowMetric = operatingInflowsAvailable && operatingOutflowsAvailable
     ? (() => {
-        const revenue = nonNegative(monthlyRevenue);
-        const paid = nonNegative(monthlyPaidAmount);
-        const overdue = nonNegative(overdueAmount);
-        const pressure = (Math.max(0, revenue - paid) + overdue * 0.7) / Math.max(revenue, 1);
+        const inflows = nonNegative(operatingInflows);
+        const outflows = nonNegative(operatingOutflows);
+        const netCashFlow = inflows - outflows;
+        const pressure = Math.max(0, outflows - inflows) / Math.max(inflows, 1);
         return buildSubMetric({
           key: 'finance_cash_flow',
           title: 'Денежный поток',
           score: ratioScore(pressure, [[0.05, 98], [0.20, 84], [0.40, 62], [0.65, 38], [Infinity, 18]]),
           weight: 0.20,
-          sourceStatus: 'ambiguous',
-          reason: pressure > 0.4 ? 'Кассовый поток под давлением' : 'Кассовый поток выдерживает текущий план',
+          sourceStatus: 'derived',
+          details: [
+            `Операционные поступления: ${formatFinanceAmount(inflows)}`,
+            `Операционные расходы: ${formatFinanceAmount(outflows)}`,
+            `Денежный поток: ${formatFinanceAmount(netCashFlow)}`,
+          ],
+          reason: netCashFlow < 0 ? 'Фактические операционные расходы превышают поступления' : 'Фактический операционный денежный поток неотрицательный',
         });
       })()
-    : paymentsCount > 0 || hasDebtSource
-      ? buildSubMetric({
-          key: 'finance_cash_flow',
-          title: 'Денежный поток',
-          score: safeCount(input.overdueReceivablesCount) > 0 || nonNegative(overdueAmount) > 0 ? 55 : 78,
-          weight: 0.20,
-          sourceStatus: 'ambiguous',
-          reason: safeCount(input.overdueReceivablesCount) > 0 || nonNegative(overdueAmount) > 0
-            ? 'Кассовый поток под давлением из-за просрочки'
-            : 'Нет полного плана cash-flow, используется платежный контур',
-        })
-      : buildSubMetric({
-          key: 'finance_cash_flow',
-          title: 'Денежный поток',
-          weight: 0.20,
-          sourceStatus: 'missing',
-          reason: 'Недостаточно данных по cash-flow',
-        });
+    : buildSubMetric({
+        key: 'finance_cash_flow',
+        title: 'Денежный поток',
+        weight: 0.20,
+        sourceStatus: 'missing',
+        details: [
+          `Операционные поступления: ${operatingInflowsAvailable ? formatFinanceAmount(operatingInflows) : 'недостаточно данных'}`,
+          `Операционные расходы: ${operatingOutflowsAvailable ? formatFinanceAmount(operatingOutflows) : 'недостаточно данных'}`,
+          'Денежный поток: недостаточно данных',
+        ],
+        reason: 'Нет данных об операционных расходах для расчёта денежного потока',
+      });
 
-  const costMetric = expenseAmount !== null && expensePlan !== null && expensePlan > 0
+  const expenseDetails = [
+    `Расходы: ${actualExpensesAvailable ? formatFinanceAmount(actualExpenses) : 'недостаточно данных'}`,
+    `План расходов: ${approvedExpensePlan !== null && approvedExpensePlan > 0 ? formatFinanceAmount(approvedExpensePlan) : 'не задан'}`,
+  ];
+  const costMetric = actualExpensesAvailable && approvedExpensePlan !== null && approvedExpensePlan > 0
     ? (() => {
-        const ratio = nonNegative(expenseAmount) / Math.max(nonNegative(expensePlan), 1);
+        const ratio = nonNegative(actualExpenses) / Math.max(nonNegative(approvedExpensePlan), 1);
         return buildSubMetric({
           key: 'finance_cost_pressure',
           title: 'Расходы к плану',
           score: ratioScore(ratio, [[0.8, 95], [1.0, 84], [1.15, 66], [1.30, 45], [Infinity, 24]]),
           weight: 0.10,
-          sourceStatus: 'ambiguous',
+          sourceStatus: 'derived',
+          details: expenseDetails,
           reason: ratio > 1.15 ? 'Расходы выше безопасного уровня' : 'Расходы в пределах безопасного уровня',
         });
       })()
-    : expenseAmount !== null && monthlyRevenue !== null && monthlyRevenue > 0
-      ? (() => {
-          const ratio = nonNegative(expenseAmount) / Math.max(nonNegative(monthlyRevenue), 1);
-          return buildSubMetric({
-            key: 'finance_cost_pressure',
-            title: 'Расходы к плану',
-            score: ratioScore(ratio, [[0.35, 88], [0.50, 72], [0.70, 48], [Infinity, 26]]),
-            weight: 0.10,
-            sourceStatus: 'ambiguous',
-            reason: ratio > 0.5 ? 'Расходы выше безопасного уровня' : 'Расходы оценены относительно выручки',
-          });
-        })()
-      : buildSubMetric({
-          key: 'finance_cost_pressure',
-          title: 'Расходы к плану',
-          weight: 0.10,
-          sourceStatus: 'missing',
-          reason: 'Недостаточно данных по расходам',
-        });
+    : buildSubMetric({
+        key: 'finance_cost_pressure',
+        title: 'Расходы к плану',
+        weight: 0.10,
+        sourceStatus: 'missing',
+        details: expenseDetails,
+        reason: approvedExpensePlan === null || approvedExpensePlan <= 0
+          ? 'Утверждённый план расходов не задан'
+          : 'Нет фактических расходов за текущий период',
+      });
 
   const subMetrics = [receiptsMetric, overdueMetric, cashFlowMetric, costMetric];
   const weakest = weakestSubMetric(subMetrics);
   const actionByMetric = {
-    finance_receipts_to_plan: 'Сверьте план начислений и ускорьте подтверждение оплат.',
+    finance_receipts_to_plan: 'Задайте утверждённый план поступлений и сверяйте его с фактическими оплатами.',
     finance_overdue_receivables: 'Разберите просроченную дебиторку и закрепите следующий шаг взыскания.',
     finance_cash_flow: 'Соберите ближайшие поступления и перенесите необязательные платежи.',
     finance_cost_pressure: 'Проверьте крупные расходы и лимиты закупок.',
   };
 
-  return buildDirection({
+  const direction = buildDirection({
     key: 'finance',
     title: 'Финансы',
     subMetrics,
     reason: weakest?.score <= 55 || weakest?.sourceStatus === 'missing' ? weakest.reason : 'Финансовый контур в рабочей зоне по доступным данным.',
     recommendedAction: actionByMetric[weakest?.key] || 'Проверьте финансовые отклонения.',
   });
+  const missingCriticalSources = [
+    !actualReceiptsAvailable
+      ? { key: 'finance_actual_receipts', title: 'Фактические поступления', sourceStatus: actualReceipts !== null ? 'ambiguous' : 'missing' }
+      : null,
+  ].filter(Boolean);
+
+  return {
+    ...direction,
+    financeEligibility: {
+      actualReceiptsAvailable,
+      overdueReceivablesAvailable,
+    },
+    missingCriticalSources,
+    isEligible: direction.score !== null
+      && direction.rawCoveragePercent >= MIN_FINANCE_COVERAGE_PERCENT
+      && actualReceiptsAvailable
+      && overdueReceivablesAvailable,
+  };
 }
 
 function utilizationScore(utilization) {

@@ -680,26 +680,11 @@ async function waitForStableBusinessSnapshot(
   return latest!;
 }
 
-async function companyHealthCardClip(page: Page) {
-  return await page.evaluate(() => {
-    const health = document.querySelector('[data-testid="dashboard-company-health"]');
-    if (!health) return null;
-    const rect = health.getBoundingClientRect();
-    return {
-      x: Math.max(0, Math.floor(rect.left + window.scrollX)),
-      y: Math.max(0, Math.floor(rect.top + window.scrollY)),
-      width: Math.ceil(rect.width),
-      height: Math.ceil(rect.height),
-    };
-  });
-}
-
 async function captureCompanyHealthCard(page: Page, testInfo: TestInfo, fileName: string) {
-  const clip = await companyHealthCardClip(page);
-  expect(clip, `${fileName}: Company Health clip should exist`).not.toBeNull();
-  await page.screenshot({
+  const health = page.getByTestId('dashboard-company-health');
+  expect(await health.count(), `${fileName}: Company Health card should be unique`).toBe(1);
+  await health.screenshot({
     path: testInfo.outputPath(fileName),
-    clip: clip!,
     timeout: 15_000,
   });
 }

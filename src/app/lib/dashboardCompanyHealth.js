@@ -27,6 +27,36 @@ const COMPANY_HEALTH_DIRECTIONS = [
   { key: 'fleet', title: 'Парк' },
 ];
 
+// Provenance classifications come from docs/company-health-data-audit.md.
+// Ambiguous sources remain visible for explanation, but are deliberately not scorable.
+export const COMPANY_HEALTH_CRITICAL_METRICS = new Set([
+  'finance_receipts_to_plan',
+  'finance_overdue_receivables',
+  'rental_utilization',
+  'risks_overdue_receivables',
+  'risks_old_debt',
+  'service_fleet_readiness',
+  'fleet_health',
+]);
+
+export const MIN_DIRECTION_COVERAGE_PERCENT = 30;
+
+export function isDirectionEligible(direction = {}) {
+  return direction.score !== null
+    && direction.score !== undefined
+    && Number(direction.rawCoveragePercent) >= MIN_DIRECTION_COVERAGE_PERCENT;
+}
+
+function isCriticalMetricGap(metric, subMetrics) {
+  if (metric.key === 'risks_old_debt') return false;
+  if (metric.key === 'risks_overdue_receivables') {
+    return !subMetrics.some(item =>
+      (item.key === 'risks_overdue_receivables' || item.key === 'risks_old_debt') && item.isScorable
+    );
+  }
+  return COMPANY_HEALTH_CRITICAL_METRICS.has(metric.key) && !metric.isScorable;
+}
+
 function safeCount(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
@@ -144,45 +174,76 @@ function riskLevelForScore(score) {
   return 'excellent';
 }
 
-function missingReason(reason = 'Недостаточно данных') {
-  return `${reason}; используется нейтральная оценка 50`;
-}
-
-function buildSubMetric({ key, title, score, weight, sourceStatus = 'derived', reason }) {
-  const status = sourceStatus === 'real' || sourceStatus === 'derived' || sourceStatus === 'missing'
+function buildSubMetric({ key, title, score, weight, sourceStatus = 'derived', reason, isScorable }) {
+  const status = ['real', 'derived', 'missing', 'ambiguous'].includes(sourceStatus)
     ? sourceStatus
-    : 'derived';
-  const resolvedScore = status === 'missing'
-    ? 50
-    : clampPercent(Math.round(Number.isFinite(Number(score)) ? Number(score) : 50));
+    : 'ambiguous';
+  const hasScore = score !== null && score !== undefined && score !== '' && Number.isFinite(Number(score));
+  const approvedScorable = typeof isScorable === 'boolean'
+    ? isScorable
+    : (status === 'real' || status === 'derived');
+  const scorable = approvedScorable && hasScore && status !== 'missing' && status !== 'ambiguous';
+  const resolvedScore = scorable ? clampPercent(Math.round(Number(score))) : null;
   return {
     key,
     title,
     score: resolvedScore,
+    isScorable: scorable,
     weight,
-    contribution: Number((resolvedScore * weight).toFixed(4)),
+    contribution: scorable ? Number((resolvedScore * weight).toFixed(4)) : 0,
     sourceStatus: status,
-    reason: status === 'missing' ? missingReason(reason) : reason || '',
+    reason: reason || (status === 'missing' ? 'Недостаточно данных' : 'Источник требует проверки'),
   };
 }
 
 function weakestSubMetric(subMetrics) {
   return subMetrics
     .slice()
-    .sort((left, right) => left.score - right.score || right.weight - left.weight || left.title.localeCompare(right.title, 'ru'))[0];
+    .sort((left, right) => {
+      if (left.isScorable !== right.isScorable) return left.isScorable ? 1 : -1;
+      return (left.score ?? 101) - (right.score ?? 101) || right.weight - left.weight || left.title.localeCompare(right.title, 'ru');
+    })[0];
+}
+
+function confidenceForCoverage(coveragePercent, hasCriticalAmbiguity = false) {
+  let confidence = coveragePercent >= 85
+    ? 'high'
+    : coveragePercent >= 60
+      ? 'medium'
+      : coveragePercent >= 30
+        ? 'low'
+        : 'insufficient';
+  if (hasCriticalAmbiguity && (confidence === 'high' || confidence === 'medium')) confidence = 'low';
+  return confidence;
 }
 
 function buildDirection({ key, title, subMetrics, reason, recommendedAction }) {
-  const score = clampPercent(Math.round(subMetrics.reduce((sum, metric) => sum + metric.contribution, 0)));
+  const availableWeight = subMetrics
+    .filter(metric => metric.isScorable)
+    .reduce((sum, metric) => sum + metric.weight, 0);
+  const totalMetricWeight = subMetrics.reduce((sum, metric) => sum + metric.weight, 0);
+  const rawCoveragePercent = totalMetricWeight > 0 ? (availableWeight / totalMetricWeight) * 100 : 0;
+  const coveragePercent = Math.round(rawCoveragePercent);
+  const score = availableWeight > 0
+    ? clampPercent(Math.round(subMetrics.reduce((sum, metric) => sum + metric.contribution, 0) / availableWeight))
+    : null;
   const weight = COMPANY_HEALTH_WEIGHTS[key];
   const weakest = weakestSubMetric(subMetrics);
-  const allMissing = subMetrics.every(metric => metric.sourceStatus === 'missing');
-  const hasMissingSubMetrics = subMetrics.some(metric => metric.sourceStatus === 'missing');
+  const allMissing = availableWeight === 0;
+  const hasMissingSubMetrics = subMetrics.some(metric => !metric.isScorable);
+  const hasCriticalAmbiguity = subMetrics.some(metric => isCriticalMetricGap(metric, subMetrics));
+  const dataConfidence = confidenceForCoverage(rawCoveragePercent, hasCriticalAmbiguity);
+  const isEligible = score !== null && rawCoveragePercent >= MIN_DIRECTION_COVERAGE_PERCENT;
+  const coverageAdjustedScore = totalMetricWeight > 0
+    ? clampPercent(Math.round(subMetrics.reduce((sum, metric) => sum + metric.contribution, 0) / totalMetricWeight))
+    : null;
   const fallbackReason = allMissing
     ? 'Недостаточно данных'
-    : weakest?.score <= 55
+    : weakest?.isScorable && weakest.score <= 55
       ? weakest.reason
-      : 'Отклонения по доступным данным в допустимой зоне.';
+      : hasMissingSubMetrics
+        ? 'Часть источников отсутствует или неоднозначна.'
+        : 'Отклонения по доступным данным в допустимой зоне.';
   const safeReason = reason || fallbackReason;
 
   return {
@@ -190,15 +251,29 @@ function buildDirection({ key, title, subMetrics, reason, recommendedAction }) {
     title,
     score,
     weight,
-    totalWeight: weight,
-    weightedContribution: Number((score * weight).toFixed(4)),
-    weightedDeficit: Number(((100 - score) * weight).toFixed(4)),
+    availableWeight: Number(availableWeight.toFixed(4)),
+    totalWeight: Number(totalMetricWeight.toFixed(4)),
+    rawCoveragePercent,
+    coveragePercent,
+    isEligible,
+    coverageAdjustedScore,
+    dataConfidence,
+    status: dataConfidence,
+    label: dataConfidence === 'insufficient'
+      ? 'Недостаточно данных'
+      : score >= 80
+        ? 'Хорошо'
+        : score >= 55
+          ? 'Зона внимания'
+          : 'Критично',
+    weightedContribution: score === null ? 0 : Number((score * weight).toFixed(4)),
+    weightedDeficit: score === null ? 0 : Number(((100 - score) * weight).toFixed(4)),
     subMetrics,
-    primaryMetric: weakest ? `${weakest.title}: ${weakest.score}/100` : 'Недостаточно данных',
+    primaryMetric: weakest?.isScorable ? `${weakest.title}: ${weakest.score}/100` : weakest?.title || 'Недостаточно данных',
     shortReason: safeReason,
     reason: safeReason,
     recommendedAction: recommendedAction || 'Проверьте направление и уточните исходные данные.',
-    riskLevel: riskLevelForScore(score),
+    riskLevel: score === null ? 'insufficient' : riskLevelForScore(score),
     insufficientData: allMissing,
     hasMissingSubMetrics,
   };
@@ -210,7 +285,7 @@ function normalizeLegacyDirection(key, title, source = {}) {
   const subMetric = buildSubMetric({
     key: `${key}_legacy_score`,
     title: source.primaryMetric || title,
-    score: hasScore ? numericScore : 50,
+    score: hasScore ? numericScore : null,
     weight: 1,
     sourceStatus: source.insufficientData || !hasScore ? 'missing' : 'derived',
     reason: source.shortReason || (hasScore ? 'Оценка из доступных сигналов' : 'Недостаточно данных'),
@@ -243,14 +318,57 @@ function normalizeDirection(key, title, source = {}) {
 export function calculateCompanyHealthScore(directionScores = []) {
   const byKey = new Map(directionScores.map(item => [item?.key, item]).filter(([key]) => key));
   const directions = COMPANY_HEALTH_DIRECTIONS.map(({ key, title }) => normalizeDirection(key, title, byKey.get(key) || {}));
-  const total = directions.reduce((sum, item) => sum + item.weightedContribution, 0);
-  const byWeakest = (left, right) => left.score - right.score || right.weight - left.weight || left.title.localeCompare(right.title, 'ru');
-  const byStrongest = (left, right) => right.score - left.score || right.weight - left.weight || left.title.localeCompare(right.title, 'ru');
+  const eligibleDirections = directions.filter(isDirectionEligible);
+  const availableCompanyWeight = eligibleDirections.reduce((sum, item) => sum + item.weight, 0);
+  const rawTotalCoveragePercent = directions.reduce(
+    (sum, item) => sum + item.weight * item.rawCoveragePercent,
+    0,
+  );
+  const totalCoveragePercent = Math.round(rawTotalCoveragePercent);
+  const rawScore = availableCompanyWeight > 0
+    ? clampPercent(Math.round(eligibleDirections.reduce((sum, item) => sum + item.score * item.weight, 0) / availableCompanyWeight))
+    : null;
+  // Full-denominator coverage adjustment: unavailable company/sub-metric weight contributes zero.
+  // This keeps missing or ambiguous data from improving the displayed management score.
+  const adjustedScore = eligibleDirections.length > 0
+    ? clampPercent(Math.round(eligibleDirections.reduce(
+        (sum, item) => sum + item.coverageAdjustedScore * item.weight,
+        0,
+      )))
+    : null;
+  const missingCriticalMetrics = directions.flatMap(direction => direction.subMetrics
+    .filter(metric => isCriticalMetricGap(metric, direction.subMetrics))
+    .map(metric => ({ key: metric.key, title: metric.title, direction: direction.title, sourceStatus: metric.sourceStatus })));
+  const hasCriticalMissing = missingCriticalMetrics.length > 0;
+  const confidence = confidenceForCoverage(rawTotalCoveragePercent, hasCriticalMissing);
+  const isPreliminary = rawTotalCoveragePercent < 60;
+  const totalScore = rawTotalCoveragePercent < 30 ? null : adjustedScore;
+  const displayLabel = rawTotalCoveragePercent < 30
+    ? 'Недостаточно данных для оценки'
+    : isPreliminary
+      ? 'Предварительная оценка'
+      : totalScore >= 80
+        ? 'Хорошо'
+        : totalScore >= 55
+          ? 'Зона внимания'
+          : 'Критично';
+  const byWeakest = (left, right) => (left.score ?? 101) - (right.score ?? 101) || right.weight - left.weight || left.title.localeCompare(right.title, 'ru');
+  const byStrongest = (left, right) => (right.score ?? -1) - (left.score ?? -1) || right.weight - left.weight || left.title.localeCompare(right.title, 'ru');
   const byFixImpact = (left, right) => right.weightedDeficit - left.weightedDeficit || byWeakest(left, right);
 
   return {
-    totalScore: clampPercent(Math.round(total)),
+    totalScore,
+    rawScore,
+    adjustedScore: totalScore,
     maxScore: 100,
+    rawTotalCoveragePercent,
+    totalCoveragePercent,
+    confidence,
+    isPreliminary,
+    displayLabel,
+    directionScores: directions.map(item => ({ key: item.key, score: item.score, coveragePercent: item.coveragePercent, isEligible: item.isEligible })),
+    excludedDirections: directions.filter(item => !isDirectionEligible(item)).map(item => item.key),
+    missingCriticalMetrics,
     directions,
     weakestDirections: directions.slice().sort(byWeakest),
     strongestDirections: directions.slice().sort(byStrongest),
@@ -261,7 +379,7 @@ export function calculateCompanyHealthScore(directionScores = []) {
 function buildFinanceDirection(input, contours) {
   const paymentsCount = contours.payments.count;
   const monthlyPaidAmount = firstFiniteInput(input, ['monthlyPaidAmount', 'paidAmount', 'paymentsAmount']);
-  const monthlyRevenue = firstFiniteInput(input, ['financeRevenuePlan', 'monthlyRevenuePlan', 'monthlyRevenue', 'expectedMonthlyRevenue']);
+  const monthlyRevenue = firstFiniteInput(input, ['financeRevenuePlan', 'monthlyRevenuePlan', 'expectedMonthlyRevenue']);
   const overdueAmount = firstFiniteInput(input, ['overdueReceivablesAmount', 'overdueDebtAmount']);
   const totalDebt = firstFiniteInput(input, ['totalDebt', 'receivablesAmount']);
   const expenseAmount = firstFiniteInput(input, ['monthlyExpenseAmount', 'monthlyCostAmount']);
@@ -279,7 +397,7 @@ function buildFinanceDirection(input, contours) {
         title: 'Поступления к плану',
         score: receiptsScore,
         weight: 0.40,
-        sourceStatus: 'real',
+        sourceStatus: 'derived',
         reason: receiptsScore < 75
           ? 'Низкие поступления к плану'
           : `Поступления ${Math.round((nonNegative(monthlyPaidAmount) / Math.max(nonNegative(monthlyRevenue), 1)) * 100)}% к плану`,
@@ -288,9 +406,8 @@ function buildFinanceDirection(input, contours) {
       ? buildSubMetric({
           key: 'finance_receipts_to_plan',
           title: 'Поступления к плану',
-          score: monthlyPaidAmount !== null && monthlyPaidAmount > 0 ? 82 : 72,
           weight: 0.40,
-          sourceStatus: 'derived',
+          sourceStatus: 'missing',
           reason: monthlyPaidAmount !== null && monthlyPaidAmount > 0
             ? 'Поступления есть, но план сравнения не задан'
             : 'Есть платежный контур, но план поступлений не задан',
@@ -309,10 +426,10 @@ function buildFinanceDirection(input, contours) {
         title: 'Просроченная дебиторка',
         score: overduePressureScore(nonNegative(overdueAmount), Math.max(nonNegative(totalDebt), nonNegative(monthlyRevenue), nonNegative(overdueAmount))),
         weight: 0.30,
-        sourceStatus: 'real',
+        sourceStatus: 'derived',
         reason: overdueAmount > 0 ? 'Высокая просроченная дебиторка' : 'Просроченная дебиторка не выявлена',
       })
-    : hasFiniteInput(input, 'overdueReceivablesCount')
+    : hasDebtSource && hasFiniteInput(input, 'overdueReceivablesCount')
       ? buildSubMetric({
           key: 'finance_overdue_receivables',
           title: 'Просроченная дебиторка',
@@ -327,7 +444,7 @@ function buildFinanceDirection(input, contours) {
             title: 'Просроченная дебиторка',
             score: 100,
             weight: 0.30,
-            sourceStatus: 'derived',
+            sourceStatus: 'ambiguous',
             reason: 'Просрочка не зафиксирована по доступным сигналам',
           })
         : buildSubMetric({
@@ -349,7 +466,7 @@ function buildFinanceDirection(input, contours) {
           title: 'Денежный поток',
           score: ratioScore(pressure, [[0.05, 98], [0.20, 84], [0.40, 62], [0.65, 38], [Infinity, 18]]),
           weight: 0.20,
-          sourceStatus: 'real',
+          sourceStatus: 'ambiguous',
           reason: pressure > 0.4 ? 'Кассовый поток под давлением' : 'Кассовый поток выдерживает текущий план',
         });
       })()
@@ -359,7 +476,7 @@ function buildFinanceDirection(input, contours) {
           title: 'Денежный поток',
           score: safeCount(input.overdueReceivablesCount) > 0 || nonNegative(overdueAmount) > 0 ? 55 : 78,
           weight: 0.20,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: safeCount(input.overdueReceivablesCount) > 0 || nonNegative(overdueAmount) > 0
             ? 'Кассовый поток под давлением из-за просрочки'
             : 'Нет полного плана cash-flow, используется платежный контур',
@@ -380,7 +497,7 @@ function buildFinanceDirection(input, contours) {
           title: 'Расходы к плану',
           score: ratioScore(ratio, [[0.8, 95], [1.0, 84], [1.15, 66], [1.30, 45], [Infinity, 24]]),
           weight: 0.10,
-          sourceStatus: 'real',
+          sourceStatus: 'ambiguous',
           reason: ratio > 1.15 ? 'Расходы выше безопасного уровня' : 'Расходы в пределах безопасного уровня',
         });
       })()
@@ -392,7 +509,7 @@ function buildFinanceDirection(input, contours) {
             title: 'Расходы к плану',
             score: ratioScore(ratio, [[0.35, 88], [0.50, 72], [0.70, 48], [Infinity, 26]]),
             weight: 0.10,
-            sourceStatus: 'derived',
+            sourceStatus: 'ambiguous',
             reason: ratio > 0.5 ? 'Расходы выше безопасного уровня' : 'Расходы оценены относительно выручки',
           });
         })()
@@ -445,13 +562,14 @@ function buildRentalDirection(input, contours) {
   const extensions = firstFiniteInput(input, ['rentalExtensionsThisMonth', 'extendedRentalsCount']);
   const reservations = firstFiniteInput(input, ['reservedRentalsCount']);
 
-  const utilizationMetric = utilization !== null
+  const hasFleetBase = contours.equipment.count > 0 || (activeEquipment !== null && activeEquipment > 0);
+  const utilizationMetric = utilization !== null && hasFleetBase
     ? buildSubMetric({
         key: 'rental_utilization',
         title: 'Загрузка техники',
         score: utilizationScore(utilization),
         weight: 0.50,
-        sourceStatus: contours.equipment.count > 0 ? 'real' : 'derived',
+        sourceStatus: 'derived',
         reason: utilization < 60 ? 'Загрузка ниже целевого уровня' : 'Загрузка техники в целевой зоне',
       })
     : buildSubMetric({
@@ -468,7 +586,7 @@ function buildRentalDirection(input, contours) {
         title: 'Выручка аренды к плану',
         score: planPerformanceScore(nonNegative(rentalRevenueActual), nonNegative(rentalRevenuePlan)),
         weight: 0.25,
-        sourceStatus: 'derived',
+        sourceStatus: 'ambiguous',
         reason: nonNegative(rentalRevenueActual) < nonNegative(rentalRevenuePlan) * 0.75
           ? 'Выручка аренды ниже плана'
           : 'Выручка аренды близка к плану',
@@ -479,7 +597,7 @@ function buildRentalDirection(input, contours) {
           title: 'Выручка аренды к плану',
           score: 82,
           weight: 0.25,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: 'Выручка аренды есть, но план сравнения не задан',
         })
       : buildSubMetric({
@@ -498,11 +616,11 @@ function buildRentalDirection(input, contours) {
           title: 'Простои',
           score: ratioScore(idleRatio, [[0.10, 96], [0.25, 82], [0.40, 62], [0.60, 38], [Infinity, 18]]),
           weight: 0.15,
-          sourceStatus: 'real',
+          sourceStatus: 'derived',
           reason: idleRatio > 0.4 ? 'Много свободной техники' : 'Свободный парк в допустимых пределах',
         });
       })()
-    : utilization !== null
+    : utilization !== null && hasFleetBase
       ? buildSubMetric({
           key: 'rental_idle_fleet',
           title: 'Простои',
@@ -519,7 +637,7 @@ function buildRentalDirection(input, contours) {
           reason: 'Недостаточно данных по свободной технике',
         });
 
-  const hasMovementSource = [starts, returns, extensions, reservations].some(value => value !== null);
+  const hasMovementSource = rentalsCount > 0 && [starts, returns, extensions, reservations].some(value => value !== null);
   const movementMetric = hasMovementSource
     ? (() => {
         const incoming = nonNegative(starts) + nonNegative(extensions) + nonNegative(reservations) * 0.5;
@@ -532,8 +650,8 @@ function buildRentalDirection(input, contours) {
           title: 'Движение аренды',
           score,
           weight: 0.10,
-          sourceStatus: 'real',
           reason: outgoing > incoming ? 'Возвраты опережают новые выдачи' : 'Возвраты, продления и новые выдачи сбалансированы',
+          sourceStatus: 'derived',
         });
       })()
     : rentalsCount > 0
@@ -542,7 +660,7 @@ function buildRentalDirection(input, contours) {
           title: 'Движение аренды',
           score: safeCount(input.overdueReturnsCount) > 0 ? 45 : safeCount(input.returnsTodayCount) > 0 ? 68 : 80,
           weight: 0.10,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: safeCount(input.overdueReturnsCount) > 0
             ? 'Возвраты требуют контроля'
             : 'Движение аренды оценено по возвратам и активным записям',
@@ -607,10 +725,10 @@ function buildRisksDirection(input, contours, hasScoreBase) {
         title: 'Просроченная дебиторка',
         score: overduePressureScore(nonNegative(overdueAmount), Math.max(nonNegative(totalDebt), nonNegative(monthlyRevenue), nonNegative(overdueAmount)), true),
         weight: 0.45,
-        sourceStatus: 'real',
+        sourceStatus: 'derived',
         reason: overdueAmount > 0 ? 'Высокая просроченная дебиторка' : 'Просроченная дебиторка не выявлена',
       })
-    : hasFiniteInput(input, 'overdueReceivablesCount')
+    : hasDebtSource && hasFiniteInput(input, 'overdueReceivablesCount')
       ? buildSubMetric({
           key: 'risks_overdue_receivables',
           title: 'Просроченная дебиторка',
@@ -625,7 +743,7 @@ function buildRisksDirection(input, contours, hasScoreBase) {
             title: 'Просроченная дебиторка',
             score: 100,
             weight: 0.45,
-            sourceStatus: 'derived',
+            sourceStatus: 'ambiguous',
             reason: 'Просрочка не зафиксирована',
           })
         : buildSubMetric({
@@ -645,7 +763,7 @@ function buildRisksDirection(input, contours, hasScoreBase) {
           title: 'Долги старше 30/60/90 дней',
           score: ratioScore(pressure, [[0.03, 92], [0.10, 72], [0.20, 48], [0.40, 26], [Infinity, 8]]),
           weight: 0.25,
-          sourceStatus: 'real',
+          sourceStatus: 'ambiguous',
           reason: nonNegative(debt90Plus) > 0 || nonNegative(debt60Plus) > 0
             ? 'Долг старше 30 дней'
             : nonNegative(debt30Plus) > 0
@@ -659,7 +777,7 @@ function buildRisksDirection(input, contours, hasScoreBase) {
           title: 'Долги старше 30/60/90 дней',
           score: 30,
           weight: 0.25,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: 'Долг старше 30 дней',
         })
       : hasDebtSource
@@ -668,7 +786,7 @@ function buildRisksDirection(input, contours, hasScoreBase) {
             title: 'Долги старше 30/60/90 дней',
             score: 100,
             weight: 0.25,
-            sourceStatus: 'derived',
+            sourceStatus: 'ambiguous',
             reason: 'Старые долги не выявлены',
           })
         : buildSubMetric({
@@ -694,7 +812,7 @@ function buildRisksDirection(input, contours, hasScoreBase) {
           title: 'Крупные проблемные клиенты',
           score,
           weight: 0.20,
-          sourceStatus: largestDebt !== null ? 'real' : 'derived',
+          sourceStatus: 'ambiguous',
           reason: nonNegative(largestDebt) > 0 && concentration >= 0.3
             ? 'Есть крупный проблемный долг'
             : count > 0
@@ -708,7 +826,7 @@ function buildRisksDirection(input, contours, hasScoreBase) {
           title: 'Крупные проблемные клиенты',
           score: 100,
           weight: 0.20,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: 'Крупная концентрация риска не выявлена',
         })
       : buildSubMetric({
@@ -777,7 +895,7 @@ function buildServiceDirection(input, contours) {
           title: 'Готовность техники',
           score: ratioScore(1 - readyRatio, [[0.05, 96], [0.15, 82], [0.30, 58], [0.50, 34], [Infinity, 14]]),
           weight: 0.40,
-          sourceStatus: 'real',
+          sourceStatus: 'ambiguous',
           reason: readyRatio < 0.75 ? 'Готовность техники ниже нормы' : 'Готовность техники в рабочей зоне',
         });
       })()
@@ -789,7 +907,7 @@ function buildServiceDirection(input, contours) {
         reason: 'Недостаточно данных по готовности техники',
       });
 
-  const overdueMetric = openTickets !== null && overdueTickets !== null
+  const overdueMetric = hasServiceSource && openTickets !== null && overdueTickets !== null
     ? (() => {
         const ratio = openTickets > 0 ? nonNegative(overdueTickets) / Math.max(nonNegative(openTickets), 1) : 0;
         return buildSubMetric({
@@ -797,7 +915,7 @@ function buildServiceDirection(input, contours) {
           title: 'Просроченные ремонты',
           score: ratioScore(ratio, [[0, 100], [0.05, 88], [0.15, 66], [0.30, 42], [Infinity, 18]]),
           weight: 0.25,
-          sourceStatus: 'real',
+          sourceStatus: 'derived',
           reason: overdueTickets > 0 ? 'Есть просроченные ремонты' : 'Просроченные ремонты не выявлены',
         });
       })()
@@ -807,7 +925,7 @@ function buildServiceDirection(input, contours) {
           title: 'Просроченные ремонты',
           score: safeCount(input.serviceCriticalCount) > 0 ? 42 : 100,
           weight: 0.25,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: safeCount(input.serviceCriticalCount) > 0 ? 'Есть просроченные ремонты' : 'Просроченные ремонты не выявлены',
         })
       : buildSubMetric({
@@ -824,7 +942,7 @@ function buildServiceDirection(input, contours) {
         title: 'Повторные ремонты',
         score: ratioScore(nonNegative(repeatFailures), [[0, 100], [1, 78], [3, 52], [6, 28], [Infinity, 12]]),
         weight: 0.15,
-        sourceStatus: 'real',
+        sourceStatus: 'ambiguous',
         reason: repeatFailures > 0 ? 'Повторные ремонты растут' : 'Повторные ремонты не выявлены',
       })
     : buildSubMetric({
@@ -841,7 +959,7 @@ function buildServiceDirection(input, contours) {
         title: 'Средний срок ремонта',
         score: ratioScore(nonNegative(averageDays), [[2, 96], [4, 82], [7, 62], [14, 34], [Infinity, 14]]),
         weight: 0.10,
-        sourceStatus: 'real',
+        sourceStatus: 'ambiguous',
         reason: averageDays > 7 ? 'Средний срок ремонта выше безопасного уровня' : 'Средний срок ремонта в допустимой зоне',
       })
     : hasServiceSource
@@ -850,7 +968,7 @@ function buildServiceDirection(input, contours) {
           title: 'Средний срок ремонта',
           score: 78,
           weight: 0.10,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: 'Срок ремонта оценен без полной детализации',
         })
       : buildSubMetric({
@@ -867,7 +985,7 @@ function buildServiceDirection(input, contours) {
         title: 'SLA / загрузка механиков',
         score: ratioScore(nonNegative(serviceLoadPercent) / 100, [[0.35, 92], [0.75, 86], [0.95, 72], [1.10, 52], [Infinity, 28]]),
         weight: 0.10,
-        sourceStatus: 'derived',
+        sourceStatus: 'ambiguous',
         reason: serviceLoadPercent > 100 ? 'SLA под давлением из-за загрузки механиков' : 'Загрузка механиков в рабочей зоне',
       })
     : hasServiceSource
@@ -876,7 +994,7 @@ function buildServiceDirection(input, contours) {
           title: 'SLA / загрузка механиков',
           score: safeCount(input.serviceRiskCount) > 0 ? 58 : 86,
           weight: 0.10,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: safeCount(input.serviceRiskCount) > 0 ? 'SLA под давлением из-за блокеров' : 'Загрузка механиков без критичных блокеров',
         })
       : buildSubMetric({
@@ -932,7 +1050,7 @@ function buildClientsDirection(input) {
           title: 'Новые лиды',
           score: countAgainstTargetScore(nonNegative(newClients), Math.max(2, Math.ceil(clientBase * 0.04))),
           weight: 0.30,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: newClients <= 0 ? 'Недостаточно новых лидов' : 'Новый спрос оценен по новым клиентам',
         })
       : buildSubMetric({
@@ -943,7 +1061,7 @@ function buildClientsDirection(input) {
           reason: 'Недостаточно данных по новым лидам',
         });
 
-  const activeMetric = clientsCount !== null && activeClients !== null
+  const activeMetric = clientsCount !== null && clientsCount > 0 && activeClients !== null
     ? (() => {
         const ratio = nonNegative(activeClients) / Math.max(nonNegative(clientsCount), 1);
         return buildSubMetric({
@@ -951,7 +1069,7 @@ function buildClientsDirection(input) {
           title: 'Активные клиенты',
           score: ratioScore(1 - ratio, [[0.35, 92], [0.55, 76], [0.70, 58], [0.85, 36], [Infinity, 20]]),
           weight: 0.25,
-          sourceStatus: 'real',
+          sourceStatus: 'derived',
           reason: ratio < 0.3 ? 'Мало активных клиентов' : 'Активная клиентская база поддерживает аренду',
         });
       })()
@@ -961,7 +1079,7 @@ function buildClientsDirection(input) {
           title: 'Активные клиенты',
           score: 78,
           weight: 0.25,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: 'Активность клиентов оценена по наличию клиентской базы',
         })
       : buildSubMetric({
@@ -972,7 +1090,7 @@ function buildClientsDirection(input) {
           reason: 'Недостаточно данных по активным клиентам',
         });
 
-  const repeatMetric = clientsCount !== null && repeatClients !== null
+  const repeatMetric = clientsCount !== null && clientsCount > 0 && repeatClients !== null
     ? (() => {
         const ratio = nonNegative(repeatClients) / Math.max(nonNegative(clientsCount), 1);
         return buildSubMetric({
@@ -980,7 +1098,7 @@ function buildClientsDirection(input) {
           title: 'Повторные клиенты',
           score: ratioScore(1 - ratio, [[0.45, 92], [0.65, 76], [0.80, 54], [0.92, 34], [Infinity, 18]]),
           weight: 0.25,
-          sourceStatus: 'real',
+          sourceStatus: 'derived',
           reason: ratio < 0.2 ? 'Слабая повторная база' : 'Повторная клиентская база есть',
         });
       })()
@@ -1000,7 +1118,7 @@ function buildClientsDirection(input) {
           title: 'Конверсия в сделку',
           score: ratioScore(1 - ratio, [[0.45, 94], [0.65, 76], [0.80, 52], [0.92, 32], [Infinity, 16]]),
           weight: 0.20,
-          sourceStatus: 'real',
+          sourceStatus: 'derived',
           reason: ratio < 0.2 ? 'Конверсия ниже нормы' : 'Конверсия поддерживает воронку',
         });
       })()
@@ -1058,7 +1176,7 @@ function buildFleetDirection(input, contours) {
           title: 'Исправность парка',
           score,
           weight: 0.40,
-          sourceStatus: activeEquipment !== null || inServiceEquipment !== null || inactiveEquipment !== null ? 'real' : 'derived',
+          sourceStatus: 'ambiguous',
           reason: score < 60 ? 'Часть парка недоступна' : 'Исправность парка в рабочей зоне',
         });
       })()
@@ -1098,7 +1216,7 @@ function buildFleetDirection(input, contours) {
           title: 'Ликвидность техники',
           score: ratioScore(1 - ratio, [[0.10, 92], [0.25, 78], [0.45, 56], [0.70, 34], [Infinity, 18]]),
           weight: 0.20,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: ratio < 0.55 ? 'Низкая ликвидность части техники' : 'Ликвидность оценена по плановой выручке техники',
         });
       })()
@@ -1125,7 +1243,7 @@ function buildFleetDirection(input, contours) {
           title: 'Структура парка',
           score: 70,
           weight: 0.15,
-          sourceStatus: 'derived',
+          sourceStatus: 'ambiguous',
           reason: 'Парк есть, но его вклад ограничен без загрузки',
         })
       : buildSubMetric({
@@ -1223,51 +1341,33 @@ export function buildCompanyHealthModel(input = {}) {
   const hasScoreBase = hasEquipment && hasOperationalData;
   const scoreDetails = calculateCompanyHealthScore(buildCompanyHealthDirectionInputs(input, contours, hasScoreBase));
 
-  if (isEmpty) {
-    return {
-      score: null,
-      label: 'Нет данных',
-      subtitle: 'Недостаточно данных для расчёта здоровья компании',
-      tone: 'default',
-      availableContours,
-      missingContours,
-      contourStates,
-      scoreDetails,
-      warning: criticalSignals > 0 || invalidCriticalSignals > 0 ? 'Есть сигналы без полного расчёта' : '',
-    };
-  }
-
-  if (!hasEquipment || !hasOperationalData) {
-    return {
-      score: null,
-      label: 'Недостаточно данных',
-      subtitle: 'Недостаточно данных для расчёта здоровья компании',
-      tone: 'default',
-      availableContours,
-      missingContours,
-      contourStates,
-      scoreDetails,
-      warning: criticalSignals > 0 || invalidCriticalSignals > 0 ? 'Есть сигналы без полного расчёта' : '',
-    };
-  }
-
   const score = scoreDetails.totalScore;
-  const missingDirections = scoreDetails.directions.filter(item => item.insufficientData).map(item => item.title);
+  const tone = score === null
+    ? 'default'
+    : score >= 80
+      ? 'success'
+      : score >= 55
+        ? 'warning'
+        : 'danger';
+  const warningParts = [
+    invalidCriticalSignals > 0 ? 'Есть сигналы без полного расчёта' : '',
+    scoreDetails.missingCriticalMetrics.length > 0
+      ? `Критические источники без оценки: ${scoreDetails.missingCriticalMetrics.map(item => item.title).join(', ')}`
+      : '',
+  ].filter(Boolean);
 
   return {
     score,
-    label: score >= 80 ? 'Хорошо' : score >= 55 ? 'Зона внимания' : 'Критично',
-    subtitle: 'Формула: финансы 30%, аренда 25%, риски 20%, сервис 15%, клиенты 7%, парк 3%',
-    tone: score >= 80 ? 'success' : score >= 55 ? 'warning' : 'danger',
+    label: scoreDetails.displayLabel,
+    subtitle: scoreDetails.rawTotalCoveragePercent < 30
+      ? 'Недостаточно данных для расчёта здоровья компании'
+      : 'Формула: финансы 30%, аренда 25%, риски 20%, сервис 15%, клиенты 7%, парк 3%',
+    tone,
     availableContours,
     missingContours,
     contourStates,
     scoreDetails,
-    warning: invalidCriticalSignals > 0
-      ? 'Есть сигналы без полного расчёта'
-      : missingDirections.length > 0
-        ? `Недостаточно данных: ${missingDirections.join(', ')}`
-        : '',
+    warning: warningParts.join('. '),
   };
 }
 

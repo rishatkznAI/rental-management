@@ -114,16 +114,29 @@ test('dashboard company health exposes weighted score explanation', () => {
   assert.match(block, /data-testid="dashboard-company-health-explanation-total"/);
   assert.match(block, /data-testid="dashboard-company-health-explanation-breakdown"/);
   assert.match(block, /data-testid=\{`dashboard-company-health-explanation-\$\{direction\.key\}`\}/);
-  assert.match(block, /\{Math\.round\(direction\.score\)\}\/100 × \{formatHealthWeight\(direction\.weight\)\} = \{formatHealthContribution\(direction\.weightedContribution\)\}/);
+  assert.match(block, /direction\.isEligible && direction\.score !== null/);
+  assert.match(block, /formatHealthContribution\(direction\.weightedContribution\)/);
   assert.match(block, /Недостаточно данных · /);
   assert.match(block, /direction\.subMetrics\?\.length/);
   assert.match(block, /formatHealthSourceStatus\(metric\.sourceStatus\)/);
-  assert.match(dashboardSource, /нет данных, 50/);
+  assert.doesNotMatch(dashboardSource, /нет данных, 50/);
   assert.match(block, /direction\.recommendedAction/);
   assert.match(block, /Действие:/);
   assert.match(block, /data-testid="dashboard-company-health-explanation-focus"/);
   assert.match(block, /Сначала исправить:/);
   assert.match(block, /focusDirections/);
+  assert.match(block, /data-testid="dashboard-company-health-explanation-coverage"/);
+  assert.match(block, /Оценка по доступным данным:/);
+  assert.match(block, /Покрытие данных:/);
+  assert.match(block, /Доверие к оценке:/);
+  assert.match(block, /data-testid="dashboard-company-health-explanation-adjusted"/);
+  assert.match(block, /Итоговая оценка с учётом покрытия:/);
+  assert.match(block, /data-testid="dashboard-company-health-missing-critical"/);
+  assert.match(block, /data-testid="dashboard-company-health-excluded-directions"/);
+  assert.match(block, /data-source-status=\{metric\.sourceStatus\}/);
+  for (const sourceLabel of ['Реальные данные', 'Расчётные данные', 'Нет данных', 'Неоднозначный источник']) {
+    assert.match(dashboardSource, new RegExp(sourceLabel));
+  }
 
   for (const formulaPart of ['Финансы 30%', 'Аренда 25%', 'Риски 20%', 'Сервис 15%', 'Клиенты 7%', 'Парк 3%']) {
     assert.match(block, new RegExp(formulaPart));
@@ -152,7 +165,7 @@ test('dashboard company health bottom row contains six compact business signal c
   const directionsBlock = sourceBlock(dashboardSource, 'const commandCenterDirections = [', '].filter(Boolean)');
 
   assert.match(commandCenterBlock, /data-testid="dashboard-company-health-compact"/);
-  assert.match(commandCenterBlock, /const businessSignals: CompanyHealthSignal\[] = \[/);
+  assert.match(commandCenterBlock, /const businessSignals: CompanyHealthSignal\[] = scoreDirectionOrder\.map/);
   assert.match(commandCenterBlock, /businessSignals\.map\(item => <CompanyHealthSignalCard key=\{item\.id\} item=\{item\} \/>\)/);
   assert.match(cardBlock, /<Link[\s\S]*className="rentcore-command-card company-health-signal/);
   assert.match(cardBlock, /title=\{title\}/);
@@ -171,6 +184,10 @@ test('dashboard company health bottom row contains six compact business signal c
   assert.equal(directionsBlock.match(/id: '/g)?.length, 6);
   assert.equal(directionsBlock.match(/source: '/g)?.length, 6);
   assert.equal(directionsBlock.match(/action: /g)?.length, 6);
+  assert.match(commandCenterBlock, /metric: isEligible \? `\$\{directionScore\}\/100` : '—'/);
+  assert.match(commandCenterBlock, /stateLabel: isEligible \? `\$\{directionScore\}\/100` : 'Недостаточно данных'/);
+  assert.match(commandCenterBlock, /scoreBreakdown\?\.isPreliminary/);
+  assert.match(commandCenterBlock, /coverageSummary/);
 });
 
 test('dashboard company health header pills can shrink and wrap on mobile', () => {

@@ -48,6 +48,7 @@ type DashboardLayoutSnapshot = {
   radialCoreText: string;
   radialVisible: boolean;
   radialCoreVisible: boolean;
+  radialEmptyPresent: boolean;
   radialNodeCount: number;
   radialNodesInside: boolean;
   compactVisible: boolean;
@@ -71,6 +72,49 @@ type DashboardLayoutSnapshot = {
   }>;
 };
 
+type CompanyHealthApiTracker = {
+  inFlight: Map<string, number>;
+  statuses: Map<string, number[]>;
+  transitions: Array<{
+    event: 'start' | 'response' | 'finish' | 'failed';
+    path: string;
+    status?: number;
+  }>;
+};
+
+type CompanyHealthDirectionSnapshot = {
+  key: string;
+  title: string;
+  score: number | null;
+  coveragePercent: number;
+  tileText: string;
+  explanationText: string;
+  unavailableMetricStates: Array<{
+    sourceStatus: 'missing' | 'ambiguous';
+    text: string;
+  }>;
+};
+
+type CompanyHealthBusinessSnapshot = {
+  displayedAdjustedScore: number | null;
+  explanationAdjustedScore: number | null;
+  rawScore: number | null;
+  coveragePercent: number;
+  confidence: string;
+  label: string;
+  excludedDirections: string[];
+  missingCriticalMetrics: string[];
+  directions: CompanyHealthDirectionSnapshot[];
+};
+
+type CompanyHealthClosedSnapshot = {
+  scoreText: string;
+  coverageText: string;
+  label: string;
+  directionTiles: string[];
+  loadingMarkers: number;
+};
+
 type BuildInfo = {
   commit?: string;
   commitFull?: string;
@@ -82,6 +126,22 @@ const VIEWPORT_CASES: ViewportCase[] = [
   { name: 'tablet', viewport: { width: 768, height: 1024 } },
   { name: 'mobile', viewport: { width: 390, height: 844 } },
 ];
+
+const COMPANY_HEALTH_API_PATHS = [
+  '/api/equipment',
+  '/api/rentals',
+  '/api/gantt_rentals',
+  '/api/service',
+  '/api/clients',
+  '/api/payments',
+  '/api/payment_allocations',
+  '/api/documents',
+  '/api/deliveries',
+  '/api/reports/mechanics-workload',
+  '/api/management/action-queue',
+] as const;
+
+const COMPANY_HEALTH_DIRECTION_KEYS = ['rental', 'finance', 'service', 'clients', 'fleet', 'risks'] as const;
 
 function productionAppUrl(frontendUrl: string, route = '/') {
   const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
@@ -148,6 +208,43 @@ function sanitize(text = '', limit = 800) {
     .slice(0, limit);
 }
 
+function companyHealthApiPath(url: string, apiUrl: string) {
+  try {
+    if (!url.startsWith(`${apiUrl}/`) && url !== apiUrl) return '';
+    const path = new URL(url).pathname;
+    return COMPANY_HEALTH_API_PATHS.includes(path as (typeof COMPANY_HEALTH_API_PATHS)[number]) ? path : '';
+  } catch {
+    return '';
+  }
+}
+
+function createCompanyHealthApiTracker(): CompanyHealthApiTracker {
+  return {
+    inFlight: new Map(),
+    statuses: new Map(),
+    transitions: [],
+  };
+}
+
+function resetCompanyHealthApiTracker(tracker: CompanyHealthApiTracker) {
+  tracker.inFlight.clear();
+  tracker.statuses.clear();
+  tracker.transitions.length = 0;
+}
+
+function updateCompanyHealthInFlight(tracker: CompanyHealthApiTracker, path: string, delta: number) {
+  const next = Math.max(0, (tracker.inFlight.get(path) || 0) + delta);
+  if (next === 0) tracker.inFlight.delete(path);
+  else tracker.inFlight.set(path, next);
+}
+
+function companyHealthRequestState(tracker: CompanyHealthApiTracker) {
+  const completed = Object.fromEntries(COMPANY_HEALTH_API_PATHS.map(path => [path, tracker.statuses.get(path) || []]));
+  const missing = COMPANY_HEALTH_API_PATHS.filter(path => !(tracker.statuses.get(path) || []).some(status => status >= 200 && status < 400));
+  const inFlight = Array.from(tracker.inFlight.values()).reduce((sum, count) => sum + count, 0);
+  return { completed, missing, inFlight };
+}
+
 function logStage(stage: string, fields: Record<string, unknown> = {}) {
   console.log('[production-dashboard-visual-smoke] stage', JSON.stringify({ stage, ...fields }));
 }
@@ -172,7 +269,13 @@ async function withStage<T>(
   }
 }
 
-async function installReadOnlyGuard(page: Page, apiUrl: string, issues: UiIssue[], getStage: () => string) {
+async function installReadOnlyGuard(
+  page: Page,
+  apiUrl: string,
+  issues: UiIssue[],
+  getStage: () => string,
+  companyHealthRequests: CompanyHealthApiTracker,
+) {
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const method = request.method().toUpperCase();
@@ -182,6 +285,14 @@ async function installReadOnlyGuard(page: Page, apiUrl: string, issues: UiIssue[
     }
     issues.push({ type: 'blocked-write', stage: getStage(), url: request.url(), text: method });
     await route.abort('blockedbyclient');
+  });
+
+  page.on('request', (request) => {
+    if (request.method().toUpperCase() !== 'GET') return;
+    const path = companyHealthApiPath(request.url(), apiUrl);
+    if (!path) return;
+    updateCompanyHealthInFlight(companyHealthRequests, path, 1);
+    companyHealthRequests.transitions.push({ event: 'start', path });
   });
 
   page.on('console', (message) => {
@@ -200,6 +311,16 @@ async function installReadOnlyGuard(page: Page, apiUrl: string, issues: UiIssue[
     const url = response.url();
     const path = new URL(url).pathname;
     const isApi = url.startsWith(apiUrl) || /\/api\//.test(url);
+    const companyHealthPath = response.request().method().toUpperCase() === 'GET'
+      ? companyHealthApiPath(url, apiUrl)
+      : '';
+    if (companyHealthPath) {
+      companyHealthRequests.statuses.set(companyHealthPath, [
+        ...(companyHealthRequests.statuses.get(companyHealthPath) || []),
+        status,
+      ]);
+      companyHealthRequests.transitions.push({ event: 'response', path: companyHealthPath, status });
+    }
     if (status >= 500) {
       issues.push({ type: 'http-5xx', stage: getStage(), url, status });
       return;
@@ -209,7 +330,22 @@ async function installReadOnlyGuard(page: Page, apiUrl: string, issues: UiIssue[
     }
   });
 
+  page.on('requestfinished', (request) => {
+    if (request.method().toUpperCase() !== 'GET') return;
+    const path = companyHealthApiPath(request.url(), apiUrl);
+    if (!path) return;
+    updateCompanyHealthInFlight(companyHealthRequests, path, -1);
+    companyHealthRequests.transitions.push({ event: 'finish', path });
+  });
+
   page.on('requestfailed', (request) => {
+    const companyHealthPath = request.method().toUpperCase() === 'GET'
+      ? companyHealthApiPath(request.url(), apiUrl)
+      : '';
+    if (companyHealthPath) {
+      updateCompanyHealthInFlight(companyHealthRequests, companyHealthPath, -1);
+      companyHealthRequests.transitions.push({ event: 'failed', path: companyHealthPath });
+    }
     const failure = request.failure()?.errorText || '';
     if (failure === 'net::ERR_ABORTED' || /favicon|\.map($|\?)/.test(request.url())) return;
     issues.push({ type: 'requestfailed', stage: getStage(), url: request.url(), text: sanitize(failure) });
@@ -277,6 +413,7 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
     const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]') ?? null;
     const radial = health?.querySelector('[data-testid="dashboard-radial-overview"]') ?? null;
     const radialCore = health?.querySelector('[data-testid="dashboard-radial-core"]') ?? null;
+    const radialEmpty = health?.querySelector('[data-testid="dashboard-radial-empty"]') ?? null;
     const healthRect = rectOf(health ?? null);
     const boardRect = rectOf(board);
     const boardFullRect = fullRectOf(board);
@@ -366,6 +503,7 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
       radialCoreText: radialCore?.textContent?.trim() || '',
       radialVisible: isVisible(radial),
       radialCoreVisible: isVisible(radialCore),
+      radialEmptyPresent: Boolean(radialEmpty),
       radialNodeCount: radialNodes.length,
       radialNodesInside,
       compactVisible: isVisible(compact),
@@ -376,6 +514,288 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
       overflowOffenders: offenders,
     };
   });
+}
+
+async function waitForCompanyHealthRequests(
+  tracker: CompanyHealthApiTracker,
+  viewportName: ViewportCase['name'],
+) {
+  await expect.poll(
+    () => {
+      const current = companyHealthRequestState(tracker);
+      return { missing: current.missing, inFlight: current.inFlight };
+    },
+    {
+      message: `${viewportName}: all Company Health source requests should finish successfully`,
+      timeout: 30_000,
+    },
+  ).toEqual({ missing: [], inFlight: 0 });
+
+  const settled = companyHealthRequestState(tracker);
+  logStage(`${viewportName}: company health requests settled`, {
+    completed: settled.completed,
+    transitions: tracker.transitions,
+  });
+  return settled;
+}
+
+async function readClosedCompanyHealthSnapshot(page: Page): Promise<CompanyHealthClosedSnapshot> {
+  return await page.evaluate(() => {
+    const health = document.querySelector('[data-testid="dashboard-company-health"]');
+    const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]');
+    const score = health?.querySelector('[data-testid="dashboard-company-health-score"] > div:first-child strong');
+    const coverage = health?.querySelector('[data-testid="dashboard-company-health-coverage"]');
+    const label = health?.querySelector('[data-testid="dashboard-company-health-status"]');
+    const directionTiles = Array.from(compact?.querySelectorAll<HTMLElement>('a.rentcore-command-card') || [])
+      .map(item => item.innerText.replace(/\s+/g, ' ').trim());
+    const loadingMarkers = health?.querySelectorAll('[aria-busy="true"], [data-loading="true"], [data-testid*="skeleton"]').length || 0;
+    return {
+      scoreText: score?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      coverageText: coverage?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      label: label?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      directionTiles,
+      loadingMarkers,
+    };
+  });
+}
+
+async function waitForStableClosedCompanyHealth(
+  page: Page,
+  viewportName: ViewportCase['name'],
+) {
+  let previousSignature = '';
+  let stableReads = 0;
+  let latest: CompanyHealthClosedSnapshot | null = null;
+  await expect.poll(
+    async () => {
+      latest = await readClosedCompanyHealthSnapshot(page);
+      const valid = latest.directionTiles.length === 6
+        && latest.loadingMarkers === 0
+        && /Покрытие \d+% · доверие \S+/i.test(latest.coverageText)
+        && Boolean(latest.scoreText)
+        && Boolean(latest.label);
+      const signature = valid ? JSON.stringify(latest) : '';
+      stableReads = signature && signature === previousSignature ? stableReads + 1 : signature ? 1 : 0;
+      previousSignature = signature;
+      return valid && stableReads >= 3;
+    },
+    {
+      message: `${viewportName}: hydrated Company Health DOM should be stable for three consecutive reads`,
+      timeout: 15_000,
+    },
+  ).toBe(true);
+  expect(latest, `${viewportName}: stable Company Health snapshot should exist`).not.toBeNull();
+  logStage(`${viewportName}: company health ready`, latest as unknown as Record<string, unknown>);
+  return latest!;
+}
+
+async function readCompanyHealthBusinessSnapshot(page: Page): Promise<CompanyHealthBusinessSnapshot> {
+  return await page.evaluate((directionKeys) => {
+    const health = document.querySelector('[data-testid="dashboard-company-health"]');
+    const text = (selector: string) => health?.querySelector(selector)?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    const parseScore = (value: string) => {
+      const match = value.match(/(\d+)\s*\/\s*100/);
+      return match ? Number(match[1]) : null;
+    };
+    const coverageText = text('[data-testid="dashboard-company-health-explanation-coverage"]');
+    const adjustedText = text('[data-testid="dashboard-company-health-explanation-adjusted"]');
+    const totalText = text('[data-testid="dashboard-company-health-explanation-total"]');
+    const excludedText = text('[data-testid="dashboard-company-health-excluded-directions"]');
+    const missingText = text('[data-testid="dashboard-company-health-missing-critical"]');
+    const rawScore = coverageText.match(/Оценка по доступным данным:\s*(\d+|—)\s*\/\s*100/i)?.[1] || '—';
+    const coveragePercent = Number(coverageText.match(/Покрытие данных:\s*(\d+)%/i)?.[1] || Number.NaN);
+    const confidence = coverageText.match(/Доверие к оценке:\s*([^·]+)$/i)?.[1]?.trim() || '';
+    const compactTiles = Array.from(health?.querySelectorAll<HTMLElement>('[data-testid="dashboard-company-health-compact"] a.rentcore-command-card') || []);
+    const directions = directionKeys.map((key, index) => {
+      const row = health?.querySelector<HTMLElement>(`[data-testid="dashboard-company-health-explanation-${key}"]`) || null;
+      const tile = compactTiles[index] || null;
+      const scoreText = row?.querySelector(':scope > div:first-child span:last-child')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+      const tileTitle = tile?.querySelector('.rentcore-command-card-title')?.textContent?.replace(/\s+/g, ' ').trim() || key;
+      const tileValue = tile?.querySelector('.rentcore-command-card-compact-value')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+      const tileCoverage = tile?.querySelector('.rentcore-command-card-copy')?.textContent?.match(/Покрытие\s+(\d+)%/i)?.[1];
+      const unavailableMetricStates = Array.from(row?.querySelectorAll<HTMLElement>('[data-source-status="missing"], [data-source-status="ambiguous"]') || [])
+        .map(metric => ({
+          sourceStatus: metric.getAttribute('data-source-status') as 'missing' | 'ambiguous',
+          text: metric.textContent?.replace(/\s+/g, ' ').trim() || '',
+        }));
+      return {
+        key,
+        title: tileTitle,
+        score: parseScore(scoreText),
+        coveragePercent: Number(tileCoverage || Number.NaN),
+        tileText: `${tileTitle} ${tileValue} ${tile?.querySelector('.rentcore-command-card-copy')?.textContent || ''}`.replace(/\s+/g, ' ').trim(),
+        explanationText: row?.innerText.replace(/\s+/g, ' ').trim() || '',
+        unavailableMetricStates,
+      };
+    });
+    const stripList = (value: string, prefix: RegExp, separator: string) => value
+      .replace(prefix, '')
+      .split(separator)
+      .map(item => item.trim())
+      .filter(Boolean);
+    return {
+      displayedAdjustedScore: parseScore(totalText),
+      explanationAdjustedScore: parseScore(adjustedText),
+      rawScore: rawScore === '—' ? null : Number(rawScore),
+      coveragePercent,
+      confidence,
+      label: text('[data-testid="dashboard-company-health-status"]'),
+      excludedDirections: excludedText
+        ? stripList(excludedText, /^Не участвуют из-за покрытия ниже 30%:\s*/i, ',')
+        : [],
+      missingCriticalMetrics: missingText
+        ? stripList(missingText, /^Критические метрики без оценки:\s*/i, ';')
+        : [],
+      directions,
+    };
+  }, [...COMPANY_HEALTH_DIRECTION_KEYS]);
+}
+
+async function waitForStableBusinessSnapshot(
+  page: Page,
+  viewportName: ViewportCase['name'],
+) {
+  let previousSignature = '';
+  let stableReads = 0;
+  let latest: CompanyHealthBusinessSnapshot | null = null;
+  await expect.poll(
+    async () => {
+      latest = await readCompanyHealthBusinessSnapshot(page);
+      const valid = latest.directions.length === 6
+        && Number.isFinite(latest.coveragePercent)
+        && Boolean(latest.confidence)
+        && latest.displayedAdjustedScore === latest.explanationAdjustedScore
+        && latest.directions.every(direction => Number.isFinite(direction.coveragePercent));
+      const signature = valid ? JSON.stringify(latest) : '';
+      stableReads = signature && signature === previousSignature ? stableReads + 1 : signature ? 1 : 0;
+      previousSignature = signature;
+      return valid && stableReads >= 3;
+    },
+    {
+      message: `${viewportName}: open Company Health breakdown should be complete and stable`,
+      timeout: 15_000,
+    },
+  ).toBe(true);
+  expect(latest, `${viewportName}: stable Company Health business snapshot should exist`).not.toBeNull();
+  return latest!;
+}
+
+async function companyHealthCardClip(page: Page) {
+  return await page.evaluate(() => {
+    const health = document.querySelector('[data-testid="dashboard-company-health"]');
+    if (!health) return null;
+    const rect = health.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.floor(rect.left + window.scrollX)),
+      y: Math.max(0, Math.floor(rect.top + window.scrollY)),
+      width: Math.ceil(rect.width),
+      height: Math.ceil(rect.height),
+    };
+  });
+}
+
+async function captureCompanyHealthCard(page: Page, testInfo: TestInfo, fileName: string) {
+  const clip = await companyHealthCardClip(page);
+  expect(clip, `${fileName}: Company Health clip should exist`).not.toBeNull();
+  await page.screenshot({
+    path: testInfo.outputPath(fileName),
+    clip: clip!,
+    timeout: 15_000,
+  });
+}
+
+async function openAndVerifyCompanyHealthExplanation(
+  page: Page,
+  viewportCase: ViewportCase,
+  state: { currentStage: string },
+  testInfo: TestInfo,
+) {
+  await withStage(state, `${viewportCase.name}: company health closed screenshot`, async () => {
+    await captureCompanyHealthCard(page, testInfo, `production-dashboard-${viewportCase.name}-company-health-closed.png`);
+  });
+
+  await withStage(state, `${viewportCase.name}: explanation opened`, async () => {
+    const toggle = page.getByTestId('dashboard-company-health-explanation-toggle');
+    expect(await toggle.count(), `${viewportCase.name}: explanation toggle should be unique`).toBe(1);
+    await toggle.click();
+    await expect(page.getByTestId('dashboard-company-health-explanation')).toBeVisible({ timeout: 10_000 });
+  });
+
+  const business = await withStage(state, `${viewportCase.name}: business snapshot`, async () => {
+    const value = await waitForStableBusinessSnapshot(page, viewportCase.name);
+    logStage(`${viewportCase.name}: company health business values`, value as unknown as Record<string, unknown>);
+    return value;
+  });
+
+  await withStage(state, `${viewportCase.name}: business assertions`, async () => {
+    expect(business.directions, `${viewportCase.name}: Company Health should expose exactly six direction states`).toHaveLength(6);
+    expect(business.displayedAdjustedScore, `${viewportCase.name}: displayed score should match explanation adjusted total`).toBe(business.explanationAdjustedScore);
+    expect(business.confidence, `${viewportCase.name}: confidence should be present`).not.toBe('');
+    expect(Number.isFinite(business.coveragePercent), `${viewportCase.name}: coverage should be present`).toBe(true);
+    business.directions.forEach(direction => {
+      if (direction.score === null) {
+        expect(direction.tileText, `${viewportCase.name}: insufficient ${direction.title} tile should show an em dash`).toContain('—');
+      }
+      direction.unavailableMetricStates.forEach(metric => {
+        expect(metric.text, `${viewportCase.name}: ${metric.sourceStatus} metric should not show a numeric score`).toContain('—/100');
+        expect(metric.text, `${viewportCase.name}: ${metric.sourceStatus} metric should not show a fake numeric score`).not.toMatch(/\b\d+\/100/);
+      });
+    });
+    if (business.coveragePercent < 30) {
+      expect(business.displayedAdjustedScore, `${viewportCase.name}: coverage below 30% should not show a numeric score`).toBeNull();
+      expect(business.label, `${viewportCase.name}: coverage below 30% should show the insufficient label`).toContain('Недостаточно данных для оценки');
+    } else if (business.coveragePercent < 60) {
+      expect(business.label, `${viewportCase.name}: coverage from 30% through 59% should be preliminary`).toContain('Предварительная оценка');
+    }
+  });
+
+  await withStage(state, `${viewportCase.name}: explanation containment`, async () => {
+    const containment = await page.evaluate(() => {
+      const health = document.querySelector('[data-testid="dashboard-company-health"]')?.getBoundingClientRect();
+      const explanation = document.querySelector('[data-testid="dashboard-company-health-explanation"]')?.getBoundingClientRect();
+      const viewportWidth = document.documentElement.clientWidth;
+      const scrollWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+      return {
+        inside: Boolean(health && explanation
+          && explanation.left >= health.left - 1
+          && explanation.right <= health.right + 1
+          && explanation.top >= health.top - 1
+          && explanation.bottom <= health.bottom + 1),
+        overflowX: scrollWidth - viewportWidth,
+      };
+    });
+    expect(containment.inside, `${viewportCase.name}: explanation should remain inside Company Health card`).toBe(true);
+    expect(containment.overflowX, `${viewportCase.name}: open explanation overflow should be exactly zero`).toBe(0);
+    await captureCompanyHealthCard(page, testInfo, `production-dashboard-${viewportCase.name}-company-health-open.png`);
+  });
+
+  await withStage(state, `${viewportCase.name}: explanation closed`, async () => {
+    const close = page.getByTestId('dashboard-company-health-explanation-close');
+    expect(await close.count(), `${viewportCase.name}: explanation close control should be unique`).toBe(1);
+    await close.click();
+    await expect(page.getByTestId('dashboard-company-health-explanation')).toHaveCount(0);
+  });
+
+  return business;
+}
+
+function comparableCompanyHealthSnapshot(snapshot: CompanyHealthBusinessSnapshot) {
+  return {
+    displayedAdjustedScore: snapshot.displayedAdjustedScore,
+    rawScore: snapshot.rawScore,
+    coveragePercent: snapshot.coveragePercent,
+    confidence: snapshot.confidence,
+    label: snapshot.label,
+    excludedDirections: snapshot.excludedDirections,
+    missingCriticalMetrics: snapshot.missingCriticalMetrics,
+    directions: snapshot.directions.map(direction => ({
+      key: direction.key,
+      title: direction.title,
+      score: direction.score,
+      coveragePercent: direction.coveragePercent,
+      unavailableMetricStates: direction.unavailableMetricStates,
+    })),
+  };
 }
 
 async function expectDashboardContract(
@@ -428,6 +848,7 @@ async function expectDashboardContract(
     expect(snapshot.healthCompletenessVisible, `${viewportCase.name}: company health local data strip should be visible (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.radialVisible, `${viewportCase.name}: radial overview should be visible (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.radialCoreVisible, `${viewportCase.name}: radial core should be visible (${JSON.stringify(snapshot)})`).toBe(true);
+    expect(snapshot.radialEmptyPresent, `${viewportCase.name}: radial empty compatibility selector should remain present (${JSON.stringify(snapshot)})`).toBe(true);
     expect(snapshot.radialCoreText, `${viewportCase.name}: radial core should not show a huge Нет placeholder`).not.toContain('Нет');
     expect(snapshot.radialNodeCount, `${viewportCase.name}: radial overview should render business contour nodes`).toBeGreaterThanOrEqual(6);
     expect(snapshot.radialNodesInside, `${viewportCase.name}: radial nodes should stay inside overview (${JSON.stringify(snapshot)})`).toBe(true);
@@ -477,6 +898,7 @@ test('production authenticated dashboard visual smoke', async ({ page }, testInf
   const apiUrl = requiredEnv('PRODUCTION_API_URL', 'production dashboard visual smoke').replace(/\/$/, '');
   const frontendUrl = requiredEnv('PRODUCTION_FRONTEND_URL', 'production dashboard visual smoke').replace(/\/$/, '');
   const expectedCommit = String(process.env.EXPECTED_RELEASE_COMMIT || '').trim();
+  const companyHealthRequests = createCompanyHealthApiTracker();
 
   logStage('start', {
     expectedCommit: shortCommit(expectedCommit),
@@ -484,7 +906,7 @@ test('production authenticated dashboard visual smoke', async ({ page }, testInf
     apiUrl,
   });
 
-  await installReadOnlyGuard(page, apiUrl, issues, () => state.currentStage);
+  await installReadOnlyGuard(page, apiUrl, issues, () => state.currentStage, companyHealthRequests);
 
   const api = await playwrightRequest.newContext({ baseURL: apiUrl });
   let token = '';
@@ -537,6 +959,7 @@ test('production authenticated dashboard visual smoke', async ({ page }, testInf
   }, token);
 
   const snapshots: Record<string, DashboardLayoutSnapshot> = {};
+  const companyHealthSnapshots: Record<string, CompanyHealthBusinessSnapshot> = {};
   let frontendCommit = '';
   let frontendApiBaseUrl = '';
   try {
@@ -546,6 +969,7 @@ test('production authenticated dashboard visual smoke', async ({ page }, testInf
       });
 
       await withStage(state, `${viewportCase.name}: dashboard navigation`, async () => {
+        resetCompanyHealthApiTracker(companyHealthRequests);
         await page.goto(productionAppUrl(frontendUrl, '/'), {
           waitUntil: 'domcontentloaded',
           timeout: 30_000,
@@ -585,12 +1009,39 @@ test('production authenticated dashboard visual smoke', async ({ page }, testInf
         }
       });
 
+      await withStage(state, `${viewportCase.name}: company health requests`, async () => {
+        await waitForCompanyHealthRequests(companyHealthRequests, viewportCase.name);
+      });
+
+      await withStage(state, `${viewportCase.name}: company health hydration`, async () => {
+        await waitForStableClosedCompanyHealth(page, viewportCase.name);
+      });
+
       snapshots[viewportCase.name] = await expectDashboardContract(page, viewportCase, state, testInfo);
+      companyHealthSnapshots[viewportCase.name] = await openAndVerifyCompanyHealthExplanation(page, viewportCase, state, testInfo);
     }
+
+    await withStage(state, 'company health viewport consistency', async () => {
+      const desktop = comparableCompanyHealthSnapshot(companyHealthSnapshots.desktop);
+      expect(
+        comparableCompanyHealthSnapshot(companyHealthSnapshots.tablet),
+        `tablet Company Health business state should match desktop: ${JSON.stringify(companyHealthSnapshots)}`,
+      ).toEqual(desktop);
+      expect(
+        comparableCompanyHealthSnapshot(companyHealthSnapshots.mobile),
+        `mobile Company Health business state should match desktop: ${JSON.stringify(companyHealthSnapshots)}`,
+      ).toEqual(desktop);
+    });
 
     await withStage(state, 'console/api checked', async () => {
       expect(issues, `Dashboard smoke should not emit console/page/API errors. Last stage: ${state.currentStage}`).toEqual([]);
     });
+
+    const errorCounts = {
+      consoleErrors: issues.filter(issue => issue.type === 'console.error').length,
+      pageErrors: issues.filter(issue => issue.type === 'pageerror').length,
+      apiErrors: issues.filter(issue => ['http-5xx', 'authz-response', 'requestfailed'].includes(issue.type)).length,
+    };
 
     logStage('final result', {
       expectedCommit: shortCommit(expectedCommit),
@@ -607,6 +1058,8 @@ test('production authenticated dashboard visual smoke', async ({ page }, testInf
         tablet: snapshots.tablet?.overflowX ?? 0,
         mobile: snapshots.mobile?.overflowX ?? 0,
       },
+      companyHealth: comparableCompanyHealthSnapshot(companyHealthSnapshots.desktop),
+      ...errorCounts,
       errors: issues.length,
     });
   } catch (error) {
@@ -618,6 +1071,9 @@ test('production authenticated dashboard visual smoke', async ({ page }, testInf
         mobile: snapshots.mobile?.compactCards ?? 0,
       },
       issues,
+      companyHealthRequests: companyHealthRequestState(companyHealthRequests),
+      companyHealthTransitions: companyHealthRequests.transitions,
+      companyHealthSnapshots,
       lastSnapshot,
       message: error instanceof Error ? sanitize(error.message) : sanitize(String(error)),
     }));

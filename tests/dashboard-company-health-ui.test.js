@@ -5,6 +5,7 @@ import path from 'node:path';
 
 const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
 const themeSource = fs.readFileSync(path.join(process.cwd(), 'src/styles/theme.css'), 'utf8');
+const healthModelSource = fs.readFileSync(path.join(process.cwd(), 'src/app/lib/dashboardCompanyHealth.js'), 'utf8');
 
 function sourceBlock(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -144,6 +145,35 @@ test('dashboard company health exposes weighted score explanation', () => {
 
   assert.match(themeSource, /\.company-health-explanation-popover\s*\{[\s\S]*position: absolute;[\s\S]*bottom: 9px;[\s\S]*overflow: auto;/);
   assert.match(themeSource, /@container \(max-width: 520px\)\s*\{[\s\S]*\.company-health-explanation-popover\s*\{[\s\S]*top: 148px;[\s\S]*bottom: 9px;/);
+});
+
+test('dashboard Company Health Finance explanation separates factual amounts from missing plans', () => {
+  const commandCenterBlock = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
+  const directionsBlock = sourceBlock(dashboardSource, 'const commandCenterDirections = [', '].filter(Boolean)');
+  const modelInputBlock = sourceBlock(dashboardSource, 'const companyHealthModel = buildCompanyHealthModel({', '});');
+
+  assert.match(modelInputBlock, /accruedRentalRevenueAmount: monthlyRevenue/);
+  assert.match(modelInputBlock, /actualReceiptsAmount/);
+  assert.match(modelInputBlock, /actualReceiptsAvailable/);
+  assert.match(modelInputBlock, /actualOperatingInflowsAmount/);
+  assert.match(modelInputBlock, /actualOperatingOutflowsAmount: factualOperatingOutflows/);
+  assert.match(directionsBlock, /label: 'Поступило'/);
+  assert.match(directionsBlock, /label: 'Начислено'/);
+  assert.match(directionsBlock, /label: 'Просрочено'/);
+  assert.doesNotMatch(directionsBlock, /label: 'Ожидается'/);
+  assert.match(commandCenterBlock, /dashboard-company-health-explanation-\$\{direction\.key\}-facts/);
+  assert.match(healthModelSource, /Поступило:/);
+  assert.match(healthModelSource, /Начислено:/);
+  assert.match(healthModelSource, /План поступлений:/);
+  assert.match(healthModelSource, /Просрочено:/);
+  assert.match(healthModelSource, /Денежный поток:/);
+  assert.match(healthModelSource, /Расходы:/);
+  assert.match(healthModelSource, /План расходов:/);
+  assert.match(healthModelSource, /Утверждённый план поступлений не задан/);
+  assert.match(healthModelSource, /Утверждённый план расходов не задан/);
+  assert.match(healthModelSource, /Денежный поток: недостаточно данных/);
+  assert.match(commandCenterBlock, /metric: isEligible \? `\$\{directionScore\}\/100` : '—'/);
+  assert.match(commandCenterBlock, /stateLabel: isEligible \? `\$\{directionScore\}\/100` : 'Недостаточно данных'/);
 });
 
 test('dashboard trend overview has empty and zero-value states without letting empty copy dominate', () => {

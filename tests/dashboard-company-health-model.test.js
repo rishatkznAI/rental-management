@@ -6,6 +6,7 @@ import {
   COMPANY_HEALTH_WEIGHTS,
   MIN_DIRECTION_COVERAGE_PERCENT,
   MIN_FINANCE_COVERAGE_PERCENT,
+  MIN_RISKS_COVERAGE_PERCENT,
   alertHasValidSource,
   buildCompanyHealthModel,
   buildOperationalLoadModel,
@@ -35,6 +36,44 @@ const directionKeys = Object.keys(COMPANY_HEALTH_WEIGHTS);
 
 function completeDirections(score = 80) {
   return directionKeys.map(key => testDirection(key, [testMetric(`${key}_complete`, score)]));
+}
+
+function reliableDebtAging(overrides = {}) {
+  return {
+    sourceStatus: 'derived',
+    sourceConfidence: 'high',
+    debtAgingReliable: true,
+    overdueReceivablesAvailable: true,
+    totalOutstandingAmount: 100_000,
+    overdueOutstandingAmount: 100_000,
+    currentAmount: 0,
+    bucket1to30Amount: 100_000,
+    bucket31to60Amount: 0,
+    bucket61to90Amount: 0,
+    bucketOver90Amount: 0,
+    excludedAmbiguousAmount: 0,
+    excludedAmbiguousCount: 0,
+    largestClientOverdueAmount: 20_000,
+    largestClientConcentrationAvailable: true,
+    ...overrides,
+  };
+}
+
+function riskModel(debtAging, overrides = {}) {
+  return buildCompanyHealthModel({
+    equipmentCount: 5,
+    activeEquipment: 5,
+    rentalsCount: 3,
+    paymentsCount: 2,
+    serviceCount: 1,
+    documentsCount: 1,
+    deliveriesCount: 1,
+    clientsCount: 3,
+    actualReceiptsAmount: 1_000_000,
+    actualReceiptsAvailable: true,
+    debtAging,
+    ...overrides,
+  });
 }
 
 test('company health weights are explicit and sum to 1.0', () => {
@@ -347,7 +386,7 @@ test('company health directions expose weighted sub-metric methodology', () => {
     const subMetricScore = availableWeight > 0
       ? Math.round(direction.subMetrics.reduce((sum, metric) => sum + metric.contribution, 0) / availableWeight)
       : null;
-    assert.equal(direction.score, subMetricScore);
+    assert.equal(direction.isEligible ? direction.score : direction.availableDataScore ?? direction.score, subMetricScore);
     for (const metric of direction.subMetrics) {
       assert.ok(metric.key);
       assert.ok(metric.title);
@@ -519,7 +558,7 @@ test('missing or ineligible Finance data cannot increase the displayed Company H
   assert.ok(missingFinance.totalScore < baseline.totalScore);
 });
 
-test('company health risk score is strict for one large overdue debtor', () => {
+test('company health risk score is strict for one large confirmed overdue debtor', () => {
   const model = buildCompanyHealthModel({
     equipmentCount: 10,
     activeEquipment: 10,
@@ -536,10 +575,23 @@ test('company health risk score is strict for one large overdue debtor', () => {
     monthlyPaidAmount: 700_000,
     overdueReceivablesAmount: 650_000,
     totalDebt: 800_000,
-    debt30PlusAmount: 0,
-    debt60PlusAmount: 0,
-    largestProblemDebtAmount: 650_000,
-    problemClientCount: 1,
+    debtAging: {
+      sourceStatus: 'derived',
+      sourceConfidence: 'high',
+      debtAgingReliable: true,
+      overdueReceivablesAvailable: true,
+      totalOutstandingAmount: 800_000,
+      overdueOutstandingAmount: 650_000,
+      currentAmount: 150_000,
+      bucket1to30Amount: 650_000,
+      bucket31to60Amount: 0,
+      bucket61to90Amount: 0,
+      bucketOver90Amount: 0,
+      excludedAmbiguousAmount: 0,
+      excludedAmbiguousCount: 0,
+      largestClientOverdueAmount: 650_000,
+      largestClientConcentrationAvailable: true,
+    },
     hasDebtSourceData: true,
     rentalRevenueActual: 800_000,
     rentalRevenuePlan: 1_000_000,
@@ -566,11 +618,114 @@ test('company health risk score is strict for one large overdue debtor', () => {
   assert.ok((risks?.score ?? 100) <= 40);
   assert.match(risks?.riskLevel || '', /^(critical|risk)$/);
   assert.ok((overdue?.score ?? 100) <= 10);
-  assert.equal(concentration?.sourceStatus, 'ambiguous');
-  assert.equal(concentration?.score, null);
-  assert.equal(concentration?.isScorable, false);
-  assert.equal(concentration?.contribution, 0);
-  assert.match(risks?.recommendedAction || '', /план взыскания/i);
+  assert.equal(concentration?.sourceStatus, 'derived');
+  assert.equal(concentration?.score, 16);
+  assert.equal(concentration?.isScorable, true);
+  assert.ok(risks?.riskPriorityOverride);
+});
+
+test('Risks eligibility uses the explicit 55 percent raw unrounded coverage threshold', () => {
+  assert.equal(MIN_RISKS_COVERAGE_PERCENT, 55);
+  const eligibility = { overdueReceivablesAvailable: true, debtAgingReliable: true };
+  assert.equal(isDirectionEligible({ key: 'risks', score: 50, rawCoveragePercent: 54.49, coveragePercent: 55, risksEligibility: eligibility }), false);
+  assert.equal(isDirectionEligible({ key: 'risks', score: 50, rawCoveragePercent: 54.999, coveragePercent: 55, risksEligibility: eligibility }), false);
+  assert.equal(isDirectionEligible({ key: 'risks', score: 50, rawCoveragePercent: 55, coveragePercent: 55, risksEligibility: eligibility }), true);
+});
+
+test('overdue total alone cannot manufacture Risks 99 and ambiguous aging excludes Risks', () => {
+  const model = riskModel({
+    sourceStatus: 'ambiguous',
+    sourceConfidence: 'low',
+    debtAgingReliable: false,
+    overdueReceivablesAvailable: false,
+    totalOutstandingAmount: 0,
+    overdueOutstandingAmount: 0,
+    currentAmount: 0,
+    bucket1to30Amount: 0,
+    bucket31to60Amount: 0,
+    bucket61to90Amount: 0,
+    bucketOver90Amount: 0,
+    excludedAmbiguousAmount: 500_000,
+    excludedAmbiguousCount: 2,
+    largestClientConcentrationAvailable: false,
+  }, {
+    overdueReceivablesAmount: 500_000,
+    totalDebt: 500_000,
+    overdueReceivablesCount: 2,
+  });
+  const risks = model.scoreDetails.directions.find(item => item.key === 'risks');
+
+  assert.equal(risks?.score, null);
+  assert.equal(risks?.isEligible, false);
+  assert.ok((risks?.rawCoveragePercent ?? 100) < MIN_RISKS_COVERAGE_PERCENT);
+  assert.equal(risks?.shortReason, 'Недостаточно надёжных данных по срокам задолженности');
+  assert.ok(model.scoreDetails.excludedDirections.includes('risks'));
+});
+
+test('confirmed old debt worsens the Risks score and over-90 is more severe than 1-30', () => {
+  const recent = riskModel(reliableDebtAging());
+  const middle = riskModel(reliableDebtAging({
+    bucket1to30Amount: 0,
+    bucket61to90Amount: 100_000,
+  }));
+  const old = riskModel(reliableDebtAging({
+    bucket1to30Amount: 0,
+    bucketOver90Amount: 100_000,
+  }));
+  const recentRisks = recent.scoreDetails.directions.find(item => item.key === 'risks');
+  const middleRisks = middle.scoreDetails.directions.find(item => item.key === 'risks');
+  const oldRisks = old.scoreDetails.directions.find(item => item.key === 'risks');
+  const recentAge = recentRisks?.subMetrics.find(metric => metric.key === 'risks_old_debt');
+  const oldAge = oldRisks?.subMetrics.find(metric => metric.key === 'risks_old_debt');
+
+  assert.ok((middleRisks?.score ?? 100) < (recentRisks?.score ?? 0));
+  assert.ok((oldRisks?.score ?? 100) < (middleRisks?.score ?? 0));
+  assert.ok((oldAge?.score ?? 100) < (recentAge?.score ?? 0));
+});
+
+test('confirmed severe old debt and a large confirmed debtor receive focus priority', () => {
+  const severe = riskModel(reliableDebtAging({
+    totalOutstandingAmount: 200_000,
+    overdueOutstandingAmount: 200_000,
+    bucket1to30Amount: 0,
+    bucketOver90Amount: 200_000,
+    largestClientOverdueAmount: 150_000,
+  }));
+  const risks = severe.scoreDetails.directions.find(item => item.key === 'risks');
+
+  assert.equal(risks?.hasSevereOldDebt, true);
+  assert.equal(risks?.riskPriorityOverride, true);
+  assert.equal(severe.scoreDetails.focusDirections[0]?.key, 'risks');
+});
+
+test('missing Risks data cannot improve the displayed Company Health score', () => {
+  const confirmed = riskModel(reliableDebtAging({
+    bucket1to30Amount: 0,
+    bucketOver90Amount: 100_000,
+  }));
+  const missing = riskModel({
+    sourceStatus: 'ambiguous',
+    sourceConfidence: 'low',
+    debtAgingReliable: false,
+    overdueReceivablesAvailable: false,
+    excludedAmbiguousAmount: 100_000,
+    excludedAmbiguousCount: 1,
+  });
+
+  assert.ok((missing.scoreDetails.adjustedScore ?? 0) <= (confirmed.scoreDetails.adjustedScore ?? 0));
+  assert.ok(missing.scoreDetails.rawTotalCoveragePercent < confirmed.scoreDetails.rawTotalCoveragePercent);
+});
+
+test('Risks sub-metric and Company Health weights remain unchanged', () => {
+  const risks = riskModel(reliableDebtAging()).scoreDetails.directions.find(item => item.key === 'risks');
+
+  assert.equal(COMPANY_HEALTH_WEIGHTS.risks, 0.20);
+  assert.deepEqual(risks?.subMetrics.map(metric => [metric.key, metric.weight]), [
+    ['risks_overdue_receivables', 0.45],
+    ['risks_old_debt', 0.25],
+    ['risks_problem_clients', 0.20],
+    ['risks_critical_events', 0.10],
+  ]);
 });
 
 test('empty dashboard data does not calculate a numeric company health score', () => {

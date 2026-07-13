@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 import { loginAsAdmin, navigateInApp } from './helpers/auth';
 
 const VIEWPORTS = [
@@ -303,6 +304,25 @@ test.describe('Dashboard enterprise layout', () => {
       expect(explanationText, `${viewport.name}: explanation should show focus directions`).toMatch(/Сначала исправить: \S/);
       expect(explanationText, `${viewport.name}: explanation should show raw score, coverage and confidence`).toMatch(/Оценка по доступным данным: (?:\d+|—)\/100 · Покрытие данных: \d+% · Доверие к оценке:/);
       expect(explanationText, `${viewport.name}: explanation should show the coverage-adjusted score`).toMatch(/Итоговая оценка с учётом покрытия: (?:\d+|—)\/100/);
+      for (const agingLabel of [
+        'Общая дебиторка',
+        'Просроченная дебиторка',
+        'Не наступил срок',
+        '1–30 дней',
+        '31–60 дней',
+        '61–90 дней',
+        'Более 90 дней',
+        'Исключено из расчёта из-за неоднозначной даты',
+      ]) {
+        expect(explanationText, `${viewport.name}: Risks explanation should show ${agingLabel}`).toContain(agingLabel);
+      }
+      expect(explanationText, `${viewport.name}: ambiguous aging should exclude Risks`).toMatch(/Риски[\s\S]*— · покрытие \d+%/);
+      expect(explanationText, `${viewport.name}: ambiguous aging should explain the insufficient Risks state`).toContain('Недостаточно надёжных данных по срокам задолженности');
+      expect(explanationText, `${viewport.name}: aging explanation should not show cumulative 60+ debt`).not.toMatch(/\b60\+/);
+      expect(explanationText, `${viewport.name}: aging explanation should not show a cumulative 90+ label`).not.toMatch(/\b90\+/);
+      const risksSignal = page.getByTestId('dashboard-company-health-compact').locator('a').filter({ hasText: 'Риски' });
+      await expect(risksSignal, `${viewport.name}: Risks tile should remain visible`).toHaveCount(1);
+      await expect(risksSignal, `${viewport.name}: ineligible Risks tile should show an em dash`).toContainText('—');
       await expect(page.getByTestId('dashboard-company-health-missing-critical'), `${viewport.name}: missing critical metrics should be explicit`).toBeVisible();
       await expect(page.getByTestId('dashboard-company-health-excluded-directions'), `${viewport.name}: excluded directions should be explicit`).toBeVisible();
       await expect(explanation.locator('[data-source-status="missing"]').first(), `${viewport.name}: missing source provenance should be visible`).toContainText('Нет данных');
@@ -317,8 +337,23 @@ test.describe('Dashboard enterprise layout', () => {
       expect(openSnapshot.healthExplanation?.bottom ?? 0, `${viewport.name}: open explanation should stay inside company health bottom edge (${JSON.stringify(openSnapshot)})`).toBeLessThanOrEqual((openSnapshot.health?.bottom ?? 0) + 1);
       expect(openSnapshot.compactHealthCards, `${viewport.name}: open explanation should keep six business signals`).toBe(6);
       expect(openSnapshot.radialCoreExists, `${viewport.name}: open explanation should preserve radial core selector`).toBe(true);
+      await testInfo.attach(`company-health-${viewport.name}-geometry`, {
+        body: JSON.stringify({ viewport, closed: snapshot, explanationOpen: openSnapshot }, null, 2),
+        contentType: 'application/json',
+      });
+      await writeFile(
+        testInfo.outputPath(`company-health-${viewport.name}-geometry.json`),
+        `${JSON.stringify({ viewport, closed: snapshot, explanationOpen: openSnapshot }, null, 2)}\n`,
+        'utf8',
+      );
       await explanation.screenshot({
         path: testInfo.outputPath(`company-health-${viewport.name}-open.png`),
+      });
+      const risksExplanation = page.getByTestId('dashboard-company-health-explanation-risks');
+      await risksExplanation.scrollIntoViewIfNeeded();
+      await expect(risksExplanation, `${viewport.name}: Risks explanation should be visible for evidence`).toBeVisible();
+      await explanation.screenshot({
+        path: testInfo.outputPath(`company-health-${viewport.name}-risks-open.png`),
       });
       await page.getByTestId('dashboard-company-health-explanation-close').click();
     });

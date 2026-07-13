@@ -88,6 +88,7 @@ import { buildDashboardAttentionSummary } from '../lib/dashboardAttention.js';
 import { buildDocumentControl, isUnsignedDocument } from '../lib/documentControl.js';
 import { buildDebtCollectionDashboardSummary } from '../lib/debtCollectionPlans.js';
 import { alertHasValidSource, buildCompanyHealthModel, buildOperationalLoadModel } from '../lib/dashboardCompanyHealth.js';
+import { buildCanonicalDebtAging, mapRentalDebtRowsForCompanyHealth } from '../lib/companyHealthDebtAging.js';
 import { taskPrioritySummaryLabel } from '../lib/tasksCenter.js';
 import { tasksCenterService } from '../services/tasks-center.service';
 import {
@@ -2101,6 +2102,15 @@ export default function Dashboard() {
   const rentalDebtRows = useMemo(
     () => buildRentalDebtRows(ganttRentals, payments, paymentAllocations as PaymentAllocation[]),
     [ganttRentals, paymentAllocations, payments],
+  );
+  const companyHealthDebtAging = useMemo(
+    () => buildCanonicalDebtAging(mapRentalDebtRowsForCompanyHealth(rentalDebtRows), {
+      sourceAvailable: paymentsQuery.isSuccess && paymentAllocationsQuery.isSuccess && ganttRentalsQuery.isSuccess,
+      asOfDate: today.toISOString().slice(0, 10),
+      // app_settings has no proven company timezone contract; the aging model keeps this ambiguous.
+      companyTimeZone: undefined,
+    }),
+    [ganttRentalsQuery.isSuccess, paymentAllocationsQuery.isSuccess, paymentsQuery.isSuccess, rentalDebtRows, today],
   );
   const clientDebtAgingRows = useMemo(
     () => buildClientDebtAgingRows(clients, rentalDebtRows, today.toISOString().slice(0, 10)),
@@ -4182,6 +4192,7 @@ export default function Dashboard() {
     totalDebt,
     overdueReceivablesAmount,
     overdueReceivablesAvailable,
+    debtAging: companyHealthDebtAging,
     debt30PlusAmount,
     debt60PlusAmount,
     largestProblemDebtAmount,

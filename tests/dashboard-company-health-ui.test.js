@@ -176,6 +176,31 @@ test('dashboard Company Health Finance explanation separates factual amounts fro
   assert.match(commandCenterBlock, /stateLabel: isEligible \? `\$\{directionScore\}\/100` : 'Недостаточно данных'/);
 });
 
+test('dashboard Company Health Risks explanation exposes exclusive aging states and ambiguous exclusion', () => {
+  const commandCenterBlock = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
+  const modelInputBlock = sourceBlock(dashboardSource, 'const companyHealthModel = buildCompanyHealthModel({', '});');
+
+  assert.match(dashboardSource, /buildCanonicalDebtAging\(mapRentalDebtRowsForCompanyHealth\(rentalDebtRows\)/);
+  assert.match(modelInputBlock, /debtAging: companyHealthDebtAging/);
+  assert.match(healthModelSource, /Общая дебиторка:/);
+  assert.match(healthModelSource, /Просроченная дебиторка:/);
+  assert.match(healthModelSource, /Не наступил срок:/);
+  assert.match(healthModelSource, /1–30 дней:/);
+  assert.match(healthModelSource, /31–60 дней:/);
+  assert.match(healthModelSource, /61–90 дней:/);
+  assert.match(healthModelSource, /Более 90 дней:/);
+  assert.match(healthModelSource, /Исключено из расчёта из-за неоднозначной даты:/);
+  assert.match(healthModelSource, /Крупнейшая концентрация риска:/);
+  assert.match(healthModelSource, /Источник aging:/);
+  assert.match(healthModelSource, /Доверие:/);
+  assert.match(healthModelSource, /Недостаточно надёжных данных по срокам задолженности/);
+  assert.doesNotMatch(healthModelSource, /Долги старше 30\/60\/90 дней/);
+  assert.doesNotMatch(healthModelSource, /30\+ и 60\+/);
+  assert.match(commandCenterBlock, /metric: isEligible \? `\$\{directionScore\}\/100` : '—'/);
+  assert.match(commandCenterBlock, /data-testid="dashboard-company-health-compact"/);
+  assert.match(commandCenterBlock, /data-testid="dashboard-company-health-explanation-coverage"/);
+});
+
 test('dashboard trend overview has empty and zero-value states without letting empty copy dominate', () => {
   const trendBlock = sourceBlock(dashboardSource, 'function CompanyHealthTrendOverview', 'function CompanyHealthCommandCenter');
 

@@ -9,6 +9,9 @@ const {
   ensureCanonicalReceivablesSchema,
 } = require('./lib/canonical-receivables-schema');
 const {
+  ensureCanonicalReceivablesSettlementSchema,
+} = require('./lib/canonical-receivables-settlement-schema');
+const {
   assertClientInnListUnique,
   assertClientInnWriteAllowed,
   buildClientInnDuplicateReport,
@@ -123,6 +126,7 @@ function ensureDb() {
   dbInstance = db;
   ensureSqlShadowSchema(db);
   ensureCanonicalReceivablesSchema(db);
+  ensureCanonicalReceivablesSettlementSchema(db);
   syncClientInnIndex({ throwOnDuplicates: false });
   return db;
 }

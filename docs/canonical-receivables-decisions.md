@@ -1,8 +1,8 @@
 # Canonical receivables: product-owner decision memo
 
-**Status:** product-owner baseline approved; PR1 schema/domain implementation ready for review; conditional confirmations remain
+**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; conditional confirmations remain
 
-**Prepared:** 2026-07-13
+**Prepared:** 2026-07-13; release status updated 2026-07-14
 
 **Source specification:** `docs/canonical-receivables-contract.md`
 
@@ -20,9 +20,11 @@
 
 **No silent assumptions:** implementation may encode only the answers in this baseline. Missing legal document types, retention durations, financial thresholds, tie-break policy extensions, or role powers must remain disabled, configuration-blocked, or explicitly escalated.
 
-## PR1 implementation status
+**Current status summary:** the product baseline is approved; PR1 is released; the production canonical ledger remains inactive; the canonical tables are infrastructure only; and PR2 cannot begin until its approval gate is resolved.
 
-PR1 uses migration identifier `canonical_receivables_pr1_schema` version 1 on branch `codex/canonical-receivables-pr1-schema`. It follows the existing idempotent initializer and `sql_shadow_schema_migrations` registry convention; the canonical DDL and registration run once, while repeated startup retains the original registration timestamp.
+## PR1 release status
+
+**PR1: RELEASED.** The schema/domain foundation merged as commit `ae9d8a8a286307f5d6e701585750af94d631edc1` and was deployed and verified in production. It uses migration identifier `canonical_receivables_pr1_schema` version 1. The migration follows the existing idempotent initializer and `sql_shadow_schema_migrations` registry convention; production contains exactly one registration, and repeated startup skipped the initializer without re-executing the canonical DDL.
 
 The migration adds empty `canonical_companies`, `canonical_branches`, `canonical_receivables`, and `financial_audit_events` tables. Company rows require an IANA receivables timezone, while receivables retain the immutable posting-time timezone snapshot. Company and branch are mandatory on receivable/audit rows, with composite same-company branch foreign keys and no seeded tenant. The receivable table enforces RUB integer minor units, approved provenance/workflow values, normalized source-line uniqueness, company-scoped source/idempotency/external identities, and exact posted-field immutability for the approved source/scope/money/timezone fields. The audit table is append-only for ordinary application SQL through no-update/no-delete/no-replace SQLite triggers; physical DBA tampering remains outside the PR1 application guarantee.
 
@@ -32,7 +34,28 @@ Because clients, contracts, rentals, and users remain JSON records, PR1 does not
 
 Pure domain helpers implement creation validation, due-date provenance, aging eligibility, explicit PR1 workflow transitions, posted immutability, deterministic source/idempotency identities, and the limited pre-allocation balance/derived-state contract. Posted validation accepts no built-in source type: an injected approved-source policy is mandatory, and no production caller is wired.
 
-No receivable API, posting repository, backfill, seed, dual write, payment/allocation/adjustment behavior, production read switch, Company Health import, frontend change, retention deletion, D-25 threshold, or RBAC expansion is included. PR1 is implemented for review but is not released or cut over. PR2 and later gates remain unchanged and blocked/sequence-gated exactly as recorded below.
+No receivable API, posting repository, backfill, seed, dual write, payment/allocation/adjustment behavior, production read switch, Company Health import, frontend change, retention deletion, D-25 threshold, or RBAC expansion is included. PR1 is released but not cut over: production posting remains disabled, production reads remain unchanged, and PR2 and later gates remain blocked/sequence-gated exactly as recorded below.
+
+### Verified production state
+
+| Evidence | Verified value |
+|---|---:|
+| PR1 merge commit | `ae9d8a8a286307f5d6e701585750af94d631edc1` |
+| Migration | `canonical_receivables_pr1_schema`, version `1` |
+| Migration registration count | `1` |
+| Repeated initializer | Skipped |
+| `PRAGMA foreign_keys = 1` | Confirmed |
+| `PRAGMA foreign_key_check = 0` | Confirmed |
+| `canonical_companies` | `0` rows |
+| `canonical_branches` | `0` rows |
+| `canonical_receivables` | `0` rows |
+| `financial_audit_events` | `0` rows |
+
+The additive release changed no legacy table schema or application data and introduced no production canonical receivable read or write path. The four canonical tables remain empty infrastructure.
+
+### Deferred production scope
+
+PR1 enables no receivable posting, allocations, adjustments, refunds, reversals, write-offs, backfill, dual write, API, tenant/RBAC implementation, Company Health read switch, or production cutover.
 
 The repository does not support down migrations. PR1 rollback therefore reverts the code while retaining the unused empty tables. Physical table removal is permitted only offline before any canonical data exists, after a verified SQLite backup and explicit empty-table check; canonical data must never be dropped as a rollback strategy.
 
@@ -593,25 +616,25 @@ Exact amount and age limits that define the elevated path remain pending. Until 
 
 The outcomes below distinguish a product-decision baseline from later operational evidence. A `PASS` authorizes only the named PR scope; it does not authorize production enablement, migration, or cutover.
 
-### Before PR 1 — canonical schema and domain
+### PR1 — canonical schema and domain
 
-**Gate: PASS — PR 1 is unblocked for canonical schema/domain implementation.**
+**Status: RELEASED — schema/domain foundation only.**
 
-D-01, D-02, D-03, D-04, D-06, D-07, D-17, D-18, D-19, and D-20 have product-owner answers. PR1 may implement the generic allow-list boundary and source identity but must not hardcode legally sufficient source document types before D-01's accountant/legal confirmation. No production posting is authorized by this PASS.
+D-01, D-02, D-03, D-04, D-06, D-07, D-17, D-18, D-19, and D-20 have product-owner answers. PR1 implements the generic allow-list boundary and source identity but does not hardcode legally sufficient source document types before D-01's accountant/legal confirmation. RELEASED does not authorize production posting or canonical production reads.
 
 PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office branch model, RUB-only constraints, the approved lifecycle, and company IANA timezone storage. The original baseline task was docs-only and created no migration; the later PR1 migration recorded above remains additive and enables no product behavior.
 
 ### Before PR 2 — payments, allocations, adjustments
 
-**Gate: BLOCKED.** D-08 through D-16 and D-21 are approved, and D-25's role model is approved. Exact monetary/age thresholds for dual approval remain unresolved under D-25. PR2 must not invent limits; until limits are approved, every sensitive due-date change, write-off, and correction must use the stricter dual-approval path. Product/Finance must decide whether that conservative rule is sufficient to open PR2 or whether numerical thresholds are required first.
+**Gate: BLOCKED.** D-08 through D-16 and D-21 are approved, and D-25's role model is approved. Exact monetary/age thresholds for dual approval remain unresolved under D-25. PR2 must not invent limits; Product/Finance must either approve those thresholds or explicitly approve the always-dual path for every sensitive action before PR2 begins.
 
 ### Before PR 3 — read API and aging
 
-**Decision gate: PASS; sequence gate: BLOCKED by unfinished PR1–PR2 dependencies.** D-05, D-16, D-19, D-20, D-25's role model, and D-26 are approved. The API must exclude disputed balances from ordinary overdue KPI while returning them in total outstanding and a separate risk bucket.
+**Sequence gate: BLOCKED by PR2 and the approved API contract.** D-05, D-16, D-19, D-20, D-25's role model, and D-26 are approved. The API must exclude disputed balances from ordinary overdue KPI while returning them in total outstanding and a separate risk bucket.
 
 ### Before PR 4 — backfill and reconciliation
 
-**Decision gate: PASS for no-delete tooling; execution gate requires PR1–PR3 and cohort mappings.** D-22 and D-23 are approved. D-24 authorizes append-only/no-delete handling, so tooling may be designed under indefinite retention. Actual data retirement, purge, or finite retention behavior remains blocked until the retention duration is confirmed. Company, Head Office/branch, `Europe/Moscow`, and RUB mappings must be configured for every migration cohort.
+**Sequence gate: BLOCKED by PR3 and approved migration/backfill decisions.** D-22 and D-23 are approved. D-24 authorizes append-only/no-delete handling, so tooling may be designed under indefinite retention. Actual data retirement, purge, or finite retention behavior remains blocked until the retention duration is confirmed. Company, Head Office/branch, `Europe/Moscow`, and RUB mappings must be configured for every migration cohort.
 
 ### Before PR 5 — dual write
 
@@ -623,11 +646,11 @@ PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office bra
 
 ### Before PR 7 — Company Health shadow read
 
-**Decision gate: PASS; sequence gate: BLOCKED by PR3–PR6.** D-04, D-16, D-19, and D-20 are approved. Shadow output must retain ambiguous/disputed coverage and may not silently change visible scoring.
+**Sequence gate: BLOCKED by the canonical read API and shadow reconciliation after PR3–PR6.** D-04, D-16, D-19, and D-20 are approved. Shadow output must retain ambiguous/disputed coverage and may not silently change visible scoring.
 
 ### Before PR 8 — production cutover
 
-**Gate: BLOCKED.** Product decisions are recorded, but cutover still requires D-01 source-type confirmation, D-24 retention confirmation or a formally approved indefinite no-delete policy, D-25 numerical limits, all upstream PRs, and the following operational evidence:
+**Gate: BLOCKED.** Product decisions are recorded, but cutover still requires D-01 source-type confirmation, D-24 retention confirmation or a formally approved indefinite no-delete policy, D-25 numerical limits, all upstream PRs, signed zero-delta reconciliation, explicit cutover approval, and the following operational evidence:
 
 - reconciliation threshold and signed results approved;
 - authority matrix active and tested;

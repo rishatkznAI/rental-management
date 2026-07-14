@@ -14,13 +14,13 @@
 
 **Approved decisions:** D-01 through D-27 in `docs/canonical-receivables-decisions.md`.
 
-**Conditional approvals:** D-01's exact allow-list of legally/accountingly sufficient source document types requires accountant and legal confirmation. D-24's exact retention duration and related legal-hold/export rules require accountant and legal confirmation. D-25's authority model is approved, but exact monetary and age thresholds for dual approval remain pending product/Finance approval.
+**Conditional approvals:** D-01's exact allow-list of legally/accountingly sufficient source document types requires accountant and legal confirmation. D-24's exact retention duration and related legal-hold/export rules require accountant and legal confirmation. D-25's mandatory dual-approval policy for sensitive operations is approved for PR2 and the initial release; exact monetary and age thresholds are deferred to a separate product-owner decision.
 
 **PR1 release status: RELEASED.** The schema/domain foundation is deployed and verified. This status authorizes no canonical production business behavior: no legally sufficient source type is hardcoded, no production posting or canonical read is enabled, and the legacy operational paths remain authoritative until a separately approved cutover. Baseline commit `574edc53fc0c94d9727b03ac18c2022877a2094c` itself created no schema or migration; the released PR1 implementation is recorded below.
 
 **No silent assumptions:** unresolved source document types, retention periods, approval thresholds, or expanded permissions must remain disabled, configuration-blocked, or escalated. Implementation must not invent defaults for them.
 
-**Current product-owner status:** the product baseline is approved; PR1 is released; the production canonical ledger remains inactive; the canonical tables are infrastructure only; and PR2 cannot begin until its approval gate is resolved.
+**Current product-owner status:** the product baseline is approved; PR1 is released; the production canonical ledger remains inactive; and the canonical tables are infrastructure only. The temporary D-25 policy makes the PR2 decision gate **PASS** for settlement, allocation, and adjustment domain implementation. Production enablement remains blocked until PR6 implements concrete tenant membership, roles, capabilities, and authorization enforcement.
 
 ## PR1 implementation record
 
@@ -78,7 +78,7 @@ All canonical tables are empty after the migration because PR1 contains no seed,
 
 **Rollback:** the repository has no down-migration framework. The safe rollback is to deploy the prior code and leave the unused empty additive tables in place. If physical removal is required before any later PR writes data, take and verify a SQLite backup, confirm all four tables are empty, then remove the append-only triggers and tables offline in foreign-key dependency order and delete only the `canonical_receivables_pr1_schema` migration-registry row. Once canonical data exists, tables must not be dropped as rollback; later integrations must be disabled while records are retained for diagnosis and audit.
 
-**Deferred:** every PR2+ payment, allocation, adjustment, refund, reversal, credit/debit, write-off, retention, backfill, dual-write, API, tenant/RBAC implementation, Company Health read switch, and production cutover item remains deferred. There is no receivable posting, allocation, adjustment, refund, reversal, write-off, backfill, dual write, API, tenant/RBAC enforcement, Company Health canonical read, or production cutover. This record does not change any implementation gate below.
+**Deferred from PR1:** every PR2+ payment, allocation, adjustment, refund, reversal, credit/debit, write-off, retention, backfill, dual-write, API, tenant/RBAC implementation, Company Health read switch, and production cutover item remains outside the released PR1 scope. The D-25 decision gate now permits PR2 domain implementation to begin, but no such behavior exists yet. There is no receivable posting, allocation, adjustment, refund, reversal, write-off, backfill, dual write, API, tenant/RBAC enforcement, Company Health canonical read, or production cutover.
 
 ## 1. Purpose and decisions at a glance
 
@@ -637,13 +637,43 @@ Use backend capabilities, mapped to roles separately:
 - `financial_audit.read`;
 - `migration.cutover`.
 
-Approved authority baseline:
+#### 8.3.1 Temporary D-25 initial-release authority policy
 
-- accountants may create/post receivables and make ordinary allocations within authorized company/branch scope;
-- finance managers may approve refunds and adjustments;
-- sensitive due-date changes, write-offs, and large corrections require two distinct approvers;
-- migration cutover requires both product-owner and finance-owner approval;
-- exact monetary and age thresholds for the elevated path remain pending. Until they are approved, every action in those sensitive categories uses dual approval; code must not invent a threshold.
+This policy is approved for PR2 domain implementation and the initial release. It does not authorize production operations before PR6 authorization enforcement exists.
+
+1. **Ordinary payment allocation**
+   - An accountant may create the allocation.
+   - Dual approval is not required only when payment and receivable belong to the same company, currencies match, the allocation exceeds neither payment balance nor receivable outstanding, and there is an exact document/reference match or explicit client instruction.
+   - Manual allocation without clear matching requires finance-manager confirmation.
+2. **Cross-branch allocation**
+   - An accountant initiates and a finance manager approves every cross-branch allocation.
+   - Cross-company allocation is forbidden.
+3. **Refund**
+   - Every refund requires dual approval: an accountant or finance manager initiates, and another finance-authorized user approves.
+   - The initiator cannot approve the same operation.
+4. **Credit/debit adjustment**
+   - Every credit or debit adjustment requires dual approval.
+   - An explicit type and reason are mandatory, and the original posted financial event is never edited.
+5. **Reversal/correction**
+   - Every reversal or correction requires dual approval, references the original event, and is an append-only compensating event.
+6. **Write-off**
+   - Every write-off requires dual approval, with at least one approver being the finance owner or commercial/product owner.
+   - A reason and supporting document reference are mandatory; automatic write-off is forbidden.
+7. **Contractual due-date change**
+   - Before any payment allocation, an accountant or finance manager may initiate the change and an audit reason is mandatory.
+   - After any payment allocation, every change requires dual approval.
+   - A retroactive change preserves the previous value in the audit log.
+8. **Cancellation of a posted receivable**
+   - Every cancellation requires dual approval.
+   - If allocations or adjustments exist, direct cancellation is forbidden and compensating operations are required.
+9. **Separation of duties**
+   - Initiator and approver must be different users, and system/integration events cannot self-approve sensitive operations.
+   - Every approval records `initiatorId`, `approverId`, `requestedAt`, `approvedAt`, `reason`, and `correlationId`.
+10. **Temporary-policy status**
+    - This is the approved initial-release policy. Monetary and age thresholds remain deferred.
+    - Future threshold changes require a separate product-owner decision and must not weaken auditability or separation of duties.
+
+Migration cutover continues to require both product-owner and finance-owner approval.
 
 Admin status alone must not bypass company membership. Carrier, mechanic, bot-only carrier, and investor roles receive no client receivable/payment detail unless an explicit approved capability says otherwise. Existing frontend checks remain UX only.
 
@@ -1074,20 +1104,20 @@ Remaining conditional items are narrow and must not be filled by implementation 
 |---|---|---|---|
 | D-01 source sufficiency | Only posted/financially approved allow-listed obligations create receivables; a rental alone never does | Accountant/legal confirmation of exact source document types | PR5 production dual-write enablement and PR8 cutover; PR1 may model a configurable allow-list |
 | D-24 retention | Financial audit is append-only and never deleted | Accountant/legal retention duration, legal hold, export, and evidence policy | Data retirement/purge and PR8 unless an approved indefinite no-delete policy is signed |
-| D-25 approval limits | Named authority roles and dual approval for sensitive actions are approved | Exact amount/age thresholds for large corrections, sensitive due-date changes, refunds, adjustments, and write-offs | PR2 and PR6 policy completion; PR8 cutover |
+| D-25 approval policy | Mandatory dual approval is approved for refunds, credit/debit adjustments, reversals/corrections, write-offs, posted-receivable cancellations, post-allocation due-date changes, and cross-branch allocations; tightly constrained ordinary allocations follow the approved exception above | Monetary and age thresholds are deferred; PR6 must map concrete users, memberships, roles, and capabilities and enforce the approval policy before production enablement | PR6 authorization enforcement and production enablement; does not block PR2 domain implementation |
 
 ### 15.1 Implementation gate summary
 
 | Gate | Outcome | Remaining condition |
 |---|---|---|
 | PR1 canonical schema/domain | **RELEASED** | Foundation only; production posting and canonical reads remain disabled |
-| PR2 payments/allocations/adjustments | **BLOCKED** | D-25 numerical thresholds, or explicit approval to apply dual approval to every sensitive action |
+| PR2 payments/allocations/adjustments | **PASS — domain implementation unblocked** | Implement the approved temporary D-25 policy; production enablement remains blocked until PR6 authorization enforcement |
 | PR3 read API/aging | **SEQUENCE BLOCKED** | PR2 plus an approved API contract |
 | PR4 backfill/reconciliation tooling | **SEQUENCE BLOCKED** | PR3 plus approved migration/backfill decisions and configured company/branch/RUB mappings; finite retention remains unresolved |
 | PR5 dual write | **BLOCKED for enablement** | D-01 source-document confirmation, upstream PRs, and PR6 authorization |
-| PR6 tenant/RBAC | **BLOCKED** | Concrete tenant/company/branch/Head Office membership and capability mappings plus D-25 limits |
+| PR6 tenant/RBAC | **BLOCKED** | Concrete user membership, tenant/company/branch/Head Office role and capability mappings, plus enforcement of the approved D-25 separation-of-duties policy |
 | PR7 Company Health shadow read | **SEQUENCE BLOCKED** | Canonical read API plus shadow reconciliation after PR3–PR6 |
-| PR8 production read cutover | **BLOCKED** | D-01, D-24, D-25, signed zero-delta reconciliation, and explicit cutover approval |
+| PR8 production read cutover | **BLOCKED** | D-01 and D-24 confirmations, PR6 enforcement of the approved D-25 policy, signed zero-delta reconciliation, and explicit cutover approval |
 
 No gate outcome authorizes product behavior beyond its named PR scope. PR1's RELEASED status covers only the additive schema/domain foundation recorded above, which remains unreachable from production business reads and writes.
 
@@ -1096,13 +1126,13 @@ No gate outcome authorizes product behavior beyond its named PR scope. PR1's REL
 | PR | Scope | Risk | Dependencies | Migration impact | Rollback | Required tests |
 |---|---|---|---|---|---|---|
 | 1. Canonical receivable schema/domain | Normalized receivable, company/mandatory branch/RUB/source identity, approved lifecycle, financial audit/idempotency foundations; no read switch | High: foundational identity/scope | **RELEASED**; configurable allow-list only until D-01 external confirmation | Add-only schema deployed; tables remain empty | Revert code; retain unused additive tables | Schema checks, lifecycle, source uniqueness, tenant FK, integer money, audit |
-| 2. Payment allocation and adjustment model | Canonical payment/refund, allocation, typed adjustment, append-only reversal, atomic balance service | P0 financial correctness/concurrency | PR1; **blocked on D-25 limits or approved always-dual rule** | Add-only tables/services; no legacy mutation | Disable canonical writes; no data deletion | Partial/multi-allocation, caps, types/effects, write-offs/refunds/reversals, concurrency/idempotency |
+| 2. Payment allocation and adjustment model | Canonical payment/refund, allocation, typed adjustment, append-only reversal, atomic balance service | P0 financial correctness/concurrency | PR1; **D-25 initial-release policy approved**; production enablement requires PR6 | Add-only tables/services; no legacy mutation | Disable canonical writes; no data deletion | Partial/multi-allocation, caps, types/effects, write-offs/refunds/reversals, concurrency/idempotency |
 | 3. Read-only receivable and aging API | List/detail/summary/aging with scope, currency, timezone, reconciliation | High reporting/security | PR2 and approved API contract | No backfill required for empty result | Disable routes/flag | API validation/pagination/RBAC, bucket/timezone/reconciliation/security |
 | 4. Backfill and reconciliation tooling | Read-only audit, backup checks, deterministic backfill, checkpointing, discrepancy reports | High data safety | PR3; approved migration/backfill decisions; company/Head Office-or-branch/RUB/source mappings | Writes canonical tables in controlled batches | Stop job; restore backup if schema/data corruption; otherwise rerun idempotently | Repeat/resume, duplicate/orphan, unknown dates, reports, rollback |
 | 5. Dual-write rental/payment integration | Approved source posts receivables; receipts/allocations update both legacy and canonical paths | Very high divergence risk | PR4 reconciliation; D-01 source-type confirmation; PR6 before enablement | Starts new canonical production writes | Feature flag to legacy-only; outbox replay/reconcile | Transaction failure/retry, idempotency, source correction, legacy/canonical equivalence |
-| 6. Company/branch isolation and RBAC enforcement | Capability mapping, permitted same-company cross-branch flow, DB/API cross-scope defenses | P0 security | PR1–5; D-25 limits and concrete membership mappings | Scope backfill must be complete | Disable canonical access; retain legacy backend rules | Cross-company/branch endpoint and DB tests, unknown roles, carrier/bot denial |
+| 6. Company/branch isolation and RBAC enforcement | Capability mapping, permitted same-company cross-branch flow, DB/API cross-scope defenses | P0 security | PR1–5; concrete membership/role/capability mappings and D-25 approval-policy enforcement | Scope backfill must be complete | Disable canonical access; retain legacy backend rules | Cross-company/branch endpoint and DB tests, unknown roles, carrier/bot denial |
 | 7. Company Health shadow-read integration | Consume canonical aging in shadow, compare guarded current result; no visible score switch | Medium/high metric trust | Canonical read API, PR3–6, and shadow reconciliation | Read-only | Disable shadow flag | Mapping, ambiguous/empty/positive debt, metric reconciliation, deterministic verification |
-| 8. Feature-flagged production read switch | Finance then Risks canonical read rollout, monitoring and rollback runbook | High user-visible correctness | D-01/D-24/D-25 conditions, signed zero-unexplained-delta reconciliation, PR7, and explicit cutover approval | Switch reads only | Immediate flags back to legacy/guarded behavior | Production smoke, cohort scope, performance, empty/positive/ambiguous scenarios, rollback drill |
+| 8. Feature-flagged production read switch | Finance then Risks canonical read rollout, monitoring and rollback runbook | High user-visible correctness | D-01/D-24 confirmations, PR6 enforcement of D-25, signed zero-unexplained-delta reconciliation, PR7, and explicit cutover approval | Switch reads only | Immediate flags back to legacy/guarded behavior | Production smoke, cohort scope, performance, empty/positive/ambiguous scenarios, rollback drill |
 
 Old logic retirement is a later PR only after a signed monitoring period; it should not be bundled into PR8.
 

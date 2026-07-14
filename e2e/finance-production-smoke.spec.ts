@@ -10,7 +10,7 @@ import {
   financeSmokeSummary,
   hasUnsafeFinanceSmokeText,
 } from '../scripts/finance-smoke-checks.mjs';
-import { backendCommitGateResult } from '../scripts/release-preflight.mjs';
+import { releaseVerificationContractResult, safeDiagnosticExcerpt } from '../scripts/release-preflight.mjs';
 import {
   describeEquipmentCandidate,
   discoverRentalModeEquipment,
@@ -21,6 +21,16 @@ type BuildInfo = {
   commitFull?: string;
   apiBaseUrl?: string;
   releaseType?: string;
+};
+
+type ProbeEvidence = {
+  ok: boolean;
+  url: string;
+  status: number | null;
+  timeoutMs: number;
+  timedOut: boolean;
+  error: string;
+  bodyExcerpt: string;
 };
 
 type EquipmentRecord = {
@@ -54,80 +64,99 @@ type EquipmentDiscovery = {
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
-function shortCommit(value = '') {
-  return value.trim().slice(0, 12);
-}
-
-function commitsMatch(left = '', right = '') {
-  const normalizedLeft = left.trim();
-  const normalizedRight = right.trim();
-  if (!normalizedLeft || !normalizedRight) return false;
-  return normalizedLeft.startsWith(normalizedRight) || normalizedRight.startsWith(normalizedLeft);
-}
-
 function productionAppUrl(frontendUrl: string, route = '/') {
   const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
   return `${frontendUrl.replace(/\/$/, '')}/?debugVersion=1&_smoke=${Date.now()}#${normalizedRoute}`;
 }
 
-function normalizeFinanceSmokeReleaseType(value = '') {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized || normalized === 'auto') return '';
-  return normalized;
-}
-
-function resolveFinanceSmokeReleaseType(input: {
-  envReleaseType?: string;
-  frontendReleaseType?: string;
-  backendReleaseType?: string;
-}) {
-  return normalizeFinanceSmokeReleaseType(input.envReleaseType || '')
-    || normalizeFinanceSmokeReleaseType(input.frontendReleaseType || '')
-    || normalizeFinanceSmokeReleaseType(input.backendReleaseType || '')
-    || 'full-stack';
-}
-
-function assertBackendCommitMatchesPolicy(input: {
-  backendBuild: BuildInfo | null;
-  expectedCommit: string;
-  releaseType: string;
-  label: string;
-}) {
-  const gate = backendCommitGateResult({
-    env: 'production',
-    releaseType: input.releaseType,
-    backendBuild: input.backendBuild || {},
-    expectedCommit: input.expectedCommit,
-  });
-  if (gate.status === 'warn') {
-    safeSmokeLog('backendCommitDrift', {
-      label: input.label,
-      releaseType: input.releaseType,
-      expectedCommit: shortCommit(input.expectedCommit),
-      backendCommit: gate.backendCommit,
-      status: 'warn',
+async function collectPublicFrontendBuildMarker(page: Page, frontendUrl: string, apiUrl: string) {
+  const timeoutMs = 30_000;
+  let status: number | null = null;
+  try {
+    const response = await page.goto(productionAppUrl(frontendUrl, '/login'), {
+      waitUntil: 'domcontentloaded',
+      timeout: timeoutMs,
     });
-    return gate;
+    status = response?.status() ?? null;
+    await page.locator('body').waitFor({ state: 'visible', timeout: timeoutMs });
+    await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit), null, { timeout: timeoutMs });
+    const build = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
+    const apiMatches = build?.apiBaseUrl === apiUrl;
+    return {
+      build,
+      evidence: {
+        ok: Boolean(build?.commit) && apiMatches,
+        url: frontendUrl,
+        status,
+        timeoutMs,
+        timedOut: false,
+        error: apiMatches ? '' : `frontend marker API URL mismatch. expected=${apiUrl} actual=${build?.apiBaseUrl || 'missing'}`,
+        bodyExcerpt: '',
+      } satisfies ProbeEvidence,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const bodyExcerpt = safeDiagnosticExcerpt(await page.locator('body').innerText().catch(() => ''));
+    return {
+      build: null,
+      evidence: {
+        ok: false,
+        url: frontendUrl,
+        status,
+        timeoutMs,
+        timedOut: /abort|timeout/i.test(`${error instanceof Error ? error.name : ''} ${message}`),
+        error: safeDiagnosticExcerpt(message),
+        bodyExcerpt,
+      } satisfies ProbeEvidence,
+    };
   }
-  expect(gate.status, `${input.label}: ${gate.message}`).toBe('pass');
-  return gate;
 }
 
-async function readPublicFrontendBuildMarker(page: Page, frontendUrl: string, apiUrl: string, expectedCommit: string) {
-  await page.goto(productionAppUrl(frontendUrl, '/login'), { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('body')).toBeVisible();
-  await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit));
-  const frontendBuild = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
-  expect(frontendBuild?.apiBaseUrl, 'frontend build marker should point at production API').toBe(apiUrl);
-
-  if (expectedCommit) {
-    expect(
-      commitsMatch(frontendBuild?.commit || '', shortCommit(expectedCommit)),
-      `frontend commit should match expected release commit: expected=${shortCommit(expectedCommit)}, frontend=${frontendBuild?.commit || 'missing'}`,
-    ).toBeTruthy();
+async function collectApiJsonProbe(
+  api: Awaited<ReturnType<typeof playwrightRequest.newContext>>,
+  apiUrl: string,
+  path: string,
+) {
+  const timeoutMs = 15_000;
+  const url = `${apiUrl}${path}`;
+  try {
+    const response = await api.get(path, { timeout: timeoutMs });
+    const text = await response.text();
+    let json: Record<string, unknown> | null = null;
+    let parseError = '';
+    try {
+      json = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      parseError = 'response was not valid JSON';
+    }
+    const ok = response.status() === 200 && json?.ok === true;
+    return {
+      evidence: {
+        ok,
+        url,
+        status: response.status(),
+        timeoutMs,
+        timedOut: false,
+        error: parseError || (ok ? '' : 'HTTP 200 with JSON ok=true is required'),
+        bodyExcerpt: safeDiagnosticExcerpt(text),
+      } satisfies ProbeEvidence,
+      json,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      evidence: {
+        ok: false,
+        url,
+        status: null,
+        timeoutMs,
+        timedOut: /abort|timeout/i.test(`${error instanceof Error ? error.name : ''} ${message}`),
+        error: safeDiagnosticExcerpt(message),
+        bodyExcerpt: '',
+      } satisfies ProbeEvidence,
+      json: null,
+    };
   }
-
-  return frontendBuild;
 }
 
 function sanitizeUrl(url: string) {
@@ -311,40 +340,33 @@ test('production finance smoke stays read-only', async ({ page }, testInfo) => {
   const expectedCommit = String(process.env.EXPECTED_RELEASE_COMMIT || '').trim();
   const blockedWrites = await installProductionReadOnlyGuard(page);
   const aggregateCounts = installSafeAggregateMonitor(page, apiUrl);
-  const frontendBuild = await readPublicFrontendBuildMarker(page, frontendUrl, apiUrl, expectedCommit);
-  let releaseType = resolveFinanceSmokeReleaseType({
-    envReleaseType: String(process.env.RELEASE_TYPE || ''),
-    frontendReleaseType: frontendBuild?.releaseType,
-  });
+  const frontendMarker = await collectPublicFrontendBuildMarker(page, frontendUrl, apiUrl);
+  const frontendBuild = frontendMarker.build;
 
   let token = '';
   let backendBuild: BuildInfo | null = null;
 
   const publicApi = await playwrightRequest.newContext({ baseURL: apiUrl });
   try {
-    const health = await publicApi.get('/health');
-    expect(health.ok(), 'production /health should return 200').toBeTruthy();
-
-    const version = await publicApi.get('/api/version');
-    expect(version.ok(), 'production /api/version should return 200').toBeTruthy();
-    const versionJson = await version.json() as { build?: BuildInfo; app?: { disabled?: boolean } };
-    backendBuild = versionJson.build || null;
-    expect(versionJson.app?.disabled, 'production APP_DISABLED must remain false').toBe(false);
-    releaseType = resolveFinanceSmokeReleaseType({
-      envReleaseType: String(process.env.RELEASE_TYPE || ''),
-      frontendReleaseType: frontendBuild?.releaseType,
-      backendReleaseType: backendBuild?.releaseType,
+    const versionProbe = await collectApiJsonProbe(publicApi, apiUrl, '/api/version');
+    const healthProbe = await collectApiJsonProbe(publicApi, apiUrl, '/health');
+    const readinessProbe = await collectApiJsonProbe(publicApi, apiUrl, '/health/ready');
+    const versionJson = versionProbe.json as { build?: BuildInfo; app?: { disabled?: boolean } } | null;
+    backendBuild = versionJson?.build || null;
+    const releaseContract = releaseVerificationContractResult({
+      env: 'production',
+      releaseType: String(process.env.RELEASE_TYPE || ''),
+      frontendBuild: frontendBuild || {},
+      backendBuild: backendBuild || {},
+      expectedCommit,
+      frontendEvidence: frontendMarker.evidence,
+      backendVersion: versionProbe.evidence,
+      health: healthProbe.evidence,
+      readiness: readinessProbe.evidence,
     });
-    safeSmokeLog('releaseType', { releaseType });
-
-    if (expectedCommit) {
-      assertBackendCommitMatchesPolicy({
-        backendBuild,
-        expectedCommit,
-        releaseType,
-        label: 'backend expected release commit',
-      });
-    }
+    safeSmokeLog('releaseCommitContract', releaseContract);
+    expect(releaseContract.pass, releaseContract.failureReasons.join('; ')).toBe(true);
+    expect(versionJson?.app?.disabled, 'production APP_DISABLED must remain false').toBe(false);
 
     const anonymousCashFlow = await publicApi.get('/api/finance/cash-flow?includeDepreciation=true');
     expect(anonymousCashFlow.status(), 'anonymous cash-flow request should be 401').toBe(401);
@@ -405,15 +427,6 @@ test('production finance smoke stays read-only', async ({ page }, testInfo) => {
     }
   } finally {
     await authedApi.dispose();
-  }
-
-  if (frontendBuild?.commit && backendBuild?.commit) {
-    assertBackendCommitMatchesPolicy({
-      backendBuild,
-      expectedCommit: frontendBuild.commit,
-      releaseType,
-      label: 'frontend/backend commit match',
-    });
   }
 
   await page.getByLabel('Логин').fill(adminEmail);

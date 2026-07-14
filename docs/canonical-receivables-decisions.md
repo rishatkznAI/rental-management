@@ -1,12 +1,12 @@
 # Canonical receivables: product-owner decision memo
 
-**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; conditional confirmations remain
+**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement foundation **IMPLEMENTED FOR REVIEW — NOT RELEASED**; conditional confirmations remain
 
 **Prepared:** 2026-07-13; release status updated 2026-07-14
 
 **Source specification:** `docs/canonical-receivables-contract.md`
 
-**Scope:** approved product-owner rules plus factual PR1 implementation metadata; this memo does not change business decisions
+**Scope:** approved product-owner rules plus factual PR1/PR2 implementation metadata; this memo does not change business decisions
 
 ## Product-owner baseline
 
@@ -20,7 +20,7 @@
 
 **No silent assumptions:** implementation may encode only the answers in this baseline. Missing legal document types, retention durations, financial thresholds, tie-break policy extensions, or role powers must remain disabled, configuration-blocked, or explicitly escalated.
 
-**Current status summary:** the product baseline is approved; PR1 is released; the production canonical ledger remains inactive; and the PR2 decision gate is PASS for settlement/allocation/adjustment domain implementation under the approved temporary D-25 policy. Production enablement remains blocked until PR6 authorization enforcement exists.
+**Current status summary:** the product baseline is approved; PR1 is released; and the production canonical ledger remains inactive. The PR2 decision gate is PASS under the approved temporary D-25 policy, and its additive settlement foundation is implemented for review but not released. Production enablement remains blocked until PR6 authorization enforcement exists.
 
 ## PR1 release status
 
@@ -58,6 +58,18 @@ The additive release changed no legacy table schema or application data and intr
 PR1 enables no receivable posting, allocations, adjustments, refunds, reversals, write-offs, backfill, dual write, API, tenant/RBAC implementation, Company Health read switch, or production cutover.
 
 The repository does not support down migrations. PR1 rollback therefore reverts the code while retaining the unused empty tables. Physical table removal is permitted only offline before any canonical data exists, after a verified SQLite backup and explicit empty-table check; canonical data must never be dropped as a rollback strategy.
+
+## PR2 implementation status
+
+**PR2: IMPLEMENTED FOR REVIEW — NOT RELEASED.** The review implementation uses migration `canonical_receivables_pr2_settlement`, version 1, through the existing `sql_shadow_schema_migrations` startup convention. It requires registered and structurally present PR1 version 1 before any PR2 DDL, and adds only `canonical_payments`, `canonical_payment_allocations`, `canonical_receivable_adjustments`, and `canonical_approval_requests`. The migration is additive, atomic, and idempotent and contains no seed, backfill, legacy trigger, or dual write.
+
+The existing JSON payment/allocation collections are not referenced because they do not provide mandatory company/branch/currency identity, integer-minor-unit receipt semantics, immutable reversal history, or canonical receivable targets. PR2 instead supplies an isolated canonical payment and settlement foundation.
+
+The implementation covers partial and multi-allocation balances, unapplied receipt capacity, typed positive-magnitude adjustment effects, refunds, payment/allocation/adjustment reversals, write-offs, due-date-change approval, cancellation protection, shared approval requests, separation of duties, company-scoped idempotency, append-only audit events, and SQLite immediate-transaction/version concurrency guards. Pending or rejected events never affect balances; confirmed reversals compensate originals without editing or deleting them.
+
+The approved temporary D-25 policy is encoded without monetary or age thresholds. Exact-reference or explicit-client-instruction allocation may be approval-exempt only in the same company, currency, and branch and within both balances. Ambiguous and cross-branch allocation is represented as approval-required. Refunds, adjustments, reversals, write-offs, post-allocation due-date changes, and posted cancellation require a distinct approver. Concrete user membership, role, capability, finance-owner/commercial-owner mapping, and production authorization remain PR6 work.
+
+Only the schema initializer is reachable from startup. No production route, worker, legacy payment/rental handler, frontend module, Company Health/report reader, backfill, or dual-write path imports the PR2 domain or repository. Production settlement remains disabled. PR3+ dependencies are unchanged.
 
 ## How to use this memo
 
@@ -653,7 +665,7 @@ PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office bra
 
 ### Before PR 2 — payments, allocations, adjustments
 
-**Gate: PASS — unblocked for settlement/allocation/adjustment domain implementation.** D-08 through D-16 and D-21 are approved, and D-25 now supplies the approved initial-release authority policy. PR2 must implement the mandatory dual-approval and separation-of-duties contract exactly, but no PR2 code may enable production operations before PR6 authorization enforcement exists.
+**Gate: PASS — IMPLEMENTED FOR REVIEW, NOT RELEASED.** D-08 through D-16 and D-21 are approved, and D-25 supplies the approved initial-release authority policy. The additive PR2 settlement foundation implements the mandatory dual-approval and separation-of-duties domain contract, but no production operation may be enabled before PR6 authorization enforcement exists.
 
 ### Before PR 3 — read API and aging
 

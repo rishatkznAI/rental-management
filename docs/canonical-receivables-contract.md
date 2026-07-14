@@ -1,6 +1,6 @@
 # Canonical receivables backend contract
 
-**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**
+**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement foundation **IMPLEMENTED FOR REVIEW — NOT RELEASED**
 
 **Audit date:** 2026-07-14
 
@@ -20,7 +20,7 @@
 
 **No silent assumptions:** unresolved source document types, retention periods, approval thresholds, or expanded permissions must remain disabled, configuration-blocked, or escalated. Implementation must not invent defaults for them.
 
-**Current product-owner status:** the product baseline is approved; PR1 is released; the production canonical ledger remains inactive; and the canonical tables are infrastructure only. The temporary D-25 policy makes the PR2 decision gate **PASS** for settlement, allocation, and adjustment domain implementation. Production enablement remains blocked until PR6 implements concrete tenant membership, roles, capabilities, and authorization enforcement.
+**Current product-owner status:** the product baseline is approved; PR1 is released; the production canonical ledger remains inactive; and the canonical tables are infrastructure only. The temporary D-25 policy makes the PR2 decision gate **PASS**. PR2's additive settlement implementation is present for review but is not released and is unreachable from production business entrypoints. Production enablement remains blocked until PR6 implements concrete tenant membership, roles, capabilities, and authorization enforcement.
 
 ## PR1 implementation record
 
@@ -78,7 +78,49 @@ All canonical tables are empty after the migration because PR1 contains no seed,
 
 **Rollback:** the repository has no down-migration framework. The safe rollback is to deploy the prior code and leave the unused empty additive tables in place. If physical removal is required before any later PR writes data, take and verify a SQLite backup, confirm all four tables are empty, then remove the append-only triggers and tables offline in foreign-key dependency order and delete only the `canonical_receivables_pr1_schema` migration-registry row. Once canonical data exists, tables must not be dropped as rollback; later integrations must be disabled while records are retained for diagnosis and audit.
 
-**Deferred from PR1:** every PR2+ payment, allocation, adjustment, refund, reversal, credit/debit, write-off, retention, backfill, dual-write, API, tenant/RBAC implementation, Company Health read switch, and production cutover item remains outside the released PR1 scope. The D-25 decision gate now permits PR2 domain implementation to begin, but no such behavior exists yet. There is no receivable posting, allocation, adjustment, refund, reversal, write-off, backfill, dual write, API, tenant/RBAC enforcement, Company Health canonical read, or production cutover.
+**Deferred from PR1:** every PR2+ payment, allocation, adjustment, refund, reversal, credit/debit, write-off, retention, backfill, dual-write, API, tenant/RBAC implementation, Company Health read switch, and production cutover item remains outside the released PR1 scope. PR2 now supplies an isolated review-only settlement implementation as recorded below, but it is not released and no production business entrypoint imports it. There is still no production receivable posting, settlement API, backfill, dual write, tenant/RBAC enforcement, Company Health canonical read, or production cutover.
+
+## PR2 implementation record
+
+**Implementation status:** **IMPLEMENTED FOR REVIEW — NOT RELEASED.** This status authorizes no production settlement behavior.
+
+**Migration:** `canonical_receivables_pr2_settlement`, version 1, registered through `sql_shadow_schema_migrations`. Startup calls `ensureCanonicalReceivablesSettlementSchema()` immediately after the PR1 initializer. PR2 requires the registered and structurally present `canonical_receivables_pr1_schema` version 1 and fails clearly before PR2 DDL if that prerequisite is absent. The migration is additive, atomic, and idempotent, creates no financial rows, and does not register on failed DDL.
+
+**Tables:**
+
+- `canonical_payments` — immutable confirmed receipt/refund/reversal events with RUB integer magnitudes, company/branch/client scope, external/idempotency identity, explicit status, internal-transfer marker, and linked reversal identity;
+- `canonical_payment_allocations` — explicit payment-to-receivable allocations and append-only reversal rows with branch context, evidence, approval, idempotency, and correlation data;
+- `canonical_receivable_adjustments` — positive-magnitude typed credit, debit, discount, penalty, correction, write-off, refund-effect, and reversal rows with explicit balance effect and approval evidence;
+- `canonical_approval_requests` — shared pending/approved/rejected decisions with immutable final state, separate initiator/approver identity, timestamps, reason, correlation, and operation payload.
+
+The legacy JSON `payments` and `payment_allocations` collections are not canonical inputs. They lack mandatory company, branch, currency, immutable receipt identity, integer minor-unit, and canonical-receivable target semantics. PR2 performs no import, seed, backfill, synchronization, or dual write from them.
+
+**Implemented domain contract:**
+
+- exact integer-minor-unit receivable outstanding and payment unapplied calculations;
+- pending/rejected operations have no financial effect;
+- confirmed allocation and adjustment effects are append-only and reversal-aware;
+- cross-company and currency mismatch rejection;
+- ordinary same-branch allocation exemption only for an exact document/reference match or explicit client instruction verified by an injected matching-evidence policy; an unverified caller claim remains approval-required;
+- approval-required representation for ambiguous or cross-branch allocation;
+- mandatory dual approval for refunds, adjustments, reversals, write-offs, post-allocation due-date changes, and posted-receivable cancellation;
+- separation of duties, including denial of self-approval and non-user approvers;
+- due-date operations preserve previous date/provenance in append-only audit evidence;
+- cancellation with active, uncompensated allocation or adjustment effects requires compensating operations; compensated history remains retained.
+
+**Repository:** `createCanonicalSettlementRepository()` exposes isolated test infrastructure for canonical receipt creation; allocation request/approve/reject/reversal; adjustment request/approve/reject/reversal; refund request/approve/reversal; write-off request/approval; due-date request/approval; posted cancellation request/approval; scoped getters; and balance calculations. Every public query requires `companyId`. No production route, worker, existing payment/rental handler, frontend module, Company Health reader, or executable script imports the settlement domain or repository.
+
+**Atomicity and concurrency:** balance-changing confirmation runs in a `better-sqlite3` immediate transaction. The transaction obtains SQLite's write lock before reading current balances, revalidates payment/receivable scope, currency, status, approval, and capacity, then confirms the append-only event and compare-and-swap increments payment/receivable versions. Database triggers independently reject direct over-allocation, over-settlement, invalid reversal, and refund-capacity writes. Competing writers serialize before confirmation; stale versions fail instead of overwriting or silently clamping a conflict.
+
+**Reversal chains:** allocation and adjustment originals may have at most one pending or confirmed reversal. Allocation reversals and adjustment reversal rows cannot themselves be reversed; reversal-of-reversal is fail-closed. A confirmed refund may be reversed exactly once because refund reversal is an explicitly approved payment event, while a refund-reversal row cannot be reversed again.
+
+**D-25 implementation:** numerical and age thresholds remain absent. The temporary mandatory dual-approval policy is represented at the domain, schema, and repository layers; real user membership, role, capability, finance-owner/commercial-owner mapping, and production authorization remain PR6 blockers. Capability and matching-evidence policies are accepted as injected trusted-server context rather than read from a global session or caller assertion. Approval request identity and payload snapshots are immutable and bind operation type, aggregate, amount, currency, targets, branches, evidence/support, correlation, and operation-specific fields before confirmation.
+
+**Audit:** settlement operations append the required `payment_recorded`, allocation, adjustment, refund, write-off, due-date-change, and cancellation request/approval/rejection/reversal event types to `financial_audit_events`. Payloads retain correlation and approval references, previous/new values where applicable, and reject secret-bearing keys. Existing audit update/delete/replace protection remains unchanged.
+
+**Rollback:** revert the PR2 code and retain the unused additive tables. Physical removal is permitted only offline after a verified backup and explicit confirmation that all four PR2 tables are empty; otherwise retain all append-only financial and audit history.
+
+**Deferred:** production APIs, routes, workers, role lookup, tenant/RBAC enforcement, backfill, dual write, legacy integration, Company Health/report reads, production settlement enablement, and cutover remain deferred. PR3+ dependencies are unchanged.
 
 ## 1. Purpose and decisions at a glance
 
@@ -299,8 +341,8 @@ The existing JSON `payments` collection cannot remain canonical unchanged becaus
 | `clientId` | text, required | Payer/client ID; counterparty ID may be added if payer differs. |
 | `kind` | enum, required | `receipt`, `refund`, or `reversal`; refund/reversal rows are append-only events linked to the original receipt. |
 | `currency` | `CHAR(3)`, required | Immutable and must match every allocation. |
-| `receivedAmountMinor` | integer, required | Positive for `receipt`; zero for `refund`/`reversal`. |
-| `refundAmountMinor` | integer, required | Positive for `refund`/`reversal`; zero for `receipt`. No signed money. |
+| `receivedAmountMinor` | integer, required | Positive magnitude for every receipt/refund/reversal payment event; direction comes from `paymentKind`. |
+| `refundAmountMinor` | integer, required | Positive and equal to `receivedAmountMinor` for `refund`/`reversal`; zero for `receipt`. No signed money. |
 | `receivedAt` | UTC instant, required for confirmed receipt | Actual bank/cash event time, not a due date. |
 | `status` | enum, required | `pending`, `confirmed`, `failed`, `cancelled`. Only confirmed receipts fund allocations; effective reversal is derived from confirmed compensating events. |
 | `externalTransactionId` | text, nullable | Bank/acquirer/import transaction identity. |
@@ -1010,7 +1052,7 @@ sum(confirmed receipt amounts)
 
 ## 14. Test plan
 
-PR1 now implements focused schema, domain, isolation, audit, and runtime-boundary tests for its additive foundation. The remaining items below continue to define required future coverage for PR2+ settlement, APIs, migration, cutover, and end-to-end security behavior:
+PR1 implements focused schema, domain, isolation, audit, and runtime-boundary tests for its released additive foundation. PR2 now implements focused settlement schema, balance, allocation, adjustment, refund, reversal, approval, SQLite locking/version, audit, migration, and runtime-boundary tests for its review-only foundation. The remaining items below continue to define required future coverage for APIs, migration, cutover, and end-to-end PR6 authorization behavior:
 
 ### Domain
 
@@ -1111,7 +1153,7 @@ Remaining conditional items are narrow and must not be filled by implementation 
 | Gate | Outcome | Remaining condition |
 |---|---|---|
 | PR1 canonical schema/domain | **RELEASED** | Foundation only; production posting and canonical reads remain disabled |
-| PR2 payments/allocations/adjustments | **PASS — domain implementation unblocked** | Implement the approved temporary D-25 policy; production enablement remains blocked until PR6 authorization enforcement |
+| PR2 payments/allocations/adjustments | **PASS — IMPLEMENTED FOR REVIEW, NOT RELEASED** | Review/release the additive foundation; production enablement remains blocked until PR6 authorization enforcement |
 | PR3 read API/aging | **SEQUENCE BLOCKED** | PR2 plus an approved API contract |
 | PR4 backfill/reconciliation tooling | **SEQUENCE BLOCKED** | PR3 plus approved migration/backfill decisions and configured company/branch/RUB mappings; finite retention remains unresolved |
 | PR5 dual write | **BLOCKED for enablement** | D-01 source-document confirmation, upstream PRs, and PR6 authorization |
@@ -1126,7 +1168,7 @@ No gate outcome authorizes product behavior beyond its named PR scope. PR1's REL
 | PR | Scope | Risk | Dependencies | Migration impact | Rollback | Required tests |
 |---|---|---|---|---|---|---|
 | 1. Canonical receivable schema/domain | Normalized receivable, company/mandatory branch/RUB/source identity, approved lifecycle, financial audit/idempotency foundations; no read switch | High: foundational identity/scope | **RELEASED**; configurable allow-list only until D-01 external confirmation | Add-only schema deployed; tables remain empty | Revert code; retain unused additive tables | Schema checks, lifecycle, source uniqueness, tenant FK, integer money, audit |
-| 2. Payment allocation and adjustment model | Canonical payment/refund, allocation, typed adjustment, append-only reversal, atomic balance service | P0 financial correctness/concurrency | PR1; **D-25 initial-release policy approved**; production enablement requires PR6 | Add-only tables/services; no legacy mutation | Disable canonical writes; no data deletion | Partial/multi-allocation, caps, types/effects, write-offs/refunds/reversals, concurrency/idempotency |
+| 2. Payment allocation and adjustment model | Canonical payment/refund, allocation, typed adjustment, append-only reversal, atomic balance service | P0 financial correctness/concurrency | **IMPLEMENTED FOR REVIEW — NOT RELEASED**; PR1 and D-25 satisfied; production enablement requires PR6 | Add-only tables/services; no legacy mutation | Revert code and retain unused additive tables; no data deletion | Partial/multi-allocation, caps, types/effects, write-offs/refunds/reversals, concurrency/idempotency |
 | 3. Read-only receivable and aging API | List/detail/summary/aging with scope, currency, timezone, reconciliation | High reporting/security | PR2 and approved API contract | No backfill required for empty result | Disable routes/flag | API validation/pagination/RBAC, bucket/timezone/reconciliation/security |
 | 4. Backfill and reconciliation tooling | Read-only audit, backup checks, deterministic backfill, checkpointing, discrepancy reports | High data safety | PR3; approved migration/backfill decisions; company/Head Office-or-branch/RUB/source mappings | Writes canonical tables in controlled batches | Stop job; restore backup if schema/data corruption; otherwise rerun idempotently | Repeat/resume, duplicate/orphan, unknown dates, reports, rollback |
 | 5. Dual-write rental/payment integration | Approved source posts receivables; receipts/allocations update both legacy and canonical paths | Very high divergence risk | PR4 reconciliation; D-01 source-type confirmation; PR6 before enablement | Starts new canonical production writes | Feature flag to legacy-only; outbox replay/reconcile | Transaction failure/retry, idempotency, source correction, legacy/canonical equivalence |

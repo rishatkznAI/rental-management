@@ -1,12 +1,12 @@
 # Canonical receivables backend contract
 
-**Status:** product-owner baseline approved; specification only
+**Status:** product-owner baseline approved; PR1 schema/domain implementation ready for review
 
 **Audit date:** 2026-07-13
 
-**Target branch:** `codex/canonical-receivables-contract`
+**Implementation branch:** `codex/canonical-receivables-pr1-schema`
 
-**Implementation status:** no schema, backend, API, Company Health, or frontend behavior is changed by this document
+**Implementation status:** PR1 additive schema and isolated backend domain infrastructure are implemented; production posting, reads, APIs, backfill, dual write, Company Health, and frontend behavior remain unchanged
 
 ## Product-owner baseline
 
@@ -16,9 +16,44 @@
 
 **Conditional approvals:** D-01's exact allow-list of legally/accountingly sufficient source document types requires accountant and legal confirmation. D-24's exact retention duration and related legal-hold/export rules require accountant and legal confirmation. D-25's authority model is approved, but exact monetary and age thresholds for dual approval remain pending product/Finance approval.
 
-**PR 1 implementation gate: PASS.** PR1 may implement the canonical schema/domain baseline because its structural decisions are approved. It may model a configurable source-type allow-list, but it must not hardcode unconfirmed legally sufficient document types or enable production posting. This documentation task itself creates no schema or migration.
+**PR 1 implementation gate: PASS.** PR1 may implement the canonical schema/domain baseline because its structural decisions are approved. It may model a configurable source-type allow-list, but it must not hardcode unconfirmed legally sufficient document types or enable production posting. Baseline commit `574edc53fc0c94d9727b03ac18c2022877a2094c` itself created no schema or migration; the later PR1 implementation is recorded below.
 
 **No silent assumptions:** unresolved source document types, retention periods, approval thresholds, or expanded permissions must remain disabled, configuration-blocked, or escalated. Implementation must not invent defaults for them.
+
+## PR1 implementation record
+
+**Implementation date:** 2026-07-13
+
+**Migration:** `canonical_receivables_pr1_schema`, version 1, registered through the repository's existing `sql_shadow_schema_migrations` initializer convention. The registry is checked inside the migration transaction; once version 1 is present, later startups retain the original registration timestamp and skip the canonical DDL.
+
+**Tables:**
+
+- `canonical_companies` — empty company identity and required IANA receivables-timezone foundation; no company or timezone is hardcoded or seeded;
+- `canonical_branches` — empty company-owned branch identity foundation with a company-scoped Head Office uniqueness invariant;
+- `canonical_receivables` — canonical receivable rows;
+- `financial_audit_events` — append-only financial audit foundation.
+
+The company and branch foundation is intentionally schema-only. The audited repository and populated local snapshot contain no relational company/branch tables, stable tenant IDs, user membership, or authenticated tenant context that PR1 could reference. Each placeholder company row requires `receivablesTimezone`, while each receivable keeps its immutable `companyTimezone` snapshot. `canonical_receivables` and `financial_audit_events` use composite `(companyId, branchId)` foreign keys, so a branch from another company cannot be referenced.
+
+`canonical_companies` and `canonical_branches` are not an independently usable operational tenant directory: PR1 provides no CRUD, seed, backfill, synchronization, authentication lookup, or application repository for them, and they remain empty. Before any canonical production write, PR6 must identify or create the approved operational company/branch authority, assign stable IDs, map every user/company/branch/Head Office membership, and populate these roots through a reviewed idempotent migration. At that gate the project must either adopt these roots as the single approved tenant master or rebuild the empty canonical foreign keys against another approved master; running two independently editable identity models is forbidden. IDs must never be inferred from names or from the current user. Until that mapping and authorization exist, a direct database administrator could insert a scope unrelated to an application tenant, but no PR1 application path can do so and no canonical write may be enabled.
+
+PR1 therefore solves only the schema-level invariant that every canonical row has a company and a same-company branch. It deliberately does not claim end-to-end tenant isolation, active-tenant matching, user membership, or branch RBAC; those remain blocking PR6 work rather than being silently treated as complete.
+
+Existing clients, contracts, rentals, documents, and users remain JSON records in `app_data`. Consequently `clientId`, nullable `contractId`, nullable `rentalId`, and audit `actorId` have no database foreign keys in PR1, and this implementation does not claim referential integrity for them. Domain validation requires stable IDs and never derives identity from a client name; future posting/backfill must validate their company ownership through the approved scoped registries before insertion.
+
+Implemented receivable invariants include mandatory company, branch, client, source, idempotency, currency, timezone, workflow, timestamp, and version fields; RUB-only currency; safe integer minor-unit validation; non-negative draft amount with a positive amount required once posted; accepted due-date provenance requiring a contractual date; approved stored workflow states only; company-scoped idempotency; company/source-system/source-document/normalized-line uniqueness; external identity uniqueness when present; and posted-field immutability for company, branch, client, exact source fields, currency, company-timezone snapshot, and original amount. A generated `normalizedSourceLineId` maps a missing or blank line to `__document_total__`, avoiding SQLite's nullable-unique behavior without making null, empty, and whitespace values interchangeable after posting.
+
+The source type remains extensible text. Posted-input validation requires an injected `isApprovedSourceDocument` policy and contains no legal source-type allow-list. No current runtime module supplies that policy, so this foundation cannot post a production receivable.
+
+The audit table rejects updates, deletes, and duplicate-ID `INSERT OR REPLACE` attempts at the SQLite boundary while allowing new inserts. Its append helper requires company/branch scope, actor classification, correlation ID, source system, and valid JSON; user events require an actor ID, and compound or nested secret-bearing JSON keys are rejected. Audit payloads may still contain personal data if a future caller supplies it, so callers must minimize data to stable IDs and necessary financial values. The append-only guarantee covers ordinary application SQL while the triggers exist; a physical database administrator can alter the SQLite file or drop triggers and is outside the application-level guarantee. D-24 retention, legal-hold, export, tamper-evidence, privileged-DBA, and privacy controls remain unresolved; no deletion or purge behavior is implemented.
+
+PR1 balance/status helpers are deliberately not a settlement engine. With no allocations or adjustments, positive `posted`/`disputed` outstanding equals `originalAmountMinor`; cancelled, written-off, and draft rows return no active outstanding. Disputed positive balances remain visible but are not ordinary-aging eligible. No production aging buckets are calculated or exposed.
+
+All canonical tables are empty after the migration because PR1 contains no seed, backfill, posting repository, route, worker, dual write, or legacy trigger. Current Finance, Risks, Dashboard, Company Health, rentals, payments, documents, and reports do not import or query these tables.
+
+**Rollback:** the repository has no down-migration framework. The safe rollback is to deploy the prior code and leave the unused empty additive tables in place. If physical removal is required before any later PR writes data, take and verify a SQLite backup, confirm all four tables are empty, then remove the append-only triggers and tables offline in foreign-key dependency order and delete only the `canonical_receivables_pr1_schema` migration-registry row. Once canonical data exists, tables must not be dropped as rollback; later integrations must be disabled while records are retained for diagnosis and audit.
+
+**Deferred:** every PR2+ payment, allocation, adjustment, refund, reversal, credit/debit, write-off, retention, backfill, dual-write, read API, tenant/RBAC enforcement, Company Health integration, and production cutover item remains deferred. This record does not change any implementation gate below.
 
 ## 1. Purpose and decisions at a glance
 
@@ -210,9 +245,9 @@ A receivable is a legally or operationally approved obligation owed by one clien
 | `companyTimezone` | IANA zone, required after posting | Immutable aging snapshot copied server-side from the owning company's timezone. The company setting remains authoritative for new postings. |
 | `status` | enum, required | Stored lifecycle: `draft`, `posted`, `disputed`, `cancelled`, `written_off`. |
 | `cancellationReason` | text, nullable | Required only for `cancelled`; cancellation preserves source and financial history. |
-| `description` | text, required | Human-readable, non-identity label. |
+| `description` | text, nullable | Optional human-readable, non-identity label. |
 | `createdAt`, `updatedAt` | UTC instants, required | Server generated. |
-| `cancelledAt`, `writtenOffAt` | UTC instants, nullable | `writtenOffAt` is set only when a full approved write-off moves stored status to `written_off`; partial write-off remains an adjustment. |
+| `cancelledAt`, `closedAt`, `writtenOffAt` | UTC instants, nullable | Lifecycle timestamps; `writtenOffAt` is set only when a full approved write-off moves stored status to `written_off`, while partial write-off remains an adjustment. `closedAt` is schema foundation only in PR1 and does not add a persisted `closed` workflow state. |
 | `version` | integer, required | Optimistic concurrency; starts at 1 and increments on permitted metadata/lifecycle changes. |
 
 **Original amount decision:** `originalAmountMinor` is immutable once status leaves `draft`. A posted amount correction uses a typed adjustment. Cancellation/replacement is allowed only through a dedicated workflow that preserves both records and source relationships.
@@ -920,7 +955,7 @@ sum(confirmed receipt amounts)
 
 ## 14. Test plan
 
-No tests are implemented in this specification phase. Required future coverage:
+PR1 now implements focused schema, domain, isolation, audit, and runtime-boundary tests for its additive foundation. The remaining items below continue to define required future coverage for PR2+ settlement, APIs, migration, cutover, and end-to-end security behavior:
 
 ### Domain
 
@@ -1029,7 +1064,7 @@ Remaining conditional items are narrow and must not be filled by implementation 
 | PR7 Company Health shadow read | **Decision PASS; sequence blocked** | Complete PR3–PR6 |
 | PR8 production read cutover | **BLOCKED** | D-01, D-24, D-25 conditions plus signed zero-delta reconciliation and operational cutover evidence |
 
-No gate outcome authorizes product code in this documentation task.
+No gate outcome authorizes product behavior beyond its named PR scope. PR1's PASS authorizes only the additive, production-unreachable schema/domain foundation recorded above.
 
 ## 16. Recommended implementation PR sequence
 
@@ -1070,9 +1105,9 @@ PR5 may merge code behind a disabled flag, but canonical production dual-write m
 
 ## 18. Explicit non-goals
 
-This specification does not:
+This PR1 implementation does not:
 
-- implement a database migration, table, route, helper, test, or UI;
+- implement a receivable write route, production posting service, read endpoint, or UI;
 - change existing payment, allocation, rental, document, finance, Company Health, Risks, or aging behavior;
 - declare current rental billing to be a legal invoice;
 - promote `expectedPaymentDate`, rental `endDate`, payment `dueDate`, or collection promises to contractual dates;

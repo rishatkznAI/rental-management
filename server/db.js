@@ -6,6 +6,9 @@ const {
   syncSqlShadowIndexForCollection,
 } = require('./lib/sql-shadow-indexes');
 const {
+  ensureCanonicalReceivablesSchema,
+} = require('./lib/canonical-receivables-schema');
+const {
   assertClientInnListUnique,
   assertClientInnWriteAllowed,
   buildClientInnDuplicateReport,
@@ -95,6 +98,7 @@ function ensureDb() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
   db.exec(`
     CREATE TABLE IF NOT EXISTS app_data (
       name TEXT PRIMARY KEY,
@@ -118,6 +122,7 @@ function ensureDb() {
   `);
   dbInstance = db;
   ensureSqlShadowSchema(db);
+  ensureCanonicalReceivablesSchema(db);
   syncClientInnIndex({ throwOnDuplicates: false });
   return db;
 }

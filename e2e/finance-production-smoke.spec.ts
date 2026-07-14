@@ -10,7 +10,7 @@ import {
   financeSmokeSummary,
   hasUnsafeFinanceSmokeText,
 } from '../scripts/finance-smoke-checks.mjs';
-import { backendCommitGateResult } from '../scripts/release-preflight.mjs';
+import { financeSmokeReleaseCommitContractResult } from '../scripts/release-preflight.mjs';
 import {
   describeEquipmentCandidate,
   discoverRentalModeEquipment,
@@ -54,79 +54,17 @@ type EquipmentDiscovery = {
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
-function shortCommit(value = '') {
-  return value.trim().slice(0, 12);
-}
-
-function commitsMatch(left = '', right = '') {
-  const normalizedLeft = left.trim();
-  const normalizedRight = right.trim();
-  if (!normalizedLeft || !normalizedRight) return false;
-  return normalizedLeft.startsWith(normalizedRight) || normalizedRight.startsWith(normalizedLeft);
-}
-
 function productionAppUrl(frontendUrl: string, route = '/') {
   const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
   return `${frontendUrl.replace(/\/$/, '')}/?debugVersion=1&_smoke=${Date.now()}#${normalizedRoute}`;
 }
 
-function normalizeFinanceSmokeReleaseType(value = '') {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized || normalized === 'auto') return '';
-  return normalized;
-}
-
-function resolveFinanceSmokeReleaseType(input: {
-  envReleaseType?: string;
-  frontendReleaseType?: string;
-  backendReleaseType?: string;
-}) {
-  return normalizeFinanceSmokeReleaseType(input.envReleaseType || '')
-    || normalizeFinanceSmokeReleaseType(input.frontendReleaseType || '')
-    || normalizeFinanceSmokeReleaseType(input.backendReleaseType || '')
-    || 'full-stack';
-}
-
-function assertBackendCommitMatchesPolicy(input: {
-  backendBuild: BuildInfo | null;
-  expectedCommit: string;
-  releaseType: string;
-  label: string;
-}) {
-  const gate = backendCommitGateResult({
-    env: 'production',
-    releaseType: input.releaseType,
-    backendBuild: input.backendBuild || {},
-    expectedCommit: input.expectedCommit,
-  });
-  if (gate.status === 'warn') {
-    safeSmokeLog('backendCommitDrift', {
-      label: input.label,
-      releaseType: input.releaseType,
-      expectedCommit: shortCommit(input.expectedCommit),
-      backendCommit: gate.backendCommit,
-      status: 'warn',
-    });
-    return gate;
-  }
-  expect(gate.status, `${input.label}: ${gate.message}`).toBe('pass');
-  return gate;
-}
-
-async function readPublicFrontendBuildMarker(page: Page, frontendUrl: string, apiUrl: string, expectedCommit: string) {
+async function readPublicFrontendBuildMarker(page: Page, frontendUrl: string, apiUrl: string) {
   await page.goto(productionAppUrl(frontendUrl, '/login'), { waitUntil: 'domcontentloaded' });
   await expect(page.locator('body')).toBeVisible();
   await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit));
   const frontendBuild = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
   expect(frontendBuild?.apiBaseUrl, 'frontend build marker should point at production API').toBe(apiUrl);
-
-  if (expectedCommit) {
-    expect(
-      commitsMatch(frontendBuild?.commit || '', shortCommit(expectedCommit)),
-      `frontend commit should match expected release commit: expected=${shortCommit(expectedCommit)}, frontend=${frontendBuild?.commit || 'missing'}`,
-    ).toBeTruthy();
-  }
-
   return frontendBuild;
 }
 
@@ -311,11 +249,7 @@ test('production finance smoke stays read-only', async ({ page }, testInfo) => {
   const expectedCommit = String(process.env.EXPECTED_RELEASE_COMMIT || '').trim();
   const blockedWrites = await installProductionReadOnlyGuard(page);
   const aggregateCounts = installSafeAggregateMonitor(page, apiUrl);
-  const frontendBuild = await readPublicFrontendBuildMarker(page, frontendUrl, apiUrl, expectedCommit);
-  let releaseType = resolveFinanceSmokeReleaseType({
-    envReleaseType: String(process.env.RELEASE_TYPE || ''),
-    frontendReleaseType: frontendBuild?.releaseType,
-  });
+  const frontendBuild = await readPublicFrontendBuildMarker(page, frontendUrl, apiUrl);
 
   let token = '';
   let backendBuild: BuildInfo | null = null;
@@ -325,26 +259,23 @@ test('production finance smoke stays read-only', async ({ page }, testInfo) => {
     const health = await publicApi.get('/health');
     expect(health.ok(), 'production /health should return 200').toBeTruthy();
 
+    const ready = await publicApi.get('/health/ready');
+    expect(ready.ok(), 'production /health/ready should return 200').toBeTruthy();
+
     const version = await publicApi.get('/api/version');
     expect(version.ok(), 'production /api/version should return 200').toBeTruthy();
     const versionJson = await version.json() as { build?: BuildInfo; app?: { disabled?: boolean } };
     backendBuild = versionJson.build || null;
     expect(versionJson.app?.disabled, 'production APP_DISABLED must remain false').toBe(false);
-    releaseType = resolveFinanceSmokeReleaseType({
-      envReleaseType: String(process.env.RELEASE_TYPE || ''),
-      frontendReleaseType: frontendBuild?.releaseType,
-      backendReleaseType: backendBuild?.releaseType,
+    const releaseContract = financeSmokeReleaseCommitContractResult({
+      env: 'production',
+      releaseType: String(process.env.RELEASE_TYPE || ''),
+      frontendBuild: frontendBuild || {},
+      backendBuild: backendBuild || {},
+      expectedCommit,
     });
-    safeSmokeLog('releaseType', { releaseType });
-
-    if (expectedCommit) {
-      assertBackendCommitMatchesPolicy({
-        backendBuild,
-        expectedCommit,
-        releaseType,
-        label: 'backend expected release commit',
-      });
-    }
+    safeSmokeLog('releaseCommitContract', releaseContract);
+    expect(releaseContract.status, releaseContract.message).toBe('pass');
 
     const anonymousCashFlow = await publicApi.get('/api/finance/cash-flow?includeDepreciation=true');
     expect(anonymousCashFlow.status(), 'anonymous cash-flow request should be 401').toBe(401);
@@ -405,15 +336,6 @@ test('production finance smoke stays read-only', async ({ page }, testInfo) => {
     }
   } finally {
     await authedApi.dispose();
-  }
-
-  if (frontendBuild?.commit && backendBuild?.commit) {
-    assertBackendCommitMatchesPolicy({
-      backendBuild,
-      expectedCommit: frontendBuild.commit,
-      releaseType,
-      label: 'frontend/backend commit match',
-    });
   }
 
   await page.getByLabel('Логин').fill(adminEmail);

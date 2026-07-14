@@ -153,6 +153,106 @@ function backendCommitFromBuild(build = {}) {
   return build.commitFull || build.commit || '';
 }
 
+function releaseTypeValue(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function frontendCommitFromBuild(build = {}) {
+  return build.commitFull || build.commit || '';
+}
+
+function resolvedSmokeReleaseType({ releaseType = '', frontendBuild = {}, backendBuild = {}, expectedCommit = '' } = {}) {
+  const requestedReleaseType = releaseTypeValue(releaseType);
+  if (requestedReleaseType && requestedReleaseType !== 'auto') return requestedReleaseType;
+
+  const frontendCommit = frontendCommitFromBuild(frontendBuild);
+  const backendCommit = backendCommitFromBuild(backendBuild);
+  const frontendMatchesExpected = commitsMatch(frontendCommit, expectedCommit);
+  const backendMatchesExpected = commitsMatch(backendCommit, expectedCommit);
+  const frontendReleaseType = releaseTypeValue(frontendBuild.releaseType);
+  const backendReleaseType = releaseTypeValue(backendBuild.releaseType);
+
+  if (backendMatchesExpected && !frontendMatchesExpected) return 'backend';
+  if (frontendMatchesExpected && !backendMatchesExpected) {
+    if (['frontend-only', 'deploy-tooling', 'frontend-deploy-tooling'].includes(frontendReleaseType)) {
+      return frontendReleaseType;
+    }
+    return 'frontend-only';
+  }
+  if (frontendMatchesExpected && backendMatchesExpected) {
+    if (frontendReleaseType && frontendReleaseType === backendReleaseType && RELEASE_TYPES.has(frontendReleaseType)) {
+      return frontendReleaseType;
+    }
+    return 'full-stack';
+  }
+
+  if (RELEASE_TYPES.has(backendReleaseType)) return backendReleaseType;
+  if (RELEASE_TYPES.has(frontendReleaseType)) return frontendReleaseType;
+  return 'full-stack';
+}
+
+export function financeSmokeReleaseCommitContractResult({
+  env = 'production',
+  releaseType = '',
+  frontendBuild = {},
+  backendBuild = {},
+  expectedCommit = '',
+} = {}) {
+  const requestedReleaseType = releaseTypeValue(releaseType) || 'auto';
+  const resolvedReleaseType = resolvedSmokeReleaseType({ releaseType, frontendBuild, backendBuild, expectedCommit });
+  const frontendCommit = frontendCommitFromBuild(frontendBuild);
+  const backendCommit = backendCommitFromBuild(backendBuild);
+  const frontendMatchesExpected = commitsMatch(frontendCommit, expectedCommit);
+  const backendMatchesExpected = commitsMatch(backendCommit, expectedCommit);
+  const knownReleaseType = RELEASE_TYPES.has(resolvedReleaseType);
+  const frontendMatchRequired = knownReleaseType && resolvedReleaseType !== 'backend';
+  const backendMatchRequired = knownReleaseType && !allowsBackendCommitDrift({ env, releaseType: resolvedReleaseType });
+  const failures = [];
+  const informationalDifferences = [];
+
+  if (!knownReleaseType) {
+    failures.push(`unknown release type "${resolvedReleaseType}"; expected one of ${RELEASE_TYPE_OPTIONS.join(', ')}`);
+  }
+  if (!String(expectedCommit || '').trim()) failures.push('expected release commit is missing');
+  if (!frontendCommit) failures.push('frontend build marker commit is missing');
+  if (!backendCommit) failures.push('/api/version backend commit is missing');
+  if (frontendCommit && frontendMatchRequired && !frontendMatchesExpected) {
+    failures.push(`frontend commit mismatch. expected=${shortCommit(expectedCommit)} actual=${frontendCommit}`);
+  }
+  if (backendCommit && backendMatchRequired && !backendMatchesExpected) {
+    failures.push(`backend commit mismatch. expected=${shortCommit(expectedCommit)} actual=${backendCommit}`);
+  }
+  if (frontendCommit && !frontendMatchRequired && !frontendMatchesExpected) {
+    informationalDifferences.push(`frontend commit differs from expected and is allowed for ${resolvedReleaseType} release`);
+  }
+  if (backendCommit && !backendMatchRequired && !backendMatchesExpected) {
+    informationalDifferences.push(`backend commit differs from expected and is allowed for ${resolvedReleaseType} release`);
+  }
+
+  return {
+    status: failures.length === 0 ? 'pass' : 'fail',
+    message: failures.join('; '),
+    requestedReleaseType,
+    releaseType: resolvedReleaseType,
+    expectedCommit: String(expectedCommit || '').trim(),
+    frontendCommit,
+    backendCommit,
+    comparisonsRequired: {
+      frontendToExpected: frontendMatchRequired,
+      backendToExpected: backendMatchRequired,
+    },
+    differencesAllowed: {
+      frontendFromExpected: knownReleaseType && !frontendMatchRequired,
+      backendFromExpected: knownReleaseType && !backendMatchRequired,
+    },
+    comparisonResults: {
+      frontendMatchesExpected,
+      backendMatchesExpected,
+    },
+    informationalDifferences,
+  };
+}
+
 export function backendCommitMatchesExpected(backendBuild = {}, expectedCommit = '') {
   const backendCommit = backendCommitFromBuild(backendBuild);
   return commitsMatch(backendCommit, expectedCommit) || commitsMatch(backendBuild.commit, shortCommit(expectedCommit));

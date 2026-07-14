@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { backendCommitGateResult } from '../scripts/release-preflight.mjs';
+import { financeSmokeReleaseCommitContractResult } from '../scripts/release-preflight.mjs';
 import {
   discoverRentalModeEquipment,
   financeSmokeFixtureDiagnostic,
@@ -133,31 +133,117 @@ test('production UI selector smoke passes frontend marker release type into rele
   assert.match(productionUiSelectorSmokeSource, /if \(actionRowCount > 0\)/);
 });
 
-test('finance production smoke uses release type policy for backend commit drift', () => {
-  assert.match(financeProductionSmokeSource, /backendCommitGateResult\(\{/);
+test('finance production smoke uses one release commit contract after both build markers are available', () => {
+  assert.match(financeProductionSmokeSource, /financeSmokeReleaseCommitContractResult\(\{/);
   assert.match(financeProductionSmokeSource, /env: 'production'/);
-  assert.match(financeProductionSmokeSource, /resolveFinanceSmokeReleaseType/);
-  assert.match(financeProductionSmokeSource, /envReleaseType: String\(process\.env\.RELEASE_TYPE \|\| ''\)/);
-  assert.match(financeProductionSmokeSource, /frontendReleaseType: frontendBuild\?\.releaseType/);
-  assert.match(financeProductionSmokeSource, /backendReleaseType: backendBuild\?\.releaseType/);
-  assert.match(financeProductionSmokeSource, /safeSmokeLog\('backendCommitDrift'/);
-  assert.match(financeProductionSmokeSource, /expect\(gate\.status, `\$\{input\.label\}: \$\{gate\.message\}`\)\.toBe\('pass'\)/);
+  assert.match(financeProductionSmokeSource, /releaseType: String\(process\.env\.RELEASE_TYPE \|\| ''\)/);
+  assert.match(financeProductionSmokeSource, /frontendBuild: frontendBuild \|\| \{\}/);
+  assert.match(financeProductionSmokeSource, /backendBuild: backendBuild \|\| \{\}/);
+  assert.match(financeProductionSmokeSource, /safeSmokeLog\('releaseCommitContract', releaseContract\)/);
+  assert.match(financeProductionSmokeSource, /expect\(releaseContract\.status, releaseContract\.message\)\.toBe\('pass'\)/);
+  assert.match(financeProductionSmokeSource, /production \/health\/ready should return 200/);
+  assert.doesNotMatch(financeProductionSmokeSource, /frontend commit should match expected release commit/);
 });
 
-test('finance production smoke release policy warns only for frontend and deploy tooling drift', () => {
-  const backendBuild = { commitFull: '3b445384ab16263c620a08db3a84a0316d7c3719' };
-  const expectedCommit = '287e2127a7efd14ddc37c09b4092dba67cd00e6a';
+const expectedReleaseCommit = 'ae9d8a8a286307f5d6e701585750af94d631edc1';
+const olderFrontendBuild = { commit: 'eb7dea8ef464', releaseType: 'frontend-only' };
+const matchingFrontendBuild = { commitFull: expectedReleaseCommit, releaseType: 'frontend-only' };
+const matchingBackendBuild = { commitFull: expectedReleaseCommit, releaseType: 'backend' };
+const olderBackendBuild = { commitFull: '3b445384ab16263c620a08db3a84a0316d7c3719', releaseType: 'full-stack' };
 
-  for (const releaseType of ['frontend-only', 'deploy-tooling', 'frontend-deploy-tooling']) {
-    const result = backendCommitGateResult({ env: 'production', releaseType, backendBuild, expectedCommit });
-    assert.equal(result.status, 'warn', `${releaseType} backend drift should warn`);
-    assert.match(result.message, new RegExp(`expected for ${releaseType === 'frontend-only' ? 'frontend-only' : releaseType} release`));
-  }
+function financeReleaseContract(releaseType, frontendBuild, backendBuild) {
+  return financeSmokeReleaseCommitContractResult({
+    env: 'production',
+    releaseType,
+    frontendBuild,
+    backendBuild,
+    expectedCommit: expectedReleaseCommit,
+  });
+}
 
-  for (const releaseType of ['backend', 'full-stack']) {
-    const result = backendCommitGateResult({ env: 'production', releaseType, backendBuild, expectedCommit });
-    assert.equal(result.status, 'fail', `${releaseType} backend drift should fail`);
+test('backend release passes when backend matches and frontend is older', () => {
+  const result = financeReleaseContract('backend', olderFrontendBuild, matchingBackendBuild);
+  assert.equal(result.status, 'pass');
+  assert.deepEqual(result.comparisonsRequired, { frontendToExpected: false, backendToExpected: true });
+  assert.deepEqual(result.differencesAllowed, { frontendFromExpected: true, backendFromExpected: false });
+  assert.deepEqual(result.informationalDifferences, ['frontend commit differs from expected and is allowed for backend release']);
+});
+
+test('backend release fails when backend mismatches', () => {
+  const result = financeReleaseContract('backend', olderFrontendBuild, olderBackendBuild);
+  assert.equal(result.status, 'fail');
+  assert.match(result.message, /backend commit mismatch/);
+});
+
+test('backend release fails when /api/version build commit is unavailable', () => {
+  const result = financeReleaseContract('backend', olderFrontendBuild, {});
+  assert.equal(result.status, 'fail');
+  assert.match(result.message, /\/api\/version backend commit is missing/);
+});
+
+test('backend release fails when the frontend marker is unavailable even though frontend equality is optional', () => {
+  const result = financeReleaseContract('backend', {}, matchingBackendBuild);
+  assert.equal(result.status, 'fail');
+  assert.match(result.message, /frontend build marker commit is missing/);
+});
+
+test('frontend-only release passes when frontend matches under existing backend drift rules', () => {
+  const result = financeReleaseContract('frontend-only', matchingFrontendBuild, olderBackendBuild);
+  assert.equal(result.status, 'pass');
+  assert.deepEqual(result.comparisonsRequired, { frontendToExpected: true, backendToExpected: false });
+});
+
+test('frontend-only release fails when frontend mismatches', () => {
+  const result = financeReleaseContract('frontend-only', olderFrontendBuild, olderBackendBuild);
+  assert.equal(result.status, 'fail');
+  assert.match(result.message, /frontend commit mismatch/);
+});
+
+test('full-stack release passes when frontend and backend both match', () => {
+  const result = financeReleaseContract('full-stack', matchingFrontendBuild, matchingBackendBuild);
+  assert.equal(result.status, 'pass');
+  assert.deepEqual(result.comparisonsRequired, { frontendToExpected: true, backendToExpected: true });
+});
+
+test('full-stack release fails when only frontend matches', () => {
+  const result = financeReleaseContract('full-stack', matchingFrontendBuild, olderBackendBuild);
+  assert.equal(result.status, 'fail');
+  assert.match(result.message, /backend commit mismatch/);
+});
+
+test('full-stack release fails when only backend matches', () => {
+  const result = financeReleaseContract('full-stack', olderFrontendBuild, matchingBackendBuild);
+  assert.equal(result.status, 'fail');
+  assert.match(result.message, /frontend commit mismatch/);
+});
+
+test('finance release contract fails closed for an unknown release type', () => {
+  const result = financeReleaseContract('mystery-release', matchingFrontendBuild, matchingBackendBuild);
+  assert.equal(result.status, 'fail');
+  assert.match(result.message, /unknown release type "mystery-release"/);
+});
+
+test('deploy-tooling release types preserve frontend match and approved backend drift behavior', () => {
+  for (const releaseType of ['deploy-tooling', 'frontend-deploy-tooling']) {
+    const passing = financeReleaseContract(releaseType, matchingFrontendBuild, olderBackendBuild);
+    assert.equal(passing.status, 'pass');
+    assert.deepEqual(passing.comparisonsRequired, { frontendToExpected: true, backendToExpected: false });
+    assert.deepEqual(passing.informationalDifferences, [`backend commit differs from expected and is allowed for ${releaseType} release`]);
+
+    const failing = financeReleaseContract(releaseType, olderFrontendBuild, olderBackendBuild);
+    assert.equal(failing.status, 'fail');
+    assert.match(failing.message, /frontend commit mismatch/);
   }
+});
+
+test('PR #199 auto contract resolves ae9d8a8a backend with an earlier frontend marker as backend release', () => {
+  const result = financeReleaseContract('auto', olderFrontendBuild, matchingBackendBuild);
+  assert.equal(result.status, 'pass');
+  assert.equal(result.requestedReleaseType, 'auto');
+  assert.equal(result.releaseType, 'backend');
+  assert.equal(result.expectedCommit, expectedReleaseCommit);
+  assert.equal(result.frontendCommit, 'eb7dea8ef464');
+  assert.equal(result.backendCommit, expectedReleaseCommit);
 });
 
 test('finance production smoke workflow passes release type with auto default', () => {

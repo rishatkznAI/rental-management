@@ -7,6 +7,12 @@ import { readFileSync } from 'node:fs';
 const ENVIRONMENTS = new Set(['staging', 'production']);
 const RELEASE_TYPE_OPTIONS = ['frontend-only', 'backend', 'full-stack', 'deploy-tooling', 'frontend-deploy-tooling'];
 const RELEASE_TYPES = new Set(RELEASE_TYPE_OPTIONS);
+const RELEASE_REQUEST_TYPE_OPTIONS = [...RELEASE_TYPE_OPTIONS, 'auto'];
+const RELEASE_REQUEST_TYPES = new Set(RELEASE_REQUEST_TYPE_OPTIONS);
+const FRONTEND_RELEASE_TYPES = new Set(['frontend-only', 'deploy-tooling', 'frontend-deploy-tooling']);
+const MIN_GIT_SHA_LENGTH = 7;
+const MAX_GIT_SHA_LENGTH = 40;
+const DEFAULT_RELEASE_PROBE_TIMEOUT_MS = 15_000;
 const FRONTEND_ONLY_FORBIDDEN_FILE_PATTERNS = [
   /^(server|backend|api)(\/|$)/,
   /^(routes|lib|db|storage|migrations)(\/|$)/,
@@ -127,7 +133,7 @@ Required env by mode:
 Optional:
   EXPECTED_RELEASE_COMMIT or GITHUB_SHA
   RELEASE_PREFLIGHT_OLD_COMMIT
-  RELEASE_TYPE or --release-type ${RELEASE_TYPE_OPTIONS.join('|')}
+  RELEASE_TYPE or --release-type ${RELEASE_REQUEST_TYPE_OPTIONS.join('|')}
   RELEASE_PREFLIGHT_CHANGED_FILES or --changed-files <newline-or-comma-separated paths>
   RELEASE_PREFLIGHT_CHANGED_FILES_FILE or --changed-files-file <path>`);
 }
@@ -142,11 +148,36 @@ export function shortCommit(value = '') {
   return String(value || '').trim().slice(0, 12);
 }
 
+export function validateGitSha(value = '', label = 'Git SHA') {
+  const original = String(value || '').trim();
+  const normalized = original.toLowerCase();
+  let error = '';
+  if (!normalized) error = `${label} is missing`;
+  else if (!/^[0-9a-f]+$/.test(normalized)) error = `${label} must contain only hexadecimal characters`;
+  else if (normalized.length < MIN_GIT_SHA_LENGTH || normalized.length > MAX_GIT_SHA_LENGTH) {
+    error = `${label} must be between ${MIN_GIT_SHA_LENGTH} and ${MAX_GIT_SHA_LENGTH} hexadecimal characters`;
+  }
+  return {
+    valid: !error,
+    original,
+    normalized,
+    length: normalized.length,
+    error,
+  };
+}
+
+export function compareGitShas(actual = '', expected = '') {
+  const actualValidation = validateGitSha(actual, 'actual Git SHA');
+  const expectedValidation = validateGitSha(expected, 'expected Git SHA');
+  const match = actualValidation.valid && expectedValidation.valid && (
+    actualValidation.normalized.startsWith(expectedValidation.normalized) ||
+    expectedValidation.normalized.startsWith(actualValidation.normalized)
+  );
+  return { match, actualValidation, expectedValidation };
+}
+
 export function commitsMatch(actual = '', expected = '') {
-  const left = String(actual || '').trim();
-  const right = String(expected || '').trim();
-  if (!left || !right) return false;
-  return left.startsWith(right) || right.startsWith(left);
+  return compareGitShas(actual, expected).match;
 }
 
 function backendCommitFromBuild(build = {}) {
@@ -161,95 +192,246 @@ function frontendCommitFromBuild(build = {}) {
   return build.commitFull || build.commit || '';
 }
 
-function resolvedSmokeReleaseType({ releaseType = '', frontendBuild = {}, backendBuild = {}, expectedCommit = '' } = {}) {
-  const requestedReleaseType = releaseTypeValue(releaseType);
-  if (requestedReleaseType && requestedReleaseType !== 'auto') return requestedReleaseType;
-
-  const frontendCommit = frontendCommitFromBuild(frontendBuild);
-  const backendCommit = backendCommitFromBuild(backendBuild);
-  const frontendMatchesExpected = commitsMatch(frontendCommit, expectedCommit);
-  const backendMatchesExpected = commitsMatch(backendCommit, expectedCommit);
-  const frontendReleaseType = releaseTypeValue(frontendBuild.releaseType);
-  const backendReleaseType = releaseTypeValue(backendBuild.releaseType);
-
-  if (backendMatchesExpected && !frontendMatchesExpected) return 'backend';
-  if (frontendMatchesExpected && !backendMatchesExpected) {
-    if (['frontend-only', 'deploy-tooling', 'frontend-deploy-tooling'].includes(frontendReleaseType)) {
-      return frontendReleaseType;
-    }
-    return 'frontend-only';
-  }
-  if (frontendMatchesExpected && backendMatchesExpected) {
-    if (frontendReleaseType && frontendReleaseType === backendReleaseType && RELEASE_TYPES.has(frontendReleaseType)) {
-      return frontendReleaseType;
-    }
-    return 'full-stack';
-  }
-
-  if (RELEASE_TYPES.has(backendReleaseType)) return backendReleaseType;
-  if (RELEASE_TYPES.has(frontendReleaseType)) return frontendReleaseType;
-  return 'full-stack';
+export function safeDiagnosticExcerpt(value = '', maxLength = 300) {
+  return String(value || '')
+    .replace(/("[^"]*(?:password|token|secret|authorization|cookie|credential)[^"]*"\s*:\s*")[^"]*/gi, '$1[redacted]')
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1[redacted]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
 }
 
-export function financeSmokeReleaseCommitContractResult({
+function normalizeProbeEvidence(evidence = {}, fallbackUrl = '') {
+  const status = Number.isInteger(evidence.status) ? evidence.status : null;
+  const timeoutMs = Number.isFinite(evidence.timeoutMs) && evidence.timeoutMs > 0
+    ? Number(evidence.timeoutMs)
+    : DEFAULT_RELEASE_PROBE_TIMEOUT_MS;
+  return {
+    ok: evidence.ok === true,
+    url: String(evidence.url || fallbackUrl || '').trim(),
+    status,
+    timeoutMs,
+    timedOut: evidence.timedOut === true,
+    error: safeDiagnosticExcerpt(evidence.error || ''),
+    bodyExcerpt: safeDiagnosticExcerpt(evidence.bodyExcerpt || ''),
+  };
+}
+
+function probeFailureReason(label, evidence, resolvedReleaseType) {
+  return `${label} required by ${resolvedReleaseType || 'unresolved'} release contract failed: ` +
+    `url=${evidence.url || 'missing'} status=${evidence.status ?? 'network-error'} ` +
+    `timeoutMs=${evidence.timeoutMs} timedOut=${evidence.timedOut} ` +
+    `error=${evidence.error || 'none'} body=${evidence.bodyExcerpt || 'empty'}`;
+}
+
+function concreteReleaseType(value = '') {
+  const normalized = releaseTypeValue(value);
+  return RELEASE_TYPES.has(normalized) ? normalized : '';
+}
+
+function resolveAutoReleaseType({
+  frontendBuild = {},
+  backendBuild = {},
+  frontendMatch = false,
+  backendMatch = false,
+  releaseMetadataType = '',
+} = {}) {
+  const failureReasons = [];
+  const frontendMarkerType = concreteReleaseType(frontendBuild.releaseType);
+  const backendMarkerType = concreteReleaseType(backendBuild.releaseType);
+  const metadataType = concreteReleaseType(releaseMetadataType);
+  const rawMetadataType = releaseTypeValue(releaseMetadataType);
+
+  if (rawMetadataType && !metadataType) {
+    failureReasons.push(`unknown authoritative release metadata type "${rawMetadataType}"`);
+  }
+
+  if (metadataType) {
+    const matchingMarkerTypes = [
+      frontendMatch ? frontendMarkerType : '',
+      backendMatch ? backendMarkerType : '',
+    ].filter(Boolean);
+    const conflicts = matchingMarkerTypes.filter(type => type !== metadataType);
+    if (conflicts.length > 0) {
+      failureReasons.push(`conflicting authoritative release evidence: metadata=${metadataType}, markers=${[...new Set(matchingMarkerTypes)].join(',')}`);
+    }
+    return {
+      resolvedReleaseType: metadataType,
+      failureReasons,
+      authoritativeEvidence: { metadataType, frontendMarkerType, backendMarkerType },
+    };
+  }
+
+  if (frontendMatch && backendMatch) {
+    const matchingMarkerTypes = [frontendMarkerType, backendMarkerType].filter(Boolean);
+    const uniqueMarkerTypes = [...new Set(matchingMarkerTypes)];
+    if (uniqueMarkerTypes.length > 1) {
+      failureReasons.push(`conflicting authoritative release markers: frontend=${frontendMarkerType || 'missing'}, backend=${backendMarkerType || 'missing'}`);
+    } else if (uniqueMarkerTypes.length === 1 && uniqueMarkerTypes[0] !== 'full-stack') {
+      failureReasons.push(`auto observed both commits matching but authoritative marker says ${uniqueMarkerTypes[0]} instead of full-stack`);
+    }
+    return {
+      resolvedReleaseType: 'full-stack',
+      failureReasons,
+      authoritativeEvidence: { metadataType: '', frontendMarkerType, backendMarkerType },
+    };
+  }
+
+  if (backendMatch && !frontendMatch) {
+    if (backendMarkerType === 'full-stack') {
+      return {
+        resolvedReleaseType: 'full-stack',
+        failureReasons,
+        authoritativeEvidence: { metadataType: '', frontendMarkerType, backendMarkerType },
+      };
+    }
+    if (backendMarkerType !== 'backend') {
+      failureReasons.push(`auto cannot infer backend release: matching backend marker type is ${backendMarkerType || 'missing or unknown'}`);
+    }
+    return {
+      resolvedReleaseType: 'backend',
+      failureReasons,
+      authoritativeEvidence: { metadataType: '', frontendMarkerType, backendMarkerType },
+    };
+  }
+
+  if (frontendMatch && !backendMatch) {
+    if (frontendMarkerType === 'full-stack') {
+      return {
+        resolvedReleaseType: 'full-stack',
+        failureReasons,
+        authoritativeEvidence: { metadataType: '', frontendMarkerType, backendMarkerType },
+      };
+    }
+    if (!FRONTEND_RELEASE_TYPES.has(frontendMarkerType)) {
+      failureReasons.push(`auto cannot infer frontend release: matching frontend marker type is ${frontendMarkerType || 'missing or unknown'}`);
+    }
+    return {
+      resolvedReleaseType: FRONTEND_RELEASE_TYPES.has(frontendMarkerType) ? frontendMarkerType : 'frontend-only',
+      failureReasons,
+      authoritativeEvidence: { metadataType: '', frontendMarkerType, backendMarkerType },
+    };
+  }
+
+  failureReasons.push('auto cannot resolve release type because neither frontend nor backend matches the expected commit');
+  return {
+    resolvedReleaseType: 'full-stack',
+    failureReasons,
+    authoritativeEvidence: { metadataType: '', frontendMarkerType, backendMarkerType },
+  };
+}
+
+export function releaseVerificationContractResult({
   env = 'production',
   releaseType = '',
+  releaseMetadataType = '',
   frontendBuild = {},
   backendBuild = {},
   expectedCommit = '',
+  frontendEvidence = {},
+  backendVersion = {},
+  health = {},
+  readiness = {},
 } = {}) {
   const requestedReleaseType = releaseTypeValue(releaseType) || 'auto';
-  const resolvedReleaseType = resolvedSmokeReleaseType({ releaseType, frontendBuild, backendBuild, expectedCommit });
   const frontendCommit = frontendCommitFromBuild(frontendBuild);
   const backendCommit = backendCommitFromBuild(backendBuild);
-  const frontendMatchesExpected = commitsMatch(frontendCommit, expectedCommit);
-  const backendMatchesExpected = commitsMatch(backendCommit, expectedCommit);
-  const knownReleaseType = RELEASE_TYPES.has(resolvedReleaseType);
-  const frontendMatchRequired = knownReleaseType && resolvedReleaseType !== 'backend';
-  const backendMatchRequired = knownReleaseType && !allowsBackendCommitDrift({ env, releaseType: resolvedReleaseType });
-  const failures = [];
-  const informationalDifferences = [];
+  const expectedSha = validateGitSha(expectedCommit, 'expected release commit');
+  const frontendSha = validateGitSha(frontendCommit, 'frontend actual commit');
+  const backendSha = validateGitSha(backendCommit, 'backend actual commit');
+  const frontendComparison = compareGitShas(frontendCommit, expectedCommit);
+  const backendComparison = compareGitShas(backendCommit, expectedCommit);
+  const frontendMatch = frontendComparison.match;
+  const backendMatch = backendComparison.match;
+  const failureReasons = [];
+  let resolvedReleaseType = requestedReleaseType;
+  let authoritativeEvidence = {
+    metadataType: '',
+    frontendMarkerType: concreteReleaseType(frontendBuild.releaseType),
+    backendMarkerType: concreteReleaseType(backendBuild.releaseType),
+  };
 
-  if (!knownReleaseType) {
-    failures.push(`unknown release type "${resolvedReleaseType}"; expected one of ${RELEASE_TYPE_OPTIONS.join(', ')}`);
+  if (!RELEASE_REQUEST_TYPES.has(requestedReleaseType)) {
+    failureReasons.push(`unknown requested release type "${requestedReleaseType}"; expected one of ${RELEASE_REQUEST_TYPE_OPTIONS.join(', ')}`);
+  } else if (requestedReleaseType === 'auto') {
+    const autoResolution = resolveAutoReleaseType({
+      frontendBuild,
+      backendBuild,
+      frontendMatch,
+      backendMatch,
+      releaseMetadataType,
+    });
+    resolvedReleaseType = autoResolution.resolvedReleaseType;
+    authoritativeEvidence = autoResolution.authoritativeEvidence;
+    failureReasons.push(...autoResolution.failureReasons);
   }
-  if (!String(expectedCommit || '').trim()) failures.push('expected release commit is missing');
-  if (!frontendCommit) failures.push('frontend build marker commit is missing');
-  if (!backendCommit) failures.push('/api/version backend commit is missing');
-  if (frontendCommit && frontendMatchRequired && !frontendMatchesExpected) {
-    failures.push(`frontend commit mismatch. expected=${shortCommit(expectedCommit)} actual=${frontendCommit}`);
+
+  const knownReleaseType = RELEASE_TYPES.has(resolvedReleaseType);
+  const requireFrontendMatch = knownReleaseType && resolvedReleaseType !== 'backend';
+  const requireBackendMatch = knownReleaseType && !allowsBackendCommitDrift({ env, releaseType: resolvedReleaseType });
+  const allowFrontendDrift = knownReleaseType && !requireFrontendMatch;
+  const allowBackendDrift = knownReleaseType && !requireBackendMatch;
+  const informationalDifferences = [];
+  const normalizedFrontendEvidence = normalizeProbeEvidence(frontendEvidence);
+  const normalizedBackendVersion = normalizeProbeEvidence(backendVersion, '/api/version');
+  const normalizedHealth = normalizeProbeEvidence(health, '/health');
+  const normalizedReadiness = normalizeProbeEvidence(readiness, '/health/ready');
+
+  if (!knownReleaseType && RELEASE_REQUEST_TYPES.has(requestedReleaseType)) {
+    failureReasons.push(`unresolved release type "${resolvedReleaseType}"`);
   }
-  if (backendCommit && backendMatchRequired && !backendMatchesExpected) {
-    failures.push(`backend commit mismatch. expected=${shortCommit(expectedCommit)} actual=${backendCommit}`);
+  if (!expectedSha.valid) failureReasons.push(expectedSha.error);
+  if (!frontendSha.valid) failureReasons.push(frontendSha.error);
+  if (!backendSha.valid) failureReasons.push(backendSha.error);
+  if (!normalizedFrontendEvidence.ok) {
+    failureReasons.push(probeFailureReason('frontend marker', normalizedFrontendEvidence, resolvedReleaseType));
   }
-  if (frontendCommit && !frontendMatchRequired && !frontendMatchesExpected) {
+  if (!normalizedBackendVersion.ok) {
+    failureReasons.push(probeFailureReason('/api/version', normalizedBackendVersion, resolvedReleaseType));
+  }
+  if (!normalizedHealth.ok) failureReasons.push(probeFailureReason('/health', normalizedHealth, resolvedReleaseType));
+  if (!normalizedReadiness.ok) failureReasons.push(probeFailureReason('/health/ready', normalizedReadiness, resolvedReleaseType));
+  if (frontendSha.valid && expectedSha.valid && requireFrontendMatch && !frontendMatch) {
+    failureReasons.push(`frontend commit mismatch. expected=${expectedSha.normalized} actual=${frontendSha.normalized}`);
+  }
+  if (backendSha.valid && expectedSha.valid && requireBackendMatch && !backendMatch) {
+    failureReasons.push(`backend commit mismatch. expected=${expectedSha.normalized} actual=${backendSha.normalized}`);
+  }
+  if (frontendSha.valid && expectedSha.valid && allowFrontendDrift && !frontendMatch) {
     informationalDifferences.push(`frontend commit differs from expected and is allowed for ${resolvedReleaseType} release`);
   }
-  if (backendCommit && !backendMatchRequired && !backendMatchesExpected) {
+  if (backendSha.valid && expectedSha.valid && allowBackendDrift && !backendMatch) {
     informationalDifferences.push(`backend commit differs from expected and is allowed for ${resolvedReleaseType} release`);
   }
 
   return {
-    status: failures.length === 0 ? 'pass' : 'fail',
-    message: failures.join('; '),
     requestedReleaseType,
-    releaseType: resolvedReleaseType,
+    resolvedReleaseType,
     expectedCommit: String(expectedCommit || '').trim(),
-    frontendCommit,
-    backendCommit,
-    comparisonsRequired: {
-      frontendToExpected: frontendMatchRequired,
-      backendToExpected: backendMatchRequired,
-    },
-    differencesAllowed: {
-      frontendFromExpected: knownReleaseType && !frontendMatchRequired,
-      backendFromExpected: knownReleaseType && !backendMatchRequired,
-    },
-    comparisonResults: {
-      frontendMatchesExpected,
-      backendMatchesExpected,
-    },
+    frontendActualCommit: frontendCommit,
+    backendActualCommit: backendCommit,
+    requireFrontendMatch,
+    requireBackendMatch,
+    allowFrontendDrift,
+    allowBackendDrift,
+    frontendMatch,
+    backendMatch,
+    pass: failureReasons.length === 0,
+    failureReasons,
     informationalDifferences,
+    authoritativeEvidence,
+    shaValidation: {
+      expected: expectedSha,
+      frontend: frontendSha,
+      backend: backendSha,
+    },
+    probes: {
+      frontend: normalizedFrontendEvidence,
+      backendVersion: normalizedBackendVersion,
+      health: normalizedHealth,
+      readiness: normalizedReadiness,
+    },
+    message: failureReasons.join('; '),
   };
 }
 
@@ -518,17 +700,50 @@ async function fetchText(url, options = {}) {
   return { response, text };
 }
 
-async function fetchJson(url) {
-  const { response, text } = await fetchText(url, {
-    headers: { Accept: 'application/json' },
-  });
-  let json = null;
+async function collectJsonProbe(url, { timeoutMs = DEFAULT_RELEASE_PROBE_TIMEOUT_MS } = {}) {
+  const startedAt = Date.now();
   try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(`${url} did not return JSON. HTTP ${response.status}. Body: ${text.slice(0, 300)}`);
+    const { response, text } = await fetchText(url, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    let json = null;
+    let parseError = '';
+    try {
+      json = JSON.parse(text);
+    } catch {
+      parseError = 'response was not valid JSON';
+    }
+    const ok = response.status === 200 && json?.ok === true;
+    return {
+      evidence: {
+        ok,
+        url,
+        status: response.status,
+        timeoutMs,
+        timedOut: false,
+        error: parseError || (ok ? '' : 'HTTP 200 with JSON ok=true is required'),
+        bodyExcerpt: safeDiagnosticExcerpt(text),
+        durationMs: Date.now() - startedAt,
+      },
+      json,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      evidence: {
+        ok: false,
+        url,
+        status: null,
+        timeoutMs,
+        timedOut: /abort|timeout/i.test(`${error?.name || ''} ${message}`),
+        error: safeDiagnosticExcerpt(message),
+        bodyExcerpt: '',
+        durationMs: Date.now() - startedAt,
+      },
+      json: null,
+    };
   }
-  return { response, json, text };
 }
 
 function assertOk(condition, message) {
@@ -562,6 +777,7 @@ async function readFrontendBundle(frontendUrl) {
   const separator = frontendUrl.includes('?') ? '&' : '?';
   const { response, text: html } = await fetchText(`${frontendUrl}${separator}${cacheBust}`, {
     headers: { Accept: 'text/html' },
+    signal: AbortSignal.timeout(60_000),
   });
   assertOk(response.status === 200, `frontend URL must return 200. HTTP ${response.status}: ${frontendUrl}`);
 
@@ -571,7 +787,7 @@ async function readFrontendBundle(frontendUrl) {
   const assets = [];
   for (const scriptUrl of scriptUrls) {
     const assetUrl = resolveAssetUrl(frontendUrl, scriptUrl);
-    const asset = await fetchText(assetUrl);
+    const asset = await fetchText(assetUrl, { signal: AbortSignal.timeout(60_000) });
     assertOk(asset.response.status === 200, `frontend asset must return 200. HTTP ${asset.response.status}: ${assetUrl}`);
     assets.push({ url: assetUrl, text: asset.text });
   }
@@ -580,6 +796,18 @@ async function readFrontendBundle(frontendUrl) {
     html,
     assets,
     combinedText: [html, ...assets.map(asset => asset.text)].join('\n'),
+  };
+}
+
+export function extractFrontendBuildMarkerFromBundle(text = '') {
+  const marker = String(text || '').match(
+    /service\s*:\s*["']frontend["'][\s\S]{0,500}?commit\s*:\s*["']([^"']*)["'][\s\S]{0,500}?releaseType\s*:\s*["']([^"']*)["']/,
+  );
+  if (!marker) return null;
+  return {
+    service: 'frontend',
+    commit: marker[1],
+    releaseType: marker[2],
   };
 }
 
@@ -631,14 +859,8 @@ async function main() {
     printUsage();
     throw new Error('--env must be staging or production');
   }
-  if (!RELEASE_TYPES.has(args.releaseType)) {
-    printUsage();
-    throw new Error(`--release-type must be ${RELEASE_TYPE_OPTIONS.join(', ')}`);
-  }
-
   const prefix = args.env === 'staging' ? 'STAGING' : 'PRODUCTION';
   const expectedCommit = String(args.expectedCommit || '').trim();
-  assertOk(expectedCommit, 'expected commit is required via --expected-commit, EXPECTED_RELEASE_COMMIT, or GITHUB_SHA');
 
   console.log(`[release-preflight] environment=${args.env}`);
   console.log(`[release-preflight] expectedCommit=${shortCommit(expectedCommit)}`);
@@ -669,44 +891,52 @@ async function main() {
   console.log(`[release-preflight] frontend host type=${classifyHost(frontendUrl)}`);
   console.log(`[release-preflight] api=${apiUrl}`);
 
-  const healthUrl = `${apiUrl}/health`;
-  const health = await fetchJson(healthUrl);
-  assertOk(health.response.status === 200, `/health must return 200. HTTP ${health.response.status}`);
-  assertOk(health.json?.ok === true, '/health JSON must include ok=true');
-  console.log('[release-preflight] backend /health OK');
+  let frontend = null;
+  let frontendCollectionError = '';
+  try {
+    frontend = await readFrontendBundle(frontendUrl);
+  } catch (error) {
+    frontendCollectionError = safeDiagnosticExcerpt(error instanceof Error ? error.message : String(error));
+  }
 
-  const versionUrl = `${apiUrl}/api/version`;
-  const version = await fetchJson(versionUrl);
-  assertOk(version.response.status === 200, `/api/version must return 200. HTTP ${version.response.status}`);
-  assertOk(version.json?.ok === true, '/api/version JSON must include ok=true');
-  const backendBuild = version.json?.build || {};
-  const backendCommit = backendCommitFromBuild(backendBuild);
-  assertOk(backendCommit, '/api/version must expose backend build commit');
-  const backendGate = backendCommitGateResult({
+  const frontendText = frontend?.combinedText || '';
+  const frontendBuild = extractFrontendBuildMarkerFromBundle(frontendText) || {};
+  const expectedShort = shortCommit(expectedCommit);
+  const detectedApiUrls = detectApiUrlCandidates(frontendText);
+  const productionLikeBackendUrls = detectProductionLikeBackendUrls(detectedApiUrls, apiUrl);
+  const expectedApiFound = frontendText.includes(apiUrl);
+  const apiTargetClasses = unique(detectedApiUrls.map(url => classifyApiTarget(url, apiUrl, args.env)));
+  const frontendEvidence = {
+    ok: Boolean(frontendBuild.commit) && expectedApiFound && !frontendCollectionError,
+    url: frontendUrl,
+    status: frontend ? 200 : null,
+    timeoutMs: 60_000,
+    timedOut: /abort|timeout/i.test(frontendCollectionError),
+    error: frontendCollectionError || (!frontendBuild.commit
+      ? 'frontend build marker was not found in public bundle'
+      : (!expectedApiFound ? `frontend bundle does not contain expected API URL ${apiUrl}` : '')),
+    bodyExcerpt: '',
+  };
+
+  const versionProbe = await collectJsonProbe(`${apiUrl}/api/version`);
+  const healthProbe = await collectJsonProbe(`${apiUrl}/health`);
+  const readinessProbe = await collectJsonProbe(`${apiUrl}/health/ready`);
+  const backendBuild = versionProbe.json?.build || {};
+  const releaseContract = releaseVerificationContractResult({
     env: args.env,
     releaseType: args.releaseType,
+    frontendBuild,
     backendBuild,
     expectedCommit,
+    frontendEvidence,
+    backendVersion: versionProbe.evidence,
+    health: healthProbe.evidence,
+    readiness: readinessProbe.evidence,
   });
-  if (backendGate.status === 'warn') {
-    console.warn(`[release-preflight] WARN: ${backendGate.message}`);
-  } else {
-    assertOk(backendGate.status === 'pass', backendGate.message);
-    console.log(`[release-preflight] backend commit OK (${shortCommit(backendCommit)})`);
-  }
 
-  const frontend = await readFrontendBundle(frontendUrl);
-  const expectedShort = shortCommit(expectedCommit);
-  const detectedApiUrls = detectApiUrlCandidates(frontend.combinedText);
-  const productionLikeBackendUrls = detectProductionLikeBackendUrls(detectedApiUrls, apiUrl);
-  const markerFound = frontend.combinedText.includes(expectedShort) || frontend.combinedText.includes(expectedCommit);
-  const expectedApiFound = frontend.combinedText.includes(apiUrl);
-  const apiTargetClasses = unique(detectedApiUrls.map(url => classifyApiTarget(url, apiUrl, args.env)));
+  console.log(`[release-preflight] releaseContract ${JSON.stringify(releaseContract)}`);
 
-  console.log(`[release-preflight] frontend marker expected=${expectedShort} found=${markerFound ? 'yes' : 'no'}`);
-  if (!markerFound) {
-    console.log(`[release-preflight] frontend marker status=BLOCKED url=${frontendUrl}`);
-  }
+  console.log(`[release-preflight] frontend marker actual=${frontendBuild.commit || 'missing'} expected=${expectedShort}`);
   console.log(`[release-preflight] frontend API target class=${apiTargetClasses.join(', ') || 'unknown'}`);
   if (args.env === 'staging' && !apiTargetClasses.includes('staging')) {
     console.log('[release-preflight] staging API target status=RISK');
@@ -716,14 +946,7 @@ async function main() {
     console.warn(`[release-preflight] WARNING: staging frontend bundle contains production-like backend URL(s): ${productionLikeBackendUrls.join(', ')}`);
   }
 
-  assertOk(
-    markerFound,
-    `frontend build marker does not contain expected commit ${expectedShort}. detectedApiUrls=${detectedApiUrls.join(', ') || 'none'}`,
-  );
-  assertOk(
-    expectedApiFound,
-    `frontend bundle does not contain expected API URL ${apiUrl}. detectedApiUrls=${detectedApiUrls.join(', ') || 'none'}`,
-  );
+  assertOk(releaseContract.pass, releaseContract.failureReasons.join('; '));
   if (args.env === 'staging') {
     assertOk(
       productionLikeBackendUrls.length === 0,
@@ -733,11 +956,11 @@ async function main() {
   if (args.oldCommit) {
     const oldShort = shortCommit(args.oldCommit);
     assertOk(
-      !frontend.combinedText.includes(oldShort) && !frontend.combinedText.includes(args.oldCommit),
+      !frontendText.includes(oldShort) && !frontendText.includes(args.oldCommit),
       `frontend still appears to contain old commit ${oldShort}`,
     );
   }
-  console.log(`[release-preflight] frontend marker OK (${expectedShort})`);
+  console.log(`[release-preflight] release contract OK (${releaseContract.resolvedReleaseType})`);
   console.log('[release-preflight] frontend API URL OK');
   console.log('[release-preflight] PASS');
 }

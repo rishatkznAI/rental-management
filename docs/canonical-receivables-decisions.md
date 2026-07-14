@@ -14,13 +14,13 @@
 
 **Approved decisions:** D-01 through D-27. The product owner approved every decision in this memo as recorded in the Owner answer column and detailed answer fields.
 
-**Conditional approvals:** D-01 is approved subject to accountant and legal confirmation of the exact allow-listed source document types that are sufficient to create debt. D-24 is approved subject to accountant and legal confirmation of the exact retention duration and related legal-hold/export requirements. D-25's authority model is approved, while exact monetary thresholds for dual approval remain pending product/Finance approval.
+**Conditional approvals:** D-01 is approved subject to accountant and legal confirmation of the exact allow-listed source document types that are sufficient to create debt. D-24 is approved subject to accountant and legal confirmation of the exact retention duration and related legal-hold/export requirements. D-25's mandatory dual-approval policy for sensitive initial-release operations is approved for PR2; exact monetary and age thresholds are deferred.
 
-**Unresolved numerical limits:** the amount and age thresholds for large corrections, sensitive due-date changes, refunds, adjustments, and write-offs. Until approved, implementations must use the stricter dual-approval path for every affected action; they may not invent a threshold.
+**Deferred numerical limits:** amount and age thresholds remain intentionally undefined. The approved initial-release policy below applies mandatory dual approval to every sensitive operation instead of using unapproved thresholds. A future threshold policy requires a separate product-owner decision and may not weaken auditability or separation of duties.
 
 **No silent assumptions:** implementation may encode only the answers in this baseline. Missing legal document types, retention durations, financial thresholds, tie-break policy extensions, or role powers must remain disabled, configuration-blocked, or explicitly escalated.
 
-**Current status summary:** the product baseline is approved; PR1 is released; the production canonical ledger remains inactive; the canonical tables are infrastructure only; and PR2 cannot begin until its approval gate is resolved.
+**Current status summary:** the product baseline is approved; PR1 is released; the production canonical ledger remains inactive; and the PR2 decision gate is PASS for settlement/allocation/adjustment domain implementation under the approved temporary D-25 policy. Production enablement remains blocked until PR6 authorization enforcement exists.
 
 ## PR1 release status
 
@@ -34,7 +34,7 @@ Because clients, contracts, rentals, and users remain JSON records, PR1 does not
 
 Pure domain helpers implement creation validation, due-date provenance, aging eligibility, explicit PR1 workflow transitions, posted immutability, deterministic source/idempotency identities, and the limited pre-allocation balance/derived-state contract. Posted validation accepts no built-in source type: an injected approved-source policy is mandatory, and no production caller is wired.
 
-No receivable API, posting repository, backfill, seed, dual write, payment/allocation/adjustment behavior, production read switch, Company Health import, frontend change, retention deletion, D-25 threshold, or RBAC expansion is included. PR1 is released but not cut over: production posting remains disabled, production reads remain unchanged, and PR2 and later gates remain blocked/sequence-gated exactly as recorded below.
+No receivable API, posting repository, backfill, seed, dual write, payment/allocation/adjustment behavior, production read switch, Company Health import, frontend change, retention deletion, D-25 threshold, or RBAC expansion is included. PR1 is released but not cut over: production posting remains disabled and production reads remain unchanged. The PR2 decision gate is now PASS for domain implementation; later sequence, authorization, enablement, and cutover gates remain as recorded below.
 
 ### Verified production state
 
@@ -101,7 +101,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 | D-22 | Which records may be backfilled? | Import only deterministic facts; unknown dates stay unknown; uncertain allocations stay unapplied | Approved; stable source identity is mandatory | approved | PR 4 |
 | D-23 | Cutover discrepancy threshold | Zero unexplained money delta; classified count differences only; zero P0 integrity errors | Approved as recommended | approved | PR 4, PR 8 |
 | D-24 | Audit retention | Append-only audit; no purge until accountant/lawyer approve retention and legal-hold policy | No deletion; exact retention duration requires accountant/legal confirmation | approved subject to accountant/legal confirmation | PR 8 retention gate |
-| D-25 | Who approves sensitive actions? | Capability/threshold matrix with separation of duties; admin is not automatic financial approver | Authority roles approved; exact financial limits remain pending | approved; numerical limits pending | PR 2, PR 6, PR 8 |
+| D-25 | Who approves sensitive actions? | Mandatory dual approval for sensitive initial-release operations, with a constrained ordinary-allocation exception and strict separation of duties | Initial-release policy approved for PR2; numerical limits deferred | approved for PR2; numerical limits deferred | PR 6 enforcement and production enablement; not PR 2 domain implementation |
 | D-26 | Do plans belong here? | Keep approved plans and forecasts in a separate planning domain | Approved as recommended | approved | PR 3, PR 5 |
 | D-27 | Source of truth after cutover | Canonical ledger is operational authority; accounting system remains reconciled external source | Approved as recommended | approved | PR 5, PR 8 |
 
@@ -550,31 +550,58 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Why the decision matters:** Technical admin access must not automatically authorize financial loss or KPI-changing actions.
 - **Current system behavior:** Admin and office-manager control most payment/allocation writes; accountant/finance/commercial/branch authority roles are not established in the audited role model.
 - **Available options:** role-only; capability-only; amount thresholds; two-person approval; external accounting approval.
-- **Recommended default:** capability-based matrix with company/branch scope and separation of duties for high-risk actions. Approved matrix:
+- **Recommended default:** capability-based authority with company/branch scope, immutable approval records, and separation of duties. For the initial release, use the approved mandatory dual-approval policy below instead of unapproved monetary or age thresholds.
 
-| Action | Initiator/ordinary authority | Required approval/control |
-|---|---|---|
-| Receivable creation/posting | Accountant | Posted-source validation and authorized company/branch |
-| Ordinary allocation | Accountant | Explicit allocation record; cross-branch permission where applicable |
-| Refund | Authorized requester | Finance-manager approval and immutable original links |
-| Ordinary adjustment | Authorized requester | Finance-manager approval, typed effect, reason, and evidence |
-| Sensitive post-allocation due-date change | Accountant or finance manager | Second distinct authorized manager approval |
-| Write-off | Authorized finance initiator | Second distinct authorized approval; reason/evidence mandatory |
-| Large correction | Authorized finance initiator | Second distinct authorized approval |
-| Migration cutover | Release/migration owner | Product owner plus finance owner |
+#### Approved temporary initial-release policy
 
-Exact amount and age limits that define the elevated path remain pending. Until approved, the stricter dual-approval path applies to every sensitive due-date change, write-off, and correction.
+1. **Ordinary payment allocation**
+   - An accountant may create the allocation.
+   - Dual approval is not required only when payment and receivable belong to the same company, currencies match, the allocation exceeds neither payment balance nor receivable outstanding, and there is an exact document/reference match or explicit client instruction.
+   - A manual allocation without clear matching requires finance-manager confirmation.
+2. **Cross-branch allocation**
+   - Always requires accountant initiation and finance-manager approval.
+   - Cross-company allocation is forbidden.
+3. **Refund**
+   - Always requires dual approval.
+   - An accountant or finance manager initiates; another finance-authorized user approves.
+   - The initiator cannot approve the same operation.
+4. **Credit/debit adjustment**
+   - Always requires dual approval.
+   - Explicit adjustment type and reason are mandatory.
+   - The original posted financial event is never edited.
+5. **Reversal/correction**
+   - Always requires dual approval.
+   - It must reference the original event and use an append-only compensating event.
+6. **Write-off**
+   - Always requires dual approval.
+   - One approver must be the finance owner or commercial/product owner.
+   - Reason and supporting-document reference are mandatory; automatic write-off is forbidden.
+7. **Contractual due-date change**
+   - Before any payment allocation, an accountant or finance manager may initiate the change and an audit reason is mandatory.
+   - After any payment allocation, dual approval is always required.
+   - A retroactive change preserves the previous value in the audit log.
+8. **Cancellation of a posted receivable**
+   - Always requires dual approval.
+   - If allocations or adjustments exist, direct cancellation is forbidden and compensating operations are required.
+9. **Separation of duties and approval evidence**
+   - Initiator and approver are different users.
+   - System and integration events cannot self-approve sensitive operations.
+   - Every approval records `initiatorId`, `approverId`, `requestedAt`, `approvedAt`, `reason`, and `correlationId`.
+10. **Temporary-policy status**
+   - This is the approved initial-release D-25 policy.
+   - Monetary and age thresholds remain deferred.
+   - Future threshold changes require a separate product-owner decision and must not weaken auditability or separation of duties.
 
 - **Acceptable alternative:** stricter two-person approval for every posted correction/refund/write-off.
 - **Dangerous option:** administrator can approve every financial action solely because of system role.
 - **Business benefits:** controlled authority, branch safety, and clear accountability.
 - **Business risks:** roles/thresholds may slow work if understaffed.
-- **Accounting/operational consequences:** final roles, thresholds, and separation rules require **accountant and product-owner confirmation**; legal-sensitive cancellation/write-off evidence needs **legal confirmation**.
-- **Technical consequences:** new capabilities/approval records, scoped checks, threshold configuration, non-self-approval constraint.
+- **Accounting/operational consequences:** the initial-release authority and separation rules are approved. Future numerical thresholds still require **accountant and product-owner confirmation**; legal-sensitive cancellation/write-off evidence needs **legal confirmation**.
+- **Technical consequences:** new capabilities and immutable approval records, scoped checks, non-self-approval, exact approval metadata, and default-deny enforcement. No threshold configuration is required for the initial-release policy.
 - **Migration consequences:** discrepancy acceptance and verified-date actors must use this matrix.
-- **What becomes impossible if postponed:** PR2 approvals, PR6 RBAC, and PR8 sign-off cannot be completed.
-- **Product-owner answer:** Accountants create/post receivables and ordinary allocations; finance managers approve refunds and adjustments; sensitive due-date changes, write-offs, and large corrections require dual approval; migration cutover requires product owner plus finance owner. Exact financial limits remain pending approval.
-- **Status:** approved; numerical limits pending
+- **What becomes impossible if postponed:** PR6 authorization enforcement and production enablement cannot be completed; the PR2 domain may proceed under this approved policy.
+- **Product-owner answer:** Approve the temporary initial-release policy above: every sensitive operation uses dual approval and separation of duties, while only strictly matched ordinary same-company/same-currency allocations may use the documented single-accountant path. Numerical limits remain deferred.
+- **Status:** approved for PR2; numerical limits deferred
 
 ### D-26 — Do financial plans belong to this model?
 
@@ -626,7 +653,7 @@ PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office bra
 
 ### Before PR 2 — payments, allocations, adjustments
 
-**Gate: BLOCKED.** D-08 through D-16 and D-21 are approved, and D-25's role model is approved. Exact monetary/age thresholds for dual approval remain unresolved under D-25. PR2 must not invent limits; Product/Finance must either approve those thresholds or explicitly approve the always-dual path for every sensitive action before PR2 begins.
+**Gate: PASS — unblocked for settlement/allocation/adjustment domain implementation.** D-08 through D-16 and D-21 are approved, and D-25 now supplies the approved initial-release authority policy. PR2 must implement the mandatory dual-approval and separation-of-duties contract exactly, but no PR2 code may enable production operations before PR6 authorization enforcement exists.
 
 ### Before PR 3 — read API and aging
 
@@ -642,7 +669,7 @@ PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office bra
 
 ### Before PR 6 — tenant and RBAC enforcement
 
-**Gate: BLOCKED on D-25 limits and operational mappings.** D-05 through D-08 and the named authority roles are approved. Exact financial thresholds, concrete user-to-role/capability mappings, company membership, branch membership, and the Head Office branch ID must be supplied before enforcement is complete.
+**Gate: BLOCKED on operational authorization mappings and enforcement.** The temporary D-25 policy is approved, but concrete users, finance-authorized roles, capabilities, company membership, branch membership, Head Office branch identity, and immutable approval-record enforcement must be supplied and tested before production enablement.
 
 ### Before PR 7 — Company Health shadow read
 
@@ -650,7 +677,7 @@ PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office bra
 
 ### Before PR 8 — production cutover
 
-**Gate: BLOCKED.** Product decisions are recorded, but cutover still requires D-01 source-type confirmation, D-24 retention confirmation or a formally approved indefinite no-delete policy, D-25 numerical limits, all upstream PRs, signed zero-delta reconciliation, explicit cutover approval, and the following operational evidence:
+**Gate: BLOCKED.** Product decisions are recorded, but cutover still requires D-01 source-type confirmation, D-24 retention confirmation or a formally approved indefinite no-delete policy, PR6 enforcement of the approved D-25 policy, all upstream PRs, signed zero-delta reconciliation, explicit cutover approval, and the following operational evidence:
 
 - reconciliation threshold and signed results approved;
 - authority matrix active and tested;
@@ -670,9 +697,9 @@ D-01 requires confirmation of which source document types are financially suffic
 
 D-01 requires confirmation of which allow-listed source documents are legally sufficient evidence of debt. D-24 requires confirmation of legal retention, legal-hold, deletion, and evidence-preservation requirements.
 
-### Product/Finance numerical approval required
+### Deferred Product/Finance numerical policy
 
-D-25 requires exact amount and age limits for large corrections, sensitive due-date changes, refunds, adjustments, and write-offs. No implementation may silently choose those limits.
+D-25 does not require numerical limits for the approved initial-release policy because sensitive operations use mandatory dual approval. Monetary and age thresholds remain deferred; no implementation may silently choose them. Any future threshold change requires a separate product-owner decision and must preserve auditability and separation of duties.
 
 ## Approval record
 

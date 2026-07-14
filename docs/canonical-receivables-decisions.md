@@ -1,12 +1,12 @@
 # Canonical receivables: product-owner decision memo
 
-**Status:** product-owner baseline approved; conditional confirmations remain
+**Status:** product-owner baseline approved; PR1 schema/domain implementation ready for review; conditional confirmations remain
 
 **Prepared:** 2026-07-13
 
 **Source specification:** `docs/canonical-receivables-contract.md`
 
-**Scope:** specification only; this memo records approved product-owner rules but does not implement them
+**Scope:** approved product-owner rules plus factual PR1 implementation metadata; this memo does not change business decisions
 
 ## Product-owner baseline
 
@@ -19,6 +19,22 @@
 **Unresolved numerical limits:** the amount and age thresholds for large corrections, sensitive due-date changes, refunds, adjustments, and write-offs. Until approved, implementations must use the stricter dual-approval path for every affected action; they may not invent a threshold.
 
 **No silent assumptions:** implementation may encode only the answers in this baseline. Missing legal document types, retention durations, financial thresholds, tie-break policy extensions, or role powers must remain disabled, configuration-blocked, or explicitly escalated.
+
+## PR1 implementation status
+
+PR1 uses migration identifier `canonical_receivables_pr1_schema` version 1 on branch `codex/canonical-receivables-pr1-schema`. It follows the existing idempotent initializer and `sql_shadow_schema_migrations` registry convention; the canonical DDL and registration run once, while repeated startup retains the original registration timestamp.
+
+The migration adds empty `canonical_companies`, `canonical_branches`, `canonical_receivables`, and `financial_audit_events` tables. Company rows require an IANA receivables timezone, while receivables retain the immutable posting-time timezone snapshot. Company and branch are mandatory on receivable/audit rows, with composite same-company branch foreign keys and no seeded tenant. The receivable table enforces RUB integer minor units, approved provenance/workflow values, normalized source-line uniqueness, company-scoped source/idempotency/external identities, and exact posted-field immutability for the approved source/scope/money/timezone fields. The audit table is append-only for ordinary application SQL through no-update/no-delete/no-replace SQLite triggers; physical DBA tampering remains outside the PR1 application guarantee.
+
+Repository and populated-snapshot review found no existing company/branch tables, stable tenant IDs, user memberships, or auth tenant context. The two scope tables are therefore empty foreign-key placeholders, not a second operational directory: PR1 exposes no application read/write surface for them. Before production posting, PR6 must approve the single company/branch authority, map stable IDs and user/Head Office memberships, and either adopt these roots as that authority or rebuild the still-empty canonical foreign keys against the approved master. Independent synchronization of two editable identity models is forbidden. PR1 establishes same-company schema relationships only and does not claim active-tenant or RBAC enforcement.
+
+Because clients, contracts, rentals, and users remain JSON records, PR1 does not claim database referential integrity for `clientId`, `contractId`, `rentalId`, or audit `actorId`. Their stable identity and company ownership must be validated by the future approved scope/migration path.
+
+Pure domain helpers implement creation validation, due-date provenance, aging eligibility, explicit PR1 workflow transitions, posted immutability, deterministic source/idempotency identities, and the limited pre-allocation balance/derived-state contract. Posted validation accepts no built-in source type: an injected approved-source policy is mandatory, and no production caller is wired.
+
+No receivable API, posting repository, backfill, seed, dual write, payment/allocation/adjustment behavior, production read switch, Company Health import, frontend change, retention deletion, D-25 threshold, or RBAC expansion is included. PR1 is implemented for review but is not released or cut over. PR2 and later gates remain unchanged and blocked/sequence-gated exactly as recorded below.
+
+The repository does not support down migrations. PR1 rollback therefore reverts the code while retaining the unused empty tables. Physical table removal is permitted only offline before any canonical data exists, after a verified SQLite backup and explicit empty-table check; canonical data must never be dropped as a rollback strategy.
 
 ## How to use this memo
 
@@ -583,7 +599,7 @@ The outcomes below distinguish a product-decision baseline from later operationa
 
 D-01, D-02, D-03, D-04, D-06, D-07, D-17, D-18, D-19, and D-20 have product-owner answers. PR1 may implement the generic allow-list boundary and source identity but must not hardcode legally sufficient source document types before D-01's accountant/legal confirmation. No production posting is authorized by this PASS.
 
-PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office branch model, RUB-only constraints, the approved lifecycle, and company IANA timezone storage. It must not create a migration or enable product behavior as part of this docs-only task.
+PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office branch model, RUB-only constraints, the approved lifecycle, and company IANA timezone storage. The original baseline task was docs-only and created no migration; the later PR1 migration recorded above remains additive and enables no product behavior.
 
 ### Before PR 2 — payments, allocations, adjustments
 

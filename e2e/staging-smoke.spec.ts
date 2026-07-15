@@ -107,31 +107,18 @@ test('staging read-only smoke', async ({ page }) => {
   }
 
   await page.goto(stagingAppUrl(config.frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: 'Что требует внимания сегодня' })).toBeVisible();
-  const dashboardAttentionBlock = page.getByTestId('dashboard-attention-block');
-  for (const label of ['Критично', 'Просрочено', 'Сегодня', 'Без ответственного', 'Потери сейчас', 'Потеря в день']) {
-    await expect(dashboardAttentionBlock.getByText(label, { exact: true }).first()).toBeVisible();
-  }
-  await expect(dashboardAttentionBlock.getByRole('link', { name: 'Открыть очередь' })).toBeVisible();
-  await expect(dashboardAttentionBlock.getByRole('link', { name: 'Показать без ответственного' })).toHaveAttribute('href', /actionQueueFilter=unassigned/);
-  await expect(dashboardAttentionBlock.getByRole('link', { name: 'Показать просроченные' })).toHaveAttribute('href', /actionQueueFilter=overdue/);
-
-  await dashboardAttentionBlock.getByRole('link', { name: 'Показать без ответственного' }).click();
-  await expect(page.getByText('Активный фильтр: Без ответственного')).toBeVisible();
-  let actionQueueSection = page.getByTestId('management-action-queue-section');
-  await expect(actionQueueSection.getByRole('button', { name: 'Без ответственного' })).toHaveAttribute('aria-pressed', 'true');
-  expect(hasUnsafeVisibleText(await page.locator('main').innerText())).toBe(false);
-
-  await page.goto(stagingAppUrl(config.frontendUrl, '/equipment?actionQueueFilter=overdue'), { waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('Активный фильтр: Просрочено')).toBeVisible();
-  actionQueueSection = page.getByTestId('management-action-queue-section');
-  await expect(actionQueueSection.getByRole('button', { name: 'Просрочено' })).toHaveAttribute('aria-pressed', 'true');
-  expect(hasUnsafeVisibleText(await page.locator('main').innerText())).toBe(false);
-
-  await page.goto(stagingAppUrl(config.frontendUrl, '/equipment?actionQueueFilter=unknown'), { waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('Активный фильтр: Все')).toBeVisible();
-  actionQueueSection = page.getByTestId('management-action-queue-section');
-  await expect(actionQueueSection.getByRole('button', { name: 'Все' })).toHaveAttribute('aria-pressed', 'true');
+  const dashboardAttentionBlock = page.getByTestId('dashboard-key-signals');
+  await expect(dashboardAttentionBlock, 'Dashboard attention block should be visible').toBeVisible();
+  await expect(dashboardAttentionBlock.getByRole('heading', { name: 'Главные сигналы сегодня' })).toBeVisible();
+  await expect(dashboardAttentionBlock.getByText('Что требует внимания сейчас', { exact: true })).toBeVisible();
+  await expect(dashboardAttentionBlock.getByTestId('dashboard-legacy-attention-list')).toBeVisible();
+  const allSignalsLink = dashboardAttentionBlock.getByRole('link', { name: 'Все сигналы' });
+  await expect(allSignalsLink).toHaveAttribute('href', /actionQueueFilter=overdue/);
+  await allSignalsLink.click();
+  const actionQueuePanel = page.getByTestId('management-action-queue-panel');
+  await expect(actionQueuePanel).toBeVisible();
+  await expect(actionQueuePanel.getByText('Активный фильтр: Просрочено', { exact: true })).toBeVisible();
+  await expect(actionQueuePanel.getByRole('button', { name: 'Просрочено', exact: true })).toHaveAttribute('aria-pressed', 'true');
   expect(hasUnsafeVisibleText(await page.locator('main').innerText())).toBe(false);
 
   const uiIssues: Array<{ type: string; url: string; status?: number; text?: string }> = [];

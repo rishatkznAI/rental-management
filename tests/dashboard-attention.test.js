@@ -10,6 +10,9 @@ const documentsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/
 const documentsRouteSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/documents.js'), 'utf8');
 const equipmentServiceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/equipment.service.ts'), 'utf8');
 const equipmentHooksSource = fs.readFileSync(path.join(process.cwd(), 'src/app/hooks/useEquipment.ts'), 'utf8');
+const dashboardDesignStandardSource = fs.readFileSync(path.join(process.cwd(), 'docs/dashboard-design-standard.md'), 'utf8');
+const stagingSmokeSource = fs.readFileSync(path.join(process.cwd(), 'e2e/staging-smoke.spec.ts'), 'utf8');
+const productionUiSelectorSmokeSource = fs.readFileSync(path.join(process.cwd(), 'e2e/production-ui-selector-smoke.spec.ts'), 'utf8');
 
 function sourceBlock(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -116,6 +119,29 @@ test('dashboard renders executive signal strip from compact action queue API', (
   assert.match(equipmentServiceSource, /getManagementActionAttention: \(\): Promise<ManagementActionAttentionResponse> =>\s*api\.get<ManagementActionAttentionResponse>\('\/api\/management\/action-queue\?view=attention'\)/);
   assert.match(equipmentHooksSource, /useManagementActionAttention/);
   assert.match(dashboardSource, /useManagementActionAttention\(\{\s*enabled: canViewAttentionBlock && canViewEquipment/);
+});
+
+test('staging smoke follows the approved Dashboard attention contract shared with production', () => {
+  const standardBlock = sourceBlock(
+    dashboardDesignStandardSource,
+    '## 14. “Главные сигналы сегодня” Block',
+    '## 15. “Задачи сегодня” Block',
+  );
+  const commandScreenBlock = sourceBlock(
+    dashboardSource,
+    '<div className="rentcore-command-screen">',
+    'return (\n    <div className="space-y-4',
+  );
+
+  assert.match(standardBlock, /Required heading contract[\s\S]*Главные сигналы сегодня/);
+  assert.match(standardBlock, /Subtitle[\s\S]*Что требует внимания сейчас/);
+  assert.match(commandScreenBlock, /data-testid="dashboard-key-signals"[\s\S]*Главные сигналы сегодня[\s\S]*Что требует внимания сейчас/);
+  assert.match(stagingSmokeSource, /getByTestId\('dashboard-key-signals'\)/);
+  assert.match(stagingSmokeSource, /dashboardAttentionBlock\.getByRole\('heading', \{ name: 'Главные сигналы сегодня' \}\)/);
+  assert.match(stagingSmokeSource, /dashboardAttentionBlock\.getByText\('Что требует внимания сейчас', \{ exact: true \}\)/);
+  assert.doesNotMatch(stagingSmokeSource, /Что требует внимания сегодня/);
+  assert.match(productionUiSelectorSmokeSource, /getByTestId\('dashboard-key-signals'\)/);
+  assert.match(productionUiSelectorSmokeSource, /getByTestId\('dashboard-attention-block'\)[\s\S]*Главные сигналы сегодня/);
 });
 
 test('dashboard executive cockpit renders adaptive KPI cards and compact risk signals', () => {

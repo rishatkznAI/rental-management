@@ -1,8 +1,8 @@
 # Canonical receivables: product-owner decision memo
 
-**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement foundation **IMPLEMENTED FOR REVIEW — NOT RELEASED**; conditional confirmations remain
+**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; conditional confirmations remain
 
-**Prepared:** 2026-07-13; release status updated 2026-07-14
+**Prepared:** 2026-07-13; release status updated 2026-07-15
 
 **Source specification:** `docs/canonical-receivables-contract.md`
 
@@ -20,7 +20,7 @@
 
 **No silent assumptions:** implementation may encode only the answers in this baseline. Missing legal document types, retention durations, financial thresholds, tie-break policy extensions, or role powers must remain disabled, configuration-blocked, or explicitly escalated.
 
-**Current status summary:** the product baseline is approved; PR1 is released; and the production canonical ledger remains inactive. The PR2 decision gate is PASS under the approved temporary D-25 policy, and its additive settlement foundation is implemented for review but not released. Production enablement remains blocked until PR6 authorization enforcement exists.
+**Current status summary:** the canonical ledger baseline is approved; the PR1 schema foundation and PR2 settlement foundation are released; and all eight canonical tables remain empty. The production ledger remains inactive, with reads and writes continuing on the existing systems. PR3 may begin as read-only canonical receivable/aging infrastructure, but production settlement remains blocked by PR6 authorization enforcement and the later reconciliation and cutover gates.
 
 ## PR1 release status
 
@@ -59,17 +59,40 @@ PR1 enables no receivable posting, allocations, adjustments, refunds, reversals,
 
 The repository does not support down migrations. PR1 rollback therefore reverts the code while retaining the unused empty tables. Physical table removal is permitted only offline before any canonical data exists, after a verified SQLite backup and explicit empty-table check; canonical data must never be dropped as a rollback strategy.
 
-## PR2 implementation status
+## PR2 release status
 
-**PR2: IMPLEMENTED FOR REVIEW — NOT RELEASED.** The review implementation uses migration `canonical_receivables_pr2_settlement`, version 1, through the existing `sql_shadow_schema_migrations` startup convention. It requires registered and structurally present PR1 version 1 before any PR2 DDL, and adds only `canonical_payments`, `canonical_payment_allocations`, `canonical_receivable_adjustments`, and `canonical_approval_requests`. The migration is additive, atomic, and idempotent and contains no seed, backfill, legacy trigger, or dual write.
+**PR2: RELEASED — settlement/domain foundation only.** The additive settlement/domain foundation merged as commit `ee2c1b6e1340acb3fc3149c6a39487a283db829c`, was deployed, and was verified in production. It uses migration `canonical_receivables_pr2_settlement`, version 1, through the existing `sql_shadow_schema_migrations` startup convention. It requires registered and structurally present PR1 version 1 before any PR2 DDL, and adds only `canonical_payments`, `canonical_payment_allocations`, `canonical_receivable_adjustments`, and `canonical_approval_requests`. The migration is additive, atomic, and idempotent and contains no seed, backfill, legacy trigger, or dual write.
 
 The existing JSON payment/allocation collections are not referenced because they do not provide mandatory company/branch/currency identity, integer-minor-unit receipt semantics, immutable reversal history, or canonical receivable targets. PR2 instead supplies an isolated canonical payment and settlement foundation.
 
 The implementation covers partial and multi-allocation balances, unapplied receipt capacity, typed positive-magnitude adjustment effects, refunds, payment/allocation/adjustment reversals, write-offs, due-date-change approval, cancellation protection, shared approval requests, separation of duties, company-scoped idempotency, append-only audit events, and SQLite immediate-transaction/version concurrency guards. Pending or rejected events never affect balances; confirmed reversals compensate originals without editing or deleting them.
 
-The approved temporary D-25 policy is encoded without monetary or age thresholds. Exact-reference or explicit-client-instruction allocation may be approval-exempt only in the same company, currency, and branch and within both balances. Ambiguous and cross-branch allocation is represented as approval-required. Refunds, adjustments, reversals, write-offs, post-allocation due-date changes, and posted cancellation require a distinct approver. Concrete user membership, role, capability, finance-owner/commercial-owner mapping, and production authorization remain PR6 work.
+The approved temporary D-25 domain policy is implemented in PR2 infrastructure without monetary or age thresholds. Exact-reference or explicit-client-instruction allocation may be approval-exempt only in the same company, currency, and branch and within both balances. Ambiguous and cross-branch allocation is represented as approval-required. Refunds, adjustments, reversals, write-offs, post-allocation due-date changes, and posted cancellation require a distinct approver. Concrete user membership, role, capability, finance-owner/commercial-owner mapping, and approval enforcement remain PR6 work; production use remains blocked until PR6 is implemented and verified.
 
-Only the schema initializer is reachable from startup. No production route, worker, legacy payment/rental handler, frontend module, Company Health/report reader, backfill, or dual-write path imports the PR2 domain or repository. Production settlement remains disabled. PR3+ dependencies are unchanged.
+Only the schema initializer is reachable from startup. The settlement repository and domain remain unreachable from production flows: no production route, worker, legacy payment/rental handler, frontend module, Company Health/report reader, backfill, or dual-write path imports them. No settlement operation, production API, canonical read switch, or cutover is enabled. PR3 may now begin as read-only canonical receivable/aging infrastructure; later authorization, migration, reconciliation, integration, and cutover gates remain in force.
+
+### PR2 verified production state
+
+| Evidence | Verified value |
+|---|---:|
+| PR2 merge commit | `ee2c1b6e1340acb3fc3149c6a39487a283db829c` |
+| Migration | `canonical_receivables_pr2_settlement`, version `1` |
+| Migration order | `canonical_receivables_pr1_schema` v1, then `canonical_receivables_pr2_settlement` v1 |
+| PR1 registration count | `1` |
+| PR2 registration count | `1` |
+| Repeated initializers | Both skipped |
+| `PRAGMA foreign_keys = 1` | Confirmed |
+| `PRAGMA foreign_key_check = 0` | Confirmed |
+| `canonical_companies` | `0` rows |
+| `canonical_branches` | `0` rows |
+| `canonical_receivables` | `0` rows |
+| `financial_audit_events` | `0` rows |
+| `canonical_payments` | `0` rows |
+| `canonical_payment_allocations` | `0` rows |
+| `canonical_receivable_adjustments` | `0` rows |
+| `canonical_approval_requests` | `0` rows |
+
+Production verification found no legacy schema or application-data change, seed, or backfill. It also confirmed that no production canonical settlement read or write path exists.
 
 ## How to use this memo
 
@@ -663,17 +686,17 @@ D-01, D-02, D-03, D-04, D-06, D-07, D-17, D-18, D-19, and D-20 have product-owne
 
 PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office branch model, RUB-only constraints, the approved lifecycle, and company IANA timezone storage. The original baseline task was docs-only and created no migration; the later PR1 migration recorded above remains additive and enables no product behavior.
 
-### Before PR 2 — payments, allocations, adjustments
+### PR2 — payments, allocations, adjustments
 
-**Gate: PASS — IMPLEMENTED FOR REVIEW, NOT RELEASED.** D-08 through D-16 and D-21 are approved, and D-25 supplies the approved initial-release authority policy. The additive PR2 settlement foundation implements the mandatory dual-approval and separation-of-duties domain contract, but no production operation may be enabled before PR6 authorization enforcement exists.
+**Status: RELEASED — settlement/domain foundation only.** D-08 through D-16 and D-21 are approved, and D-25 supplies the approved initial-release authority policy. The additive PR2 settlement foundation implements the mandatory dual-approval and separation-of-duties domain contract. RELEASED does not authorize production settlement; no production operation may be enabled before PR6 authorization enforcement exists.
 
 ### Before PR 3 — read API and aging
 
-**Sequence gate: BLOCKED by PR2 and the approved API contract.** D-05, D-16, D-19, D-20, D-25's role model, and D-26 are approved. The API must exclude disputed balances from ordinary overdue KPI while returning them in total outstanding and a separate risk bucket.
+**Gate: PASS for read-only API design and implementation.** PR2 is released, and D-05, D-16, D-19, D-20, D-25's role model, and D-26 are approved. PR3 may implement a read-only canonical receivable/aging API under an approved API contract, but it must not expose or enable settlement writes. The API must exclude disputed balances from ordinary overdue KPI while returning them in total outstanding and a separate risk bucket.
 
 ### Before PR 4 — backfill and reconciliation
 
-**Sequence gate: BLOCKED by PR3 and approved migration/backfill decisions.** D-22 and D-23 are approved. D-24 authorizes append-only/no-delete handling, so tooling may be designed under indefinite retention. Actual data retirement, purge, or finite retention behavior remains blocked until the retention duration is confirmed. Company, Head Office/branch, `Europe/Moscow`, and RUB mappings must be configured for every migration cohort.
+**Sequence gate: BLOCKED by PR3 and an approved backfill/reconciliation strategy.** D-22 and D-23 are approved. D-24 authorizes append-only/no-delete handling, so tooling may be designed under indefinite retention. Actual data retirement, purge, or finite retention behavior remains blocked until the retention duration is confirmed. Company, Head Office/branch, `Europe/Moscow`, and RUB mappings must be configured for every migration cohort.
 
 ### Before PR 5 — dual write
 
@@ -681,7 +704,7 @@ PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office bra
 
 ### Before PR 6 — tenant and RBAC enforcement
 
-**Gate: BLOCKED on operational authorization mappings and enforcement.** The temporary D-25 policy is approved, but concrete users, finance-authorized roles, capabilities, company membership, branch membership, Head Office branch identity, and immutable approval-record enforcement must be supplied and tested before production enablement.
+**Gate: BLOCKED on operational authorization mappings and enforcement.** The temporary D-25 domain policy is implemented in PR2 infrastructure, but concrete tenant memberships, finance-authorized roles, capabilities, company/branch/Head Office mappings, real-user approval identity, and immutable approval enforcement must be supplied and tested before production enablement.
 
 ### Before PR 7 — Company Health shadow read
 
@@ -689,7 +712,7 @@ PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office bra
 
 ### Before PR 8 — production cutover
 
-**Gate: BLOCKED.** Product decisions are recorded, but cutover still requires D-01 source-type confirmation, D-24 retention confirmation or a formally approved indefinite no-delete policy, PR6 enforcement of the approved D-25 policy, all upstream PRs, signed zero-delta reconciliation, explicit cutover approval, and the following operational evidence:
+**Gate: BLOCKED.** Product decisions are recorded, but cutover still requires D-01 source-type confirmation, D-24 retention confirmation or a formally approved indefinite no-delete policy, PR6 enforcement of the approved D-25 policy, all upstream PRs, signed zero-delta reconciliation, verified rollback evidence, explicit cutover approval, and the following operational evidence:
 
 - reconciliation threshold and signed results approved;
 - authority matrix active and tested;

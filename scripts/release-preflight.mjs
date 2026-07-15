@@ -43,8 +43,7 @@ const DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
   /^e2e\/.*smoke\.spec\.ts$/,
   /^e2e\/auth-login\.spec\.ts$/,
   /^e2e\/sidebar-navigation\.spec\.ts$/,
-  /^tests\/release-preflight\.test\.js$/,
-  /^tests\/release-smoke-conservation\.test\.js$/,
+  /^tests\/.*\.test\.js$/,
   /^docs\/(?:release-runbook|deploy-checklist|production-smoke-checklist)\.md$/,
   /^docs\/.*(?:release|deploy|smoke|preflight).*\.md$/,
 ];

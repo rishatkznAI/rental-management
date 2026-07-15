@@ -120,8 +120,8 @@ The GitHub Pages deploy workflow runs in two ways:
 
 Automatic `main` deploys classify the changed files before publishing:
 
-- `frontend-only`: `src/**`, `public/**`, `index.html`, `vite.config.*`, `postcss.config.*`, `tsconfig*.json`, root `package.json`, root `package-lock.json`, `scripts/vite-build.mjs`, frontend tests, and docs.
-- `deploy-tooling`: `.github/workflows/deploy.yml`, release preflight/marker scripts, production smoke helper/spec files, release smoke tests, and release/deploy/smoke/preflight docs.
+- `frontend-only`: `src/**`, `public/**`, `index.html`, `vite.config.*`, `postcss.config.*`, `tsconfig*.json`, root `package.json`, root `package-lock.json`, `scripts/vite-build.mjs`, and docs.
+- `deploy-tooling`: `.github/workflows/deploy.yml`, release preflight/marker scripts, production smoke helper/spec files, root `tests/*.test.js` coverage, and release/deploy/smoke/preflight docs. Root tests do not count as frontend runtime; backend, data, secret, arbitrary script, and runtime frontend changes remain outside this scope.
 - Backend or deploy-critical files, including `server/**`, non-build `scripts/**`, most workflow changes, Railway/Docker/env files, and server package files, block the automatic Pages deploy with a workflow summary explaining which files require a backend or full-stack release.
 
 The production GitHub Pages deploy workflow requires:

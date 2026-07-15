@@ -1,26 +1,26 @@
 # Canonical receivables: product-owner decision memo
 
-**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; conditional confirmations remain
+**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; `PR4: DESIGN PROPOSED — OWNER APPROVAL REQUIRED`; conditional confirmations remain
 
-**Prepared:** 2026-07-13; release status updated 2026-07-15
+**Prepared:** 2026-07-13; release status and PR4 product-owner clarifications updated 2026-07-15
 
 **Source specification:** `docs/canonical-receivables-contract.md`
 
-**Scope:** approved product-owner rules plus factual PR1/PR2/PR3 implementation metadata; this memo does not change business decisions
+**Scope:** approved product-owner rules plus factual PR1/PR2/PR3 implementation metadata and the PR4 design gate; proposals remain distinct from approved decisions
 
 ## Product-owner baseline
 
-**Decision date:** 2026-07-13
+**Decision date:** 2026-07-13; D-01, D-24, and forecast-domain clarifications dated 2026-07-15
 
-**Approved decisions:** D-01 through D-27. The product owner approved every decision in this memo as recorded in the Owner answer column and detailed answer fields.
+**Approved decisions:** D-01 through D-27. The product owner approved every decision in this memo as recorded in the Owner answer column and detailed answer fields. On 2026-07-15 the product owner clarified D-01, D-24, and D-26's forecast-domain boundary as recorded below.
 
-**Conditional approvals:** D-01 is approved subject to accountant and legal confirmation of the exact allow-listed source document types that are sufficient to create debt. D-24 is approved subject to accountant and legal confirmation of the exact retention duration and related legal-hold/export requirements. D-25's mandatory dual-approval policy for sensitive initial-release operations is approved for PR2; exact monetary and age thresholds are deferred.
+**Conditional approvals:** D-01 now fixes the source combination: the relevant rental billing period must be closed and a UPD must be formed and explicitly conducted. Accountant and legal confirmation is still required for the exact evidence and sufficiency of those states, any additional signature requirement, due-date provenance, and correction/cancellation treatment. D-24 now requires indefinite retention and forbids deletion, purge, TTL, scheduled cleanup, and rollback deletion until a separate accountant-and-lawyer decision is approved; no finite duration is pending as an implementation default. Legal-hold, export, access/privacy, and tamper-evidence controls still require accountant/legal confirmation. D-25's mandatory dual-approval policy for sensitive initial-release operations is approved for PR2; exact monetary and age thresholds are deferred.
 
 **Deferred numerical limits:** amount and age thresholds remain intentionally undefined. The approved initial-release policy below applies mandatory dual approval to every sensitive operation instead of using unapproved thresholds. A future threshold policy requires a separate product-owner decision and may not weaken auditability or separation of duties.
 
-**No silent assumptions:** implementation may encode only the answers in this baseline. Missing legal document types, retention durations, financial thresholds, tie-break policy extensions, or role powers must remain disabled, configuration-blocked, or explicitly escalated.
+**No silent assumptions:** implementation may encode only the answers in this baseline. Missing conducted-UPD evidence, signature rules, due-date provenance, money/VAT/rounding rules, correction behavior, financial thresholds, mapping cardinalities, or role powers must remain disabled, fail-closed, or explicitly escalated. No finite retention period may be invented.
 
-**Current status summary:** the canonical ledger baseline is approved; the PR1 schema foundation, PR2 settlement foundation, and PR3 default-disabled read-only infrastructure are released; and all eight canonical tables remain empty. The production ledger remains inactive, with canonical reads disabled and existing systems continuing to serve production reads and writes. Production settlement remains blocked by PR6 authorization enforcement and the later reconciliation and cutover gates.
+**Current status summary:** the canonical ledger baseline is approved; the PR1 schema foundation, PR2 settlement foundation, and PR3 default-disabled read-only infrastructure are released; and all eight canonical tables remain empty. The production ledger remains inactive, with canonical reads disabled and existing systems continuing to serve production reads and writes. PR4 is a design gate only. Prospective implementation follows the revised PR5–PR12 sequence below; production settlement and every canonical write/read switch remain blocked.
 
 ## PR1 release status
 
@@ -108,7 +108,7 @@ Production safety verification found `CANONICAL_RECEIVABLES_READ_API_ENABLED` ab
 
 `RELEASED` covers only the isolated canonical read layer, the four GET endpoints, `receivables-aging-v1`, and default-disabled infrastructure. It does not mean production API enablement, a canonical read switch, Finance or Company Health/Risks adoption, settlement, write capability, backfill, dual write, cutover, or PR6 completion. Rollback is flag disablement or code revert with no data rollback.
 
-Gate summary: PR1 — **RELEASED**; PR2 — **RELEASED**; PR3 — **RELEASED, read-only infrastructure only**; PR4 — **BLOCKED pending a separately approved backfill/reconciliation strategy and mappings**; PR5 — **BLOCKED**; PR6 — **BLOCKED**; PR7 — **SEQUENCE BLOCKED**; PR8 — **BLOCKED**. PR4 was not started by this release-marker change.
+Gate summary at the PR3 release remained: PR1 — **RELEASED**; PR2 — **RELEASED**; PR3 — **RELEASED, read-only infrastructure only**; later work blocked. PR4 was not started by the PR3 release-marker change. The 2026-07-15 product-owner direction now replaces the obsolete future PR4–PR8 sequence prospectively: `PR4: DESIGN PROPOSED — OWNER APPROVAL REQUIRED`; the revised PR5–PR12 dependency order is recorded below. This sequencing update does not rewrite or reinterpret the PR3 release evidence.
 
 ## How to use this memo
 
@@ -128,14 +128,14 @@ No recommendation in this memo is a legal or accounting conclusion.
 
 | ID | Decision | Recommendation | Owner answer | Status | Blocks PR |
 |---|---|---|---|---|---|
-| D-01 | What creates a receivable? | Only a posted/approved, allow-listed source-obligation line; a rental alone is insufficient | Approved; exact sufficient document types require accountant/legal confirmation | approved subject to accountant/legal confirmation | PR 1 baseline PASS; PR 5 enablement pending confirmation |
+| D-01 | What creates a receivable? | Both a closed relevant rental billing period and a formed/explicitly conducted UPD with valid mapping | Approved on 2026-07-15; exact evidence, signature, due-date, and correction sufficiency require accountant/legal confirmation | approved clarification; external confirmation gates remain | PR6 source design, PR8 eligibility, PR9 write authorization |
 | D-02 | One receivable or installments? | One receivable per contractual due date; no installment table initially | Approved as recommended | approved | PR 1 |
-| D-03 | When does rental debt become active? | On posting/approval of the accepted source event; due/overdue remain derived | Approved as recommended | approved | PR 1, PR 5 |
-| D-04 | Accepted due-date sources | Allow proven invoice, contract, installment, and verified-migration dates; reject forecasts/rental end dates | Approved with the four named canonical provenance values | approved | PR 1, PR 3, PR 7 |
-| D-05 | Who may create/change due dates? | Capability-based finance authority, reason/evidence/audit, elevated post-allocation approval | Approved for accountant/finance-manager roles and additional manager approval after allocation | approved | PR 3, PR 6 |
-| D-06 | Is `companyId` mandatory? | Yes, on every financial record; no cross-company references | Approved as recommended | approved | PR 1, PR 6 |
-| D-07 | Is `branchId` mandatory? | Mandatory; use a dedicated Head Office branch instead of null | Mandatory; use a dedicated Head Office branch instead of null | approved | PR 1, PR 6 |
-| D-08 | Can payments cross branches? | Same company only, explicit permission, preserved branch identities and visible reporting | Allowed only within one company with explicit permission and both branch contexts | approved | PR 2, PR 6 |
+| D-03 | When does rental debt become active? | Closed relevant period plus formed/explicitly conducted UPD; due/overdue remain derived | Narrowed by the dated D-01 clarification | approved clarification | PR6 source authority, PR8 eligibility, PR9 posting |
+| D-04 | Accepted due-date sources | Allow proven invoice, contract, installment, and verified-migration dates; reject forecasts/rental end dates | Approved with the four named canonical provenance values | approved | Released PR1/PR3; PR6 source authority, PR8 eligibility, PR11 reporting |
+| D-05 | Who may create/change due dates? | Capability-based finance authority, reason/evidence/audit, elevated post-allocation approval | Approved for accountant/finance-manager roles and additional manager approval after allocation | approved | Released PR3; PR5 authority, PR6 evidence, PR10 enforcement |
+| D-06 | Is `companyId` mandatory? | Yes, on every financial record; no cross-company references | Approved as recommended | approved | Released PR1; PR5 authority and all later stages |
+| D-07 | Is `branchId` mandatory? | Mandatory; use a dedicated Head Office branch instead of null | Mandatory; use a dedicated Head Office branch instead of null | approved | Released PR1; PR5 authority and all later stages |
+| D-08 | Can payments cross branches? | Same company only, explicit permission, preserved branch identities and visible reporting | Allowed only within one company with explicit permission and both branch contexts | approved | Released PR2; PR5 authority, PR10 enforcement |
 | D-09 | Can one payment settle many receivables? | Yes, only through explicit allocations | Approved as recommended | approved | PR 2 |
 | D-10 | Can one receivable use many payments? | Yes; partial/paid status derived from confirmed allocations | Approved as recommended | approved | PR 2 |
 | D-11 | How are overpayments handled? | Keep as unapplied client/payment balance until explicit allocation or refund | Approved as recommended | approved | PR 2 |
@@ -143,18 +143,18 @@ No recommendation in this memo is a legal or accounting conclusion.
 | D-13 | How are reversals/corrections handled? | Append-only compensating records referencing originals | Approved as recommended | approved | PR 2 |
 | D-14 | How are credits/debits handled? | Positive magnitude plus explicit effect type; no signed-value inference | Approved types: credit, debit, discount, penalty, correction | approved | PR 2 |
 | D-15 | How are write-offs handled? | Approved append-only adjustment, permanently reportable; correction only by compensating event | Approved; reason and approval required | approved | PR 2 |
-| D-16 | How are disputes handled? | Keep in total outstanding, report separately, exclude from ordinary overdue KPI pending policy | Approved as recommended; keep a separate risk signal | approved | PR 2, PR 3, PR 7 |
+| D-16 | How are disputes handled? | Keep in total outstanding, report separately, exclude from ordinary overdue KPI pending policy | Approved as recommended; keep a separate risk signal | approved | Released PR2/PR3; PR11 reporting |
 | D-17 | Stored vs derived lifecycle states | Store legal/workflow state; derive partial, paid, overdue, and balance | Store draft/posted/disputed/cancelled/written_off; derive open/partially_paid/paid/overdue | approved | PR 1 |
 | D-18 | Can posted original amount change? | No; draft editable, posted amount corrected by adjustments or cancel/reissue | Approved as recommended | approved | PR 1 |
-| D-19 | Company timezone | Company-configured IANA zone; initially propose `Europe/Moscow`; never browser-local | Approved; current company starts with Europe/Moscow | approved | PR 1, PR 3, PR 7 |
+| D-19 | Company timezone | Company-configured IANA zone; initially propose `Europe/Moscow`; never browser-local | Approved; current company starts with Europe/Moscow | approved | Released PR1/PR3; PR5 scope, PR7 forecast, PR11 reporting |
 | D-20 | Currency behavior | Currency required, RUB-only first release, exact allocation match, no automatic FX | Approved as recommended | approved | PR 1, PR 2, PR 3 |
-| D-21 | Automatic allocation policy | Exact reference, then documented instruction, then oldest confirmed debt; otherwise unapplied | Approved in the stated priority | approved | PR 2, PR 5 |
-| D-22 | Which records may be backfilled? | Import only deterministic facts; unknown dates stay unknown; uncertain allocations stay unapplied | Approved; stable source identity is mandatory | approved | PR 4 |
-| D-23 | Cutover discrepancy threshold | Zero unexplained money delta; classified count differences only; zero P0 integrity errors | Approved as recommended | approved | PR 4, PR 8 |
-| D-24 | Audit retention | Append-only audit; no purge until accountant/lawyer approve retention and legal-hold policy | No deletion; exact retention duration requires accountant/legal confirmation | approved subject to accountant/legal confirmation | PR 8 retention gate |
-| D-25 | Who approves sensitive actions? | Mandatory dual approval for sensitive initial-release operations, with a constrained ordinary-allocation exception and strict separation of duties | Initial-release policy approved for PR2; numerical limits deferred | approved for PR2; numerical limits deferred | PR 6 enforcement and production enablement; not PR 2 domain implementation |
-| D-26 | Do plans belong here? | Keep approved plans and forecasts in a separate planning domain | Approved as recommended | approved | PR 3, PR 5 |
-| D-27 | Source of truth after cutover | Canonical ledger is operational authority; accounting system remains reconciled external source | Approved as recommended | approved | PR 5, PR 8 |
+| D-21 | Automatic allocation policy | Exact reference, then documented instruction, then oldest confirmed debt; otherwise unapplied | Approved in the stated priority | approved | Released PR2; PR10 settlement integration |
+| D-22 | Which records may be backfilled? | Import only deterministic facts if a separately approved future project exists | Historical guardrails retained; backfill removed from the mandatory path on 2026-07-15 | approved guardrails; no current backfill authorization | Separate future project only |
+| D-23 | Cutover discrepancy threshold | Zero unexplained money delta; classified count differences only; zero P0 integrity errors | Approved as recommended | approved | PR8 dry run, PR12 cutover |
+| D-24 | Audit retention | Indefinite retention; no delete/purge/TTL/cleanup; rollback retains records | Approved on 2026-07-15 until a separate accountant-and-lawyer decision | approved clarification; control confirmations remain | All data lifecycle behavior; PR12 evidence controls |
+| D-25 | Who approves sensitive actions? | Mandatory dual approval for sensitive initial-release operations, with a constrained ordinary-allocation exception and strict separation of duties | Initial-release policy approved for PR2; numerical limits deferred | approved for PR2; numerical limits deferred | PR5 authority, PR10 enforcement; not PR2 domain implementation |
+| D-26 | Do plans belong here? | Forecast receivables are a separate planning domain and never actual debt | Approved and clarified on 2026-07-15; required forecast output/lineage fields fixed | approved | PR7 forecast domain, PR11 reporting |
+| D-27 | Source of truth after cutover | Canonical ledger is operational authority after a separately authorized cutover; accounting remains reconciled external source | Approved; 2026-07-15 sequence forbids dual write | approved; future activation blocked | PR9 posting authorization, PR12 cutover |
 
 ## Detailed decisions
 
@@ -164,7 +164,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Why the decision matters:** It determines whether recorded debt is authorized, unique, auditable, and legally supportable.
 - **Current system behavior:** Rental billing creates a derived balance. Invoice-typed documents and invoice numbers exist, but no immutable posting event makes them a canonical receivable.
 - **Available options:** signed contract; issued invoice; signed act/service completion document; closed rental billing period; manually approved obligation; imported accounting document; an allow-listed combination by contract/product.
-- **Recommended default:** create a receivable only from a posted/approved, allow-listed source-obligation line with stable document identity, amount, client, company, currency, and posting state. A rental record alone may create a draft billing candidate but is not sufficient financial debt. Do not choose exact production source types until accountant/legal confirmation is recorded.
+- **Original recommended default (superseded where narrower by the dated clarification):** create a receivable only from a posted/approved, allow-listed source-obligation line with stable document identity, amount, client, company, currency, and posting state. A rental record alone may create a draft billing candidate but is not sufficient financial debt. Do not choose exact production source types until accountant/legal confirmation is recorded.
 - **Acceptable alternative:** use a signed act or billing-period close where the relevant contract and accounting policy explicitly make that the obligation trigger.
 - **Dangerous option:** make every active/closed rental automatically become debt without a posting/source rule.
 - **Business benefits:** prevents premature/duplicate debt and gives staff one explainable source document.
@@ -172,9 +172,11 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** the posting workflow and source status must be owned by Finance; **accountant confirmation required**. Contractual sufficiency of invoice/act/contract triggers needs **legal confirmation**.
 - **Technical consequences:** source-type allow-list, source-state adapter, immutable source identity, and uniqueness constraint are mandatory.
 - **Migration consequences:** rental-derived rows without an approved source remain shadow/ambiguous rather than canonical debt.
-- **What becomes impossible if postponed:** PR1 cannot finalize identity/uniqueness; PR5 cannot know when to dual-write a receivable.
-- **Product-owner answer:** A receivable is created only from a posted/approved allow-listed source obligation. A rental alone does not create debt. Exact legally sufficient source document types require accountant and legal confirmation.
-- **Status:** approved subject to accountant/legal confirmation
+- **What becomes impossible if postponed:** The billing source authority, eligibility dry run, and any future canonical write cannot proceed safely.
+- **Original product-owner answer (2026-07-13):** A receivable is created only from a posted/approved allow-listed source obligation. A rental alone does not create debt. Exact legally sufficient source document types require accountant and legal confirmation.
+- **Dated product-owner clarification (2026-07-15):** A canonical actual receivable may arise only when **both** conditions are true: (1) the relevant rental billing period is closed; and (2) a UPD has been formed and explicitly conducted. Both are mandatory. An active rental, open billing period, preliminary charge, forecast, `expectedPaymentDate`, rental end date, draft UPD, sent UPD, or merely signed UPD does not create an actual canonical receivable. `signed` must not be interpreted as `conducted`. Actual receivables are independently created from the approved closed-period plus conducted-UPD source event and valid mapping.
+- **External confirmation still required:** Accountant/legal confirmation must define source evidence and sufficiency, whether client signature is additionally required, due-date provenance, amount/VAT treatment, and cancellation/correction behavior. Missing confirmation remains fail-closed.
+- **Status:** approved clarification; accountant/legal confirmation gates remain
 
 ### D-02 — One receivable or installments?
 
@@ -200,7 +202,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Why the decision matters:** The trigger controls totals, collection work, customer statements, and downstream metrics.
 - **Current system behavior:** Calculated rental balance appears without a canonical approval/posting transition; due/overdue use derived rental dates in legacy Finance.
 - **Available options:** invoice issue; act signing; billing-period close; manual financial approval; another contract-specific event.
-- **Recommended default:** a calculated rental charge remains noncanonical/draft; a receivable becomes `posted` only when D-01's accepted source is posted or financially approved. `overdue` is derived only after the contractual date passes with positive outstanding.
+- **Recommended default:** a calculated rental charge remains noncanonical/draft; under the dated D-01 clarification, a receivable may become `posted` only after the relevant billing period is closed and the mapped UPD is formed and explicitly conducted. `overdue` is derived only after an accepted contractual date passes with positive outstanding.
 - **Acceptable alternative:** contract-specific trigger adapters, provided each maps to the same posted/open invariant.
 - **Dangerous option:** treat rental creation, rental end, or a manager forecast as automatic approval.
 - **Business benefits:** separates operational accrual from collectible debt and prevents premature collection.
@@ -208,8 +210,9 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** trigger validity requires **accountant and legal confirmation**; operations must own draft-to-open exceptions.
 - **Technical consequences:** stored draft/open lifecycle, posting command, audit, and immutable-on-open fields.
 - **Migration consequences:** legacy balances without proof remain draft/shadow or excluded, not silently open.
-- **What becomes impossible if postponed:** PR1 lifecycle and PR5 source integration cannot be implemented safely.
+- **What becomes impossible if postponed:** Revised PR6 source authority, PR8 eligibility, and PR9 posting cannot be implemented safely.
 - **Product-owner answer:** Activate the receivable when its source obligation is posted or financially approved. Derive overdue only after the contractual due date passes.
+- **2026-07-15 clarification:** D-01 narrows the activation source to the mandatory closed-period plus explicitly conducted-UPD combination. The original generic `posted or financially approved` wording is not an alternative source rule.
 - **Status:** approved
 
 ### D-04 — Accepted contractual due-date sources
@@ -226,7 +229,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** accepted documentary evidence requires **accountant and legal confirmation**.
 - **Technical consequences:** allow-list, evidence fields, unknown exclusion, and Company Health mapping version.
 - **Migration consequences:** unverified dates use `unknown`; no numeric aging.
-- **What becomes impossible if postponed:** PR1 due-date contract, PR3 aging API, and PR7 shadow Risks mapping cannot finalize.
+- **What becomes impossible if postponed:** Future PR6 source evidence, PR8 eligibility, and PR11 shadow reporting cannot finalize safely; released PR1/PR3 remain disabled.
 - **Product-owner answer:** Accept only `invoice_due_date`, `contractual_payment_due_date`, `installment_due_date`, and `migrated_verified` as canonical provenances. `expectedPaymentDate`, rental `endDate`, and manager forecasts are noncanonical.
 - **Status:** approved
 
@@ -244,7 +247,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** reason and evidence mandatory; retroactive policy needs **accountant confirmation** and potentially **legal confirmation**.
 - **Technical consequences:** capability checks, optimistic version, before/after audit, approval reference, historical as-of support.
 - **Migration consequences:** migrated verified dates need a named verifier/approval route.
-- **What becomes impossible if postponed:** PR3 cannot safely expose date writes; PR6 cannot map permissions.
+- **What becomes impossible if postponed:** Revised PR5 cannot map due-date capabilities and PR10 cannot enforce post-allocation approval; released PR3 remains read-only.
 - **Product-owner answer:** Only accountant or finance-manager roles may create/change contractual due dates. Reason and audit are mandatory; a post-allocation change requires additional manager approval.
 - **Status:** approved
 
@@ -262,7 +265,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** company ownership must be assigned operationally; no special accounting conclusion.
 - **Technical consequences:** non-null columns, composite FKs/constraints, mandatory query predicates, immutable company.
 - **Migration consequences:** missing/ambiguous company blocks canonical import.
-- **What becomes impossible if postponed:** PR1/PR6 cannot meet P0 isolation; no production canonical endpoint is safe.
+- **What becomes impossible if postponed:** Revised PR5 cannot meet P0 isolation; no production canonical endpoint is safe.
 - **Product-owner answer:** `companyId` is mandatory on every receivable, payment, allocation, adjustment, and audit event. Cross-company references are forbidden.
 - **Status:** approved
 
@@ -280,7 +283,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** Finance/operations must define head-office ownership; **accountant confirmation required** if branch drives books/reporting.
 - **Technical consequences:** non-null branch FK, Head Office master record, branch access predicate, immutable-after-posting rule.
 - **Migration consequences:** ambiguous branch rows remain quarantined until mapped to a real branch or Head Office.
-- **What becomes impossible if postponed:** PR1 schema nullability and PR6 branch RBAC cannot finalize.
+- **What becomes impossible if postponed:** Revised PR5 branch/Head Office authority cannot finalize; no production canonical endpoint is safe.
 - **Product-owner answer:** `branchId` is mandatory. Company-wide operations use a dedicated Head Office branch; null is forbidden.
 - **Status:** approved
 
@@ -298,7 +301,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** cross-branch transfer treatment requires **accountant confirmation**.
 - **Technical consequences:** branch-policy service, capability, audit reason, dual-branch reporting fields.
 - **Migration consequences:** legacy allocations cannot be classified cross-branch until branch mapping exists.
-- **What becomes impossible if postponed:** PR2 cannot enforce allocation scope; PR6 cannot complete branch authorization.
+- **What becomes impossible if postponed:** Revised PR5 cannot complete branch authorization and PR10 cannot safely enable settlement; released PR2 remains isolated.
 - **Product-owner answer:** Cross-branch allocations are allowed only inside the same company, require explicit permission, and preserve both payment and receivable branch context.
 - **Status:** approved
 
@@ -442,7 +445,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** balance remains until settled/credited/written off; KPI treatment needs **accountant/product confirmation** and legal workflow needs **legal confirmation**.
 - **Technical consequences:** stored disputed state, exclusive classification precedence, reason/date audit, Company Health mapping.
 - **Migration consequences:** legacy dispute actions must link deterministically; otherwise debt remains ordinary/ambiguous with discrepancy note.
-- **What becomes impossible if postponed:** PR2 lifecycle, PR3 aging output, and PR7 Risks methodology cannot finalize.
+- **What becomes impossible if postponed:** PR11 Risks shadow methodology cannot finalize; released PR2/PR3 behavior remains isolated and unchanged.
 - **Product-owner answer:** Disputed receivables remain in total outstanding, appear in a separate disputed bucket, are excluded from ordinary overdue KPI, and remain visible as a separate risk signal.
 - **Status:** approved
 
@@ -496,7 +499,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** company calendar/default requires **accountant/product confirmation**.
 - **Technical consequences:** company setting, IANA validation, civil-date arithmetic, calculation metadata.
 - **Migration consequences:** no age eligibility until company timezone is assigned; historical reports need timezone versioning policy.
-- **What becomes impossible if postponed:** PR1 required field, PR3 aging, and PR7 Company Health mapping cannot finalize.
+- **What becomes impossible if postponed:** Revised PR5 scope, PR7 forecast calendars, and PR11 Company Health mapping cannot finalize; released PR1/PR3 remain unchanged.
 - **Product-owner answer:** Store an IANA timezone per company, use `Europe/Moscow` for the current company initially, and never age by browser-local time.
 - **Status:** approved
 
@@ -532,7 +535,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** settlement-order policy needs **accountant and legal confirmation**.
 - **Technical consequences:** deterministic ordering, confidence/reason, preview/confirm, idempotency, exclusion rules.
 - **Migration consequences:** uncertain legacy allocation remains unapplied; no reconstructed oldest-first allocation.
-- **What becomes impossible if postponed:** PR2 auto-allocation and PR5 payment dual-write behavior cannot finalize.
+- **What becomes impossible if postponed:** PR10 settlement integration cannot finalize automatic allocation behavior. Dual write is not permitted.
 - **Product-owner answer:** Allocate automatically by exact document/reference match, then explicit client instruction, then oldest confirmed receivable; otherwise leave the payment unapplied.
 - **Status:** approved
 
@@ -555,9 +558,10 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** evidence rules and migrated receipt status need **accountant confirmation**.
 - **Technical consequences:** classifier, reason codes, quarantine, source hashes, checkpoints, idempotent batches.
 - **Migration consequences:** this decision is the migration contract itself; every record receives one classification.
-- **What becomes impossible if postponed:** PR4 cannot write a safe backfill or discrepancy report.
+- **What becomes impossible if postponed:** A separately approved future migration project could not safely classify records. PR4 performs no backfill and writes no discrepancy data.
 - **Product-owner answer:** Backfill only stable source identities; never invent contractual dates. Use `provenance=unknown` for unknown dates and leave ambiguous allocations unapplied.
-- **Status:** approved
+- **2026-07-15 sequencing clarification:** These rules remain historical safety constraints if a separately approved backfill project is ever proposed. Backfill is removed from the mandatory receivables path because no approved real source dataset exists. No current PR is authorized to seed or backfill canonical tables.
+- **Status:** approved guardrails; no current backfill authorization
 
 ### D-23 — What reconciliation discrepancy permits cutover?
 
@@ -573,7 +577,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** acceptance threshold/sign-off needs **accountant confirmation**.
 - **Technical consequences:** exact minor-unit reports, reason taxonomy, gate automation, signed run ID.
 - **Migration consequences:** unresolved cohorts remain shadow-only.
-- **What becomes impossible if postponed:** PR4 acceptance tests and PR8 production switch cannot be authorized.
+- **What becomes impossible if postponed:** PR8 dry-run acceptance and PR12 production cutover cannot be authorized.
 - **Product-owner answer:** Production read cutover requires zero unexplained monetary discrepancy. Count differences must be fully classified; cross-company leaks and unresolved duplicates block cutover.
 - **Status:** approved
 
@@ -583,17 +587,18 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Why the decision matters:** Corrections, disputes, external audits, and historical reports depend on durable evidence.
 - **Current system behavior:** General JSON audit is capped at 10,000 records and is not a dedicated immutable financial ledger.
 - **Available options:** fixed period; indefinite; legal/accounting retention policy; tiered active/archive/legal hold.
-- **Recommended default:** append-only financial audit with actor, time, reason, before/after minor-unit values, source system, request/correlation/idempotency IDs, approvals, and versions. Do not purge until accountant/lawyer approve a retention, archive, export, legal-hold, and tamper-evidence policy.
+- **Recommended default:** append-only financial audit with actor, time, reason, before/after minor-unit values, source system, request/correlation/idempotency IDs, approvals, and versions. Retain financial records and audit events indefinitely unless a later accountant-and-lawyer decision explicitly changes the policy.
 - **Acceptable alternative:** tiered online/archive storage with the same immutable retrievability.
 - **Dangerous option:** reuse the current capped audit as sole evidence or delete audit with source records.
 - **Business benefits:** defensible corrections and reproducible history.
 - **Business risks:** storage/privacy/export obligations increase.
-- **Accounting/operational consequences:** retention duration requires **accountant and legal confirmation**; no duration is asserted here.
-- **Technical consequences:** dedicated table, append-only permissions, archival/export, legal hold, optional hashes.
+- **Accounting/operational consequences:** indefinite retention is the approved operating rule. Accountant/legal confirmation is still required for legal hold, export/retrieval, privacy/access, tamper evidence, and any future proposal to change retention.
+- **Technical consequences:** dedicated append-only storage, no automatic deletion, archival/export that preserves immutable retrievability, legal hold, and optional hashes.
 - **Migration consequences:** retain migration run/evidence/discrepancy events under the approved policy.
-- **What becomes impossible if postponed:** PR4 cannot finalize audit retention/exports; PR8 lacks a production evidence policy.
-- **Product-owner answer:** Financial audit events are append-only and never deleted. Exact retention duration and related legal/accounting controls require accountant and legal confirmation.
-- **Status:** approved subject to accountant/legal confirmation
+- **What becomes impossible if postponed:** No purge/delete/TTL/cleanup implementation may proceed; production cutover still needs confirmed evidence controls.
+- **Original product-owner answer (2026-07-13):** Financial audit events are append-only and never deleted. Exact retention duration and related legal/accounting controls require accountant and legal confirmation.
+- **Dated product-owner clarification (2026-07-15):** Until a separate accountant-and-lawyer decision is approved, financial records and financial audit events are retained indefinitely. Automatic deletion, purge, TTL, and scheduled cleanup are forbidden. Rollback must retain financial records. No finite retention period may be invented.
+- **Status:** approved clarification; legal/accounting control confirmations remain
 
 ### D-25 — Who can approve sensitive actions?
 
@@ -650,7 +655,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** the initial-release authority and separation rules are approved. Future numerical thresholds still require **accountant and product-owner confirmation**; legal-sensitive cancellation/write-off evidence needs **legal confirmation**.
 - **Technical consequences:** new capabilities and immutable approval records, scoped checks, non-self-approval, exact approval metadata, and default-deny enforcement. No threshold configuration is required for the initial-release policy.
 - **Migration consequences:** discrepancy acceptance and verified-date actors must use this matrix.
-- **What becomes impossible if postponed:** PR6 authorization enforcement and production enablement cannot be completed; the PR2 domain may proceed under this approved policy.
+- **What becomes impossible if postponed:** Revised PR5 authorization enforcement and production enablement cannot be completed; the released PR2 domain remains isolated.
 - **Product-owner answer:** Approve the temporary initial-release policy above: every sensitive operation uses dual approval and separation of duties, while only strictly matched ordinary same-company/same-currency allocations may use the documented single-accountant path. Numerical limits remain deferred.
 - **Status:** approved for PR2; numerical limits deferred
 
@@ -668,9 +673,10 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Accounting/operational consequences:** plan approval authority belongs to planning governance, not AR posting.
 - **Technical consequences:** separate schema/API/domain and explicit read joins only.
 - **Migration consequences:** `receivable_payment_plans` remain collection/planning records, not installments or receipts.
-- **What becomes impossible if postponed:** PR3 API boundaries and PR5 integrations risk mixing planned and factual values.
-- **Product-owner answer:** Approved plans and forecasts belong to a separate planning domain and must not be mixed with actual receivables or payments.
-- **Status:** approved
+- **What becomes impossible if postponed:** PR7 forecast implementation and later reporting integrations risk mixing planned and factual values.
+- **Original product-owner answer (2026-07-13):** Approved plans and forecasts belong to a separate planning domain and must not be mixed with actual receivables or payments.
+- **Dated product-owner clarification (2026-07-15):** Forecast receivables are not actual debt; do not enter `canonical_receivables` or aging; are not overdue; do not trigger collection or legal work; cannot be settled; cannot automatically convert into actual receivables; and must never be returned as canonical debt. A forecast record cannot become actual by changing status. Actual is independently created only from the approved closed-period plus conducted-UPD source event. Forecast calculation must be capable of considering rates, the open period, expected end or configured horizon, confirmed downtime, discounts, approved extensions, partial/full returns, VAT, minimum terms, and other effective terms. Every result exposes `calculatedAt`, horizon, integer-minor-unit amount, confidence level, explicit incomplete-confidence reasons, calculation version, and source/input lineage.
+- **Status:** approved and clarified
 
 ### D-27 — What is the source of truth after cutover?
 
@@ -679,74 +685,87 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **Current system behavior:** Rentals/payments and derived finance helpers are operational sources; accounting integration is not a canonical reconciled AR authority in this model.
 - **Available options:** canonical ledger; accounting integration; permanent dual authority; current rentals/payments.
 - **Recommended default:** after signed reconciliation and feature-flagged cutover, the canonical receivable ledger becomes the operational source of truth for outstanding, allocation, and aging. Accounting integration remains a reconciled external source with explicit inbound/outbound ownership; it does not independently overwrite canonical facts.
-- **Acceptable alternative:** accounting system becomes the sole posting authority while this application is a read/operational projection, provided idempotent integration and ownership are explicitly designed before PR5.
+- **Acceptable alternative:** accounting system becomes the sole posting authority while this application is a read/operational projection, provided idempotent integration and ownership are explicitly designed before PR9.
 - **Dangerous option:** permanent bidirectional dual authority without conflict ownership.
 - **Business benefits:** one explainable balance and clear integration responsibility.
 - **Business risks:** outages or delayed integration require defined operating procedures.
 - **Accounting/operational consequences:** accounting-system ownership and reconciliation workflow require **accountant confirmation**.
 - **Technical consequences:** feature flags, write ownership, outbox/import contracts, conflict quarantine, rollback policy.
-- **Migration consequences:** dual-write is temporary; read/write authority changes only at approved cutover.
-- **What becomes impossible if postponed:** PR5 cannot define write direction and PR8 cannot declare a completed cutover.
+- **Migration consequences:** the original temporary dual-write concept is superseded. Dual write is forbidden; read/write authority changes only through the approved forward-only projection and cutover sequence.
+- **What becomes impossible if postponed:** PR9 cannot define forward-only write direction and PR12 cannot declare a completed cutover.
 - **Product-owner answer:** After shadow reconciliation and feature-flagged cutover, the canonical receivable ledger is the operational source of truth; accounting remains a reconciled external source.
-- **Status:** approved
+- **2026-07-15 sequencing clarification:** Dual write is forbidden. A future default-disabled canonical posting adapter may consume only authoritative eligibility events after separate owner approval; no legacy/canonical dual-write stage is authorized.
+- **Status:** approved; future activation remains gated
 
 ## Implementation gates
 
 The outcomes below distinguish a product-decision baseline from later operational evidence. A `PASS` authorizes only the named PR scope; it does not authorize production enablement, migration, or cutover.
 
+The prospective PR4–PR12 dependency order below is an architecture recommendation and remains `OWNER APPROVAL REQUIRED`; the fixed D-01, forecast, and D-24 decisions constrain it but do not approve its unimplemented details.
+
 ### PR1 — canonical schema and domain
 
 **Status: RELEASED — schema/domain foundation only.**
 
-D-01, D-02, D-03, D-04, D-06, D-07, D-17, D-18, D-19, and D-20 have product-owner answers. PR1 implements the generic allow-list boundary and source identity but does not hardcode legally sufficient source document types before D-01's accountant/legal confirmation. RELEASED does not authorize production posting or canonical production reads.
+D-01, D-02, D-03, D-04, D-06, D-07, D-17, D-18, D-19, and D-20 have product-owner answers. PR1 implements a generic injected source-policy boundary and target source identity. It does not implement the clarified closed-period plus conducted-UPD source authority. RELEASED does not authorize production posting or canonical production reads.
 
 PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office branch model, RUB-only constraints, the approved lifecycle, and company IANA timezone storage. The original baseline task was docs-only and created no migration; the later PR1 migration recorded above remains additive and enables no product behavior.
 
 ### PR2 — payments, allocations, adjustments
 
-**Status: RELEASED — settlement/domain foundation only.** D-08 through D-16 and D-21 are approved, and D-25 supplies the approved initial-release authority policy. The additive PR2 settlement foundation implements the mandatory dual-approval and separation-of-duties domain contract. RELEASED does not authorize production settlement; no production operation may be enabled before PR6 authorization enforcement exists.
+**Status: RELEASED — settlement/domain foundation only.** D-08 through D-16 and D-21 are approved, and D-25 supplies the approved initial-release authority policy. The additive PR2 settlement foundation implements the mandatory dual-approval and separation-of-duties domain contract. RELEASED does not authorize production settlement; no production operation may be enabled before PR5 authority and future PR10 enforcement gates pass.
 
 ### PR 3 — read API and aging
 
-**Status: RELEASED — read-only canonical receivables API and aging infrastructure only.** PR2 is released, and D-05, D-16, D-19, D-20, D-25's role model, and D-26 are approved. PR3 implements the read-only canonical receivable/aging API under the approved contract without exposing settlement writes. It excludes disputed balances from ordinary overdue KPI while returning them in total outstanding and a separate risk bucket. Production enablement remains disabled and scope-mapping remains blocked on PR6.
+**Status: RELEASED — read-only canonical receivables API and aging infrastructure only.** PR2 is released, and D-05, D-16, D-19, D-20, D-25's role model, and D-26 are approved. PR3 implements the read-only canonical receivable/aging API under the approved contract without exposing settlement writes. It excludes disputed balances from ordinary overdue KPI while returning them in total outstanding and a separate risk bucket. Production enablement remains disabled and scope mapping remains blocked on PR5.
 
-### Before PR 4 — backfill and reconciliation
+### PR4 — actual/forecast architecture design gate
 
-**Gate: BLOCKED pending a separately approved backfill/reconciliation strategy and mappings.** The PR3 sequence dependency is satisfied, but PR4 may proceed only as a separate design stage after its strategy and company, Head Office/branch, `Europe/Moscow`, RUB, and source mappings are approved. D-22 and D-23 are approved. D-24 authorizes append-only/no-delete handling, so tooling may be designed under indefinite retention only after that approval. Actual data retirement, purge, or finite retention behavior remains blocked until the retention duration is confirmed.
+**Status: `PR4: DESIGN PROPOSED — OWNER APPROVAL REQUIRED`.** PR4 is documentation only. It separates Rental Operations, Billing Source Authority, Forecast Receivables Planning, Canonical Actual Receivables, Settlement, and Reporting; records the three-lane recommendation; removes backfill and dual write from the mandatory path; and introduces no runtime behavior. The detailed gate is `docs/canonical-receivables-pr4-design-gate.md`.
 
-### Before PR 5 — dual write
+### PR5 — company/branch authority and fail-closed RBAC
 
-**Gate: BLOCKED for production enablement.** D-03, D-09, D-12, D-13, D-21, D-26, and D-27 are approved. Enablement additionally requires D-01's accountant/legal source-type confirmation, completion of upstream PRs, and PR6 company/branch authorization. Any code prepared earlier must remain disabled.
+**Gate: BLOCKED pending PR4 owner approval and P0 scope decisions.** Establish the single company/branch/Head Office authority, memberships, capabilities, and default-deny backend enforcement. No canonical production read or write may be enabled.
 
-### Before PR 6 — tenant and RBAC enforcement
+### PR6 — billing source authority
 
-**Gate: BLOCKED on operational authorization mappings and enforcement.** The temporary D-25 domain policy is implemented in PR2 infrastructure, but concrete tenant memberships, finance-authorized roles, capabilities, company/branch/Head Office mappings, real-user approval identity, and immutable approval enforcement must be supplied and tested before production enablement.
+**Gate: BLOCKED pending PR5 and owner/accountant/legal source decisions.** Implement closed billing periods, immutable pricing/VAT snapshots, explicit UPD formed/conducted/cancelled/corrected lifecycle, immutable UPD line identity, and exact period mapping. No canonical writes.
 
-### Before PR 7 — Company Health shadow read
+### PR7 — forecast receivables planning
 
-**Sequence gate: BLOCKED by the canonical read API and shadow reconciliation after PR3–PR6.** D-04, D-16, D-19, and D-20 are approved. Shadow output must retain ambiguous/disputed coverage and may not silently change visible scoring.
+**Gate: BLOCKED pending approved horizon/status/confidence/VAT/term policies and PR5 scope.** Implement a separate planning domain and read contract/API. Forecasts never enter canonical debt, aging, collections, or settlement. No Finance or Company Health/Risks switch and no canonical writes.
 
-### Before PR 8 — production cutover
+### PR8 — forward-only actual-source eligibility dry run
 
-**Gate: BLOCKED.** Product decisions are recorded, but cutover still requires D-01 source-type confirmation, D-24 retention confirmation or a formally approved indefinite no-delete policy, PR6 enforcement of the approved D-25 policy, all upstream PRs, signed zero-delta reconciliation, verified rollback evidence, explicit cutover approval, and the following operational evidence:
+**Gate: BLOCKED pending PR5/PR6, approved forward-only activation, and exact mappings.** Read-only eligibility, quarantine, discrepancy, and reconciliation reports only. No backfill and no canonical writes. Every unexplained net/VAT/gross minor-unit delta blocks.
 
-- reconciliation threshold and signed results approved;
-- authority matrix active and tested;
-- audit/retention policy approved or a lawyer/accountant-approved interim no-purge policy;
-- source-of-truth ownership approved;
-- feature flags, backup, rollback policy, and rollback drill approved;
-- zero unresolved cross-company, duplicate, currency, allocation-cap, or minor-unit reconciliation errors;
-- explicit sign-off from product, Finance/accounting, security/operations, and release ownership.
+### PR9 — canonical actual posting adapter
+
+**BLOCKED PENDING SEPARATE EXPLICIT OWNER APPROVAL.** The future adapter must be default-disabled and consume only idempotent `ActualReceivableEligibleV1` events. No dual write. PR4 does not authorize implementation.
+
+### PR10 — payment/settlement integration
+
+**BLOCKED.** Requires real authorization/membership and approval enforcement, an approved payment/settlement strategy, and released prerequisites.
+
+### PR11 — Finance and Company Health/Risks shadow reads
+
+**BLOCKED.** Treat Finance and Company Health/Risks as separate read gates. Preserve actual, closed-unbilled, and forecast components/provenance. No visible switch.
+
+### PR12 — feature-flagged production cutover
+
+**BLOCKED.** Requires all upstream gates, signed zero-unexplained-delta reconciliation, authority enforcement, source sufficiency, confirmed evidence/retention controls, verified backup/rollback runbooks and drill, explicit product/Finance/security/release sign-off, and separate cutover approval.
+
+Backfill is removed from the mandatory path and may return only as a separately approved project with a real authoritative dataset. Dual write is forbidden. No implementation may move canonical writes before scope, source, and dry-run gates.
 
 ## Decisions requiring external confirmation
 
 ### Accountant confirmation required
 
-D-01 requires confirmation of which source document types are financially sufficient to create a receivable. D-24 requires confirmation of the accounting retention duration and export/control requirements.
+D-01 requires confirmation that the closed-period plus explicitly conducted-UPD combination is financially sufficient, the authoritative evidence/meaning of conducted, any additional accounting preconditions, exact UPD-line/period and receivable granularity, money/VAT/rounding, due-date provenance, reopen/correction/cancellation behavior, and forward-only activation. D-24 already fixes indefinite retention; accountant confirmation is still required for retrieval/export, legal-hold coordination, control evidence, and any future proposal to change that policy. No finite duration may be assumed.
 
 ### Legal confirmation required
 
-D-01 requires confirmation of which allow-listed source documents are legally sufficient evidence of debt. D-24 requires confirmation of legal retention, legal-hold, deletion, and evidence-preservation requirements.
+D-01 requires confirmation that the closed-period plus explicitly conducted-UPD combination is legally sufficient evidence of debt, whether client signature is additionally required, which due-date evidence permits overdue/collection/legal work, and how reopen/cancellation/correction affects existing actual debt. D-24 already fixes indefinite no-delete retention; legal confirmation is still required for legal hold, export/retrieval, privacy/access, tamper evidence, litigation preservation, and any future proposal to change that policy.
 
 ### Deferred Product/Finance numerical policy
 
@@ -758,6 +777,7 @@ Record the durable approval identity and later conditional confirmations here wi
 
 | Approval batch | Decision IDs | Product owner | Accountant confirmation | Legal confirmation | Date | Notes/reference |
 |---|---|---|---|---|---|---|
+| PR4 clarification batch | D-01, D-24, D-26 forecast boundary | Direction recorded; approver identity not supplied in repository | Pending | Pending | 2026-07-15 | `docs/canonical-receivables-pr4-design-gate.md`; architecture recommendations remain owner-approval-required |
 | — | — | — | — | — | — | — |
 
 This memo records the product-owner baseline. Conditional confirmations and blocked gates must not be bypassed through implementation defaults.

@@ -12,15 +12,17 @@
 
 ## Product-owner baseline
 
-**Decision date:** 2026-07-13; D-01, D-24, and forecast-domain clarifications dated 2026-07-15
+**Decision date:** 2026-07-13; D-01, D-24, forecast-domain, and PR4 design-detail decisions dated 2026-07-15
 
 **Approved decisions:** D-01 through D-27 in `docs/canonical-receivables-decisions.md`.
 
 **Clarified approvals:** D-01 now requires both a closed relevant rental billing period and a formed/explicitly conducted UPD; merely signed is not conducted. The separate forecast-domain decision keeps forecasts outside actual debt, canonical receivables, aging, collections, and settlement and forbids conversion to actual. D-24 now requires indefinite retention and forbids deletion, purge, TTL, scheduled cleanup, and rollback deletion until a separate accountant-and-lawyer decision is approved. Accountant/legal confirmation remains required for source evidence/sufficiency, any additional signature requirement, due-date and correction rules, and retention controls such as legal hold/export/access/tamper evidence. D-25's mandatory dual-approval policy for sensitive operations remains approved for PR2 and the initial release; exact monetary and age thresholds are deferred.
 
+**Approved PR4 design details:** one non-overlapping billing period per rental line/contractual billing cycle; capability-gated close; immutable reasoned/audited reopen version; explicit conducted state; contract-specific signature default; zero-tolerance unexplained net/VAT/gross mismatch; one active UPD line per period slice with explicit non-overlapping multi-period line coverage; one actual per immutable UPD slice and contractual due date; actual-with-unknown-date exclusion rules; operational rental-branch ownership and dedicated centralized Head Office branch; append-only corrections; approved closed-unbilled display; 30-day forecast horizon; `active`/`return_planned` forecast status scope; separate excluded `planned_future`; four forecast confidence levels/reasons; indefinite forecast history pending a separate policy; separately displayed unapplied advances; exact three-component expected-load equation; stable rental-line return events; versioned minimum terms/discounts before VAT; and fully governed forward-only periods with no partial-period or historical import. These approvals do not approve PR4 as a whole or release any implementation stage.
+
 **PR1 release status: RELEASED.** The schema/domain foundation is deployed and verified. This status authorizes no canonical production business behavior: no legally sufficient source type is hardcoded, no production posting or canonical read is enabled, and the legacy operational paths remain authoritative until a separately approved cutover. Baseline commit `574edc53fc0c94d9727b03ac18c2022877a2094c` itself created no schema or migration; the released PR1 implementation is recorded below.
 
-**No silent assumptions:** unresolved source evidence, signature, due-date, money/VAT/rounding, mapping cardinality, correction, approval threshold, or expanded permission details remain disabled, fail-closed, or escalated. Implementation must not invent a finite retention period.
+**No silent assumptions:** unresolved source evidence/sufficiency, proven-date evidence, exact money/VAT/rounding, source compensation, downtime/extension authority, coverage precedence, activation date/cohort, membership/capability/RBAC details, approval thresholds, or expanded permission details remain disabled, fail-closed, or escalated. Implementation must not invent a finite retention period.
 
 **Current product-owner status:** the canonical ledger baseline is approved; the PR1 schema foundation, PR2 settlement foundation, and PR3 default-disabled read-only infrastructure are released; and all eight canonical tables remain empty. The production ledger remains inactive, with reads and writes continuing on the existing systems. `PR4: DESIGN PROPOSED — OWNER APPROVAL REQUIRED`. Production settlement, canonical writes, canonical read switches, backfill, dual write, shadow reads, and cutover remain blocked.
 
@@ -210,11 +212,11 @@ An **actual receivable** may become eligible only when both conditions are indep
 1. the relevant rental billing period is closed; and
 2. the matching UPD is formed and explicitly conducted.
 
-An active/open rental period, preliminary calculation, forecast, expected payment date, rental end date, draft UPD, sent UPD, or signed UPD is insufficient unless the source also independently records explicit conducted status. Signed never means conducted. A rental or document total by itself is not canonical debt. The exact closed-period, conducted-UPD, stable-line, mapping, due-date, scope, money, VAT, correction, and evidence authorities remain `OWNER APPROVAL REQUIRED` and fail closed until approved and implemented.
+An active/open rental period, preliminary calculation, forecast, expected payment date, rental end date, draft UPD, sent UPD, or signed UPD is insufficient unless the source also independently records explicit conducted status. Signed never means conducted. A rental or document total by itself is not canonical debt. The approved PR4 details fix the named granularity, cardinality, unknown-date, branch-ownership, mismatch, return-line, correction, and forward-only boundaries. Concrete identity authority, memberships/capabilities, conducted/source evidence, proven-date evidence, exact money/VAT/rounding, compensation, activation date/cohort, and remaining operational authority still fail closed until their stage-specific approvals/confirmations exist.
 
-A **forecast** is a separate, replaceable planning result. It never enters canonical receivables, balance, aging, overdue, collection, settlement, or accounting totals; never automatically converts to actual; and never becomes canonical debt. Each result must carry `calculatedAt`, horizon, amount, confidence/reasons, calculation version and lineage, and effective-term inputs. The proposed three-lane presentation—`actual`, `closed_unbilled_candidate`, and `open_period_forecast`, with precedence `actual > closed_unbilled_candidate > open_period_forecast`—is also `OWNER APPROVAL REQUIRED`.
+A **forecast** is a separate, replaceable planning result. It never enters canonical receivables, balance, aging, overdue, collection, settlement, or accounting totals; never automatically converts to actual; and never becomes canonical debt. Each result must carry `calculatedAt`, horizon, amount, confidence/reasons, calculation version and lineage, and effective-term inputs. The three separately visible lanes, the “closed billing without conducted UPD” display, and the `actual outstanding + closed unbilled + open-period forecast` equation are approved. Exact one-slice coverage precedence/key enforcement remains `OWNER APPROVAL REQUIRED`.
 
-PR4 adopts a forward-only recommendation for the current horizon: no historical backfill, migration, dual write, or legacy normalization is approved. Existing Finance and Company Health paths remain unchanged. PR1–PR3 release evidence remains authoritative and all eight canonical tables remain empty under the recorded production evidence.
+PR4 records the approved forward-only coverage boundary: only fully source-governed periods may participate, with no partial-period or historical import. No historical backfill, migration, dual write, or legacy normalization is approved. Existing Finance and Company Health paths remain unchanged. PR1–PR3 release evidence remains authoritative and all eight canonical tables remain empty under the recorded production evidence.
 
 ## 1. Purpose and decisions at a glance
 
@@ -1037,7 +1039,7 @@ Posted receivables and confirmed financial events are never physically deleted; 
 
 ## 12. Forward-only activation and migration boundary
 
-The current recommendation is forward-only and is `OWNER APPROVAL REQUIRED`. It supersedes the former plan to backfill historical rental, document, receivable, payment, or allocation records.
+The forward-only coverage rule is approved: only periods fully governed by the new source authority may participate, and partial-period or historical import is forbidden. The exact activation date/cohort remains `OWNER APPROVAL REQUIRED`. This supersedes the former plan to backfill historical rental, document, receivable, payment, or allocation records.
 
 - no historical backfill is approved;
 - no migration of existing business records into canonical receivables is approved;
@@ -1186,15 +1188,16 @@ PR1 implements focused schema, domain, isolation, audit, and runtime-boundary te
 
 ## 15. Decision baseline and remaining confirmations
 
-The product owner approved D-01 through D-27 on 2026-07-13 and clarified D-01, D-24, and the forecast-domain boundary on 2026-07-15. The authoritative answers are recorded in `docs/canonical-receivables-decisions.md`; this contract incorporates their structural and behavioral consequences. PR4's conceptual structures, field authorities, mappings, lifecycle details, and three-lane display remain proposals and are not approved merely because they are documented.
+The product owner approved D-01 through D-27 on 2026-07-13; clarified D-01, D-24, and the forecast-domain boundary on 2026-07-15; and approved the PR4 design details recorded above and in `docs/canonical-receivables-decisions.md` on 2026-07-15. The approved details do not approve the revised sequence, every conceptual schema/authority, or PR4 as a whole. PR4 remains `DESIGN PROPOSED — OWNER APPROVAL REQUIRED`.
 
 Remaining conditional items are narrow and must not be filled by implementation assumptions:
 
 | Item | Approved baseline | Still required | Blocks |
 |---|---|---|---|
 | D-01 source sufficiency | Actual only when the relevant billing period is closed **and** the matching UPD is formed and explicitly conducted; signed never implies conducted | Accountant/legal confirmation of the exact authoritative period/UPD statuses, evidence, date, and any additional signature requirement | PR6 source authority, PR8 source dry run, PR9 projection, and later cutover |
-| Forecast boundary | Forecast is planning-only, never canonical/aging/overdue/collections/settlement, never auto-converted, and never canonical debt | Owner approval of the conceptual forecast model, three-lane display, horizon, confidence/reasons, version/lineage, and effective-term authorities | PR7 forecast implementation and every consumer |
-| D-24 retention | Financial and audit records are retained indefinitely; deletion, purge, TTL, scheduled cleanup, and rollback deletion are forbidden | Accountant/legal confirmation of legal hold, export, access, privacy, and tamper-evidence controls; no finite duration may be invented | All implementation stages; missing controls fail closed but never authorize deletion |
+| Forecast boundary/details | Forecast remains planning-only. Three lanes/components, total equation, 30-day horizon, status allow-list, `planned_future`, confidence levels/reasons, indefinite history, separate advances, return-line boundary, and minimum-term/discount order are approved | Exact coverage precedence/key enforcement and authoritative downtime/extension/return input lifecycle; schema/API details | PR7 forecast implementation and PR11 consumers |
+| Scope/RBAC | Operational rental-branch ownership and dedicated stable Head Office branch for centralized operations are approved | Revised sequence, single identity authority, stable memberships, complete capability model, and deny-by-default authorization | PR5 only; source/forecast/accounting decisions do not block PR5 |
+| D-24 retention | Financial and audit records are retained indefinitely; deletion, purge, TTL, scheduled cleanup, and rollback deletion are forbidden | Accountant/legal confirmation of legal hold, export, access, privacy, and tamper-evidence controls; no finite duration may be invented | PR6 where financial/audit records are created, PR8/PR9, and later activation as relevant; not PR5 scope/RBAC or the separately approved PR7 forecast-history policy |
 | D-25 approval policy | Mandatory dual approval is approved for refunds, credit/debit adjustments, reversals/corrections, write-offs, posted-receivable cancellations, post-allocation due-date changes, and cross-branch allocations; tightly constrained ordinary allocations follow the approved exception above | Monetary and age thresholds are deferred; revised PR5 must map concrete users, memberships, roles, and capabilities and enforce the approval policy before production enablement | Revised PR5 authorization enforcement and production enablement; does not block released PR2 domain implementation |
 
 ### 15.1 Implementation gate summary
@@ -1204,17 +1207,24 @@ Remaining conditional items are narrow and must not be filled by implementation 
 | PR1 canonical schema/domain | **RELEASED** | Foundation only; production posting and canonical reads remain disabled |
 | PR2 payments/allocations/adjustments | **RELEASED** | Settlement/domain foundation only; production settlement remains blocked until revised PR5 authorization enforcement |
 | PR3 read API/aging | **RELEASED — read-only infrastructure only** | Production flag and trusted scope remain disabled/unmapped; no production read switch |
-| PR4 actual/forecast design gate | **DESIGN PROPOSED — OWNER APPROVAL REQUIRED** | No implementation; all unresolved decisions and external confirmations remain gates |
-| PR5 scope/RBAC | **BLOCKED pending PR4 approval** | Concrete tenant memberships, roles, capabilities, company/branch/Head Office mappings, real-user approval identity, and D-25 enforcement |
-| PR6 source authority | **BLOCKED pending PR4/PR5** | Immutable closed billing period, explicitly conducted UPD, stable UPD line, deterministic mapping, due-date, money/VAT, correction, and audit authorities |
-| PR7 forecast domain | **BLOCKED pending owner approval** | Strict planning isolation, effective terms, deterministic version/lineage, confidence/reasons, and separate storage/read contract |
-| PR8 source dry run | **BLOCKED pending PR5–PR7** | Read-only/no-write source evaluation, quarantine, duplicate prevention, and discrepancy evidence |
-| PR9 blocked canonical adapter | **BLOCKED pending PR8 approval** | Forward-only, default-disabled canonical projection; no backfill and no dual write |
+| PR4 actual/forecast design gate | **DESIGN PROPOSED — OWNER APPROVAL REQUIRED** | Approved detail decisions are recorded, but sequence and remaining architecture decisions are not approved as a whole |
+| PR5 scope/RBAC | **BLOCKED on PR5-scoped owner approvals only** | Revised sequence, single company/branch identity authority, stable membership model, complete capability model, and deny-by-default authorization; no canonical reads/writes |
+| PR6 source authority | **BLOCKED pending PR5 plus PR6 source gates** | Exact authority/evidence and accountant/legal confirmation for close/reopen, conducted/signature, granularity/cardinality, VAT/rounding, corrections, and returns; no canonical writes |
+| PR7 forecast domain | **BLOCKED pending PR5 plus remaining forecast gates** | Exact lane precedence/coverage mechanics and downtime/extension/return authority; separate planning API/storage; no canonical writes or consumer switch |
+| PR8 source dry run | **BLOCKED pending PR5/PR6 and actual-source gates** | Source sufficiency, proven-date evidence, exact money/VAT, mappings, activation date/cohort, idempotency, reconciliation, and zero-delta evidence; no writes/backfill |
+| PR9 blocked canonical adapter | **BLOCKED pending PR8 and separate explicit owner authorization** | Forward-only, default-disabled canonical projection; no backfill and no dual write |
 | PR10 settlement integration | **BLOCKED pending PR9** | Trusted production authorization and approved actual-receivable source projection |
 | PR11 shadow reads | **BLOCKED pending PR9–PR10** | Read-only comparison with existing Finance/Company Health; no user-visible switch |
 | PR12 cutover | **BLOCKED** | Accountant/legal confirmations, signed zero-unexplained-delta evidence, rollback proof, owner approval, and staged read enablement |
 
 No gate outcome authorizes product behavior beyond its named PR scope. PR1, PR2, and PR3 RELEASED status covers only the additive schema/domain, settlement/domain, and default-disabled read-only foundations recorded above; all remain outside production business reads and writes.
+
+### 15.2 Stage-specific readiness boundary
+
+- **PR5 may begin** after owner approval of the revised sequence, single company/branch authority, dedicated Head Office semantics, stable membership model, capability model, deny-by-default authorization, and continued prohibition on canonical reads/writes. It is not blocked by UPD, signature, due-date, VAT, billing-period, forecast, correction, reconciliation, or settlement decisions that it does not implement.
+- **PR6 remains blocked** by its billing-period, close/reopen, conducted-UPD, signature, mapping/granularity, VAT/rounding, correction/cancellation, return-source, and relevant accountant/legal gates. Product-level decisions already approved do not remove the named external/evidence requirements.
+- **PR7 remains blocked** only by its forecast-specific dependencies: three-lane coverage mechanics, forecast inputs/status/horizon/confidence/history/advances, and effective terms including minimum terms, discounts, downtime, extensions, and returns. Approved items are recorded; downtime/extension and exact return/coverage mechanics remain unresolved.
+- **PR8 and PR9 remain blocked** by all actual-source sufficiency, reconciliation, exact activation, legal/accounting, idempotency/replay, and zero-unexplained-delta gates. PR9 additionally requires separate explicit canonical-write authorization.
 
 ## 16. Recommended implementation PR sequence
 
@@ -1225,8 +1235,8 @@ This prospective dependency order is a PR4 architecture recommendation and is `O
 | PR1 | Canonical receivable schema/domain foundation | **RELEASED**; empty additive tables, no production behavior | Preserved release evidence |
 | PR2 | Payment/allocation/adjustment foundation | **RELEASED**; isolated, no production settlement | Preserved release evidence |
 | PR3 | Read-only canonical API/aging foundation | **RELEASED**; default-disabled, trusted scope null/fail-closed | Preserved release evidence |
-| PR4 | Actual-versus-forecast architecture and design gate | Documentation only; no code/schema/data/config/runtime changes | Owner decisions and accountant/legal confirmations recorded |
-| PR5 | Scope, membership, company/branch authority, and RBAC | No financial activation | Cross-scope tests and real-principal enforcement approved |
+| PR4 | Actual-versus-forecast architecture and design gate | Documentation only; no code/schema/data/config/runtime changes | Revised sequence and PR5-scoped authority/RBAC decisions approved; downstream external confirmations remain later gates |
+| PR5 | Scope, membership, company/branch authority, and RBAC | No financial activation and no canonical production reads/writes | PR5-scoped owner decisions, cross-scope tests, and real-principal enforcement approved |
 | PR6 | Closed billing period, conducted UPD, stable lines, mapping, commercial-term, due-date, money/VAT, correction, and audit source authority | Source facts only; no canonical projection | Authoritative lifecycle and evidence contract approved |
 | PR7 | Separate forecast domain | Planning-only writes/reads; cannot reference canonical write adapters | Isolation, lineage, confidence/reasons, and replacement semantics approved |
 | PR8 | Source-authority dry run and discrepancy/quarantine reporting | Strictly no canonical or legacy writes | Deterministic zero-duplicate evidence and classified discrepancies approved |

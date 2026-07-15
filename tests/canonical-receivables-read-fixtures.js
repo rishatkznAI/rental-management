@@ -409,15 +409,15 @@ export function insertDueDateAudit(db, overrides = {}) {
     actorType: 'user',
     occurredAt: overrides.occurredAt || '2026-07-15T10:00:00.000Z',
     reason: 'fixture correction',
-    previousValueJson: JSON.stringify({
+    previousValueJson: overrides.previousValueJson ?? JSON.stringify({
       contractualDueDate: overrides.previousDueDate || '2026-07-01',
       dueDateProvenance: overrides.previousProvenance || 'invoice_due_date',
     }),
-    newValueJson: JSON.stringify({
+    newValueJson: overrides.newValueJson ?? JSON.stringify({
       contractualDueDate: overrides.newDueDate || '2026-08-01',
       dueDateProvenance: overrides.newProvenance || 'contractual_payment_due_date',
     }),
-    correlationId: `correlation-${id}`,
+    correlationId: overrides.correlationId || `correlation-${id}`,
     sourceSystem: 'test-canonical',
     createdAt: overrides.occurredAt || '2026-07-15T10:00:00.000Z',
   };

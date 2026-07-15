@@ -75,6 +75,18 @@ function appendReceivableIdScope(where, params, alias, receivableIds) {
   return false;
 }
 
+function appendPaymentIdScope(where, params, alias, paymentIds) {
+  if (!Array.isArray(paymentIds)) return false;
+  if (paymentIds.length === 0) return true;
+  const placeholders = paymentIds.map((id, index) => {
+    const key = `paymentScopeId${index}`;
+    params[key] = requiredText(id, 'paymentId');
+    return `@${key}`;
+  });
+  where.push(`${alias}.paymentId IN (${placeholders.join(', ')})`);
+  return false;
+}
+
 function createCanonicalReceivablesReadRepository(db) {
   if (!db || typeof db.prepare !== 'function' || typeof db.transaction !== 'function') {
     fail('DATABASE_REQUIRED', 'A better-sqlite3 database is required.');
@@ -195,8 +207,8 @@ function createCanonicalReceivablesReadRepository(db) {
         where.push(`event.aggregateId IN (${placeholders.join(', ')})`);
       }
       return db.prepare(`
-        SELECT event.aggregateId, event.eventType, event.occurredAt,
-          event.previousValueJson, event.newValueJson
+        SELECT event.id, event.aggregateId, event.eventType, event.occurredAt,
+          event.previousValueJson, event.newValueJson, event.correlationId
         FROM ${FINANCIAL_AUDIT_EVENTS_TABLE} event
         WHERE ${where.join(' AND ')}
         ORDER BY event.aggregateId, event.occurredAt, event.id
@@ -206,11 +218,29 @@ function createCanonicalReceivablesReadRepository(db) {
     listPayments(scope = {}, options = {}) {
       const params = {};
       const where = scopedWhere(scope, 'payment', params, options.branchId);
+      if (options.receiptsOnly === true) where.push("payment.paymentKind = 'receipt'");
+      if (options.after) {
+        where.push(`(
+          payment.receivedAt > @afterReceivedAt
+          OR (payment.receivedAt = @afterReceivedAt AND payment.id > @afterId)
+        )`);
+        params.afterReceivedAt = requiredText(options.after.receivedAt, 'afterReceivedAt');
+        params.afterId = requiredText(options.after.id, 'afterId');
+      }
+      let limitClause = '';
+      if (options.limit !== undefined) {
+        if (!Number.isSafeInteger(options.limit) || options.limit < 1) {
+          fail('INVALID_READ_BATCH_LIMIT', 'Read batch limit must be a positive safe integer.', 'limit');
+        }
+        params.limit = options.limit;
+        limitClause = 'LIMIT @limit';
+      }
       return db.prepare(`
         SELECT payment.*
         FROM ${CANONICAL_PAYMENTS_TABLE} payment
         WHERE ${where.join(' AND ')}
         ORDER BY payment.receivedAt, payment.id
+        ${limitClause}
       `).all(params);
     },
 
@@ -230,11 +260,83 @@ function createCanonicalReceivablesReadRepository(db) {
         });
         where.push(`allocation.paymentBranchId IN (${placeholders.join(', ')})`);
       }
+      if (appendPaymentIdScope(where, params, 'allocation', options.paymentIds)) return [];
+      if (options.after) {
+        where.push(`(
+          allocation.createdAt > @afterCreatedAt
+          OR (allocation.createdAt = @afterCreatedAt AND allocation.id > @afterId)
+        )`);
+        params.afterCreatedAt = requiredText(options.after.createdAt, 'afterCreatedAt');
+        params.afterId = requiredText(options.after.id, 'afterId');
+      }
+      let limitClause = '';
+      if (options.limit !== undefined) {
+        if (!Number.isSafeInteger(options.limit) || options.limit < 1) {
+          fail('INVALID_READ_BATCH_LIMIT', 'Read batch limit must be a positive safe integer.', 'limit');
+        }
+        params.limit = options.limit;
+        limitClause = 'LIMIT @limit';
+      }
       return db.prepare(`
         SELECT allocation.*
         FROM ${CANONICAL_PAYMENT_ALLOCATIONS_TABLE} allocation
         WHERE ${where.join(' AND ')}
-        ORDER BY allocation.paymentId, allocation.createdAt, allocation.id
+        ORDER BY allocation.createdAt, allocation.id
+        ${limitClause}
+      `).all(params);
+    },
+
+    listPaymentCompensations(scope = {}, options = {}) {
+      const params = {};
+      const where = scopedWhere(scope, 'event', params, options.branchId);
+      if (!Array.isArray(options.receiptIds) || options.receiptIds.length === 0) return [];
+      const placeholders = options.receiptIds.map((id, index) => {
+        const key = `receiptScopeId${index}`;
+        params[key] = requiredText(id, 'paymentId');
+        return `@${key}`;
+      });
+      const receiptScope = placeholders.join(', ');
+      where.push(`(
+        event.reversalOfPaymentId IN (${receiptScope})
+        OR (
+          event.paymentKind = 'reversal'
+          AND originalRefund.paymentKind = 'refund'
+          AND originalRefund.reversalOfPaymentId IN (${receiptScope})
+        )
+      )`);
+      if (options.after) {
+        where.push(`(
+          event.receivedAt > @afterReceivedAt
+          OR (event.receivedAt = @afterReceivedAt AND event.id > @afterId)
+        )`);
+        params.afterReceivedAt = requiredText(options.after.receivedAt, 'afterReceivedAt');
+        params.afterId = requiredText(options.after.id, 'afterId');
+      }
+      let limitClause = '';
+      if (options.limit !== undefined) {
+        if (!Number.isSafeInteger(options.limit) || options.limit < 1) {
+          fail('INVALID_READ_BATCH_LIMIT', 'Read batch limit must be a positive safe integer.', 'limit');
+        }
+        params.limit = options.limit;
+        limitClause = 'LIMIT @limit';
+      }
+      return db.prepare(`
+        SELECT event.id, event.receivedAt, event.workflowStatus,
+          CASE
+            WHEN event.reversalOfPaymentId IN (${receiptScope}) THEN event.reversalOfPaymentId
+            ELSE originalRefund.reversalOfPaymentId
+          END AS receiptId,
+          CASE
+            WHEN event.reversalOfPaymentId IN (${receiptScope}) THEN event.refundAmountMinor
+            ELSE -event.refundAmountMinor
+          END AS refundDeltaMinor
+        FROM ${CANONICAL_PAYMENTS_TABLE} event
+        LEFT JOIN ${CANONICAL_PAYMENTS_TABLE} originalRefund
+          ON originalRefund.companyId = event.companyId
+         AND originalRefund.id = event.reversalOfPaymentId
+        WHERE ${where.join(' AND ')}
+        ORDER BY event.receivedAt, event.id
+        ${limitClause}
       `).all(params);
     },
   });

@@ -1,13 +1,13 @@
 const crypto = require('crypto');
 const {
   AGING_CALCULATION_VERSION,
-  buildCanonicalAging,
+  createCanonicalAgingAccumulator,
   resolveAsOfDate,
   validateDateOnly,
   validateTimezone,
 } = require('./canonical-receivables-aging');
 const {
-  calculateScopedUnappliedPayments,
+  createScopedUnappliedPaymentsAccumulator,
   matchesReceivableFilters,
   projectScopedReceivables,
 } = require('./canonical-receivables-read-model');
@@ -28,6 +28,18 @@ const DETAIL_FILTERS = new Set(['asOfDate', 'currency']);
 const STATUS_VALUES = new Set(['draft', 'posted', 'disputed', 'cancelled', 'written_off']);
 const BALANCE_STATUS_VALUES = new Set(['open', 'partially_paid', 'paid', 'not_applicable']);
 const AGING_STATUS_VALUES = new Set(['current', 'overdue', 'ambiguous', 'disputed', 'otherExcluded', 'settled']);
+const CURSOR_SECRET_MIN_BYTES = 32;
+const INSECURE_CURSOR_SECRETS = new Set([
+  'change-me',
+  'changeme',
+  'canonical-receivables-cursor-secret',
+  'cursor-secret',
+  'default',
+  'replace-me',
+  'replace-this-secret',
+  'secret',
+  'test-secret',
+]);
 
 class CanonicalReceivablesReadServiceError extends Error {
   constructor(code, message, { field, status = 400 } = {}) {
@@ -76,7 +88,7 @@ function normalizeTrustedScope(input = {}) {
     });
   }
   const branchIds = Array.isArray(input.allowedBranchIds)
-    ? [...new Set(input.allowedBranchIds.map(value => String(value || '').trim()).filter(Boolean))]
+    ? [...new Set(input.allowedBranchIds.map(value => String(value || '').trim()).filter(Boolean))].sort()
     : [];
   if (branchIds.length === 0) {
     fail('RECEIVABLES_SCOPE_DENIED', 'Trusted allowed branch IDs are required.', { status: 403 });
@@ -199,11 +211,22 @@ function stableJson(value) {
 
 function createCursorCodec(secret) {
   const key = typeof secret === 'string' ? secret : '';
+  const normalizedKey = key.trim();
+  if (
+    Buffer.byteLength(normalizedKey, 'utf8') < CURSOR_SECRET_MIN_BYTES
+    || new Set(Buffer.from(normalizedKey, 'utf8')).size < 8
+    || INSECURE_CURSOR_SECRETS.has(normalizedKey.toLowerCase())
+  ) {
+    fail(
+      'CURSOR_CONFIGURATION_INVALID',
+      `Canonical cursor signing requires a non-default secret of at least ${CURSOR_SECRET_MIN_BYTES} bytes.`,
+      { status: 500 },
+    );
+  }
   function fingerprint(value) {
     return crypto.createHash('sha256').update(stableJson(value)).digest('base64url');
   }
   function sign(payload) {
-    if (!key) fail('CURSOR_CONFIGURATION_MISSING', 'Canonical cursor signing is not configured.', { status: 500 });
     return crypto.createHmac('sha256', key).update(payload).digest('base64url');
   }
   return Object.freeze({
@@ -319,13 +342,100 @@ function createCanonicalReceivablesReadService({ repository, cursorSecret, now =
           allocations: reader.listAllocations(scope, { branchId: filters.branchId, receivableId: options.id }),
           adjustments: reader.listAdjustments(scope, { branchId: filters.branchId, receivableId: options.id }),
           auditEvents: reader.listReceivableAuditEvents(scope, { branchId: filters.branchId, receivableId: options.id }),
-          payments: options.includePayments ? reader.listPayments(scope, { branchId: filters.branchId }) : [],
-          paymentAllocations: options.includePayments
-            ? reader.listPaymentAllocations(scope, { branchId: filters.branchId })
-            : [],
         },
       };
     });
+  }
+
+  function forEachProjectedBatch(reader, prepared, callback) {
+    const batchLimit = 200;
+    let position = null;
+    while (true) {
+      const receivables = reader.listReceivables(prepared.scope, {
+        branchId: prepared.filters.branchId,
+        after: position,
+        limit: batchLimit,
+      });
+      if (receivables.length === 0) break;
+      const receivableIds = receivables.map(row => row.id);
+      callback(projected(prepared, {
+        receivables,
+        allocations: reader.listAllocations(prepared.scope, {
+          branchId: prepared.filters.branchId,
+          receivableIds,
+        }),
+        adjustments: reader.listAdjustments(prepared.scope, {
+          branchId: prepared.filters.branchId,
+          receivableIds,
+        }),
+        auditEvents: reader.listReceivableAuditEvents(prepared.scope, {
+          branchId: prepared.filters.branchId,
+          receivableIds,
+        }),
+      }));
+      const last = receivables[receivables.length - 1];
+      position = { createdAt: last.createdAt, id: last.id };
+      if (receivables.length < batchLimit) break;
+    }
+  }
+
+  function calculateUnappliedPaymentMinor(reader, prepared) {
+    const batchLimit = 200;
+    let position = null;
+    let total = 0;
+    while (true) {
+      const receipts = reader.listPayments(prepared.scope, {
+        branchId: prepared.filters.branchId,
+        after: position,
+        limit: batchLimit,
+        receiptsOnly: true,
+      });
+      if (receipts.length === 0) break;
+      const receiptIds = receipts.map(row => row.id);
+      const accumulator = createScopedUnappliedPaymentsAccumulator({
+        asOfDate: prepared.asOfDate,
+        timezone: prepared.timezone,
+        clientId: prepared.filters.clientId,
+        currency: prepared.filters.currency,
+      });
+      accumulator.addPayments(receipts);
+
+      let allocationPosition = null;
+      while (true) {
+        const allocations = reader.listPaymentAllocations(prepared.scope, {
+          branchId: prepared.filters.branchId,
+          paymentIds: receiptIds,
+          after: allocationPosition,
+          limit: batchLimit,
+        });
+        if (allocations.length === 0) break;
+        accumulator.addAllocations(allocations);
+        const last = allocations[allocations.length - 1];
+        allocationPosition = { createdAt: last.createdAt, id: last.id };
+        if (allocations.length < batchLimit) break;
+      }
+
+      let compensationPosition = null;
+      while (true) {
+        const compensations = reader.listPaymentCompensations(prepared.scope, {
+          branchId: prepared.filters.branchId,
+          receiptIds,
+          after: compensationPosition,
+          limit: batchLimit,
+        });
+        if (compensations.length === 0) break;
+        accumulator.addPaymentEffects(compensations);
+        const last = compensations[compensations.length - 1];
+        compensationPosition = { receivedAt: last.receivedAt, id: last.id };
+        if (compensations.length < batchLimit) break;
+      }
+
+      total = safeAdd(total, accumulator.finish(), 'unappliedPaymentMinor');
+      const last = receipts[receipts.length - 1];
+      position = { receivedAt: last.receivedAt, id: last.id };
+      if (receipts.length < batchLimit) break;
+    }
+    return total;
   }
 
   function projected(prepared, snapshot) {
@@ -371,7 +481,13 @@ function createCanonicalReceivablesReadService({ repository, cursorSecret, now =
         prepared.timezone,
         prepared.asOfDate,
       );
-      const cursorContext = { scope: scopeMetadata, filters: prepared.filters };
+      const cursorContext = {
+        scope: scopeMetadata,
+        principalId: prepared.scope.principalId,
+        capability: 'receivables.read',
+        ordering: ['createdAt', 'id'],
+        filters: prepared.filters,
+      };
       let position = query.cursor ? cursorCodec.decode(query.cursor, cursorContext) : null;
       const matches = [];
       const batchLimit = 201;
@@ -437,92 +553,92 @@ function createCanonicalReceivablesReadService({ repository, cursorSecret, now =
   }
 
   function aging(query = {}, scopeInput = {}) {
-    const loaded = loadSnapshot(prepare(query, scopeInput, AGGREGATE_FILTERS));
-    const { prepared, snapshot } = loaded;
-    const views = projected(prepared, snapshot);
-    const scopeMetadata = makeScopeMetadata(
-      prepared.scope,
-      prepared.filters.branchId,
-      prepared.timezone,
-      prepared.asOfDate,
-    );
-    return {
-      ...buildCanonicalAging(views, {
+    const initial = prepare(query, scopeInput, AGGREGATE_FILTERS);
+    return repository.readSnapshot(reader => {
+      const { prepared } = resolvePreparedInSnapshot(reader, initial);
+      const scopeMetadata = makeScopeMetadata(
+        prepared.scope,
+        prepared.filters.branchId,
+        prepared.timezone,
+        prepared.asOfDate,
+      );
+      const accumulator = createCanonicalAgingAccumulator({
         asOfDate: prepared.asOfDate,
         timezone: prepared.timezone,
         currency: prepared.filters.currency,
         companyId: prepared.scope.companyId,
         branchScope: scopeMetadata.branchScope,
-      }),
-      scope: scopeMetadata,
-      request: { filters: prepared.filters },
-    };
+      });
+      forEachProjectedBatch(reader, prepared, views => accumulator.addMany(views));
+      return {
+        ...accumulator.finish(),
+        scope: scopeMetadata,
+        request: { filters: prepared.filters },
+      };
+    });
   }
 
   function summary(query = {}, scopeInput = {}) {
-    const loaded = loadSnapshot(
-      prepare(query, scopeInput, AGGREGATE_FILTERS),
-      { includePayments: true },
-    );
-    const { prepared, snapshot } = loaded;
-    const views = projected(prepared, snapshot);
-    const agingResult = buildCanonicalAging(views, {
-      asOfDate: prepared.asOfDate,
-      timezone: prepared.timezone,
-      currency: prepared.filters.currency,
-      companyId: prepared.scope.companyId,
-      branchScope: prepared.filters.branchId ? 'selected' : prepared.scope.companyWideBranchAccess
-        ? 'all_authorized' : 'allowed_branches',
+    const initial = prepare(query, scopeInput, AGGREGATE_FILTERS);
+    return repository.readSnapshot(reader => {
+      const { prepared } = resolvePreparedInSnapshot(reader, initial);
+      const scopeMetadata = makeScopeMetadata(
+        prepared.scope,
+        prepared.filters.branchId,
+        prepared.timezone,
+        prepared.asOfDate,
+      );
+      const agingAccumulator = createCanonicalAgingAccumulator({
+        asOfDate: prepared.asOfDate,
+        timezone: prepared.timezone,
+        currency: prepared.filters.currency,
+        companyId: prepared.scope.companyId,
+        branchScope: scopeMetadata.branchScope,
+      });
+      const totals = {
+        originalAmountMinor: 0,
+        confirmedDebitAdjustmentsMinor: 0,
+        confirmedCreditAdjustmentsMinor: 0,
+        confirmedAllocatedMinor: 0,
+        confirmedWriteOffMinor: 0,
+      };
+      let receivableCount = 0;
+      forEachProjectedBatch(reader, prepared, views => {
+        agingAccumulator.addMany(views);
+        receivableCount += views.length;
+        for (const view of views) {
+          for (const field of Object.keys(totals)) {
+            totals[field] = safeAdd(totals[field], view[field], field);
+          }
+        }
+      });
+      const agingResult = agingAccumulator.finish();
+      return {
+        asOfDate: prepared.asOfDate,
+        timezone: prepared.timezone,
+        currency: prepared.filters.currency,
+        companyId: prepared.scope.companyId,
+        branchScope: scopeMetadata.branchScope,
+        calculationVersion: AGING_CALCULATION_VERSION,
+        receivableCount,
+        ...totals,
+        totalOutstandingMinor: agingResult.totalOutstandingMinor,
+        eligibleOutstandingMinor: agingResult.eligibleOutstandingMinor,
+        currentMinor: agingResult.currentMinor,
+        overdueMinor: agingResult.overdueMinor,
+        unappliedPaymentMinor: calculateUnappliedPaymentMinor(reader, prepared),
+        ambiguousAmountMinor: agingResult.ambiguousAmountMinor,
+        ambiguousCount: agingResult.counts.ambiguous,
+        disputedAmountMinor: agingResult.disputedAmountMinor,
+        disputedCount: agingResult.counts.disputed,
+        otherExcludedAmountMinor: agingResult.otherExcludedAmountMinor,
+        otherExcludedCount: agingResult.counts.otherExcluded,
+        integrityErrorCount: agingResult.integrityErrorCount,
+        reconciled: agingResult.reconciled,
+        scope: scopeMetadata,
+        request: { filters: prepared.filters },
+      };
     });
-    const totals = {
-      originalAmountMinor: 0,
-      confirmedDebitAdjustmentsMinor: 0,
-      confirmedCreditAdjustmentsMinor: 0,
-      confirmedAllocatedMinor: 0,
-      confirmedWriteOffMinor: 0,
-    };
-    for (const view of views) {
-      for (const field of Object.keys(totals)) {
-        totals[field] = safeAdd(totals[field], view[field], field);
-      }
-    }
-    const unappliedPaymentMinor = calculateScopedUnappliedPayments(snapshot, {
-      asOfDate: prepared.asOfDate,
-      timezone: prepared.timezone,
-      clientId: prepared.filters.clientId,
-      currency: prepared.filters.currency,
-    });
-    const scopeMetadata = makeScopeMetadata(
-      prepared.scope,
-      prepared.filters.branchId,
-      prepared.timezone,
-      prepared.asOfDate,
-    );
-    return {
-      asOfDate: prepared.asOfDate,
-      timezone: prepared.timezone,
-      currency: prepared.filters.currency,
-      companyId: prepared.scope.companyId,
-      branchScope: scopeMetadata.branchScope,
-      calculationVersion: AGING_CALCULATION_VERSION,
-      receivableCount: views.length,
-      ...totals,
-      totalOutstandingMinor: agingResult.totalOutstandingMinor,
-      eligibleOutstandingMinor: agingResult.eligibleOutstandingMinor,
-      currentMinor: agingResult.currentMinor,
-      overdueMinor: agingResult.overdueMinor,
-      unappliedPaymentMinor,
-      ambiguousAmountMinor: agingResult.ambiguousAmountMinor,
-      ambiguousCount: agingResult.counts.ambiguous,
-      disputedAmountMinor: agingResult.disputedAmountMinor,
-      disputedCount: agingResult.counts.disputed,
-      otherExcludedAmountMinor: agingResult.otherExcludedAmountMinor,
-      otherExcludedCount: agingResult.counts.otherExcluded,
-      integrityErrorCount: agingResult.integrityErrorCount,
-      reconciled: agingResult.reconciled,
-      scope: scopeMetadata,
-      request: { filters: prepared.filters },
-    };
   }
 
   return Object.freeze({ aging, detail, list, summary });

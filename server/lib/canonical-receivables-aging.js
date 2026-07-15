@@ -157,7 +157,7 @@ function safeAdd(left, right, field) {
   return result;
 }
 
-function buildCanonicalAging(views, metadata = {}, options = {}) {
+function createCanonicalAgingAccumulator(metadata = {}, options = {}) {
   const asOfDate = validateDateOnly(metadata.asOfDate, 'asOfDate');
   const timezone = validateTimezone(metadata.timezone);
   if (metadata.currency !== 'RUB') {
@@ -201,8 +201,10 @@ function buildCanonicalAging(views, metadata = {}, options = {}) {
   const reasons = new Map();
   const seenIds = new Set();
   const seenSources = new Set();
+  let finished = false;
 
-  for (const view of views) {
+  function add(view) {
+    if (finished) fail('AGING_ACCUMULATOR_FINISHED', 'Canonical aging accumulation is already complete.');
     const sourceIdentity = JSON.stringify([
       view.companyId,
       view.sourceSystem,
@@ -222,7 +224,7 @@ function buildCanonicalAging(views, metadata = {}, options = {}) {
       'writtenOffAmountMinor',
     );
     const classification = classifyReceivable(view, asOfDate);
-    if (classification.classification === 'settled') continue;
+    if (classification.classification === 'settled') return;
 
     const amount = view.outstandingBalanceMinor;
     result.totalOutstandingMinor = safeAdd(result.totalOutstandingMinor, amount, 'totalOutstandingMinor');
@@ -252,35 +254,51 @@ function buildCanonicalAging(views, metadata = {}, options = {}) {
     if (classification.integrityError) result.integrityErrorCount += 1;
   }
 
-  result.overdueMinor = safeAdd(
-    safeAdd(result.buckets.days1to30Minor, result.buckets.days31to60Minor, 'overdueMinor'),
-    safeAdd(result.buckets.days61to90Minor, result.buckets.over90Minor, 'overdueMinor'),
-    'overdueMinor',
-  );
-  result.eligibleOutstandingMinor = safeAdd(result.currentMinor, result.overdueMinor, 'eligibleOutstandingMinor');
-  result.excludedReasons = [...reasons.values()].sort((left, right) => left.reason.localeCompare(right.reason));
-
-  const reconciledOutstanding = safeAdd(
-    safeAdd(result.currentMinor, result.overdueMinor, 'reconciliation'),
-    safeAdd(
-      safeAdd(result.ambiguousAmountMinor, result.disputedAmountMinor, 'reconciliation'),
-      result.otherExcludedAmountMinor,
-      'reconciliation',
-    ),
-    'reconciliation',
-  );
-  const reconciled = !options.forceReconciliationFailure
-    && result.totalOutstandingMinor === reconciledOutstanding
-    && result.eligibleOutstandingMinor === result.currentMinor + result.overdueMinor
-    && result.overdueMinor === Object.values(result.buckets).reduce(
-      (sum, amount) => safeAdd(sum, amount, 'overdueReconciliation'),
-      0,
-    );
-  if (!reconciled) {
-    fail('RECEIVABLES_RECONCILIATION_FAILED', 'Canonical receivables aging did not reconcile exactly.');
+  function addMany(views = []) {
+    for (const view of views) add(view);
   }
-  result.reconciled = true;
-  return result;
+
+  function finish() {
+    if (finished) fail('AGING_ACCUMULATOR_FINISHED', 'Canonical aging accumulation is already complete.');
+    finished = true;
+    result.overdueMinor = safeAdd(
+      safeAdd(result.buckets.days1to30Minor, result.buckets.days31to60Minor, 'overdueMinor'),
+      safeAdd(result.buckets.days61to90Minor, result.buckets.over90Minor, 'overdueMinor'),
+      'overdueMinor',
+    );
+    result.eligibleOutstandingMinor = safeAdd(result.currentMinor, result.overdueMinor, 'eligibleOutstandingMinor');
+    result.excludedReasons = [...reasons.values()].sort((left, right) => left.reason.localeCompare(right.reason));
+
+    const reconciledOutstanding = safeAdd(
+      safeAdd(result.currentMinor, result.overdueMinor, 'reconciliation'),
+      safeAdd(
+        safeAdd(result.ambiguousAmountMinor, result.disputedAmountMinor, 'reconciliation'),
+        result.otherExcludedAmountMinor,
+        'reconciliation',
+      ),
+      'reconciliation',
+    );
+    const reconciled = !options.forceReconciliationFailure
+      && result.totalOutstandingMinor === reconciledOutstanding
+      && result.eligibleOutstandingMinor === result.currentMinor + result.overdueMinor
+      && result.overdueMinor === Object.values(result.buckets).reduce(
+        (sum, amount) => safeAdd(sum, amount, 'overdueReconciliation'),
+        0,
+      );
+    if (!reconciled) {
+      fail('RECEIVABLES_RECONCILIATION_FAILED', 'Canonical receivables aging did not reconcile exactly.');
+    }
+    result.reconciled = true;
+    return result;
+  }
+
+  return Object.freeze({ add, addMany, finish });
+}
+
+function buildCanonicalAging(views, metadata = {}, options = {}) {
+  const accumulator = createCanonicalAgingAccumulator(metadata, options);
+  accumulator.addMany(views);
+  return accumulator.finish();
 }
 
 module.exports = {
@@ -292,6 +310,7 @@ module.exports = {
   civilDateInTimezone,
   civilDayNumber,
   classifyReceivable,
+  createCanonicalAgingAccumulator,
   isDateOnly,
   isEffectiveByAsOf,
   isValidIanaTimezone,

@@ -3,10 +3,25 @@ const {
   calculateReceivableOutstanding,
 } = require('./canonical-receivables-settlement-domain');
 const {
+  ACCEPTED_DUE_DATE_PROVENANCES: AGING_ACCEPTED_DUE_DATE_PROVENANCES,
   classifyReceivable,
   civilDateInTimezone,
+  isDateOnly,
   isEffectiveByAsOf,
 } = require('./canonical-receivables-aging');
+
+const ACCEPTED_DUE_DATE_PROVENANCES = new Set(AGING_ACCEPTED_DUE_DATE_PROVENANCES);
+const DUE_DATE_PROVENANCES = new Set([...ACCEPTED_DUE_DATE_PROVENANCES, 'unknown']);
+const WORKFLOW_STATUSES = new Set(['draft', 'posted', 'disputed', 'cancelled', 'written_off']);
+const COMPLETED_WORKFLOW_EVENT_TYPES = new Set([
+  'cancellation_approved',
+  'dispute_opened',
+  'dispute_resolved',
+  'receivable_posted',
+  'workflow_status_changed',
+  'write_off_approved',
+  'write_off_reversed',
+]);
 
 class CanonicalReceivablesReadModelError extends Error {
   constructor(code, message, field) {
@@ -32,14 +47,74 @@ function safeAdd(left, right, field) {
   return safeInteger(left + right, field);
 }
 
-function parseAuditJson(value, field) {
-  if (value === null || value === undefined || value === '') return null;
+function parseAuditJson(value, field, { required = false } = {}) {
+  if (value === null || value === undefined || value === '') {
+    if (required) {
+      fail('CANONICAL_AUDIT_INTEGRITY_ERROR', `${field} is missing from canonical audit evidence.`, field);
+    }
+    return null;
+  }
   try {
     const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    if (required) {
+      fail('CANONICAL_AUDIT_INTEGRITY_ERROR', `${field} must contain a canonical audit object.`, field);
+    }
+    return null;
   } catch {
     fail('CANONICAL_AUDIT_INTEGRITY_ERROR', `${field} contains invalid canonical audit JSON.`, field);
   }
+}
+
+function auditIntegrity(message, field) {
+  fail('CANONICAL_AUDIT_INTEGRITY_ERROR', message, field);
+}
+
+function compareAuditEvents(left, right) {
+  const byTime = String(left.occurredAt || '').localeCompare(String(right.occurredAt || ''));
+  return byTime || String(left.id || '').localeCompare(String(right.id || ''));
+}
+
+function validateAuditEventIdentity(event, seenCorrelations) {
+  if (
+    typeof event.id !== 'string'
+    || !event.id
+    || typeof event.correlationId !== 'string'
+    || !event.correlationId
+    || typeof event.occurredAt !== 'string'
+    || Number.isNaN(Date.parse(event.occurredAt))
+  ) {
+    auditIntegrity('Canonical audit evidence has an invalid identity or effective timestamp.');
+  }
+  if (seenCorrelations.has(event.correlationId)) {
+    auditIntegrity('Duplicate canonical audit evidence was detected.', 'correlationId');
+  }
+  seenCorrelations.add(event.correlationId);
+}
+
+function dueDateState(value, field) {
+  const parsed = parseAuditJson(value, field, { required: true });
+  if (
+    !Object.prototype.hasOwnProperty.call(parsed, 'contractualDueDate')
+    || !Object.prototype.hasOwnProperty.call(parsed, 'dueDateProvenance')
+  ) {
+    auditIntegrity(`${field} is missing contractual due-date evidence.`, field);
+  }
+  const contractualDueDate = parsed.contractualDueDate ?? null;
+  const dueDateProvenance = parsed.dueDateProvenance;
+  if (
+    !DUE_DATE_PROVENANCES.has(dueDateProvenance)
+    || (contractualDueDate !== null && !isDateOnly(contractualDueDate))
+    || (ACCEPTED_DUE_DATE_PROVENANCES.has(dueDateProvenance) && contractualDueDate === null)
+  ) {
+    auditIntegrity(`${field} contains invalid contractual due-date evidence.`, field);
+  }
+  return { contractualDueDate, dueDateProvenance };
+}
+
+function sameDueDateState(left, right) {
+  return left.contractualDueDate === right.contractualDueDate
+    && left.dueDateProvenance === right.dueDateProvenance;
 }
 
 function groupBy(rows, key) {
@@ -58,23 +133,40 @@ function dueDateAtAsOf(receivable, events, { asOfDate, timezone }) {
     .filter(event => event.eventType === 'due_date_change_approved')
     .map(event => ({
       ...event,
-      previousValue: parseAuditJson(event.previousValueJson, 'previousValueJson'),
-      newValue: parseAuditJson(event.newValueJson, 'newValueJson'),
-    }));
+      previousValue: dueDateState(event.previousValueJson, 'previousValueJson'),
+      newValue: dueDateState(event.newValueJson, 'newValueJson'),
+    }))
+    .sort(compareAuditEvents);
+  const seenCorrelations = new Set();
+  for (let index = 0; index < approved.length; index += 1) {
+    const event = approved[index];
+    validateAuditEventIdentity(event, seenCorrelations);
+    if (index > 0) {
+      const previous = approved[index - 1];
+      if (event.occurredAt === previous.occurredAt) {
+        auditIntegrity('Multiple due-date approvals share an ambiguous effective timestamp.', 'occurredAt');
+      }
+      if (!sameDueDateState(event.previousValue, previous.newValue)) {
+        auditIntegrity('Canonical due-date audit evidence is conflicting or incomplete.');
+      }
+    }
+  }
+  if (approved.length > 0) {
+    const current = {
+      contractualDueDate: receivable.contractualDueDate ?? null,
+      dueDateProvenance: receivable.dueDateProvenance,
+    };
+    if (!sameDueDateState(approved[approved.length - 1].newValue, current)) {
+      auditIntegrity('Canonical due-date audit evidence does not reconcile to the stored receivable.');
+    }
+  }
   const effective = approved.filter(event => isEffectiveByAsOf(event.occurredAt, timezone, asOfDate));
   if (effective.length > 0) {
     const latest = effective[effective.length - 1];
-    return {
-      contractualDueDate: latest.newValue?.contractualDueDate ?? null,
-      dueDateProvenance: latest.newValue?.dueDateProvenance || 'unknown',
-    };
+    return latest.newValue;
   }
   if (approved.length > 0) {
-    const earliestFuture = approved[0];
-    return {
-      contractualDueDate: earliestFuture.previousValue?.contractualDueDate ?? null,
-      dueDateProvenance: earliestFuture.previousValue?.dueDateProvenance || 'unknown',
-    };
+    return approved[0].previousValue;
   }
   return {
     contractualDueDate: receivable.contractualDueDate,
@@ -82,33 +174,63 @@ function dueDateAtAsOf(receivable, events, { asOfDate, timezone }) {
   };
 }
 
+function workflowState(value, field) {
+  const parsed = parseAuditJson(value, field, { required: true });
+  if (!WORKFLOW_STATUSES.has(parsed.workflowStatus)) {
+    auditIntegrity(`${field} is missing an approved workflow status.`, field);
+  }
+  return parsed.workflowStatus;
+}
+
 function workflowStatusAtAsOf(receivable, events, { asOfDate, timezone }) {
   if (receivable.postedAt && !isEffectiveByAsOf(receivable.postedAt, timezone, asOfDate)) return 'draft';
   const approvedTransitions = events
-    .filter(event => isEffectiveByAsOf(event.occurredAt, timezone, asOfDate))
+    .filter(event => COMPLETED_WORKFLOW_EVENT_TYPES.has(event.eventType))
     .map(event => ({
       ...event,
-      previousValue: parseAuditJson(event.previousValueJson, 'previousValueJson'),
-      newValue: parseAuditJson(event.newValueJson, 'newValueJson'),
+      previousStatus: workflowState(event.previousValueJson, 'previousValueJson'),
+      newStatus: workflowState(event.newValueJson, 'newValueJson'),
     }))
-    .filter(event => typeof event.newValue?.workflowStatus === 'string');
+    .sort(compareAuditEvents);
+  const seenCorrelations = new Set();
+  for (let index = 0; index < approvedTransitions.length; index += 1) {
+    const event = approvedTransitions[index];
+    validateAuditEventIdentity(event, seenCorrelations);
+    if (index > 0) {
+      const previous = approvedTransitions[index - 1];
+      if (event.occurredAt === previous.occurredAt || event.previousStatus !== previous.newStatus) {
+        auditIntegrity('Canonical workflow audit evidence is conflicting or incomplete.');
+      }
+    }
+  }
   if (approvedTransitions.length > 0) {
-    return approvedTransitions[approvedTransitions.length - 1].newValue.workflowStatus;
+    const latest = approvedTransitions[approvedTransitions.length - 1];
+    if (latest.newStatus !== receivable.workflowStatus) {
+      auditIntegrity('Canonical workflow audit evidence does not reconcile to the stored receivable.');
+    }
+    let status = approvedTransitions[0].previousStatus;
+    for (const event of approvedTransitions) {
+      if (!isEffectiveByAsOf(event.occurredAt, timezone, asOfDate)) break;
+      status = event.newStatus;
+    }
+    return status;
   }
   if (
-    receivable.workflowStatus === 'cancelled'
-    && receivable.cancelledAt
-    && !isEffectiveByAsOf(receivable.cancelledAt, timezone, asOfDate)
+    ['cancelled', 'written_off'].includes(receivable.workflowStatus)
+    && !isEffectiveByAsOf(
+      receivable.workflowStatus === 'cancelled' ? receivable.cancelledAt : receivable.writtenOffAt,
+      timezone,
+      asOfDate,
+    )
   ) {
-    const event = events.find(item => item.eventType === 'cancellation_approved');
-    const previousValue = parseAuditJson(event?.previousValueJson, 'previousValueJson');
-    return previousValue?.workflowStatus || 'posted';
+    auditIntegrity('Historical workflow status cannot be reconstructed without completed audit evidence.');
   }
   if (
-    receivable.workflowStatus === 'written_off'
-    && receivable.writtenOffAt
-    && !isEffectiveByAsOf(receivable.writtenOffAt, timezone, asOfDate)
-  ) return 'posted';
+    receivable.workflowStatus === 'disputed'
+    && !isEffectiveByAsOf(receivable.updatedAt, timezone, asOfDate)
+  ) {
+    auditIntegrity('Historical dispute status cannot be reconstructed without completed audit evidence.');
+  }
   return receivable.workflowStatus;
 }
 
@@ -165,11 +287,11 @@ function projectReceivable(receivable, context = {}) {
 
   const status = workflowStatusAtAsOf(receivable, auditEvents, { asOfDate, timezone });
   const dueDate = dueDateAtAsOf(receivable, auditEvents, { asOfDate, timezone });
-  // PR2 owns the approved arithmetic. Passing the raw balance-bearing state lets
-  // the read side detect positive draft/cancelled/written-off integrity defects
-  // instead of hiding them behind workflow zeroing.
+  // PR2 owns the approved arithmetic, including zero balance for draft and
+  // cancelled workflow states. The aging layer still rejects any positive
+  // cancelled/written-off view supplied by a future or corrupted projection.
   const outstandingBalanceMinor = calculateReceivableOutstanding({
-    workflowStatus: 'posted',
+    workflowStatus: status,
     originalAmountMinor: safeInteger(receivable.originalAmountMinor, 'originalAmountMinor'),
     confirmedDebitAdjustmentsMinor,
     confirmedCreditAdjustmentsMinor,
@@ -245,59 +367,112 @@ function projectScopedReceivables(snapshot, { asOfDate, timezone }) {
     }));
 }
 
-function calculateScopedUnappliedPayments(snapshot, { asOfDate, timezone, clientId, currency = 'RUB' } = {}) {
-  const allocationsByPayment = groupBy(snapshot.paymentAllocations || [], 'paymentId');
-  const payments = (snapshot.payments || []).filter(payment => (
-    payment.currency === currency
-    && (!clientId || payment.clientId === clientId)
-    && isEffectiveByAsOf(payment.receivedAt, timezone, asOfDate)
-  ));
-  const byId = new Map(payments.map(payment => [payment.id, payment]));
-  let total = 0;
-  for (const payment of payments) {
-    if (payment.paymentKind !== 'receipt') continue;
-    let confirmedActiveAllocationsMinor = 0;
-    for (const allocation of allocationsByPayment.get(payment.id) || []) {
+function createScopedUnappliedPaymentsAccumulator({
+  asOfDate,
+  timezone,
+  clientId,
+  currency = 'RUB',
+} = {}) {
+  const paymentsById = new Map();
+  const receiptStates = new Map();
+
+  function addPayments(rows = []) {
+    for (const payment of rows) {
+      if (
+        payment.currency !== currency
+        || (clientId && payment.clientId !== clientId)
+        || !isEffectiveByAsOf(payment.receivedAt, timezone, asOfDate)
+      ) continue;
+      paymentsById.set(payment.id, payment);
+      if (payment.paymentKind === 'receipt') {
+        receiptStates.set(payment.id, {
+          payment,
+          confirmedActiveAllocationsMinor: 0,
+          confirmedRefundsMinor: 0,
+        });
+      }
+    }
+  }
+
+  function addAllocations(rows = []) {
+    for (const allocation of rows) {
       if (
         allocation.allocationStatus !== 'confirmed'
         || !isEffectiveByAsOf(allocationEffectiveAt(allocation), timezone, asOfDate)
       ) continue;
-      confirmedActiveAllocationsMinor = safeAdd(
-        confirmedActiveAllocationsMinor,
-        (allocation.allocationKind === 'reversal' ? -1 : 1) * allocation.allocatedAmountMinor,
+      const state = receiptStates.get(allocation.paymentId);
+      if (!state) continue;
+      const amount = safeInteger(allocation.allocatedAmountMinor, 'allocatedAmountMinor');
+      state.confirmedActiveAllocationsMinor = safeAdd(
+        state.confirmedActiveAllocationsMinor,
+        (allocation.allocationKind === 'reversal' ? -1 : 1) * amount,
         'confirmedActiveAllocationsMinor',
       );
     }
-    let confirmedRefundsMinor = 0;
-    for (const compensation of payments) {
-      if (compensation.workflowStatus !== 'confirmed') continue;
-      if (compensation.reversalOfPaymentId === payment.id) {
-        confirmedRefundsMinor = safeAdd(
-          confirmedRefundsMinor,
-          compensation.refundAmountMinor,
+  }
+
+  function addPaymentEffects(rows = []) {
+    for (const effect of rows) {
+      if (
+        effect.workflowStatus !== 'confirmed'
+        || !isEffectiveByAsOf(effect.receivedAt, timezone, asOfDate)
+      ) continue;
+      const state = receiptStates.get(effect.receiptId);
+      if (!state) continue;
+      state.confirmedRefundsMinor = safeAdd(
+        state.confirmedRefundsMinor,
+        safeInteger(effect.refundDeltaMinor, 'refundDeltaMinor'),
+        'confirmedRefundsMinor',
+      );
+    }
+  }
+
+  function finish() {
+    for (const payment of paymentsById.values()) {
+      if (payment.workflowStatus !== 'confirmed' || !payment.reversalOfPaymentId) continue;
+      const directReceipt = receiptStates.get(payment.reversalOfPaymentId);
+      const amount = safeInteger(payment.refundAmountMinor, 'refundAmountMinor');
+      if (directReceipt) {
+        directReceipt.confirmedRefundsMinor = safeAdd(
+          directReceipt.confirmedRefundsMinor,
+          amount,
           'confirmedRefundsMinor',
         );
         continue;
       }
-      if (compensation.paymentKind !== 'reversal') continue;
-      const original = byId.get(compensation.reversalOfPaymentId);
-      if (original?.paymentKind === 'refund' && original.reversalOfPaymentId === payment.id) {
-        confirmedRefundsMinor = safeAdd(
-          confirmedRefundsMinor,
-          -compensation.refundAmountMinor,
+      if (payment.paymentKind !== 'reversal') continue;
+      const original = paymentsById.get(payment.reversalOfPaymentId);
+      const receipt = original?.paymentKind === 'refund'
+        ? receiptStates.get(original.reversalOfPaymentId)
+        : null;
+      if (receipt) {
+        receipt.confirmedRefundsMinor = safeAdd(
+          receipt.confirmedRefundsMinor,
+          -amount,
           'confirmedRefundsMinor',
         );
       }
     }
-    const unapplied = calculatePaymentUnapplied({
-      ...payment,
-      internalTransfer: payment.internalTransfer === 1,
-      confirmedActiveAllocationsMinor,
-      confirmedRefundsMinor,
-    });
-    total = safeAdd(total, unapplied, 'unappliedPaymentMinor');
+    let total = 0;
+    for (const state of receiptStates.values()) {
+      total = safeAdd(total, calculatePaymentUnapplied({
+        ...state.payment,
+        internalTransfer: state.payment.internalTransfer === 1,
+        confirmedActiveAllocationsMinor: state.confirmedActiveAllocationsMinor,
+        confirmedRefundsMinor: state.confirmedRefundsMinor,
+      }), 'unappliedPaymentMinor');
+    }
+    return total;
   }
-  return total;
+
+  return Object.freeze({ addAllocations, addPaymentEffects, addPayments, finish });
+}
+
+function calculateScopedUnappliedPayments(snapshot, options = {}) {
+  const accumulator = createScopedUnappliedPaymentsAccumulator(options);
+  accumulator.addPayments(snapshot.payments || []);
+  accumulator.addAllocations(snapshot.paymentAllocations || []);
+  return accumulator.finish();
 }
 
 function matchesReceivableFilters(view, filters = {}, timezone) {
@@ -330,6 +505,7 @@ function matchesReceivableFilters(view, filters = {}, timezone) {
 module.exports = {
   CanonicalReceivablesReadModelError,
   calculateScopedUnappliedPayments,
+  createScopedUnappliedPaymentsAccumulator,
   dueDateAtAsOf,
   matchesReceivableFilters,
   projectReceivable,

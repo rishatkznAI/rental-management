@@ -91,7 +91,7 @@ test('legacy rental/payment debt cannot populate an empty canonical read result'
 
     const service = createCanonicalReceivablesReadService({
       repository: createCanonicalReceivablesReadRepository(context.db),
-      cursorSecret: 'isolation-cursor-secret',
+      cursorSecret: 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
       now: () => new Date('2026-07-15T12:00:00.000Z'),
     });
     const scope = trustedScope({

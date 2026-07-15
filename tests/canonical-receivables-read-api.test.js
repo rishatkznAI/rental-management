@@ -32,7 +32,9 @@ function createApp(context, options = {}) {
     resolveTrustedScope: options.resolveTrustedScope === undefined
       ? ({ principal }) => trustedScope({ principalId: principal.userId })
       : options.resolveTrustedScope,
-    cursorSecret: 'http-test-cursor-secret',
+    cursorSecret: Object.hasOwn(options, 'cursorSecret')
+      ? options.cursorSecret
+      : '123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0',
     now: () => new Date('2026-07-15T12:00:00.000Z'),
     service: options.service,
     logger: { error() {} },
@@ -67,6 +69,29 @@ test('feature flag disabled registers no canonical read route', async () => {
   }
 });
 
+test('enabled routes reject absent, short, or known default cursor secrets at registration', () => {
+  const context = createCanonicalReadContext();
+  try {
+    for (const cursorSecret of [
+      undefined,
+      'too-short',
+      'canonical-receivables-cursor-secret',
+      ' '.repeat(64),
+      'x'.repeat(64),
+    ]) {
+      assert.throws(
+        () => createApp(context, { cursorSecret }),
+        error => error.code === 'CURSOR_CONFIGURATION_INVALID',
+      );
+    }
+    assert.doesNotThrow(() => createApp(context, {
+      cursorSecret: 'abcdef9876543210abcdef9876543210abcdef9876543210abcdef9876543210',
+    }));
+  } finally {
+    context.close();
+  }
+});
+
 test('missing authentication, trusted scope, or read capability is denied with request ID', async () => {
   const context = createCanonicalReadContext();
   try {
@@ -87,6 +112,16 @@ test('missing authentication, trusted scope, or read capability is denied with r
       const denied = await request(baseUrl, '/api/receivables');
       assert.equal(denied.response.status, 403);
       assert.equal(denied.json.error.code, 'RECEIVABLES_READ_FORBIDDEN');
+    });
+    await withServer(createApp(context, {
+      resolveTrustedScope: () => trustedScope({
+        companyWideBranchAccess: false,
+        allowedBranchIds: [],
+      }),
+    }), async baseUrl => {
+      const denied = await request(baseUrl, '/api/receivables');
+      assert.equal(denied.response.status, 403);
+      assert.equal(denied.json.error.code, 'RECEIVABLES_SCOPE_DENIED');
     });
   } finally {
     context.close();
@@ -181,12 +216,14 @@ test('list filters and deterministic signed cursor pagination validate tampering
     insertReceivable(context.db, {
       id: 'rec-3', createdAt: '2026-06-02T09:00:00.000Z', sourceSystem: 'source-b', workflowStatus: 'draft',
     });
+    let companyWideCursor;
     await withServer(createApp(context), async baseUrl => {
       const first = await request(baseUrl, '/api/receivables?limit=1');
       assert.equal(first.response.status, 200);
       assert.equal(first.json.items[0].id, 'rec-1');
       assert.equal(first.json.hasMore, true);
       assert.ok(first.json.nextCursor);
+      companyWideCursor = first.json.nextCursor;
       const second = await request(baseUrl, `/api/receivables?limit=1&cursor=${encodeURIComponent(first.json.nextCursor)}`);
       assert.equal(second.json.items[0].id, 'rec-2');
 
@@ -197,6 +234,13 @@ test('list filters and deterministic signed cursor pagination validate tampering
       const reused = await request(baseUrl,
         `/api/receivables?limit=1&sourceSystem=source-b&cursor=${encodeURIComponent(first.json.nextCursor)}`);
       assert.equal(reused.response.status, 400);
+      const otherPrincipal = await request(
+        baseUrl,
+        `/api/receivables?limit=1&cursor=${encodeURIComponent(first.json.nextCursor)}`,
+        { token: 'other-finance-user' },
+      );
+      assert.equal(otherPrincipal.response.status, 400);
+      assert.equal(otherPrincipal.json.error.code, 'INVALID_CURSOR');
 
       const filtered = await request(baseUrl, '/api/receivables?sourceSystem=source-b&status=draft');
       assert.deepEqual(filtered.json.items.map(item => item.id), ['rec-3']);
@@ -206,6 +250,19 @@ test('list filters and deterministic signed cursor pagination validate tampering
         assert.equal(response.json.error.code, 'INVALID_LIMIT');
       }
     });
+    for (const resolveTrustedScope of [
+      () => trustedScope({ companyWideBranchAccess: false, allowedBranchIds: ['branch-a1'] }),
+      () => trustedScope({ companyId: 'company-b' }),
+    ]) {
+      await withServer(createApp(context, { resolveTrustedScope }), async baseUrl => {
+        const replay = await request(
+          baseUrl,
+          `/api/receivables?limit=1&cursor=${encodeURIComponent(companyWideCursor)}`,
+        );
+        assert.equal(replay.response.status, 400);
+        assert.equal(replay.json.error.code, 'INVALID_CURSOR');
+      });
+    }
   } finally {
     context.close();
   }

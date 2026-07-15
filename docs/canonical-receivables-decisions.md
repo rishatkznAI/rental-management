@@ -1,8 +1,8 @@
 # Canonical receivables: product-owner decision memo
 
-**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; `PR4: DESIGN PROPOSED — OWNER APPROVAL REQUIRED`; conditional confirmations remain
+**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; `PR4: DESIGN APPROVED — IMPLEMENTATION NOT STARTED`; conditional confirmations remain
 
-**Prepared:** 2026-07-13; release status, PR4 product-owner clarifications, and PR4 design-detail decisions updated 2026-07-15
+**Prepared:** 2026-07-13; release status, PR4 product-owner clarifications, PR4 design-detail decisions, and final PR4 architecture/PR5 foundation approval updated 2026-07-15
 
 **Source specification:** `docs/canonical-receivables-contract.md`
 
@@ -10,7 +10,7 @@
 
 ## Product-owner baseline
 
-**Decision date:** 2026-07-13; D-01, D-24, forecast-domain, and PR4 design-detail decisions dated 2026-07-15
+**Decision date:** 2026-07-13; D-01, D-24, forecast-domain, PR4 design-detail, and final PR4 architecture/PR5 foundation decisions dated 2026-07-15
 
 **Approved decisions:** D-01 through D-27. The product owner approved every decision in this memo as recorded in the Owner answer column and detailed answer fields. On 2026-07-15 the product owner clarified D-01, D-24, and D-26's forecast-domain boundary as recorded below.
 
@@ -18,9 +18,9 @@
 
 **Deferred numerical limits:** amount and age thresholds remain intentionally undefined. The approved initial-release policy below applies mandatory dual approval to every sensitive operation instead of using unapproved thresholds. A future threshold policy requires a separate product-owner decision and may not weaken auditability or separation of duties.
 
-**No silent assumptions:** implementation may encode only the answers in this baseline. Missing source sufficiency/evidence, proven-date evidence, exact money/VAT/rounding, compensation details, downtime/extension authority, lane-precedence mechanics, activation date/cohort, financial thresholds, or membership/capability/RBAC details must remain disabled, fail-closed, or explicitly escalated. No finite retention period may be invented.
+**No silent assumptions:** implementation may encode only the answers in this baseline. Missing source sufficiency/evidence, proven-date evidence, exact money/VAT/rounding, compensation details, downtime/extension authority, lane-precedence mechanics, activation date/cohort, financial thresholds, concrete membership records, audited capability assignments, named integration contracts, or other unapproved details must remain disabled, fail-closed, or explicitly escalated. No finite retention period may be invented.
 
-**Current status summary:** the canonical ledger baseline is approved; the PR1 schema foundation, PR2 settlement foundation, and PR3 default-disabled read-only infrastructure are released; and all eight canonical tables remain empty. The production ledger remains inactive, with canonical reads disabled and existing systems continuing to serve production reads and writes. PR4 is a design gate only. The proposed prospective implementation order is the revised PR5–PR12 sequence below and remains owner-approval-required; production settlement and every canonical write/read switch remain blocked.
+**Current status summary:** the canonical ledger baseline is approved; the PR1 schema foundation, PR2 settlement foundation, and PR3 default-disabled read-only infrastructure are released; and all eight canonical tables remain empty. The production ledger remains inactive, with canonical reads disabled and existing systems continuing to serve production reads and writes. PR4 architecture/design and the revised PR4–PR12 sequence are approved, but PR4 is not released and implementation has not started. After PR4 merges, PR5 may begin only as the approved scope-authority/RBAC foundation; production settlement and every canonical write/read switch remain blocked.
 
 ## PR4 design-detail product-owner decisions
 
@@ -49,7 +49,23 @@
 21. Minimum terms and discounts are versioned effective terms applied before VAT.
 22. Forward-only activation includes only periods fully governed by the new source authority; partial-period and historical import are forbidden.
 
-These decisions approve the named boundaries only. They do not approve the revised PR4–PR12 sequence, choose the single company/branch identity master, approve the complete membership/capability/default-deny model, define exact VAT/rounding, define downtime/extension or exact return lifecycle authority, choose an activation date/cohort, supply accountant/legal confirmations, authorize canonical writes, or approve/release PR4. PR4 remains `DESIGN PROPOSED — OWNER APPROVAL REQUIRED`.
+These design-detail decisions approve the named boundaries. The final approval batch below additionally approves the revised PR4–PR12 sequence, neutral platform identity authority, branch semantics, membership model, capability model, deny-by-default authorization, and PR4 architecture. It does not define exact VAT/rounding, downtime/extension or exact return lifecycle authority, activation date/cohort, accountant/legal confirmations, or canonical writes. PR4 is design-approved but not released.
+
+## PR4 architecture and PR5 foundation approval
+
+**Decision date: 2026-07-15.** The product owner explicitly approved the PR4 architecture and the following remaining PR5-scoped decisions:
+
+1. **Revised sequence.** Approve the revised PR4–PR12 dependency sequence exactly as documented. The dependencies and prohibitions in that sequence remain fixed.
+2. **Neutral platform identity authority.** Approve one neutral platform identity authority conceptually comprising `companies`, `branches`, `company_memberships`, and `membership_branch_access`. `canonical_companies` and `canonical_branches` must not become a separate independently editable operational authority. Because every canonical table remains empty, PR5 must evaluate and design the safe replacement or rebinding of the empty canonical company/branch foreign-key roots to the neutral platform authority. Running neutral platform identities and independently editable canonical company/branch identities together is forbidden.
+3. **Branch semantics.** Every branch has a stable opaque ID and belongs to exactly one company. Head Office is a dedicated stable branch record and is never null, a wildcard, or a scope sentinel. Genuinely centralized operations may use Head Office; ordinary rental operations use the operational rental branch.
+4. **Membership model.** A user accesses a company only through an active stable company-scoped membership. Branch access is explicit allowed branch IDs or explicit company-wide branch authority. Company-wide authority never erases branch identity from records. Revoked or inactive membership denies. Missing membership, inferred membership, current-user inference, and name-based mapping are forbidden.
+5. **Capability model.** Backend authorization checks explicit capabilities rather than role display names. Role templates may grant capability sets for administrative convenience. The catalog is versioned and server-authoritative. Per-user or membership grants may only narrow or explicitly grant approved capabilities through audited administration. Administrator status alone does not imply financial authority. The initial conceptual namespace is `companies.manage`, `branches.manage`, `members.manage`, `receivables.read`, `billing.period.close`, `billing.period.reopen`, `upd.form`, `upd.conduct`, `upd.correct`, `forecast.read`, and `forecast.calculate`. Future canonical posting and settlement capabilities may be reserved in design but may not be enabled, assigned, routed, or enforced as active production behavior in PR5.
+6. **Deny by default.** Missing or inactive membership denies; unknown role or capability denies; missing branch scope denies. Client-supplied `companyId` or `branchId` may only narrow server-authorized scope and never elevate it. Every ID lookup includes authorized company and branch predicates. Cross-company access is forbidden. Carrier, bot-only, integration, and system identities receive no user capabilities unless explicitly approved for a named integration contract.
+7. **PR5 start boundary.** PR5 may begin only as the scope-authority/RBAC foundation after PR4 merges. PR5 must not enable canonical production reads or writes; populate canonical financial rows; implement billing periods, conducted UPD, forecast calculations, actual-source eligibility, or settlement; switch Finance or Company Health/Risks; or perform backfill, dual write, shadow read, or cutover.
+
+**Approval result:** `PR4: DESIGN APPROVED — IMPLEMENTATION NOT STARTED`. PR4 is not `RELEASED`. PR5 design/implementation may begin after PR4 merge. PR6–PR12 remain gated exactly as documented. Canonical production reads and writes remain disabled, all eight canonical tables remain empty, and this approval authorizes no implementation or production behavior.
+
+Every proposal outside the explicitly approved decisions above and the previously approved D-01, forecast, D-24, and PR4 design-detail decisions retains its existing status.
 
 ## PR1 release status
 
@@ -734,7 +750,7 @@ No recommendation in this memo is a legal or accounting conclusion.
 
 The outcomes below distinguish a product-decision baseline from later operational evidence. A `PASS` authorizes only the named PR scope; it does not authorize production enablement, migration, or cutover.
 
-The prospective PR4–PR12 dependency order below is an architecture recommendation and remains `OWNER APPROVAL REQUIRED`; the fixed D-01, forecast, and D-24 decisions constrain it but do not approve its unimplemented details.
+The prospective PR4–PR12 dependency order below is product-owner **APPROVED — 2026-07-15** exactly as documented. This sequence approval does not approve any remaining downstream decision, implementation, production enablement, migration, or cutover.
 
 ### PR1 — canonical schema and domain
 
@@ -754,13 +770,13 @@ PR1 must use mandatory `companyId` and `branchId`, the dedicated Head Office bra
 
 ### PR4 — actual/forecast architecture design gate
 
-**Status: `PR4: DESIGN PROPOSED — OWNER APPROVAL REQUIRED`.** PR4 is documentation only. It separates Rental Operations, Billing Source Authority, Forecast Receivables Planning, Canonical Actual Receivables, Settlement, and Reporting; records the three-lane recommendation; removes backfill and dual write from the mandatory path; and introduces no runtime behavior. The detailed gate is `docs/canonical-receivables-pr4-design-gate.md`.
+**Status: `PR4: DESIGN APPROVED — IMPLEMENTATION NOT STARTED`.** PR4 is documentation only and is not released. Its bounded-context architecture and revised dependency sequence are approved; it separates Rental Operations, Billing Source Authority, Forecast Receivables Planning, Canonical Actual Receivables, Settlement, and Reporting, removes backfill and dual write from the mandatory path, and introduces no runtime behavior. The detailed gate is `docs/canonical-receivables-pr4-design-gate.md`.
 
 ### PR5 — company/branch authority and fail-closed RBAC
 
-**Gate: BLOCKED on PR5-scoped product-owner approvals only.** PR5 may begin after approval of the revised PR4–PR12 sequence, the single company/branch identity authority, dedicated Head Office semantics, stable membership model, complete capability model, deny-by-default authorization, and continued prohibition on canonical production reads/writes. The operational rental-branch/dedicated-Head-Office ownership rule is approved; the sequence, identity master, membership model, full capability model, and default-deny model remain `OWNER APPROVAL REQUIRED`.
+**Gate: MAY BEGIN AFTER PR4 MERGE — SCOPE-AUTHORITY/RBAC FOUNDATION ONLY.** The revised PR4–PR12 sequence, neutral platform company/branch authority, dedicated Head Office semantics, stable membership model, explicit capability model, deny-by-default authorization, and continued prohibition on canonical production reads/writes are product-owner approved. PR5 must evaluate safe replacement/rebinding of the empty canonical company/branch roots, implement the approved authority model, and prove scoped backend enforcement without enabling production financial behavior.
 
-PR5 does not implement and is not blocked by UPD sufficiency, client signature, due-date evidence, VAT/rounding, billing-period state, forecast policy, source correction/cancellation, reconciliation, or settlement decisions.
+PR5 does not implement and is not blocked by UPD sufficiency, client signature, due-date evidence, VAT/rounding, billing-period state, forecast policy, source correction/cancellation, reconciliation, or settlement decisions. It must not enable canonical production reads or writes; populate canonical financial rows; implement billing periods, conducted UPD, forecast calculations, actual-source eligibility, or settlement; switch Finance or Company Health/Risks; or perform backfill, dual write, shadow read, or cutover.
 
 ### PR6 — billing source authority
 
@@ -814,8 +830,9 @@ Record the durable approval identity and later conditional confirmations here wi
 
 | Approval batch | Decision IDs | Product owner | Accountant confirmation | Legal confirmation | Date | Notes/reference |
 |---|---|---|---|---|---|---|
-| PR4 clarification batch | D-01, D-24, D-26 forecast boundary | Direction recorded; approver identity not supplied in repository | Pending | Pending | 2026-07-15 | `docs/canonical-receivables-pr4-design-gate.md`; architecture recommendations remain owner-approval-required |
-| PR4 design-detail batch | Billing/source/forecast/branch/correction/activation details listed above | Approved direction supplied; approver identity not supplied in repository | Pending where section 18/PR6–PR9 requires it | Pending where section 18/PR6–PR9 requires it | 2026-07-15 | Does not approve revised sequence, complete PR5 authority model, exact VAT/rounding, remaining PR7 input authority, canonical writes, or PR4 as a whole |
+| PR4 clarification batch | D-01, D-24, D-26 forecast boundary | Direction recorded; approver identity not supplied in repository | Pending | Pending | 2026-07-15 | Source/retention/forecast clarifications preserved unchanged; final PR4 approval recorded below |
+| PR4 design-detail batch | Billing/source/forecast/branch/correction/activation details listed above | Approved direction supplied; approver identity not supplied in repository | Pending where section 18/PR6–PR9 requires it | Pending where section 18/PR6–PR9 requires it | 2026-07-15 | Detail decisions preserved unchanged; final architecture/sequence/PR5 approval recorded below |
+| Final PR4 architecture/PR5 foundation batch | PR4 architecture; revised sequence; neutral identity; branch; membership; capability; default deny; PR5 start boundary | Approved direction supplied; approver identity not supplied in repository | Not required for PR5; downstream confirmations remain pending | Not required for PR5; downstream confirmations remain pending | 2026-07-15 | `PR4: DESIGN APPROVED — IMPLEMENTATION NOT STARTED`; PR5 may begin after merge; no implementation or production behavior authorized |
 | — | — | — | — | — | — | — |
 
 This memo records the product-owner baseline. Conditional confirmations and blocked gates must not be bypassed through implementation defaults.

@@ -1,14 +1,14 @@
 # PR4 design gate: actual and forecast receivables
 
-**Status:** `PR4: DESIGN PROPOSED — OWNER APPROVAL REQUIRED`
+**Status:** `PR4: DESIGN APPROVED — IMPLEMENTATION NOT STARTED`
 
 **Design date:** 2026-07-15
 
 **Scope:** architecture and documentation only. This document does not authorize or implement production behavior.
 
-**Approved inputs:** the dated D-01 clarification, the separate forecast-domain decision, the dated D-24 clarification, and the dated PR4 design-detail product-owner decisions recorded in `docs/canonical-receivables-decisions.md`.
+**Approved inputs:** the dated D-01 clarification, the separate forecast-domain decision, the dated D-24 clarification, the dated PR4 design-detail decisions, and the final product-owner approval of the PR4 architecture, revised PR4–PR12 sequence, and PR5 scope-authority/RBAC foundation recorded in `docs/canonical-receivables-decisions.md`.
 
-**Proposal boundary:** every recommendation in this document that is not one of those approved inputs is marked `OWNER APPROVAL REQUIRED`. PR1–PR3 release evidence remains historical fact and is not reinterpreted here.
+**Proposal boundary:** the bounded-context architecture, revised sequence, and exact PR5 authority/RBAC decisions recorded below are approved. Every other recommendation that is not an approved input remains marked `OWNER APPROVAL REQUIRED`. PR1–PR3 release evidence remains historical fact and is not reinterpreted here.
 
 ## 1. Executive recommendation
 
@@ -16,7 +16,7 @@ Adopt a source-first, forward-only architecture in which mutable rental operatio
 
 The first authoritative actual-receivable event must be created independently from a closed billing period plus an explicitly conducted UPD with deterministic line-to-period coverage. A forecast row must never be promoted, relabeled, or converted into an actual receivable.
 
-Recommended next stage: PR5, establishing stable company/branch/Head Office authority, memberships, capabilities, and fail-closed RBAC, once only the PR5-scoped approvals in section 19.1 are complete. Downstream source, forecast, accountant, legal, reconciliation, and settlement decisions do not block PR5. The revised sequence and remaining PR5 authority model are still `OWNER APPROVAL REQUIRED`.
+The PR4 architecture and revised PR4–PR12 dependency sequence are product-owner approved. After PR4 merges, PR5 may begin only as the scope-authority/RBAC foundation described in sections 16, 17.1, and 19.1. Downstream source, forecast, accountant, legal, reconciliation, and settlement decisions do not block that limited PR5 scope. This approval does not start implementation or authorize any canonical production read, write, data population, or consumer switch.
 
 ## 2. Fixed release baseline
 
@@ -30,7 +30,7 @@ Recommended next stage: PR5, establishing stable company/branch/Head Office auth
 | Canonical data | All eight PR1/PR2 canonical tables are empty in the recorded production evidence. |
 | Production authority | Existing Finance and Company Health/Risks paths remain unchanged. |
 | Canonical posting/settlement | No production canonical write or settlement entrypoint exists. |
-| PR4 | Design gate only; not released and no runtime work started. |
+| PR4 | **DESIGN APPROVED — IMPLEMENTATION NOT STARTED**; not released and no runtime work started. |
 
 Nothing in this design changes that baseline. References in released PR1–PR3 evidence to the old future PR numbering remain historical traceability only; the prospective sequence is replaced by section 16.
 
@@ -45,8 +45,9 @@ Nothing in this design changes that baseline. References in released PR1–PR3 e
 | Financial records and financial audit events are retained indefinitely; no purge, TTL, cleanup, or deletion | **APPROVED — 2026-07-15 D-24 clarification** |
 | Closed-unbilled lane, three separately visible components, and `actual outstanding + closed unbilled + open-period forecast` expected-load equation | **APPROVED — 2026-07-15 PR4 design-detail decision** |
 | Billing-period, conducted-UPD, mapping, actual granularity, unknown-date, branch ownership, correction, forecast, return/effective-term, and forward-only boundaries listed in section 17 | **APPROVED WHERE MARKED — 2026-07-15 PR4 design-detail decisions** |
+| PR4 bounded-context architecture and revised PR4–PR12 sequence | **APPROVED — 2026-07-15 final PR4 architecture decision** |
+| Neutral platform company/branch authority, branch semantics, stable memberships, explicit capability model, and deny-by-default authorization for the PR5 foundation | **APPROVED — 2026-07-15 final PR5-scoped decisions** |
 | Remaining conceptual schema shapes, key serialization, unapproved lifecycle details, and operational authorities below | **RECOMMENDATION — OWNER APPROVAL REQUIRED** |
-| Revised PR4–PR12 sequence | **RECOMMENDATION — OWNER APPROVAL REQUIRED** |
 
 ## 4. Repository current-state audit
 
@@ -731,12 +732,12 @@ The UI/API must never return the combined total alone. Component amounts, curren
 
 ## 16. Revised gated PR sequence
 
-This is the recommended dependency order. It is `OWNER APPROVAL REQUIRED`. A PR may be split for reviewability, but canonical writes may not move ahead of source, scope, and dry-run gates.
+This dependency order is **APPROVED — 2026-07-15** exactly as documented. A PR may be split for reviewability without changing the approved dependencies, and canonical writes may not move ahead of source, scope, and dry-run gates. Sequence approval does not authorize implementation or production behavior.
 
 | PR | Scope | Explicit exclusions / gate |
 |---|---|---|
-| PR4 | Architecture/design gate; documentation and owner decisions | No implementation. Status remains `DESIGN PROPOSED — OWNER APPROVAL REQUIRED`. |
-| PR5 | Stable company/branch/Head Office authority; memberships, capabilities, fail-closed RBAC foundation | No canonical production reads or writes enabled. |
+| PR4 | Architecture/design gate; documentation and owner decisions | `DESIGN APPROVED — IMPLEMENTATION NOT STARTED`; not released. |
+| PR5 | Neutral platform company/branch/Head Office authority; memberships, capabilities, fail-closed RBAC foundation | May begin after PR4 merge. No canonical production reads or writes enabled. |
 | PR6 | Billing Source Authority: closed billing periods, immutable snapshots, explicit conducted-UPD lifecycle, stable UPD lines and mappings | No canonical writes. |
 | PR7 | Separate Forecast Receivables Planning domain and separate read contract/API | No canonical writes; no Finance or Company Health/Risks switch. |
 | PR8 | Read-only forward-only actual-source eligibility dry run; discrepancy and reconciliation reports | No backfill and no canonical writes. Requires approved activation boundary. |
@@ -749,7 +750,7 @@ Old logic retirement is outside PR12 and requires a later separately approved st
 
 ## 17. Owner decision matrix
 
-The approved D-01/forecast/D-24 boundaries and the 2026-07-15 PR4 design-detail decisions constrain these questions. Rows marked approved record the exact product-owner direction supplied for this update. A boundary approval does not replace the accountant/legal confirmation or implementation detail explicitly listed as remaining. Every unresolved row remains `OWNER APPROVAL REQUIRED`.
+The approved D-01/forecast/D-24 boundaries, the PR4 design-detail decisions, and the final PR4 architecture/PR5 foundation decisions constrain these questions. Rows marked approved record the exact product-owner direction supplied for this update. A boundary approval does not replace the accountant/legal confirmation or implementation detail explicitly listed as remaining. Every unresolved row remains `OWNER APPROVAL REQUIRED`.
 
 | Priority | Decision / question | Recorded decision / recommended remaining detail | Alternatives | Financial risk | Required approver | Future PR blocked | Status |
 |---|---|---|---|---|---|---|---|
@@ -762,10 +763,12 @@ The approved D-01/forecast/D-24 boundaries and the 2026-07-15 PR4 design-detail 
 | P0 | UPD-line-to-period cardinality | One period coverage slice maps to only one active UPD line; one UPD line may map to multiple explicit non-overlapping period slices | One line per period; one UPD per rental/period | Double counting and arbitrary splits | Product owner; accountant confirms source treatment | PR6 | **APPROVED — 2026-07-15** |
 | P0 | Canonical receivable granularity | One actual receivable per immutable UPD source slice and contractual due date | One per whole UPD; one per closed period | One debt row contains several dates or allocations target ambiguous totals | Product owner; accountant confirms obligation granularity | PR6, PR8, PR9 | **APPROVED — 2026-07-15** |
 | P0 | Unknown contractual due-date policy | Actual may be created with `dueDateProvenance=unknown`, but stays outside aging, overdue, collection automation, and legal escalation until a proven due date exists | Block posting until date proven | False overdue or actual debt invisible to aging | Product owner; accountant/legal confirm proven-date evidence | PR6, PR8, PR9 | **APPROVED — 2026-07-15; PROVEN-DATE CONFIRMATION PENDING** |
-| P0 | Company/branch ownership and Head Office semantics | Use the operational rental branch; use a dedicated stable Head Office branch only for genuinely centralized operations | Different approved operational authority | Cross-company disclosure/posting and orphan authority | Product owner + security owner + finance owner | PR5 and all later PRs | **APPROVED OWNERSHIP RULE — 2026-07-15** |
-| P0 | Single company/branch identity authority | Choose one operational master and stable mapping; do not maintain two independently editable authorities | Adopt canonical roots; rebuild empty canonical FKs against an approved master | Split tenant identity and cross-scope access | Product owner + security owner + finance owner | PR5 and all later PRs | **OWNER APPROVAL REQUIRED** |
-| P0 | Stable membership, capability, and deny-by-default model | Stable principal-to-company/branch membership, explicit capabilities, and backend default deny | Role-derived capabilities with immutable membership; separate policy service | Unauthorized financial reads/writes | Product owner + security owner | PR5 and all later PRs | **OWNER APPROVAL REQUIRED** |
-| P0 | Revised PR4–PR12 sequence | Approve the dependency order in section 16 without moving writes before PR8 | Split stages for reviewability without changing dependencies | Implementation starts under the wrong authority | Product owner + release owner | PR5 and all later PRs | **OWNER APPROVAL REQUIRED** |
+| P0 | Company/branch ownership and Head Office semantics | Every branch has a stable opaque ID, belongs to exactly one company, and is retained on records. Head Office is a dedicated stable branch record—not null, wildcard, or scope sentinel—and is used only for genuinely centralized operations; ordinary rentals use the operational rental branch | None within the approved architecture | Cross-company disclosure/posting and orphan authority | Product owner + security owner + finance owner | PR5 and all later PRs | **APPROVED — 2026-07-15** |
+| P0 | Single company/branch identity authority | One neutral platform authority conceptually owns `companies`, `branches`, `company_memberships`, and `membership_branch_access`. Empty `canonical_companies`/`canonical_branches` must be safely replaced or rebound in PR5 and may never become an independently editable authority | None within the approved architecture | Split tenant identity and cross-scope access | Product owner + security owner + finance owner | PR5 and all later PRs | **APPROVED — 2026-07-15** |
+| P0 | Stable membership model | Active stable company membership is mandatory; branch access is explicit allowed IDs or explicit company-wide authority; revoked, inactive, missing, inferred, current-user-derived, or name-mapped membership denies | None within the approved architecture | Unauthorized financial reads/writes | Product owner + security owner | PR5 and all later PRs | **APPROVED — 2026-07-15** |
+| P0 | Capability model | Backend checks explicit server-authoritative versioned capabilities rather than role display names; role templates are administrative grants; audited grants may narrow or explicitly grant approved capabilities; administrator alone has no financial authority | None within the approved architecture | Unauthorized financial reads/writes | Product owner + security owner | PR5 and all later PRs | **APPROVED — 2026-07-15** |
+| P0 | Deny-by-default authorization | Missing/inactive membership, unknown role/capability, or missing branch scope denies; client scope may only narrow; lookups include scope predicates; cross-company access is forbidden; non-user identities receive no capabilities without a named approved integration contract | None within the approved architecture | Unauthorized financial reads/writes | Product owner + security owner | PR5 and all later PRs | **APPROVED — 2026-07-15** |
+| P0 | Revised PR4–PR12 sequence | Dependency order in section 16 approved exactly as documented without moving writes before PR8 | None within the approved architecture | Implementation starts under the wrong authority | Product owner + release owner | PR5 and all later PRs | **APPROVED — 2026-07-15** |
 | P0 | Forward-only governed coverage | Include only periods fully governed by the new source authority; no partial-period or historical import | Later separate backfill project with its own approval | Gaps or accidental historical import | Product owner + accountant + release owner | PR8, PR9 | **APPROVED — 2026-07-15** |
 | P0 | Exact activation date/cohort | Choose an explicit company-local activation boundary after PR6 and a scoped rollout cohort | Source event offset; limited branch cohort | Ambiguous in-flight ownership | Product owner + accountant + release owner | PR8, PR9 | **OWNER APPROVAL REQUIRED** |
 | P0 | Correction/cancellation after eligibility or posting | Append-only; never overwrite or delete the original source or actual | Approved cancel/reissue or compensating event details | Duplicate debt, lost history, wrong outstanding | Product owner; accountant/legal confirm financial/legal effect | PR6, PR8, PR9, PR10 | **APPROVED BOUNDARY — 2026-07-15; EXTERNAL CONFIRMATION REQUIRED** |
@@ -781,6 +784,48 @@ The approved D-01/forecast/D-24 boundaries and the 2026-07-15 PR4 design-detail 
 | P1 | Partial/full return source authority | Require stable rental-line source events; exact return lifecycle/evidence remains PR6 design | Prohibit partial return until modeled | Forecast continues after returned equipment or truncates other lines | Product owner; rental operations/accountant confirm source authority | PR6, PR7 | **APPROVED BOUNDARY — 2026-07-15; SOURCE DETAIL PENDING** |
 | P1 | Minimum rental terms and discounts | Versioned effective terms applied before VAT | Contract-specific adapter; exclude until modeled | Under/overbilling and non-reproducible forecast | Product owner + rental operations + accountant | PR6, PR7 | **APPROVED — 2026-07-15** |
 | P1 | Confirmed downtime and approved extension inputs | Define authoritative states, effective intervals, precedence, and source versions for forecasting | Exclude affected coverage as insufficient confidence | Forecast overlap or wrong amount | Product owner + rental operations + accountant | PR6, PR7 | **OWNER APPROVAL REQUIRED** |
+
+### 17.1 Approved PR5 scope-authority/RBAC foundation
+
+The following product-owner decisions are approved for PR5. They authorize design and implementation of this foundation only after PR4 merges; they do not authorize production enablement.
+
+#### Neutral platform identity authority
+
+- There is one neutral platform identity authority, conceptually comprising `companies`, `branches`, `company_memberships`, and `membership_branch_access`.
+- `canonical_companies` and `canonical_branches` must not become a separate independently editable operational authority.
+- Because all canonical tables remain empty, PR5 must evaluate and design the safe replacement or rebinding of the empty canonical company/branch foreign-key roots to the neutral platform authority.
+- Running neutral platform identities alongside independently editable canonical company/branch identities is forbidden.
+
+#### Branch semantics
+
+- Every branch has a stable opaque ID and belongs to exactly one company.
+- Head Office is a dedicated stable branch record. It is not null, a wildcard, or a scope sentinel.
+- Genuinely centralized operations may use the Head Office branch; ordinary rental operations use the operational rental branch.
+
+#### Membership model
+
+- A user accesses a company only through an active stable company-scoped membership.
+- Branch access is represented explicitly as allowed branch IDs or explicit company-wide branch authority.
+- Company-wide authority does not erase branch identity from records.
+- Revoked or inactive membership denies access.
+- Missing membership, inferred membership, current-user inference, and name-based mapping are forbidden.
+
+#### Capability model
+
+- Backend authorization checks explicit capabilities, not role display names.
+- Role templates may grant capability sets for administrative convenience.
+- The capability catalog is versioned and server-authoritative.
+- Per-user or membership grants may only narrow or explicitly grant approved capabilities through audited administration.
+- Administrator status alone does not imply financial authority.
+- The initial conceptual namespace includes `companies.manage`, `branches.manage`, `members.manage`, `receivables.read`, `billing.period.close`, `billing.period.reopen`, `upd.form`, `upd.conduct`, `upd.correct`, `forecast.read`, and `forecast.calculate`.
+- Future canonical posting and settlement capabilities may be reserved in design, but PR5 must not enable, assign, route, or enforce them as active production behavior.
+
+#### Deny-by-default authorization
+
+- Missing or inactive membership denies. Unknown role or capability denies. Missing branch scope denies.
+- Client-supplied `companyId` or `branchId` may only narrow server-authorized scope and can never elevate it.
+- Every ID lookup includes authorized company and branch predicates; cross-company access is forbidden.
+- Carrier, bot-only, integration, and system identities receive no user capabilities unless explicitly approved for a named integration contract.
 
 ## 18. External accountant and legal confirmations
 
@@ -816,19 +861,29 @@ Readiness is stage-specific. A downstream source, forecast, legal/accounting, re
 
 ### 19.1 PR5 scope-authority/RBAC foundation
 
-PR5 may begin after product-owner approval of only the following PR5-scoped items:
+All PR5-scoped product-owner criteria are approved. PR5 design/implementation may begin after PR4 merges and only within the foundation scope below:
 
 | PR5 criterion | Current status |
 |---|---|
-| Revised PR4–PR12 sequence | `OWNER APPROVAL REQUIRED` |
-| Single company/branch identity authority | `OWNER APPROVAL REQUIRED`; operational rental-branch ownership is approved, but the identity master is not chosen |
-| Dedicated Head Office branch semantics | **APPROVED — 2026-07-15:** dedicated stable Head Office branch only for genuinely centralized operations |
-| Stable user membership model | `OWNER APPROVAL REQUIRED` |
-| Capability model | `OWNER APPROVAL REQUIRED`; only the specific `billing.period.close` requirement is approved so far |
-| Deny-by-default authorization model | `OWNER APPROVAL REQUIRED` |
+| Revised PR4–PR12 sequence | **APPROVED — 2026-07-15:** exactly as documented in section 16 |
+| Single company/branch identity authority | **APPROVED — 2026-07-15:** one neutral platform authority; PR5 evaluates safe replacement/rebinding of the empty canonical FK roots; independently editable dual authorities are forbidden |
+| Dedicated Head Office branch semantics | **APPROVED — 2026-07-15:** stable opaque branch IDs, exactly one owning company, and a dedicated stable Head Office record that is never null/wildcard/sentinel |
+| Stable user membership model | **APPROVED — 2026-07-15:** active company-scoped membership plus explicit branch IDs or explicit company-wide authority; missing, inactive, revoked, inferred, or name-based membership denies |
+| Capability model | **APPROVED — 2026-07-15:** explicit versioned server-authoritative capabilities, administrative role templates, audited grants, and no administrator-implied financial authority |
+| Deny-by-default authorization model | **APPROVED — 2026-07-15:** fail closed for membership, role, capability, and branch scope; client scope can only narrow; all lookups are scope-predicated; cross-company access is forbidden |
 | Continued prohibition on canonical production reads and writes during PR5 | Fixed safety boundary; confirmed and unchanged |
 
-PR5 must not implement or enable financial source or canonical business behavior. It is **not blocked** by UPD sufficiency, client signature, contractual due-date evidence, VAT/rounding, billing-period lifecycle, forecast policy, source correction/cancellation, reconciliation, or settlement decisions.
+PR5 must not:
+
+- enable canonical production reads or writes;
+- populate canonical financial rows;
+- implement billing periods or conducted UPD;
+- implement forecast calculations or actual-source eligibility;
+- implement settlement;
+- switch Finance or Company Health/Risks;
+- perform backfill, dual write, shadow read, or cutover.
+
+PR5 is **not blocked** by UPD sufficiency, client signature, contractual due-date evidence, VAT/rounding, billing-period lifecycle, forecast policy, source correction/cancellation, reconciliation, or settlement decisions. Those remain gates for their documented downstream PRs.
 
 ### 19.2 PR6 Billing Source Authority
 

@@ -1,6 +1,6 @@
 # Canonical receivables backend contract
 
-**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging **IMPLEMENTED FOR REVIEW — NOT RELEASED**
+**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**
 
 **Audit date:** 2026-07-15
 
@@ -8,7 +8,7 @@
 
 **PR2 merge commit:** `ee2c1b6e1340acb3fc3149c6a39487a283db829c`
 
-**Implementation status:** the PR1 additive schema/domain foundation and PR2 settlement/domain foundation are released in production. Both version 1 migrations are applied and verified, and all eight canonical tables are present and empty. PR3 now implements the isolated read-only canonical query side for review, but it is not released. Production posting, settlement, and canonical reads remain disabled; production reads and writes remain on the existing systems, and no cutover has occurred.
+**Implementation status:** the PR1 additive schema/domain foundation, PR2 settlement/domain foundation, and PR3 isolated read-only query/aging infrastructure are released. Both version 1 migrations are applied and verified, and all eight canonical tables are present and empty. PR3 release does not enable its production feature flag or trusted scope. Production posting, settlement, and canonical reads remain disabled; production reads and writes remain on the existing systems, and no cutover has occurred.
 
 ## Product-owner baseline
 
@@ -22,7 +22,7 @@
 
 **No silent assumptions:** unresolved source document types, retention periods, approval thresholds, or expanded permissions must remain disabled, configuration-blocked, or escalated. Implementation must not invent defaults for them.
 
-**Current product-owner status:** the canonical ledger baseline is approved; the PR1 schema foundation and PR2 settlement foundation are released; and all eight canonical tables remain empty. PR3 read-only infrastructure is implemented for review but is not released. The production ledger remains inactive, with reads and writes continuing on the existing systems. Production settlement and canonical reads remain blocked until the recorded review/release, authorization, reconciliation, and cutover gates are satisfied.
+**Current product-owner status:** the canonical ledger baseline is approved; the PR1 schema foundation, PR2 settlement foundation, and PR3 default-disabled read-only infrastructure are released; and all eight canonical tables remain empty. The production ledger remains inactive, with reads and writes continuing on the existing systems. Production settlement and canonical reads remain blocked until the recorded authorization, reconciliation, enablement, and cutover gates are satisfied.
 
 ## PR1 implementation record
 
@@ -152,11 +152,13 @@ The legacy JSON `payments` and `payment_allocations` collections are not canonic
 
 **Rollback:** revert the PR2 code and retain the unused additive tables. Physical removal is permitted only offline after a verified backup and explicit confirmation that all four PR2 tables are empty; otherwise retain all append-only financial and audit history.
 
-**Deferred:** production settlement APIs, routes, workers, role lookup, tenant/RBAC enforcement, real user approvals, backfill, dual write, legacy integration, Company Health/report reads, canonical production read/write switching, monetary/age thresholds, settlement enablement, and cutover remain deferred. PR3 now supplies review-only read infrastructure as recorded below; PR4–PR8 dependencies remain in force.
+**Deferred:** production settlement APIs, routes, workers, role lookup, tenant/RBAC enforcement, real user approvals, backfill, dual write, legacy integration, Company Health/report reads, canonical production read/write switching, monetary/age thresholds, settlement enablement, and cutover remain deferred. PR3 supplies released but default-disabled read infrastructure as recorded below; PR4–PR8 dependencies remain in force.
 
-## PR3 implementation record
+## PR3 release record
 
-**Implementation status:** **IMPLEMENTED FOR REVIEW — NOT RELEASED.** A separate post-deployment verification/release-marker PR is required before PR3 may be marked `RELEASED`.
+**PR3: RELEASED — read-only canonical receivables API and aging infrastructure only.**
+
+Implementation PR [#205](https://github.com/rishatkznAI/rental-management/pull/205) had head `a4f46760c75d11989c74225f23891418cdb62de2` and merged as `6a38582f5f90b85734884b6b12ad8e306b24619e`. The release verification below confirms only the isolated, default-disabled read layer; it does not enable canonical production behavior.
 
 PR3 adds an isolated canonical query/read side backed only by the eight PR1/PR2 normalized tables. It implements exactly these read-only endpoints:
 
@@ -169,9 +171,33 @@ The endpoints are guarded by `CANONICAL_RECEIVABLES_READ_API_ENABLED`, which def
 
 The read repository exposes only a read-snapshot entrypoint. It never exposes PR2 mutation methods to HTTP code and imports no legacy Finance or `app_data` semantics. Balance projection reuses the pure PR2 settlement arithmetic, applies only confirmed effective canonical events, preserves allocation/adjustment reversal effects, and fails on unsafe integer or reconciliation errors. Historical due-date aging reads a complete, chronologically reconciled chain of append-only `due_date_change_approved` evidence valid at the requested company-local as-of point; malformed, duplicate, conflicting, or incomplete evidence fails without financial output. Aging uses `calculationVersion: "receivables-aging-v1"`, company IANA civil dates, the approved exclusive buckets and precedence, and all three exact minor-unit reconciliation equations. List, summary, aging, payment, and allocation scans stay inside one SQLite read snapshot and use bounded keyset batches (200 aggregate entities/effects, with a 201-row list lookahead). Enabled route registration requires a non-default cursor HMAC secret of at least 32 bytes.
 
+### PR3 production release evidence
+
+| Evidence | Verified value |
+|---|---|
+| PR3 implementation PR / head / merge | [#205](https://github.com/rishatkznAI/rental-management/pull/205); `a4f46760c75d11989c74225f23891418cdb62de2`; `6a38582f5f90b85734884b6b12ad8e306b24619e` |
+| Railway production backend deployment | `b74623ec-d20d-4c50-ab40-0e0a494c5bc5`, `SUCCESS`, backend `6a38582f5f90b85734884b6b12ad8e306b24619e` |
+| Smoke-contract correction | PR [#206](https://github.com/rishatkznAI/rental-management/pull/206), merge `7fed3e49ca77bc3c9db2c587a6cdc06f579a3196` |
+| Merged-main Staging Smoke | [run 29399559743](https://github.com/rishatkznAI/rental-management/actions/runs/29399559743), `success`, head `7fed3e49ca77bc3c9db2c587a6cdc06f579a3196` |
+| Release-tooling correction | PR [#207](https://github.com/rishatkznAI/rental-management/pull/207), merge `e5e516da92216830be42ef25fa0e5ca6681379e4` |
+| GitHub Pages deployment and post-deploy gate | [run 29402545157](https://github.com/rishatkznAI/rental-management/actions/runs/29402545157), `deploy-tooling`, `success` |
+| Production frontend marker | `e5e516da92216830be42ef25fa0e5ca6681379e4`, release type `deploy-tooling`, production API target matched |
+| Production backend marker and drift contract | `6a38582f5f90b85734884b6b12ad8e306b24619e`; backend drift explicitly allowed and reported for `deploy-tooling` |
+| Production health / readiness / version | `/health` `200`; `/health/ready` `200`; `/api/version` `200` |
+| Dashboard / Company Health smoke | [run 29403203787](https://github.com/rishatkznAI/rental-management/actions/runs/29403203787), `success`; desktop/tablet/mobile passed; Company Health stayed on its existing path; Risks reported derived, not canonical, aging; console/page/API errors `0` |
+| Finance smoke | [run 29403203743](https://github.com/rishatkznAI/rental-management/actions/runs/29403203743), `success`, read-only Finance path passed |
+| Feature flag / route | `CANONICAL_RECEIVABLES_READ_API_ENABLED` absent and therefore default-disabled; `/api/receivables` returned `404` |
+| Trusted scope | Unmapped and fail-closed; production resolver returns no trusted canonical scope |
+| Canonical table counts | `canonical_companies=0`; `canonical_branches=0`; `canonical_receivables=0`; `financial_audit_events=0`; `canonical_payments=0`; `canonical_payment_allocations=0`; `canonical_receivable_adjustments=0`; `canonical_approval_requests=0` |
+| Migration registrations | Only `canonical_receivables_pr1_schema` v1 (`2026-07-14 05:19:11`) and `canonical_receivables_pr2_settlement` v1 (`2026-07-14 18:42:21`); no duplicates and no PR3 migration |
+| Foreign-key evidence | `PRAGMA foreign_key_check` returned `0` violations |
+| Mutation evidence | No seed, backfill, dual write, canonical write, or settlement API; legacy business collection timestamps remained pre-release and no financial record was created by verification |
+
+The `RELEASED` status covers only the isolated canonical read layer, the four GET endpoints listed above, `receivables-aging-v1`, and its default-disabled infrastructure. It does not mean that the production API is enabled, that production reads use canonical data, that Finance or Company Health/Risks have switched, or that settlement, write capability, backfill, dual write, cutover, or PR6 is complete.
+
 The canonical tables remain empty unless tests explicitly create isolated temporary-database fixtures. Consequently an authorized injected test scope over an empty ledger returns canonical empty/zero list, summary, and aging results with `reconciled: true`; it never falls back to legacy rentals, payments, documents, clients, plans, or Finance totals. There is no migration, seed, backfill, posting, settlement write API, dual write, frontend change, Finance switch, Company Health/Risks switch, or production canonical read cutover in PR3.
 
-Production behavior remains unchanged because the feature flag defaults to disabled and the production trusted-scope boundary remains unmapped. Rollback is flag disablement or code revert; no data rollback is required. PR4 remains sequence-blocked until PR3 is reviewed, released through a separate verification/release-marker PR, and an approved backfill/reconciliation strategy plus company/branch/RUB mappings exists. PR6, PR7, and PR8 gates remain unchanged.
+Production behavior remains unchanged because the feature flag defaults to disabled and the production trusted-scope boundary remains unmapped. Rollback is flag disablement or code revert; no data rollback is required. The PR3 sequence dependency is satisfied, but PR4 may proceed only as a separate design stage after an approved backfill/reconciliation strategy and company/branch/RUB mappings exist. PR6, PR7, and PR8 gates remain unchanged.
 
 ## 1. Purpose and decisions at a glance
 
@@ -1205,14 +1231,14 @@ Remaining conditional items are narrow and must not be filled by implementation 
 |---|---|---|
 | PR1 canonical schema/domain | **RELEASED** | Foundation only; production posting and canonical reads remain disabled |
 | PR2 payments/allocations/adjustments | **RELEASED** | Settlement/domain foundation only; production settlement remains blocked until PR6 authorization enforcement |
-| PR3 read API/aging | **IMPLEMENTED FOR REVIEW — NOT RELEASED** | Review, deployment verification, and a separate release-marker PR; production flag and trusted scope remain disabled/unmapped |
-| PR4 backfill/reconciliation tooling | **SEQUENCE BLOCKED** | Reviewed/released PR3 plus an approved backfill/reconciliation strategy and configured company/branch/RUB mappings; finite retention remains unresolved |
+| PR3 read API/aging | **RELEASED — read-only infrastructure only** | Production flag and trusted scope remain disabled/unmapped; no production read switch |
+| PR4 backfill/reconciliation tooling | **BLOCKED pending separate design approval** | PR3 sequence dependency is satisfied; an approved backfill/reconciliation strategy and configured company/branch/RUB mappings are still required; finite retention remains unresolved |
 | PR5 dual write | **BLOCKED for enablement** | D-01 source-document confirmation, upstream PRs, and PR6 authorization |
 | PR6 tenant/RBAC | **BLOCKED** | Concrete tenant memberships, roles, capabilities, company/branch/Head Office mappings, real-user approval identity, and enforcement of the approved D-25 separation-of-duties policy |
 | PR7 Company Health shadow read | **SEQUENCE BLOCKED** | Canonical read API plus shadow reconciliation after PR3–PR6 |
 | PR8 production read cutover | **BLOCKED** | D-01 and D-24 confirmations, PR6 enforcement of the approved D-25 policy, signed zero-delta reconciliation, verified rollback evidence, and explicit cutover approval |
 
-No gate outcome authorizes product behavior beyond its named PR scope. PR1 and PR2 RELEASED status covers only the additive schema/domain and settlement/domain foundations recorded above; both remain unreachable from production business reads and writes.
+No gate outcome authorizes product behavior beyond its named PR scope. PR1, PR2, and PR3 RELEASED status covers only the additive schema/domain, settlement/domain, and default-disabled read-only foundations recorded above; all remain outside production business reads and writes.
 
 ## 16. Recommended implementation PR sequence
 
@@ -1220,8 +1246,8 @@ No gate outcome authorizes product behavior beyond its named PR scope. PR1 and P
 |---|---|---|---|---|---|---|
 | 1. Canonical receivable schema/domain | Normalized receivable, company/mandatory branch/RUB/source identity, approved lifecycle, financial audit/idempotency foundations; no read switch | High: foundational identity/scope | **RELEASED**; configurable allow-list only until D-01 external confirmation | Add-only schema deployed; tables remain empty | Revert code; retain unused additive tables | Schema checks, lifecycle, source uniqueness, tenant FK, integer money, audit |
 | 2. Payment allocation and adjustment model | Canonical payment/refund, allocation, typed adjustment, append-only reversal, atomic balance service | P0 financial correctness/concurrency | **RELEASED** foundation; PR1 and D-25 satisfied; production enablement requires PR6 | Add-only tables/services deployed; tables remain empty; no legacy mutation | Revert code and retain unused additive tables; no data deletion | Partial/multi-allocation, caps, types/effects, write-offs/refunds/reversals, concurrency/idempotency |
-| 3. Read-only receivable and aging API | List/detail/summary/aging with scope, currency, timezone, reconciliation | High reporting/security | **IMPLEMENTED FOR REVIEW — NOT RELEASED**; PR2 and approved API contract | No backfill required for empty result | Disable routes/flag | API validation/pagination/scope, bucket/timezone/reconciliation/security |
-| 4. Backfill and reconciliation tooling | Read-only audit, backup checks, deterministic backfill, checkpointing, discrepancy reports | High data safety | PR3; approved migration/backfill decisions; company/Head Office-or-branch/RUB/source mappings | Writes canonical tables in controlled batches | Stop job; restore backup if schema/data corruption; otherwise rerun idempotently | Repeat/resume, duplicate/orphan, unknown dates, reports, rollback |
+| 3. Read-only receivable and aging API | List/detail/summary/aging with scope, currency, timezone, reconciliation | High reporting/security | **RELEASED — default-disabled infrastructure only**; PR2 and approved API contract | No backfill required for empty result | Disable routes/flag | API validation/pagination/scope, bucket/timezone/reconciliation/security |
+| 4. Backfill and reconciliation tooling | Read-only audit, backup checks, deterministic backfill, checkpointing, discrepancy reports | High data safety | Released PR3; separate approved migration/backfill strategy; company/Head Office-or-branch/RUB/source mappings | Writes canonical tables in controlled batches | Stop job; restore backup if schema/data corruption; otherwise rerun idempotently | Repeat/resume, duplicate/orphan, unknown dates, reports, rollback |
 | 5. Dual-write rental/payment integration | Approved source posts receivables; receipts/allocations update both legacy and canonical paths | Very high divergence risk | PR4 reconciliation; D-01 source-type confirmation; PR6 before enablement | Starts new canonical production writes | Feature flag to legacy-only; outbox replay/reconcile | Transaction failure/retry, idempotency, source correction, legacy/canonical equivalence |
 | 6. Company/branch isolation and RBAC enforcement | Capability mapping, permitted same-company cross-branch flow, DB/API cross-scope defenses | P0 security | PR1–5; concrete membership/role/capability mappings and D-25 approval-policy enforcement | Scope backfill must be complete | Disable canonical access; retain legacy backend rules | Cross-company/branch endpoint and DB tests, unknown roles, carrier/bot denial |
 | 7. Company Health shadow-read integration | Consume canonical aging in shadow, compare guarded current result; no visible score switch | Medium/high metric trust | Canonical read API, PR3–6, and shadow reconciliation | Read-only | Disable shadow flag | Mapping, ambiguous/empty/positive debt, metric reconciliation, deterministic verification |

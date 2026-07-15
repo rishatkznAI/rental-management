@@ -201,6 +201,7 @@ function createCanonicalAgingAccumulator(metadata = {}, options = {}) {
   const reasons = new Map();
   const seenIds = new Set();
   const seenSources = new Set();
+  let positiveReceivableCount = 0;
   let finished = false;
 
   function add(view) {
@@ -225,25 +226,30 @@ function createCanonicalAgingAccumulator(metadata = {}, options = {}) {
     );
     const classification = classifyReceivable(view, asOfDate);
     if (classification.classification === 'settled') return;
+    positiveReceivableCount = safeAdd(positiveReceivableCount, 1, 'positiveReceivableCount');
 
     const amount = view.outstandingBalanceMinor;
     result.totalOutstandingMinor = safeAdd(result.totalOutstandingMinor, amount, 'totalOutstandingMinor');
     if (classification.classification === 'current') {
       result.currentMinor = safeAdd(result.currentMinor, amount, 'currentMinor');
-      result.counts.current += 1;
+      result.counts.current = safeAdd(result.counts.current, 1, 'currentCount');
     } else if (['days1to30', 'days31to60', 'days61to90', 'over90'].includes(classification.classification)) {
       const field = `${classification.classification}Minor`;
       result.buckets[field] = safeAdd(result.buckets[field], amount, field);
-      result.counts[classification.classification] += 1;
+      result.counts[classification.classification] = safeAdd(
+        result.counts[classification.classification],
+        1,
+        `${classification.classification}Count`,
+      );
     } else if (classification.classification === 'ambiguous') {
       result.ambiguousAmountMinor = safeAdd(result.ambiguousAmountMinor, amount, 'ambiguousAmountMinor');
-      result.counts.ambiguous += 1;
+      result.counts.ambiguous = safeAdd(result.counts.ambiguous, 1, 'ambiguousCount');
     } else if (classification.classification === 'disputed') {
       result.disputedAmountMinor = safeAdd(result.disputedAmountMinor, amount, 'disputedAmountMinor');
-      result.counts.disputed += 1;
+      result.counts.disputed = safeAdd(result.counts.disputed, 1, 'disputedCount');
     } else {
       result.otherExcludedAmountMinor = safeAdd(result.otherExcludedAmountMinor, amount, 'otherExcludedAmountMinor');
-      result.counts.otherExcluded += 1;
+      result.counts.otherExcluded = safeAdd(result.counts.otherExcluded, 1, 'otherExcludedCount');
     }
     if (classification.reason) {
       const previous = reasons.get(classification.reason) || { reason: classification.reason, amountMinor: 0, count: 0 };
@@ -278,9 +284,14 @@ function createCanonicalAgingAccumulator(metadata = {}, options = {}) {
       ),
       'reconciliation',
     );
+    const classifiedCount = Object.values(result.counts).reduce(
+      (sum, count) => safeAdd(sum, count, 'countReconciliation'),
+      0,
+    );
     const reconciled = !options.forceReconciliationFailure
       && result.totalOutstandingMinor === reconciledOutstanding
       && result.eligibleOutstandingMinor === result.currentMinor + result.overdueMinor
+      && positiveReceivableCount === classifiedCount
       && result.overdueMinor === Object.values(result.buckets).reduce(
         (sum, amount) => safeAdd(sum, amount, 'overdueReconciliation'),
         0,

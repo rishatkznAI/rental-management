@@ -9,6 +9,7 @@ import {
   backendCommitMatchesExpected,
   backendDriftMessage,
   classifyReleaseChangedFiles,
+  isFrontendRuntimeChangedFile,
   normalizeReleaseType,
   parseArgs,
 } from '../scripts/release-preflight.mjs';
@@ -133,6 +134,34 @@ test('release preflight allows deploy-tooling safe file scope and reports backen
   assert.match(backendGate.message, /Backend commit differs from frontend commit: expected for deploy-tooling release/);
 });
 
+test('release preflight accepts the exact smoke tooling and root test scope from failed Pages run', () => {
+  const changedFiles = [
+    'e2e/staging-smoke.spec.ts',
+    'tests/dashboard-attention.test.js',
+  ];
+
+  const classified = classifyReleaseChangedFiles(changedFiles);
+  assert.equal(classified.allowed, true);
+  assert.equal(classified.releaseType, 'deploy-tooling');
+  assert.equal(classified.hasFrontendRuntime, false);
+  assert.deepEqual(classified.blockedFiles, []);
+
+  const scope = assertDeployToolingReleaseScope({ releaseType: 'deploy-tooling', changedFiles });
+  assert.equal(scope.checked, true);
+  assert.deepEqual(scope.disallowedChangedFiles, []);
+});
+
+test('release preflight treats a root test as deploy coverage, not frontend runtime', () => {
+  const changedFiles = ['tests/dashboard-attention.test.js'];
+  const classified = classifyReleaseChangedFiles(changedFiles);
+
+  assert.equal(isFrontendRuntimeChangedFile(changedFiles[0]), false);
+  assert.equal(classified.allowed, true);
+  assert.equal(classified.releaseType, 'deploy-tooling');
+  assert.equal(classified.hasFrontendRuntime, false);
+  assert.equal(classified.hasDeployTooling, true);
+});
+
 test('release preflight allows frontend-deploy-tooling safe file scope and reports backend drift as warning', () => {
   const changedFiles = [
     '.github/workflows/deploy.yml',
@@ -238,6 +267,25 @@ test('release preflight blocks deploy-tooling when app runtime changed', () => {
   );
 });
 
+test('release preflight keeps unsafe files outside deploy-tooling scope', () => {
+  for (const file of [
+    'server/routes/example.js',
+    'server/tests/example.test.js',
+    'server/data/app.sqlite',
+    '.env.production',
+    'src/app/pages/Dashboard.tsx',
+    'scripts/arbitrary-business-script.mjs',
+  ]) {
+    assert.throws(
+      () => assertDeployToolingReleaseScope({
+        releaseType: 'deploy-tooling',
+        changedFiles: ['e2e/staging-smoke.spec.ts', file],
+      }),
+      new RegExp(`Disallowed files: ${file.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}`),
+    );
+  }
+});
+
 test('release classifier allows deploy-tooling only', () => {
   const result = classifyReleaseChangedFiles([
     '.github/workflows/deploy.yml',
@@ -288,6 +336,20 @@ test('release classifier allows frontend runtime with deploy tooling as GitHub P
 
   assert.equal(result.allowed, true);
   assert.equal(result.releaseType, 'frontend-deploy-tooling');
+  assert.deepEqual(result.blockedFiles, []);
+});
+
+test('release classifier keeps frontend runtime plus root test coverage as frontend-deploy-tooling', () => {
+  const result = classifyReleaseChangedFiles([
+    'src/app/pages/Dashboard.tsx',
+    'e2e/staging-smoke.spec.ts',
+    'tests/dashboard-attention.test.js',
+  ]);
+
+  assert.equal(result.allowed, true);
+  assert.equal(result.releaseType, 'frontend-deploy-tooling');
+  assert.equal(result.hasFrontendRuntime, true);
+  assert.equal(result.hasDeployTooling, true);
   assert.deepEqual(result.blockedFiles, []);
 });
 

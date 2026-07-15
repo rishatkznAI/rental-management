@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+  assertDeployToolingReleaseScope,
+  classifyReleaseChangedFiles,
   commitsMatch,
   extractFrontendBuildMarkerFromBundle,
   releaseVerificationContractResult,
@@ -28,6 +30,29 @@ const releasePreflightMainSource = releasePreflightSource.slice(
 const productionDashboardVisualSmokeSource = readFileSync(new URL('../e2e/production-dashboard-visual-smoke.spec.ts', import.meta.url), 'utf8');
 const productionDashboardVisualSmokeWorkflowSource = readFileSync(new URL('../.github/workflows/production-dashboard-visual-smoke.yml', import.meta.url), 'utf8');
 const financeEquipmentDiscoverySource = readFileSync(new URL('../scripts/finance-smoke-equipment-discovery.mjs', import.meta.url), 'utf8');
+
+function workflowRegex(variableName) {
+  const match = deployWorkflowSource.match(new RegExp(`^\\s*${variableName}='([^']+)'$`, 'm'));
+  assert.ok(match, `workflow regex not found: ${variableName}`);
+  return new RegExp(match[1]);
+}
+
+test('workflow classifier and preflight conserve deploy-tooling scope for root Node tests', () => {
+  const changedFiles = [
+    'e2e/staging-smoke.spec.ts',
+    'tests/dashboard-attention.test.js',
+  ];
+  const workflowDeployToolingAllowed = workflowRegex('deploy_tooling_allowed');
+
+  for (const file of changedFiles) {
+    assert.equal(workflowDeployToolingAllowed.test(file), true, `${file} must stay allowed by workflow deploy-tooling scope`);
+  }
+
+  const classified = classifyReleaseChangedFiles(changedFiles);
+  assert.equal(classified.releaseType, 'deploy-tooling');
+  assert.equal(classified.hasFrontendRuntime, false);
+  assert.doesNotThrow(() => assertDeployToolingReleaseScope({ releaseType: classified.releaseType, changedFiles }));
+});
 
 test('production release smoke checks app.disabled before authenticated smoke', () => {
   assert.match(releaseSmokeSource, /type VersionInfo = \{/);

@@ -4,6 +4,14 @@
 **Scope:** overdue receivables aging and the Company Health `Risks` direction only
 **Status:** `NEEDS_BACKEND_DATA`
 
+## Canonical read implementation status
+
+PR3 is **IMPLEMENTED FOR REVIEW — NOT RELEASED**. It adds the default-disabled, read-only canonical endpoints `GET /api/receivables`, `GET /api/receivables/:id`, `GET /api/receivables/summary`, and `GET /api/receivables/aging` with `calculationVersion: "receivables-aging-v1"`. The code reads only the eight canonical PR1/PR2 tables and has no legacy fallback.
+
+This does not change the `NEEDS_BACKEND_DATA` status or any production Company Health result. The canonical tables remain empty unless isolated tests create fixtures; there is no seed or backfill; `CANONICAL_RECEIVABLES_READ_API_ENABLED` defaults to disabled; and the production trusted company/branch/capability resolver remains deliberately unmapped until PR6. No Finance, Company Health, Dashboard, or Risks reader is switched, no settlement write API exists, and no production canonical read cutover occurred.
+
+Rollback is flag disablement or code revert with no data rollback. PR4 remains blocked until PR3 is reviewed/released through a separate verification/release-marker PR and an approved backfill/reconciliation strategy exists. The PR6, PR7, and PR8 gates remain unchanged. Numeric production aging and a Risks score remain forbidden until the later scope, population, reconciliation, shadow-read, and cutover gates are satisfied.
+
 ## Decision
 
 The existing data cannot support honest production debt aging. There is no canonical invoice or receivable entity with a proven contractual due date. The calculated rental balance is useful as a derived balance, but:
@@ -178,14 +186,14 @@ Safe aggregate read-only check of the repository SQLite snapshot at 2026-07-13 (
 
 The exclusion reconciles: `0 ₽ eligible + 15,630,100 ₽ ambiguous = 15,630,100 ₽ derived outstanding`. No client names or personal data were used in this evidence.
 
-## Exact backend contract required
+## Exact backend contract required for production Company Health
 
-To move from `NEEDS_BACKEND_DATA` to real aging, provide an authenticated, backend-scoped endpoint such as `GET /api/finance/receivables-aging?asOf=YYYY-MM-DD` backed by a canonical receivable/installment ledger. Each row must include:
+PR3 implements the review-only backend contract at `GET /api/receivables/aging?asOfDate=YYYY-MM-DD`, but Company Health cannot consume it in production yet. Moving from `NEEDS_BACKEND_DATA` to real aging still requires PR3 release verification, PR6 trusted company/branch/capability mappings, populated and reconciled canonical data, PR7 shadow comparison, and the later cutover approval. The canonical rows and aggregate response must continue to provide:
 
 - immutable unique `receivableId` and, when applicable, `invoiceId`/`documentId`;
 - stable `clientId`, optional `rentalId`/`contractId`, and explicit `companyId`/`branchId` scope;
 - currency and integer-minor-unit `canonicalReceivableAmount`;
-- contractual `dueDate` plus provenance (`invoice_due_date` or `contractual_payment_due_date`);
+- contractual `dueDate` plus one of the approved provenances (`invoice_due_date`, `contractual_payment_due_date`, `installment_due_date`, or `migrated_verified`);
 - receivable lifecycle `status` with defined open/paid/cancelled/void/written-off semantics;
 - confirmed allocated payments in minor units, excluding pending/scheduled payments;
 - confirmed credit notes and reversal/refund events in minor units with effective status/date;
@@ -201,4 +209,4 @@ totalOutstanding = current + 1–30 + 31–60 + 61–90 + over90
 overdueOutstanding = 1–30 + 31–60 + 61–90 + over90
 ```
 
-Until that contract exists, showing numeric production aging or a numeric Risks score would overstate data integrity.
+Until that contract is released, authorized, populated, reconciled, shadow-verified, and explicitly cut over, showing numeric production aging or a numeric Risks score would overstate data integrity.

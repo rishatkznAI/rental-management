@@ -64,7 +64,7 @@ test('PR2 repository/domain have no production route, worker, script, frontend, 
   assert.doesNotMatch(source, /canonical_payment_allocations|canonical_receivable_adjustments|canonical_payments/);
 });
 
-test('only the PR2 schema initializer is reachable from backend startup', () => {
+test('backend startup reaches only PR2 schema and pure balance helpers, never the mutation repository', () => {
   const entryFiles = [
     path.join(root, 'server/server.js'),
     ...javascriptFiles('server/scripts').map(file => path.join(root, file)),
@@ -74,7 +74,7 @@ test('only the PR2 schema initializer is reachable from backend startup', () => 
   const domain = path.join(root, 'server/lib/canonical-receivables-settlement-domain.js');
   const repository = path.join(root, 'server/lib/canonical-receivables-settlement-repository.js');
   assert.equal(reachable.has(schema), true);
-  assert.equal(reachable.has(domain), false);
+  assert.equal(reachable.has(domain), true);
   assert.equal(reachable.has(repository), false);
 });
 

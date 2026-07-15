@@ -105,6 +105,7 @@ const {
   getAppDisabledConfig,
   getBotDisabledConfig,
   getGsmDisabledConfig,
+  isCanonicalReceivablesReadApiEnabled,
   sendAppDisabled,
   shouldWarnForMissingMaxWebhookSecret,
 } = require('./lib/feature-flags');
@@ -152,6 +153,7 @@ const { registerServiceRoutes } = require('./routes/service');
 const { registerStaffRoutes } = require('./routes/staff');
 const { registerSystemRoutes } = require('./routes/system');
 const { registerTasksCenterRoutes } = require('./routes/tasks-center');
+const { registerCanonicalReceivablesReadRoutes } = require('./routes/canonical-receivables-read');
 const {
   backfillServiceTicketCreatedAt,
   normalizeServiceTicketForWrite,
@@ -176,6 +178,7 @@ const {
 } = require('./db');
 
 const DEMO_MODE = isDemoMode();
+const CANONICAL_RECEIVABLES_READ_API_ENABLED = isCanonicalReceivablesReadApiEnabled();
 
 // ── Пароли ────────────────────────────────────────────────────────────────────
 
@@ -383,6 +386,12 @@ function readData(name) {
 
 function writeData(name, data) {
   setData(name, data);
+}
+
+// PR6 must replace this fail-closed boundary with approved company membership,
+// branch authority, and capability mappings before production reads can start.
+function resolveCanonicalReceivablesTrustedScope() {
+  return null;
 }
 
 const accessControl = createAccessControl({ readData });
@@ -1300,6 +1309,15 @@ registerAuthRoutes(app, {
 apiRouter.use(createAppDisabledMiddleware({
   getConfig: () => appDisabledConfig,
 }));
+
+registerCanonicalReceivablesReadRoutes(apiRouter, {
+  enabled: CANONICAL_RECEIVABLES_READ_API_ENABLED,
+  db: CANONICAL_RECEIVABLES_READ_API_ENABLED ? ensureDb() : null,
+  requireAuth,
+  resolveTrustedScope: resolveCanonicalReceivablesTrustedScope,
+  cursorSecret: process.env.CANONICAL_RECEIVABLES_CURSOR_SECRET,
+  logger: console,
+});
 
 apiRouter.get('/access-diagnostics', requireAuth, (req, res) => {
   return res.json(buildAccessDiagnostics(req));

@@ -155,6 +155,9 @@ const { registerSystemRoutes } = require('./routes/system');
 const { registerTasksCenterRoutes } = require('./routes/tasks-center');
 const { registerCanonicalReceivablesReadRoutes } = require('./routes/canonical-receivables-read');
 const {
+  resolveCanonicalReceivablesTrustedScope,
+} = require('./lib/canonical-receivables-scope-adapter');
+const {
   backfillServiceTicketCreatedAt,
   normalizeServiceTicketForWrite,
   normalizeServiceTicketList,
@@ -386,12 +389,6 @@ function readData(name) {
 
 function writeData(name, data) {
   setData(name, data);
-}
-
-// PR6 must replace this fail-closed boundary with approved company membership,
-// branch authority, and capability mappings before production reads can start.
-function resolveCanonicalReceivablesTrustedScope() {
-  return null;
 }
 
 const accessControl = createAccessControl({ readData });

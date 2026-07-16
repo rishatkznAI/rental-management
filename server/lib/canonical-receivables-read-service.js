@@ -77,16 +77,6 @@ function normalizeTrustedScope(input = {}) {
   if (!normalizeCapabilities(input.capabilities).has('receivables.read')) {
     fail('RECEIVABLES_READ_FORBIDDEN', 'The receivables.read capability is required.', { status: 403 });
   }
-  if (input.companyWideBranchAccess === true) {
-    return Object.freeze({
-      authenticated: true,
-      principalId,
-      companyId,
-      companyWideBranchAccess: true,
-      branchIds: null,
-      receivablesTimezone: input.receivablesTimezone || null,
-    });
-  }
   const branchIds = Array.isArray(input.allowedBranchIds)
     ? [...new Set(input.allowedBranchIds.map(value => String(value || '').trim()).filter(Boolean))].sort()
     : [];
@@ -97,7 +87,7 @@ function normalizeTrustedScope(input = {}) {
     authenticated: true,
     principalId,
     companyId,
-    companyWideBranchAccess: false,
+    companyWideBranchAccess: input.companyWideBranchAccess === true,
     branchIds,
     receivablesTimezone: input.receivablesTimezone || null,
   });
@@ -166,7 +156,7 @@ function normalizeFilters(query = {}) {
 
 function assertAuthorizedBranch(scope, branchId) {
   if (!branchId) return;
-  if (!scope.companyWideBranchAccess && !scope.branchIds.includes(branchId)) {
+  if (!scope.branchIds.includes(branchId)) {
     fail('BRANCH_SCOPE_FORBIDDEN', 'The requested branch is outside the trusted scope.', {
       field: 'branchId',
       status: 403,

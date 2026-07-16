@@ -32,16 +32,17 @@ function requiredText(value, field) {
 
 function normalizeBranchScope(scope = {}) {
   const companyId = requiredText(scope.companyId, 'companyId');
-  if (scope.companyWideBranchAccess === true) {
-    return { companyId, companyWideBranchAccess: true, branchIds: null };
-  }
   const branchIds = Array.isArray(scope.branchIds)
     ? [...new Set(scope.branchIds.map(value => String(value || '').trim()).filter(Boolean))]
     : [];
   if (branchIds.length === 0) {
     fail('READ_BRANCH_SCOPE_REQUIRED', 'A trusted branch scope is required.', 'branchIds');
   }
-  return { companyId, companyWideBranchAccess: false, branchIds };
+  return {
+    companyId,
+    companyWideBranchAccess: scope.companyWideBranchAccess === true,
+    branchIds,
+  };
 }
 
 function scopedWhere(scope, alias, params, requestedBranchId) {
@@ -50,9 +51,12 @@ function scopedWhere(scope, alias, params, requestedBranchId) {
   const where = [`${prefix}companyId = @companyId`];
   params.companyId = normalized.companyId;
   if (requestedBranchId) {
+    if (!normalized.branchIds.includes(requestedBranchId)) {
+      fail('READ_BRANCH_SCOPE_DENIED', 'Requested branch is outside the trusted scope.', 'branchId');
+    }
     where.push(`${prefix}branchId = @requestedBranchId`);
     params.requestedBranchId = requestedBranchId;
-  } else if (!normalized.companyWideBranchAccess) {
+  } else {
     const placeholders = normalized.branchIds.map((branchId, index) => {
       const key = `branchId${index}`;
       params[key] = branchId;
@@ -103,13 +107,20 @@ function createCanonicalReceivablesReadRepository(db) {
     },
 
     listBranches(scope = {}) {
-      const companyId = requiredText(scope.companyId, 'companyId');
+      const normalized = normalizeBranchScope(scope);
+      const params = { companyId: normalized.companyId };
+      const placeholders = normalized.branchIds.map((branchId, index) => {
+        const key = `knownBranchId${index}`;
+        params[key] = branchId;
+        return `@${key}`;
+      });
       return db.prepare(`
         SELECT id
         FROM ${CANONICAL_BRANCHES_TABLE}
-        WHERE companyId = ?
+        WHERE companyId = @companyId
+          AND id IN (${placeholders.join(', ')})
         ORDER BY id
-      `).all(companyId).map(row => row.id);
+      `).all(params).map(row => row.id);
     },
 
     listReceivables(scope = {}, options = {}) {
@@ -150,9 +161,12 @@ function createCanonicalReceivablesReadRepository(db) {
       const where = ['allocation.companyId = @companyId'];
       params.companyId = normalized.companyId;
       if (options.branchId) {
+        if (!normalized.branchIds.includes(options.branchId)) {
+          fail('READ_BRANCH_SCOPE_DENIED', 'Requested branch is outside the trusted scope.', 'branchId');
+        }
         where.push('allocation.receivableBranchId = @requestedBranchId');
         params.requestedBranchId = options.branchId;
-      } else if (!normalized.companyWideBranchAccess) {
+      } else {
         const placeholders = normalized.branchIds.map((branchId, index) => {
           const key = `allocationBranchId${index}`;
           params[key] = branchId;
@@ -250,9 +264,12 @@ function createCanonicalReceivablesReadRepository(db) {
       const where = ['allocation.companyId = @companyId'];
       params.companyId = normalized.companyId;
       if (options.branchId) {
+        if (!normalized.branchIds.includes(options.branchId)) {
+          fail('READ_BRANCH_SCOPE_DENIED', 'Requested branch is outside the trusted scope.', 'branchId');
+        }
         where.push('allocation.paymentBranchId = @requestedBranchId');
         params.requestedBranchId = options.branchId;
-      } else if (!normalized.companyWideBranchAccess) {
+      } else {
         const placeholders = normalized.branchIds.map((branchId, index) => {
           const key = `paymentAllocationBranchId${index}`;
           params[key] = branchId;

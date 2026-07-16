@@ -203,8 +203,10 @@ platform security authority.
 PR5 introduces relational `authorization_audit_events` with append-only database
 triggers. Platform security mutations and their audit events are committed in one
 SQLite transaction. Company-level events use the real active Head Office branch.
-Secret-bearing JSON keys are rejected. There is no update, delete, replace, cap, TTL,
-or cleanup path.
+Audit actor identity is derived only after trusted live-user/membership validation.
+Audit `before`/`after` values accept only validated plain JSON objects, arrays, or
+`null`; recursive secret-bearing keys and non-JSON/exotic structures are rejected.
+There is no update, delete, replace, cap, TTL, or cleanup path.
 
 ## 12. Bot, integration, and system actors
 
@@ -390,8 +392,20 @@ authorization remains unchanged and grants no platform capability.
 `authorization_audit_events` is relational and append-only:
 
 - update, delete, and replace are blocked by triggers;
-- JSON must be valid;
-- secret-bearing JSON keys are rejected before insert;
+- actor type, principal, membership, membership version, and correlation ID are
+  derived from an in-transaction validated trusted server context rather than copied
+  from mutation input;
+- audit `before`/`after` accepts only `null`, a plain object, or a standard array
+  containing JSON primitives, plain objects, and standard arrays;
+- raw strings and stringified JSON, custom prototypes/classes, `Date`, `Buffer`,
+  `Map`, `Set`, functions, symbols, bigint, nested `undefined`, accessors, hidden
+  properties, `toJSON`, proxies, cycles, sparse/custom arrays, and non-finite numbers
+  are rejected without invoking user serialization hooks;
+- secret-bearing keys are checked recursively and case/separator-insensitively,
+  including password, secret, token, authorization, cookie, session, API-key, and
+  private-key forms;
+- canonical JSON uses sorted object keys and is limited to depth 24 and 64 KiB, with
+  the size budget enforced during traversal;
 - no cap, TTL, cleanup, or delete path exists;
 - security mutation and audit insert share one `BEGIN IMMEDIATE` transaction;
 - forced audit failure rolls back company, branch, membership, grant, assignment, or
@@ -452,18 +466,114 @@ Repeated startup preserves those counts and the migration timestamp. Legacy
   templates/capabilities/assignments, mixed branch modes, financial rows, FK errors,
   schema-fingerprint drift, missing approval, or missing backup metadata.
 - `plan` performs zero writes and returns deterministic checksum, exact changes,
-  before/after counts, blockers/warnings, required approval checksum, and schema
-  fingerprint.
+  before/after counts, blockers/warnings, required approval checksum, schema
+  fingerprint, users-directory fingerprint, normalized mapped and intentionally
+  unmapped users, approved operator, and complete eligible-active-user coverage.
 - `apply` requires literal `--apply`, exact confirmed checksum, matching approved
   checksum/fingerprint, active bootstrap operator, approval reference, backup
   reference, zero blockers, empty financial tables, and empty authority.
-- Apply rechecks schema and financial emptiness inside `BEGIN IMMEDIATE`, writes only
-  identity/security/audit/bootstrap records, and creates no financial record.
-- Repeating the same successful checksum is a no-op. Changed authority configuration
-  changes the checksum and requires a new matching approval.
+- The config checksum covers the security-relevant users-directory fingerprint and
+  normalized mapping plan as well as authority configuration.
+- Apply obtains `BEGIN IMMEDIATE` before transactional revalidation, rereads
+  `app_data.users`, and rechecks JSON shape, duplicate/missing IDs, eligibility,
+  `approvedBy`, mappings, intentionally unmapped users, complete active-user
+  coverage, users/schema fingerprints, financial counts, FK state, and authority
+  state before any authority DML.
+- A second SQLite writer cannot alter users while the apply transaction holds the
+  lock. Concurrent applies deterministically produce one success and one
+  approved-checksum no-op.
+- Repeating the same successful checksum is a no-op only after the live approved
+  human operator and users directory are revalidated. Changed security-relevant user
+  state or authority configuration requires a new plan and matching approval.
 
 Only the redacted placeholder example is committed. No production IDs, mappings,
 template holders, approval, or backup evidence are included, and no bootstrap was run.
+
+## Independent review remediation
+
+The independent security review evaluated old head
+`447a34743cc06823d83df7ffb917ded17a99cb04` and reported three P1 findings and one
+P2 finding. This remediation fixes all four boundaries without enabling production
+reads, writes, bootstrap, release, or PR6.
+
+### Trusted audit actor (P1)
+
+- Generic platform mutations no longer accept the old arbitrary `actor` DTO.
+- Callers must supply an opaque server-created human actor context. The repository
+  rereads the current users directory inside the same `BEGIN IMMEDIATE` transaction
+  and requires exactly one eligible active human record for the authenticated stable
+  principal ID.
+- If an actor membership is supplied, the live membership must exist, be active,
+  belong to the mutation company and actor principal, and exactly match the expected
+  stored version. The audit event records the membership version reread from SQLite,
+  never a caller-provided audit value.
+- Without an actor membership, generic access is limited to initial provisioning
+  while the target company has no membership rows. It cannot be used for ordinary
+  later management mutations.
+- Bootstrap has a separate internal operator contract: `approval.approvedBy` must be
+  exactly one eligible active human user and is revalidated live even for a
+  same-checksum no-op. This operator may be intentionally unmapped, but cannot be a
+  system/integration actor.
+- Arbitrary `system` and `integration` actors are default-denied. Header, body, query,
+  display-role, and session-permission values cannot select an audit actor. PR5 ships
+  no active integration/system contract or hardcoded bypass actor.
+
+### Recursive audit payload protection (P1)
+
+- `before` and `after` accept only `null`, plain JSON objects, or standard JSON
+  arrays; raw/plain strings and stringified JSON are rejected.
+- Validation walks the actual structure before serialization, checks secret-bearing
+  keys at every depth and inside arrays, rejects exotic/non-JSON values and custom
+  serialization behavior, enforces finite numbers, cycle/depth/size limits, and then
+  emits deterministic canonical JSON.
+- Any validation or audit insert failure rolls back the surrounding security
+  mutation and audit event.
+
+### Bootstrap users-directory TOCTOU (P1)
+
+- The plan and approval checksum now include a deterministic fingerprint of stable
+  user IDs, current status, bot/frontend eligibility flags, duplicate/missing IDs,
+  eligible active users, mapped users, intentionally unmapped users, and
+  `approvedBy`. Passwords, tokens, secrets, display names, display roles, and JSON
+  field ordering are excluded.
+- After `BEGIN IMMEDIATE`, apply repeats the complete users/mapping/operator,
+  schema/FK, financial, and identity validation and compares it to the approved plan
+  before the first authority write.
+- Deactivation/deletion/duplication of the operator, mapped-user removal, new active
+  unmapped users, intentionally-unmapped coverage drift, or eligibility-field drift
+  fails explicitly and leaves authority, audit, bootstrap-run, and financial counts
+  unchanged.
+- Independent-connection and child-process tests prove writer exclusion and
+  deterministic concurrent apply behavior.
+
+### Company-scoped capability configuration (P2)
+
+- An explicit-branch membership bound to a template containing
+  `companies.manage`, `branches.manage`, or `members.manage` now denies the entire
+  resolved scope.
+- Active individual grants of those company capabilities to an explicit membership
+  also deny the entire scope.
+- Repository create/update/activation/template-binding/grant paths and bootstrap
+  validate/plan/apply reject incompatible state before write. Manual inconsistent DB
+  state fails closed in the resolver; capabilities are never silently removed to
+  produce a partial scope.
+- Company-wide memberships may still use approved company-scoped capabilities, and
+  an active deny assignment still wins.
+
+### Added targeted evidence
+
+Targeted tests cover missing/inactive/duplicate/forged actors; cross-principal,
+cross-company, nonexistent, inactive, and stale actor memberships; version
+substitution; arbitrary system/integration and request-selected actors; active and
+invalid bootstrap operators; recursive secret variants; stringified JSON; custom
+prototypes/serialization; exotic values; cycles/depth/size; rollback; all requested
+users-directory drift cases; SQLite writer locking and concurrent apply; incompatible
+company capabilities; competing `companies`/`branches` physical roots; and prior
+application initializer compatibility after the additive migration.
+
+The owner approvals listed in section 16 remain required. No production identity
+mapping, bootstrap approval, integration/system contract, audit-retention operation,
+release, or cutover decision is introduced by this remediation.
 
 ## 14. Risks and blockers
 
@@ -527,6 +637,7 @@ inputs and are not invented by PR5.
 - `tests/platform-identity-schema.test.js`
 - `tests/platform-authorization.test.js`
 - `tests/platform-identity-bootstrap.test.js`
+- `tests/platform-identity-remediation.test.js`
 - `tests/platform-identity-safety.test.js`
 - `tests/canonical-receivables-read-fixtures.js`
 - `tests/canonical-receivables-read-safety.test.js`
@@ -609,21 +720,25 @@ Executed before commit:
 
 | Command | Result |
 |---|---|
-| `node --test tests/platform-identity-schema.test.js tests/platform-authorization.test.js tests/platform-identity-bootstrap.test.js tests/platform-identity-safety.test.js tests/canonical-receivables-read-api.test.js tests/canonical-receivables-read-model.test.js tests/canonical-receivables-read-safety.test.js` | 67 passed, 0 failed, 0 skipped |
-| Same focused command under Node `v20.20.2` with an isolated Node-20 native dependency install | 67 passed, 0 failed, 0 skipped |
-| `npm test` | 1849 passed, 0 failed, 0 skipped |
-| `node --test tests/*.test.js` | 1849 passed, 0 failed, 0 skipped |
+| `node --test tests/platform-identity-remediation.test.js tests/platform-authorization.test.js tests/platform-identity-bootstrap.test.js tests/platform-identity-schema.test.js tests/platform-identity-safety.test.js tests/canonical-receivables-read-safety.test.js` under Node `v20.20.2` | 81 passed, 0 failed, 0 skipped |
+| `npm test` under Node `v20.20.2` (full suite pass 1) | 1884 passed, 0 failed, 0 skipped |
+| `node --test tests/*.test.js` under Node `v20.20.2` (full suite pass 2) | 1884 passed, 0 failed, 0 skipped |
 | `npm run build` | success; Vite transformed 3385 modules |
 | `git diff --check` | clean |
 
 Final isolated SQLite fixture:
 
-- migration first apply: `true`
-- migration rerun: `false`
 - `PRAGMA foreign_keys`: `1`
 - `PRAGMA foreign_key_check`: `0`
-- company/branch/membership/grant/template/assignment/audit/bootstrap-run counts:
-  all `0`
+- `canonical_companies`: `0`
+- `canonical_branches`: `0`
+- `company_memberships`: `0`
+- `membership_branch_access`: `0`
+- `role_templates`: `0`
+- `role_template_capabilities`: `0`
+- `membership_capability_assignments`: `0`
+- `authorization_audit_events`: `0`
+- `identity_bootstrap_runs`: `0`
 - catalog versions: `1`
 - catalog entries: `11`
 - `canonical_receivables`: `0`
@@ -632,11 +747,9 @@ Final isolated SQLite fixture:
 - `canonical_payment_allocations`: `0`
 - `canonical_receivable_adjustments`: `0`
 - `canonical_approval_requests`: `0`
-- legacy `app_data` probe unchanged: `true`
+- production canonical resolver result: `null`
 
-The default verification environment provided Node `v22.22.0`; both package manifests
-declare Node `20.x`. An initial attempt to reuse the Node-22-compiled
-`better-sqlite3` binary under Node 20 stopped at native ABI loading before assertions.
-After an isolated Node-20 `npm ci`, the same 67 focused tests passed. The required
-repository test/build commands also completed green under the default environment,
-without changing package manifests or lockfiles.
+The final verification environment used Node `v20.20.2` and npm `10.9.4`, matching
+the `20.x` engine declared by both package manifests. Native dependencies were
+installed in an isolated verification copy; package manifests and lockfiles were not
+changed.

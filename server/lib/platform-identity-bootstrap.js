@@ -5,6 +5,7 @@ const {
 } = require('./canonical-receivables-schema');
 const {
   CAPABILITY_CATALOG_V1,
+  COMPANY_SCOPED_CAPABILITY_KEYS,
   COMPANY_MEMBERSHIPS_TABLE,
   FINANCIAL_TABLES,
   IDENTITY_BOOTSTRAP_RUNS_TABLE,
@@ -20,6 +21,7 @@ const {
   assertIanaTimezone,
   assertNoSecrets,
   createPlatformIdentityRepository,
+  isEligiblePlatformUser,
   requiredId,
 } = require('./platform-identity-repository');
 
@@ -70,6 +72,7 @@ const LEGACY_INFERENCE_KEYS = new Set([
   'equipmentId',
 ]);
 const KNOWN_CAPABILITIES = new Map(CAPABILITY_CATALOG_V1.map(item => [item.key, item]));
+const COMPANY_SCOPED_CAPABILITIES = new Set(COMPANY_SCOPED_CAPABILITY_KEYS);
 
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
@@ -88,6 +91,118 @@ function readJsonCollection(db, name) {
   } catch {
     return [];
   }
+}
+
+function normalizedSecurityFlag(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+  return null;
+}
+
+function readUsersDirectorySnapshot(db) {
+  const exists = db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_data'
+  `).get();
+  if (!exists) {
+    return Object.freeze({
+      ok: false,
+      errorCode: 'USERS_DIRECTORY_TABLE_MISSING',
+      users: Object.freeze([]),
+      records: Object.freeze([]),
+      duplicateUserIds: Object.freeze([]),
+      missingUserIdIndexes: Object.freeze([]),
+      eligibleActiveUserIds: Object.freeze([]),
+      fingerprint: sha256(stableJson({ errorCode: 'USERS_DIRECTORY_TABLE_MISSING' })),
+    });
+  }
+  const row = db.prepare('SELECT json FROM app_data WHERE name = ?').get('users');
+  if (!row) {
+    const records = Object.freeze([]);
+    return Object.freeze({
+      ok: true,
+      errorCode: null,
+      users: records,
+      records,
+      duplicateUserIds: Object.freeze([]),
+      missingUserIdIndexes: Object.freeze([]),
+      eligibleActiveUserIds: Object.freeze([]),
+      fingerprint: sha256(stableJson({ records })),
+    });
+  }
+  let users;
+  try {
+    users = JSON.parse(row.json);
+  } catch {
+    return Object.freeze({
+      ok: false,
+      errorCode: 'USERS_DIRECTORY_JSON_INVALID',
+      users: Object.freeze([]),
+      records: Object.freeze([]),
+      duplicateUserIds: Object.freeze([]),
+      missingUserIdIndexes: Object.freeze([]),
+      eligibleActiveUserIds: Object.freeze([]),
+      fingerprint: sha256(stableJson({ errorCode: 'USERS_DIRECTORY_JSON_INVALID' })),
+    });
+  }
+  if (!Array.isArray(users)) {
+    return Object.freeze({
+      ok: false,
+      errorCode: 'USERS_DIRECTORY_SHAPE_INVALID',
+      users: Object.freeze([]),
+      records: Object.freeze([]),
+      duplicateUserIds: Object.freeze([]),
+      missingUserIdIndexes: Object.freeze([]),
+      eligibleActiveUserIds: Object.freeze([]),
+      fingerprint: sha256(stableJson({ errorCode: 'USERS_DIRECTORY_SHAPE_INVALID' })),
+    });
+  }
+
+  const idCounts = new Map();
+  const missingUserIdIndexes = [];
+  const records = users.map((user, index) => {
+    const id = user && typeof user.id === 'string' ? user.id.trim() : '';
+    if (id) idCounts.set(id, (idCounts.get(id) || 0) + 1);
+    else missingUserIdIndexes.push(index);
+    return Object.freeze({
+      id: id || null,
+      status: user && typeof user.status === 'string' ? user.status : null,
+      botOnly: normalizedSecurityFlag(user?.botOnly),
+      allowFrontendLogin: normalizedSecurityFlag(user?.allowFrontendLogin),
+      frontendAccess: normalizedSecurityFlag(user?.frontendAccess),
+    });
+  }).sort((left, right) => (
+    String(left.id || '').localeCompare(String(right.id || ''))
+    || stableJson(left).localeCompare(stableJson(right))
+  ));
+  const duplicateUserIds = [...idCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([id, count]) => Object.freeze({ id, count }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const eligibleActiveUserIds = [...new Set(users
+    .filter(isEligiblePlatformUser)
+    .map(user => String(user.id || '').trim())
+    .filter(Boolean))]
+    .sort();
+  const frozenRecords = Object.freeze(records);
+  return Object.freeze({
+    ok: true,
+    errorCode: null,
+    users: Object.freeze(users),
+    records: frozenRecords,
+    duplicateUserIds: Object.freeze(duplicateUserIds),
+    missingUserIdIndexes: Object.freeze(missingUserIdIndexes),
+    eligibleActiveUserIds: Object.freeze(eligibleActiveUserIds),
+    fingerprint: sha256(stableJson({
+      records: frozenRecords,
+      duplicateUserIds,
+      missingUserIdIndexes,
+      eligibleActiveUserIds,
+    })),
+  });
+}
+
+function getUsersDirectoryFingerprint(db) {
+  return readUsersDirectorySnapshot(db).fingerprint;
 }
 
 function tableCount(db, table) {
@@ -158,23 +273,15 @@ function getSchemaFingerprint(db) {
 }
 
 function inspectPlatformIdentity(db, env = process.env) {
-  const users = readJsonCollection(db, 'users');
-  const idCounts = new Map();
-  const userHints = users.map(user => {
+  const usersDirectory = readUsersDirectorySnapshot(db);
+  const userHints = usersDirectory.users.map(user => {
     const id = typeof user?.id === 'string' ? user.id.trim() : '';
-    if (id) idCounts.set(id, (idCounts.get(id) || 0) + 1);
     return {
       id: id || null,
       status: typeof user?.status === 'string' ? user.status : null,
       displayRoleHint: typeof user?.role === 'string' ? user.role : null,
     };
   });
-  const duplicateUserIds = [...idCounts.entries()]
-    .filter(([, count]) => count > 1)
-    .map(([id, count]) => ({ id, count }));
-  const missingUserIdIndexes = userHints
-    .map((user, index) => user.id ? null : index)
-    .filter(index => index !== null);
 
   const settings = readJsonCollection(db, 'app_settings');
   const companyLikeSettings = settings
@@ -220,8 +327,10 @@ function inspectPlatformIdentity(db, env = process.env) {
     mode: 'inspect',
     writes: 0,
     users: userHints,
-    duplicateUserIds,
-    missingUserIdIndexes,
+    duplicateUserIds: usersDirectory.duplicateUserIds,
+    missingUserIdIndexes: usersDirectory.missingUserIdIndexes,
+    eligibleActiveUserIds: usersDirectory.eligibleActiveUserIds,
+    usersDirectoryFingerprint: usersDirectory.fingerprint,
     companyLikeSettings,
     locationCandidates,
     migrations: listMigrations(db),
@@ -260,9 +369,32 @@ function authorityPayload(config = {}) {
   };
 }
 
-function calculateBootstrapChecksum(config) {
-  assertNoSecrets(authorityPayload(config));
-  return sha256(stableJson(authorityPayload(config)));
+function calculateBootstrapChecksum(db, config) {
+  const authority = authorityPayload(config);
+  assertNoSecrets(authority);
+  const usersDirectory = readUsersDirectorySnapshot(db);
+  const mappedUserIds = [...new Set(
+    (Array.isArray(config?.memberships) ? config.memberships : [])
+      .map(membership => String(membership?.principalId || '').trim())
+      .filter(Boolean),
+  )].sort();
+  const intentionallyUnmappedUserIds = [...new Set(
+    (Array.isArray(config?.intentionallyUnmappedUserIds)
+      ? config.intentionallyUnmappedUserIds
+      : [])
+      .map(value => String(value || '').trim())
+      .filter(Boolean),
+  )].sort();
+  return sha256(stableJson({
+    authority,
+    usersDirectoryFingerprint: usersDirectory.fingerprint,
+    mappingPlan: {
+      mappedUserIds,
+      intentionallyUnmappedUserIds,
+      eligibleActiveUserIds: usersDirectory.eligibleActiveUserIds,
+      approvedBy: String(config?.approval?.approvedBy || '').trim() || null,
+    },
+  }));
 }
 
 function validateBootstrapConfig(db, config = {}) {
@@ -361,15 +493,21 @@ function validateBootstrapConfig(db, config = {}) {
     blockers.push({ code: 'ROLE_TEMPLATE_REQUIRED', path: 'roleTemplates' });
   }
 
-  const users = readJsonCollection(db, 'users');
+  const usersDirectory = readUsersDirectorySnapshot(db);
+  if (!usersDirectory.ok) {
+    blockers.push({ code: usersDirectory.errorCode, path: 'app_data.users' });
+  }
+  usersDirectory.missingUserIdIndexes.forEach(index => {
+    blockers.push({ code: 'USER_ID_MISSING', path: `app_data.users[${index}]` });
+  });
+  usersDirectory.duplicateUserIds.forEach(({ id }) => {
+    blockers.push({ code: 'USER_ID_DUPLICATE', path: `app_data.users.${id}` });
+  });
+  const users = usersDirectory.users;
   const usersById = new Map();
   for (const user of users) {
     const id = typeof user?.id === 'string' ? user.id.trim() : '';
-    if (!id) {
-      blockers.push({ code: 'USER_ID_MISSING', path: 'app_data.users' });
-      continue;
-    }
-    if (usersById.has(id)) blockers.push({ code: 'USER_ID_DUPLICATE', path: `app_data.users.${id}` });
+    if (!id || usersById.has(id)) continue;
     usersById.set(id, user);
   }
 
@@ -440,7 +578,7 @@ function validateBootstrapConfig(db, config = {}) {
       if (!templateKeys.has(`${roleTemplateKey}:${roleTemplateVersion}`)) {
         blockers.push({ code: 'TEMPLATE_UNKNOWN', path: `memberships[${index}]` });
       }
-      if (!usersById.has(principalId) || usersById.get(principalId)?.status !== 'Активен') {
+      if (!usersById.has(principalId) || !isEligiblePlatformUser(usersById.get(principalId))) {
         blockers.push({ code: 'MEMBERSHIP_USER_INVALID', path: `memberships[${index}].principalId` });
       }
       if (membershipIds.has(id)) blockers.push({ code: 'MEMBERSHIP_ID_DUPLICATE', path: `memberships[${index}].id` });
@@ -454,6 +592,28 @@ function validateBootstrapConfig(db, config = {}) {
       }
       if (!companyWideBranchAuthority && status === 'active' && explicitBranches.length === 0) {
         blockers.push({ code: 'EMPTY_BRANCH_SCOPE', path: `memberships[${index}].branchIds` });
+      }
+      const boundTemplate = templateKeys.get(`${roleTemplateKey}:${roleTemplateVersion}`);
+      if (
+        !companyWideBranchAuthority
+        && boundTemplate?.capabilities.some(capability => COMPANY_SCOPED_CAPABILITIES.has(capability))
+      ) {
+        blockers.push({
+          code: 'COMPANY_CAPABILITY_SCOPE_CONFLICT',
+          path: `memberships[${index}].roleTemplateKey`,
+        });
+      }
+      if (
+        !companyWideBranchAuthority
+        && assignments.some(assignment => (
+          assignment.effect === 'grant'
+          && COMPANY_SCOPED_CAPABILITIES.has(assignment.capabilityKey)
+        ))
+      ) {
+        blockers.push({
+          code: 'COMPANY_CAPABILITY_SCOPE_CONFLICT',
+          path: `memberships[${index}].capabilityAssignments`,
+        });
       }
       for (const branchId of explicitBranches) {
         const branch = branches.find(item => item.id === branchId);
@@ -494,8 +654,8 @@ function validateBootstrapConfig(db, config = {}) {
     if (!usersById.has(userId)) blockers.push({ code: 'UNMAPPED_USER_UNKNOWN', path: 'intentionallyUnmappedUserIds' });
     if (membershipPrincipalIds.has(userId)) blockers.push({ code: 'USER_MAPPING_CONFLICT', path: 'intentionallyUnmappedUserIds' });
   }
-  for (const [userId, user] of usersById.entries()) {
-    if (user.status === 'Активен' && !membershipPrincipalIds.has(userId) && !unmapped.has(userId)) {
+  for (const userId of usersDirectory.eligibleActiveUserIds) {
+    if (!membershipPrincipalIds.has(userId) && !unmapped.has(userId)) {
       blockers.push({ code: 'ACTIVE_USER_UNRESOLVED', path: `app_data.users.${userId}` });
     }
   }
@@ -524,7 +684,7 @@ function validateBootstrapConfig(db, config = {}) {
 
   let configChecksum = null;
   try {
-    configChecksum = calculateBootstrapChecksum(config);
+    configChecksum = calculateBootstrapChecksum(db, config);
   } catch (error) {
     blockers.push({ code: error.code || 'CHECKSUM_FAILED' });
   }
@@ -540,9 +700,18 @@ function validateBootstrapConfig(db, config = {}) {
   if (!schemaFingerprint || approval.schemaFingerprint !== schemaFingerprint) {
     blockers.push({ code: 'APPROVAL_SCHEMA_MISMATCH', path: 'approval.schemaFingerprint' });
   }
-  if (!usersById.has(approval.approvedBy) || usersById.get(approval.approvedBy)?.status !== 'Активен') {
+  const bootstrapOperatorMatches = users.filter(user => (
+    user
+    && typeof user.id === 'string'
+    && user.id.trim() === approval.approvedBy
+  ));
+  if (
+    bootstrapOperatorMatches.length !== 1
+    || !isEligiblePlatformUser(bootstrapOperatorMatches[0])
+  ) {
     blockers.push({ code: 'BOOTSTRAP_OPERATOR_INVALID', path: 'approval.approvedBy' });
   }
+  const mappedUserIds = [...membershipPrincipalIds].sort();
 
   return Object.freeze({
     mode: 'validate',
@@ -552,6 +721,11 @@ function validateBootstrapConfig(db, config = {}) {
     warnings: Object.freeze(warnings),
     configChecksum,
     schemaFingerprint,
+    usersDirectoryFingerprint: usersDirectory.fingerprint,
+    eligibleActiveUserIds: usersDirectory.eligibleActiveUserIds,
+    mappedUserIds: Object.freeze(mappedUserIds),
+    intentionallyUnmappedUserIds: Object.freeze(intentionallyUnmappedUserIds),
+    approvedBy: approval.approvedBy,
     foreignKeyFailures,
     financialCounts: Object.freeze(financialCounts),
     identityCounts: Object.freeze(identityCounts),
@@ -562,6 +736,9 @@ function validateBootstrapConfig(db, config = {}) {
       roleTemplates,
       memberships,
       intentionallyUnmappedUserIds,
+      usersDirectoryFingerprint: usersDirectory.fingerprint,
+      eligibleActiveUserIds: usersDirectory.eligibleActiveUserIds,
+      mappedUserIds,
       approval: {
         approvedBy: approval.approvedBy,
         approvedAt: approval.approvedAt,
@@ -623,6 +800,11 @@ function planPlatformIdentityBootstrap(db, config) {
     ok: validation.ok,
     configChecksum: validation.configChecksum,
     schemaFingerprint: validation.schemaFingerprint,
+    usersDirectoryFingerprint: validation.usersDirectoryFingerprint,
+    mappedUserIds: validation.mappedUserIds,
+    intentionallyUnmappedUserIds: validation.intentionallyUnmappedUserIds,
+    eligibleActiveUserIds: validation.eligibleActiveUserIds,
+    approvedBy: validation.approvedBy,
     blockers: validation.blockers,
     warnings: validation.warnings,
     exactChanges: changes,
@@ -632,6 +814,7 @@ function planPlatformIdentityBootstrap(db, config) {
     requiredApproval: {
       approvedConfigChecksum: validation.configChecksum,
       approvedSchemaFingerprint: validation.schemaFingerprint,
+      approvedUsersDirectoryFingerprint: validation.usersDirectoryFingerprint,
       backupReferenceRequired: true,
     },
     normalized,
@@ -664,15 +847,42 @@ function applyPlatformIdentityBootstrap(db, config, options = {}) {
       });
     }
   }
+  if (typeof options.afterPlanBeforeTransaction === 'function') {
+    options.afterPlanBeforeTransaction(plan);
+  }
   const nowIso = options.nowIso || (() => new Date().toISOString());
   const repository = createPlatformIdentityRepository(db, {
     nowIso,
     generateId: options.generateId,
+    readUsers: () => readUsersDirectorySnapshot(db).users,
     beforeAuditInsert: options.beforeAuditInsert,
     beforeBootstrapApply() {
-      if (getSchemaFingerprint(db) !== plan.schemaFingerprint) {
-        throw Object.assign(new Error('Bootstrap schema fingerprint changed before apply.'), {
-          code: 'BOOTSTRAP_SCHEMA_CHANGED',
+      if (typeof options.beforeTransactionalRevalidation === 'function') {
+        options.beforeTransactionalRevalidation(plan);
+      }
+      const liveValidation = validateBootstrapConfig(db, config);
+      const expectedState = {
+        configChecksum: plan.configChecksum,
+        schemaFingerprint: plan.schemaFingerprint,
+        usersDirectoryFingerprint: plan.usersDirectoryFingerprint,
+        mappedUserIds: plan.mappedUserIds,
+        intentionallyUnmappedUserIds: plan.intentionallyUnmappedUserIds,
+        eligibleActiveUserIds: plan.eligibleActiveUserIds,
+        approvedBy: plan.approvedBy,
+      };
+      const actualState = {
+        configChecksum: liveValidation.configChecksum,
+        schemaFingerprint: liveValidation.schemaFingerprint,
+        usersDirectoryFingerprint: liveValidation.usersDirectoryFingerprint,
+        mappedUserIds: liveValidation.mappedUserIds,
+        intentionallyUnmappedUserIds: liveValidation.intentionallyUnmappedUserIds,
+        eligibleActiveUserIds: liveValidation.eligibleActiveUserIds,
+        approvedBy: liveValidation.approvedBy,
+      };
+      if (!liveValidation.ok || stableJson(actualState) !== stableJson(expectedState)) {
+        throw Object.assign(new Error('Bootstrap state changed before transactional apply.'), {
+          code: 'BOOTSTRAP_TRANSACTIONAL_REVALIDATION_FAILED',
+          blockers: liveValidation.blockers,
         });
       }
     },
@@ -688,6 +898,10 @@ function applyPlatformIdentityBootstrap(db, config, options = {}) {
       beforeCounts: plan.beforeCounts,
       afterCounts: plan.afterCounts,
       financialCounts: plan.financialCounts,
+      usersDirectoryFingerprint: plan.usersDirectoryFingerprint,
+      mappedUserIds: plan.mappedUserIds,
+      intentionallyUnmappedUserIds: plan.intentionallyUnmappedUserIds,
+      eligibleActiveUserIds: plan.eligibleActiveUserIds,
     },
   });
 }
@@ -706,6 +920,7 @@ module.exports = {
   applyPlatformIdentityBootstrap,
   calculateBootstrapChecksum,
   getSchemaFingerprint,
+  getUsersDirectoryFingerprint,
   inspectPlatformIdentity,
   planPlatformIdentityBootstrap,
   runPlatformIdentityBootstrap,

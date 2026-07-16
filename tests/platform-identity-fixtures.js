@@ -14,6 +14,7 @@ const {
 } = require('../server/lib/platform-identity-schema.js');
 const {
   createPlatformIdentityRepository,
+  createTrustedUserActorContext,
 } = require('../server/lib/platform-identity-repository.js');
 
 export const DEFAULT_USERS = Object.freeze([
@@ -34,8 +35,9 @@ export const DEFAULT_USERS = Object.freeze([
 export function createPlatformIdentityContext({
   users = DEFAULT_USERS,
   beforeAuditInsert,
+  dbPath = ':memory:',
 } = {}) {
-  const db = new Database(':memory:');
+  const db = new Database(dbPath);
   db.pragma('foreign_keys = ON');
   db.exec(`
     CREATE TABLE app_data (
@@ -51,8 +53,12 @@ export function createPlatformIdentityContext({
   ensureCanonicalReceivablesSchema(db);
   ensureCanonicalReceivablesSettlementSchema(db);
   ensurePlatformIdentitySchema(db);
+  const readUsers = () => JSON.parse(
+    db.prepare("SELECT json FROM app_data WHERE name = 'users'").get().json,
+  );
   let sequence = 0;
   const repository = createPlatformIdentityRepository(db, {
+    readUsers,
     nowIso: () => `2026-07-16T00:00:${String(sequence++).padStart(2, '0')}.000Z`,
     generateId: prefix => `${prefix}-${++sequence}`,
     beforeAuditInsert,
@@ -60,9 +66,7 @@ export function createPlatformIdentityContext({
   return {
     db,
     repository,
-    readUsers: () => JSON.parse(
-      db.prepare("SELECT json FROM app_data WHERE name = 'users'").get().json,
-    ),
+    readUsers,
     close() {
       db.close();
     },
@@ -70,13 +74,12 @@ export function createPlatformIdentityContext({
 }
 
 export function testActor(overrides = {}) {
-  return {
-    type: 'user',
+  return createTrustedUserActorContext({
     principalId: overrides.principalId || 'U-admin',
     membershipId: overrides.membershipId,
-    membershipVersion: overrides.membershipVersion,
+    expectedMembershipVersion: overrides.expectedMembershipVersion,
     correlationId: overrides.correlationId || 'test-correlation-1',
-  };
+  });
 }
 
 export function seedAuthority(context, {
@@ -89,7 +92,7 @@ export function seedAuthority(context, {
   templateKey = 'template-a',
   templateCapabilities = ['receivables.read'],
 } = {}) {
-  const actor = testActor();
+  const actorContext = testActor();
   context.repository.createCompanyAuthority({
     company: {
       id: companyId,
@@ -97,7 +100,7 @@ export function seedAuthority(context, {
       receivablesTimezone: 'Europe/Moscow',
     },
     branches,
-    actor,
+    actorContext,
     reason: 'test-approved',
   });
   context.repository.createRoleTemplate({
@@ -106,8 +109,8 @@ export function seedAuthority(context, {
     templateVersion: 1,
     displayName: `Template ${templateKey}`,
     capabilities: templateCapabilities,
-    actor,
+    actorContext,
     reason: 'test-approved',
   });
-  return { actor, companyId, templateKey };
+  return { actorContext, companyId, templateKey };
 }

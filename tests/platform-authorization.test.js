@@ -38,6 +38,32 @@ function resolve(context, userId, options = {}) {
   });
 }
 
+function createManagementActor(context, {
+  companyId = 'company-a',
+  principalId = 'U-finance',
+  membershipId = `membership-management-${companyId}`,
+  templateKey = 'template-a',
+} = {}) {
+  const membership = context.repository.createMembership({
+    id: membershipId,
+    companyId,
+    principalId,
+    status: 'active',
+    roleTemplateKey: templateKey,
+    roleTemplateVersion: 1,
+    companyWideBranchAuthority: true,
+    branchIds: [],
+    actorContext: testActor(),
+    reason: 'test-management-actor',
+  });
+  return testActor({
+    principalId,
+    membershipId: membership.id,
+    expectedMembershipVersion: membership.version,
+    correlationId: `management-${companyId}`,
+  });
+}
+
 test('legacy administrator role creates no platform membership, capability, or company-wide authority', () => {
   const context = createPlatformIdentityContext();
   try {
@@ -53,7 +79,7 @@ test('legacy administrator role creates no platform membership, capability, or c
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     const scope = resolve(context, 'U-admin');
@@ -94,7 +120,7 @@ test('trusted scope is immutable, sorted, concrete, and ignores client authority
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-2', 'branch-a-1', 'branch-a-2'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     const scope = resolve(context, 'U-admin', {
@@ -133,6 +159,7 @@ test('missing, duplicate, inactive, and bot-only users fail closed after authent
   const context = createPlatformIdentityContext({ users });
   try {
     seedAuthority(context);
+    const managementActor = createManagementActor(context);
     for (const principalId of ['U-inactive', 'U-bot']) {
       context.repository.createMembership({
         id: `membership-${principalId}`,
@@ -143,7 +170,7 @@ test('missing, duplicate, inactive, and bot-only users fail closed after authent
         roleTemplateVersion: 1,
         companyWideBranchAuthority: false,
         branchIds: ['branch-a-1'],
-        actor: testActor(),
+        actorContext: managementActor,
         reason: 'test-approved',
       });
       assert.throws(() => resolve(context, principalId));
@@ -175,6 +202,7 @@ test('pending, inactive, and revoked memberships do not authorize and revoked is
   const context = createPlatformIdentityContext({ users });
   try {
     seedAuthority(context);
+    const managementActor = createManagementActor(context);
     for (const [principalId, status] of [
       ['U-pending', 'pending'],
       ['U-inactive-member', 'inactive'],
@@ -189,7 +217,7 @@ test('pending, inactive, and revoked memberships do not authorize and revoked is
         roleTemplateVersion: 1,
         companyWideBranchAuthority: false,
         branchIds: [],
-        actor: testActor(),
+        actorContext: managementActor,
         reason: 'test-approved',
       });
       assert.throws(() => resolve(context, principalId));
@@ -199,7 +227,7 @@ test('pending, inactive, and revoked memberships do not authorize and revoked is
       membershipId: revoked.id,
       expectedVersion: revoked.version,
       status: 'active',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'forbidden-reactivation',
     }), /Revoked membership is terminal/);
   } finally {
@@ -211,6 +239,7 @@ test('branch and capability mutations retain history and bump membership version
   const context = createPlatformIdentityContext();
   try {
     seedAuthority(context, { templateCapabilities: [] });
+    const managementActor = createManagementActor(context);
     let membership = context.repository.createMembership({
       id: 'membership-admin',
       companyId: 'company-a',
@@ -220,7 +249,7 @@ test('branch and capability mutations retain history and bump membership version
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: [],
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     });
     assert.equal(membership.version, 1);
@@ -228,7 +257,7 @@ test('branch and capability mutations retain history and bump membership version
       membershipId: membership.id,
       expectedMembershipVersion: membership.version,
       branchId: 'branch-a-1',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     });
     assert.equal(membership.version, 2);
@@ -236,7 +265,7 @@ test('branch and capability mutations retain history and bump membership version
       membershipId: membership.id,
       expectedMembershipVersion: membership.version,
       branchId: 'branch-a-2',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     });
     assert.equal(membership.version, 3);
@@ -244,14 +273,14 @@ test('branch and capability mutations retain history and bump membership version
       membershipId: membership.id,
       expectedMembershipVersion: 2,
       branchId: 'branch-a-ho',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'stale',
     }), /stale/);
     membership = context.repository.revokeBranchAccess({
       membershipId: membership.id,
       expectedMembershipVersion: membership.version,
       branchId: 'branch-a-2',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     });
     assert.equal(membership.version, 4);
@@ -260,7 +289,7 @@ test('branch and capability mutations retain history and bump membership version
       expectedMembershipVersion: membership.version,
       capabilityKey: 'receivables.read',
       effect: 'grant',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     });
     assert.equal(membership.version, 5);
@@ -268,7 +297,7 @@ test('branch and capability mutations retain history and bump membership version
       membershipId: membership.id,
       expectedMembershipVersion: membership.version,
       capabilityKey: 'receivables.read',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     });
     assert.equal(membership.version, 6);
@@ -297,7 +326,7 @@ test('explicit branch access never expands when a new branch is created', () => 
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     assert.deepEqual(resolve(context, 'U-admin').allowedBranchIds, ['branch-a-1']);
@@ -305,7 +334,7 @@ test('explicit branch access never expands when a new branch is created', () => 
       companyId: 'company-a',
       id: 'branch-a-new',
       displayName: 'New branch',
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     assert.deepEqual(resolve(context, 'U-admin').allowedBranchIds, ['branch-a-1']);
@@ -330,7 +359,7 @@ test('company-wide authority materializes all concrete branches and mixed mode d
       roleTemplateVersion: 1,
       companyWideBranchAuthority: true,
       branchIds: [],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     let scope = resolve(context, 'U-admin');
@@ -342,7 +371,7 @@ test('company-wide authority materializes all concrete branches and mixed mode d
       companyId: 'company-a',
       id: 'branch-a-new',
       displayName: 'New branch',
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     scope = resolve(context, 'U-admin');
@@ -376,7 +405,7 @@ test('company and branch selectors only narrow and multi-company ambiguity denie
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1', 'branch-a-2'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     seedAuthority(context, {
@@ -396,7 +425,7 @@ test('company and branch selectors only narrow and multi-company ambiguity denie
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-b-1'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     assert.throws(() => resolve(context, 'U-admin'));
@@ -424,7 +453,7 @@ test('cross-company grants are rejected and scoped predicates are non-disclosing
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     seedAuthority(context, {
@@ -439,7 +468,7 @@ test('cross-company grants are rejected and scoped predicates are non-disclosing
       membershipId: membership.id,
       expectedMembershipVersion: membership.version,
       branchId: 'branch-b-1',
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'cross-company',
     }));
     const scope = resolve(context, 'U-admin');
@@ -465,8 +494,8 @@ test('grants add capabilities, denies win, and company capabilities require comp
     seedAuthority(context, {
       templateCapabilities: ['forecast.read', 'members.manage'],
     });
-    let membership = context.repository.createMembership({
-      id: 'membership-admin',
+    assert.throws(() => context.repository.createMembership({
+      id: 'membership-explicit-incompatible',
       companyId: 'company-a',
       principalId: 'U-admin',
       status: 'active',
@@ -474,7 +503,19 @@ test('grants add capabilities, denies win, and company capabilities require comp
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1'],
-      actor: testActor(),
+      actorContext: testActor(),
+      reason: 'test-approved',
+    }), /Company-scoped role-template capabilities require company-wide branch authority/);
+    let membership = context.repository.createMembership({
+      id: 'membership-admin',
+      companyId: 'company-a',
+      principalId: 'U-admin',
+      status: 'active',
+      roleTemplateKey: 'template-a',
+      roleTemplateVersion: 1,
+      companyWideBranchAuthority: true,
+      branchIds: [],
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     membership = context.repository.assignCapability({
@@ -482,7 +523,7 @@ test('grants add capabilities, denies win, and company capabilities require comp
       expectedMembershipVersion: membership.version,
       capabilityKey: 'receivables.read',
       effect: 'grant',
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     membership = context.repository.assignCapability({
@@ -490,24 +531,124 @@ test('grants add capabilities, denies win, and company capabilities require comp
       expectedMembershipVersion: membership.version,
       capabilityKey: 'forecast.read',
       effect: 'deny',
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     const scope = resolve(context, 'U-admin');
-    assert.deepEqual(scope.capabilities, ['receivables.read']);
+    assert.deepEqual(scope.capabilities, ['members.manage', 'receivables.read']);
     assert.equal(assertCapability(scope, 'receivables.read'), true);
     assert.throws(() => assertCapability(scope, 'forecast.read'));
-    assert.throws(() => assertCapability(scope, 'members.manage'));
+    assert.equal(assertCapability(scope, 'members.manage'), true);
     assert.throws(() => context.repository.assignCapability({
       membershipId: membership.id,
       expectedMembershipVersion: membership.version,
       capabilityKey: 'canonical.receivables.post',
       effect: 'grant',
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'reserved',
     }));
   } finally {
     context.close();
+  }
+});
+
+test('repository and resolver fail closed for incompatible company-scoped capability state', () => {
+  const explicitGrant = createPlatformIdentityContext();
+  try {
+    seedAuthority(explicitGrant, { templateCapabilities: ['receivables.read'] });
+    const membership = explicitGrant.repository.createMembership({
+      id: 'membership-explicit-company-grant',
+      companyId: 'company-a',
+      principalId: 'U-admin',
+      status: 'active',
+      roleTemplateKey: 'template-a',
+      roleTemplateVersion: 1,
+      companyWideBranchAuthority: false,
+      branchIds: ['branch-a-1'],
+      actorContext: testActor(),
+      reason: 'test-approved',
+    });
+    assert.throws(() => explicitGrant.repository.assignCapability({
+      membershipId: membership.id,
+      expectedMembershipVersion: membership.version,
+      capabilityKey: 'companies.manage',
+      effect: 'grant',
+      actorContext: testActor(),
+      reason: 'must-fail-closed',
+    }), /Company-scoped grants require company-wide branch authority/);
+    assert.equal(
+      explicitGrant.repository.listCapabilityAssignments(membership.id).length,
+      0,
+    );
+
+    explicitGrant.repository.createRoleTemplate({
+      companyId: 'company-a',
+      templateKey: 'company-manager-template',
+      templateVersion: 1,
+      displayName: 'Company manager',
+      capabilities: ['members.manage'],
+      actorContext: testActor(),
+      reason: 'test-approved',
+    });
+    assert.throws(() => explicitGrant.repository.updateMembership({
+      membershipId: membership.id,
+      expectedVersion: membership.version,
+      roleTemplateKey: 'company-manager-template',
+      roleTemplateVersion: 1,
+      actorContext: testActor(),
+      reason: 'must-fail-closed',
+    }), /Company-scoped role-template capabilities require company-wide branch authority/);
+    assert.equal(
+      explicitGrant.repository.getMembership(membership.id).roleTemplateKey,
+      'template-a',
+    );
+
+    explicitGrant.db.prepare(`
+      INSERT INTO membership_capability_assignments (
+        id, membershipId, companyId, catalogVersion, capabilityKey, effect,
+        status, version, grantedAt, grantedBy, reason
+      ) VALUES (
+        'manual-company-grant', ?, 'company-a', 1, 'companies.manage', 'grant',
+        'active', 1, '2026-07-16T00:00:00.000Z', 'manual-fixture', 'manual-corruption'
+      )
+    `).run(membership.id);
+    assert.throws(
+      () => resolve(explicitGrant, 'U-admin'),
+      /Company-scoped grants require company-wide authority/,
+    );
+  } finally {
+    explicitGrant.close();
+  }
+
+  const companyWide = createPlatformIdentityContext();
+  try {
+    seedAuthority(companyWide, { templateCapabilities: ['members.manage'] });
+    const membership = companyWide.repository.createMembership({
+      id: 'membership-company-wide-manager',
+      companyId: 'company-a',
+      principalId: 'U-admin',
+      status: 'active',
+      roleTemplateKey: 'template-a',
+      roleTemplateVersion: 1,
+      companyWideBranchAuthority: true,
+      branchIds: [],
+      actorContext: testActor(),
+      reason: 'test-approved',
+    });
+    assert.throws(() => companyWide.repository.updateMembership({
+      membershipId: membership.id,
+      expectedVersion: membership.version,
+      status: 'inactive',
+      companyWideBranchAuthority: false,
+      actorContext: testActor(),
+      reason: 'must-fail-closed',
+    }), /Company-scoped role-template capabilities require company-wide branch authority/);
+    const unchanged = companyWide.repository.getMembership(membership.id);
+    assert.equal(unchanged.status, 'active');
+    assert.equal(unchanged.companyWideBranchAuthority, 1);
+    assert.equal(unchanged.version, membership.version);
+  } finally {
+    companyWide.close();
   }
 });
 
@@ -528,7 +669,7 @@ test('catalog checksum mismatch and conflicting active assignments fail closed',
         capabilityKey: 'forecast.read',
         effect: 'grant',
       }],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     context.db.exec('DROP INDEX uq_membership_capability_active');
@@ -558,7 +699,7 @@ test('catalog checksum mismatch and conflicting active assignments fail closed',
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     corruptCatalog.db.exec(`
@@ -575,6 +716,7 @@ test('scope freshness detects membership mutation and branch narrowing stays fre
   const context = createPlatformIdentityContext();
   try {
     seedAuthority(context);
+    const managementActor = createManagementActor(context);
     const membership = context.repository.createMembership({
       id: 'membership-admin',
       companyId: 'company-a',
@@ -584,7 +726,7 @@ test('scope freshness detects membership mutation and branch narrowing stays fre
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1', 'branch-a-2'],
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     });
     const scope = resolve(context, 'U-admin');
@@ -599,7 +741,7 @@ test('scope freshness detects membership mutation and branch narrowing stays fre
       expectedMembershipVersion: membership.version,
       capabilityKey: 'forecast.read',
       effect: 'grant',
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     assert.throws(() => assertScopeFresh(scope, {
@@ -615,6 +757,7 @@ test('authorization audit is append-only, validates JSON, uses Head Office, and 
   const context = createPlatformIdentityContext();
   try {
     seedAuthority(context);
+    const managementActor = createManagementActor(context);
     const companyEvent = context.db.prepare(`
       SELECT *
       FROM authorization_audit_events
@@ -645,7 +788,7 @@ test('authorization audit is append-only, validates JSON, uses Head Office, and 
     `).run());
     assert.throws(() => context.repository.insertAudit({
       companyId: 'company-a',
-      actor: testActor(),
+      actorContext: managementActor,
       action: 'test.secret',
       targetType: 'company',
       targetId: 'company-a',
@@ -673,7 +816,7 @@ test('authorization audit is append-only, validates JSON, uses Head Office, and 
         displayName: 'Rollback Head Office',
         isHeadOffice: true,
       }],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     }), /forced-audit-failure/);
     assert.equal(rollback.db.prepare('SELECT COUNT(*) AS count FROM canonical_companies').get().count, 0);
@@ -688,18 +831,19 @@ test('root identity and membership constraints reject sentinel IDs, duplicates, 
   const context = createPlatformIdentityContext();
   try {
     seedAuthority(context);
+    const managementActor = createManagementActor(context);
     assert.throws(() => context.repository.createBranch({
       companyId: 'company-a',
       id: '*',
       displayName: 'Wildcard',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test',
     }));
     assert.throws(() => context.repository.createBranch({
       companyId: 'company-a',
       id: 'branch-a-1',
       displayName: 'Duplicate',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test',
     }));
     const membership = context.repository.createMembership({
@@ -711,7 +855,7 @@ test('root identity and membership constraints reject sentinel IDs, duplicates, 
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1'],
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     });
     assert.throws(() => context.repository.createMembership({
@@ -723,7 +867,7 @@ test('root identity and membership constraints reject sentinel IDs, duplicates, 
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-2'],
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     }));
     assert.throws(() => context.db.prepare(`
@@ -756,7 +900,7 @@ test('company creation rejects missing, multiple, sentinel, and globally duplica
         receivablesTimezone: 'Europe/Moscow',
       },
       branches,
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     assert.throws(() => context.repository.createCompanyAuthority(input([
@@ -782,7 +926,7 @@ test('company creation rejects missing, multiple, sentinel, and globally duplica
         { id: 'branch-b-ho', displayName: 'B Head Office', isHeadOffice: true },
         { id: 'branch-a-1', displayName: 'Duplicate global branch', isHeadOffice: false },
       ],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     }));
     assert.equal(context.repository.getCompany('company-b'), null);
@@ -804,7 +948,7 @@ test('unknown exact template versions and multiple active catalogs deny', () => 
       roleTemplateVersion: 2,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     }));
     context.repository.createMembership({
@@ -816,7 +960,7 @@ test('unknown exact template versions and multiple active catalogs deny', () => 
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     context.db.exec('DROP INDEX uq_capability_catalog_single_active');
@@ -843,7 +987,7 @@ test('resolver denies missing or multiple Head Office state even after direct fi
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     missing.db.exec(`
@@ -876,7 +1020,7 @@ test('resolver denies missing or multiple Head Office state even after direct fi
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     multiple.db.exec('DROP INDEX uq_canonical_branches_head_office');
@@ -898,12 +1042,13 @@ test('root updates require optimistic versions and active Head Office remains co
   const context = createPlatformIdentityContext();
   try {
     seedAuthority(context);
+    const managementActor = createManagementActor(context);
     const company = context.repository.getCompany('company-a');
     const updatedCompany = context.repository.updateCompany({
       companyId: company.id,
       expectedVersion: company.version,
       displayName: 'Updated company',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     });
     assert.equal(updatedCompany.version, company.version + 1);
@@ -911,7 +1056,7 @@ test('root updates require optimistic versions and active Head Office remains co
       companyId: company.id,
       expectedVersion: company.version,
       displayName: 'Stale update',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     }), /stale/);
     const headOffice = context.repository.listHeadOffices('company-a')[0];
@@ -922,7 +1067,7 @@ test('root updates require optimistic versions and active Head Office remains co
       branchId: headOffice.id,
       expectedVersion: headOffice.version,
       status: 'inactive',
-      actor: testActor(),
+      actorContext: managementActor,
       reason: 'test-approved',
     }), /retain its active Head Office/);
   } finally {
@@ -943,11 +1088,12 @@ test('audit failure rolls back a membership security mutation', () => {
       roleTemplateVersion: 1,
       companyWideBranchAuthority: false,
       branchIds: ['branch-a-1'],
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     });
     let failAudit = true;
     const repository = createPlatformIdentityRepository(context.db, {
+      readUsers: context.readUsers,
       nowIso: () => '2026-07-16T13:00:00.000Z',
       generateId: prefix => `${prefix}-forced`,
       beforeAuditInsert() {
@@ -959,7 +1105,7 @@ test('audit failure rolls back a membership security mutation', () => {
       expectedMembershipVersion: membership.version,
       capabilityKey: 'forecast.read',
       effect: 'grant',
-      actor: testActor(),
+      actorContext: testActor(),
       reason: 'test-approved',
     }), /forced-security-audit-failure/);
     failAudit = false;

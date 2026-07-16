@@ -1,22 +1,20 @@
 const {
   CAPABILITY_CATALOG_V1,
   CAPABILITY_CATALOG_V1_CHECKSUM,
+  COMPANY_SCOPED_CAPABILITY_KEYS,
   stableJson,
 } = require('./platform-identity-schema');
 const {
   FORBIDDEN_BRANCH_IDS,
   assertIanaTimezone,
+  isEligiblePlatformUser,
   requiredId,
 } = require('./platform-identity-repository');
 
 const KNOWN_CAPABILITIES = new Map(
   CAPABILITY_CATALOG_V1.map(entry => [entry.key, Object.freeze({ ...entry })]),
 );
-const COMPANY_SCOPED_CAPABILITIES = new Set([
-  'companies.manage',
-  'branches.manage',
-  'members.manage',
-]);
+const COMPANY_SCOPED_CAPABILITIES = new Set(COMPANY_SCOPED_CAPABILITY_KEYS);
 
 class PlatformAuthorizationError extends Error {
   constructor(code, message, { status = 403, field } = {}) {
@@ -97,18 +95,10 @@ function resolveLiveUser(readUsers, principalId) {
     deny('PLATFORM_USER_DIRECTORY_UNAVAILABLE', 'Principal is unavailable.');
   }
   const matches = users.filter(user => user && user.id === principalId);
-  if (matches.length !== 1 || matches[0].status !== 'Активен') {
+  if (matches.length !== 1 || !isEligiblePlatformUser(matches[0])) {
     deny('PLATFORM_PRINCIPAL_DENIED', 'Principal is unavailable.');
   }
-  const user = matches[0];
-  if (
-    user.botOnly === true
-    && user.allowFrontendLogin !== true
-    && user.frontendAccess !== true
-  ) {
-    deny('PLATFORM_PRINCIPAL_DENIED', 'Principal is unavailable.');
-  }
-  return user;
+  return matches[0];
 }
 
 function validateCatalog(repository) {
@@ -209,15 +199,29 @@ function resolveEffectiveCapabilities(repository, membership, templateCapabiliti
     byCapability.set(assignment.capabilityKey, assignment.effect);
   }
 
+  if (membership.companyWideBranchAuthority !== 1) {
+    if (templateCapabilities.some(capability => COMPANY_SCOPED_CAPABILITIES.has(capability))) {
+      deny(
+        'PLATFORM_CAPABILITY_STATE_DENIED',
+        'Company-scoped template capabilities require company-wide authority.',
+      );
+    }
+    if ([...byCapability.entries()].some(([capabilityKey, effect]) => (
+      effect === 'grant' && COMPANY_SCOPED_CAPABILITIES.has(capabilityKey)
+    ))) {
+      deny(
+        'PLATFORM_CAPABILITY_STATE_DENIED',
+        'Company-scoped grants require company-wide authority.',
+      );
+    }
+  }
+
   const effective = new Set(templateCapabilities);
   for (const [capabilityKey, effect] of byCapability.entries()) {
     if (effect === 'grant') effective.add(capabilityKey);
   }
   for (const [capabilityKey, effect] of byCapability.entries()) {
     if (effect === 'deny') effective.delete(capabilityKey);
-  }
-  if (membership.companyWideBranchAuthority !== 1) {
-    COMPANY_SCOPED_CAPABILITIES.forEach(capability => effective.delete(capability));
   }
   return sortedUnique([...effective]);
 }

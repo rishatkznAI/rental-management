@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { types: utilTypes } = require('util');
 const {
   CANONICAL_BRANCHES_TABLE,
   CANONICAL_COMPANIES_TABLE,
@@ -8,6 +9,7 @@ const {
   CAPABILITY_CATALOG_ENTRIES_TABLE,
   CAPABILITY_CATALOG_V1_CHECKSUM,
   CAPABILITY_CATALOG_VERSIONS_TABLE,
+  COMPANY_SCOPED_CAPABILITY_KEYS,
   COMPANY_MEMBERSHIPS_TABLE,
   FINANCIAL_TABLES,
   IDENTITY_BOOTSTRAP_RUNS_TABLE,
@@ -22,6 +24,10 @@ const COMPANY_STATUSES = new Set(['inactive', 'active', 'archived']);
 const BRANCH_STATUSES = new Set(['inactive', 'active', 'archived']);
 const MEMBERSHIP_STATUSES = new Set(['pending', 'active', 'inactive', 'revoked']);
 const ASSIGNMENT_EFFECTS = new Set(['grant', 'deny']);
+const COMPANY_SCOPED_CAPABILITIES = new Set(COMPANY_SCOPED_CAPABILITY_KEYS);
+const AUDIT_JSON_MAX_DEPTH = 24;
+const AUDIT_JSON_MAX_BYTES = 64 * 1024;
+const TRUSTED_USER_ACTOR_CONTEXTS = new WeakSet();
 const FORBIDDEN_BRANCH_IDS = new Set([
   '*',
   'all',
@@ -31,7 +37,20 @@ const FORBIDDEN_BRANCH_IDS = new Set([
   'any',
   'null',
 ]);
-const SECRET_KEY_PATTERN = /^(?:.*password.*|.*passwd.*|.*secret.*|.*token.*|authorization|cookie|api[_-]?key|webhook[_-]?(?:secret|token))$/i;
+const SECRET_KEY_FRAGMENTS = Object.freeze([
+  'password',
+  'passwd',
+  'secret',
+  'token',
+  'credential',
+]);
+const SECRET_KEY_EXACT = new Set([
+  'authorization',
+  'cookie',
+  'session',
+  'apikey',
+  'privatekey',
+]);
 
 class PlatformIdentityRepositoryError extends Error {
   constructor(code, message, field) {
@@ -101,6 +120,18 @@ function assertBranchId(value, field = 'branchId') {
   return branchId;
 }
 
+function normalizedSecurityKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function isSecretBearingKey(value) {
+  const normalized = normalizedSecurityKey(value);
+  return (
+    SECRET_KEY_EXACT.has(normalized)
+    || SECRET_KEY_FRAGMENTS.some(fragment => normalized.includes(fragment))
+  );
+}
+
 function assertNoSecrets(value, path = 'json') {
   if (Array.isArray(value)) {
     value.forEach((item, index) => assertNoSecrets(item, `${path}[${index}]`));
@@ -108,39 +139,207 @@ function assertNoSecrets(value, path = 'json') {
   }
   if (!value || typeof value !== 'object') return;
   for (const [key, child] of Object.entries(value)) {
-    if (SECRET_KEY_PATTERN.test(key)) {
+    if (isSecretBearingKey(key)) {
       fail('PLATFORM_IDENTITY_AUDIT_SECRET_REJECTED', `Secret-bearing audit field is forbidden: ${path}.${key}.`);
     }
     assertNoSecrets(child, `${path}.${key}`);
   }
 }
 
+function invalidAuditJson(message, path) {
+  fail('PLATFORM_IDENTITY_AUDIT_JSON_REJECTED', message, path);
+}
+
+function addAuditJsonBytes(state, value, path) {
+  state.bytes += Buffer.byteLength(value, 'utf8');
+  if (state.bytes > AUDIT_JSON_MAX_BYTES) {
+    invalidAuditJson(`Audit payload exceeds ${AUDIT_JSON_MAX_BYTES} bytes.`, path);
+  }
+}
+
+function canonicalizeAuditValue(value, path, depth, ancestors, sizeState) {
+  if (depth > AUDIT_JSON_MAX_DEPTH) {
+    invalidAuditJson(`Audit payload exceeds maximum depth ${AUDIT_JSON_MAX_DEPTH}.`, path);
+  }
+  if (value === null) {
+    addAuditJsonBytes(sizeState, 'null', path);
+    return null;
+  }
+  if (typeof value === 'string' || typeof value === 'boolean') {
+    addAuditJsonBytes(sizeState, JSON.stringify(value), path);
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) invalidAuditJson('Audit payload numbers must be finite.', path);
+    addAuditJsonBytes(sizeState, JSON.stringify(value), path);
+    return value;
+  }
+  if (typeof value !== 'object') {
+    invalidAuditJson('Audit payload contains a non-JSON value.', path);
+  }
+  if (utilTypes.isProxy(value)) {
+    invalidAuditJson('Audit payload cannot contain proxy objects.', path);
+  }
+  if (ancestors.has(value)) {
+    invalidAuditJson('Audit payload cannot contain cyclic structures.', path);
+  }
+  if ('toJSON' in value) {
+    invalidAuditJson('Audit payload objects cannot define or inherit toJSON.', path);
+  }
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    invalidAuditJson('Audit payload cannot contain symbol keys.', path);
+  }
+
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype) {
+        invalidAuditJson('Audit arrays must use the standard Array prototype.', path);
+      }
+      addAuditJsonBytes(sizeState, '[]', path);
+      const keys = Object.getOwnPropertyNames(value).filter(key => key !== 'length');
+      if (
+        keys.length !== value.length
+        || keys.some(key => !/^(?:0|[1-9]\d*)$/.test(key) || Number(key) >= value.length)
+      ) {
+        invalidAuditJson('Audit arrays cannot contain holes or custom properties.', path);
+      }
+      const result = [];
+      for (let index = 0; index < value.length; index += 1) {
+        if (index > 0) addAuditJsonBytes(sizeState, ',', path);
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (
+          !descriptor
+          || !descriptor.enumerable
+          || !Object.prototype.hasOwnProperty.call(descriptor, 'value')
+        ) {
+          invalidAuditJson('Audit arrays cannot contain holes or accessors.', `${path}[${index}]`);
+        }
+        result.push(canonicalizeAuditValue(
+          descriptor.value,
+          `${path}[${index}]`,
+          depth + 1,
+          ancestors,
+          sizeState,
+        ));
+      }
+      return result;
+    }
+
+    if (Object.getPrototypeOf(value) !== Object.prototype) {
+      invalidAuditJson('Audit objects must be plain JSON objects.', path);
+    }
+    addAuditJsonBytes(sizeState, '{}', path);
+    const result = {};
+    const keys = Object.getOwnPropertyNames(value).sort();
+    for (const [index, key] of keys.entries()) {
+      if (index > 0) addAuditJsonBytes(sizeState, ',', path);
+      if (isSecretBearingKey(key)) {
+        fail(
+          'PLATFORM_IDENTITY_AUDIT_SECRET_REJECTED',
+          `Secret-bearing audit field is forbidden: ${path}.${key}.`,
+          `${path}.${key}`,
+        );
+      }
+      addAuditJsonBytes(sizeState, `${JSON.stringify(key)}:`, `${path}.${key}`);
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (
+        !descriptor
+        || !descriptor.enumerable
+        || !Object.prototype.hasOwnProperty.call(descriptor, 'value')
+      ) {
+        invalidAuditJson('Audit objects cannot contain accessors or hidden values.', `${path}.${key}`);
+      }
+      result[key] = canonicalizeAuditValue(
+        descriptor.value,
+        `${path}.${key}`,
+        depth + 1,
+        ancestors,
+        sizeState,
+      );
+    }
+    return result;
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
 function auditJson(value) {
-  if (value === undefined || value === null) return null;
-  assertNoSecrets(value);
-  return JSON.stringify(value);
+  if (value === null) return null;
+  if (!Array.isArray(value) && (
+    typeof value !== 'object'
+    || value === null
+    || Object.getPrototypeOf(value) !== Object.prototype
+  )) {
+    invalidAuditJson('Audit payload must be null, a plain JSON object, or a JSON array.', 'json');
+  }
+  const sizeState = { bytes: 0 };
+  const serialized = JSON.stringify(canonicalizeAuditValue(
+    value,
+    'json',
+    0,
+    new WeakSet(),
+    sizeState,
+  ));
+  return serialized;
 }
 
 function sortedUnique(values, normalizer) {
   return [...new Set((Array.isArray(values) ? values : []).map(normalizer))].sort();
 }
 
-function normalizeActor(actor = {}) {
-  const type = enumValue(actor.type || 'user', new Set(['user', 'integration', 'system']), 'actor.type');
-  const principalId = requiredId(actor.principalId, 'actor.principalId');
-  const membershipId = actor.membershipId == null
+function createTrustedUserActorContext(input = {}) {
+  const allowedKeys = new Set([
+    'principalId',
+    'membershipId',
+    'expectedMembershipVersion',
+    'correlationId',
+  ]);
+  const unknownKeys = Object.keys(input || {}).filter(key => !allowedKeys.has(key));
+  if (unknownKeys.length > 0) {
+    fail(
+      'PLATFORM_IDENTITY_ACTOR_CONTEXT_REJECTED',
+      `Trusted actor context contains an unsupported field: ${unknownKeys[0]}.`,
+      unknownKeys[0],
+    );
+  }
+  const principalId = requiredId(input.principalId, 'actorContext.principalId');
+  const membershipId = input.membershipId == null
     ? null
-    : requiredId(actor.membershipId, 'actor.membershipId');
-  const membershipVersion = membershipId == null
+    : requiredId(input.membershipId, 'actorContext.membershipId');
+  const expectedMembershipVersion = membershipId == null
     ? null
-    : requiredVersion(actor.membershipVersion, 'actor.membershipVersion');
-  return {
-    type,
+    : requiredVersion(
+      input.expectedMembershipVersion,
+      'actorContext.expectedMembershipVersion',
+    );
+  if (membershipId == null && input.expectedMembershipVersion != null) {
+    fail(
+      'PLATFORM_IDENTITY_ACTOR_CONTEXT_REJECTED',
+      'A membership version cannot be supplied without a membership ID.',
+      'actorContext.expectedMembershipVersion',
+    );
+  }
+  const context = Object.freeze({
     principalId,
     membershipId,
-    membershipVersion,
-    correlationId: requiredId(actor.correlationId, 'actor.correlationId'),
-  };
+    expectedMembershipVersion,
+    correlationId: requiredId(input.correlationId, 'actorContext.correlationId'),
+  });
+  TRUSTED_USER_ACTOR_CONTEXTS.add(context);
+  return context;
+}
+
+function isEligiblePlatformUser(user) {
+  return Boolean(
+    user
+    && user.status === 'Активен'
+    && !(
+      user.botOnly === true
+      && user.allowFrontendLogin !== true
+      && user.frontendAccess !== true
+    )
+  );
 }
 
 function createPlatformIdentityRepository(db, options = {}) {
@@ -148,6 +347,12 @@ function createPlatformIdentityRepository(db, options = {}) {
     fail('PLATFORM_IDENTITY_DATABASE_REQUIRED', 'A better-sqlite3 database is required.');
   }
   assertPlatformIdentityStructure(db);
+  if (typeof options.readUsers !== 'function') {
+    fail(
+      'PLATFORM_IDENTITY_USER_DIRECTORY_REQUIRED',
+      'A live users-directory reader is required.',
+    );
+  }
 
   const nowIso = typeof options.nowIso === 'function'
     ? options.nowIso
@@ -155,6 +360,94 @@ function createPlatformIdentityRepository(db, options = {}) {
   const generateId = typeof options.generateId === 'function'
     ? options.generateId
     : prefix => `${prefix}-${crypto.randomUUID()}`;
+  const validatedActors = new WeakSet();
+
+  function resolveTrustedActor(actorContext, companyId, {
+    allowWithoutMembership = false,
+    allowWithoutMembershipAfterProvisioning = false,
+  } = {}) {
+    if (!actorContext || !TRUSTED_USER_ACTOR_CONTEXTS.has(actorContext)) {
+      fail(
+        'PLATFORM_IDENTITY_ACTOR_CONTEXT_REJECTED',
+        'A trusted server-created user actor context is required.',
+      );
+    }
+    const principalId = actorContext.principalId;
+    const users = options.readUsers();
+    if (!Array.isArray(users)) {
+      fail('PLATFORM_IDENTITY_ACTOR_USER_DENIED', 'The live users directory is unavailable.');
+    }
+    const matches = users.filter(user => user && user.id === principalId);
+    if (matches.length !== 1 || !isEligiblePlatformUser(matches[0])) {
+      fail('PLATFORM_IDENTITY_ACTOR_USER_DENIED', 'The audit actor is unavailable.');
+    }
+
+    const normalizedCompanyId = requiredId(companyId, 'companyId');
+    const activeMemberships = db.prepare(`
+      SELECT *
+      FROM ${COMPANY_MEMBERSHIPS_TABLE}
+      WHERE companyId = ? AND principalId = ? AND status = 'active'
+      ORDER BY id
+    `).all(normalizedCompanyId, principalId);
+    let membership = null;
+    if (actorContext.membershipId != null) {
+      membership = getMembership(actorContext.membershipId);
+      if (
+        !membership
+        || membership.companyId !== normalizedCompanyId
+        || membership.principalId !== principalId
+        || membership.status !== 'active'
+        || Number(membership.version) !== Number(actorContext.expectedMembershipVersion)
+      ) {
+        fail(
+          'PLATFORM_IDENTITY_ACTOR_MEMBERSHIP_DENIED',
+          'The audit actor membership is unavailable or stale.',
+        );
+      }
+    } else if (activeMemberships.length === 1) {
+      membership = activeMemberships[0];
+    } else if (activeMemberships.length > 1) {
+      fail(
+        'PLATFORM_IDENTITY_ACTOR_MEMBERSHIP_DENIED',
+        'The audit actor membership is ambiguous.',
+      );
+    } else {
+      const companyMembershipCount = Number(db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM ${COMPANY_MEMBERSHIPS_TABLE}
+        WHERE companyId = ?
+      `).get(normalizedCompanyId).count);
+      if (
+        !allowWithoutMembership
+        || (companyMembershipCount !== 0 && !allowWithoutMembershipAfterProvisioning)
+      ) {
+        fail(
+          'PLATFORM_IDENTITY_ACTOR_MEMBERSHIP_DENIED',
+          'An active audit actor membership is required.',
+        );
+      }
+    }
+    if (
+      membership
+      && actorContext.membershipId != null
+      && activeMemberships.some(item => item.id !== membership.id)
+    ) {
+      fail(
+        'PLATFORM_IDENTITY_ACTOR_MEMBERSHIP_DENIED',
+        'The audit actor membership is ambiguous.',
+      );
+    }
+
+    const actor = Object.freeze({
+      type: 'user',
+      principalId,
+      membershipId: membership?.id || null,
+      membershipVersion: membership ? Number(membership.version) : null,
+      correlationId: actorContext.correlationId,
+    });
+    validatedActors.add(actor);
+    return actor;
+  }
 
   function transactionImmediate(operation) {
     return db.transaction(operation).immediate();
@@ -343,8 +636,50 @@ function createPlatformIdentityRepository(db, options = {}) {
     return template;
   }
 
-  function insertAudit(event) {
-    const actor = normalizeActor(event.actor);
+  function assertMembershipCapabilityCompatibility(membershipLike, {
+    assignments,
+  } = {}) {
+    if (membershipLike.companyWideBranchAuthority === 1) return true;
+    const templateCapabilities = listRoleTemplateCapabilities(
+      membershipLike.companyId,
+      membershipLike.roleTemplateKey,
+      Number(membershipLike.roleTemplateVersion),
+    );
+    if (
+      templateCapabilities.some(item => COMPANY_SCOPED_CAPABILITIES.has(item.capabilityKey))
+    ) {
+      fail(
+        'PLATFORM_IDENTITY_COMPANY_CAPABILITY_SCOPE_CONFLICT',
+        'Company-scoped role-template capabilities require company-wide branch authority.',
+      );
+    }
+    const activeAssignments = assignments || (
+      membershipLike.id
+        ? listCapabilityAssignments(membershipLike.id, { status: 'active' })
+        : []
+    );
+    if (
+      activeAssignments.some(item => (
+        item.effect === 'grant'
+        && COMPANY_SCOPED_CAPABILITIES.has(item.capabilityKey)
+      ))
+    ) {
+      fail(
+        'PLATFORM_IDENTITY_COMPANY_CAPABILITY_SCOPE_CONFLICT',
+        'Company-scoped grants require company-wide branch authority.',
+      );
+    }
+    return true;
+  }
+
+  function insertAuditRow(event) {
+    const actor = event.validatedActor;
+    if (!actor || !validatedActors.has(actor)) {
+      fail(
+        'PLATFORM_IDENTITY_ACTOR_CONTEXT_REJECTED',
+        'Audit actor metadata must come from in-transaction trusted validation.',
+      );
+    }
     const companyId = requiredId(event.companyId, 'companyId');
     const branchId = event.branchId == null
       ? requireActiveHeadOffice(companyId).id
@@ -377,8 +712,8 @@ function createPlatformIdentityRepository(db, options = {}) {
         'audit.decision',
       ),
       reasonCode: requiredText(event.reasonCode, 'audit.reasonCode'),
-      beforeJson: auditJson(event.before),
-      afterJson: auditJson(event.after),
+      beforeJson: event.before === undefined ? null : auditJson(event.before),
+      afterJson: event.after === undefined ? null : auditJson(event.after),
       capabilityCatalogVersion: event.capabilityCatalogVersion == null
         ? null
         : requiredVersion(event.capabilityCatalogVersion, 'audit.capabilityCatalogVersion'),
@@ -401,6 +736,18 @@ function createPlatformIdentityRepository(db, options = {}) {
       )
     `).run(row);
     return Object.freeze({ ...row });
+  }
+
+  function insertAudit(event = {}) {
+    return transactionImmediate(() => {
+      const companyId = requiredId(event.companyId, 'companyId');
+      const validatedActor = resolveTrustedActor(event.actorContext, companyId);
+      return insertAuditRow({
+        ...event,
+        companyId,
+        validatedActor,
+      });
+    });
   }
 
   function bumpMembership(membershipId, expectedVersion, actorPrincipalId, reason, timestamp) {
@@ -443,7 +790,9 @@ function createPlatformIdentityRepository(db, options = {}) {
       const companyId = requiredId(company.id, 'company.id');
       const displayName = requiredText(company.displayName, 'company.displayName');
       const receivablesTimezone = assertIanaTimezone(company.receivablesTimezone);
-      const actor = normalizeActor(input.actor);
+      const validatedActor = resolveTrustedActor(input.actorContext, companyId, {
+        allowWithoutMembership: true,
+      });
       const reason = requiredText(input.reason, 'reason');
       const timestamp = input.timestamp || nowIso();
       const branches = Array.isArray(input.branches) ? input.branches : [];
@@ -489,9 +838,9 @@ function createPlatformIdentityRepository(db, options = {}) {
         WHERE id = ? AND version = 1
       `).run(timestamp, companyId);
       const created = getCompany(companyId);
-      insertAudit({
+      insertAuditRow({
         companyId,
-        actor,
+        validatedActor,
         action: 'company.authority.created',
         targetType: 'company',
         targetId: companyId,
@@ -500,10 +849,10 @@ function createPlatformIdentityRepository(db, options = {}) {
         capabilityCatalogVersion: 1,
       });
       for (const branch of normalizedBranches) {
-        insertAudit({
+        insertAuditRow({
           companyId,
           branchId: branch.id,
-          actor,
+          validatedActor,
           action: 'branch.created',
           targetType: 'branch',
           targetId: branch.id,
@@ -523,7 +872,9 @@ function createPlatformIdentityRepository(db, options = {}) {
     return transactionImmediate(() => {
       const companyId = requiredId(input.companyId, 'companyId');
       requireActiveCompany(companyId);
-      const actor = normalizeActor(input.actor);
+      const validatedActor = resolveTrustedActor(input.actorContext, companyId, {
+        allowWithoutMembership: true,
+      });
       const catalog = requireActiveCatalog();
       const templateKey = requiredId(input.templateKey, 'templateKey');
       const templateVersion = requiredVersion(input.templateVersion, 'templateVersion');
@@ -547,7 +898,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         displayName,
         timestamp,
         timestamp,
-        actor.principalId,
+        validatedActor.principalId,
         reason,
       );
       const insertCapability = db.prepare(`
@@ -564,13 +915,13 @@ function createPlatformIdentityRepository(db, options = {}) {
           catalog.version,
           capabilityKey,
           timestamp,
-          actor.principalId,
+          validatedActor.principalId,
         );
       }
       const template = getRoleTemplate(companyId, templateKey, templateVersion);
-      insertAudit({
+      insertAuditRow({
         companyId,
-        actor,
+        validatedActor,
         action: 'role_template.created',
         targetType: 'role_template',
         targetId: `${templateKey}:v${templateVersion}`,
@@ -592,7 +943,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       if (input.isHeadOffice === true) {
         fail('PLATFORM_IDENTITY_HEAD_OFFICE_IMMUTABLE', 'Head Office is established with company authority.');
       }
-      const actor = normalizeActor(input.actor);
+      const validatedActor = resolveTrustedActor(input.actorContext, companyId);
       const reason = requiredText(input.reason, 'reason');
       const timestamp = input.timestamp || nowIso();
       db.prepare(`
@@ -605,10 +956,10 @@ function createPlatformIdentityRepository(db, options = {}) {
         FROM ${CANONICAL_BRANCHES_TABLE}
         WHERE companyId = ? AND id = ?
       `).get(companyId, branchId);
-      insertAudit({
+      insertAuditRow({
         companyId,
         branchId,
-        actor,
+        validatedActor,
         action: 'branch.created',
         targetType: 'branch',
         targetId: branchId,
@@ -628,7 +979,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       if (!company || Number(company.version) !== expectedVersion) {
         fail('PLATFORM_IDENTITY_STALE_VERSION', 'Company version is stale.');
       }
-      const actor = normalizeActor(input.actor);
+      const validatedActor = resolveTrustedActor(input.actorContext, companyId);
       const reason = requiredText(input.reason, 'reason');
       const displayName = input.displayName === undefined
         ? company.displayName
@@ -664,9 +1015,9 @@ function createPlatformIdentityRepository(db, options = {}) {
         fail('PLATFORM_IDENTITY_STALE_VERSION', 'Company version is stale.');
       }
       const updated = getCompany(companyId);
-      insertAudit({
+      insertAuditRow({
         companyId,
-        actor,
+        validatedActor,
         action: 'company.updated',
         targetType: 'company',
         targetId: companyId,
@@ -692,7 +1043,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       if (!branch || Number(branch.version) !== expectedVersion) {
         fail('PLATFORM_IDENTITY_STALE_VERSION', 'Branch version is stale.');
       }
-      const actor = normalizeActor(input.actor);
+      const validatedActor = resolveTrustedActor(input.actorContext, companyId);
       const reason = requiredText(input.reason, 'reason');
       const displayName = input.displayName === undefined
         ? branch.displayName
@@ -724,10 +1075,10 @@ function createPlatformIdentityRepository(db, options = {}) {
         FROM ${CANONICAL_BRANCHES_TABLE}
         WHERE companyId = ? AND id = ?
       `).get(companyId, branchId);
-      insertAudit({
+      insertAuditRow({
         companyId,
         branchId,
-        actor,
+        validatedActor,
         action: 'branch.updated',
         targetType: 'branch',
         targetId: branchId,
@@ -744,7 +1095,9 @@ function createPlatformIdentityRepository(db, options = {}) {
     return transactionImmediate(() => {
       const companyId = requiredId(input.companyId, 'companyId');
       requireActiveCompany(companyId);
-      const actor = normalizeActor(input.actor);
+      const validatedActor = resolveTrustedActor(input.actorContext, companyId, {
+        allowWithoutMembership: true,
+      });
       const catalog = requireActiveCatalog();
       const membershipId = requiredId(input.id, 'id');
       const principalId = requiredId(input.principalId, 'principalId');
@@ -771,6 +1124,14 @@ function createPlatformIdentityRepository(db, options = {}) {
       if (!companyWide && status === 'active' && branchIds.length === 0) {
         fail('PLATFORM_IDENTITY_EMPTY_BRANCH_SCOPE', 'Active explicit membership requires branch access.');
       }
+      assertMembershipCapabilityCompatibility({
+        companyId,
+        roleTemplateKey,
+        roleTemplateVersion,
+        companyWideBranchAuthority: companyWide ? 1 : 0,
+      }, {
+        assignments: input.capabilityAssignments || [],
+      });
       db.prepare(`
         INSERT INTO ${COMPANY_MEMBERSHIPS_TABLE} (
           id, companyId, principalId, status, roleTemplateKey, roleTemplateVersion,
@@ -794,15 +1155,15 @@ function createPlatformIdentityRepository(db, options = {}) {
         activatedAt: status === 'active' ? timestamp : null,
         inactivatedAt: status === 'inactive' ? timestamp : null,
         revokedAt: status === 'revoked' ? timestamp : null,
-        createdBy: actor.principalId,
-        updatedBy: actor.principalId,
-        revokedBy: status === 'revoked' ? actor.principalId : null,
+        createdBy: validatedActor.principalId,
+        updatedBy: validatedActor.principalId,
+        revokedBy: status === 'revoked' ? validatedActor.principalId : null,
         reason,
       });
       let membership = getMembership(membershipId);
-      insertAudit({
+      insertAuditRow({
         companyId,
-        actor,
+        validatedActor,
         action: 'membership.created',
         targetType: 'membership',
         targetId: membershipId,
@@ -814,7 +1175,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         membership = grantBranchAccessInternal({
           membership,
           branchId,
-          actor,
+          validatedActor,
           reason,
           timestamp,
           audit: true,
@@ -825,7 +1186,7 @@ function createPlatformIdentityRepository(db, options = {}) {
           membership,
           capabilityKey: assignment.capabilityKey,
           effect: assignment.effect,
-          actor,
+          validatedActor,
           reason,
           timestamp,
           audit: true,
@@ -838,7 +1199,7 @@ function createPlatformIdentityRepository(db, options = {}) {
   function grantBranchAccessInternal({
     membership,
     branchId,
-    actor,
+    validatedActor,
     reason,
     timestamp,
     audit,
@@ -878,21 +1239,21 @@ function createPlatformIdentityRepository(db, options = {}) {
       membership.companyId,
       normalizedBranchId,
       timestamp,
-      actor.principalId,
+      validatedActor.principalId,
       reason,
     );
     const updated = bumpMembership(
       membership.id,
       Number(membership.version),
-      actor.principalId,
+      validatedActor.principalId,
       reason,
       timestamp,
     );
     if (audit) {
-      insertAudit({
+      insertAuditRow({
         companyId: membership.companyId,
         branchId: normalizedBranchId,
-        actor,
+        validatedActor,
         action: 'membership_branch.granted',
         targetType: 'membership_branch_access',
         targetId: grantId,
@@ -910,11 +1271,11 @@ function createPlatformIdentityRepository(db, options = {}) {
       if (!membership || Number(membership.version) !== requiredVersion(input.expectedMembershipVersion, 'expectedMembershipVersion')) {
         fail('PLATFORM_IDENTITY_STALE_VERSION', 'Membership version is stale.');
       }
-      const actor = normalizeActor(input.actor);
+      const validatedActor = resolveTrustedActor(input.actorContext, membership.companyId);
       const updated = grantBranchAccessInternal({
         membership,
         branchId: input.branchId,
-        actor,
+        validatedActor,
         reason: requiredText(input.reason, 'reason'),
         timestamp: input.timestamp || nowIso(),
         audit: true,
@@ -929,7 +1290,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       if (!membership || Number(membership.version) !== requiredVersion(input.expectedMembershipVersion, 'expectedMembershipVersion')) {
         fail('PLATFORM_IDENTITY_STALE_VERSION', 'Membership version is stale.');
       }
-      const actor = normalizeActor(input.actor);
+      const validatedActor = resolveTrustedActor(input.actorContext, membership.companyId);
       const reason = requiredText(input.reason, 'reason');
       const branchId = assertBranchId(input.branchId);
       const grant = db.prepare(`
@@ -959,18 +1320,18 @@ function createPlatformIdentityRepository(db, options = {}) {
             revokedBy = ?,
             reason = ?
         WHERE id = ? AND version = ?
-      `).run(timestamp, actor.principalId, reason, grant.id, grant.version);
+      `).run(timestamp, validatedActor.principalId, reason, grant.id, grant.version);
       const updated = bumpMembership(
         membership.id,
         Number(membership.version),
-        actor.principalId,
+        validatedActor.principalId,
         reason,
         timestamp,
       );
-      insertAudit({
+      insertAuditRow({
         companyId: membership.companyId,
         branchId,
-        actor,
+        validatedActor,
         action: 'membership_branch.revoked',
         targetType: 'membership_branch_access',
         targetId: grant.id,
@@ -987,7 +1348,7 @@ function createPlatformIdentityRepository(db, options = {}) {
     membership,
     capabilityKey,
     effect,
-    actor,
+    validatedActor,
     reason,
     timestamp,
     audit,
@@ -1002,6 +1363,16 @@ function createPlatformIdentityRepository(db, options = {}) {
       capabilityKey,
       { grant: normalizedEffect === 'grant' },
     );
+    if (
+      normalizedEffect === 'grant'
+      && membership.companyWideBranchAuthority !== 1
+      && COMPANY_SCOPED_CAPABILITIES.has(capability.capabilityKey)
+    ) {
+      fail(
+        'PLATFORM_IDENTITY_COMPANY_CAPABILITY_SCOPE_CONFLICT',
+        'Company-scoped grants require company-wide branch authority.',
+      );
+    }
     const active = db.prepare(`
       SELECT *
       FROM ${MEMBERSHIP_CAPABILITY_ASSIGNMENTS_TABLE}
@@ -1024,20 +1395,20 @@ function createPlatformIdentityRepository(db, options = {}) {
       capability.capabilityKey,
       normalizedEffect,
       timestamp,
-      actor.principalId,
+      validatedActor.principalId,
       reason,
     );
     const updated = bumpMembership(
       membership.id,
       Number(membership.version),
-      actor.principalId,
+      validatedActor.principalId,
       reason,
       timestamp,
     );
     if (audit) {
-      insertAudit({
+      insertAuditRow({
         companyId: membership.companyId,
-        actor,
+        validatedActor,
         action: 'membership_capability.assigned',
         targetType: 'membership_capability_assignment',
         targetId: assignmentId,
@@ -1061,11 +1432,12 @@ function createPlatformIdentityRepository(db, options = {}) {
       if (!membership || Number(membership.version) !== requiredVersion(input.expectedMembershipVersion, 'expectedMembershipVersion')) {
         fail('PLATFORM_IDENTITY_STALE_VERSION', 'Membership version is stale.');
       }
+      const validatedActor = resolveTrustedActor(input.actorContext, membership.companyId);
       const updated = assignCapabilityInternal({
         membership,
         capabilityKey: input.capabilityKey,
         effect: input.effect,
-        actor: normalizeActor(input.actor),
+        validatedActor,
         reason: requiredText(input.reason, 'reason'),
         timestamp: input.timestamp || nowIso(),
         audit: true,
@@ -1080,7 +1452,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       if (!membership || Number(membership.version) !== requiredVersion(input.expectedMembershipVersion, 'expectedMembershipVersion')) {
         fail('PLATFORM_IDENTITY_STALE_VERSION', 'Membership version is stale.');
       }
-      const actor = normalizeActor(input.actor);
+      const validatedActor = resolveTrustedActor(input.actorContext, membership.companyId);
       const reason = requiredText(input.reason, 'reason');
       const capabilityKey = requiredId(input.capabilityKey, 'capabilityKey');
       const assignment = db.prepare(`
@@ -1100,17 +1472,17 @@ function createPlatformIdentityRepository(db, options = {}) {
             revokedBy = ?,
             reason = ?
         WHERE id = ? AND version = ?
-      `).run(timestamp, actor.principalId, reason, assignment.id, assignment.version);
+      `).run(timestamp, validatedActor.principalId, reason, assignment.id, assignment.version);
       const updated = bumpMembership(
         membership.id,
         Number(membership.version),
-        actor.principalId,
+        validatedActor.principalId,
         reason,
         timestamp,
       );
-      insertAudit({
+      insertAuditRow({
         companyId: membership.companyId,
-        actor,
+        validatedActor,
         action: 'membership_capability.revoked',
         targetType: 'membership_capability_assignment',
         targetId: assignment.id,
@@ -1134,7 +1506,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       if (membership.status === 'revoked') {
         fail('PLATFORM_IDENTITY_MEMBERSHIP_REVOKED', 'Revoked membership is terminal.');
       }
-      const actor = normalizeActor(input.actor);
+      const validatedActor = resolveTrustedActor(input.actorContext, membership.companyId);
       const reason = requiredText(input.reason, 'reason');
       const nextStatus = input.status === undefined
         ? membership.status
@@ -1160,6 +1532,12 @@ function createPlatformIdentityRepository(db, options = {}) {
       if (!companyWide && nextStatus === 'active' && activeGrants.length === 0) {
         fail('PLATFORM_IDENTITY_EMPTY_BRANCH_SCOPE', 'Active explicit membership requires branch access.');
       }
+      assertMembershipCapabilityCompatibility({
+        ...membership,
+        roleTemplateKey,
+        roleTemplateVersion,
+        companyWideBranchAuthority: companyWide ? 1 : 0,
+      });
       const timestamp = input.timestamp || nowIso();
       const result = db.prepare(`
         UPDATE ${COMPANY_MEMBERSHIPS_TABLE}
@@ -1189,8 +1567,8 @@ function createPlatformIdentityRepository(db, options = {}) {
           : membership.activatedAt,
         inactivatedAt: nextStatus === 'inactive' ? timestamp : membership.inactivatedAt,
         revokedAt: nextStatus === 'revoked' ? timestamp : null,
-        updatedBy: actor.principalId,
-        revokedBy: nextStatus === 'revoked' ? actor.principalId : null,
+        updatedBy: validatedActor.principalId,
+        revokedBy: nextStatus === 'revoked' ? validatedActor.principalId : null,
         reason,
       });
       if (result.changes !== 1) {
@@ -1198,9 +1576,9 @@ function createPlatformIdentityRepository(db, options = {}) {
       }
       const updated = getMembership(membership.id);
       assertExplicitBranchMode(updated);
-      insertAudit({
+      insertAuditRow({
         companyId: membership.companyId,
-        actor,
+        validatedActor,
         action: 'membership.updated',
         targetType: 'membership',
         targetId: membership.id,
@@ -1218,12 +1596,6 @@ function createPlatformIdentityRepository(db, options = {}) {
     if (!/^[a-f0-9]{64}$/.test(configChecksum)) {
       fail('PLATFORM_IDENTITY_BOOTSTRAP_CHECKSUM_INVALID', 'Bootstrap checksum must be SHA-256.');
     }
-    const existing = db.prepare(`
-      SELECT *
-      FROM ${IDENTITY_BOOTSTRAP_RUNS_TABLE}
-      WHERE configChecksum = ? AND status = 'succeeded'
-    `).get(configChecksum);
-    if (existing) return Object.freeze({ status: 'noop', run: existing });
 
     return transactionImmediate(() => {
       assertPlatformIdentityStructure(db);
@@ -1239,6 +1611,16 @@ function createPlatformIdentityRepository(db, options = {}) {
       if (typeof options.beforeBootstrapApply === 'function') {
         options.beforeBootstrapApply(plan);
       }
+      const approval = plan.approval || {};
+      const companyId = requiredId(plan.company?.id, 'company.id');
+      const actorContext = createTrustedUserActorContext({
+        principalId: approval.approvedBy,
+        correlationId: plan.correlationId,
+      });
+      const validatedActor = resolveTrustedActor(actorContext, companyId, {
+        allowWithoutMembership: true,
+        allowWithoutMembershipAfterProvisioning: true,
+      });
       const duplicate = db.prepare(`
         SELECT *
         FROM ${IDENTITY_BOOTSTRAP_RUNS_TABLE}
@@ -1264,18 +1646,12 @@ function createPlatformIdentityRepository(db, options = {}) {
         fail('PLATFORM_IDENTITY_BOOTSTRAP_NOT_EMPTY', 'Bootstrap apply requires an empty identity authority.');
       }
 
-      const approval = plan.approval || {};
-      const actor = normalizeActor({
-        type: 'user',
-        principalId: approval.approvedBy,
-        correlationId: plan.correlationId,
-      });
       const reason = requiredText(approval.approvalReference, 'approval.approvalReference');
       const timestamp = plan.startedAt || nowIso();
       const companyResult = createCompanyAuthorityInternal({
         company: plan.company,
         branches: plan.branches,
-        actor,
+        validatedActor,
         reason,
         timestamp,
       });
@@ -1283,7 +1659,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         createRoleTemplateInternal({
           companyId: companyResult.company.id,
           ...template,
-          actor,
+          validatedActor,
           reason,
           timestamp,
         });
@@ -1292,7 +1668,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         createMembershipInternal({
           companyId: companyResult.company.id,
           ...membership,
-          actor,
+          validatedActor,
           reason,
           timestamp,
         });
@@ -1305,7 +1681,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         schemaFingerprint: requiredText(plan.schemaFingerprint, 'schemaFingerprint'),
         mode: 'apply',
         status: 'succeeded',
-        approvedBy: actor.principalId,
+        approvedBy: validatedActor.principalId,
         approvedAt: requiredText(approval.approvedAt, 'approval.approvedAt'),
         approvalReference: reason,
         backupReference: requiredText(approval.backupReference, 'approval.backupReference'),
@@ -1375,9 +1751,9 @@ function createPlatformIdentityRepository(db, options = {}) {
       WHERE id = ? AND version = 1
     `).run(input.timestamp, companyId);
     const created = getCompany(companyId);
-    insertAudit({
+    insertAuditRow({
       companyId,
-      actor: input.actor,
+      validatedActor: input.validatedActor,
       action: 'company.authority.created',
       targetType: 'company',
       targetId: companyId,
@@ -1386,10 +1762,10 @@ function createPlatformIdentityRepository(db, options = {}) {
       capabilityCatalogVersion: 1,
     });
     for (const branch of branches) {
-      insertAudit({
+      insertAuditRow({
         companyId,
         branchId: branch.id,
-        actor: input.actor,
+        validatedActor: input.validatedActor,
         action: 'branch.created',
         targetType: 'branch',
         targetId: branch.id,
@@ -1422,7 +1798,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       requiredText(input.displayName, 'displayName'),
       input.timestamp,
       input.timestamp,
-      input.actor.principalId,
+      input.validatedActor.principalId,
       input.reason,
     );
     const insertCapability = db.prepare(`
@@ -1438,11 +1814,11 @@ function createPlatformIdentityRepository(db, options = {}) {
       catalog.version,
       capabilityKey,
       input.timestamp,
-      input.actor.principalId,
+      input.validatedActor.principalId,
     ));
-    insertAudit({
+    insertAuditRow({
       companyId: input.companyId,
-      actor: input.actor,
+      validatedActor: input.validatedActor,
       action: 'role_template.created',
       targetType: 'role_template',
       targetId: `${templateKey}:v${templateVersion}`,
@@ -1459,7 +1835,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       current = grantBranchAccessInternal({
         membership: current,
         branchId,
-        actor: input.actor,
+        validatedActor: input.validatedActor,
         reason: input.reason,
         timestamp: input.timestamp,
         audit: true,
@@ -1470,7 +1846,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         membership: current,
         capabilityKey: assignment.capabilityKey,
         effect: assignment.effect,
-        actor: input.actor,
+        validatedActor: input.validatedActor,
         reason: input.reason,
         timestamp: input.timestamp,
         audit: true,
@@ -1505,6 +1881,14 @@ function createPlatformIdentityRepository(db, options = {}) {
     ) {
       fail('PLATFORM_IDENTITY_TEMPLATE_INVALID', 'An exact active role template is required.');
     }
+    assertMembershipCapabilityCompatibility({
+      companyId: input.companyId,
+      roleTemplateKey,
+      roleTemplateVersion,
+      companyWideBranchAuthority: companyWide ? 1 : 0,
+    }, {
+      assignments: input.capabilityAssignments || [],
+    });
     db.prepare(`
       INSERT INTO ${COMPANY_MEMBERSHIPS_TABLE} (
         id, companyId, principalId, status, roleTemplateKey, roleTemplateVersion,
@@ -1528,15 +1912,15 @@ function createPlatformIdentityRepository(db, options = {}) {
       activatedAt: status === 'active' ? input.timestamp : null,
       inactivatedAt: status === 'inactive' ? input.timestamp : null,
       revokedAt: status === 'revoked' ? input.timestamp : null,
-      createdBy: input.actor.principalId,
-      updatedBy: input.actor.principalId,
-      revokedBy: status === 'revoked' ? input.actor.principalId : null,
+      createdBy: input.validatedActor.principalId,
+      updatedBy: input.validatedActor.principalId,
+      revokedBy: status === 'revoked' ? input.validatedActor.principalId : null,
       reason: input.reason,
     });
     const membership = getMembership(id);
-    insertAudit({
+    insertAuditRow({
       companyId: input.companyId,
-      actor: input.actor,
+      validatedActor: input.validatedActor,
       action: 'membership.created',
       targetType: 'membership',
       targetId: id,
@@ -1577,6 +1961,8 @@ function createPlatformIdentityRepository(db, options = {}) {
 }
 
 module.exports = {
+  AUDIT_JSON_MAX_BYTES,
+  AUDIT_JSON_MAX_DEPTH,
   FORBIDDEN_BRANCH_IDS,
   PlatformIdentityRepositoryError,
   assertBranchId,
@@ -1584,5 +1970,7 @@ module.exports = {
   assertNoSecrets,
   auditJson,
   createPlatformIdentityRepository,
+  createTrustedUserActorContext,
+  isEligiblePlatformUser,
   requiredId,
 };

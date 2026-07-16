@@ -63,6 +63,11 @@ const CAPABILITY_CATALOG_V1 = Object.freeze([
   Object.freeze({ key: 'upd.correct', scopeKind: 'branch', assignable: true }),
   Object.freeze({ key: 'upd.form', scopeKind: 'branch', assignable: true }),
 ]);
+const COMPANY_SCOPED_CAPABILITY_KEYS = Object.freeze(
+  CAPABILITY_CATALOG_V1
+    .filter(capability => capability.scopeKind === 'company')
+    .map(capability => capability.key),
+);
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
@@ -1068,6 +1073,7 @@ module.exports = {
   CAPABILITY_CATALOG_V1,
   CAPABILITY_CATALOG_V1_CHECKSUM,
   CAPABILITY_CATALOG_VERSIONS_TABLE,
+  COMPANY_SCOPED_CAPABILITY_KEYS,
   COMPANY_MEMBERSHIPS_TABLE,
   FINANCIAL_TABLES,
   IDENTITY_BOOTSTRAP_RUNS_TABLE,

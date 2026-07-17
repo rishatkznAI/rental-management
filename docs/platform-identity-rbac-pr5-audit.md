@@ -1,6 +1,6 @@
 # PR5 platform identity and RBAC architecture audit
 
-**Program status:** `PR5: IMPLEMENTED FOR REVIEW — NOT RELEASED`
+**Program status:** PR5: RELEASED — neutral platform identity and fail-closed authorization foundation only.
 
 **Exact starting SHA:** `f071633e1df537dfe6595e31f3d222e0a5cc1515`
 
@@ -8,13 +8,35 @@
 
 **Worktree:** `/private/tmp/rental-management-pr5`
 
+## Release record
+
+- Implementation PR: [#210](https://github.com/rishatkznAI/rental-management/pull/210)
+- Reviewed head: `f2c3b7230f81be874ed46b3e4c243fa6e686f963`
+- Released squash commit: `35aa9891e389ab7de114475f7012d737d1165695`
+- Release date: 2026-07-17
+- Migration: `platform_identity_pr5` version 1
+- Required CI: `lightweight-pr-check` completed successfully for the reviewed head
+- Final independent review findings: P0/P1/P2 = `0/0/0`
+
+The released foundation promotes `canonical_companies` and `canonical_branches` in
+place as the only physical company and branch roots. No separate editable
+`companies` or `branches` authority exists, and no canonical child table was rebuilt
+or foreign key rebound. The server-authoritative capability catalog contains exactly
+11 entries.
+
+Release did not run production bootstrap, create production identity records, create
+canonical financial rows, deploy, or cut over any reader or writer. The production
+canonical resolver remains unconditional `null`; the feature flag alone remains
+fail-closed with `403`. Canonical production reads and writes remain disabled.
+
 ## 1. Audit boundary
 
-This document records the factual repository state before PR5 implementation and the
-implemented PR5 conformance evidence after the change. It does not authorize canonical
-production reads or writes, financial settlement, bootstrap application, a Finance or
-Company Health/Risks switch, backfill, dual write, shadow read, cutover, deployment, or
-PR6 work.
+This document records the factual repository state before PR5 implementation, the
+implemented PR5 conformance evidence, and the foundation-only release. It does not
+authorize canonical production reads or writes, financial settlement, production
+bootstrap application, a Finance or Company Health/Risks switch, backfill, dual write,
+shadow read, cutover, deployment, or PR6 work outside the Billing Source Authority
+boundary in section 18.
 
 The audit reviewed the canonical receivables contract, decision memo, PR4 design gate,
 SQLite initialization and migration conventions, authentication/session behavior,
@@ -490,7 +512,7 @@ Repeated startup preserves those counts and the migration timestamp. Legacy
 Only the redacted placeholder example is committed. No production IDs, mappings,
 template holders, approval, or backup evidence are included, and no bootstrap was run.
 
-## Independent review remediation
+## Independent review remediation (historical pre-release evidence)
 
 The independent security review evaluated old head
 `447a34743cc06823d83df7ffb917ded17a99cb04` and reported three P1 findings and one
@@ -576,7 +598,7 @@ The owner approvals listed in section 16 remain required. No production identity
 mapping, bootstrap approval, integration/system contract, audit-retention operation,
 release, or cutover decision is introduced by this remediation.
 
-## Second independent review remediation
+## Second independent review remediation (historical pre-release evidence)
 
 The second independent review evaluated head
 `cf41d108b08f6dd566e499173a2fbf9b24a792d6` and identified one remaining
@@ -624,11 +646,12 @@ after `BEGIN IMMEDIATE` before any authority write or same-checksum no-op decisi
 
 No caller-provided callback can weaken, replace, or skip these checks.
 
-The remaining owner approvals in section 16 are unchanged. PR5 remains implemented
-for review and is not released; this remediation does not approve production
-identity data, bootstrap execution, release, cutover, or PR6.
+Historical state at that remediation head: the remaining owner approvals in section
+16 were unchanged, PR5 remained implemented for review and was not released, and the
+remediation did not approve production identity data, bootstrap execution, release,
+cutover, or PR6.
 
-## Inert bootstrap input boundary remediation
+## Inert bootstrap input boundary remediation (historical pre-release evidence)
 
 The final independent review evaluated head
 `8e47510fde4507e946ff5f9013c8bd20189c1964` and identified a caller-owned
@@ -777,11 +800,23 @@ from a verified backup in a maintenance window with separate approval.
 
 ## 18. PR6 entry criteria
 
-PR6 remains blocked until PR5 is reviewed and released, concrete production identity
-and authorization mappings are approved and applied through the controlled bootstrap,
-and the separate PR6 source-authority/accounting/legal gates in the canonical
-receivables contract are satisfied. PR5 itself starts no PR6 source, billing-period,
-UPD, forecast, posting, or settlement implementation.
+With PR5 released within its foundation-only boundary, PR6 may begin only as Billing
+Source Authority. Its allowed scope is:
+
+- closed billing periods;
+- immutable billing snapshots;
+- an explicit conducted-UPD lifecycle;
+- stable UPD line IDs;
+- deterministic line-to-period mappings.
+
+PR6 remains subject to the separate source-authority, accounting, legal, evidence,
+and lifecycle gates in the canonical receivables contract. It may not:
+
+- create canonical receivables or perform canonical writes;
+- enable the canonical read API;
+- switch Finance or Company Health;
+- run production bootstrap;
+- implement PR7.
 
 ## 19. Architecture conformance assertions
 

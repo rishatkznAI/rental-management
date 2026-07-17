@@ -1,14 +1,18 @@
 # Canonical receivables backend contract
 
-**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; `PR4: DESIGN APPROVED — IMPLEMENTATION NOT STARTED`
+**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; PR4 **DESIGN APPROVED** as a historical design gate and not released; PR5 **RELEASED** as the neutral platform identity and fail-closed authorization foundation only
 
 **Audit date:** 2026-07-15
+
+**Current-state update:** 2026-07-17
 
 **PR1 merge commit:** `ae9d8a8a286307f5d6e701585750af94d631edc1`
 
 **PR2 merge commit:** `ee2c1b6e1340acb3fc3149c6a39487a283db829c`
 
-**Implementation status:** the PR1 additive schema/domain foundation, PR2 settlement/domain foundation, and PR3 isolated read-only query/aging infrastructure are released. Both version 1 migrations are applied and verified, and all eight canonical tables are present and empty in the recorded production evidence. PR3 release does not enable its production feature flag or trusted scope. Production posting, settlement, and canonical reads remain disabled; production reads and writes remain on the existing systems, and no cutover has occurred. PR4 architecture/design is approved but not released and introduces no implementation. After PR4 merges, PR5 may begin only as the approved scope-authority/RBAC foundation.
+**PR5 implementation PR / reviewed head / released squash commit:** [#210](https://github.com/rishatkznAI/rental-management/pull/210); `f2c3b7230f81be874ed46b3e4c243fa6e686f963`; `35aa9891e389ab7de114475f7012d737d1165695`
+
+**Implementation status:** PR1, PR2, and PR3 are released within their recorded foundation-only boundaries. PR4 remains a design-approved historical gate and was not released. PR5 is released only as the neutral platform identity and fail-closed authorization foundation. PR6 may now begin only as Billing Source Authority. Canonical production reads and writes, production settlement, production identity/bootstrap activation, Finance or Company Health switching, deployment, and cutover remain disabled or unperformed.
 
 ## Product-owner baseline
 
@@ -26,7 +30,7 @@
 
 **No silent assumptions:** unresolved source evidence/sufficiency, proven-date evidence, exact money/VAT/rounding, source compensation, downtime/extension authority, coverage precedence, activation date/cohort, concrete membership records, audited capability assignments, named integration contracts, approval thresholds, or expanded permission details remain disabled, fail-closed, or escalated. Implementation must not invent a finite retention period.
 
-**Current product-owner status:** the canonical ledger baseline is approved; the PR1 schema foundation, PR2 settlement foundation, and PR3 default-disabled read-only infrastructure are released; and all eight canonical tables remain empty. The production ledger remains inactive, with reads and writes continuing on the existing systems. `PR4: DESIGN APPROVED — IMPLEMENTATION NOT STARTED`. PR4 is not released. Production settlement, canonical writes, canonical read switches, backfill, dual write, shadow reads, and cutover remain blocked.
+**Current product-owner status:** PR1 is **RELEASED**; PR2 is **RELEASED**; PR3 is **RELEASED**; PR4 is **DESIGN APPROVED** as a historical design gate and is not released; and PR5 is **RELEASED, foundation only**. The production ledger remains inactive, with canonical production reads and writes disabled and existing systems continuing to serve production behavior. PR6 may begin only as Billing Source Authority under the boundaries recorded below. Production settlement, canonical writes, canonical read switches, backfill, dual write, shadow reads, deployment, bootstrap, and cutover remain blocked.
 
 ## PR1 implementation record
 
@@ -66,9 +70,9 @@ The migration was applied exactly once. Repeated startup followed the idempotent
 
 The company and branch foundation is intentionally schema-only. The audited repository and populated local snapshot contain no relational company/branch tables, stable tenant IDs, user membership, or authenticated tenant context that PR1 could reference. Each placeholder company row requires `receivablesTimezone`, while each receivable keeps its immutable `companyTimezone` snapshot. `canonical_receivables` and `financial_audit_events` use composite `(companyId, branchId)` foreign keys, so a branch from another company cannot be referenced.
 
-`canonical_companies` and `canonical_branches` are not an independently usable operational tenant directory: PR1 provides no CRUD, seed, backfill, synchronization, authentication lookup, or application repository for them, and they remain empty. Before any canonical production write, PR6 must identify or create the approved operational company/branch authority, assign stable IDs, map every user/company/branch/Head Office membership, and populate these roots through a reviewed idempotent migration. At that gate the project must either adopt these roots as the single approved tenant master or rebuild the empty canonical foreign keys against another approved master; running two independently editable identity models is forbidden. IDs must never be inferred from names or from the current user. Until that mapping and authorization exist, a direct database administrator could insert a scope unrelated to an application tenant, but no PR1 application path can do so and no canonical write may be enabled.
+**Historical PR1 release boundary:** `canonical_companies` and `canonical_branches` were not yet an independently usable operational tenant directory: PR1 provided no CRUD, seed, backfill, synchronization, authentication lookup, or application repository for them, and they remained empty. A later authority stage therefore had to adopt those roots as the single approved tenant master or rebuild the empty canonical foreign keys against another approved master; running two independently editable identity models was forbidden. PR5 has since promoted the same physical roots in place as the neutral platform identity authority without rebuilding child tables or rebinding foreign keys. Concrete production IDs, memberships, mappings, approvals, and bootstrap remain unapplied and must exist before any separately authorized production enablement; PR6 may not run that production bootstrap. IDs must never be inferred from names or from the current user, and no canonical write may be enabled.
 
-PR1 therefore solves only the schema-level invariant that every canonical row has a company and a same-company branch. It deliberately does not claim end-to-end tenant isolation, active-tenant matching, user membership, or branch RBAC; those remain blocking PR6 work rather than being silently treated as complete.
+At its historical release gate, PR1 therefore solved only the schema-level invariant that every canonical row has a company and a same-company branch. It did not claim end-to-end tenant isolation, active-tenant matching, user membership, or branch RBAC. PR5 now supplies the released fail-closed authority foundation, but concrete production identity state and production enablement remain absent and are not silently treated as complete.
 
 Existing clients, contracts, rentals, documents, and users remain JSON records in `app_data`. Consequently `clientId`, nullable `contractId`, nullable `rentalId`, and audit `actorId` have no database foreign keys in PR1, and this implementation does not claim referential integrity for them. Domain validation requires stable IDs and never derives identity from a client name; future posting/backfill must validate their company ownership through the approved scoped registries before insertion.
 
@@ -150,7 +154,7 @@ The legacy JSON `payments` and `payment_allocations` collections are not canonic
 
 **Reversal chains:** allocation and adjustment originals may have at most one pending or confirmed reversal. Allocation reversals and adjustment reversal rows cannot themselves be reversed; reversal-of-reversal is fail-closed. A confirmed refund may be reversed exactly once because refund reversal is an explicitly approved payment event, while a refund-reversal row cannot be reversed again.
 
-**D-25 implementation:** numerical and age thresholds remain absent. The approved temporary D-25 domain policy is implemented in PR2 infrastructure at the domain, schema, and repository layers. Real user membership, roles, capabilities, finance-owner/commercial-owner mapping, company/branch scope, and approval enforcement remain PR6 blockers, so production use remains disabled until PR6 is implemented and verified. Capability and matching-evidence policies are accepted as injected trusted-server context rather than read from a global session or caller assertion. Approval request identity and payload snapshots are immutable and bind operation type, aggregate, amount, currency, targets, branches, evidence/support, correlation, and operation-specific fields before confirmation.
+**D-25 implementation:** numerical and age thresholds remain absent. The approved temporary D-25 domain policy is implemented in PR2 infrastructure at the domain, schema, and repository layers. PR5 now supplies the released membership, role-template, capability, company/branch-scope, and fail-closed authorization foundation. Concrete production identity records and approval assignments remain absent, so production use remains disabled; PR6 cannot create or activate those records. Capability and matching-evidence policies are accepted as injected trusted-server context rather than read from a global session or caller assertion. Approval request identity and payload snapshots are immutable and bind operation type, aggregate, amount, currency, targets, branches, evidence/support, correlation, and operation-specific fields before confirmation.
 
 **Audit:** settlement operations append the required `payment_recorded`, allocation, adjustment, refund, write-off, due-date-change, and cancellation request/approval/rejection/reversal event types to `financial_audit_events`. Payloads retain correlation and approval references, previous/new values where applicable, and reject secret-bearing keys. Existing audit update/delete/replace protection remains unchanged.
 
@@ -171,7 +175,7 @@ PR3 adds an isolated canonical query/read side backed only by the eight PR1/PR2 
 - `GET /api/receivables/summary`;
 - `GET /api/receivables/aging`.
 
-The endpoints are guarded by `CANONICAL_RECEIVABLES_READ_API_ENABLED`, which defaults to disabled. Enabling route registration is not sufficient to grant access: the production trusted-scope resolver deliberately returns no mapping and therefore fails closed until PR6 supplies authenticated principal, company membership, allowed-branch or company-wide branch authority, and the `receivables.read` capability. Administrator status alone is not a substitute. Cursor pagination is signed with server-side `CANONICAL_RECEIVABLES_CURSOR_SECRET` configuration when the API is enabled.
+The endpoints are guarded by `CANONICAL_RECEIVABLES_READ_API_ENABLED`, which defaults to disabled. Enabling route registration is not sufficient to grant access: the production trusted-scope resolver remains unconditional `null`, so the route fails closed with `403` after authentication and before data access. The released PR5 foundation does not populate production identity records or connect a production resolver, and PR6 may not enable the API or resolver. Administrator status alone is not a substitute. Cursor pagination is signed with server-side `CANONICAL_RECEIVABLES_CURSOR_SECRET` configuration when the API is enabled.
 
 The read repository exposes only a read-snapshot entrypoint. It never exposes PR2 mutation methods to HTTP code and imports no legacy Finance or `app_data` semantics. Balance projection reuses the pure PR2 settlement arithmetic, applies only confirmed effective canonical events, preserves allocation/adjustment reversal effects, and fails on unsafe integer or reconciliation errors. Historical due-date aging reads a complete, chronologically reconciled chain of append-only `due_date_change_approved` evidence valid at the requested company-local as-of point; malformed, duplicate, conflicting, or incomplete evidence fails without financial output. Aging uses `calculationVersion: "receivables-aging-v1"`, company IANA civil dates, the approved exclusive buckets and precedence, and all three exact minor-unit reconciliation equations. List, summary, aging, payment, and allocation scans stay inside one SQLite read snapshot and use bounded keyset batches (200 aggregate entities/effects, with a 201-row list lookahead). Enabled route registration requires a non-default cursor HMAC secret of at least 32 bytes.
 
@@ -219,6 +223,32 @@ An active/open rental period, preliminary calculation, forecast, expected paymen
 A **forecast** is a separate, replaceable planning result. It never enters canonical receivables, balance, aging, overdue, collection, settlement, or accounting totals; never automatically converts to actual; and never becomes canonical debt. Each result must carry `calculatedAt`, horizon, amount, confidence/reasons, calculation version and lineage, and effective-term inputs. The three separately visible lanes, the “closed billing without conducted UPD” display, and the `actual outstanding + closed unbilled + open-period forecast` equation are approved. Exact one-slice coverage precedence/key enforcement remains `OWNER APPROVAL REQUIRED`.
 
 PR4 records the approved forward-only coverage boundary: only fully source-governed periods may participate, with no partial-period or historical import. No historical backfill, migration, dual write, or legacy normalization is approved. Existing Finance and Company Health paths remain unchanged. PR1–PR3 release evidence remains authoritative and all eight canonical tables remain empty under the recorded production evidence.
+
+## PR5 release record
+
+**PR5: RELEASED — neutral platform identity and fail-closed authorization foundation only.**
+
+Implementation PR [#210](https://github.com/rishatkznAI/rental-management/pull/210), reviewed head `f2c3b7230f81be874ed46b3e4c243fa6e686f963`, was squash-merged as `35aa9891e389ab7de114475f7012d737d1165695` on 2026-07-17. Its required `lightweight-pr-check` completed successfully, and the final independent review reported P0/P1/P2 findings of `0/0/0`.
+
+The released migration is `platform_identity_pr5` version 1. The only physical company and branch roots remain `canonical_companies` and `canonical_branches`; no separate editable `companies` or `branches` authority exists. Existing canonical child tables were not rebuilt and their foreign keys were not rebound. The server-authoritative capability catalog contains exactly 11 entries. Repository-owned transactional revalidation is mandatory for controlled bootstrap apply, and the bootstrap-plan input boundary is inert before the transaction.
+
+Release marks code and architecture only. Production bootstrap was not run; production identity records and canonical financial rows were not created; deployment and cutover were not performed. The production canonical resolver remains unconditional `null`. The feature flag alone remains fail-closed with `403`, and canonical production reads and writes remain disabled.
+
+PR6 may now begin only as **Billing Source Authority**, limited to:
+
+- closed billing periods;
+- immutable billing snapshots;
+- an explicit conducted-UPD lifecycle;
+- stable UPD line IDs;
+- deterministic line-to-period mappings.
+
+PR6 may not:
+
+- create canonical receivables or perform any canonical write;
+- enable the canonical read API;
+- switch Finance or Company Health;
+- run production bootstrap;
+- implement PR7.
 
 ## 1. Purpose and decisions at a glance
 
@@ -779,7 +809,7 @@ Use backend capabilities, mapped to roles separately:
 
 #### 8.3.1 Temporary D-25 initial-release authority policy
 
-This policy is approved for PR2 domain implementation and the initial release. It does not authorize production operations before revised PR5 authorization enforcement exists.
+This policy is approved for PR2 domain implementation and the initial release. The released PR5 authorization foundation does not by itself authorize production operations; production identity state, operation-specific enforcement, and separate enablement approval remain required.
 
 1. **Ordinary payment allocation**
    - An accountant may create the allocation.
@@ -1054,7 +1084,7 @@ The forward-only coverage rule is approved: only periods fully governed by the n
 
 ### Activation safety requirements
 
-Before any forward-only source projection can be enabled, revised PR5–PR8 must establish trusted scope/RBAC, immutable billing-period authority, conducted-UPD authority and stable UPD lines, deterministic mappings, effective commercial terms, integer-minor money/VAT/rounding policy, source versioning, correction semantics, and a dry-run discrepancy path that performs no writes. Unresolved or contradictory evidence is quarantined and produces no canonical receivable.
+Before any forward-only source projection can be enabled, the released PR5 foundation and the gated PR6–PR8 work must establish approved production trusted scope, immutable billing-period authority, conducted-UPD authority and stable UPD lines, deterministic mappings, effective commercial terms, integer-minor money/VAT/rounding policy, source versioning, correction semantics, and a dry-run discrepancy path that performs no writes. Unresolved or contradictory evidence is quarantined and produces no canonical receivable.
 
 Rollback disables the relevant projector/read flag while retaining every financial and audit record indefinitely. Rollback never deletes canonical rows, source evidence, forecast lineage, quarantine records, or audit events. Backup/restore verification remains mandatory before any later schema or production-write stage, but PR4 itself creates no schema and touches no data.
 
@@ -1102,7 +1132,7 @@ sum(confirmed receipt amounts)
 
 ## 14. Test plan
 
-PR1 implements focused schema, domain, isolation, audit, and runtime-boundary tests for its released additive foundation. PR2 implements focused settlement schema, balance, allocation, adjustment, refund, reversal, approval, SQLite locking/version, audit, migration, and runtime-boundary tests for its released but production-inactive foundation. PR3 implements focused default-disabled read and aging safety tests. The remaining items below define future coverage for source authority, forecast isolation, forward-only activation, cutover, and end-to-end revised PR5 authorization behavior:
+PR1 implements focused schema, domain, isolation, audit, and runtime-boundary tests for its released additive foundation. PR2 implements focused settlement schema, balance, allocation, adjustment, refund, reversal, approval, SQLite locking/version, audit, migration, and runtime-boundary tests for its released but production-inactive foundation. PR3 implements focused default-disabled read and aging safety tests. PR5 implements focused platform-identity, transactional-bootstrap, capability, audit, and fail-closed trusted-scope tests. The remaining items below define future coverage for billing source authority, forecast isolation, forward-only activation, operation-specific production enforcement, and cutover:
 
 ### Domain
 
@@ -1198,37 +1228,37 @@ Remaining conditional items are narrow and must not be filled by implementation 
 |---|---|---|---|
 | D-01 source sufficiency | Actual only when the relevant billing period is closed **and** the matching UPD is formed and explicitly conducted; signed never implies conducted | Accountant/legal confirmation of the exact authoritative period/UPD statuses, evidence, date, and any additional signature requirement | PR6 source authority, PR8 source dry run, PR9 projection, and later cutover |
 | Forecast boundary/details | Forecast remains planning-only. Three lanes/components, total equation, 30-day horizon, status allow-list, `planned_future`, confidence levels/reasons, indefinite history, separate advances, return-line boundary, and minimum-term/discount order are approved | Exact coverage precedence/key enforcement and authoritative downtime/extension/return input lifecycle; schema/API details | PR7 forecast implementation and PR11 consumers |
-| Scope/RBAC | Revised sequence, neutral platform identity authority, stable branch semantics, stable memberships, explicit versioned capability model, and deny-by-default authorization are approved | PR5 must design safe replacement/rebinding of the empty canonical company/branch FK roots, implement audited administration and scoped lookup enforcement, and verify the model without enabling canonical production reads/writes | PR5 implementation after PR4 merge; owner-decision gate passed |
+| Scope/RBAC | Revised sequence, neutral platform identity authority, stable branch semantics, stable memberships, explicit versioned capability model, and deny-by-default authorization are approved | PR5 implemented and verified the foundation by promoting the existing roots in place; production records, bootstrap, resolver connection, and enablement remain absent | PR5 **RELEASED — foundation only** |
 | D-24 retention | Financial and audit records are retained indefinitely; deletion, purge, TTL, scheduled cleanup, and rollback deletion are forbidden | Accountant/legal confirmation of legal hold, export, access, privacy, and tamper-evidence controls; no finite duration may be invented | PR6 where financial/audit records are created, PR8/PR9, and later activation as relevant; not PR5 scope/RBAC or the separately approved PR7 forecast-history policy |
-| D-25 approval policy | Mandatory dual approval is approved for refunds, credit/debit adjustments, reversals/corrections, write-offs, posted-receivable cancellations, post-allocation due-date changes, and cross-branch allocations; tightly constrained ordinary allocations follow the approved exception above | Monetary and age thresholds are deferred; revised PR5 must map concrete users, memberships, roles, and capabilities and enforce the approval policy before production enablement | Revised PR5 authorization enforcement and production enablement; does not block released PR2 domain implementation |
+| D-25 approval policy | Mandatory dual approval is approved for refunds, credit/debit adjustments, reversals/corrections, write-offs, posted-receivable cancellations, post-allocation due-date changes, and cross-branch allocations; tightly constrained ordinary allocations follow the approved exception above | Monetary and age thresholds are deferred; concrete production users, memberships, roles, capabilities, and operation-specific enforcement remain required before production enablement | Future production authorization/operation integration; does not block released PR2 or PR5 foundations |
 
 ### 15.1 Implementation gate summary
 
 | Gate | Outcome | Remaining condition |
 |---|---|---|
 | PR1 canonical schema/domain | **RELEASED** | Foundation only; production posting and canonical reads remain disabled |
-| PR2 payments/allocations/adjustments | **RELEASED** | Settlement/domain foundation only; production settlement remains blocked until revised PR5 authorization enforcement |
+| PR2 payments/allocations/adjustments | **RELEASED** | Settlement/domain foundation only; production settlement remains blocked despite the released PR5 foundation |
 | PR3 read API/aging | **RELEASED — read-only infrastructure only** | Production flag and trusted scope remain disabled/unmapped; no production read switch |
 | PR4 actual/forecast design gate | **DESIGN APPROVED — IMPLEMENTATION NOT STARTED** | Architecture, sequence, and named PR5 decisions approved; documentation only, not released, no production behavior |
-| PR5 scope/RBAC | **MAY BEGIN AFTER PR4 MERGE — FOUNDATION ONLY** | Implement the approved neutral identity, branch, membership, capability, and default-deny model; no canonical reads/writes or financial behavior |
-| PR6 source authority | **BLOCKED pending PR5 plus PR6 source gates** | Exact authority/evidence and accountant/legal confirmation for close/reopen, conducted/signature, granularity/cardinality, VAT/rounding, corrections, and returns; no canonical writes |
-| PR7 forecast domain | **BLOCKED pending PR5 plus remaining forecast gates** | Exact lane precedence/coverage mechanics and downtime/extension/return authority; separate planning API/storage; no canonical writes or consumer switch |
-| PR8 source dry run | **BLOCKED pending PR5/PR6 and actual-source gates** | Source sufficiency, proven-date evidence, exact money/VAT, mappings, activation date/cohort, idempotency, reconciliation, and zero-delta evidence; no writes/backfill |
+| PR5 scope/RBAC | **RELEASED — FOUNDATION ONLY** | Neutral identity, branch, membership, capability, audit, and fail-closed model implemented; no production records, bootstrap, canonical reads/writes, or financial behavior |
+| PR6 Billing Source Authority | **MAY BEGIN — SOURCE AUTHORITY ONLY** | Closed periods, immutable billing snapshots, explicit conducted-UPD lifecycle, stable UPD line IDs, and deterministic line-to-period mappings; no canonical writes, read enablement, product switch, bootstrap, or PR7 |
+| PR7 forecast domain | **BLOCKED pending remaining forecast gates** | Exact lane precedence/coverage mechanics and downtime/extension/return authority; separate planning API/storage; no canonical writes or consumer switch |
+| PR8 source dry run | **BLOCKED pending PR6 and actual-source gates** | Source sufficiency, proven-date evidence, exact money/VAT, mappings, activation date/cohort, idempotency, reconciliation, and zero-delta evidence; no writes/backfill |
 | PR9 blocked canonical adapter | **BLOCKED pending PR8 and separate explicit owner authorization** | Forward-only, default-disabled canonical projection; no backfill and no dual write |
 | PR10 settlement integration | **BLOCKED pending PR9** | Trusted production authorization and approved actual-receivable source projection |
 | PR11 shadow reads | **BLOCKED pending PR9–PR10** | Read-only comparison with existing Finance/Company Health; no user-visible switch |
 | PR12 cutover | **BLOCKED** | Accountant/legal confirmations, signed zero-unexplained-delta evidence, rollback proof, owner approval, and staged read enablement |
 
-No gate outcome authorizes product behavior beyond its named PR scope. PR1, PR2, and PR3 RELEASED status covers only the additive schema/domain, settlement/domain, and default-disabled read-only foundations recorded above; all remain outside production business reads and writes.
+No gate outcome authorizes product behavior beyond its named PR scope. PR1, PR2, PR3, and PR5 RELEASED status covers only their recorded foundations; all remain outside canonical production business reads and writes.
 
 ### 15.2 Stage-specific readiness boundary
 
-- **PR5 may begin after PR4 merges.** The revised sequence, neutral company/branch authority, dedicated Head Office semantics, stable membership model, explicit capability model, deny-by-default authorization, and continued prohibition on canonical reads/writes are approved. PR5 must remain a scope-authority/RBAC foundation and is not blocked by UPD, signature, due-date, VAT, billing-period, forecast, correction, reconciliation, or settlement decisions it does not implement.
-- **PR6 remains blocked** by its billing-period, close/reopen, conducted-UPD, signature, mapping/granularity, VAT/rounding, correction/cancellation, return-source, and relevant accountant/legal gates. Product-level decisions already approved do not remove the named external/evidence requirements.
+- **PR5 is released, foundation only.** The neutral company/branch authority, dedicated Head Office semantics, stable membership model, explicit capability model, append-only authorization audit, controlled bootstrap tooling, and deny-by-default authorization are implemented without enabling canonical production reads or writes.
+- **PR6 may begin only as Billing Source Authority.** Its allowed scope is closed billing periods, immutable billing snapshots, an explicit conducted-UPD lifecycle, stable UPD line IDs, and deterministic line-to-period mappings. It remains gated by the applicable close/reopen, conducted-UPD, signature, mapping/granularity, VAT/rounding, correction/cancellation, return-source, and accountant/legal requirements.
 - **PR7 remains blocked** only by its forecast-specific dependencies: three-lane coverage mechanics, forecast inputs/status/horizon/confidence/history/advances, and effective terms including minimum terms, discounts, downtime, extensions, and returns. Approved items are recorded; downtime/extension and exact return/coverage mechanics remain unresolved.
 - **PR8 and PR9 remain blocked** by all actual-source sufficiency, reconciliation, exact activation, legal/accounting, idempotency/replay, and zero-unexplained-delta gates. PR9 additionally requires separate explicit canonical-write authorization.
 
-The approved PR5 scope explicitly forbids canonical production reads, canonical writes, canonical financial-row population, billing-period implementation, conducted-UPD implementation, forecast calculations, actual-source eligibility, settlement, Finance or Company Health/Risks switching, backfill, dual write, shadow read, and cutover. Future canonical posting and settlement capabilities may be reserved in design only; PR5 may not enable, assign, route, or enforce them as active production behavior.
+PR6 may not create canonical receivables, perform canonical writes, enable the canonical read API, switch Finance or Company Health, run production bootstrap, or implement PR7. Future canonical posting and settlement capabilities remain inactive and require their own later gates.
 
 ## 16. Recommended implementation PR sequence
 
@@ -1240,7 +1270,7 @@ This prospective dependency order is **APPROVED — 2026-07-15** exactly as docu
 | PR2 | Payment/allocation/adjustment foundation | **RELEASED**; isolated, no production settlement | Preserved release evidence |
 | PR3 | Read-only canonical API/aging foundation | **RELEASED**; default-disabled, trusted scope null/fail-closed | Preserved release evidence |
 | PR4 | Actual-versus-forecast architecture and design gate | Documentation only; no code/schema/data/config/runtime changes | `DESIGN APPROVED — IMPLEMENTATION NOT STARTED`; merge completes the documentation gate, not a release |
-| PR5 | Scope, membership, neutral company/branch authority, and RBAC | May begin after PR4 merge; no financial activation and no canonical production reads/writes | Approved model implemented with safe empty-root rebinding design, audited administration, cross-scope tests, and real-principal enforcement |
+| PR5 | Scope, membership, neutral company/branch authority, and RBAC | **RELEASED** foundation only; no financial activation and no canonical production reads/writes | Released as `35aa9891e389ab7de114475f7012d737d1165695`; production resolver remains null and bootstrap was not run |
 | PR6 | Closed billing period, conducted UPD, stable lines, mapping, commercial-term, due-date, money/VAT, correction, and audit source authority | Source facts only; no canonical projection | Authoritative lifecycle and evidence contract approved |
 | PR7 | Separate forecast domain | Planning-only writes/reads; cannot reference canonical write adapters | Isolation, lineage, confidence/reasons, and replacement semantics approved |
 | PR8 | Source-authority dry run and discrepancy/quarantine reporting | Strictly no canonical or legacy writes | Deterministic zero-duplicate evidence and classified discrepancies approved |

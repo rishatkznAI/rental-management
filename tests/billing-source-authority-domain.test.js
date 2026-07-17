@@ -10,7 +10,9 @@ const require = createRequire(import.meta.url);
 const {
   BillingSourceAuthorityError,
   OPERATION_CAPABILITIES,
+  canonicalizeEvidenceSet,
   civilDate,
+  computeEvidenceSetHash,
   fingerprint,
   materializeBillingSourceCommandPlan,
   moneyMinor,
@@ -81,6 +83,63 @@ test('calculation-input hash is deterministic and includes algorithm version', (
   const changedPlan = materializeBillingSourceCommandPlan(changedAlgorithm);
   assert.equal(firstPlan.snapshot.calculationInputsHash, reorderedPlan.snapshot.calculationInputsHash);
   assert.notEqual(firstPlan.snapshot.calculationInputsHash, changedPlan.snapshot.calculationInputsHash);
+});
+
+test('evidence-set integrity is order-independent and covers every authoritative field', () => {
+  const first = closePlan().evidence[0];
+  const second = {
+    ...first,
+    evidenceType: 'contract',
+    sourceId: 'contract-source-1',
+    sourceEventId: 'contract-evidence-event-1',
+    authorityPolicyRef: 'contract-authority-policy-test-v1',
+    evidenceHash: hash('contract-evidence-1'),
+  };
+  const baseline = computeEvidenceSetHash([first, second]);
+  assert.equal(baseline, computeEvidenceSetHash([second, first]));
+  for (const [field, changed] of [
+    ['evidenceType', { evidenceType: 'effective_terms' }],
+    ['sourceEventVersion', { sourceEventVersion: 2 }],
+    ['covered interval', { coveredEndDateExclusive: '2026-08-31' }],
+    ['authorityStatus', { authorityStatus: 'rejected', authorityPolicyRef: null }],
+    ['authorityPolicyRef', { authorityPolicyRef: 'rental-authority-policy-test-v2' }],
+    ['evidenceHash', { evidenceHash: hash('changed-evidence-content') }],
+  ]) {
+    assert.notEqual(
+      baseline,
+      computeEvidenceSetHash([{ ...first, ...changed }, second]),
+      field,
+    );
+  }
+});
+
+test('duplicate evidence identities fail closed as exact duplicates or conflicting facts', () => {
+  const evidence = closePlan().evidence[0];
+  assert.throws(
+    () => canonicalizeEvidenceSet([evidence, { ...evidence }]),
+    error => code(error, 'BILLING_SOURCE_DUPLICATE_EVIDENCE'),
+  );
+  assert.throws(
+    () => canonicalizeEvidenceSet([evidence, { ...evidence, evidenceHash: hash('conflicting-content') }]),
+    error => code(error, 'BILLING_SOURCE_CONFLICTING_EVIDENCE'),
+  );
+});
+
+test('caller evidence hash is assertion-only and materialized evidence is isolated from caller mutation', () => {
+  const arbitrary = closePlan();
+  arbitrary.snapshot.evidenceSetHash = hash('caller-authoritative-hash');
+  assert.throws(
+    () => materializeBillingSourceCommandPlan(arbitrary),
+    error => code(error, 'BILLING_SOURCE_UNKNOWN_FIELD'),
+  );
+
+  const input = closePlan();
+  const expectedHash = computeEvidenceSetHash(input.evidence);
+  input.snapshot.expectedEvidenceSetHash = expectedHash;
+  const plan = materializeBillingSourceCommandPlan(input);
+  input.evidence[0].evidenceHash = hash('mutated-after-materialization');
+  assert.equal(plan.snapshot.expectedEvidenceSetHash, expectedHash);
+  assert.equal(computeEvidenceSetHash(plan.evidence), expectedHash);
 });
 
 test('matched snapshots require exact discount-before-VAT and net/VAT/gross arithmetic', () => {

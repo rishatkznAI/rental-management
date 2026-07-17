@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   closePlan,
+  conductPlan,
   createBillingSourceContext,
   formPlan,
   hash,
@@ -159,6 +160,41 @@ test('SQLite-native close fault injection rolls back each authority write stage'
   }
 });
 
+test('transaction-owned persisted evidence hash mismatch rolls back the complete close', () => {
+  const context = createBillingSourceContext();
+  try {
+    insertActivationBoundary(context);
+    const before = counts(context.db);
+    context.db.exec(`
+      CREATE TEMP TRIGGER inject_persisted_evidence_mismatch
+      AFTER INSERT ON billing_source_snapshot_evidence
+      WHEN NEW.evidenceType <> 'other_explicit'
+      BEGIN
+        INSERT INTO billing_source_snapshot_evidence (
+          id, companyId, branchId, snapshotId, evidenceType, sourceSystem,
+          sourceId, sourceVersion, sourceEventId, sourceEventVersion,
+          coveredStartDate, coveredEndDateExclusive, authorityStatus,
+          authorityPolicyRef, evidenceHash, schemaVersion, createdAt
+        ) VALUES (
+          'injected-evidence-row', NEW.companyId, NEW.branchId, NEW.snapshotId,
+          'other_explicit', 'fault_injection', 'injected-source', 1,
+          'injected-event', 1, NEW.coveredStartDate, NEW.coveredEndDateExclusive,
+          'unresolved', NULL, '${hash('injected-evidence-content')}', NEW.schemaVersion, NEW.createdAt
+        );
+      END;
+    `);
+    assert.throws(
+      () => context.service.closeBillingPeriod(context.commandContext, closePlan()),
+      error => code(error, 'BILLING_SOURCE_PERSISTED_EVIDENCE_HASH_MISMATCH'),
+    );
+    assert.deepEqual(counts(context.db), before);
+    assert.equal(context.db.inTransaction, false);
+    assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+  } finally {
+    context.close();
+  }
+});
+
 test('SQLite-native form fault injection rolls back UPD, line, coverage, operation, and audit stages', async t => {
   for (const table of [
     'billing_source_upds',
@@ -195,6 +231,110 @@ test('SQLite-native form fault injection rolls back UPD, line, coverage, operati
       }
     });
   }
+});
+
+test('coverage lifecycle insertion failure rolls back complete cancellation and replacement transactions', async t => {
+  await t.test('cancel', () => {
+    const context = createBillingSourceContext();
+    try {
+      insertActivationBoundary(context);
+      context.service.closeBillingPeriod(context.commandContext, closePlan());
+      context.service.formUpd(context.commandContext, formPlan(context));
+      context.service.conductUpd(context.commandContext, conductPlan(context));
+      const upd = context.db.prepare('SELECT id FROM billing_source_upds').get();
+      const before = counts(context.db);
+      context.db.exec(`
+        CREATE TEMP TRIGGER fail_cancel_coverage_lifecycle
+        BEFORE INSERT ON billing_source_coverage_supersessions
+        BEGIN
+          SELECT RAISE(ABORT, 'forced cancellation lifecycle failure');
+        END;
+      `);
+      assert.throws(() => context.service.correctUpd(context.commandContext, {
+        operationType: 'correct_upd',
+        idempotencyKey: 'cancel-lifecycle-fault',
+        updId: upd.id,
+        expectedUpdVersion: 3,
+        action: 'cancel',
+        reasonCode: 'CANCEL_FAULT',
+        reasonText: 'Cancellation lifecycle fault injection',
+        sourceEventId: 'cancel-lifecycle-fault-event',
+        sourceEventVersion: 1,
+        sourceHash: hash('cancel-lifecycle-fault-event'),
+      }), /forced cancellation lifecycle failure/);
+      assert.deepEqual(counts(context.db), before);
+      assert.equal(context.db.prepare('SELECT state FROM billing_source_upd_versions ORDER BY version DESC LIMIT 1').get().state, 'conducted');
+      assert.equal(context.db.inTransaction, false);
+    } finally {
+      context.close();
+    }
+  });
+
+  await t.test('replace', () => {
+    const context = createBillingSourceContext();
+    try {
+      insertActivationBoundary(context);
+      context.service.closeBillingPeriod(context.commandContext, closePlan());
+      context.service.formUpd(context.commandContext, formPlan(context));
+      context.service.conductUpd(context.commandContext, conductPlan(context));
+      const upd = context.db.prepare('SELECT id FROM billing_source_upds').get();
+      const line = context.db.prepare('SELECT * FROM billing_source_upd_lines').get();
+      const predecessor = context.db.prepare('SELECT id FROM billing_source_coverage_sets').get();
+      const before = counts(context.db);
+      context.db.exec(`
+        CREATE TEMP TRIGGER fail_replacement_coverage_lifecycle
+        BEFORE INSERT ON billing_source_coverage_supersessions
+        BEGIN
+          SELECT RAISE(ABORT, 'forced replacement lifecycle failure');
+        END;
+      `);
+      assert.throws(() => context.service.correctUpd(context.commandContext, {
+        operationType: 'correct_upd',
+        idempotencyKey: 'replace-lifecycle-fault',
+        updId: upd.id,
+        expectedUpdVersion: 3,
+        action: 'replace',
+        reasonCode: 'REPLACE_FAULT',
+        reasonText: 'Replacement lifecycle fault injection',
+        sourceEventId: 'replace-lifecycle-fault-event',
+        sourceEventVersion: 1,
+        sourceHash: hash('replace-lifecycle-fault-event'),
+        lines: [{
+          id: line.id,
+          sourceLineRef: line.sourceLineRef,
+          sourceLineIdentityKind: line.sourceLineIdentityKind,
+          displayPosition: 2,
+          description: 'Replacement lifecycle fault line',
+          quantityValueInteger: 1,
+          quantityScale: 0,
+          unitCode: 'service',
+          currency: 'RUB',
+          netMinor: 100_000,
+          vatMinor: 20_000,
+          grossMinor: 120_000,
+          vatPolicyRef: 'vat-policy-test-v1',
+          roundingPolicyRef: 'rounding-policy-test-v1',
+          policyDecisionRef: 'policy-decision-test-v1',
+          sourceIntegrityStatus: 'matched',
+          blockerReasonCodes: [],
+          sourceSystem: 'isolated_test_adapter',
+          sourceRef: line.sourceLineRef,
+          sourceVersion: 2,
+          sourceHash: hash('replace-lifecycle-fault-line'),
+        }],
+        coverage: {
+          ...formPlan(context).coverage,
+          supersedesCoverageSetIds: [predecessor.id],
+        },
+      }), /forced replacement lifecycle failure/);
+      assert.deepEqual(counts(context.db), before);
+      assert.equal(context.db.prepare('SELECT state FROM billing_source_upd_versions ORDER BY version DESC LIMIT 1').get().state, 'conducted');
+      assert.equal(context.db.inTransaction, false);
+      assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+    } finally {
+      context.close();
+    }
+  });
 });
 
 test('internal inspection repository is branded, scoped, bounded, deterministic, and non-disclosing', () => {

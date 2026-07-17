@@ -4,6 +4,7 @@ const {
 const {
   BILLING_SOURCE_AUDIT_EVENTS_TABLE,
   BILLING_SOURCE_COVERAGE_SETS_TABLE,
+  BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
   BILLING_SOURCE_COVERAGE_SLICES_TABLE,
   BILLING_SOURCE_EFFECTIVE_TERMS_TABLE,
   BILLING_SOURCE_OPERATIONS_TABLE,
@@ -208,6 +209,14 @@ function createBillingSourceAuthorityReadRepository(db) {
   function inspectCoverageSet(scope, coverageSetId, options = {}) {
     const coverageSet = one(BILLING_SOURCE_COVERAGE_SETS_TABLE, scope, coverageSetId);
     if (!coverageSet) return null;
+    const lifecycleSuccessors = list(
+      BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
+      scope,
+      'originalCoverageSetId = ?',
+      [coverageSet.id],
+      'createdAt ASC, id ASC',
+      options.limit,
+    );
     return Object.freeze({
       coverageSet,
       slices: list(
@@ -218,7 +227,49 @@ function createBillingSourceAuthorityReadRepository(db) {
         'periodId ASC, sliceStartDate ASC, sliceEndDateExclusive ASC, updLineId ASC, id ASC',
         options.limit,
       ),
+      lifecycleSuccessor: lifecycleSuccessors[0] || null,
+      lifecyclePredecessors: list(
+        BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
+        scope,
+        'replacementCoverageSetId = ?',
+        [coverageSet.id],
+        'createdAt ASC, id ASC',
+        options.limit,
+      ),
     });
+  }
+
+  function listActiveValidatedCoverage(scope, options = {}) {
+    const query = scoped(scope);
+    return db.prepare(`
+      SELECT coverage.*
+      FROM ${BILLING_SOURCE_COVERAGE_SETS_TABLE} coverage
+      WHERE coverage.companyId = ?
+        AND coverage.branchId IN (${query.placeholders})
+        AND coverage.status = 'validated'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE} lifecycle
+          WHERE lifecycle.originalCoverageSetId = coverage.id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} terminal
+          WHERE terminal.companyId = coverage.companyId
+            AND terminal.branchId = coverage.branchId
+            AND terminal.updId = coverage.updId
+            AND terminal.version = (
+              SELECT MAX(latest.version)
+              FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} latest
+              WHERE latest.companyId = coverage.companyId
+                AND latest.branchId = coverage.branchId
+                AND latest.updId = coverage.updId
+            )
+            AND terminal.state IN ('cancelled', 'corrected')
+        )
+      ORDER BY coverage.createdAt ASC, coverage.id ASC
+      LIMIT ?
+    `).all(...query.params, limitValue(options.limit));
   }
 
   function inspectOperation(scope, operationType, idempotencyKey) {
@@ -289,6 +340,7 @@ function createBillingSourceAuthorityReadRepository(db) {
     inspectTermsVersions,
     inspectUpd,
     inspectUpdLines,
+    listActiveValidatedCoverage,
     listBlockedSourceIntegrity,
   });
 }

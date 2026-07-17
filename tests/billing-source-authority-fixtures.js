@@ -141,6 +141,38 @@ export function createBillingSourceContext({
   };
 }
 
+export function openExistingBillingSourceContext(dbPath, { correlationId = 'billing-source-existing-context' } = {}) {
+  const db = new Database(dbPath);
+  db.pragma('foreign_keys = ON');
+  db.pragma('busy_timeout = 5000');
+  const readUsers = () => JSON.parse(
+    db.prepare("SELECT json FROM app_data WHERE name = 'users'").get().json,
+  );
+  const platformRepository = createPlatformIdentityRepository(db, { readUsers });
+  const platformScope = resolveTrustedScope({
+    req: { user: { userId: 'U-billing' } },
+    repository: platformRepository,
+    readUsers,
+    nowIso: () => '2026-07-17T12:00:00.000Z',
+  });
+  const commandContext = createBillingSourceCommandContext(platformScope, {
+    branchId: 'branch-a-1',
+    correlationId,
+  });
+  const service = createBillingSourceAuthorityService({ db });
+  return {
+    db,
+    readUsers,
+    platformRepository,
+    platformScope,
+    commandContext,
+    service,
+    close() {
+      db.close();
+    },
+  };
+}
+
 export function insertActivationBoundary(context, overrides = {}) {
   const row = {
     id: overrides.id || 'activation-a-1',
@@ -245,7 +277,9 @@ export function closePlan(overrides = {}) {
         observedQuantityInteger: 31,
         observedQuantityScale: 0,
       },
-      evidenceSetHash: overrides.evidenceSetHash || hash('evidence-set-1'),
+      ...(overrides.expectedEvidenceSetHash
+        ? { expectedEvidenceSetHash: overrides.expectedEvidenceSetHash }
+        : {}),
       sourceHash: overrides.snapshotSourceHash || hash('snapshot-1'),
     },
     evidence: overrides.evidence || [{
@@ -302,8 +336,8 @@ export function formPlan(context, overrides = {}) {
     sourceHash: hash(`upd-line:${lineRef}`),
   }];
   const coverage = overrides.withoutCoverage ? undefined : {
-    expectedCoverageVersion: 0,
-    supersedesCoverageSetId: null,
+    expectedCoverageVersion: overrides.expectedCoverageVersion ?? 0,
+    supersedesCoverageSetIds: overrides.supersedesCoverageSetIds || [],
     mappingAlgorithmVersion: 1,
     status: overrides.coverageStatus || 'validated',
     netDeltaMinor: overrides.netDeltaMinor ?? 0,

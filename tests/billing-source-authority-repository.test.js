@@ -17,12 +17,17 @@ const {
 } = require('../server/lib/billing-source-authority-schema.js');
 const {
   BillingSourceAuthorityError,
+  computeEvidenceSetHash,
   createBillingSourceCommandContext,
   materializeBillingSourceCommandPlan,
 } = require('../server/lib/billing-source-authority-domain.js');
 const {
   createBillingSourceAuthorityRepository,
 } = require('../server/lib/billing-source-authority-repository.js');
+const {
+  createBillingSourceAuthorityReadRepository,
+  createBillingSourceInspectionScope,
+} = require('../server/lib/billing-source-authority-read-repository.js');
 const {
   createTrustedUserActorContext,
 } = require('../server/lib/platform-identity-repository.js');
@@ -46,6 +51,60 @@ function tableCounts(db) {
     table,
     db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count,
   ]));
+}
+
+function replacementCommand(context, overrides = {}) {
+  const upd = context.db.prepare('SELECT * FROM billing_source_upds ORDER BY createdAt, id LIMIT 1').get();
+  const latestUpdVersion = context.db.prepare(`
+    SELECT * FROM billing_source_upd_versions
+    WHERE updId = ? ORDER BY version DESC, id DESC LIMIT 1
+  `).get(upd.id);
+  const line = context.db.prepare('SELECT * FROM billing_source_upd_lines WHERE updId = ? ORDER BY id LIMIT 1').get(upd.id);
+  const latestLineVersion = context.db.prepare(`
+    SELECT * FROM billing_source_upd_line_versions
+    WHERE updLineId = ? ORDER BY version DESC, id DESC LIMIT 1
+  `).get(line.id);
+  const coverage = {
+    ...formPlan(context).coverage,
+    supersedesCoverageSetIds: overrides.supersedesCoverageSetIds || [],
+    ...(overrides.coverage || {}),
+  };
+  return {
+    operationType: 'correct_upd',
+    idempotencyKey: overrides.idempotencyKey || 'replace-upd-helper',
+    updId: upd.id,
+    expectedUpdVersion: Number(latestUpdVersion.version),
+    action: 'replace',
+    reasonCode: 'ACCOUNTING_REPLACE',
+    reasonText: 'Explicit replacement evidence',
+    sourceEventId: overrides.sourceEventId || 'replace-helper-event',
+    sourceEventVersion: 1,
+    sourceHash: hash(overrides.sourceEventId || 'replace-helper-event'),
+    lines: [{
+      id: line.id,
+      sourceLineRef: line.sourceLineRef,
+      sourceLineIdentityKind: line.sourceLineIdentityKind,
+      displayPosition: Number(latestLineVersion.version) + 1,
+      description: 'Corrected display metadata',
+      quantityValueInteger: 1,
+      quantityScale: 0,
+      unitCode: 'service',
+      currency: 'RUB',
+      netMinor: 100_000,
+      vatMinor: 20_000,
+      grossMinor: 120_000,
+      vatPolicyRef: 'vat-policy-test-v1',
+      roundingPolicyRef: 'rounding-policy-test-v1',
+      policyDecisionRef: 'policy-decision-test-v1',
+      sourceIntegrityStatus: 'matched',
+      blockerReasonCodes: [],
+      sourceSystem: 'isolated_test_adapter',
+      sourceRef: line.sourceLineRef,
+      sourceVersion: Number(latestLineVersion.version) + 1,
+      sourceHash: hash(`replacement-line-${Number(latestLineVersion.version) + 1}`),
+    }],
+    coverage,
+  };
 }
 
 test('close atomically creates stable line, terms, period, version, snapshot, evidence, operation, and audit', () => {
@@ -113,6 +172,92 @@ test('exact close replay returns original logical result and writes no source or
   }
 });
 
+test('repository owns evidence-set hashing, persisted reconstruction, and expected-hash assertions', async t => {
+  const first = closePlan().evidence[0];
+  const second = {
+    ...first,
+    evidenceType: 'contract',
+    sourceId: 'contract-source-1',
+    sourceEventId: 'contract-evidence-event-1',
+    authorityPolicyRef: 'contract-authority-policy-test-v1',
+    evidenceHash: hash('contract-evidence-1'),
+  };
+  const expectedEvidenceSetHash = computeEvidenceSetHash([first, second]);
+
+  await t.test('correct expected hash and reversed input order persist the same repository hash and result fingerprint', () => {
+    const left = createBillingSourceContext();
+    const right = createBillingSourceContext();
+    try {
+      insertActivationBoundary(left);
+      insertActivationBoundary(right);
+      const leftResult = left.service.closeBillingPeriod(left.commandContext, closePlan({
+        evidence: [first, second],
+        expectedEvidenceSetHash,
+      }));
+      const leftReplay = left.service.closeBillingPeriod(left.commandContext, closePlan({
+        evidence: [second, first],
+        expectedEvidenceSetHash,
+      }));
+      right.service.closeBillingPeriod(right.commandContext, closePlan({
+        evidence: [second, first],
+        expectedEvidenceSetHash,
+      }));
+      const leftSnapshot = left.db.prepare('SELECT * FROM billing_source_snapshots').get();
+      const rightSnapshot = right.db.prepare('SELECT * FROM billing_source_snapshots').get();
+      assert.equal(leftSnapshot.evidenceSetHash, expectedEvidenceSetHash);
+      assert.equal(rightSnapshot.evidenceSetHash, expectedEvidenceSetHash);
+      assert.equal(leftReplay.replayed, true);
+      assert.equal(leftReplay.fingerprint, leftResult.fingerprint);
+      const columns = `
+        evidenceType, sourceSystem, sourceId, sourceVersion, sourceEventId,
+        sourceEventVersion, coveredStartDate, coveredEndDateExclusive,
+        authorityStatus, authorityPolicyRef, evidenceHash
+      `;
+      const persisted = left.db.prepare(`SELECT ${columns} FROM billing_source_snapshot_evidence`).all();
+      assert.equal(computeEvidenceSetHash(persisted), leftSnapshot.evidenceSetHash);
+      assert.throws(() => left.db.prepare(`
+        INSERT INTO billing_source_snapshot_evidence (
+          id, companyId, branchId, snapshotId, evidenceType, sourceSystem,
+          sourceId, sourceVersion, sourceEventId, sourceEventVersion,
+          coveredStartDate, coveredEndDateExclusive, authorityStatus,
+          authorityPolicyRef, evidenceHash, schemaVersion, createdAt
+        )
+        SELECT 'duplicate-evidence-id', companyId, branchId, snapshotId, evidenceType, sourceSystem,
+               sourceId, sourceVersion, sourceEventId, sourceEventVersion,
+               coveredStartDate, coveredEndDateExclusive, authorityStatus,
+               authorityPolicyRef, evidenceHash, schemaVersion, createdAt
+        FROM billing_source_snapshot_evidence
+        LIMIT 1
+      `).run(), /UNIQUE constraint failed/);
+      const leftIds = left.db.prepare('SELECT id FROM billing_source_snapshot_evidence ORDER BY id').all();
+      const rightIds = right.db.prepare('SELECT id FROM billing_source_snapshot_evidence ORDER BY id').all();
+      assert.notDeepEqual(leftIds, rightIds);
+    } finally {
+      left.close();
+      right.close();
+    }
+  });
+
+  await t.test('arbitrary expected hash rejects the complete close before any source commit', () => {
+    const context = createBillingSourceContext();
+    try {
+      insertActivationBoundary(context);
+      const before = tableCounts(context.db);
+      assert.throws(
+        () => context.service.closeBillingPeriod(context.commandContext, closePlan({
+          evidence: [first, second],
+          expectedEvidenceSetHash: hash('arbitrary-caller-assertion'),
+        })),
+        error => code(error, 'BILLING_SOURCE_EVIDENCE_SET_HASH_MISMATCH'),
+      );
+      assert.deepEqual(tableCounts(context.db), before);
+      assert.equal(context.db.inTransaction, false);
+    } finally {
+      context.close();
+    }
+  });
+});
+
 test('reopen and standalone coverage commands replay exactly without new source or audit rows', async t => {
   await t.test('reopen_billing_period', () => {
     const { context, source } = setupClosed();
@@ -154,6 +299,11 @@ test('reopen and standalone coverage commands replay exactly without new source 
         formedUpdVersionId: formed.id,
         expectedUpdVersion: 3,
         coverage: formPlan(context).coverage,
+        reasonCode: 'COVERAGE_RECORDED',
+        reasonText: 'Explicit standalone coverage evidence',
+        sourceEventId: 'coverage-replay-event',
+        sourceEventVersion: 1,
+        sourceHash: hash('coverage-replay-event'),
       };
       const first = context.service.recordUpdCoverage(context.commandContext, command);
       const before = tableCounts(context.db);
@@ -235,7 +385,6 @@ test('stable line binding is reusable across periods, conflicting immutable cont
       sourceEventId: 'close-event-2',
       sourceHash: hash('close-event-2'),
       snapshotSourceHash: hash('snapshot-2'),
-      evidenceSetHash: hash('evidence-set-2'),
     }));
     assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM billing_source_rental_lines').get().count, 1);
     assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM billing_source_periods').get().count, 2);
@@ -264,7 +413,6 @@ test('stable line binding is reusable across periods, conflicting immutable cont
       sourceEventId: 'close-event-line-2',
       sourceHash: hash('close-event-line-2'),
       snapshotSourceHash: hash('snapshot-line-2'),
-      evidenceSetHash: hash('evidence-set-line-2'),
     }));
     assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM billing_source_rental_lines').get().count, 2);
     assert.equal(new Set(context.db.prepare('SELECT id FROM billing_source_rental_lines').all().map(row => row.id)).size, 2);
@@ -290,7 +438,6 @@ test('effective terms append exact versions, preserve predecessor, and reject st
       sourceEventId: 'close-with-terms-v2',
       sourceHash: hash('close-with-terms-v2'),
       snapshotSourceHash: hash('snapshot-v2'),
-      evidenceSetHash: hash('evidence-set-v2'),
     }));
     const terms = context.db.prepare('SELECT * FROM billing_source_effective_terms ORDER BY version').all();
     assert.deepEqual(terms.map(row => row.version), [1, 2]);
@@ -357,7 +504,6 @@ test('period activation, adjacency, overlap, and close/reopen/re-close lifecycle
       sourceEventId: 'reclose-event-1',
       sourceHash: hash('reclose-event-1'),
       snapshotSourceHash: hash('snapshot-reclose-1'),
-      evidenceSetHash: hash('evidence-set-reclose-1'),
     }));
     assert.equal(reclosed.version, 3);
     const versions = context.db.prepare('SELECT * FROM billing_source_period_versions ORDER BY version').all();
@@ -531,6 +677,23 @@ test('UPD cancellation and replacement append lineage without deleting originals
         ['draft', 'formed', 'conducted', 'cancelled'],
       );
       assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM billing_source_upds').get().count, 1);
+      assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM billing_source_coverage_sets').get().count, 1);
+      assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM billing_source_coverage_slices').get().count, 1);
+      const cancellation = context.db.prepare('SELECT * FROM billing_source_coverage_supersessions').get();
+      assert.equal(cancellation.action, 'cancelled');
+      assert.equal(cancellation.replacementCoverageSetId, null);
+      const reader = createBillingSourceAuthorityReadRepository(context.db);
+      const scope = createBillingSourceInspectionScope({ companyId: 'company-a', branchIds: ['branch-a-1'] });
+      assert.deepEqual(reader.listActiveValidatedCoverage(scope), []);
+
+      context.service.formUpd(context.commandContext, formPlan(context, {
+        idempotencyKey: 'form-upd-after-cancel',
+        sourceDocumentRef: 'upd-source-after-cancel',
+        sourceLineRef: 'upd-line-source-after-cancel',
+      }));
+      assert.equal(reader.listActiveValidatedCoverage(scope).length, 1);
+      assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM billing_source_coverage_sets').get().count, 2);
+      assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM billing_source_coverage_slices').get().count, 2);
       assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM canonical_receivables').get().count, 0);
       const beforeReplay = tableCounts(context.db);
       const replay = context.service.correctUpd(context.commandContext, command);
@@ -551,7 +714,7 @@ test('UPD cancellation and replacement append lineage without deleting originals
       const originalCoverage = context.db.prepare('SELECT * FROM billing_source_coverage_sets').get();
       const replacementCoverage = {
         ...formPlan(context).coverage,
-        supersedesCoverageSetId: originalCoverage.id,
+        supersedesCoverageSetIds: [originalCoverage.id],
       };
       const result = context.service.correctUpd(context.commandContext, {
         operationType: 'correct_upd',
@@ -599,13 +762,168 @@ test('UPD cancellation and replacement append lineage without deleting originals
       assert.equal(lineVersions[1].supersedesLineVersionId, lineVersions[0].id);
       const coverageSets = context.db.prepare('SELECT * FROM billing_source_coverage_sets ORDER BY createdAt, id').all();
       assert.equal(coverageSets.length, 2);
-      assert.equal(coverageSets[1].supersedesCoverageSetId, coverageSets[0].id);
+      const lifecycle = context.db.prepare('SELECT * FROM billing_source_coverage_supersessions').get();
+      assert.equal(lifecycle.originalCoverageSetId, coverageSets[0].id);
+      assert.equal(lifecycle.replacementCoverageSetId, coverageSets[1].id);
+      assert.equal(lifecycle.action, 'corrected');
       assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM billing_source_coverage_slices').get().count, 2);
+      const reader = createBillingSourceAuthorityReadRepository(context.db);
+      const scope = createBillingSourceInspectionScope({ companyId: 'company-a', branchIds: ['branch-a-1'] });
+      assert.deepEqual(reader.listActiveValidatedCoverage(scope).map(row => row.id), [coverageSets[1].id]);
+      assert.equal(reader.inspectCoverageSet(scope, coverageSets[0].id).lifecycleSuccessor.id, lifecycle.id);
+      assert.equal(reader.inspectCoverageSet(scope, coverageSets[1].id).lifecyclePredecessors[0].id, lifecycle.id);
       assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM canonical_receivables').get().count, 0);
     } finally {
       context.close();
     }
   });
+});
+
+test('coverage replacement requires the exact active validated predecessor and rejects inactive or blocked sets', async t => {
+  await t.test('missing predecessor and already superseded predecessor leave no partial correction rows', () => {
+    const { context } = setupClosed();
+    try {
+      context.service.formUpd(context.commandContext, formPlan(context));
+      context.service.conductUpd(context.commandContext, conductPlan(context));
+      const original = context.db.prepare('SELECT * FROM billing_source_coverage_sets').get();
+      const beforeMissing = tableCounts(context.db);
+      assert.throws(
+        () => context.service.correctUpd(context.commandContext, replacementCommand(context, {
+          idempotencyKey: 'replace-missing-predecessor',
+          sourceEventId: 'replace-missing-predecessor-event',
+        })),
+        error => code(error, 'BILLING_SOURCE_COVERAGE_PREDECESSOR_REQUIRED'),
+      );
+      assert.deepEqual(tableCounts(context.db), beforeMissing);
+
+      context.service.correctUpd(context.commandContext, replacementCommand(context, {
+        idempotencyKey: 'replace-exact-predecessor',
+        sourceEventId: 'replace-exact-predecessor-event',
+        supersedesCoverageSetIds: [original.id],
+      }));
+      const beforeInactive = tableCounts(context.db);
+      assert.throws(
+        () => context.service.correctUpd(context.commandContext, replacementCommand(context, {
+          idempotencyKey: 'replace-inactive-predecessor',
+          sourceEventId: 'replace-inactive-predecessor-event',
+          supersedesCoverageSetIds: [original.id],
+        })),
+        error => code(error, 'BILLING_SOURCE_COVERAGE_PREDECESSOR_INACTIVE'),
+      );
+      assert.deepEqual(tableCounts(context.db), beforeInactive);
+    } finally {
+      context.close();
+    }
+  });
+
+  await t.test('blocked set neither deactivates validated coverage nor bypasses global overlap', () => {
+    const { context } = setupClosed();
+    try {
+      context.service.formUpd(context.commandContext, formPlan(context, { withoutCoverage: true }));
+      context.service.conductUpd(context.commandContext, conductPlan(context));
+      const upd = context.db.prepare('SELECT * FROM billing_source_upds').get();
+      const formed = context.db.prepare("SELECT * FROM billing_source_upd_versions WHERE state = 'formed'").get();
+      const record = (idempotencyKey, coverage, sourceEventId) => context.service.recordUpdCoverage(context.commandContext, {
+        operationType: 'record_upd_coverage',
+        idempotencyKey,
+        updId: upd.id,
+        formedUpdVersionId: formed.id,
+        expectedUpdVersion: 3,
+        coverage,
+        reasonCode: 'COVERAGE_EVIDENCE',
+        reasonText: 'Explicit coverage evidence',
+        sourceEventId,
+        sourceEventVersion: 1,
+        sourceHash: hash(sourceEventId),
+      });
+      record('record-validated-before-blocked', formPlan(context, { expectedCoverageVersion: 0 }).coverage, 'validated-before-blocked');
+      record('record-blocked-after-validated', formPlan(context, {
+        expectedCoverageVersion: 1,
+        coverageStatus: 'blocked',
+        coverageBlockerReasonCodes: ['MAPPING_UNRESOLVED'],
+      }).coverage, 'blocked-after-validated');
+      const coverageSets = context.db.prepare('SELECT * FROM billing_source_coverage_sets ORDER BY version').all();
+      const validated = coverageSets[0];
+      const blocked = coverageSets[1];
+      const reader = createBillingSourceAuthorityReadRepository(context.db);
+      const scope = createBillingSourceInspectionScope({ companyId: 'company-a', branchIds: ['branch-a-1'] });
+      assert.deepEqual(reader.listActiveValidatedCoverage(scope).map(row => row.id), [validated.id]);
+      assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM billing_source_coverage_supersessions').get().count, 0);
+
+      const beforeBlockedReplacement = tableCounts(context.db);
+      assert.throws(
+        () => context.service.correctUpd(context.commandContext, replacementCommand(context, {
+          idempotencyKey: 'replace-with-blocked-predecessor',
+          sourceEventId: 'replace-with-blocked-predecessor-event',
+          supersedesCoverageSetIds: [blocked.id],
+        })),
+        error => code(error, 'BILLING_SOURCE_COVERAGE_PREDECESSOR_INVALID'),
+      );
+      assert.deepEqual(tableCounts(context.db), beforeBlockedReplacement);
+
+      const beforeOverlap = tableCounts(context.db);
+      assert.throws(
+        () => context.service.formUpd(context.commandContext, formPlan(context, {
+          idempotencyKey: 'second-upd-after-blocked',
+          sourceDocumentRef: 'second-upd-after-blocked',
+          sourceLineRef: 'second-upd-line-after-blocked',
+        })),
+        error => code(error, 'BILLING_SOURCE_COVERAGE_OVERLAP'),
+      );
+      assert.deepEqual(tableCounts(context.db), beforeOverlap);
+    } finally {
+      context.close();
+    }
+  });
+});
+
+test('coverage lifecycle table rejects direct mutation, duplicate successor, scope drift, and replacement mismatch', () => {
+  const { context } = setupClosed();
+  try {
+    context.service.formUpd(context.commandContext, formPlan(context));
+    context.service.conductUpd(context.commandContext, conductPlan(context));
+    const original = context.db.prepare('SELECT * FROM billing_source_coverage_sets').get();
+    context.service.correctUpd(context.commandContext, replacementCommand(context, {
+      idempotencyKey: 'replace-for-direct-lifecycle-guards',
+      sourceEventId: 'replace-for-direct-lifecycle-guards-event',
+      supersedesCoverageSetIds: [original.id],
+    }));
+    const relation = context.db.prepare('SELECT * FROM billing_source_coverage_supersessions').get();
+    assert.throws(
+      () => context.db.prepare('UPDATE billing_source_coverage_supersessions SET reasonText = ? WHERE id = ?').run('mutated', relation.id),
+      /immutable|append-only/,
+    );
+    assert.throws(
+      () => context.db.prepare('DELETE FROM billing_source_coverage_supersessions WHERE id = ?').run(relation.id),
+      /immutable|append-only/,
+    );
+    const copy = (id, companyId, branchId, replacementCoverageSetId = relation.replacementCoverageSetId) => context.db.prepare(`
+      INSERT INTO billing_source_coverage_supersessions (
+        id, companyId, branchId, originalCoverageSetId, replacementCoverageSetId,
+        action, reasonCode, reasonText, operationId, actorPrincipalId,
+        actorMembershipId, actorMembershipVersion, capabilityCatalogVersion,
+        capabilityKey, sourceEventId, sourceEventVersion, sourceHash,
+        schemaVersion, createdAt
+      ) VALUES (
+        @id, @companyId, @branchId, @originalCoverageSetId, @replacementCoverageSetId,
+        @action, @reasonCode, @reasonText, @operationId, @actorPrincipalId,
+        @actorMembershipId, @actorMembershipVersion, @capabilityCatalogVersion,
+        @capabilityKey, @sourceEventId, @sourceEventVersion, @sourceHash,
+        @schemaVersion, @createdAt
+      )
+    `).run({ ...relation, id, companyId, branchId, replacementCoverageSetId });
+    assert.throws(() => copy('duplicate-successor', relation.companyId, relation.branchId), /supersession invalid|UNIQUE constraint failed/);
+    assert.throws(() => copy('cross-company', 'company-b', relation.branchId), /supersession invalid|FOREIGN KEY constraint failed/);
+    assert.throws(() => copy('cross-branch', relation.companyId, 'branch-a-2'), /supersession invalid|FOREIGN KEY constraint failed/);
+    assert.throws(
+      () => copy('replacement-mismatch', relation.companyId, relation.branchId, relation.originalCoverageSetId),
+      /supersession invalid|CHECK constraint failed|replacement coverage set must differ/i,
+    );
+    assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM billing_source_coverage_supersessions').get().count, 1);
+    assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+  } finally {
+    context.close();
+  }
 });
 
 test('capabilities are operation-specific and legacy Administrator display role grants nothing', async t => {

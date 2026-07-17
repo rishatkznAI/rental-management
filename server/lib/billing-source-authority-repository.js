@@ -14,6 +14,7 @@ const {
   BILLING_SOURCE_AUDIT_EVENTS_TABLE,
   BILLING_SOURCE_AUTHORITY_SCHEMA_VERSION,
   BILLING_SOURCE_COVERAGE_SETS_TABLE,
+  BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
   BILLING_SOURCE_COVERAGE_SLICES_TABLE,
   BILLING_SOURCE_EFFECTIVE_TERMS_TABLE,
   BILLING_SOURCE_OPERATIONS_TABLE,
@@ -33,6 +34,7 @@ const {
   OPERATION_CAPABILITIES,
   assertBillingSourceCommandContext,
   assertBillingSourceCommandPlan,
+  canonicalizeEvidenceSet,
   fingerprint,
   safeAdd,
   stableJson,
@@ -95,7 +97,18 @@ function createBillingSourceAuthorityRepository(db) {
   }
 
   function transaction(operation) {
-    return db.transaction(operation).immediate();
+    try {
+      return db.transaction(operation).immediate();
+    } catch (error) {
+      if (error?.code === 'SQLITE_BUSY' || error?.code === 'SQLITE_LOCKED') {
+        fail(
+          'BILLING_SOURCE_CONCURRENT_CONFLICT',
+          'Concurrent billing-source mutation conflicted; retry from fresh state.',
+          'operation',
+        );
+      }
+      throw error;
+    }
   }
 
   function scopedById(table, context, entityId) {
@@ -129,6 +142,109 @@ function createBillingSourceAuthorityRepository(db) {
       ORDER BY version DESC, id DESC
       LIMIT 1
     `).get(context.companyId, context.branchId, updId) || null;
+  }
+
+  function activeValidatedCoverageSets(context, updId) {
+    return db.prepare(`
+      SELECT coverage.*
+      FROM ${BILLING_SOURCE_COVERAGE_SETS_TABLE} coverage
+      WHERE coverage.companyId = ? AND coverage.branchId = ?
+        AND coverage.updId = ? AND coverage.status = 'validated'
+        AND NOT EXISTS (
+          SELECT 1 FROM ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE} lifecycle
+          WHERE lifecycle.originalCoverageSetId = coverage.id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} terminal
+          WHERE terminal.companyId = coverage.companyId
+            AND terminal.branchId = coverage.branchId
+            AND terminal.updId = coverage.updId
+            AND terminal.version = (
+              SELECT MAX(latest.version)
+              FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} latest
+              WHERE latest.companyId = coverage.companyId
+                AND latest.branchId = coverage.branchId
+                AND latest.updId = coverage.updId
+            )
+            AND terminal.state IN ('cancelled', 'corrected')
+        )
+      ORDER BY coverage.createdAt, coverage.id
+    `).all(context.companyId, context.branchId, updId);
+  }
+
+  function resolveCoveragePredecessors(context, upd, coverage, expectedActive) {
+    if (!coverage) return [];
+    const requested = coverage.supersedesCoverageSetIds;
+    if (coverage.status !== 'validated') return [];
+    const rows = requested.map(coverageSetId => {
+      const row = requireScopedById(BILLING_SOURCE_COVERAGE_SETS_TABLE, context, coverageSetId);
+      if (row.status !== 'validated') {
+        fail('BILLING_SOURCE_COVERAGE_PREDECESSOR_INVALID', 'Coverage predecessor must be validated.', 'coverage.supersedesCoverageSetIds');
+      }
+      if (row.updId !== upd.id) {
+        fail('BILLING_SOURCE_COVERAGE_LINEAGE_CONFLICT', 'Coverage predecessor belongs to another UPD lineage.', 'coverage.supersedesCoverageSetIds');
+      }
+      const lifecycle = db.prepare(`
+        SELECT id FROM ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE}
+        WHERE companyId = ? AND branchId = ? AND originalCoverageSetId = ?
+      `).get(context.companyId, context.branchId, row.id);
+      if (lifecycle) {
+        fail('BILLING_SOURCE_COVERAGE_PREDECESSOR_INACTIVE', 'Coverage predecessor is already inactive.', 'coverage.supersedesCoverageSetIds');
+      }
+      return row;
+    });
+    const active = expectedActive || activeValidatedCoverageSets(context, upd.id);
+    const requestedIds = rows.map(row => row.id).sort();
+    const activeIds = active.map(row => row.id).sort();
+    if (!sameJson(requestedIds, activeIds)) {
+      fail(
+        activeIds.length > 0 && requestedIds.length === 0
+          ? 'BILLING_SOURCE_COVERAGE_PREDECESSOR_REQUIRED'
+          : 'BILLING_SOURCE_COVERAGE_PREDECESSOR_MISMATCH',
+        'Validated coverage replacement must identify the exact active predecessor set.',
+        'coverage.supersedesCoverageSetIds',
+      );
+    }
+    return rows;
+  }
+
+  function insertCoverageSupersession(context, plan, original, replacement, action, operationId, createdAt) {
+    db.prepare(`
+      INSERT INTO ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE} (
+        id, companyId, branchId, originalCoverageSetId, replacementCoverageSetId,
+        action, reasonCode, reasonText, operationId, actorPrincipalId,
+        actorMembershipId, actorMembershipVersion, capabilityCatalogVersion,
+        capabilityKey, sourceEventId, sourceEventVersion, sourceHash,
+        schemaVersion, createdAt
+      ) VALUES (
+        @id, @companyId, @branchId, @originalCoverageSetId, @replacementCoverageSetId,
+        @action, @reasonCode, @reasonText, @operationId, @actorPrincipalId,
+        @actorMembershipId, @actorMembershipVersion, @capabilityCatalogVersion,
+        @capabilityKey, @sourceEventId, @sourceEventVersion, @sourceHash,
+        @schemaVersion, @createdAt
+      )
+    `).run({
+      id: id('billing-source-coverage-supersession'),
+      companyId: context.companyId,
+      branchId: context.branchId,
+      originalCoverageSetId: original.id,
+      replacementCoverageSetId: replacement?.id || null,
+      action,
+      reasonCode: plan.reasonCode,
+      reasonText: plan.reasonText,
+      operationId,
+      actorPrincipalId: context.principalId,
+      actorMembershipId: context.membershipId,
+      actorMembershipVersion: context.membershipVersion,
+      capabilityCatalogVersion: context.capabilityCatalogVersion,
+      capabilityKey: OPERATION_CAPABILITIES[plan.operationType],
+      sourceEventId: plan.sourceEventId,
+      sourceEventVersion: plan.sourceEventVersion,
+      sourceHash: plan.sourceHash,
+      schemaVersion: BILLING_SOURCE_AUTHORITY_SCHEMA_VERSION,
+      createdAt,
+    });
   }
 
   function replayOrConflict(context, plan) {
@@ -556,6 +672,17 @@ function createBillingSourceAuthorityRepository(db) {
       if (plan.snapshot.sourceIntegrityStatus === 'matched' && terms.policyResolutionStatus !== 'resolved') {
         fail('BILLING_SOURCE_POLICY_UNRESOLVED', 'Matched snapshots cannot use unresolved terms policies.', 'effectiveTerms');
       }
+      const evidenceIntegrity = canonicalizeEvidenceSet(plan.evidence);
+      if (
+        plan.snapshot.expectedEvidenceSetHash
+        && plan.snapshot.expectedEvidenceSetHash !== evidenceIntegrity.hash
+      ) {
+        fail(
+          'BILLING_SOURCE_EVIDENCE_SET_HASH_MISMATCH',
+          'Expected evidence-set hash does not match the repository-owned evidence set.',
+          'snapshot.expectedEvidenceSetHash',
+        );
+      }
 
       const nextVersion = (latest ? Number(latest.version) : 0) + 1;
       const periodVersionId = id('billing-source-period-version');
@@ -639,7 +766,7 @@ function createBillingSourceAuthorityRepository(db) {
         blockerReasonCodesJson: json(plan.snapshot.blockerReasonCodes),
         calculationInputsJson: json(plan.snapshot.calculationInputs),
         calculationInputsHash: plan.snapshot.calculationInputsHash,
-        evidenceSetHash: plan.snapshot.evidenceSetHash,
+        evidenceSetHash: evidenceIntegrity.hash,
         sourceHash: plan.snapshot.sourceHash,
         schemaVersion: BILLING_SOURCE_AUTHORITY_SCHEMA_VERSION,
         createdAt,
@@ -657,7 +784,7 @@ function createBillingSourceAuthorityRepository(db) {
           @authorityPolicyRef, @evidenceHash, @schemaVersion, @createdAt
         )
       `);
-      for (const evidence of plan.evidence) {
+      for (const evidence of evidenceIntegrity.evidence) {
         if (
           evidence.coveredStartDate < periodResult.row.periodStartDate
           || evidence.coveredEndDateExclusive > periodResult.row.periodEndDateExclusive
@@ -672,12 +799,30 @@ function createBillingSourceAuthorityRepository(db) {
           createdAt,
         });
       }
+      const persistedEvidence = db.prepare(`
+        SELECT evidenceType, sourceSystem, sourceId, sourceVersion, sourceEventId,
+               sourceEventVersion, coveredStartDate, coveredEndDateExclusive,
+               authorityStatus, authorityPolicyRef, evidenceHash
+        FROM ${BILLING_SOURCE_SNAPSHOT_EVIDENCE_TABLE}
+        WHERE companyId = ? AND branchId = ? AND snapshotId = ?
+        ORDER BY evidenceType, sourceSystem, sourceId, sourceVersion, sourceEventId,
+                 sourceEventVersion, coveredStartDate, coveredEndDateExclusive
+      `).all(context.companyId, context.branchId, snapshotId);
+      const persistedEvidenceIntegrity = canonicalizeEvidenceSet(persistedEvidence);
+      if (persistedEvidenceIntegrity.hash !== evidenceIntegrity.hash) {
+        fail(
+          'BILLING_SOURCE_PERSISTED_EVIDENCE_HASH_MISMATCH',
+          'Persisted evidence rows do not match the repository-owned evidence-set hash.',
+          'evidence',
+        );
+      }
       const resultFingerprint = fingerprint({
         schemaVersion: 1,
         periodId: periodResult.row.id,
         periodVersionId,
         version: nextVersion,
         snapshotId,
+        evidenceSetHash: evidenceIntegrity.hash,
         sourceHash: plan.sourceHash,
       });
       return finish(context, plan, {
@@ -945,7 +1090,17 @@ function createBillingSourceAuthorityRepository(db) {
     return results;
   }
 
-  function validateAndInsertCoverage(context, plan, upd, formedVersion, lineResults, coverage, operationId, createdAt) {
+  function validateAndInsertCoverage(
+    context,
+    plan,
+    upd,
+    formedVersion,
+    lineResults,
+    coverage,
+    operationId,
+    createdAt,
+    { predecessors = [], lifecycleAction = null } = {},
+  ) {
     if (!coverage) return null;
     const latestForFormed = db.prepare(`
       SELECT *
@@ -957,18 +1112,8 @@ function createBillingSourceAuthorityRepository(db) {
     if (latestVersion !== coverage.expectedCoverageVersion) {
       fail('BILLING_SOURCE_COVERAGE_STALE', 'The expected coverage version is stale.', 'coverage.expectedCoverageVersion');
     }
-    let predecessor = null;
-    if (coverage.supersedesCoverageSetId) {
-      predecessor = requireScopedById(BILLING_SOURCE_COVERAGE_SETS_TABLE, context, coverage.supersedesCoverageSetId);
-      if (predecessor.updId !== upd.id || predecessor.status !== 'validated') nonDisclosingNotFound();
-      const successor = db.prepare(`
-        SELECT id FROM ${BILLING_SOURCE_COVERAGE_SETS_TABLE}
-        WHERE companyId = ? AND branchId = ?
-          AND supersedesCoverageSetId = ? AND status = 'validated'
-      `).get(context.companyId, context.branchId, predecessor.id);
-      if (successor) fail('BILLING_SOURCE_COVERAGE_LINEAGE_CONFLICT', 'Validated coverage lineage cannot branch.', 'coverage.supersedesCoverageSetId');
-    } else if (latestForFormed?.status === 'validated' && coverage.status === 'validated') {
-      fail('BILLING_SOURCE_COVERAGE_SUPERSESSION_REQUIRED', 'Validated replacement must reference its predecessor.', 'coverage.supersedesCoverageSetId');
+    if (predecessors.length > 0 && !lifecycleAction) {
+      fail('BILLING_SOURCE_COVERAGE_LIFECYCLE_REQUIRED', 'Coverage replacement requires an explicit lifecycle action.', 'coverage');
     }
     const byLineId = new Map(lineResults.map(item => [item.logical.id, item]));
     const bySourceRef = new Map(lineResults.map(item => [item.logical.sourceLineRef, item]));
@@ -1023,6 +1168,48 @@ function createBillingSourceAuthorityRepository(db) {
       }
     }
     if (coverage.status === 'validated') {
+      const predecessorIds = new Set(predecessors.map(row => row.id));
+      for (const item of normalizedSlices) {
+        const conflicts = db.prepare(`
+          SELECT existingSet.id AS coverageSetId
+          FROM ${BILLING_SOURCE_COVERAGE_SLICES_TABLE} existing
+          JOIN ${BILLING_SOURCE_COVERAGE_SETS_TABLE} existingSet
+            ON existingSet.id = existing.coverageSetId
+          WHERE existing.companyId = ? AND existing.branchId = ?
+            AND existing.periodId = ?
+            AND existing.sliceStartDate < ? AND ? < existing.sliceEndDateExclusive
+            AND existingSet.status = 'validated'
+            AND NOT EXISTS (
+              SELECT 1 FROM ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE} lifecycle
+              WHERE lifecycle.originalCoverageSetId = existingSet.id
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} terminal
+              WHERE terminal.companyId = existingSet.companyId
+                AND terminal.branchId = existingSet.branchId
+                AND terminal.updId = existingSet.updId
+                AND terminal.version = (
+                  SELECT MAX(latest.version)
+                  FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} latest
+                  WHERE latest.companyId = existingSet.companyId
+                    AND latest.branchId = existingSet.branchId
+                    AND latest.updId = existingSet.updId
+                )
+                AND terminal.state IN ('cancelled', 'corrected')
+            )
+          ORDER BY existingSet.id
+        `).all(
+          context.companyId,
+          context.branchId,
+          item.period.id,
+          item.source.sliceEndDateExclusive,
+          item.source.sliceStartDate,
+        );
+        if (conflicts.some(conflict => !predecessorIds.has(conflict.coverageSetId))) {
+          fail('BILLING_SOURCE_COVERAGE_OVERLAP', 'An active validated mapping already owns this economic slice.', 'coverage.slices');
+        }
+      }
       const lineGroups = new Map();
       const snapshotGroups = new Map();
       for (const item of normalizedSlices) {
@@ -1061,6 +1248,8 @@ function createBillingSourceAuthorityRepository(db) {
       updId: upd.id,
       formedUpdVersionId: formedVersion.id,
       status: coverage.status,
+      predecessorMappingHashes: predecessors.map(row => row.mappingHash).sort(),
+      lifecycleAction,
       slices: normalizedSlices.map(item => ({
         updLineId: item.line.logical.id,
         updLineVersionId: item.line.version.id,
@@ -1081,14 +1270,12 @@ function createBillingSourceAuthorityRepository(db) {
     db.prepare(`
       INSERT INTO ${BILLING_SOURCE_COVERAGE_SETS_TABLE} (
         id, companyId, branchId, updId, formedUpdVersionId, version,
-        supersedesCoverageSetId, mappingAlgorithmVersion, status, mappingHash,
-        netDeltaMinor, vatDeltaMinor, grossDeltaMinor, blockerReasonCodesJson,
-        operationId, schemaVersion, createdAt
+        mappingAlgorithmVersion, status, mappingHash, netDeltaMinor, vatDeltaMinor,
+        grossDeltaMinor, blockerReasonCodesJson, operationId, schemaVersion, createdAt
       ) VALUES (
         @id, @companyId, @branchId, @updId, @formedUpdVersionId, @version,
-        @supersedesCoverageSetId, @mappingAlgorithmVersion, @status, @mappingHash,
-        @netDeltaMinor, @vatDeltaMinor, @grossDeltaMinor, @blockerReasonCodesJson,
-        @operationId, @schemaVersion, @createdAt
+        @mappingAlgorithmVersion, @status, @mappingHash, @netDeltaMinor, @vatDeltaMinor,
+        @grossDeltaMinor, @blockerReasonCodesJson, @operationId, @schemaVersion, @createdAt
       )
     `).run({
       id: setId,
@@ -1097,7 +1284,6 @@ function createBillingSourceAuthorityRepository(db) {
       updId: upd.id,
       formedUpdVersionId: formedVersion.id,
       version: latestVersion + 1,
-      supersedesCoverageSetId: predecessor?.id || null,
       mappingAlgorithmVersion: coverage.mappingAlgorithmVersion,
       status: coverage.status,
       mappingHash,
@@ -1109,6 +1295,18 @@ function createBillingSourceAuthorityRepository(db) {
       schemaVersion: BILLING_SOURCE_AUTHORITY_SCHEMA_VERSION,
       createdAt,
     });
+    const replacement = requireScopedById(BILLING_SOURCE_COVERAGE_SETS_TABLE, context, setId);
+    for (const predecessor of predecessors) {
+      insertCoverageSupersession(
+        context,
+        plan,
+        predecessor,
+        replacement,
+        lifecycleAction,
+        operationId,
+        createdAt,
+      );
+    }
     const insertSlice = db.prepare(`
       INSERT INTO ${BILLING_SOURCE_COVERAGE_SLICES_TABLE} (
         id, companyId, branchId, coverageSetId, updId, formedUpdVersionId,
@@ -1174,7 +1372,7 @@ function createBillingSourceAuthorityRepository(db) {
         createdAt,
       });
     }
-    return requireScopedById(BILLING_SOURCE_COVERAGE_SETS_TABLE, context, setId);
+    return replacement;
   }
 
   function formUpd(context, plan) {
@@ -1263,7 +1461,18 @@ function createBillingSourceAuthorityRepository(db) {
         createdAt,
       });
       const formed = requireScopedById(BILLING_SOURCE_UPD_VERSIONS_TABLE, context, formedId);
-      validateAndInsertCoverage(context, plan, upd, formed, lineResults, plan.coverage, operationId, createdAt);
+      const coveragePredecessors = resolveCoveragePredecessors(context, upd, plan.coverage);
+      validateAndInsertCoverage(
+        context,
+        plan,
+        upd,
+        formed,
+        lineResults,
+        plan.coverage,
+        operationId,
+        createdAt,
+        { predecessors: coveragePredecessors, lifecycleAction: 'superseded' },
+      );
       return finish(context, plan, {
         aggregateType: 'upd',
         aggregateId: updId,
@@ -1327,7 +1536,18 @@ function createBillingSourceAuthorityRepository(db) {
       if (lineResults.length === 0) fail('BILLING_SOURCE_UPD_LINES_REQUIRED', 'Formed UPD has no immutable lines.', 'formedUpdVersionId');
       const createdAt = nowIso();
       const operationId = id('billing-source-operation');
-      const coverage = validateAndInsertCoverage(context, plan, upd, formed, lineResults, plan.coverage, operationId, createdAt);
+      const coveragePredecessors = resolveCoveragePredecessors(context, upd, plan.coverage);
+      const coverage = validateAndInsertCoverage(
+        context,
+        plan,
+        upd,
+        formed,
+        lineResults,
+        plan.coverage,
+        operationId,
+        createdAt,
+        { predecessors: coveragePredecessors, lifecycleAction: 'superseded' },
+      );
       const resultFingerprint = coverage.mappingHash;
       return finish(context, plan, {
         aggregateType: 'upd_coverage',
@@ -1428,6 +1648,10 @@ function createBillingSourceAuthorityRepository(db) {
       if (!latest || Number(latest.version) !== plan.expectedUpdVersion || !['formed', 'conducted'].includes(latest.state)) {
         fail('BILLING_SOURCE_UPD_STALE', 'Correction requires the exact current formed or conducted UPD.', 'expectedUpdVersion');
       }
+      const activeCoverage = activeValidatedCoverageSets(context, upd.id);
+      const coveragePredecessors = plan.action === 'replace'
+        ? resolveCoveragePredecessors(context, upd, plan.coverage, activeCoverage)
+        : [];
       const createdAt = nowIso();
       const operationId = id('billing-source-operation');
       const correctionId = id('billing-source-upd-version');
@@ -1465,6 +1689,17 @@ function createBillingSourceAuthorityRepository(db) {
         createdAt,
       });
       if (plan.action === 'cancel') {
+        for (const predecessor of activeCoverage) {
+          insertCoverageSupersession(
+            context,
+            plan,
+            predecessor,
+            null,
+            'cancelled',
+            operationId,
+            createdAt,
+          );
+        }
         return finish(context, plan, {
           aggregateType: 'upd',
           aggregateId: upd.id,
@@ -1524,7 +1759,17 @@ function createBillingSourceAuthorityRepository(db) {
         createdAt,
       });
       const formed = requireScopedById(BILLING_SOURCE_UPD_VERSIONS_TABLE, context, formedId);
-      validateAndInsertCoverage(context, plan, upd, formed, lineResults, plan.coverage, operationId, createdAt);
+      validateAndInsertCoverage(
+        context,
+        plan,
+        upd,
+        formed,
+        lineResults,
+        plan.coverage,
+        operationId,
+        createdAt,
+        { predecessors: coveragePredecessors, lifecycleAction: 'corrected' },
+      );
       return finish(context, plan, {
         aggregateType: 'upd',
         aggregateId: upd.id,

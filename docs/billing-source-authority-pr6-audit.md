@@ -2,7 +2,11 @@
 
 ## Status and implementation base
 
-- Final implementation status: **PR6: IMPLEMENTED FOR REVIEW — NOT RELEASED**.
+- Final implementation status: **PR6: REMEDIATED FOR REVIEW — NOT RELEASED**.
+- Remediation finding: **P1 coverage lifecycle — fixed in this PR; not released**.
+- Remediation finding: **P1 caller-provided `evidenceSetHash` — fixed in this PR; not released**.
+- Previous reviewed PR head: `5f4be8aaad3d53434fad230a65f3fee8a64b3920`.
+- Actual remediation starting head after fetch: `5f4be8aaad3d53434fad230a65f3fee8a64b3920`.
 - Prompt baseline: `030b140fa767f4c2ff16b3f9910a46e12b94e485`.
 - Actual starting `origin/main`: `030b140fa767f4c2ff16b3f9910a46e12b94e485`.
 - Baseline difference: none.
@@ -13,9 +17,9 @@
 - PR3: **RELEASED**, default-disabled read-only infrastructure only.
 - PR4: **DESIGN APPROVED**, historical design gate, not released.
 - PR5: **RELEASED**, neutral platform identity and fail-closed authorization foundation only.
-- PR6: **IMPLEMENTED FOR REVIEW — NOT RELEASED**.
+- PR6: **REMEDIATED FOR REVIEW — NOT RELEASED**.
 
-The starting SHA was verified after `git fetch origin --prune`; the isolated worktree started clean at that exact SHA. PR #210 and PR #211 were inspected through their complete repository diffs as well as their reviewed and squash commits. No PR6, production bootstrap, canonical write, resolver wiring, feature enablement, forecast, or PR7 implementation had landed on the actual base.
+The original implementation starting SHA was verified after `git fetch origin --prune`; the isolated worktree started clean at that exact SHA. For remediation, PR #212 and the remote branch were re-fetched, the actual PR head exactly matched the previous reviewed head above, and there was no newer delta to preserve. PR #210 and PR #211 were inspected through their complete repository diffs as well as their reviewed and squash commits. No production bootstrap, canonical write, resolver wiring, feature enablement, forecast, or PR7 implementation is introduced by this remediation.
 
 ## Actual repository audit
 
@@ -77,6 +81,7 @@ The normalized source tables are:
 | `billing_source_upd_lines` | Stable source-line identity independent of display position/description |
 | `billing_source_upd_line_versions` | Immutable line content and correction lineage |
 | `billing_source_coverage_sets` | Versioned validated/blocked deterministic mapping result |
+| `billing_source_coverage_supersessions` | Append-only cancellation/correction/supersession relation from an original validated set to an exact validated replacement, or null replacement for cancellation |
 | `billing_source_coverage_slices` | Exact non-overlapping UPD-line-to-closed-period half-open slices with monetary and due-date provenance |
 | `billing_source_operations` | Exact company-scoped operation identity, command fingerprint, authority snapshot, and replay result |
 | `billing_source_audit_events` | Append-only relational source audit in the same transaction as the mutation |
@@ -99,7 +104,11 @@ Snapshot source money is explicit RUB safe-integer minor units. Discount is appl
 
 ### UPD and coverage lifecycle
 
-`formUpd` creates a stable UPD, an immutable draft version, stable line identities, immutable line-content versions, and a formed version freezing the line set; it may atomically persist an initial coverage set. `conductUpd` is a separate append-only accounting event with explicit evidence/policy fields. Sent, signed, uploaded, and generic document states cannot imply conducted. `correctUpd` appends cancellation or replacement lineage and never deletes or overwrites original aggregates, versions, lines, or coverage.
+`formUpd` creates a stable UPD, an immutable draft version, stable line identities, immutable line-content versions, and a formed version freezing the line set; it may atomically persist an initial coverage set. `conductUpd` is a separate append-only accounting event with explicit evidence/policy fields. Sent, signed, uploaded, and generic document states cannot imply conducted. `correctUpd` appends cancellation or replacement lineage and never deletes or overwrites original aggregates, versions, lines, coverage sets, or slices.
+
+Active validated coverage is defined exactly as a validated set with no append-only lifecycle successor and no terminal cancelled/corrected UPD state lacking replacement lineage. There is no mutable active flag. A blocked set is never active, never deactivates a validated set, and cannot be supplied as a replacement predecessor. Repository reads, overlap checks, the SQLite overlap trigger, and internal inspection use this definition.
+
+Cancellation finds every current active validated set in the exact UPD lineage before mutation, appends the cancelled UPD version, and appends one `cancelled` relation with a null replacement per set in the same immediate transaction. Replacement commands must provide the exact sorted set of current active validated predecessor IDs. The repository validates those IDs without position, label, creation-time, or document-number inference, then appends corrected/draft/formed versions, immutable line versions, a validated replacement set, exact predecessor relations, slices, operation, and audit atomically. A missing, wrong-lineage, inactive, blocked, already-superseded, cross-scope, or incomplete predecessor set fails closed. The schema permits one lifecycle successor per original, requires matching concrete scope and UPD lineage, requires a validated replacement owned by the same operation, and retains every original row.
 
 One validated coverage slice can belong to only one active UPD line. One UPD line may cover multiple explicitly declared, non-overlapping closed-period slices. Mapping requires matching company/branch/client/contract/currency and reconciled safe-integer net/VAT/gross totals across line, slice, and snapshot. Due date and provenance are explicit; rental end, expected-payment labels, forecast, or current date are not inferred as contractual evidence. Blocked snapshots/lines/mappings remain inspectable but cannot enter validated coverage.
 
@@ -122,13 +131,21 @@ An inert branded command plan is materialized before transaction entry. Inputs r
 
 Idempotency is exact by company, operation type, and idempotency key. The stored lowercase SHA-256 command fingerprint is bound to the concrete branch, principal, membership/version, catalog version, capability, result aggregate/version, and result fingerprint. An exact replay returns the original logical result with `replayed: true` and writes nothing; changed content or authority is a conflict. SQLite uniqueness and immediate transactions provide the final concurrency boundary.
 
+Child-process concurrency tests use independent SQLite connections. Two replacements of one predecessor, cancellation racing replacement, and two UPDs racing for one economic slice each produce exactly one committed winner. The loser receives a domain conflict rather than raw `SQLITE_BUSY`; no partial source rows, duplicate active mapping, missing operation/audit, or orphan lifecycle relation remains.
+
 Source mutation, operation record, and relational audit event commit atomically. Audit captures stable aggregate/event/actor/scope/capability/correlation/reason/fingerprint/operation fields; arbitrary secrets and mutable names are excluded. SQLite-native failures injected at each close and form write stage demonstrate complete rollback, including operation and audit rows.
+
+### Evidence-set integrity and focused hash audit
+
+The close input no longer accepts `evidenceSetHash` as an authority value. It may carry `expectedEvidenceSetHash` only as an assertion. Domain and repository code independently normalize the complete inert evidence records, reject duplicate identities and conflicting facts, sort by the full stable identity/content tuple, exclude generated row IDs and timestamps, and compute lowercase SHA-256 over the canonical versioned representation. Snapshot insertion always uses this repository-owned value. The transaction then inserts the evidence rows, re-reads the persisted relational columns, recomputes the canonical hash, and compares it before operation/audit insertion and commit. An expected-hash mismatch, evidence insert failure, or persisted revalidation mismatch rolls back the complete close.
+
+The focused `*Hash`/`*Fingerprint` audit classifies `sourceHash`, rental-line `provenanceHash`, evidence-row `evidenceHash`, `conductedEvidenceHash`, and activation-boundary approval/source proofs as externally supplied provenance assertions; they are stored as source evidence and are not treated as repository integrity calculations. Repository-owned `calculationInputsHash`, `evidenceSetHash`, stable identity hashes, UPD line `contentHash`, `lineSetHash`, coverage `mappingHash`, slice hash, command/result fingerprints, and audit before/after fingerprints are computed internally. No caller-provided repository-integrity hash remains authoritative.
 
 ## Internal inspection and runtime wiring
 
 There is no PR6 HTTP router, route registration, feature flag, production service construction, worker, timer, watcher, CLI, legacy adapter, or frontend change. Normal startup imports and calls only `ensureBillingSourceAuthoritySchema(db)`.
 
-The internal read repository requires a branded scope containing one company and one or more concrete active branch IDs, exact scoped predicates, deterministic ordering, and a bounded limit of at most 100. It inspects rental lines/terms, periods/versions, snapshots/evidence, UPDs/versions/lines, coverage, operations, audit, and explicit blocked integrity. It has no `app_data` fallback and performs no eligibility, debt, aging, settlement, or forecast calculation.
+The internal read repository requires a branded scope containing one company and one or more concrete active branch IDs, exact scoped predicates, deterministic ordering, and a bounded limit of at most 100. It inspects rental lines/terms, periods/versions, snapshots/evidence, UPDs/versions/lines, coverage slices and lifecycle predecessor/successor relations, active validated coverage, operations, audit, and explicit blocked integrity. It has no `app_data` fallback and performs no eligibility, debt, aging, settlement, or forecast calculation.
 
 The production canonical resolver remains unconditional `null`; `CANONICAL_RECEIVABLES_READ_API_ENABLED` remains default-disabled. Production bootstrap is not called. Finance and Company Health/Risks remain on their existing implementations. PR7 was not started.
 
@@ -175,21 +192,18 @@ Verification values are recorded from the final unchanged pre-commit worktree:
 
 | Check | Result |
 |---|---|
-| Node / npm | `v22.22.0` / `10.9.4` |
-| PR6 schema focused suite | 20 passed, 0 failed |
-| PR6 domain focused suite | 41 passed, 0 failed |
-| PR6 repository focused suite | 29 passed, 0 failed |
-| PR6 safety focused suite | 28 passed, 0 failed |
-| Relevant existing regressions | 215 passed, 0 failed |
-| Full `npm test`, pass 1 | 2,056 passed, 0 failed |
-| Full `npm test`, pass 2 | 2,056 passed, 0 failed |
-| `npm run build` | Passed; Vite transformed 3,385 modules and completed in 6.24s |
+| Node / npm | `v20.20.2` / `10.9.8` |
+| PR6 schema/domain/repository/safety/remediation focused suites | 135 passed, 0 failed |
+| PR6 child-process concurrency suite | 3 passed, 0 failed (included above) |
+| Full `npm test`, pass 1 | 2,073 passed, 0 failed |
+| Full `npm test`, pass 2 | 2,073 passed, 0 failed |
+| `npm run build` | Passed; Vite transformed 3,385 modules and completed in 6.16s |
 | `git diff --check` | Passed with no output |
-| `PRAGMA foreign_keys` | `1` in focused migration/startup verification |
-| `PRAGMA foreign_key_check` | 0 rows in focused migration/startup verification |
+| `PRAGMA foreign_keys` | `1` in fresh-startup SQLite probe |
+| `PRAGMA foreign_key_check` | 0 rows in fresh-startup SQLite probe |
 
-The two independent startup probes each registered PR6 exactly once and produced zero rows in all 15 PR6 tables, all platform identity/membership/assignment tables, and all canonical financial tables. The rerun path preserved registration and did not execute business migration.
+The startup contract registers the unchanged `billing_source_authority_pr6` migration at version `1`. The normalized model now contains 16 PR6 tables because the unmerged version-1 definition includes the append-only coverage lifecycle table. Two independent startup probes registered it once with zero source, identity/membership/assignment, or canonical financial rows; the rerun path preserved registration without business migration.
 
 ## Final status
 
-PR6: IMPLEMENTED FOR REVIEW — NOT RELEASED
+PR6: REMEDIATED FOR REVIEW — NOT RELEASED

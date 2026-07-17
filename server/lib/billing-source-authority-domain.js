@@ -495,7 +495,7 @@ function normalizeSnapshot(value) {
     'currency', 'preDiscountNetMinor', 'discountMinor', 'netMinor', 'vatMinor', 'grossMinor',
     'calculationAlgorithmVersion', 'calculationPolicyRef', 'vatPolicyRef',
     'roundingPolicyRef', 'policyDecisionRef', 'sourceIntegrityStatus', 'blockerReasonCodes',
-    'calculationInputs', 'evidenceSetHash', 'sourceHash',
+    'calculationInputs', 'expectedEvidenceSetHash', 'sourceHash',
   ]), field);
   const blockers = reasonCodes(value.blockerReasonCodes, `${field}.blockerReasonCodes`);
   const status = integrity(value.sourceIntegrityStatus, `${field}.sourceIntegrityStatus`, blockers);
@@ -535,7 +535,9 @@ function normalizeSnapshot(value) {
       calculationAlgorithmVersion: value.calculationAlgorithmVersion,
       calculationInputs: value.calculationInputs,
     }),
-    evidenceSetHash: hash64(value.evidenceSetHash, `${field}.evidenceSetHash`),
+    expectedEvidenceSetHash: value.expectedEvidenceSetHash == null
+      ? null
+      : hash64(value.expectedEvidenceSetHash, `${field}.expectedEvidenceSetHash`),
     sourceHash: hash64(value.sourceHash, `${field}.sourceHash`),
   });
 }
@@ -571,6 +573,63 @@ function normalizeEvidence(value, index) {
     authorityPolicyRef,
     evidenceHash: hash64(value.evidenceHash, `${field}.evidenceHash`),
   });
+}
+
+function canonicalizeEvidenceSet(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    fail('BILLING_SOURCE_EVIDENCE_REQUIRED', 'A close requires explicit evidence.', 'evidence', 400);
+  }
+  const entries = value.map((item, index) => {
+    const row = normalizeEvidence(item, index);
+    const identity = {
+      evidenceType: row.evidenceType,
+      sourceSystem: row.sourceSystem,
+      sourceId: row.sourceId,
+      sourceVersion: row.sourceVersion,
+      sourceEventId: row.sourceEventId,
+      sourceEventVersion: row.sourceEventVersion,
+      coveredStartDate: row.coveredStartDate,
+      coveredEndDateExclusive: row.coveredEndDateExclusive,
+    };
+    const canonical = {
+      schemaVersion: BILLING_SOURCE_SCHEMA_VERSION,
+      ...identity,
+      authorityStatus: row.authorityStatus,
+      authorityPolicyRef: row.authorityPolicyRef,
+      evidenceHash: row.evidenceHash,
+    };
+    return { row, identity, canonical };
+  });
+  const identities = new Map();
+  for (const entry of entries) {
+    const identityKey = stableJson(entry.identity);
+    const existing = identities.get(identityKey);
+    if (existing) {
+      const exact = stableJson(existing.canonical) === stableJson(entry.canonical);
+      fail(
+        exact ? 'BILLING_SOURCE_DUPLICATE_EVIDENCE' : 'BILLING_SOURCE_CONFLICTING_EVIDENCE',
+        exact
+          ? 'Duplicate evidence identity is forbidden.'
+          : 'One evidence identity cannot carry conflicting authority or content.',
+        'evidence',
+        400,
+      );
+    }
+    identities.set(identityKey, entry);
+  }
+  entries.sort((left, right) => stableJson(left.canonical).localeCompare(stableJson(right.canonical)));
+  const canonicalEvidence = entries.map(entry => entry.canonical);
+  return Object.freeze({
+    evidence: Object.freeze(entries.map(entry => entry.row)),
+    hash: fingerprint({
+      schemaVersion: BILLING_SOURCE_SCHEMA_VERSION,
+      evidence: canonicalEvidence,
+    }),
+  });
+}
+
+function computeEvidenceSetHash(value) {
+  return canonicalizeEvidenceSet(value).hash;
 }
 
 function normalizeUpd(value) {
@@ -701,7 +760,7 @@ function normalizeCoverage(value) {
   const field = 'coverage';
   if (value == null) return null;
   assertExactKeys(value, new Set([
-    'expectedCoverageVersion', 'supersedesCoverageSetId', 'mappingAlgorithmVersion', 'status',
+    'expectedCoverageVersion', 'supersedesCoverageSetIds', 'mappingAlgorithmVersion', 'status',
     'netDeltaMinor', 'vatDeltaMinor', 'grossDeltaMinor', 'blockerReasonCodes', 'slices',
   ]), field);
   const status = enumValue(value.status, new Set(['validated', 'blocked']), `${field}.status`);
@@ -717,15 +776,24 @@ function normalizeCoverage(value) {
   if (status === 'validated' && Object.values(deltas).some(delta => delta !== 0)) {
     fail('BILLING_SOURCE_COVERAGE_DELTA', 'Validated coverage requires zero unexplained deltas.', field, 400);
   }
-  if (status === 'blocked' && value.supersedesCoverageSetId) {
-    fail('BILLING_SOURCE_BLOCKED_SUPERSESSION', 'Blocked coverage cannot deactivate a valid mapping.', `${field}.supersedesCoverageSetId`, 400);
+  if (!Array.isArray(value.supersedesCoverageSetIds)) {
+    fail('BILLING_SOURCE_COVERAGE_PREDECESSORS_REQUIRED', 'Coverage requires an explicit predecessor set.', `${field}.supersedesCoverageSetIds`, 400);
+  }
+  const supersedesCoverageSetIds = value.supersedesCoverageSetIds
+    .map((item, index) => requiredId(item, `${field}.supersedesCoverageSetIds[${index}]`))
+    .sort();
+  if (new Set(supersedesCoverageSetIds).size !== supersedesCoverageSetIds.length) {
+    fail('BILLING_SOURCE_DUPLICATE_COVERAGE_PREDECESSOR', 'Coverage predecessor IDs must be unique.', `${field}.supersedesCoverageSetIds`, 400);
+  }
+  if (status === 'blocked' && supersedesCoverageSetIds.length > 0) {
+    fail('BILLING_SOURCE_BLOCKED_SUPERSESSION', 'Blocked coverage cannot deactivate a valid mapping.', `${field}.supersedesCoverageSetIds`, 400);
   }
   if (!Array.isArray(value.slices) || value.slices.length === 0) {
     fail('BILLING_SOURCE_COVERAGE_SLICES_REQUIRED', 'Coverage requires explicit slices.', `${field}.slices`, 400);
   }
   return Object.freeze({
     expectedCoverageVersion: requiredVersion(value.expectedCoverageVersion, `${field}.expectedCoverageVersion`, { allowZero: true }),
-    supersedesCoverageSetId: optionalId(value.supersedesCoverageSetId, `${field}.supersedesCoverageSetId`),
+    supersedesCoverageSetIds: Object.freeze(supersedesCoverageSetIds),
     mappingAlgorithmVersion: requiredVersion(value.mappingAlgorithmVersion, `${field}.mappingAlgorithmVersion`),
     status,
     ...deltas,
@@ -747,7 +815,8 @@ function normalizeClosePlan(value) {
   const effectiveTerms = normalizeEffectiveTerms(value.effectiveTerms);
   const period = normalizePeriod(value.period);
   const snapshot = normalizeSnapshot(value.snapshot);
-  const evidence = Object.freeze(value.evidence.map(normalizeEvidence));
+  const canonicalEvidence = canonicalizeEvidenceSet(value.evidence);
+  const evidence = canonicalEvidence.evidence;
   if (snapshot.sourceIntegrityStatus === 'matched' && evidence.some(item => item.authorityStatus !== 'approved_by_reference')) {
     fail('BILLING_SOURCE_EVIDENCE_UNRESOLVED', 'Matched snapshots require approved evidence references.', 'evidence', 400);
   }
@@ -813,7 +882,8 @@ function normalizeFormPlan(value) {
 function normalizeRecordCoveragePlan(value) {
   assertExactKeys(value, new Set([
     'operationType', 'idempotencyKey', 'updId', 'formedUpdVersionId', 'expectedUpdVersion',
-    'coverage', 'auditMetadata',
+    'coverage', 'reasonCode', 'reasonText', 'sourceEventId', 'sourceEventVersion',
+    'sourceHash', 'auditMetadata',
   ]), 'command');
   return {
     operationType: 'record_upd_coverage',
@@ -822,6 +892,11 @@ function normalizeRecordCoveragePlan(value) {
     formedUpdVersionId: requiredId(value.formedUpdVersionId, 'formedUpdVersionId'),
     expectedUpdVersion: requiredVersion(value.expectedUpdVersion, 'expectedUpdVersion'),
     coverage: normalizeCoverage(value.coverage),
+    reasonCode: requiredText(value.reasonCode, 'reasonCode', 120),
+    reasonText: requiredText(value.reasonText, 'reasonText', 1000),
+    sourceEventId: requiredId(value.sourceEventId, 'sourceEventId'),
+    sourceEventVersion: requiredVersion(value.sourceEventVersion, 'sourceEventVersion'),
+    sourceHash: hash64(value.sourceHash, 'sourceHash'),
     auditMetadata: normalizeAuditMetadata(value.auditMetadata),
   };
 }
@@ -990,7 +1065,9 @@ module.exports = {
   STABLE_IDENTITY_KINDS,
   assertBillingSourceCommandContext,
   assertBillingSourceCommandPlan,
+  canonicalizeEvidenceSet,
   civilDate,
+  computeEvidenceSetHash,
   createBillingSourceCommandContext,
   fingerprint,
   hash64,

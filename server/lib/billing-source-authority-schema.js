@@ -31,6 +31,7 @@ const BILLING_SOURCE_UPD_VERSIONS_TABLE = 'billing_source_upd_versions';
 const BILLING_SOURCE_UPD_LINES_TABLE = 'billing_source_upd_lines';
 const BILLING_SOURCE_UPD_LINE_VERSIONS_TABLE = 'billing_source_upd_line_versions';
 const BILLING_SOURCE_COVERAGE_SETS_TABLE = 'billing_source_coverage_sets';
+const BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE = 'billing_source_coverage_supersessions';
 const BILLING_SOURCE_COVERAGE_SLICES_TABLE = 'billing_source_coverage_slices';
 const BILLING_SOURCE_OPERATIONS_TABLE = 'billing_source_operations';
 const BILLING_SOURCE_AUDIT_EVENTS_TABLE = 'billing_source_audit_events';
@@ -48,6 +49,7 @@ const BILLING_SOURCE_AUTHORITY_TABLES = Object.freeze([
   BILLING_SOURCE_UPD_LINES_TABLE,
   BILLING_SOURCE_UPD_LINE_VERSIONS_TABLE,
   BILLING_SOURCE_COVERAGE_SETS_TABLE,
+  BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
   BILLING_SOURCE_COVERAGE_SLICES_TABLE,
   BILLING_SOURCE_OPERATIONS_TABLE,
   BILLING_SOURCE_AUDIT_EVENTS_TABLE,
@@ -63,13 +65,15 @@ const REQUIRED_INDEXES = Object.freeze([
   'uq_billing_source_upd_version',
   'uq_billing_source_upd_line_identity',
   'uq_billing_source_upd_line_content_version',
+  'uq_billing_source_snapshot_evidence_identity',
   'uq_billing_source_coverage_set_version',
-  'uq_billing_source_validated_coverage_successor',
+  'uq_billing_source_coverage_supersession_original',
   'uq_billing_source_operation_identity',
   'idx_billing_source_period_scope',
   'idx_billing_source_snapshot_scope',
   'idx_billing_source_upd_scope',
   'idx_billing_source_coverage_scope',
+  'idx_billing_source_coverage_supersession_replacement',
   'idx_billing_source_audit_scope',
   'idx_billing_source_blocked_snapshots',
   'idx_billing_source_blocked_upd_versions',
@@ -86,6 +90,7 @@ const REQUIRED_TRIGGERS = Object.freeze([
   'trg_billing_source_operations_no_replace',
   'trg_billing_source_audit_events_no_replace',
   'trg_billing_source_periods_no_overlap',
+  'trg_billing_source_coverage_supersessions_validate',
   'trg_billing_source_coverage_slices_no_overlap',
 ]);
 
@@ -165,9 +170,15 @@ const REQUIRED_COLUMNS = Object.freeze({
   ],
   [BILLING_SOURCE_COVERAGE_SETS_TABLE]: [
     'id', 'companyId', 'branchId', 'updId', 'formedUpdVersionId', 'version',
-    'supersedesCoverageSetId', 'mappingAlgorithmVersion', 'status', 'mappingHash',
-    'netDeltaMinor', 'vatDeltaMinor', 'grossDeltaMinor', 'blockerReasonCodesJson',
-    'operationId', 'schemaVersion', 'createdAt',
+    'mappingAlgorithmVersion', 'status', 'mappingHash', 'netDeltaMinor', 'vatDeltaMinor',
+    'grossDeltaMinor', 'blockerReasonCodesJson', 'operationId', 'schemaVersion', 'createdAt',
+  ],
+  [BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE]: [
+    'id', 'companyId', 'branchId', 'originalCoverageSetId', 'replacementCoverageSetId',
+    'action', 'reasonCode', 'reasonText', 'operationId', 'actorPrincipalId',
+    'actorMembershipId', 'actorMembershipVersion', 'capabilityCatalogVersion',
+    'capabilityKey', 'sourceEventId', 'sourceEventVersion', 'sourceHash', 'schemaVersion',
+    'createdAt',
   ],
   [BILLING_SOURCE_COVERAGE_SLICES_TABLE]: [
     'id', 'companyId', 'branchId', 'coverageSetId', 'updId', 'formedUpdVersionId',
@@ -846,7 +857,6 @@ function ensureBillingSourceAuthoritySchema(db) {
         updId TEXT NOT NULL,
         formedUpdVersionId TEXT NOT NULL,
         version INTEGER NOT NULL,
-        supersedesCoverageSetId TEXT,
         mappingAlgorithmVersion INTEGER NOT NULL,
         status TEXT NOT NULL,
         mappingHash TEXT NOT NULL,
@@ -865,9 +875,6 @@ function ensureBillingSourceAuthoritySchema(db) {
         FOREIGN KEY (formedUpdVersionId, companyId, branchId)
           REFERENCES ${BILLING_SOURCE_UPD_VERSIONS_TABLE}(id, companyId, branchId)
           ON UPDATE RESTRICT ON DELETE RESTRICT,
-        FOREIGN KEY (supersedesCoverageSetId, companyId, branchId)
-          REFERENCES ${BILLING_SOURCE_COVERAGE_SETS_TABLE}(id, companyId, branchId)
-          ON UPDATE RESTRICT ON DELETE RESTRICT,
         FOREIGN KEY (operationId, companyId, branchId)
           REFERENCES ${BILLING_SOURCE_OPERATIONS_TABLE}(id, companyId, branchId)
           ON UPDATE RESTRICT ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
@@ -879,7 +886,54 @@ function ensureBillingSourceAuthoritySchema(db) {
         CHECK (json_valid(blockerReasonCodesJson) AND json_type(blockerReasonCodesJson) = 'array'),
         CHECK ((status = 'validated' AND json_array_length(blockerReasonCodesJson) = 0) OR (status = 'blocked' AND json_array_length(blockerReasonCodesJson) > 0)),
         CHECK (status != 'validated' OR (netDeltaMinor = 0 AND vatDeltaMinor = 0 AND grossDeltaMinor = 0)),
-        CHECK (status != 'blocked' OR supersedesCoverageSetId IS NULL),
+        CHECK (typeof(schemaVersion) = 'integer' AND schemaVersion >= 1)
+      );
+
+      CREATE TABLE ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE} (
+        id TEXT PRIMARY KEY,
+        companyId TEXT NOT NULL,
+        branchId TEXT NOT NULL,
+        originalCoverageSetId TEXT NOT NULL,
+        replacementCoverageSetId TEXT,
+        action TEXT NOT NULL,
+        reasonCode TEXT NOT NULL,
+        reasonText TEXT NOT NULL,
+        operationId TEXT NOT NULL,
+        actorPrincipalId TEXT NOT NULL,
+        actorMembershipId TEXT NOT NULL,
+        actorMembershipVersion INTEGER NOT NULL,
+        capabilityCatalogVersion INTEGER NOT NULL,
+        capabilityKey TEXT NOT NULL,
+        sourceEventId TEXT NOT NULL,
+        sourceEventVersion INTEGER NOT NULL,
+        sourceHash TEXT NOT NULL,
+        schemaVersion INTEGER NOT NULL,
+        createdAt TEXT NOT NULL,
+        UNIQUE (id, companyId, branchId),
+        ${scopedRootForeignKeys()},
+        FOREIGN KEY (originalCoverageSetId, companyId, branchId)
+          REFERENCES ${BILLING_SOURCE_COVERAGE_SETS_TABLE}(id, companyId, branchId)
+          ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (replacementCoverageSetId, companyId, branchId)
+          REFERENCES ${BILLING_SOURCE_COVERAGE_SETS_TABLE}(id, companyId, branchId)
+          ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (operationId, companyId, branchId)
+          REFERENCES ${BILLING_SOURCE_OPERATIONS_TABLE}(id, companyId, branchId)
+          ON UPDATE RESTRICT ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+        FOREIGN KEY (actorMembershipId, companyId)
+          REFERENCES company_memberships(id, companyId)
+          ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (capabilityCatalogVersion, capabilityKey)
+          REFERENCES capability_catalog_entries(catalogVersion, capabilityKey)
+          ON UPDATE RESTRICT ON DELETE RESTRICT,
+        CHECK (action IN ('cancelled', 'corrected', 'superseded')),
+        CHECK ((action = 'cancelled' AND replacementCoverageSetId IS NULL) OR (action IN ('corrected', 'superseded') AND replacementCoverageSetId IS NOT NULL)),
+        CHECK (replacementCoverageSetId IS NULL OR replacementCoverageSetId != originalCoverageSetId),
+        CHECK ((action IN ('cancelled', 'corrected') AND capabilityKey = 'upd.correct') OR (action = 'superseded' AND capabilityKey = 'upd.form')),
+        CHECK (length(trim(reasonCode)) > 0 AND length(trim(reasonText)) > 0),
+        CHECK (typeof(actorMembershipVersion) = 'integer' AND actorMembershipVersion >= 1),
+        CHECK (typeof(sourceEventVersion) = 'integer' AND sourceEventVersion >= 1),
+        CHECK (length(sourceHash) = 64),
         CHECK (typeof(schemaVersion) = 'integer' AND schemaVersion >= 1)
       );
 
@@ -1056,11 +1110,16 @@ function ensureBillingSourceAuthoritySchema(db) {
         ON ${BILLING_SOURCE_UPD_LINES_TABLE}(companyId, branchId, updId, sourceLineRef);
       CREATE UNIQUE INDEX uq_billing_source_upd_line_content_version
         ON ${BILLING_SOURCE_UPD_LINE_VERSIONS_TABLE}(companyId, branchId, updLineId, version);
+      CREATE UNIQUE INDEX uq_billing_source_snapshot_evidence_identity
+        ON ${BILLING_SOURCE_SNAPSHOT_EVIDENCE_TABLE}(
+          companyId, branchId, snapshotId, evidenceType, sourceSystem, sourceId,
+          sourceVersion, sourceEventId, sourceEventVersion, coveredStartDate,
+          coveredEndDateExclusive
+        );
       CREATE UNIQUE INDEX uq_billing_source_coverage_set_version
         ON ${BILLING_SOURCE_COVERAGE_SETS_TABLE}(companyId, branchId, updId, formedUpdVersionId, version);
-      CREATE UNIQUE INDEX uq_billing_source_validated_coverage_successor
-        ON ${BILLING_SOURCE_COVERAGE_SETS_TABLE}(supersedesCoverageSetId)
-        WHERE status = 'validated' AND supersedesCoverageSetId IS NOT NULL;
+      CREATE UNIQUE INDEX uq_billing_source_coverage_supersession_original
+        ON ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE}(originalCoverageSetId);
       CREATE UNIQUE INDEX uq_billing_source_operation_identity
         ON ${BILLING_SOURCE_OPERATIONS_TABLE}(companyId, operationType, idempotencyKey);
 
@@ -1072,6 +1131,8 @@ function ensureBillingSourceAuthoritySchema(db) {
         ON ${BILLING_SOURCE_UPDS_TABLE}(companyId, branchId, clientId, documentDate, id);
       CREATE INDEX idx_billing_source_coverage_scope
         ON ${BILLING_SOURCE_COVERAGE_SLICES_TABLE}(companyId, branchId, periodId, sliceStartDate, id);
+      CREATE INDEX idx_billing_source_coverage_supersession_replacement
+        ON ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE}(companyId, branchId, replacementCoverageSetId, id);
       CREATE INDEX idx_billing_source_audit_scope
         ON ${BILLING_SOURCE_AUDIT_EVENTS_TABLE}(companyId, branchId, aggregateType, aggregateId, aggregateVersion, id);
       CREATE INDEX idx_billing_source_blocked_snapshots
@@ -1103,6 +1164,56 @@ function ensureBillingSourceAuthoritySchema(db) {
         SELECT RAISE(ABORT, 'billing source period overlap');
       END;
 
+      CREATE TRIGGER trg_billing_source_coverage_supersessions_validate
+      BEFORE INSERT ON ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE}
+      WHEN NOT EXISTS (
+        SELECT 1 FROM ${BILLING_SOURCE_COVERAGE_SETS_TABLE} original
+        WHERE original.id = NEW.originalCoverageSetId
+          AND original.companyId = NEW.companyId
+          AND original.branchId = NEW.branchId
+          AND original.status = 'validated'
+      )
+      OR EXISTS (
+        SELECT 1 FROM ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE} existing
+        WHERE existing.originalCoverageSetId = NEW.originalCoverageSetId
+      )
+      OR (
+        NEW.replacementCoverageSetId IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ${BILLING_SOURCE_COVERAGE_SETS_TABLE} replacement
+          JOIN ${BILLING_SOURCE_COVERAGE_SETS_TABLE} original
+            ON original.id = NEW.originalCoverageSetId
+           AND original.companyId = NEW.companyId
+           AND original.branchId = NEW.branchId
+          WHERE replacement.id = NEW.replacementCoverageSetId
+            AND replacement.companyId = NEW.companyId
+            AND replacement.branchId = NEW.branchId
+            AND replacement.status = 'validated'
+            AND replacement.updId = original.updId
+            AND replacement.operationId = NEW.operationId
+        )
+      )
+      OR (
+        NEW.action = 'cancelled'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ${BILLING_SOURCE_COVERAGE_SETS_TABLE} original
+          JOIN ${BILLING_SOURCE_UPD_VERSIONS_TABLE} cancelled
+            ON cancelled.updId = original.updId
+           AND cancelled.companyId = original.companyId
+           AND cancelled.branchId = original.branchId
+          WHERE original.id = NEW.originalCoverageSetId
+            AND original.companyId = NEW.companyId
+            AND original.branchId = NEW.branchId
+            AND cancelled.state = 'cancelled'
+            AND cancelled.operationId = NEW.operationId
+        )
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'billing source coverage supersession invalid');
+      END;
+
       CREATE TRIGGER trg_billing_source_coverage_slices_no_overlap
       BEFORE INSERT ON ${BILLING_SOURCE_COVERAGE_SLICES_TABLE}
       WHEN EXISTS (
@@ -1116,9 +1227,23 @@ function ensureBillingSourceAuthoritySchema(db) {
           AND NEW.sliceStartDate < existing.sliceEndDateExclusive
           AND existingSet.status = 'validated'
           AND NOT EXISTS (
-            SELECT 1 FROM ${BILLING_SOURCE_COVERAGE_SETS_TABLE} successor
-            WHERE successor.supersedesCoverageSetId = existingSet.id
-              AND successor.status = 'validated'
+            SELECT 1 FROM ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE} lifecycle
+            WHERE lifecycle.originalCoverageSetId = existingSet.id
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} terminal
+            WHERE terminal.companyId = existingSet.companyId
+              AND terminal.branchId = existingSet.branchId
+              AND terminal.updId = existingSet.updId
+              AND terminal.version = (
+                SELECT MAX(latest.version)
+                FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} latest
+                WHERE latest.companyId = existingSet.companyId
+                  AND latest.branchId = existingSet.branchId
+                  AND latest.updId = existingSet.updId
+              )
+              AND terminal.state IN ('cancelled', 'corrected')
           )
           AND (SELECT status FROM ${BILLING_SOURCE_COVERAGE_SETS_TABLE} WHERE id = NEW.coverageSetId) = 'validated'
       )
@@ -1160,6 +1285,7 @@ module.exports = {
   BILLING_SOURCE_AUTHORITY_SCHEMA_VERSION,
   BILLING_SOURCE_AUTHORITY_TABLES,
   BILLING_SOURCE_COVERAGE_SETS_TABLE,
+  BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
   BILLING_SOURCE_COVERAGE_SLICES_TABLE,
   BILLING_SOURCE_EFFECTIVE_TERMS_TABLE,
   BILLING_SOURCE_OPERATIONS_TABLE,

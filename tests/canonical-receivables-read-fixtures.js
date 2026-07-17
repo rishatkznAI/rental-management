@@ -436,13 +436,21 @@ export function insertDueDateAudit(db, overrides = {}) {
 }
 
 export function trustedScope(overrides = {}) {
+  const companyId = overrides.companyId || 'company-a';
+  const defaultBranches = companyId === 'company-b'
+    ? ['branch-b1']
+    : companyId === 'company-a'
+      ? ['branch-a1', 'branch-a2']
+      : ['unmapped-test-branch'];
+  const allowedBranchIds = overrides.allowedBranchIds ?? defaultBranches;
   return {
     authenticated: true,
     principalId: overrides.principalId || 'user-finance',
-    companyId: overrides.companyId || 'company-a',
+    companyId,
     capabilities: overrides.capabilities || ['receivables.read'],
     companyWideBranchAccess: overrides.companyWideBranchAccess ?? true,
-    allowedBranchIds: overrides.allowedBranchIds,
+    allowedBranchIds,
+    branchIds: allowedBranchIds,
     receivablesTimezone: overrides.receivablesTimezone,
   };
 }

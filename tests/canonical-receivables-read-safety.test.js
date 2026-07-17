@@ -30,7 +30,10 @@ test('canonical read feature flag defaults disabled and production scope resolve
   assert.equal(isCanonicalReceivablesReadApiEnabled({ CANONICAL_RECEIVABLES_READ_API_ENABLED: 'false' }), false);
   assert.equal(isCanonicalReceivablesReadApiEnabled({ CANONICAL_RECEIVABLES_READ_API_ENABLED: 'true' }), true);
   const server = read('server/server.js');
-  assert.match(server, /function resolveCanonicalReceivablesTrustedScope\(\) \{\s*return null;\s*\}/);
+  const adapter = read('server/lib/canonical-receivables-scope-adapter.js');
+  assert.match(adapter, /function resolveCanonicalReceivablesTrustedScope\(\) \{\s*return null;\s*\}/);
+  assert.match(server, /require\('\.\/lib\/canonical-receivables-scope-adapter'\)/);
+  assert.doesNotMatch(server, /require\('\.\/lib\/platform-authorization'\)/);
   assert.match(server, /enabled: CANONICAL_RECEIVABLES_READ_API_ENABLED/);
   assert.match(server, /CANONICAL_RECEIVABLES_READ_API_ENABLED \? ensureDb\(\) : null/);
 });

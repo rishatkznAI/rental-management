@@ -1,0 +1,55 @@
+{
+  "configVersion": 1,
+  "company": {
+    "id": "replace-with-approved-opaque-company-id",
+    "displayName": "Replace with approved display name",
+    "receivablesTimezone": "replace-with-approved-IANA-timezone"
+  },
+  "branches": [
+    {
+      "id": "replace-with-approved-head-office-id",
+      "displayName": "Replace with approved Head Office name",
+      "isHeadOffice": true,
+      "status": "active"
+    },
+    {
+      "id": "replace-with-approved-operational-branch-id",
+      "displayName": "Replace with approved operational branch name",
+      "isHeadOffice": false,
+      "status": "active"
+    }
+  ],
+  "roleTemplates": [
+    {
+      "templateKey": "replace-with-approved-template-key",
+      "templateVersion": 1,
+      "displayName": "Replace with approved template display name",
+      "capabilities": [
+        "receivables.read"
+      ]
+    }
+  ],
+  "memberships": [
+    {
+      "id": "replace-with-approved-membership-id",
+      "principalId": "replace-with-existing-users-id",
+      "status": "active",
+      "roleTemplateKey": "replace-with-approved-template-key",
+      "roleTemplateVersion": 1,
+      "companyWideBranchAuthority": false,
+      "branchIds": [
+        "replace-with-approved-operational-branch-id"
+      ],
+      "capabilityAssignments": []
+    }
+  ],
+  "intentionallyUnmappedUserIds": [],
+  "approval": {
+    "approvedBy": "replace-with-existing-bootstrap-operator-users-id",
+    "approvedAt": "replace-with-approved-ISO-8601-timestamp",
+    "approvalReference": "replace-with-owner-approval-reference",
+    "backupReference": "replace-with-verified-backup-reference",
+    "configChecksum": "replace-with-plan-sha256",
+    "schemaFingerprint": "replace-with-plan-schema-fingerprint"
+  }
+}

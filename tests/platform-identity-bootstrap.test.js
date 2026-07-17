@@ -106,6 +106,33 @@ function allProtectedCounts(db) {
   ]));
 }
 
+const BOOTSTRAP_ROLLBACK_TABLES = [
+  'canonical_companies',
+  'canonical_branches',
+  'company_memberships',
+  'membership_branch_access',
+  'role_templates',
+  'role_template_capabilities',
+  'membership_capability_assignments',
+  'authorization_audit_events',
+  'identity_bootstrap_runs',
+  'capability_catalog_versions',
+  'capability_catalog_entries',
+  ...FINANCIAL_TABLES,
+];
+
+function completeBootstrapRollbackState(db) {
+  const usersRow = db.prepare("SELECT json FROM app_data WHERE name = 'users'").get();
+  return {
+    usersRaw: usersRow?.json ?? null,
+    usersParsed: usersRow ? JSON.parse(usersRow.json) : null,
+    tables: Object.fromEntries(BOOTSTRAP_ROLLBACK_TABLES.map(table => [
+      table,
+      db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
+    ])),
+  };
+}
+
 function applyOptions(db, config, overrides = {}) {
   return {
     db,
@@ -324,6 +351,7 @@ test('forced bootstrap audit failure rolls back authority and bootstrap-run reco
   try {
     const config = validConfig(context);
     installAuditInsertFailure(context.db, 'forced-bootstrap-audit-failure');
+    const before = completeBootstrapRollbackState(context.db);
     assert.throws(() => runPlatformIdentityBootstrap({
       db: context.db,
       mode: 'apply',
@@ -331,16 +359,15 @@ test('forced bootstrap audit failure rolls back authority and bootstrap-run reco
       explicitApply: true,
       expectedChecksum: config.approval.configChecksum,
     }), /forced-bootstrap-audit-failure/);
-    for (const table of [
-      'canonical_companies',
-      'canonical_branches',
-      'role_templates',
-      'company_memberships',
-      'authorization_audit_events',
-      'identity_bootstrap_runs',
-    ]) {
-      assert.equal(context.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0);
+    const after = completeBootstrapRollbackState(context.db);
+    assert.equal(after.usersRaw, before.usersRaw);
+    assert.deepEqual(after.usersParsed, before.usersParsed);
+    assert.deepEqual(after.tables, before.tables);
+    for (const table of FINANCIAL_TABLES) {
+      assert.deepEqual(after.tables[table], []);
     }
+    assert.equal(context.db.inTransaction, false);
+    assert.deepEqual(context.db.pragma('foreign_key_check'), []);
   } finally {
     context.close();
   }

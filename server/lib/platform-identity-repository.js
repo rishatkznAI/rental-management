@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { types: utilTypes } = require('util');
+const { types } = require('util');
 const {
   CANONICAL_BRANCHES_TABLE,
   CANONICAL_COMPANIES_TABLE,
@@ -35,6 +35,10 @@ const ASSIGNMENT_EFFECTS = new Set(['grant', 'deny']);
 const COMPANY_SCOPED_CAPABILITIES = new Set(COMPANY_SCOPED_CAPABILITY_KEYS);
 const AUDIT_JSON_MAX_DEPTH = 24;
 const AUDIT_JSON_MAX_BYTES = 64 * 1024;
+const BOOTSTRAP_PLAN_MAX_DEPTH = 32;
+const BOOTSTRAP_PLAN_MAX_NODES = 10_000;
+const BOOTSTRAP_PLAN_MAX_BYTES = 1024 * 1024;
+const MATERIALIZED_BOOTSTRAP_PLANS = new WeakSet();
 const TRUSTED_USER_ACTOR_CONTEXTS = new WeakSet();
 const FORBIDDEN_BRANCH_IDS = new Set([
   '*',
@@ -193,7 +197,7 @@ function canonicalizeAuditValue(value, path, depth, ancestors, sizeState) {
   if (typeof value !== 'object') {
     invalidAuditJson('Audit payload contains a non-JSON value.', path);
   }
-  if (utilTypes.isProxy(value)) {
+  if (types.isProxy(value)) {
     invalidAuditJson('Audit payload cannot contain proxy objects.', path);
   }
   if (ancestors.has(value)) {
@@ -298,6 +302,143 @@ function auditJson(value) {
     sizeState,
   ));
   return serialized;
+}
+
+function bootstrapPlanNotInert() {
+  fail(
+    'PLATFORM_IDENTITY_BOOTSTRAP_PLAN_NOT_INERT',
+    'Bootstrap plan must be deeply inert JSON data.',
+    'approvedPlan',
+  );
+}
+
+function addBootstrapPlanSize(state, bytes) {
+  state.bytes += bytes;
+  if (state.bytes > BOOTSTRAP_PLAN_MAX_BYTES) bootstrapPlanNotInert();
+}
+
+function materializeBootstrapPlanValue(value, depth, ancestors, state) {
+  if (depth > BOOTSTRAP_PLAN_MAX_DEPTH) bootstrapPlanNotInert();
+  state.nodes += 1;
+  if (state.nodes > BOOTSTRAP_PLAN_MAX_NODES) bootstrapPlanNotInert();
+
+  if (value === null) {
+    addBootstrapPlanSize(state, 4);
+    return null;
+  }
+  if (typeof value === 'string') {
+    addBootstrapPlanSize(state, Buffer.byteLength(value, 'utf8') + 2);
+    return value;
+  }
+  if (typeof value === 'boolean') {
+    addBootstrapPlanSize(state, value ? 4 : 5);
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) bootstrapPlanNotInert();
+    addBootstrapPlanSize(state, String(value).length);
+    return value;
+  }
+  if (typeof value !== 'object') bootstrapPlanNotInert();
+
+  if (types.isProxy(value)) bootstrapPlanNotInert();
+  if (ancestors.has(value)) bootstrapPlanNotInert();
+  if ('toJSON' in value) bootstrapPlanNotInert();
+  if (Object.getOwnPropertySymbols(value).length > 0) bootstrapPlanNotInert();
+
+  const isArray = Array.isArray(value);
+  const prototype = Object.getPrototypeOf(value);
+  if (
+    (isArray && prototype !== Array.prototype)
+    || (!isArray && prototype !== Object.prototype)
+  ) {
+    bootstrapPlanNotInert();
+  }
+
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  ancestors.add(value);
+  try {
+    if (isArray) {
+      const lengthDescriptor = descriptors.length;
+      if (
+        !lengthDescriptor
+        || lengthDescriptor.enumerable
+        || !Object.prototype.hasOwnProperty.call(lengthDescriptor, 'value')
+        || !Number.isSafeInteger(lengthDescriptor.value)
+        || lengthDescriptor.value < 0
+      ) {
+        bootstrapPlanNotInert();
+      }
+      const length = lengthDescriptor.value;
+      const propertyNames = Object.keys(descriptors).filter(key => key !== 'length');
+      if (propertyNames.length !== length) bootstrapPlanNotInert();
+
+      const result = [];
+      addBootstrapPlanSize(state, 2);
+      for (let index = 0; index < length; index += 1) {
+        const descriptor = descriptors[String(index)];
+        if (
+          !descriptor
+          || !descriptor.enumerable
+          || !Object.prototype.hasOwnProperty.call(descriptor, 'value')
+        ) {
+          bootstrapPlanNotInert();
+        }
+        result.push(materializeBootstrapPlanValue(
+          descriptor.value,
+          depth + 1,
+          ancestors,
+          state,
+        ));
+      }
+      return Object.freeze(result);
+    }
+
+    const result = {};
+    addBootstrapPlanSize(state, 2);
+    for (const key of Object.keys(descriptors).sort()) {
+      const descriptor = descriptors[key];
+      if (
+        !descriptor.enumerable
+        || !Object.prototype.hasOwnProperty.call(descriptor, 'value')
+      ) {
+        bootstrapPlanNotInert();
+      }
+      addBootstrapPlanSize(state, Buffer.byteLength(key, 'utf8') + 3);
+      Object.defineProperty(result, key, {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: materializeBootstrapPlanValue(
+          descriptor.value,
+          depth + 1,
+          ancestors,
+          state,
+        ),
+      });
+    }
+    return Object.freeze(result);
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function materializeBootstrapPlanInput(approvedPlan) {
+  const inertApprovedPlan = materializeBootstrapPlanValue(
+    approvedPlan,
+    0,
+    new Set(),
+    { bytes: 0, nodes: 0 },
+  );
+  if (
+    !inertApprovedPlan
+    || typeof inertApprovedPlan !== 'object'
+    || Array.isArray(inertApprovedPlan)
+  ) {
+    bootstrapPlanNotInert();
+  }
+  MATERIALIZED_BOOTSTRAP_PLANS.add(inertApprovedPlan);
+  return inertApprovedPlan;
 }
 
 function sortedUnique(values, normalizer) {
@@ -1665,19 +1806,20 @@ function createPlatformIdentityRepository(db, options = {}) {
     });
   }
 
-  function applyBootstrapPlan(approvedPlan = {}) {
+  function applyMaterializedBootstrapPlanInTransaction(inertApprovedPlan) {
+    if (!MATERIALIZED_BOOTSTRAP_PLANS.has(inertApprovedPlan)) bootstrapPlanNotInert();
     return transactionImmediate(() => {
-      const livePlan = planPlatformIdentityBootstrap(db, approvedPlan.approvedConfig || {});
+      const livePlan = planPlatformIdentityBootstrap(db, inertApprovedPlan.approvedConfig || {});
       const expectedState = {
-        mode: approvedPlan.mode,
-        configChecksum: approvedPlan.configChecksum,
-        schemaFingerprint: approvedPlan.schemaFingerprint,
-        usersDirectoryFingerprint: approvedPlan.usersDirectoryFingerprint,
-        mappedUserIds: approvedPlan.mappedUserIds,
-        intentionallyUnmappedUserIds: approvedPlan.intentionallyUnmappedUserIds,
-        eligibleActiveUserIds: approvedPlan.eligibleActiveUserIds,
-        approvedBy: approvedPlan.approvedBy,
-        normalized: approvedPlan.normalized,
+        mode: inertApprovedPlan.mode,
+        configChecksum: inertApprovedPlan.configChecksum,
+        schemaFingerprint: inertApprovedPlan.schemaFingerprint,
+        usersDirectoryFingerprint: inertApprovedPlan.usersDirectoryFingerprint,
+        mappedUserIds: inertApprovedPlan.mappedUserIds,
+        intentionallyUnmappedUserIds: inertApprovedPlan.intentionallyUnmappedUserIds,
+        eligibleActiveUserIds: inertApprovedPlan.eligibleActiveUserIds,
+        approvedBy: inertApprovedPlan.approvedBy,
+        normalized: inertApprovedPlan.normalized,
       };
       const liveState = {
         mode: livePlan.mode,
@@ -1869,6 +2011,11 @@ function createPlatformIdentityRepository(db, options = {}) {
       `).run(run);
       return Object.freeze({ status: 'succeeded', run: Object.freeze({ ...run }) });
     });
+  }
+
+  function applyBootstrapPlan(approvedPlan = {}) {
+    const inertApprovedPlan = materializeBootstrapPlanInput(approvedPlan);
+    return applyMaterializedBootstrapPlanInTransaction(inertApprovedPlan);
   }
 
   function createCompanyAuthorityInternal(input) {

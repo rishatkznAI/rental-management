@@ -30,6 +30,15 @@ const AUTHORITY_TABLES = [
   'authorization_audit_events',
   'identity_bootstrap_runs',
 ];
+const CATALOG_TABLES = [
+  'capability_catalog_versions',
+  'capability_catalog_entries',
+];
+const COMPLETE_BOOTSTRAP_TABLES = [
+  ...AUTHORITY_TABLES,
+  ...CATALOG_TABLES,
+  ...FINANCIAL_TABLES,
+];
 
 function validConfig(context) {
   const config = {
@@ -126,8 +135,8 @@ function assertZeroProtectedWrites(db) {
   }
 }
 
-function directRepository(context, overrides = {}) {
-  return createPlatformIdentityRepository(context.db, {
+function directRepository(context, overrides = {}, db = context.db) {
+  return createPlatformIdentityRepository(db, {
     readUsers() {
       throw new Error('Bootstrap apply must not use caller-provided users.');
     },
@@ -139,6 +148,54 @@ function directRepository(context, overrides = {}) {
     },
     ...overrides,
   });
+}
+
+function readCompleteBootstrapState(db) {
+  const usersRow = db.prepare("SELECT json FROM app_data WHERE name = 'users'").get();
+  return {
+    usersRaw: usersRow?.json ?? null,
+    usersParsed: usersRow ? JSON.parse(usersRow.json) : null,
+    tables: Object.fromEntries(COMPLETE_BOOTSTRAP_TABLES.map(table => [
+      table,
+      db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
+    ])),
+  };
+}
+
+function observeTransactionExecution(db, observer) {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === 'transaction') {
+        return operation => target.transaction((...args) => {
+          observer();
+          return operation(...args);
+        });
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+function assertPlanRejectedBeforeTransaction(context, approvedPlan) {
+  const before = readCompleteBootstrapState(context.db);
+  let transactionExecutions = 0;
+  const observedDb = observeTransactionExecution(context.db, () => {
+    transactionExecutions += 1;
+  });
+  const repository = directRepository(context, {}, observedDb);
+  transactionExecutions = 0;
+  assert.throws(
+    () => repository.applyBootstrapPlan(approvedPlan),
+    error => error.code === 'PLATFORM_IDENTITY_BOOTSTRAP_PLAN_NOT_INERT',
+  );
+  assert.equal(transactionExecutions, 0);
+  assert.equal(context.db.inTransaction, false);
+  assert.deepEqual(readCompleteBootstrapState(context.db), before);
+}
+
+function mutableApprovedPlan(context) {
+  return structuredClone(planPlatformIdentityBootstrap(context.db, validConfig(context)));
 }
 
 function readProtectedState(db) {
@@ -180,6 +237,240 @@ function assertTransactionalRevalidationFailure(operation) {
     error => error.code === 'BOOTSTRAP_TRANSACTIONAL_REVALIDATION_FAILED',
   );
 }
+
+test('bootstrap plan materialization rejects executable and exotic caller input before transaction', async t => {
+  const context = createPlatformIdentityContext();
+  try {
+    await t.test('top-level getter is rejected without executing', () => {
+      const plan = mutableApprovedPlan(context);
+      let getterCalls = 0;
+      Object.defineProperty(plan, 'mode', {
+        enumerable: true,
+        get() {
+          getterCalls += 1;
+          return 'plan';
+        },
+      });
+      assertPlanRejectedBeforeTransaction(context, plan);
+      assert.equal(getterCalls, 0);
+    });
+
+    await t.test('nested getter is rejected without executing', () => {
+      const plan = mutableApprovedPlan(context);
+      let getterCalls = 0;
+      Object.defineProperty(plan.approvedConfig.approval, 'approvedBy', {
+        enumerable: true,
+        get() {
+          getterCalls += 1;
+          return 'U-admin';
+        },
+      });
+      assertPlanRejectedBeforeTransaction(context, plan);
+      assert.equal(getterCalls, 0);
+    });
+
+    await t.test('setter-only descriptor is rejected without executing', () => {
+      const plan = mutableApprovedPlan(context);
+      let setterCalls = 0;
+      Object.defineProperty(plan, 'mode', {
+        enumerable: true,
+        set() {
+          setterCalls += 1;
+        },
+      });
+      assertPlanRejectedBeforeTransaction(context, plan);
+      assert.equal(setterCalls, 0);
+    });
+
+    await t.test('own toJSON is rejected without executing', () => {
+      const plan = mutableApprovedPlan(context);
+      let toJsonCalls = 0;
+      plan.toJSON = () => {
+        toJsonCalls += 1;
+        return {};
+      };
+      assertPlanRejectedBeforeTransaction(context, plan);
+      assert.equal(toJsonCalls, 0);
+    });
+
+    await t.test('inherited toJSON is rejected without executing', () => {
+      const plan = mutableApprovedPlan(context);
+      let toJsonCalls = 0;
+      const approvalPrototype = {
+        toJSON() {
+          toJsonCalls += 1;
+          return {};
+        },
+      };
+      plan.approvedConfig.approval = Object.assign(
+        Object.create(approvalPrototype),
+        plan.approvedConfig.approval,
+      );
+      assertPlanRejectedBeforeTransaction(context, plan);
+      assert.equal(toJsonCalls, 0);
+    });
+
+    const createCountingProxy = (target, counter) => new Proxy(target, {
+      get(source, property, receiver) {
+        counter.calls += 1;
+        return Reflect.get(source, property, receiver);
+      },
+      getOwnPropertyDescriptor(source, property) {
+        counter.calls += 1;
+        return Reflect.getOwnPropertyDescriptor(source, property);
+      },
+      getPrototypeOf(source) {
+        counter.calls += 1;
+        return Reflect.getPrototypeOf(source);
+      },
+      has(source, property) {
+        counter.calls += 1;
+        return Reflect.has(source, property);
+      },
+      ownKeys(source) {
+        counter.calls += 1;
+        return Reflect.ownKeys(source);
+      },
+    });
+
+    await t.test('top-level Proxy is rejected without invoking traps', () => {
+      const counter = { calls: 0 };
+      const plan = createCountingProxy(mutableApprovedPlan(context), counter);
+      assertPlanRejectedBeforeTransaction(context, plan);
+      assert.equal(counter.calls, 0);
+    });
+
+    await t.test('nested Proxy is rejected without invoking traps', () => {
+      const counter = { calls: 0 };
+      const plan = mutableApprovedPlan(context);
+      plan.normalized.company = createCountingProxy(plan.normalized.company, counter);
+      assertPlanRejectedBeforeTransaction(context, plan);
+      assert.equal(counter.calls, 0);
+    });
+
+    await t.test('Proxy around Array is rejected without invoking traps', () => {
+      const counter = { calls: 0 };
+      const plan = mutableApprovedPlan(context);
+      plan.mappedUserIds = createCountingProxy(plan.mappedUserIds, counter);
+      assertPlanRejectedBeforeTransaction(context, plan);
+      assert.equal(counter.calls, 0);
+    });
+
+    await t.test('Proxy around approval is rejected without invoking traps', () => {
+      const counter = { calls: 0 };
+      const plan = mutableApprovedPlan(context);
+      plan.approvedConfig.approval = createCountingProxy(
+        plan.approvedConfig.approval,
+        counter,
+      );
+      assertPlanRejectedBeforeTransaction(context, plan);
+      assert.equal(counter.calls, 0);
+    });
+
+    await t.test('custom class instance is rejected', () => {
+      class CallerPlanValue {}
+      const plan = mutableApprovedPlan(context);
+      plan.callerValue = new CallerPlanValue();
+      assertPlanRejectedBeforeTransaction(context, plan);
+    });
+
+    await t.test('cyclic plan is rejected', () => {
+      const plan = mutableApprovedPlan(context);
+      plan.cycle = plan;
+      assertPlanRejectedBeforeTransaction(context, plan);
+    });
+
+    await t.test('sparse and custom-property arrays are rejected', () => {
+      const sparsePlan = mutableApprovedPlan(context);
+      sparsePlan.mappedUserIds = new Array(2);
+      assertPlanRejectedBeforeTransaction(context, sparsePlan);
+
+      const extraPropertyPlan = mutableApprovedPlan(context);
+      extraPropertyPlan.mappedUserIds.extra = true;
+      assertPlanRejectedBeforeTransaction(context, extraPropertyPlan);
+    });
+
+    await t.test('symbol and non-enumerable properties are rejected', () => {
+      const symbolPlan = mutableApprovedPlan(context);
+      symbolPlan[Symbol('caller')] = true;
+      assertPlanRejectedBeforeTransaction(context, symbolPlan);
+
+      const hiddenPlan = mutableApprovedPlan(context);
+      Object.defineProperty(hiddenPlan, 'hidden', {
+        enumerable: false,
+        value: true,
+      });
+      assertPlanRejectedBeforeTransaction(context, hiddenPlan);
+    });
+
+    await t.test('non-JSON scalar and container values are rejected', () => {
+      const values = [
+        undefined,
+        () => {},
+        Symbol('value'),
+        1n,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        new Date(),
+        Buffer.from('value'),
+        new Map(),
+        new Set(),
+        new WeakMap(),
+        new WeakSet(),
+        /value/,
+        new Error('value'),
+        Promise.resolve(),
+        new Uint8Array(1),
+        new ArrayBuffer(1),
+        Object.create(null),
+      ];
+      for (const value of values) {
+        const plan = mutableApprovedPlan(context);
+        plan.callerValue = value;
+        assertPlanRejectedBeforeTransaction(context, plan);
+      }
+    });
+
+    await t.test('excessive depth, node count, and byte size are rejected', () => {
+      const deepPlan = mutableApprovedPlan(context);
+      let nested = deepPlan;
+      for (let index = 0; index < 40; index += 1) {
+        nested.child = {};
+        nested = nested.child;
+      }
+      assertPlanRejectedBeforeTransaction(context, deepPlan);
+
+      const largeNodePlan = mutableApprovedPlan(context);
+      largeNodePlan.large = Array.from({ length: 10_001 }, () => null);
+      assertPlanRejectedBeforeTransaction(context, largeNodePlan);
+
+      const largeBytePlan = mutableApprovedPlan(context);
+      largeBytePlan.large = 'x'.repeat((1024 * 1024) + 1);
+      assertPlanRejectedBeforeTransaction(context, largeBytePlan);
+    });
+  } finally {
+    context.close();
+  }
+});
+
+test('safe deeply plain caller plan materializes before transaction and applies', () => {
+  const context = createPlatformIdentityContext();
+  try {
+    const plan = mutableApprovedPlan(context);
+    let transactionExecutions = 0;
+    const observedDb = observeTransactionExecution(context.db, () => {
+      transactionExecutions += 1;
+    });
+    const repository = directRepository(context, {}, observedDb);
+    transactionExecutions = 0;
+    assert.equal(repository.applyBootstrapPlan(plan).status, 'succeeded');
+    assert.equal(transactionExecutions, 1);
+    assert.equal(context.db.inTransaction, false);
+    assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+  } finally {
+    context.close();
+  }
+});
 
 test('direct repository apply succeeds without a validation callback and uses live DB state', () => {
   const context = createPlatformIdentityContext();
@@ -629,8 +920,40 @@ test('production source exposes only repository-owned safe bootstrap apply', () 
   assert.doesNotMatch(productionSource, /beforeAuditInsert/);
   assert.doesNotMatch(productionSource, /applyBootstrap(?:Raw|Unsafe)|rawBootstrapApply/);
   assert.equal((repositorySource.match(/function applyBootstrapPlan/g) || []).length, 1);
-  assert.match(repositorySource, /return transactionImmediate\(\(\) => \{/);
-  assert.match(repositorySource, /planPlatformIdentityBootstrap\(db, approvedPlan\.approvedConfig/);
+  assert.match(repositorySource, /const \{ types \} = require\('util'\)/);
+  assert.match(repositorySource, /types\.isProxy\(value\)/);
+  assert.match(repositorySource, /Object\.getOwnPropertyDescriptors\(value\)/);
+  assert.match(repositorySource, /const MATERIALIZED_BOOTSTRAP_PLANS = new WeakSet\(\)/);
+  assert.match(repositorySource, /function materializeBootstrapPlanInput\(approvedPlan\)/);
+  assert.match(
+    repositorySource,
+    /const inertApprovedPlan = materializeBootstrapPlanInput\(approvedPlan\)/,
+  );
+  const transactionalHelperStart = repositorySource.indexOf(
+    'function applyMaterializedBootstrapPlanInTransaction(inertApprovedPlan)',
+  );
+  const publicBoundaryStart = repositorySource.indexOf(
+    'function applyBootstrapPlan(approvedPlan = {})',
+  );
+  assert.notEqual(transactionalHelperStart, -1);
+  assert.notEqual(publicBoundaryStart, -1);
+  assert.equal(transactionalHelperStart < publicBoundaryStart, true);
+  const transactionalHelperSource = repositorySource.slice(
+    transactionalHelperStart,
+    publicBoundaryStart,
+  );
+  assert.doesNotMatch(transactionalHelperSource, /\b(?:approvedPlan|callerPlan|originalPlan)\b/);
+  assert.match(transactionalHelperSource, /MATERIALIZED_BOOTSTRAP_PLANS\.has\(inertApprovedPlan\)/);
+  assert.match(transactionalHelperSource, /return transactionImmediate\(\(\) => \{/);
+  assert.match(
+    transactionalHelperSource,
+    /planPlatformIdentityBootstrap\(db, inertApprovedPlan\.approvedConfig/,
+  );
+  const exportsSource = repositorySource.slice(repositorySource.indexOf('module.exports = {'));
+  assert.doesNotMatch(
+    exportsSource,
+    /materializeBootstrapPlanInput|applyMaterializedBootstrapPlanInTransaction/,
+  );
   assert.match(bootstrapSource, /repository\.applyBootstrapPlan\(plan\)/);
   assert.doesNotMatch(bootstrapSource, /\b(?:INSERT|UPDATE|DELETE)\b[\s\S]*canonical_/i);
   assert.doesNotMatch(bootstrapSource, /transactionImmediate|\.transaction\(/);

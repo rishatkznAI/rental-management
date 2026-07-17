@@ -628,6 +628,50 @@ The remaining owner approvals in section 16 are unchanged. PR5 remains implement
 for review and is not released; this remediation does not approve production
 identity data, bootstrap execution, release, cutover, or PR6.
 
+## Inert bootstrap input boundary remediation
+
+The final independent review evaluated head
+`8e47510fde4507e946ff5f9013c8bd20189c1964` and identified a caller-owned
+accessor/Proxy boundary after transactional revalidation, plus incomplete assertions
+in the database-native bootstrap audit rollback test.
+
+- The public `repository.applyBootstrapPlan()` boundary now materializes a completely
+  independent repository-owned plan before opening `BEGIN IMMEDIATE`.
+- Every object is checked with Node `util.types.isProxy()` before other reflective
+  operations. Proxies at the root or any nested object/array are rejected rather than
+  inspected.
+- Non-Proxy input is copied only through own-property descriptors. Accessors,
+  setters, hidden properties, symbol keys, custom or null prototypes, inherited or
+  own `toJSON`, functions, non-finite numbers, bigint, `undefined`, sparse or custom
+  arrays, and other non-JSON/exotic structures are rejected without invoking caller
+  conversion or serialization behavior.
+- Descriptor values are recursively copied into standard dense arrays and plain
+  objects. The copy retains no caller-owned nested references, enforces cycle,
+  depth, node-count, and byte-size limits, and is deeply frozen.
+- Successful materialization adds the repository-owned root to a module-private
+  `WeakSet`. The module-private transactional helper rejects unbranded input and is
+  not exported.
+- The original caller plan is used only by the pre-transaction materializer. The
+  `BEGIN IMMEDIATE` helper accepts and reads only the branded inert copy, then
+  performs mandatory live users/schema/checksum/mapping/operator/FK/financial/
+  identity revalidation, same-checksum fingerprint comparison or authority writes,
+  actual authority reread, and run creation.
+- Direct repository tests cover top-level and nested getters, setter-only
+  descriptors, own/inherited `toJSON`, top-level and nested proxies, proxied arrays
+  and approval objects, custom classes, exotic/non-JSON values, cycles, sparse and
+  custom arrays, symbol/hidden properties, depth/node/byte limits, and successful
+  application of a safe deeply plain caller plan. Test-only transaction observation
+  proves rejected executable input never enters the SQLite transaction callback.
+- The SQLite `BEFORE INSERT`/`RAISE(ABORT, ...)` audit failure test now compares raw
+  and parsed `app_data.users`, full ordered rows for both canonical roots and every
+  child authority table, authorization audit and bootstrap runs, both capability
+  catalog tables, and all six canonical financial/event tables before and after
+  rollback. It also verifies transaction closure and `foreign_key_check`.
+
+This remediation does not add a production callback, export an unsafe helper, run
+bootstrap, enable the canonical feature, write canonical or financial data, release
+PR5, or begin PR6.
+
 ## 14. Risks and blockers
 
 | Risk | Treatment |

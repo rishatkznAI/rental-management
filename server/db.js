@@ -15,6 +15,9 @@ const {
   ensurePlatformIdentitySchema,
 } = require('./lib/platform-identity-schema');
 const {
+  ensureBillingSourceAuthoritySchema,
+} = require('./lib/billing-source-authority-schema');
+const {
   assertClientInnListUnique,
   assertClientInnWriteAllowed,
   buildClientInnDuplicateReport,
@@ -131,6 +134,7 @@ function ensureDb() {
   ensureCanonicalReceivablesSchema(db);
   ensureCanonicalReceivablesSettlementSchema(db);
   ensurePlatformIdentitySchema(db);
+  ensureBillingSourceAuthoritySchema(db);
   syncClientInnIndex({ throwOnDuplicates: false });
   return db;
 }

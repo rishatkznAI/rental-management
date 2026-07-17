@@ -82,6 +82,29 @@ function validConfig(context) {
   return config;
 }
 
+function authorityDriftConfig(context) {
+  const config = validConfig(context);
+  config.branches.push({
+    id: 'approved-branch-id-2',
+    displayName: 'Approved alternate branch',
+    isHeadOffice: false,
+    status: 'active',
+  });
+  config.roleTemplates.push({
+    templateKey: 'approved-reader-alt',
+    templateVersion: 1,
+    displayName: 'Approved alternate reader',
+    capabilities: ['upd.form'],
+  });
+  config.memberships[0].branchIds = ['approved-branch-id', 'approved-branch-id-2'];
+  config.memberships[0].capabilityAssignments = [{
+    capabilityKey: 'forecast.read',
+    effect: 'grant',
+  }];
+  config.approval.configChecksum = calculateBootstrapChecksum(context.db, config);
+  return config;
+}
+
 function readUsers(db) {
   return JSON.parse(db.prepare("SELECT json FROM app_data WHERE name = 'users'").get().json);
 }
@@ -108,8 +131,46 @@ function directRepository(context, overrides = {}) {
     readUsers() {
       throw new Error('Bootstrap apply must not use caller-provided users.');
     },
-    nowIso: () => '2026-07-16T05:00:00.000Z',
+    nowIso() {
+      throw new Error('Bootstrap apply must not use a caller-provided clock.');
+    },
+    generateId() {
+      throw new Error('Bootstrap apply must not use a caller-provided ID generator.');
+    },
     ...overrides,
+  });
+}
+
+function readProtectedState(db) {
+  return Object.fromEntries([...AUTHORITY_TABLES, ...FINANCIAL_TABLES].map(table => [
+    table,
+    db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
+  ]));
+}
+
+function withTriggerDisabled(db, triggerName, mutate) {
+  const trigger = db.prepare(`
+    SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?
+  `).get(triggerName);
+  assert.equal(typeof trigger?.sql, 'string', triggerName);
+  db.exec(`DROP TRIGGER ${triggerName}`);
+  try {
+    mutate();
+  } finally {
+    db.exec(trigger.sql);
+  }
+}
+
+function mutateBootstrapSummary(db, mutate) {
+  withTriggerDisabled(db, 'trg_identity_bootstrap_runs_no_update', () => {
+    const row = db.prepare(`
+      SELECT id, summaryJson FROM identity_bootstrap_runs WHERE status = 'succeeded'
+    `).get();
+    const summary = JSON.parse(row.summaryJson);
+    mutate(summary);
+    db.prepare(`
+      UPDATE identity_bootstrap_runs SET summaryJson = ? WHERE id = ?
+    `).run(JSON.stringify(summary), row.id);
   });
 }
 
@@ -134,7 +195,7 @@ test('direct repository apply succeeds without a validation callback and uses li
   }
 });
 
-test('removed callback option is ignored and cannot replace repository validation', () => {
+test('removed callback options are ignored and cannot run inside bootstrap apply', () => {
   const context = createPlatformIdentityContext();
   try {
     const plan = planPlatformIdentityBootstrap(context.db, validConfig(context));
@@ -144,9 +205,217 @@ test('removed callback option is ignored and cannot replace repository validatio
         callbackCalled = true;
         throw new Error('Removed callback must never run.');
       },
+      beforeAuditInsert() {
+        callbackCalled = true;
+        throw new Error('Legacy audit callback must never run.');
+      },
     });
     assert.equal(repository.applyBootstrapPlan(plan).status, 'succeeded');
     assert.equal(callbackCalled, false);
+  } finally {
+    context.close();
+  }
+});
+
+test('same-checksum apply rejects deterministic authority drift and preserves live state', async t => {
+  const scenarios = [
+    {
+      name: 'membership status changed with the same row counts',
+      mutate(db) {
+        db.prepare(`
+          UPDATE company_memberships
+          SET status = 'inactive', version = version + 1,
+              inactivatedAt = '2026-07-17T00:00:00.000Z',
+              updatedAt = '2026-07-17T00:00:00.000Z'
+          WHERE id = 'approved-membership-id'
+        `).run();
+      },
+    },
+    {
+      name: 'membership version changed',
+      mutate(db) {
+        db.prepare(`
+          UPDATE company_memberships
+          SET version = version + 1, updatedAt = '2026-07-17T00:00:00.000Z'
+          WHERE id = 'approved-membership-id'
+        `).run();
+      },
+    },
+    {
+      name: 'membership role-template binding changed',
+      mutate(db) {
+        db.prepare(`
+          UPDATE company_memberships
+          SET roleTemplateKey = 'approved-reader-alt', roleTemplateVersion = 1,
+              version = version + 1, updatedAt = '2026-07-17T00:00:00.000Z'
+          WHERE id = 'approved-membership-id'
+        `).run();
+      },
+    },
+    {
+      name: 'membership company-wide authority changed',
+      mutate(db) {
+        db.prepare(`
+          UPDATE company_memberships
+          SET companyWideBranchAuthority = 1, version = version + 1,
+              updatedAt = '2026-07-17T00:00:00.000Z'
+          WHERE id = 'approved-membership-id'
+        `).run();
+      },
+    },
+    {
+      name: 'retained branch grant revoked and another grant substituted',
+      mutate(db) {
+        db.prepare(`
+          UPDATE membership_branch_access
+          SET status = 'revoked', version = version + 1,
+              revokedAt = '2026-07-17T00:00:00.000Z', revokedBy = 'U-admin'
+          WHERE membershipId = 'approved-membership-id'
+            AND branchId = 'approved-branch-id'
+        `).run();
+        db.prepare(`
+          UPDATE membership_branch_access
+          SET branchId = 'approved-head-office-id', version = version + 1
+          WHERE membershipId = 'approved-membership-id'
+            AND branchId = 'approved-branch-id-2'
+        `).run();
+      },
+    },
+    {
+      name: 'branch status changed',
+      mutate(db) {
+        db.prepare(`
+          UPDATE canonical_branches
+          SET status = 'inactive', version = version + 1,
+              updatedAt = '2026-07-17T00:00:00.000Z'
+          WHERE id = 'approved-branch-id'
+        `).run();
+      },
+    },
+    {
+      name: 'Head Office changed with the same branch count',
+      mutate(db) {
+        withTriggerDisabled(db, 'trg_canonical_branches_immutable_identity', () => {
+          db.prepare(`
+            UPDATE canonical_branches
+            SET isHeadOffice = 0, version = version + 1,
+                updatedAt = '2026-07-17T00:00:00.000Z'
+            WHERE id = 'approved-head-office-id'
+          `).run();
+          db.prepare(`
+            UPDATE canonical_branches
+            SET isHeadOffice = 1, version = version + 1,
+                updatedAt = '2026-07-17T00:00:00.000Z'
+            WHERE id = 'approved-branch-id'
+          `).run();
+        });
+      },
+    },
+    {
+      name: 'company timezone changed',
+      mutate(db) {
+        db.prepare(`
+          UPDATE canonical_companies
+          SET receivablesTimezone = 'Asia/Yekaterinburg', version = version + 1,
+              updatedAt = '2026-07-17T00:00:00.000Z'
+          WHERE id = 'approved-company-opaque-id'
+        `).run();
+      },
+    },
+    {
+      name: 'template capability changed with the same row count',
+      mutate(db) {
+        withTriggerDisabled(db, 'trg_role_template_capabilities_no_update', () => {
+          db.prepare(`
+            UPDATE role_template_capabilities
+            SET capabilityKey = 'forecast.calculate'
+            WHERE templateKey = 'approved-reader'
+              AND capabilityKey = 'receivables.read'
+          `).run();
+        });
+      },
+    },
+    {
+      name: 'membership grant changed to deny with the same row count',
+      mutate(db) {
+        db.prepare(`
+          UPDATE membership_capability_assignments
+          SET effect = 'deny', version = version + 1
+          WHERE membershipId = 'approved-membership-id'
+            AND capabilityKey = 'forecast.read'
+        `).run();
+      },
+    },
+    {
+      name: 'assignment status and version changed',
+      mutate(db) {
+        db.prepare(`
+          UPDATE membership_capability_assignments
+          SET status = 'revoked', version = version + 1,
+              revokedAt = '2026-07-17T00:00:00.000Z', revokedBy = 'U-admin'
+          WHERE membershipId = 'approved-membership-id'
+            AND capabilityKey = 'forecast.read'
+        `).run();
+      },
+    },
+    {
+      name: 'stored authority fingerprint tampered',
+      mutate(db) {
+        mutateBootstrapSummary(db, summary => {
+          summary.authorityFingerprint = '0'.repeat(64);
+        });
+      },
+    },
+    {
+      name: 'stored authority snapshot version is unknown',
+      mutate(db) {
+        mutateBootstrapSummary(db, summary => {
+          summary.authoritySnapshotVersion = 999;
+        });
+      },
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, () => {
+      const context = createPlatformIdentityContext();
+      try {
+        const plan = planPlatformIdentityBootstrap(
+          context.db,
+          authorityDriftConfig(context),
+        );
+        const repository = directRepository(context);
+        assert.equal(repository.applyBootstrapPlan(plan).status, 'succeeded');
+        scenario.mutate(context.db);
+        const beforeRetry = readProtectedState(context.db);
+        const beforeCounts = protectedCounts(context.db);
+        assert.throws(
+          () => repository.applyBootstrapPlan(plan),
+          error => error.code === 'PLATFORM_IDENTITY_BOOTSTRAP_AUTHORITY_DRIFT',
+        );
+        assert.deepEqual(readProtectedState(context.db), beforeRetry);
+        assert.deepEqual(protectedCounts(context.db), beforeCounts);
+        assert.equal(context.db.inTransaction, false);
+        assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+        for (const table of FINANCIAL_TABLES) {
+          assert.equal(beforeCounts[table], 0, table);
+        }
+      } finally {
+        context.close();
+      }
+    });
+  }
+});
+
+test('matching live authority returns a valid same-checksum no-op', () => {
+  const context = createPlatformIdentityContext();
+  try {
+    const plan = planPlatformIdentityBootstrap(context.db, authorityDriftConfig(context));
+    const repository = directRepository(context);
+    assert.equal(repository.applyBootstrapPlan(plan).status, 'succeeded');
+    const beforeRetry = readProtectedState(context.db);
+    assert.equal(repository.applyBootstrapPlan(plan).status, 'noop');
+    assert.deepEqual(readProtectedState(context.db), beforeRetry);
   } finally {
     context.close();
   }
@@ -357,6 +626,7 @@ test('production source exposes only repository-owned safe bootstrap apply', () 
   const productionSource = `${repositorySource}\n${bootstrapSource}\n${validationSource}\n${cliSource}`;
 
   assert.doesNotMatch(productionSource, /beforeBootstrapApply/);
+  assert.doesNotMatch(productionSource, /beforeAuditInsert/);
   assert.doesNotMatch(productionSource, /applyBootstrap(?:Raw|Unsafe)|rawBootstrapApply/);
   assert.equal((repositorySource.match(/function applyBootstrapPlan/g) || []).length, 1);
   assert.match(repositorySource, /return transactionImmediate\(\(\) => \{/);

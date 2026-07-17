@@ -34,7 +34,6 @@ export const DEFAULT_USERS = Object.freeze([
 
 export function createPlatformIdentityContext({
   users = DEFAULT_USERS,
-  beforeAuditInsert,
   dbPath = ':memory:',
 } = {}) {
   const db = new Database(dbPath);
@@ -61,7 +60,6 @@ export function createPlatformIdentityContext({
     readUsers,
     nowIso: () => `2026-07-16T00:00:${String(sequence++).padStart(2, '0')}.000Z`,
     generateId: prefix => `${prefix}-${++sequence}`,
-    beforeAuditInsert,
   });
   return {
     db,

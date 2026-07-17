@@ -113,9 +113,18 @@ function applyOptions(db, config, overrides = {}) {
     config,
     explicitApply: true,
     expectedChecksum: config.approval.configChecksum,
-    nowIso: () => '2026-07-16T03:00:00.000Z',
     ...overrides,
   };
+}
+
+function installAuditInsertFailure(db, message) {
+  db.exec(`
+    CREATE TEMP TRIGGER fail_authorization_audit_insert
+    BEFORE INSERT ON authorization_audit_events
+    BEGIN
+      SELECT RAISE(ABORT, '${message}');
+    END;
+  `);
 }
 
 function observeUsersRead(db, observer) {
@@ -258,18 +267,30 @@ test('bootstrap apply is atomic, records audit/run evidence, creates no financia
   const context = createPlatformIdentityContext();
   try {
     const config = validConfig(context);
-    let sequence = 0;
     const options = {
       db: context.db,
       mode: 'apply',
       config,
       explicitApply: true,
       expectedChecksum: config.approval.configChecksum,
-      nowIso: () => '2026-07-16T01:00:00.000Z',
-      generateId: prefix => `${prefix}-bootstrap-${++sequence}`,
     };
     const applied = runPlatformIdentityBootstrap(options);
     assert.equal(applied.status, 'succeeded');
+    const summary = JSON.parse(applied.run.summaryJson);
+    assert.equal(summary.authoritySnapshotVersion, 1);
+    assert.match(summary.authorityFingerprint, /^[a-f0-9]{64}$/);
+    assert.equal(summary.configChecksum, config.approval.configChecksum);
+    assert.equal(summary.schemaFingerprint, config.approval.schemaFingerprint);
+    assert.equal(summary.usersDirectoryFingerprint, getUsersDirectoryFingerprint(context.db));
+    assert.deepEqual(summary.authorityRowCounts, {
+      canonical_branches: 2,
+      canonical_companies: 1,
+      company_memberships: 1,
+      membership_branch_access: 1,
+      membership_capability_assignments: 0,
+      role_template_capabilities: 1,
+      role_templates: 1,
+    });
     assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM canonical_companies').get().count, 1);
     assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM canonical_branches').get().count, 2);
     assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM company_memberships').get().count, 1);
@@ -302,15 +323,13 @@ test('forced bootstrap audit failure rolls back authority and bootstrap-run reco
   const context = createPlatformIdentityContext();
   try {
     const config = validConfig(context);
+    installAuditInsertFailure(context.db, 'forced-bootstrap-audit-failure');
     assert.throws(() => runPlatformIdentityBootstrap({
       db: context.db,
       mode: 'apply',
       config,
       explicitApply: true,
       expectedChecksum: config.approval.configChecksum,
-      beforeAuditInsert() {
-        throw new Error('forced-bootstrap-audit-failure');
-      },
     }), /forced-bootstrap-audit-failure/);
     for (const table of [
       'canonical_companies',
@@ -617,7 +636,8 @@ test('same-checksum no-op still fails closed when the approved operator is no lo
 test('concurrent bootstrap applies produce one success and one deterministic no-op', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'identity-bootstrap-concurrent-'));
   const dbPath = path.join(directory, 'bootstrap.sqlite');
-  const markerPath = path.join(directory, 'writer-locked');
+  const readyPath = path.join(directory, 'writer-ready');
+  const releasePath = path.join(directory, 'writers-released');
   const context = createPlatformIdentityContext({ dbPath });
   const second = new Database(dbPath);
   try {
@@ -627,23 +647,21 @@ test('concurrent bootstrap applies produce one success and one deterministic no-
     const approvedPlan = planPlatformIdentityBootstrap(context.db, config);
     const childScript = `
       const fs = require('node:fs');
-      const Database = require('./server/node_modules/better-sqlite3');
+      const { createRequire } = require('node:module');
+      const serverRequire = createRequire(process.cwd() + '/server/package.json');
+      const Database = serverRequire('better-sqlite3');
       const { createPlatformIdentityRepository } = require('./server/lib/platform-identity-repository');
       const db = new Database(process.env.BOOTSTRAP_DB_PATH);
       db.pragma('foreign_keys = ON');
       db.pragma('busy_timeout = 3000');
       const approvedPlan = JSON.parse(process.env.BOOTSTRAP_PLAN);
-      let signalled = false;
       try {
+        fs.writeFileSync(process.env.BOOTSTRAP_READY_PATH, 'ready');
+        while (!fs.existsSync(process.env.BOOTSTRAP_RELEASE_PATH)) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        }
         const repository = createPlatformIdentityRepository(db, {
           readUsers: () => [],
-          nowIso: () => '2026-07-16T04:00:00.000Z',
-          beforeAuditInsert() {
-            if (signalled) return;
-            signalled = true;
-            fs.writeFileSync(process.env.BOOTSTRAP_MARKER_PATH, 'locked');
-            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
-          },
         });
         const result = repository.applyBootstrapPlan(approvedPlan);
         process.stdout.write(JSON.stringify({ status: result.status }));
@@ -660,7 +678,8 @@ test('concurrent bootstrap applies produce one success and one deterministic no-
         ...process.env,
         BOOTSTRAP_DB_PATH: dbPath,
         BOOTSTRAP_PLAN: JSON.stringify(approvedPlan),
-        BOOTSTRAP_MARKER_PATH: markerPath,
+        BOOTSTRAP_READY_PATH: readyPath,
+        BOOTSTRAP_RELEASE_PATH: releasePath,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -671,16 +690,18 @@ test('concurrent bootstrap applies produce one success and one deterministic no-
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
 
-    await waitForFile(markerPath);
+    await waitForFile(readyPath);
+    fs.writeFileSync(releasePath, 'released');
     const secondRepository = createPlatformIdentityRepository(second, {
       readUsers: () => [],
-      nowIso: () => '2026-07-16T04:00:01.000Z',
     });
     const concurrentResult = secondRepository.applyBootstrapPlan(approvedPlan);
     const [exitCode] = await once(child, 'exit');
     assert.equal(exitCode, 0, stderr);
-    assert.equal(JSON.parse(stdout).status, 'succeeded');
-    assert.equal(concurrentResult.status, 'noop');
+    assert.deepEqual(
+      [JSON.parse(stdout).status, concurrentResult.status].sort(),
+      ['noop', 'succeeded'],
+    );
     assert.equal(second.prepare('SELECT COUNT(*) AS count FROM identity_bootstrap_runs').get().count, 1);
     assert.equal(second.prepare('SELECT COUNT(*) AS count FROM canonical_companies').get().count, 1);
     assert.equal(second.prepare('SELECT COUNT(*) AS count FROM canonical_branches').get().count, 2);

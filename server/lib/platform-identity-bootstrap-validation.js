@@ -182,6 +182,328 @@ const LEGACY_INFERENCE_KEYS = new Set([
 ]);
 const KNOWN_CAPABILITIES = new Map(CAPABILITY_CATALOG_V1.map(item => [item.key, item]));
 const COMPANY_SCOPED_CAPABILITIES = new Set(COMPANY_SCOPED_CAPABILITY_KEYS);
+const AUTHORITY_SNAPSHOT_VERSION = 1;
+
+const AUTHORITY_ROW_FIELDS = Object.freeze({
+  companies: Object.freeze([
+    'id',
+    'displayName',
+    'status',
+    'version',
+    'receivablesTimezone',
+  ]),
+  branches: Object.freeze([
+    'id',
+    'companyId',
+    'displayName',
+    'status',
+    'version',
+    'isHeadOffice',
+  ]),
+  memberships: Object.freeze([
+    'id',
+    'companyId',
+    'principalId',
+    'status',
+    'version',
+    'roleTemplateKey',
+    'roleTemplateVersion',
+    'companyWideBranchAuthority',
+  ]),
+  branchAccess: Object.freeze([
+    'membershipId',
+    'companyId',
+    'branchId',
+    'status',
+    'version',
+    'grantedBy',
+    'revoked',
+    'revokedBy',
+  ]),
+  roleTemplates: Object.freeze([
+    'companyId',
+    'templateKey',
+    'templateVersion',
+    'catalogVersion',
+    'displayName',
+    'status',
+  ]),
+  roleTemplateCapabilities: Object.freeze([
+    'companyId',
+    'templateKey',
+    'templateVersion',
+    'catalogVersion',
+    'capabilityKey',
+  ]),
+  capabilityAssignments: Object.freeze([
+    'membershipId',
+    'companyId',
+    'catalogVersion',
+    'capabilityKey',
+    'effect',
+    'status',
+    'version',
+    'grantedBy',
+    'revoked',
+    'revokedBy',
+  ]),
+});
+
+function authorityInteger(value, field) {
+  const normalized = Number(value);
+  if (!Number.isSafeInteger(normalized) || normalized < 0) {
+    validationFail(
+      'PLATFORM_IDENTITY_AUTHORITY_SNAPSHOT_INVALID',
+      `${field} must be a non-negative integer.`,
+      field,
+    );
+  }
+  return normalized;
+}
+
+function authorityBoolean(value, field) {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0) return false;
+  validationFail(
+    'PLATFORM_IDENTITY_AUTHORITY_SNAPSHOT_INVALID',
+    `${field} must be boolean.`,
+    field,
+  );
+}
+
+function authorityNullableText(value, field) {
+  return value == null ? null : requiredText(value, field);
+}
+
+function assertExactAuthorityFields(row, fields, field) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) {
+    validationFail(
+      'PLATFORM_IDENTITY_AUTHORITY_SNAPSHOT_INVALID',
+      `${field} must be an authority row.`,
+      field,
+    );
+  }
+  const actual = Object.keys(row).sort();
+  const expected = [...fields].sort();
+  if (stableJson(actual) !== stableJson(expected)) {
+    validationFail(
+      'PLATFORM_IDENTITY_AUTHORITY_SNAPSHOT_INVALID',
+      `${field} contains missing or unexpected fields.`,
+      field,
+    );
+  }
+}
+
+function sortAuthorityRows(rows) {
+  return rows.sort((left, right) => {
+    const leftJson = stableJson(left);
+    const rightJson = stableJson(right);
+    if (leftJson < rightJson) return -1;
+    if (leftJson > rightJson) return 1;
+    return 0;
+  });
+}
+
+function buildAuthoritySnapshotFromRows(rows = {}) {
+  for (const collection of Object.keys(AUTHORITY_ROW_FIELDS)) {
+    if (!Array.isArray(rows[collection])) {
+      validationFail(
+        'PLATFORM_IDENTITY_AUTHORITY_SNAPSHOT_INVALID',
+        `authorityRows.${collection} must be an array.`,
+        `authorityRows.${collection}`,
+      );
+    }
+  }
+  const normalizeRows = (collection, normalize) => sortAuthorityRows(
+    rows[collection].map((row, index) => {
+      assertExactAuthorityFields(
+        row,
+        AUTHORITY_ROW_FIELDS[collection],
+        `authorityRows.${collection}[${index}]`,
+      );
+      return normalize(row, `authorityRows.${collection}[${index}]`);
+    }),
+  );
+  return deepFreeze({
+    authoritySnapshotVersion: AUTHORITY_SNAPSHOT_VERSION,
+    companies: normalizeRows('companies', (row, field) => ({
+      id: requiredId(row.id, `${field}.id`),
+      displayName: requiredText(row.displayName, `${field}.displayName`),
+      status: requiredText(row.status, `${field}.status`),
+      version: authorityInteger(row.version, `${field}.version`),
+      receivablesTimezone: assertIanaTimezone(
+        row.receivablesTimezone,
+        `${field}.receivablesTimezone`,
+      ),
+    })),
+    branches: normalizeRows('branches', (row, field) => ({
+      id: assertBranchId(row.id, `${field}.id`),
+      companyId: requiredId(row.companyId, `${field}.companyId`),
+      displayName: requiredText(row.displayName, `${field}.displayName`),
+      status: requiredText(row.status, `${field}.status`),
+      version: authorityInteger(row.version, `${field}.version`),
+      isHeadOffice: authorityBoolean(row.isHeadOffice, `${field}.isHeadOffice`),
+    })),
+    memberships: normalizeRows('memberships', (row, field) => ({
+      id: requiredId(row.id, `${field}.id`),
+      companyId: requiredId(row.companyId, `${field}.companyId`),
+      principalId: requiredId(row.principalId, `${field}.principalId`),
+      status: requiredText(row.status, `${field}.status`),
+      version: authorityInteger(row.version, `${field}.version`),
+      roleTemplateKey: requiredId(row.roleTemplateKey, `${field}.roleTemplateKey`),
+      roleTemplateVersion: authorityInteger(
+        row.roleTemplateVersion,
+        `${field}.roleTemplateVersion`,
+      ),
+      companyWideBranchAuthority: authorityBoolean(
+        row.companyWideBranchAuthority,
+        `${field}.companyWideBranchAuthority`,
+      ),
+    })),
+    branchAccess: normalizeRows('branchAccess', (row, field) => ({
+      membershipId: requiredId(row.membershipId, `${field}.membershipId`),
+      companyId: requiredId(row.companyId, `${field}.companyId`),
+      branchId: assertBranchId(row.branchId, `${field}.branchId`),
+      status: requiredText(row.status, `${field}.status`),
+      version: authorityInteger(row.version, `${field}.version`),
+      grantedBy: requiredId(row.grantedBy, `${field}.grantedBy`),
+      revoked: authorityBoolean(row.revoked, `${field}.revoked`),
+      revokedBy: authorityNullableText(row.revokedBy, `${field}.revokedBy`),
+    })),
+    roleTemplates: normalizeRows('roleTemplates', (row, field) => ({
+      companyId: requiredId(row.companyId, `${field}.companyId`),
+      templateKey: requiredId(row.templateKey, `${field}.templateKey`),
+      templateVersion: authorityInteger(row.templateVersion, `${field}.templateVersion`),
+      catalogVersion: authorityInteger(row.catalogVersion, `${field}.catalogVersion`),
+      displayName: requiredText(row.displayName, `${field}.displayName`),
+      status: requiredText(row.status, `${field}.status`),
+    })),
+    roleTemplateCapabilities: normalizeRows('roleTemplateCapabilities', (row, field) => ({
+      companyId: requiredId(row.companyId, `${field}.companyId`),
+      templateKey: requiredId(row.templateKey, `${field}.templateKey`),
+      templateVersion: authorityInteger(row.templateVersion, `${field}.templateVersion`),
+      catalogVersion: authorityInteger(row.catalogVersion, `${field}.catalogVersion`),
+      capabilityKey: requiredId(row.capabilityKey, `${field}.capabilityKey`),
+    })),
+    capabilityAssignments: normalizeRows('capabilityAssignments', (row, field) => ({
+      membershipId: requiredId(row.membershipId, `${field}.membershipId`),
+      companyId: requiredId(row.companyId, `${field}.companyId`),
+      catalogVersion: authorityInteger(row.catalogVersion, `${field}.catalogVersion`),
+      capabilityKey: requiredId(row.capabilityKey, `${field}.capabilityKey`),
+      effect: requiredText(row.effect, `${field}.effect`),
+      status: requiredText(row.status, `${field}.status`),
+      version: authorityInteger(row.version, `${field}.version`),
+      grantedBy: requiredId(row.grantedBy, `${field}.grantedBy`),
+      revoked: authorityBoolean(row.revoked, `${field}.revoked`),
+      revokedBy: authorityNullableText(row.revokedBy, `${field}.revokedBy`),
+    })),
+  });
+}
+
+function buildExpectedAuthoritySnapshot(normalized, catalogVersion) {
+  const companyId = requiredId(normalized?.company?.id, 'normalized.company.id');
+  const approvedBy = requiredId(
+    normalized?.approval?.approvedBy,
+    'normalized.approval.approvedBy',
+  );
+  const normalizedCatalogVersion = authorityInteger(catalogVersion, 'catalogVersion');
+  return buildAuthoritySnapshotFromRows({
+    companies: [{
+      id: companyId,
+      displayName: normalized.company.displayName,
+      status: 'active',
+      version: 2,
+      receivablesTimezone: normalized.company.receivablesTimezone,
+    }],
+    branches: normalized.branches.map(branch => ({
+      id: branch.id,
+      companyId,
+      displayName: branch.displayName,
+      status: branch.status,
+      version: 1,
+      isHeadOffice: branch.isHeadOffice,
+    })),
+    memberships: normalized.memberships.map(membership => ({
+      id: membership.id,
+      companyId,
+      principalId: membership.principalId,
+      status: membership.status,
+      version: 1 + membership.branchIds.length + membership.capabilityAssignments.length,
+      roleTemplateKey: membership.roleTemplateKey,
+      roleTemplateVersion: membership.roleTemplateVersion,
+      companyWideBranchAuthority: membership.companyWideBranchAuthority,
+    })),
+    branchAccess: normalized.memberships.flatMap(membership => (
+      membership.branchIds.map(branchId => ({
+        membershipId: membership.id,
+        companyId,
+        branchId,
+        status: 'active',
+        version: 1,
+        grantedBy: approvedBy,
+        revoked: false,
+        revokedBy: null,
+      }))
+    )),
+    roleTemplates: normalized.roleTemplates.map(template => ({
+      companyId,
+      templateKey: template.templateKey,
+      templateVersion: template.templateVersion,
+      catalogVersion: normalizedCatalogVersion,
+      displayName: template.displayName,
+      status: 'active',
+    })),
+    roleTemplateCapabilities: normalized.roleTemplates.flatMap(template => (
+      template.capabilities.map(capabilityKey => ({
+        companyId,
+        templateKey: template.templateKey,
+        templateVersion: template.templateVersion,
+        catalogVersion: normalizedCatalogVersion,
+        capabilityKey,
+      }))
+    )),
+    capabilityAssignments: normalized.memberships.flatMap(membership => (
+      membership.capabilityAssignments.map(assignment => ({
+        membershipId: membership.id,
+        companyId,
+        catalogVersion: normalizedCatalogVersion,
+        capabilityKey: assignment.capabilityKey,
+        effect: assignment.effect,
+        status: 'active',
+        version: 1,
+        grantedBy: approvedBy,
+        revoked: false,
+        revokedBy: null,
+      }))
+    )),
+  });
+}
+
+function calculateAuthorityFingerprint(snapshot) {
+  if (
+    !snapshot
+    || snapshot.authoritySnapshotVersion !== AUTHORITY_SNAPSHOT_VERSION
+  ) {
+    validationFail(
+      'PLATFORM_IDENTITY_AUTHORITY_SNAPSHOT_INVALID',
+      'Authority snapshot version is invalid.',
+      'authoritySnapshotVersion',
+    );
+  }
+  return sha256(stableJson(snapshot));
+}
+
+function getAuthorityRowCounts(snapshot) {
+  return Object.freeze({
+    [CANONICAL_COMPANIES_TABLE]: snapshot.companies.length,
+    [CANONICAL_BRANCHES_TABLE]: snapshot.branches.length,
+    [COMPANY_MEMBERSHIPS_TABLE]: snapshot.memberships.length,
+    [MEMBERSHIP_BRANCH_ACCESS_TABLE]: snapshot.branchAccess.length,
+    [ROLE_TEMPLATES_TABLE]: snapshot.roleTemplates.length,
+    [ROLE_TEMPLATE_CAPABILITIES_TABLE]: snapshot.roleTemplateCapabilities.length,
+    [MEMBERSHIP_CAPABILITY_ASSIGNMENTS_TABLE]: snapshot.capabilityAssignments.length,
+  });
+}
 
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
@@ -1005,8 +1327,13 @@ function planPlatformIdentityBootstrap(db, config) {
 }
 
 module.exports = {
+  AUTHORITY_SNAPSHOT_VERSION,
+  buildAuthoritySnapshotFromRows,
+  buildExpectedAuthoritySnapshot,
   calculateBootstrapChecksum,
+  calculateAuthorityFingerprint,
   deepFreeze,
+  getAuthorityRowCounts,
   getSchemaFingerprint,
   getUsersDirectoryFingerprint,
   inspectPlatformIdentity,

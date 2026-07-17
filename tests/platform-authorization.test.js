@@ -22,6 +22,16 @@ const {
   createPlatformIdentityRepository,
 } = require('../server/lib/platform-identity-repository.js');
 
+function installAuditInsertFailure(db, message) {
+  db.exec(`
+    CREATE TEMP TRIGGER fail_authorization_audit_insert
+    BEFORE INSERT ON authorization_audit_events
+    BEGIN
+      SELECT RAISE(ABORT, '${message}');
+    END;
+  `);
+}
+
 function resolve(context, userId, options = {}) {
   return resolveTrustedScope({
     req: {
@@ -799,12 +809,9 @@ test('authorization audit is append-only, validates JSON, uses Head Office, and 
     context.close();
   }
 
-  const rollback = createPlatformIdentityContext({
-    beforeAuditInsert() {
-      throw new Error('forced-audit-failure');
-    },
-  });
+  const rollback = createPlatformIdentityContext();
   try {
+    installAuditInsertFailure(rollback.db, 'forced-audit-failure');
     assert.throws(() => rollback.repository.createCompanyAuthority({
       company: {
         id: 'company-rollback',
@@ -1091,16 +1098,8 @@ test('audit failure rolls back a membership security mutation', () => {
       actorContext: testActor(),
       reason: 'test-approved',
     });
-    let failAudit = true;
-    const repository = createPlatformIdentityRepository(context.db, {
-      readUsers: context.readUsers,
-      nowIso: () => '2026-07-16T13:00:00.000Z',
-      generateId: prefix => `${prefix}-forced`,
-      beforeAuditInsert() {
-        if (failAudit) throw new Error('forced-security-audit-failure');
-      },
-    });
-    assert.throws(() => repository.assignCapability({
+    installAuditInsertFailure(context.db, 'forced-security-audit-failure');
+    assert.throws(() => context.repository.assignCapability({
       membershipId: membership.id,
       expectedMembershipVersion: membership.version,
       capabilityKey: 'forecast.read',
@@ -1108,7 +1107,6 @@ test('audit failure rolls back a membership security mutation', () => {
       actorContext: testActor(),
       reason: 'test-approved',
     }), /forced-security-audit-failure/);
-    failAudit = false;
     assert.equal(context.repository.getMembership(membership.id).version, membership.version);
     assert.equal(context.repository.listCapabilityAssignments(membership.id).length, 0);
   } finally {

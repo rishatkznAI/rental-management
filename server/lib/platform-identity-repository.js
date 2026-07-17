@@ -20,6 +20,11 @@ const {
   stableJson,
 } = require('./platform-identity-schema');
 const {
+  AUTHORITY_SNAPSHOT_VERSION,
+  buildAuthoritySnapshotFromRows,
+  buildExpectedAuthoritySnapshot,
+  calculateAuthorityFingerprint,
+  getAuthorityRowCounts,
   planPlatformIdentityBootstrap,
 } = require('./platform-identity-bootstrap-validation');
 
@@ -54,6 +59,14 @@ const SECRET_KEY_EXACT = new Set([
   'apikey',
   'privatekey',
 ]);
+
+function bootstrapNowIso() {
+  return new Date().toISOString();
+}
+
+function bootstrapGenerateId(prefix) {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
 
 class PlatformIdentityRepositoryError extends Error {
   constructor(code, message, field) {
@@ -456,6 +469,46 @@ function createPlatformIdentityRepository(db, options = {}) {
     return db.transaction(operation).immediate();
   }
 
+  function readAuthoritySnapshot() {
+    return buildAuthoritySnapshotFromRows({
+      companies: db.prepare(`
+        SELECT id, displayName, status, version, receivablesTimezone
+        FROM ${CANONICAL_COMPANIES_TABLE}
+      `).all(),
+      branches: db.prepare(`
+        SELECT id, companyId, displayName, status, version, isHeadOffice
+        FROM ${CANONICAL_BRANCHES_TABLE}
+      `).all(),
+      memberships: db.prepare(`
+        SELECT id, companyId, principalId, status, version,
+               roleTemplateKey, roleTemplateVersion, companyWideBranchAuthority
+        FROM ${COMPANY_MEMBERSHIPS_TABLE}
+      `).all(),
+      branchAccess: db.prepare(`
+        SELECT membershipId, companyId, branchId, status, version, grantedBy,
+               CASE WHEN revokedAt IS NULL THEN 0 ELSE 1 END AS revoked,
+               revokedBy
+        FROM ${MEMBERSHIP_BRANCH_ACCESS_TABLE}
+      `).all(),
+      roleTemplates: db.prepare(`
+        SELECT companyId, templateKey, templateVersion, catalogVersion,
+               displayName, status
+        FROM ${ROLE_TEMPLATES_TABLE}
+      `).all(),
+      roleTemplateCapabilities: db.prepare(`
+        SELECT companyId, templateKey, templateVersion, catalogVersion, capabilityKey
+        FROM ${ROLE_TEMPLATE_CAPABILITIES_TABLE}
+      `).all(),
+      capabilityAssignments: db.prepare(`
+        SELECT membershipId, companyId, catalogVersion, capabilityKey, effect,
+               status, version, grantedBy,
+               CASE WHEN revokedAt IS NULL THEN 0 ELSE 1 END AS revoked,
+               revokedBy
+        FROM ${MEMBERSHIP_CAPABILITY_ASSIGNMENTS_TABLE}
+      `).all(),
+    });
+  }
+
   function getCompany(companyId) {
     return db.prepare(`
       SELECT id, receivablesTimezone, createdAt, displayName, status, version, updatedAt
@@ -724,7 +777,6 @@ function createPlatformIdentityRepository(db, options = {}) {
       occurredAt: event.occurredAt || nowIso(),
       createdAt: event.createdAt || nowIso(),
     };
-    if (typeof options.beforeAuditInsert === 'function') options.beforeAuditInsert(row);
     db.prepare(`
       INSERT INTO ${AUTHORIZATION_AUDIT_EVENTS_TABLE} (
         id, companyId, branchId, actorType, actorPrincipalId,
@@ -739,6 +791,15 @@ function createPlatformIdentityRepository(db, options = {}) {
       )
     `).run(row);
     return Object.freeze({ ...row });
+  }
+
+  function insertBootstrapAuditRow(event, timestamp) {
+    return insertAuditRow({
+      ...event,
+      id: bootstrapGenerateId('authorization-audit'),
+      occurredAt: timestamp,
+      createdAt: timestamp,
+    });
   }
 
   function insertAudit(event = {}) {
@@ -1206,6 +1267,7 @@ function createPlatformIdentityRepository(db, options = {}) {
     reason,
     timestamp,
     audit,
+    bootstrap = false,
   }) {
     if (!membership || membership.status === 'revoked') {
       fail('PLATFORM_IDENTITY_MEMBERSHIP_INVALID', 'A non-revoked membership is required.');
@@ -1230,7 +1292,9 @@ function createPlatformIdentityRepository(db, options = {}) {
     if (active) {
       fail('PLATFORM_IDENTITY_DUPLICATE_BRANCH_GRANT', 'An active branch grant already exists.');
     }
-    const grantId = generateId('membership-branch');
+    const grantId = bootstrap
+      ? bootstrapGenerateId('membership-branch')
+      : generateId('membership-branch');
     db.prepare(`
       INSERT INTO ${MEMBERSHIP_BRANCH_ACCESS_TABLE} (
         id, membershipId, companyId, branchId, status, version,
@@ -1253,7 +1317,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       timestamp,
     );
     if (audit) {
-      insertAuditRow({
+      const auditEvent = {
         companyId: membership.companyId,
         branchId: normalizedBranchId,
         validatedActor,
@@ -1263,7 +1327,9 @@ function createPlatformIdentityRepository(db, options = {}) {
         reasonCode: reason,
         after: { membershipId: membership.id, branchId: normalizedBranchId, status: 'active' },
         capabilityCatalogVersion: 1,
-      });
+      };
+      if (bootstrap) insertBootstrapAuditRow(auditEvent, timestamp);
+      else insertAuditRow(auditEvent);
     }
     return updated;
   }
@@ -1355,6 +1421,7 @@ function createPlatformIdentityRepository(db, options = {}) {
     reason,
     timestamp,
     audit,
+    bootstrap = false,
   }) {
     if (!membership || membership.status === 'revoked') {
       fail('PLATFORM_IDENTITY_MEMBERSHIP_INVALID', 'A non-revoked membership is required.');
@@ -1384,7 +1451,9 @@ function createPlatformIdentityRepository(db, options = {}) {
     if (active) {
       fail('PLATFORM_IDENTITY_CAPABILITY_CONFLICT', 'An active assignment already exists for this capability.');
     }
-    const assignmentId = generateId('membership-capability');
+    const assignmentId = bootstrap
+      ? bootstrapGenerateId('membership-capability')
+      : generateId('membership-capability');
     db.prepare(`
       INSERT INTO ${MEMBERSHIP_CAPABILITY_ASSIGNMENTS_TABLE} (
         id, membershipId, companyId, catalogVersion, capabilityKey, effect,
@@ -1409,7 +1478,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       timestamp,
     );
     if (audit) {
-      insertAuditRow({
+      const auditEvent = {
         companyId: membership.companyId,
         validatedActor,
         action: 'membership_capability.assigned',
@@ -1424,7 +1493,9 @@ function createPlatformIdentityRepository(db, options = {}) {
           status: 'active',
         },
         capabilityCatalogVersion: template.catalogVersion,
-      });
+      };
+      if (bootstrap) insertBootstrapAuditRow(auditEvent, timestamp);
+      else insertAuditRow(auditEvent);
     }
     return updated;
   }
@@ -1635,6 +1706,15 @@ function createPlatformIdentityRepository(db, options = {}) {
       }
       const normalized = livePlan.normalized;
       const approval = normalized.approval;
+      const catalogVersion = Number(requireActiveCatalog().version);
+      const expectedAuthoritySnapshot = buildExpectedAuthoritySnapshot(
+        normalized,
+        catalogVersion,
+      );
+      const expectedAuthorityFingerprint = calculateAuthorityFingerprint(
+        expectedAuthoritySnapshot,
+      );
+      const expectedAuthorityRowCounts = getAuthorityRowCounts(expectedAuthoritySnapshot);
 
       const duplicate = db.prepare(`
         SELECT *
@@ -1664,14 +1744,28 @@ function createPlatformIdentityRepository(db, options = {}) {
           approvalReference: approval.approvalReference,
           backupReference: approval.backupReference,
         };
+        const liveAuthoritySnapshot = readAuthoritySnapshot();
+        const liveAuthorityFingerprint = calculateAuthorityFingerprint(liveAuthoritySnapshot);
+        const liveAuthorityRowCounts = getAuthorityRowCounts(liveAuthoritySnapshot);
         if (
           !storedSummary
           || stableJson(storedSummary.afterCounts) !== stableJson(livePlan.beforeCounts)
           || stableJson(storedApprovalState) !== stableJson(liveApprovalState)
+          || storedSummary.authoritySnapshotVersion !== AUTHORITY_SNAPSHOT_VERSION
+          || storedSummary.authorityFingerprint !== expectedAuthorityFingerprint
+          || storedSummary.authorityFingerprint !== liveAuthorityFingerprint
+          || stableJson(storedSummary.authorityRowCounts)
+            !== stableJson(expectedAuthorityRowCounts)
+          || stableJson(storedSummary.authorityRowCounts)
+            !== stableJson(liveAuthorityRowCounts)
+          || storedSummary.usersDirectoryFingerprint
+            !== livePlan.usersDirectoryFingerprint
+          || storedSummary.schemaFingerprint !== livePlan.schemaFingerprint
+          || storedSummary.configChecksum !== configChecksum
         ) {
           fail(
-            'PLATFORM_IDENTITY_BOOTSTRAP_IDENTITY_STATE_INVALID',
-            'Existing bootstrap authority state does not match the approved successful run.',
+            'PLATFORM_IDENTITY_BOOTSTRAP_AUTHORITY_DRIFT',
+            'Live authority does not match the approved successful bootstrap run.',
           );
         }
         return Object.freeze({ status: 'noop', run: Object.freeze({ ...duplicate }) });
@@ -1682,7 +1776,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       }
 
       const reason = requiredText(approval.approvalReference, 'approval.approvalReference');
-      const timestamp = nowIso();
+      const timestamp = bootstrapNowIso();
       const validatedActor = Object.freeze({
         type: 'user',
         principalId: requiredId(approval.approvedBy, 'approval.approvedBy'),
@@ -1716,8 +1810,25 @@ function createPlatformIdentityRepository(db, options = {}) {
           timestamp,
         });
       }
-      const completedAt = nowIso();
+      const actualAuthoritySnapshot = readAuthoritySnapshot();
+      const actualAuthorityFingerprint = calculateAuthorityFingerprint(actualAuthoritySnapshot);
+      const actualAuthorityRowCounts = getAuthorityRowCounts(actualAuthoritySnapshot);
+      if (
+        actualAuthorityFingerprint !== expectedAuthorityFingerprint
+        || stableJson(actualAuthorityRowCounts) !== stableJson(expectedAuthorityRowCounts)
+      ) {
+        fail(
+          'PLATFORM_IDENTITY_BOOTSTRAP_AUTHORITY_MISMATCH',
+          'Applied authority does not match the approved bootstrap configuration.',
+        );
+      }
+      const completedAt = bootstrapNowIso();
       const summary = {
+        authoritySnapshotVersion: AUTHORITY_SNAPSHOT_VERSION,
+        authorityFingerprint: actualAuthorityFingerprint,
+        authorityRowCounts: actualAuthorityRowCounts,
+        configChecksum,
+        schemaFingerprint: livePlan.schemaFingerprint,
         exactChanges: livePlan.exactChanges,
         beforeCounts: livePlan.beforeCounts,
         afterCounts: livePlan.afterCounts,
@@ -1728,7 +1839,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         eligibleActiveUserIds: livePlan.eligibleActiveUserIds,
       };
       const run = {
-        id: requiredId(generateId('identity-bootstrap'), 'runId'),
+        id: requiredId(bootstrapGenerateId('identity-bootstrap'), 'runId'),
         configVersion: requiredVersion(normalized.configVersion, 'configVersion'),
         configChecksum,
         schemaFingerprint: requiredText(livePlan.schemaFingerprint, 'schemaFingerprint'),
@@ -1804,7 +1915,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       WHERE id = ? AND version = 1
     `).run(input.timestamp, companyId);
     const created = getCompany(companyId);
-    insertAuditRow({
+    insertBootstrapAuditRow({
       companyId,
       validatedActor: input.validatedActor,
       action: 'company.authority.created',
@@ -1813,9 +1924,9 @@ function createPlatformIdentityRepository(db, options = {}) {
       reasonCode: input.reason,
       after: created,
       capabilityCatalogVersion: 1,
-    });
+    }, input.timestamp);
     for (const branch of branches) {
-      insertAuditRow({
+      insertBootstrapAuditRow({
         companyId,
         branchId: branch.id,
         validatedActor: input.validatedActor,
@@ -1825,7 +1936,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         reasonCode: input.reason,
         after: branch,
         capabilityCatalogVersion: 1,
-      });
+      }, input.timestamp);
     }
     return { company: created, branches };
   }
@@ -1869,7 +1980,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       input.timestamp,
       input.validatedActor.principalId,
     ));
-    insertAuditRow({
+    insertBootstrapAuditRow({
       companyId: input.companyId,
       validatedActor: input.validatedActor,
       action: 'role_template.created',
@@ -1878,7 +1989,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       reasonCode: input.reason,
       after: { templateKey, templateVersion, capabilities },
       capabilityCatalogVersion: catalog.version,
-    });
+    }, input.timestamp);
   }
 
   function createMembershipInternal(input) {
@@ -1892,6 +2003,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         reason: input.reason,
         timestamp: input.timestamp,
         audit: true,
+        bootstrap: true,
       });
     }
     for (const assignment of input.capabilityAssignments || []) {
@@ -1903,6 +2015,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         reason: input.reason,
         timestamp: input.timestamp,
         audit: true,
+        bootstrap: true,
       });
     }
     return current;
@@ -1971,7 +2084,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       reason: input.reason,
     });
     const membership = getMembership(id);
-    insertAuditRow({
+    insertBootstrapAuditRow({
       companyId: input.companyId,
       validatedActor: input.validatedActor,
       action: 'membership.created',
@@ -1980,7 +2093,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       reasonCode: input.reason,
       after: membership,
       capabilityCatalogVersion: catalog.version,
-    });
+    }, input.timestamp);
     return membership;
   }
 

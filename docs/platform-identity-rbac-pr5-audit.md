@@ -473,7 +473,8 @@ Repeated startup preserves those counts and the migration timestamp. Legacy
   checksum/fingerprint, active bootstrap operator, approval reference, backup
   reference, zero blockers, empty financial tables, and empty authority.
 - The config checksum covers the security-relevant users-directory fingerprint and
-  normalized mapping plan as well as authority configuration.
+  normalized mapping plan, exact approved schema fingerprint, and authority
+  configuration.
 - Apply obtains `BEGIN IMMEDIATE` before transactional revalidation, rereads
   `app_data.users`, and rechecks JSON shape, duplicate/missing IDs, eligibility,
   `approvedBy`, mappings, intentionally unmapped users, complete active-user
@@ -575,6 +576,58 @@ The owner approvals listed in section 16 remain required. No production identity
 mapping, bootstrap approval, integration/system contract, audit-retention operation,
 release, or cutover decision is introduced by this remediation.
 
+## Second independent review remediation
+
+The second independent review evaluated head
+`cf41d108b08f6dd566e499173a2fbf9b24a792d6` and identified one remaining
+merge-blocking finding: transactional bootstrap validation was optional on the
+public repository boundary because `applyBootstrapPlan()` depended on an optional
+caller callback.
+
+- The optional callback was removed from production source and is not part of the
+  repository contract.
+- `repository.applyBootstrapPlan(approvedPlan)` is the mandatory safe apply boundary
+  and owns the single `BEGIN IMMEDIATE` transaction.
+- After acquiring that transaction, the repository reads live `app_data.users`
+  through its own SQLite connection. It does not use caller-provided, cached,
+  session, config, or plan user records for bootstrap authorization.
+- Planning and transactional apply share deterministic validation and
+  canonicalization from `platform-identity-bootstrap-validation.js`. The shared
+  module performs no DML and does not import the repository factory.
+- Apply reconstructs a live normalized plan and recomputes the users-directory
+  fingerprint, schema fingerprint, approved checksum, approved operator, complete
+  mapped/intentionally-unmapped coverage, foreign-key state, financial counts, and
+  identity state before authority DML.
+- The approved checksum covers the canonical authority and mapping plan, live
+  security-relevant users-directory fingerprint, approved operator, and exact
+  approved schema fingerprint.
+- Authority writes use only the transactionally reconstructed normalized result.
+  Caller-supplied normalized objects, summaries, timestamps, run IDs, and users are
+  not write inputs.
+- A same-checksum no-op is considered only after complete live validation. The
+  existing successful run metadata and recorded after-counts must also match the
+  current identity state.
+- There is no public/exported raw or unsafe bootstrap write helper. The CLI and
+  bootstrap orchestration module perform no authority DML and call only the safe
+  repository method.
+- Direct repository regression tests cover valid apply without a callback, ignored
+  legacy callback options, users and operator drift, duplicate/missing IDs, mapping
+  coverage, bot/frontend eligibility, fake caller users, schema drift, checksum
+  tampering, same-checksum validation, rollback-before-write, writer exclusion, and
+  independent-process concurrency.
+
+Bootstrap transactional revalidation is mandatory on the public repository boundary.
+`applyBootstrapPlan()` rereads and validates the live SQLite users directory,
+approved operator, users-directory fingerprint, schema fingerprint, approved
+checksum, complete user mapping, foreign keys, financial counts, and identity state
+after `BEGIN IMMEDIATE` before any authority write or same-checksum no-op decision.
+
+No caller-provided callback can weaken, replace, or skip these checks.
+
+The remaining owner approvals in section 16 are unchanged. PR5 remains implemented
+for review and is not released; this remediation does not approve production
+identity data, bootstrap execution, release, cutover, or PR6.
+
 ## 14. Risks and blockers
 
 | Risk | Treatment |
@@ -625,7 +678,11 @@ inputs and are not invented by PR5.
 
 ### Bootstrap tooling and documentation
 
-- `server/lib/platform-identity-bootstrap.js` — inspect/validate/plan/apply engine.
+- `server/lib/platform-identity-bootstrap-validation.js` — shared deterministic,
+  read-only bootstrap inspection, canonicalization, validation, fingerprint, and
+  planning rules used by both plan and repository apply.
+- `server/lib/platform-identity-bootstrap.js` — zero-DML mode orchestration and safe
+  repository apply delegation.
 - `server/scripts/platform-identity-bootstrap.js` — separate CLI entry point.
 - `docs/platform-identity-bootstrap.example.json` — redacted placeholder only.
 - `docs/platform-identity-rbac-pr5-audit.md` — this current-state, architecture,
@@ -637,6 +694,7 @@ inputs and are not invented by PR5.
 - `tests/platform-identity-schema.test.js`
 - `tests/platform-authorization.test.js`
 - `tests/platform-identity-bootstrap.test.js`
+- `tests/platform-identity-bootstrap-repository.test.js`
 - `tests/platform-identity-remediation.test.js`
 - `tests/platform-identity-safety.test.js`
 - `tests/canonical-receivables-read-fixtures.js`
@@ -689,7 +747,8 @@ UPD, forecast, posting, or settlement implementation.
 - Separate editable `branches` table: absent
 - Canonical child-table rebuild: no
 - Canonical child-FK rebinding: no
-- Identity write owner: platform identity repository/bootstrap tooling only
+- Identity write owner: platform identity repository only; bootstrap validation and
+  orchestration perform no DML
 - Production resolver: unconditional null/fail-closed
 - Flag true plus production resolver: 403 before data access
 - Legacy route authorization changed: no
@@ -713,16 +772,17 @@ Focused PR5 verification covers migration failure/rerun/integrity, single physic
 authority, repository mutations and versioning, Head Office, live principals,
 membership states, explicit/company-wide branch scope, exact catalog and templates,
 grant/deny behavior, immutable trusted scope, selectors, freshness, audit atomicity,
-bootstrap modes/gates/no-op, production 404/403 behavior, concrete PR3 predicates,
-startup zero-authority counts, and static exclusions.
+direct repository bootstrap revalidation, live-user and schema drift, locked
+concurrency, bootstrap modes/gates/no-op, production 404/403 behavior, concrete PR3
+predicates, startup zero-authority counts, and static exclusions.
 
 Executed before commit:
 
 | Command | Result |
 |---|---|
-| `node --test tests/platform-identity-remediation.test.js tests/platform-authorization.test.js tests/platform-identity-bootstrap.test.js tests/platform-identity-schema.test.js tests/platform-identity-safety.test.js tests/canonical-receivables-read-safety.test.js` under Node `v20.20.2` | 81 passed, 0 failed, 0 skipped |
-| `npm test` under Node `v20.20.2` (full suite pass 1) | 1884 passed, 0 failed, 0 skipped |
-| `node --test tests/*.test.js` under Node `v20.20.2` (full suite pass 2) | 1884 passed, 0 failed, 0 skipped |
+| `node --test tests/platform-identity-bootstrap-repository.test.js tests/platform-identity-bootstrap.test.js tests/platform-identity-remediation.test.js tests/platform-authorization.test.js tests/platform-identity-schema.test.js tests/platform-identity-safety.test.js tests/canonical-receivables-read-safety.test.js` under Node `v20.20.2` | 103 passed, 0 failed, 0 skipped |
+| `npm test` under Node `v20.20.2` (full suite pass 1) | 1906 passed, 0 failed, 0 skipped |
+| `node --test tests/*.test.js` under Node `v20.20.2` (full suite pass 2) | 1906 passed, 0 failed, 0 skipped |
 | `npm run build` | success; Vite transformed 3385 modules |
 | `git diff --check` | clean |
 

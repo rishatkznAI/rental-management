@@ -25,6 +25,9 @@ const {
 const {
   FINANCIAL_TABLES,
 } = require('../server/lib/platform-identity-schema.js');
+const {
+  createPlatformIdentityRepository,
+} = require('../server/lib/platform-identity-repository.js');
 
 function validConfig(context) {
   const config = {
@@ -72,8 +75,8 @@ function validConfig(context) {
       backupReference: 'verified-backup-reference',
     },
   };
-  config.approval.configChecksum = calculateBootstrapChecksum(context.db, config);
   config.approval.schemaFingerprint = getSchemaFingerprint(context.db);
+  config.approval.configChecksum = calculateBootstrapChecksum(context.db, config);
   return config;
 }
 
@@ -113,6 +116,33 @@ function applyOptions(db, config, overrides = {}) {
     nowIso: () => '2026-07-16T03:00:00.000Z',
     ...overrides,
   };
+}
+
+function observeUsersRead(db, observer) {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === 'prepare') {
+        return sql => {
+          const statement = target.prepare(sql);
+          if (!/SELECT json FROM app_data WHERE name = \?/.test(sql)) return statement;
+          return new Proxy(statement, {
+            get(statementTarget, statementProperty) {
+              if (statementProperty === 'get') {
+                return (...args) => {
+                  observer();
+                  return statementTarget.get(...args);
+                };
+              }
+              const value = Reflect.get(statementTarget, statementProperty, statementTarget);
+              return typeof value === 'function' ? value.bind(statementTarget) : value;
+            },
+          });
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
 }
 
 async function waitForFile(filePath, timeoutMs = 5000) {
@@ -534,16 +564,25 @@ test('BEGIN IMMEDIATE is acquired before revalidation and blocks a competing use
   try {
     other.pragma('busy_timeout = 10');
     const config = validConfig(context);
-    const result = runPlatformIdentityBootstrap(applyOptions(context.db, config, {
-      beforeTransactionalRevalidation() {
+    const plan = planPlatformIdentityBootstrap(context.db, config);
+    let observed = false;
+    const observedDb = observeUsersRead(context.db, () => {
+      if (observed) return;
+      observed = true;
         const visibleCounts = allProtectedCounts(other);
         Object.values(visibleCounts).forEach(count => assert.equal(count, 0));
         assert.throws(
           () => other.prepare("UPDATE app_data SET updated_at = CURRENT_TIMESTAMP WHERE name = 'users'").run(),
           error => error.code === 'SQLITE_BUSY',
         );
+    });
+    const repository = createPlatformIdentityRepository(observedDb, {
+      readUsers: () => {
+        throw new Error('Direct bootstrap apply must use DB-bound users.');
       },
-    }));
+    });
+    const result = repository.applyBootstrapPlan(plan);
+    assert.equal(observed, true);
     assert.equal(result.status, 'succeeded');
     assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM identity_bootstrap_runs').get().count, 1);
   } finally {
@@ -585,27 +624,28 @@ test('concurrent bootstrap applies produce one success and one deterministic no-
     context.db.pragma('busy_timeout = 3000');
     second.pragma('busy_timeout = 3000');
     const config = validConfig(context);
+    const approvedPlan = planPlatformIdentityBootstrap(context.db, config);
     const childScript = `
       const fs = require('node:fs');
       const Database = require('./server/node_modules/better-sqlite3');
-      const { runPlatformIdentityBootstrap } = require('./server/lib/platform-identity-bootstrap');
+      const { createPlatformIdentityRepository } = require('./server/lib/platform-identity-repository');
       const db = new Database(process.env.BOOTSTRAP_DB_PATH);
       db.pragma('foreign_keys = ON');
       db.pragma('busy_timeout = 3000');
-      const config = JSON.parse(process.env.BOOTSTRAP_CONFIG);
+      const approvedPlan = JSON.parse(process.env.BOOTSTRAP_PLAN);
+      let signalled = false;
       try {
-        const result = runPlatformIdentityBootstrap({
-          db,
-          mode: 'apply',
-          config,
-          explicitApply: true,
-          expectedChecksum: config.approval.configChecksum,
+        const repository = createPlatformIdentityRepository(db, {
+          readUsers: () => [],
           nowIso: () => '2026-07-16T04:00:00.000Z',
-          beforeTransactionalRevalidation() {
+          beforeAuditInsert() {
+            if (signalled) return;
+            signalled = true;
             fs.writeFileSync(process.env.BOOTSTRAP_MARKER_PATH, 'locked');
             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
           },
         });
+        const result = repository.applyBootstrapPlan(approvedPlan);
         process.stdout.write(JSON.stringify({ status: result.status }));
       } catch (error) {
         process.stderr.write(error.stack || error.message);
@@ -619,7 +659,7 @@ test('concurrent bootstrap applies produce one success and one deterministic no-
       env: {
         ...process.env,
         BOOTSTRAP_DB_PATH: dbPath,
-        BOOTSTRAP_CONFIG: JSON.stringify(config),
+        BOOTSTRAP_PLAN: JSON.stringify(approvedPlan),
         BOOTSTRAP_MARKER_PATH: markerPath,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -632,9 +672,11 @@ test('concurrent bootstrap applies produce one success and one deterministic no-
     child.stderr.on('data', chunk => { stderr += chunk; });
 
     await waitForFile(markerPath);
-    const concurrentResult = runPlatformIdentityBootstrap(applyOptions(second, config, {
+    const secondRepository = createPlatformIdentityRepository(second, {
+      readUsers: () => [],
       nowIso: () => '2026-07-16T04:00:01.000Z',
-    }));
+    });
+    const concurrentResult = secondRepository.applyBootstrapPlan(approvedPlan);
     const [exitCode] = await once(child, 'exit');
     assert.equal(exitCode, 0, stderr);
     assert.equal(JSON.parse(stdout).status, 'succeeded');

@@ -11,14 +11,17 @@ const {
   CAPABILITY_CATALOG_VERSIONS_TABLE,
   COMPANY_SCOPED_CAPABILITY_KEYS,
   COMPANY_MEMBERSHIPS_TABLE,
-  FINANCIAL_TABLES,
   IDENTITY_BOOTSTRAP_RUNS_TABLE,
   MEMBERSHIP_BRANCH_ACCESS_TABLE,
   MEMBERSHIP_CAPABILITY_ASSIGNMENTS_TABLE,
   ROLE_TEMPLATE_CAPABILITIES_TABLE,
   ROLE_TEMPLATES_TABLE,
   assertPlatformIdentityStructure,
+  stableJson,
 } = require('./platform-identity-schema');
+const {
+  planPlatformIdentityBootstrap,
+} = require('./platform-identity-bootstrap-validation');
 
 const COMPANY_STATUSES = new Set(['inactive', 'active', 'archived']);
 const BRANCH_STATUSES = new Set(['inactive', 'active', 'archived']);
@@ -1591,71 +1594,111 @@ function createPlatformIdentityRepository(db, options = {}) {
     });
   }
 
-  function applyBootstrapPlan(plan = {}) {
-    const configChecksum = requiredText(plan.configChecksum, 'configChecksum');
-    if (!/^[a-f0-9]{64}$/.test(configChecksum)) {
-      fail('PLATFORM_IDENTITY_BOOTSTRAP_CHECKSUM_INVALID', 'Bootstrap checksum must be SHA-256.');
-    }
-
+  function applyBootstrapPlan(approvedPlan = {}) {
     return transactionImmediate(() => {
-      assertPlatformIdentityStructure(db);
-      for (const table of FINANCIAL_TABLES) {
-        const count = Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
-        if (count !== 0) {
-          fail(
-            'PLATFORM_IDENTITY_FINANCIAL_ROWS_PRESENT',
-            `Bootstrap requires ${table} to remain empty.`,
-          );
-        }
+      const livePlan = planPlatformIdentityBootstrap(db, approvedPlan.approvedConfig || {});
+      const expectedState = {
+        mode: approvedPlan.mode,
+        configChecksum: approvedPlan.configChecksum,
+        schemaFingerprint: approvedPlan.schemaFingerprint,
+        usersDirectoryFingerprint: approvedPlan.usersDirectoryFingerprint,
+        mappedUserIds: approvedPlan.mappedUserIds,
+        intentionallyUnmappedUserIds: approvedPlan.intentionallyUnmappedUserIds,
+        eligibleActiveUserIds: approvedPlan.eligibleActiveUserIds,
+        approvedBy: approvedPlan.approvedBy,
+        normalized: approvedPlan.normalized,
+      };
+      const liveState = {
+        mode: livePlan.mode,
+        configChecksum: livePlan.configChecksum,
+        schemaFingerprint: livePlan.schemaFingerprint,
+        usersDirectoryFingerprint: livePlan.usersDirectoryFingerprint,
+        mappedUserIds: livePlan.mappedUserIds,
+        intentionallyUnmappedUserIds: livePlan.intentionallyUnmappedUserIds,
+        eligibleActiveUserIds: livePlan.eligibleActiveUserIds,
+        approvedBy: livePlan.approvedBy,
+        normalized: livePlan.normalized,
+      };
+      if (!livePlan.ok || stableJson(liveState) !== stableJson(expectedState)) {
+        const error = new PlatformIdentityRepositoryError(
+          'BOOTSTRAP_TRANSACTIONAL_REVALIDATION_FAILED',
+          'Approved bootstrap state does not match the live transactional state.',
+        );
+        error.blockers = livePlan.ok
+          ? [{ code: 'APPROVED_BOOTSTRAP_PLAN_MISMATCH' }]
+          : livePlan.blockers;
+        throw error;
       }
-      if (typeof options.beforeBootstrapApply === 'function') {
-        options.beforeBootstrapApply(plan);
+      const configChecksum = livePlan.configChecksum;
+      if (!/^[a-f0-9]{64}$/.test(configChecksum)) {
+        fail('PLATFORM_IDENTITY_BOOTSTRAP_CHECKSUM_INVALID', 'Bootstrap checksum must be SHA-256.');
       }
-      const approval = plan.approval || {};
-      const companyId = requiredId(plan.company?.id, 'company.id');
-      const actorContext = createTrustedUserActorContext({
-        principalId: approval.approvedBy,
-        correlationId: plan.correlationId,
-      });
-      const validatedActor = resolveTrustedActor(actorContext, companyId, {
-        allowWithoutMembership: true,
-        allowWithoutMembershipAfterProvisioning: true,
-      });
+      const normalized = livePlan.normalized;
+      const approval = normalized.approval;
+
       const duplicate = db.prepare(`
         SELECT *
         FROM ${IDENTITY_BOOTSTRAP_RUNS_TABLE}
         WHERE configChecksum = ? AND status = 'succeeded'
       `).get(configChecksum);
-      if (duplicate) return Object.freeze({ status: 'noop', run: duplicate });
+      if (duplicate) {
+        let storedSummary;
+        try {
+          storedSummary = JSON.parse(duplicate.summaryJson);
+        } catch {
+          storedSummary = null;
+        }
+        const storedApprovalState = {
+          configVersion: Number(duplicate.configVersion),
+          schemaFingerprint: duplicate.schemaFingerprint,
+          approvedBy: duplicate.approvedBy,
+          approvedAt: duplicate.approvedAt,
+          approvalReference: duplicate.approvalReference,
+          backupReference: duplicate.backupReference,
+        };
+        const liveApprovalState = {
+          configVersion: Number(normalized.configVersion),
+          schemaFingerprint: livePlan.schemaFingerprint,
+          approvedBy: approval.approvedBy,
+          approvedAt: approval.approvedAt,
+          approvalReference: approval.approvalReference,
+          backupReference: approval.backupReference,
+        };
+        if (
+          !storedSummary
+          || stableJson(storedSummary.afterCounts) !== stableJson(livePlan.beforeCounts)
+          || stableJson(storedApprovalState) !== stableJson(liveApprovalState)
+        ) {
+          fail(
+            'PLATFORM_IDENTITY_BOOTSTRAP_IDENTITY_STATE_INVALID',
+            'Existing bootstrap authority state does not match the approved successful run.',
+          );
+        }
+        return Object.freeze({ status: 'noop', run: Object.freeze({ ...duplicate }) });
+      }
 
-      const companyRows = Number(db.prepare(`SELECT COUNT(*) AS count FROM ${CANONICAL_COMPANIES_TABLE}`).get().count);
-      const branchRows = Number(db.prepare(`SELECT COUNT(*) AS count FROM ${CANONICAL_BRANCHES_TABLE}`).get().count);
-      const authorityRows = [
-        COMPANY_MEMBERSHIPS_TABLE,
-        MEMBERSHIP_BRANCH_ACCESS_TABLE,
-        ROLE_TEMPLATES_TABLE,
-        ROLE_TEMPLATE_CAPABILITIES_TABLE,
-        MEMBERSHIP_CAPABILITY_ASSIGNMENTS_TABLE,
-        AUTHORIZATION_AUDIT_EVENTS_TABLE,
-        IDENTITY_BOOTSTRAP_RUNS_TABLE,
-      ].reduce(
-        (total, table) => total + Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count),
-        0,
-      );
-      if (companyRows !== 0 || branchRows !== 0 || authorityRows !== 0) {
+      if (Object.values(livePlan.beforeCounts).some(count => count !== 0)) {
         fail('PLATFORM_IDENTITY_BOOTSTRAP_NOT_EMPTY', 'Bootstrap apply requires an empty identity authority.');
       }
 
       const reason = requiredText(approval.approvalReference, 'approval.approvalReference');
-      const timestamp = plan.startedAt || nowIso();
+      const timestamp = nowIso();
+      const validatedActor = Object.freeze({
+        type: 'user',
+        principalId: requiredId(approval.approvedBy, 'approval.approvedBy'),
+        membershipId: null,
+        membershipVersion: null,
+        correlationId: `identity-bootstrap-${configChecksum.slice(0, 16)}`,
+      });
+      validatedActors.add(validatedActor);
       const companyResult = createCompanyAuthorityInternal({
-        company: plan.company,
-        branches: plan.branches,
+        company: normalized.company,
+        branches: normalized.branches,
         validatedActor,
         reason,
         timestamp,
       });
-      for (const template of plan.roleTemplates || []) {
+      for (const template of normalized.roleTemplates) {
         createRoleTemplateInternal({
           companyId: companyResult.company.id,
           ...template,
@@ -1664,7 +1707,7 @@ function createPlatformIdentityRepository(db, options = {}) {
           timestamp,
         });
       }
-      for (const membership of plan.memberships || []) {
+      for (const membership of normalized.memberships) {
         createMembershipInternal({
           companyId: companyResult.company.id,
           ...membership,
@@ -1673,12 +1716,22 @@ function createPlatformIdentityRepository(db, options = {}) {
           timestamp,
         });
       }
-      const completedAt = plan.completedAt || nowIso();
+      const completedAt = nowIso();
+      const summary = {
+        exactChanges: livePlan.exactChanges,
+        beforeCounts: livePlan.beforeCounts,
+        afterCounts: livePlan.afterCounts,
+        financialCounts: livePlan.financialCounts,
+        usersDirectoryFingerprint: livePlan.usersDirectoryFingerprint,
+        mappedUserIds: livePlan.mappedUserIds,
+        intentionallyUnmappedUserIds: livePlan.intentionallyUnmappedUserIds,
+        eligibleActiveUserIds: livePlan.eligibleActiveUserIds,
+      };
       const run = {
-        id: requiredId(plan.runId || generateId('identity-bootstrap'), 'runId'),
-        configVersion: requiredVersion(plan.configVersion, 'configVersion'),
+        id: requiredId(generateId('identity-bootstrap'), 'runId'),
+        configVersion: requiredVersion(normalized.configVersion, 'configVersion'),
         configChecksum,
-        schemaFingerprint: requiredText(plan.schemaFingerprint, 'schemaFingerprint'),
+        schemaFingerprint: requiredText(livePlan.schemaFingerprint, 'schemaFingerprint'),
         mode: 'apply',
         status: 'succeeded',
         approvedBy: validatedActor.principalId,
@@ -1688,7 +1741,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         startedAt: timestamp,
         completedAt,
         createdAt: completedAt,
-        summaryJson: auditJson(plan.summary || {}),
+        summaryJson: auditJson(summary),
         errorCode: null,
         errorSummary: null,
       };

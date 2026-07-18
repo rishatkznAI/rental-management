@@ -44,10 +44,6 @@ function generateId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
 function same(left, right) {
   return stableJson(left) === stableJson(right);
 }
@@ -276,22 +272,31 @@ function commandFingerprint(context, plan, inputSetHash) {
   });
 }
 
-function createForecastReceivablesPlanningRepository(db, options = {}) {
+function createForecastReceivablesPlanningRepository(db) {
   if (!db || typeof db.prepare !== 'function' || typeof db.transaction !== 'function') {
     fail('FORECAST_DATABASE_REQUIRED', 'A better-sqlite3 database is required.', 'db', 500);
   }
-  if (typeof options.readUsers !== 'function') {
-    fail('FORECAST_USER_DIRECTORY_REQUIRED', 'A trusted live user directory reader is required.', 'readUsers', 500);
-  }
   assertForecastReceivablesPlanningStructure(db);
-  const platformRepository = createPlatformIdentityRepository(db, { readUsers: options.readUsers });
-  const clock = typeof options.nowIso === 'function' ? options.nowIso : nowIso;
-  const idFactory = typeof options.generateId === 'function' ? options.generateId : generateId;
+
+  function readUsers() {
+    const row = db.prepare(`
+      SELECT json FROM app_data WHERE name = 'users'
+    `).get();
+    if (!row) return [];
+    try {
+      const users = JSON.parse(row.json);
+      return Array.isArray(users) ? users : [];
+    } catch {
+      return [];
+    }
+  }
+
+  const platformRepository = createPlatformIdentityRepository(db, { readUsers });
 
   function authorize(context, plan) {
     assertForecastCommandContext(context);
     assertPreparedForecastPlan(plan);
-    assertScopeFresh(context, { repository: platformRepository, readUsers: options.readUsers });
+    assertScopeFresh(context, { repository: platformRepository, readUsers });
     assertCapability(context, CAPABILITY_KEY);
     assertCompanyScope(context, context.companyId);
     assertBranchScope(context, plan.branchId);
@@ -716,7 +721,7 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
       )
     `);
     plan.inputs.forEach((input, inputIndex) => {
-      const snapshotId = idFactory('forecast-input');
+      const snapshotId = generateId('forecast-input');
       snapshotIds[inputIndex] = snapshotId;
       const slices = result.items.filter(item => item.inputIndex === inputIndex);
       const policyRefs = slices.map(item => ({
@@ -775,7 +780,7 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
       });
       [...input.events].sort((left, right) => stableJson(canonicalEvent(left)).localeCompare(stableJson(canonicalEvent(right))))
         .forEach(event => insertEvent.run({
-          id: idFactory('forecast-event'),
+          id: generateId('forecast-event'),
           forecastRunId: runId,
           inputSnapshotId: snapshotId,
           companyId: context.companyId,
@@ -809,7 +814,7 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
     `);
     for (const item of result.items) {
       insert.run({
-        id: idFactory('forecast-item'),
+        id: generateId('forecast-item'),
         forecastRunId: runId,
         inputSnapshotId: snapshotIds[item.inputIndex],
         companyId: context.companyId,
@@ -838,7 +843,7 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
     for (const diagnostic of result.diagnostics) {
       const inputIndex = diagnostic.inputIndex;
       insert.run({
-        id: idFactory('forecast-diagnostic'),
+        id: generateId('forecast-diagnostic'),
         forecastRunId: runId,
         inputSnapshotId: inputIndex == null ? null : snapshotIds[inputIndex],
         companyId: context.companyId,
@@ -863,7 +868,7 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
     `);
     for (const predecessor of predecessors) {
       insert.run({
-        id: idFactory('forecast-supersession'),
+        id: generateId('forecast-supersession'),
         companyId: context.companyId,
         branchId: plan.branchId,
         planningSeriesKey: plan.planningSeriesKey,
@@ -1253,14 +1258,11 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
           fail('FORECAST_ACTIVE_RUN_CONFLICT', 'The active forecast run set changed.', 'expectedActiveRunIds');
         }
         const result = buildCommittedResult({ ...context, branchId: plan.branchId }, plan, sourceStates);
-        const createdAt = clock();
-        if (typeof createdAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(createdAt)) {
-          fail('FORECAST_CLOCK_INVALID', 'Repository clock must return RFC3339 UTC milliseconds.', 'clock', 500);
-        }
+        const createdAt = new Date().toISOString();
         const ids = {
-          runId: idFactory('forecast-run'),
-          operationId: idFactory('forecast-operation'),
-          auditEventId: idFactory('forecast-audit'),
+          runId: generateId('forecast-run'),
+          operationId: generateId('forecast-operation'),
+          auditEventId: generateId('forecast-audit'),
         };
         insertRun(context, plan, result, ids, calculatedInputSetHash, predecessors, createdAt);
         const snapshotIds = insertInputs(context, plan, result, ids.runId, createdAt);

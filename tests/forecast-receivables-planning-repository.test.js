@@ -313,9 +313,7 @@ test('SQLite-native audit insertion failure rolls back the entire run', () => {
 
 test('repository cannot be called with a caller-created unbranded prepared plan', () => {
   const context = createForecastTestContext();
-  const repository = createForecastReceivablesPlanningRepository(context.db, {
-    readUsers: context.readUsers,
-  });
+  const repository = createForecastReceivablesPlanningRepository(context.db);
   assert.throws(
     () => repository.calculateForecastRun(context.forecastCommandContext, forecastCommand(context)),
     error => error.code === 'FORECAST_PREPARED_PLAN_REJECTED',
@@ -363,9 +361,7 @@ test('all injected policy callbacks finish before the repository transaction beg
   });
   const service = createForecastReceivablesPlanningService({
     db: context.db,
-    readUsers: context.readUsers,
     policyRegistry,
-    repositoryOptions: { nowIso: () => '2026-07-18T06:00:00.000Z' },
   });
   const result = service.calculateForecastRun(
     service.createCommandContext(context.platformScope),
@@ -408,7 +404,6 @@ test('source drift introduced after planning but before commit fails closed with
   });
   const service = createForecastReceivablesPlanningService({
     db: context.db,
-    readUsers: context.readUsers,
     policyRegistry,
   });
   assert.throws(
@@ -461,7 +456,6 @@ for (const mutation of ['capability-deny', 'branch-deactivate']) {
     });
     const service = createForecastReceivablesPlanningService({
       db: context.db,
-      readUsers: context.readUsers,
       policyRegistry,
     });
     assert.throws(

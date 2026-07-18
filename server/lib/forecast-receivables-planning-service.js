@@ -15,14 +15,9 @@ function createForecastReceivablesPlanningService({
   db,
   repository,
   policyRegistry,
-  readUsers,
-  repositoryOptions,
 } = {}) {
   const registry = policyRegistry || createUnavailableForecastReceivablesPolicyRegistry();
-  const forecastRepository = repository || createForecastReceivablesPlanningRepository(db, {
-    ...repositoryOptions,
-    readUsers,
-  });
+  const forecastRepository = repository || createForecastReceivablesPlanningRepository(db);
 
   return Object.freeze({
     createCommandContext: createForecastReceivablesCommandContext,

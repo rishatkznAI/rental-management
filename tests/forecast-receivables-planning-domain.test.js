@@ -167,7 +167,6 @@ test('production-default unavailable policies yield explicit blockers and no ite
   const context = createForecastTestContext();
   const service = createForecastReceivablesPlanningService({
     db: context.db,
-    readUsers: context.readUsers,
   });
   const result = service.calculateForecastRun(
     service.createCommandContext(context.platformScope),

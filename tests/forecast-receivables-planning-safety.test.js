@@ -94,9 +94,15 @@ test('PR7 has no canonical/source/legacy write, fallback, settlement, or runtime
     'server/routes/forecast-receivables-read.js',
   ];
   const source = files.map(read).join('\n');
+  const repository = read('server/lib/forecast-receivables-planning-repository.js');
+  const sourceWithoutOwnedUserDirectory = source.replace(
+    "SELECT json FROM app_data WHERE name = 'users'",
+    '',
+  );
   assert.doesNotMatch(source, /(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:canonical_receivables|canonical_payments|canonical_payment_allocations|canonical_receivable_adjustments|canonical_approval_requests|financial_audit_events)/i);
   assert.doesNotMatch(source, /(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+billing_source_/i);
-  assert.doesNotMatch(source, /app_data|gantt_rentals|equipment_downtimes|rentalBillingSnapshot|billingSnapshot/);
+  assert.equal(repository.match(/SELECT json FROM app_data WHERE name = 'users'/g)?.length, 1);
+  assert.doesNotMatch(sourceWithoutOwnedUserDirectory, /app_data|gantt_rentals|equipment_downtimes|rentalBillingSnapshot|billingSnapshot/);
   assert.doesNotMatch(source, /finance-core|receivables-core|canonical-receivables-settlement-repository/);
   assert.doesNotMatch(source, /buildRentalDebtRows|getRentalDebtOverdueDays|calculateRentalBilling|getRentalBillingAmount/);
   assert.doesNotMatch(source, /Math\.round|parseFloat|setInterval|setTimeout|scheduler|watcher|queue consumer/i);

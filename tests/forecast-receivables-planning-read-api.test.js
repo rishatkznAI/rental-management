@@ -204,9 +204,15 @@ test('runs endpoint supports historical and current-only views with deterministi
   const all = await auth(request(app).get('/api/forecast-receivables/runs'));
   assert.equal(all.status, 200);
   assert.equal(all.body.items.length, 2);
+  const expectedOrder = [first, second]
+    .sort((left, right) => (
+      right.calculatedAt.localeCompare(left.calculatedAt)
+      || right.forecastRunId.localeCompare(left.forecastRunId)
+    ))
+    .map(item => item.forecastRunId);
   assert.deepEqual(
     all.body.items.map(item => item.forecastRunId),
-    [first.forecastRunId, second.forecastRunId].sort().reverse(),
+    expectedOrder,
   );
   const current = await auth(request(app).get('/api/forecast-receivables/runs?currentOnly=true'));
   assert.equal(current.body.items.length, 1);

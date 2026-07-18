@@ -89,7 +89,6 @@ export function createForecastTestContext({
   capabilities = FORECAST_CAPABILITIES,
   dbPath = ':memory:',
   policyRegistry = deterministicForecastPolicy(),
-  clock = () => '2026-07-18T06:00:00.000Z',
   sourceCloseOverrides = {},
 } = {}) {
   const context = createBillingSourceContext({ capabilities, dbPath });
@@ -102,9 +101,7 @@ export function createForecastTestContext({
   }));
   const forecastService = createForecastReceivablesPlanningService({
     db: context.db,
-    readUsers: context.readUsers,
     policyRegistry,
-    repositoryOptions: { nowIso: clock },
   });
   const forecastCommandContext = forecastService.createCommandContext(context.platformScope);
   return {
@@ -133,9 +130,7 @@ export function openExistingForecastTestContext(dbPath, {
   });
   const forecastService = createForecastReceivablesPlanningService({
     db,
-    readUsers,
     policyRegistry,
-    repositoryOptions: { nowIso: () => '2026-07-18T07:00:00.000Z' },
   });
   const forecastCommandContext = forecastService.createCommandContext(platformScope);
   return {

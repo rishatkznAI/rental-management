@@ -284,7 +284,6 @@ test('unbranded and malformed contexts execute zero injected policy callbacks', 
   const calls = { partition: 0, calculate: 0, classify: 0 };
   const service = createForecastReceivablesPlanningService({
     db: context.db,
-    readUsers: context.readUsers,
     policyRegistry: deterministicForecastPolicy({
       partition: ({ input }) => {
         calls.partition += 1;

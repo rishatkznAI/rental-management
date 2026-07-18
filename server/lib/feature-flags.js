@@ -35,6 +35,10 @@ function isCanonicalReceivablesReadApiEnabled(env = process.env) {
   return envFlagEnabled(env.CANONICAL_RECEIVABLES_READ_API_ENABLED);
 }
 
+function isForecastReceivablesReadApiEnabled(env = process.env) {
+  return envFlagEnabled(env.FORECAST_RECEIVABLES_READ_API_ENABLED);
+}
+
 function shouldWarnForMissingMaxWebhookSecret({ botDisabled = false, transport = '', webhookSecret = '' } = {}) {
   return !botDisabled &&
     String(transport || '').trim().toLowerCase() === 'webhook' &&
@@ -78,6 +82,7 @@ module.exports = {
   getBotDisabledConfig,
   getGsmDisabledConfig,
   isCanonicalReceivablesReadApiEnabled,
+  isForecastReceivablesReadApiEnabled,
   sendAppDisabled,
   shouldWarnForMissingMaxWebhookSecret,
 };

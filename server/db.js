@@ -18,6 +18,9 @@ const {
   ensureBillingSourceAuthoritySchema,
 } = require('./lib/billing-source-authority-schema');
 const {
+  ensureForecastReceivablesPlanningSchema,
+} = require('./lib/forecast-receivables-planning-schema');
+const {
   assertClientInnListUnique,
   assertClientInnWriteAllowed,
   buildClientInnDuplicateReport,
@@ -135,6 +138,7 @@ function ensureDb() {
   ensureCanonicalReceivablesSettlementSchema(db);
   ensurePlatformIdentitySchema(db);
   ensureBillingSourceAuthoritySchema(db);
+  ensureForecastReceivablesPlanningSchema(db);
   syncClientInnIndex({ throwOnDuplicates: false });
   return db;
 }

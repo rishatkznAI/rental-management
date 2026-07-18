@@ -106,6 +106,7 @@ const {
   getBotDisabledConfig,
   getGsmDisabledConfig,
   isCanonicalReceivablesReadApiEnabled,
+  isForecastReceivablesReadApiEnabled,
   sendAppDisabled,
   shouldWarnForMissingMaxWebhookSecret,
 } = require('./lib/feature-flags');
@@ -154,9 +155,13 @@ const { registerStaffRoutes } = require('./routes/staff');
 const { registerSystemRoutes } = require('./routes/system');
 const { registerTasksCenterRoutes } = require('./routes/tasks-center');
 const { registerCanonicalReceivablesReadRoutes } = require('./routes/canonical-receivables-read');
+const { registerForecastReceivablesReadRoutes } = require('./routes/forecast-receivables-read');
 const {
   resolveCanonicalReceivablesTrustedScope,
 } = require('./lib/canonical-receivables-scope-adapter');
+const {
+  resolveForecastReceivablesTrustedScope,
+} = require('./lib/forecast-receivables-scope-adapter');
 const {
   backfillServiceTicketCreatedAt,
   normalizeServiceTicketForWrite,
@@ -182,6 +187,7 @@ const {
 
 const DEMO_MODE = isDemoMode();
 const CANONICAL_RECEIVABLES_READ_API_ENABLED = isCanonicalReceivablesReadApiEnabled();
+const FORECAST_RECEIVABLES_READ_API_ENABLED = isForecastReceivablesReadApiEnabled();
 
 // ── Пароли ────────────────────────────────────────────────────────────────────
 
@@ -1313,6 +1319,15 @@ registerCanonicalReceivablesReadRoutes(apiRouter, {
   requireAuth,
   resolveTrustedScope: resolveCanonicalReceivablesTrustedScope,
   cursorSecret: process.env.CANONICAL_RECEIVABLES_CURSOR_SECRET,
+  logger: console,
+});
+
+registerForecastReceivablesReadRoutes(apiRouter, {
+  enabled: FORECAST_RECEIVABLES_READ_API_ENABLED,
+  db: FORECAST_RECEIVABLES_READ_API_ENABLED ? ensureDb() : null,
+  requireAuth,
+  resolveTrustedScope: resolveForecastReceivablesTrustedScope,
+  cursorSecret: process.env.FORECAST_RECEIVABLES_CURSOR_SECRET,
   logger: console,
 });
 

@@ -1,12 +1,12 @@
 # Canonical receivables: product-owner decision memo
 
-**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; PR4 **DESIGN APPROVED** as a historical design gate and not released; PR5 **RELEASED** as the neutral platform identity and fail-closed authorization foundation only; PR6 **IMPLEMENTED FOR REVIEW — NOT RELEASED**; conditional confirmations remain
+**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; PR4 **DESIGN APPROVED** as a historical design gate and not released; PR5 **RELEASED** as the neutral platform identity and fail-closed authorization foundation only; **PR6: RELEASED — Billing Source Authority foundation only.** Conditional confirmations remain.
 
-**Prepared:** 2026-07-13; PR4 product-owner clarifications, design-detail decisions, and architecture/PR5 foundation approval updated 2026-07-15; PR5 release status and PR6 review implementation status updated 2026-07-17
+**Prepared:** 2026-07-13; PR4 product-owner clarifications, design-detail decisions, and architecture/PR5 foundation approval updated 2026-07-15; PR5 release status updated 2026-07-17; PR6 release-marker status updated 2026-07-18
 
 **Source specification:** `docs/canonical-receivables-contract.md`
 
-**Scope:** approved product-owner rules plus factual PR1/PR2/PR3/PR5 release metadata, factual PR6 review implementation metadata, and the historical PR4 design gate; proposals remain distinct from approved decisions
+**Scope:** approved product-owner rules plus factual PR1/PR2/PR3/PR5/PR6 foundation release metadata and the historical PR4 design gate; proposals remain distinct from approved decisions
 
 ## Product-owner baseline
 
@@ -20,7 +20,7 @@
 
 **No silent assumptions:** implementation may encode only the answers in this baseline. Missing source sufficiency/evidence, proven-date evidence, exact money/VAT/rounding, compensation details, downtime/extension authority, lane-precedence mechanics, activation date/cohort, financial thresholds, concrete membership records, audited capability assignments, named integration contracts, or other unapproved details must remain disabled, fail-closed, or explicitly escalated. No finite retention period may be invented.
 
-**Current status summary:** PR1 is **RELEASED**; PR2 is **RELEASED**; PR3 is **RELEASED**; PR4 is **DESIGN APPROVED** as a historical design gate and is not released; PR5 is **RELEASED, foundation only**; and PR6 is **IMPLEMENTED FOR REVIEW — NOT RELEASED**. The production ledger remains inactive, with canonical production reads and writes disabled and existing systems continuing to serve production behavior. Production identity/bootstrap activation, settlement, every canonical write/read switch, Finance and Company Health/Risks switches, forecast/PR7, PR8, PR9, deployment, and cutover remain blocked or unperformed.
+**Current status summary:** PR1 is **RELEASED**; PR2 is **RELEASED**; PR3 is **RELEASED**; PR4 is **DESIGN APPROVED** as a historical design gate and is not released; PR5 is **RELEASED, foundation only**; and **PR6: RELEASED — Billing Source Authority foundation only.** The production ledger remains inactive, with canonical production reads and writes disabled and existing systems continuing to serve production behavior. Production identity/bootstrap activation, settlement, every canonical write/read switch, Finance and Company Health/Risks switches, forecast/PR7, PR8, PR9, deployment, and cutover remain blocked or unperformed.
 
 ## PR4 design-detail product-owner decisions
 
@@ -163,7 +163,11 @@ Implementation PR [#210](https://github.com/rishatkznAI/rental-management/pull/2
 
 The production canonical resolver remains unconditional `null`; enabling the feature flag alone still fails closed with `403`. Production bootstrap was not run, production identity records and canonical financial rows were not created, and no deployment or cutover occurred. The PR5 release therefore authorizes no canonical production read, canonical write, or financial behavior.
 
-PR6 is **IMPLEMENTED FOR REVIEW — NOT RELEASED** as an isolated Billing Source Authority foundation for closed billing periods, immutable billing snapshots, an explicit conducted-UPD lifecycle, stable UPD line IDs, and deterministic line-to-period mappings. It creates no canonical receivable, performs no canonical write, exposes no HTTP API, enables no canonical read, switches neither Finance nor Company Health/Risks, runs no production bootstrap, and does not implement PR7.
+## PR6 release status
+
+**PR6: RELEASED — Billing Source Authority foundation only.** Implementation PR [#212](https://github.com/rishatkznAI/rental-management/pull/212), reviewed at `b2687e5c5c75caf21cf1d5659f687fcf2ba90f89`, was squash-merged as `485808d24b8c5f6481e0520eec5c8985b71ffeab` on the 2026-07-18 release-marker date. Migration `billing_source_authority_pr6` version 1 creates exactly 16 append-only source-authority tables. Node `v20.20.2`/npm `10.9.8` verification passed 135 focused tests, 364 compatibility tests, two complete 2,073-test runs, and the production build; the required CI check also passed. Coverage lifecycle now uses exact append-only predecessor/successor relations with atomic concurrency behavior, and `evidenceSetHash` is repository-owned and transactionally reconstructed from persisted evidence.
+
+Release marks only the isolated foundation for closed billing periods, immutable billing snapshots, an explicit conducted-UPD lifecycle, stable UPD line IDs, and deterministic line-to-period mappings. It creates no canonical receivable, performs no canonical write, exposes no HTTP API, runs no PR8 eligibility, canonical posting, settlement, payment allocation, forecast, production bootstrap, deployment, or cutover, enables no canonical read, switches neither Finance nor Company Health/Risks, and does not implement PR7. The production resolver remains unconditional `null`, the canonical read flag remains default-disabled, and canonical financial tables remain empty.
 
 ## How to use this memo
 
@@ -790,15 +794,17 @@ The released PR5 foundation does not implement UPD sufficiency, client signature
 
 ### PR6 — billing source authority
 
-**Status: IMPLEMENTED FOR REVIEW — NOT RELEASED.** PR6 provides an isolated normalized source schema, append-only domain/repositories, exact capability and trusted-scope enforcement, and scoped internal inspection for closed billing periods, immutable billing snapshots, explicit formed/conducted UPD lifecycle, stable source lines, and deterministic coverage. It exposes no HTTP API or production adapter. Concrete production activation, authoritative conducted evidence, accountant/legal sufficiency, exact VAT/rounding, correction/cancellation effect, partial/full-return lifecycle/evidence, production identity assignments, and enablement remain gated. It creates no canonical receivable, performs no canonical write, enables no canonical read, switches neither Finance nor Company Health/Risks, runs no production bootstrap, and does not implement PR7. See `docs/billing-source-authority-pr6-audit.md`.
+**PR6: RELEASED — Billing Source Authority foundation only.** PR6 provides an isolated normalized source schema, append-only domain/repositories, exact capability and trusted-scope enforcement, and scoped internal inspection for closed billing periods, immutable billing snapshots, explicit formed/conducted UPD lifecycle, stable source lines, and deterministic coverage. It exposes no HTTP API or production adapter. Concrete production activation, authoritative conducted evidence, accountant/legal sufficiency, exact VAT/rounding, correction/cancellation effect, partial/full-return lifecycle/evidence, production identity assignments, and enablement remain gated. It creates no canonical receivable, performs no canonical write, enables no canonical read, switches neither Finance nor Company Health/Risks, runs no production bootstrap, and does not implement PR7. See `docs/billing-source-authority-pr6-audit.md`.
 
 ### PR7 — forecast receivables planning
 
 **Gate: BLOCKED pending remaining forecast-specific decisions.** The three components/formula, closed-unbilled display, 30-day horizon, `active`/`return_planned` allow-list, excluded `planned_future`, confidence levels/reasons, indefinite forecast history, separate advances, return-line boundary, and minimum-term/discount order are approved. Exact one-slice lane precedence/key enforcement and authoritative downtime/extension/return lifecycle remain `OWNER APPROVAL REQUIRED`. Forecasts never enter canonical debt, aging, collections, or settlement. No Finance or Company Health/Risks switch and no canonical writes.
 
+PR7 has not started. After the PR6 release-marker PR itself is reviewed and merged, PR7 architecture and implementation may begin only as a separate Forecast Receivables Planning PR; canonical writes, Finance or Company Health/Risks switching, and production activation remain forbidden.
+
 ### PR8 — forward-only actual-source eligibility dry run
 
-**Gate: BLOCKED pending PR6 review/release and all applicable actual-source gates.** Source sufficiency, proven-date evidence, exact money/VAT/rounding, deterministic mappings/correction lineage, exact activation date/cohort, idempotency/replay, accountant/legal confirmation, reconciliation/runbooks, and zero unexplained net/VAT/gross delta remain mandatory. The fully governed-period/no-partial-or-historical-import boundary is approved. PR8 is read-only: no backfill and no canonical writes.
+**Gate: BLOCKED pending all applicable actual-source gates.** Source sufficiency, proven-date evidence, exact money/VAT/rounding, deterministic mappings/correction lineage, exact activation date/cohort, idempotency/replay, accountant/legal confirmation, reconciliation/runbooks, and zero unexplained net/VAT/gross delta remain mandatory. The fully governed-period/no-partial-or-historical-import boundary is approved. PR8 is read-only: no backfill and no canonical writes.
 
 ### PR9 — canonical actual posting adapter
 

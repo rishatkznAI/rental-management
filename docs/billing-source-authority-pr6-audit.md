@@ -2,9 +2,15 @@
 
 ## Status and implementation base
 
-- Final implementation status: **PR6: REMEDIATED FOR REVIEW — NOT RELEASED**.
-- Remediation finding: **P1 coverage lifecycle — fixed in this PR; not released**.
-- Remediation finding: **P1 caller-provided `evidenceSetHash` — fixed in this PR; not released**.
+- Final foundation status: **PR6: RELEASED — Billing Source Authority foundation only.**
+- Implementation PR: [#212](https://github.com/rishatkznAI/rental-management/pull/212), squash-merged at `2026-07-18T03:52:54Z`.
+- Final independently reviewed implementation head: `b2687e5c5c75caf21cf1d5659f687fcf2ba90f89`.
+- Released squash commit and resulting `origin/main`: `485808d24b8c5f6481e0520eec5c8985b71ffeab`.
+- Release-marker date: 2026-07-18.
+- Migration and scope: `billing_source_authority_pr6`, version `1`; exactly 16 append-only source-authority tables.
+- Remediation finding: **P1 coverage lifecycle — fixed, independently re-reviewed, and included in the released foundation**.
+- Remediation finding: **P1 caller-provided `evidenceSetHash` — fixed, independently re-reviewed, and included in the released foundation**.
+- CI evidence: `lightweight-pr-check` succeeded for the final reviewed head ([run 29616760318](https://github.com/rishatkznAI/rental-management/actions/runs/29616760318)).
 - Previous reviewed PR head: `5f4be8aaad3d53434fad230a65f3fee8a64b3920`.
 - Actual remediation starting head after fetch: `5f4be8aaad3d53434fad230a65f3fee8a64b3920`.
 - Prompt baseline: `030b140fa767f4c2ff16b3f9910a46e12b94e485`.
@@ -17,9 +23,9 @@
 - PR3: **RELEASED**, default-disabled read-only infrastructure only.
 - PR4: **DESIGN APPROVED**, historical design gate, not released.
 - PR5: **RELEASED**, neutral platform identity and fail-closed authorization foundation only.
-- PR6: **REMEDIATED FOR REVIEW — NOT RELEASED**.
+- **PR6: RELEASED — Billing Source Authority foundation only.**
 
-The original implementation starting SHA was verified after `git fetch origin --prune`; the isolated worktree started clean at that exact SHA. For remediation, PR #212 and the remote branch were re-fetched, the actual PR head exactly matched the previous reviewed head above, and there was no newer delta to preserve. PR #210 and PR #211 were inspected through their complete repository diffs as well as their reviewed and squash commits. No production bootstrap, canonical write, resolver wiring, feature enablement, forecast, or PR7 implementation is introduced by this remediation.
+The original implementation starting SHA was verified after `git fetch origin --prune`; the isolated worktree started clean at that exact SHA. During remediation, PR #212 and the remote branch were re-fetched, and the then-current PR head exactly matched the previous reviewed head above. Final release review independently inspected the complete `origin/main...b2687e5c...` diff, verified that PR #212 still contained only the two expected implementation/remediation commits, reran the full Node 20 matrix, and squash-merged that exact head. No production bootstrap, canonical write, resolver wiring, feature enablement, deployment, forecast, or PR7 implementation was introduced.
 
 ## Actual repository audit
 
@@ -173,12 +179,13 @@ These are implementation choices, not newly claimed historical owner approvals.
 
 ### Unresolved owner/accountant/legal gates
 
-- Exact VAT selection/exemption, calculation order beyond discount-before-VAT, rounding mode/timing, and residual allocation.
-- Minimum-term formula and accepted contractual due-date evidence.
-- Exact authoritative conducted evidence, legal/accounting sufficiency, and contract-specific signature requirements.
-- Financial authority and conflict precedence of current return, downtime, and extension events.
+- Exact VAT selection and exemption policy; exact rounding mode/timing and residual allocation.
+- Minimum-term formulas and accepted contractual due-date evidence.
+- Exact authoritative conducted evidence, accounting/legal sufficiency, and contract-specific client-signature requirements.
+- Authoritative return, downtime, and extension evidence, including precedence among those events.
 - Correction/cancellation accounting effect and legal replacement/supersession effect.
-- Production activation date/cohort, company/branch mappings, memberships, capability assignments, named integration/system actors, adapters, and enablement.
+- Production activation date/cohort, company/branch mappings, memberships, role/capability assignments, named adapters/system actors, and separate production enablement authorization.
+- PR8 reconciliation/dry-run evidence and PR9's separate explicit canonical-write authorization.
 
 Each unresolved matter must arrive as explicit approved policy/evidence; PR6 supplies no silent default.
 
@@ -186,24 +193,31 @@ Each unresolved matter must arrive as explicit approved policy/evidence; PR6 sup
 
 PR6 adds no canonical financial DML, posting adapter/event, eligibility evaluator, settlement/payment/allocation/adjustment behavior, forecast table/API/calculation, historical import/backfill, dual write, shadow read, product switch, feature enablement, production bootstrap/data, deployment file, frontend change, broad legacy refactor, purge/TTL/cleanup, or PR7 work. The only existing production runtime file changed is `server/db.js`, solely to call the schema initializer after PR5.
 
+Release did not enable canonical production reads or writes; create actual receivables; run PR8 eligibility or canonical posting; perform settlement or payment allocation; enable forecast; run production bootstrap; create production identity, membership, capability-assignment, activation-boundary, rental-line, UPD, or coverage rows; wire legacy adapters; backfill, historically import, or dual-write data; switch Finance or Company Health/Risks; deploy; or cut over production. The production canonical resolver remains unconditional `null`, the canonical read flag remains default-disabled, and canonical financial tables remain empty.
+
+PR7 has not started. Only after this release-marker PR is reviewed and merged may PR7 architecture and implementation begin as a separate Forecast Receivables Planning PR; it remains forbidden from canonical writes, Finance or Company Health/Risks switching, and production activation.
+
 ## Verification record
 
-Verification values are recorded from the final unchanged pre-commit worktree:
+Verification values are recorded from the final independently reviewed implementation head before squash merge:
 
 | Check | Result |
 |---|---|
 | Node / npm | `v20.20.2` / `10.9.8` |
 | PR6 schema/domain/repository/safety/remediation focused suites | 135 passed, 0 failed |
 | PR6 child-process concurrency suite | 3 passed, 0 failed (included above) |
-| Full `npm test`, pass 1 | 2,073 passed, 0 failed |
-| Full `npm test`, pass 2 | 2,073 passed, 0 failed |
-| `npm run build` | Passed; Vite transformed 3,385 modules and completed in 6.16s |
+| PR1/PR2/PR5/PR6 compatibility suites | 364 passed, 0 failed |
+| Full `npm test` | 2,073 passed, 0 failed |
+| Full `node --test tests/*.test.js` | 2,073 passed, 0 failed |
+| `npm run build` | Passed; Vite transformed 3,385 modules and completed in 6.99s |
 | `git diff --check` | Passed with no output |
 | `PRAGMA foreign_keys` | `1` in fresh-startup SQLite probe |
 | `PRAGMA foreign_key_check` | 0 rows in fresh-startup SQLite probe |
+| `PRAGMA integrity_check` | `ok` |
+| Final implementation CI | `lightweight-pr-check` passed for `b2687e5c...` |
 
-The startup contract registers the unchanged `billing_source_authority_pr6` migration at version `1`. The normalized model now contains 16 PR6 tables because the unmerged version-1 definition includes the append-only coverage lifecycle table. Two independent startup probes registered it once with zero source, identity/membership/assignment, or canonical financial rows; the rerun path preserved registration without business migration.
+The startup contract registers the unchanged `billing_source_authority_pr6` migration at version `1`. The released version-1 model contains exactly 16 PR6 tables, including the append-only coverage lifecycle table. Two independent Node 20 startup processes registered it once with the same migration timestamp and zero source, activation-boundary, identity/membership/assignment/bootstrap, or canonical financial rows; the rerun path preserved registration without business migration. The capability catalog remained exactly 1 version/11 entries, the production resolver returned `null`, and the canonical read flag evaluated false by default.
 
 ## Final status
 
-PR6: REMEDIATED FOR REVIEW — NOT RELEASED
+PR6: RELEASED — Billing Source Authority foundation only.

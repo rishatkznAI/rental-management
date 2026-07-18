@@ -12,7 +12,7 @@
 
 This record describes an isolated planning foundation. It does not authorize release, production activation, a production calculation adapter, canonical writes, a reporting cutover, or any consumer switch.
 
-Focused remediation was applied to the existing PR #214 from its previously reviewed and actual remediation starting head `2c82fc96f2eb78838de2b7e7d1d21e39928d5dc7`. The branch, PR, migration identity, eight-table boundary, production isolation, and unreleased status were preserved.
+The first focused remediation was applied to the existing PR #214 from head `2c82fc96f2eb78838de2b7e7d1d21e39928d5dc7`. This final focused remediation used previously reviewed head `8e583f9eece42e8cf33149ab92faf0f56e21496e` as both the verified remote head and actual remediation start. The callback-boundary implementation commit is `22e461592fa4ed407dfa0dcfa03f91487a09f9f2`; the final branch head, which necessarily includes this audit update, is recorded in the PR #214 body after push. The branch, PR, migration identity, eight-table boundary, production isolation, and unreleased status were preserved.
 
 ## Baseline audit
 
@@ -63,6 +63,8 @@ Inputs identify a PR6 rental line, activation boundary, and effective-terms vers
 
 Before `BEGIN IMMEDIATE`, the branded command context is validated before any injected policy callback. Caller data is then deeply materialized and rejects proxies, accessors, custom prototypes, exotic objects, cycles, sparse arrays, hidden/symbol fields, functions, undefined/non-finite numbers, secret-like keys, excessive depth/count/bytes, and unknown fields. The byte budget counts canonical JSON keys, primitives, commas, colons, and array/object structure. Injected policy callbacks finish before the repository transaction. After the lock is acquired, the repository freshly revalidates the PR5 principal/membership/template/catalog/capability/branch scope and rereads the required PR6 source records, versions, hashes, effective intervals, current terms lineage, policy-resolution state, and closed-period overlap.
 
+The production mutation repository now has the sole constructor `createForecastReceivablesPlanningRepository(db)`. It accepts no user-directory reader, clock, ID factory, repository options, transaction hook, or before/after callback. Its repository-owned `readUsers()` reads and fail-closed parses only `app_data.users` through the same SQLite connection, and that reader is used by both the platform identity repository and fresh-scope authorization. All persisted timestamps and identifiers are generated internally with `new Date().toISOString()` and `crypto.randomUUID()`. The service no longer accepts or forwards `readUsers` or `repositoryOptions`; it either creates the production repository from `db` alone or accepts an already-created repository for unit isolation. Consequently no caller-controlled JavaScript can execute between transactional authorization, PR6 source validation, active-run validation, persistence, operation/audit finalization, and commit.
+
 ## Policy, confidence, and unknown input
 
 The production policy registry is deliberately unavailable. It does not read mutable settings or invent VAT, rounding, minimum-term, return/downtime/extension precedence, coverage partition, or high/medium/low rules. A calculation without an explicitly injected versioned policy persists blocking `insufficient` diagnostics and no monetary item.
@@ -109,11 +111,11 @@ All verification used Node `v20.20.2` and npm `10.9.4` from an isolated `node@20
 
 | Check | Result |
 |---|---:|
-| New focused remediation regressions | 23 passed, 0 failed |
-| Focused PR7 suites | 100 passed, 0 failed |
-| PR1/PR2/PR3/PR5/PR6/PR7 compatibility suites | 461 passed, 0 failed |
-| `npm test` | 2,173 passed, 0 failed |
-| Repeated `node --test tests/*.test.js` | 2,173 passed, 0 failed |
+| New callback-boundary regressions | 5 passed, 0 failed |
+| Focused PR7 suites | 105 passed, 0 failed |
+| PR1/PR2/PR3/PR5/PR6/PR7 compatibility suites | 466 passed, 0 failed |
+| `npm test` | 2,178 passed, 0 failed |
+| Repeated `node --test tests/*.test.js` | 2,178 passed, 0 failed |
 | `npm run build` | passed |
 | `git diff --check` | passed |
 | `PRAGMA foreign_keys` | `1` |

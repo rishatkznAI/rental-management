@@ -115,6 +115,21 @@ function inputSourceHash(input) {
   });
 }
 
+function parseCanonicalJson(value, field, expectedType) {
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    fail('FORECAST_RECONCILIATION_FAILED', `Persisted ${field} is not valid JSON.`, field, 500);
+  }
+  if (
+    stableJson(parsed) !== value
+    || (expectedType === 'array' && !Array.isArray(parsed))
+    || (expectedType === 'object' && (!parsed || Array.isArray(parsed) || typeof parsed !== 'object'))
+  ) fail('FORECAST_RECONCILIATION_FAILED', `Persisted ${field} is not canonical.`, field, 500);
+  return parsed;
+}
+
 function canonicalDiagnostic(diagnostic) {
   return {
     rentalLineId: diagnostic.rentalLineId,
@@ -434,6 +449,7 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
         blockedInputs.add(inputIndex);
         const input = plan.inputs[inputIndex];
         diagnostics.push({
+          inputIndex,
           rentalLineId: input.rentalLineId,
           componentKind: input.componentKind,
           affectedStartDate: input.candidateStartDate,
@@ -447,9 +463,39 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
       }
     });
 
+    const exactlyClosedInputs = new Set();
+    plan.inputs.forEach((input, inputIndex) => {
+      if (blockedInputs.has(inputIndex)) return;
+      const slices = plan.calculatedSlices.filter(slice => slice.inputIndex === inputIndex);
+      if (slices.length === 0) return;
+      const closed = latestClosedOverlaps(context, input, {
+        coverageStartDate: input.candidateStartDate,
+        coverageEndDateExclusive: input.candidateEndDateExclusive,
+      });
+      if (
+        closed.length === 1
+        && closed[0].periodStartDate === input.candidateStartDate
+        && closed[0].periodEndDateExclusive === input.candidateEndDateExclusive
+      ) {
+        exactlyClosedInputs.add(inputIndex);
+        diagnostics.push({
+          inputIndex,
+          rentalLineId: input.rentalLineId,
+          componentKind: input.componentKind,
+          affectedStartDate: input.candidateStartDate,
+          affectedEndDateExclusive: input.candidateEndDateExclusive,
+          severity: 'info',
+          reasonCode: 'FORECAST_CLOSED_COVERAGE_SUPPRESSED',
+          sourceIdentity: input.sourceIdentity,
+          sourceHash: input.sourceHash,
+          policyRef: closed[0].latestVersionId,
+        });
+      }
+    });
+
     const items = [];
     for (const slice of plan.calculatedSlices) {
-      if (blockedInputs.has(slice.inputIndex)) continue;
+      if (blockedInputs.has(slice.inputIndex) || exactlyClosedInputs.has(slice.inputIndex)) continue;
       const input = plan.inputs[slice.inputIndex];
       const closed = latestClosedOverlaps(context, input, slice);
       if (closed.length > 0) {
@@ -457,14 +503,13 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
           && closed[0].periodStartDate === slice.coverageStartDate
           && closed[0].periodEndDateExclusive === slice.coverageEndDateExclusive;
         diagnostics.push({
+          inputIndex: slice.inputIndex,
           rentalLineId: input.rentalLineId,
           componentKind: input.componentKind,
           affectedStartDate: slice.coverageStartDate,
           affectedEndDateExclusive: slice.coverageEndDateExclusive,
           severity: exact ? 'info' : 'blocking',
-          reasonCode: exact
-            ? 'FORECAST_CLOSED_COVERAGE_SUPPRESSED'
-            : 'FORECAST_CLOSED_COVERAGE_OVERLAP',
+          reasonCode: exact ? 'FORECAST_CLOSED_COVERAGE_SUPPRESSED' : 'FORECAST_CLOSED_COVERAGE_OVERLAP',
           sourceIdentity: input.sourceIdentity,
           sourceHash: input.sourceHash,
           policyRef: exact ? closed[0].latestVersionId : null,
@@ -552,24 +597,37 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
   }
 
   function insertRun(context, plan, result, ids, inputSetHash, predecessors, createdAt) {
+    const manifest = plan.inputSetManifest;
     db.prepare(`
       INSERT INTO ${FORECAST_RECEIVABLE_RUNS_TABLE} (
         id, companyId, branchId, companyTimezone, planningSeriesKey, asOfDate,
         horizonStartDate, horizonEndDateExclusive, horizonDays, currency,
         calculationVersion, inputContractVersion, confidencePolicyVersion,
-        coveragePolicyVersion, inputSetHash, resultHash, status, completenessState,
+        coveragePolicyVersion, inputSetManifestPresent, inputSetManifestSourceSystem,
+        inputSetManifestSourceSnapshotVersion, inputSetManifestCoveredBranchId,
+        inputSetManifestCoveredStartDate, inputSetManifestCoveredEndDateExclusive,
+        inputSetManifestRentalStatusesJson, inputSetManifestAuthorityStatus,
+        inputSetManifestPolicyRef, inputSetManifestSourceHash, inputSetManifestHash,
+        inputSetManifestSchemaVersion, inputSetHash, resultHash, status, completenessState,
         openPeriodForecastNetMinor, openPeriodForecastVatMinor, openPeriodForecastGrossMinor,
         plannedFutureNetMinor, plannedFutureVatMinor, plannedFutureGrossMinor,
-        primaryForecastMinor, itemCount, diagnosticCount, blockingDiagnosticCount,
+        primaryForecastMinor, inputSnapshotCount, inputEventCount,
+        inputCompletenessManifestCount, itemCount, diagnosticCount, blockingDiagnosticCount,
         predecessorCount, operationId, calculatedAt, correlationId, schemaVersion
       ) VALUES (
         @id, @companyId, @branchId, @companyTimezone, @planningSeriesKey, @asOfDate,
         @horizonStartDate, @horizonEndDateExclusive, 30, @currency,
         @calculationVersion, @inputContractVersion, @confidencePolicyVersion,
-        @coveragePolicyVersion, @inputSetHash, @resultHash, @status, @completenessState,
+        @coveragePolicyVersion, @inputSetManifestPresent, @inputSetManifestSourceSystem,
+        @inputSetManifestSourceSnapshotVersion, @inputSetManifestCoveredBranchId,
+        @inputSetManifestCoveredStartDate, @inputSetManifestCoveredEndDateExclusive,
+        @inputSetManifestRentalStatusesJson, @inputSetManifestAuthorityStatus,
+        @inputSetManifestPolicyRef, @inputSetManifestSourceHash, @inputSetManifestHash,
+        @inputSetManifestSchemaVersion, @inputSetHash, @resultHash, @status, @completenessState,
         @openPeriodForecastNetMinor, @openPeriodForecastVatMinor, @openPeriodForecastGrossMinor,
         @plannedFutureNetMinor, @plannedFutureVatMinor, @plannedFutureGrossMinor,
-        @primaryForecastMinor, @itemCount, @diagnosticCount, @blockingDiagnosticCount,
+        @primaryForecastMinor, @inputSnapshotCount, @inputEventCount,
+        @inputCompletenessManifestCount, @itemCount, @diagnosticCount, @blockingDiagnosticCount,
         @predecessorCount, @operationId, @calculatedAt, @correlationId, @schemaVersion
       )
     `).run({
@@ -586,11 +644,26 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
       inputContractVersion: FORECAST_INPUT_CONTRACT_VERSION,
       confidencePolicyVersion: plan.confidencePolicyVersion,
       coveragePolicyVersion: plan.coveragePolicyVersion,
+      inputSetManifestPresent: manifest ? 1 : 0,
+      inputSetManifestSourceSystem: manifest?.sourceSystem || null,
+      inputSetManifestSourceSnapshotVersion: manifest?.sourceSnapshotVersion || null,
+      inputSetManifestCoveredBranchId: manifest?.coveredBranchId || null,
+      inputSetManifestCoveredStartDate: manifest?.coveredStartDate || null,
+      inputSetManifestCoveredEndDateExclusive: manifest?.coveredEndDateExclusive || null,
+      inputSetManifestRentalStatusesJson: manifest ? stableJson(manifest.rentalStatusesCovered) : null,
+      inputSetManifestAuthorityStatus: manifest?.authorityStatus || null,
+      inputSetManifestPolicyRef: manifest?.policyRef || null,
+      inputSetManifestSourceHash: manifest?.sourceHash || null,
+      inputSetManifestHash: manifest ? fingerprint(manifest) : null,
+      inputSetManifestSchemaVersion: manifest ? FORECAST_RECEIVABLES_SCHEMA_VERSION : null,
       inputSetHash,
       resultHash: result.resultHash,
       status: result.status,
       completenessState: result.completenessState,
       ...result.totals,
+      inputSnapshotCount: plan.inputs.length,
+      inputEventCount: plan.inputs.reduce((count, input) => count + input.events.length, 0),
+      inputCompletenessManifestCount: plan.inputs.filter(input => input.completenessManifest).length,
       itemCount: result.items.length,
       diagnosticCount: result.diagnostics.length,
       blockingDiagnosticCount: result.diagnostics.filter(item => item.severity === 'blocking').length,
@@ -607,17 +680,25 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
     const insertSnapshot = db.prepare(`
       INSERT INTO ${FORECAST_RECEIVABLE_INPUT_SNAPSHOTS_TABLE} (
         id, forecastRunId, companyId, branchId, rentalLineId, activationBoundaryId,
-        effectiveTermsVersionId, clientId, contractId, rentalId, equipmentId, rentalStatus,
+        activationBoundarySourceHash, effectiveTermsVersionId, effectiveTermsSourceVersion,
+        effectiveTermsSourceHash, clientId, contractId, rentalId, equipmentId, rentalStatus,
         componentKind, serviceStartDate, serviceEndDateExclusive, candidateStartDate,
         candidateEndDateExclusive, sourceSystem, sourceIdentity, sourceEventId,
-        sourceEventVersion, sourceHash, eventManifestHash, policyBundleRefsJson,
+        sourceEventVersion, sourceHash, completenessManifestPresent, manifestSourceSystem,
+        manifestSourceSnapshotVersion, manifestSourceEventWatermarkVersion,
+        manifestEventKindsCoveredJson, manifestCoveredStartDate, manifestCoveredEndDateExclusive,
+        manifestSourceHash, manifestAuthorityStatus, manifestPolicyRef, eventManifestHash, policyBundleRefsJson,
         inputSourceHash, authorityStatus, completenessStatus, schemaVersion, createdAt
       ) VALUES (
         @id, @forecastRunId, @companyId, @branchId, @rentalLineId, @activationBoundaryId,
-        @effectiveTermsVersionId, @clientId, @contractId, @rentalId, @equipmentId, @rentalStatus,
+        @activationBoundarySourceHash, @effectiveTermsVersionId, @effectiveTermsSourceVersion,
+        @effectiveTermsSourceHash, @clientId, @contractId, @rentalId, @equipmentId, @rentalStatus,
         @componentKind, @serviceStartDate, @serviceEndDateExclusive, @candidateStartDate,
         @candidateEndDateExclusive, @sourceSystem, @sourceIdentity, @sourceEventId,
-        @sourceEventVersion, @sourceHash, @eventManifestHash, @policyBundleRefsJson,
+        @sourceEventVersion, @sourceHash, @completenessManifestPresent, @manifestSourceSystem,
+        @manifestSourceSnapshotVersion, @manifestSourceEventWatermarkVersion,
+        @manifestEventKindsCoveredJson, @manifestCoveredStartDate, @manifestCoveredEndDateExclusive,
+        @manifestSourceHash, @manifestAuthorityStatus, @manifestPolicyRef, @eventManifestHash, @policyBundleRefsJson,
         @inputSourceHash, @authorityStatus, @completenessStatus, @schemaVersion, @createdAt
       )
     `);
@@ -653,7 +734,10 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
         branchId: plan.branchId,
         rentalLineId: input.rentalLineId,
         activationBoundaryId: input.activationBoundaryId,
+        activationBoundarySourceHash: input.activationBoundarySourceHash,
         effectiveTermsVersionId: input.effectiveTermsVersionId,
+        effectiveTermsSourceVersion: input.effectiveTermsSourceVersion,
+        effectiveTermsSourceHash: input.effectiveTermsSourceHash,
         clientId: input.clientId,
         contractId: input.contractId,
         rentalId: input.rentalId,
@@ -669,13 +753,23 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
         sourceEventId: input.sourceEventId,
         sourceEventVersion: input.sourceEventVersion,
         sourceHash: input.sourceHash,
+        completenessManifestPresent: manifest ? 1 : 0,
+        manifestSourceSystem: manifest?.sourceSystem || null,
+        manifestSourceSnapshotVersion: manifest?.sourceSnapshotVersion || null,
+        manifestSourceEventWatermarkVersion: manifest?.sourceEventWatermarkVersion || null,
+        manifestEventKindsCoveredJson: manifest ? stableJson(manifest.eventKindsCovered) : null,
+        manifestCoveredStartDate: manifest?.coveredStartDate || null,
+        manifestCoveredEndDateExclusive: manifest?.coveredEndDateExclusive || null,
+        manifestSourceHash: manifest?.sourceHash || null,
+        manifestAuthorityStatus: manifest?.authorityStatus || null,
+        manifestPolicyRef: manifest?.policyRef || null,
         eventManifestHash: manifest ? fingerprint(manifest) : null,
         policyBundleRefsJson: stableJson(policyRefs),
         inputSourceHash: inputSourceHash(input),
         authorityStatus: manifest?.authorityStatus || 'unresolved',
         completenessStatus: !manifest
           ? 'missing'
-          : (result.diagnostics.some(item => item.rentalLineId === input.rentalLineId && item.severity === 'blocking') ? 'incomplete' : 'complete'),
+          : (result.diagnostics.some(item => item.inputIndex === inputIndex && item.severity === 'blocking') ? 'incomplete' : 'complete'),
         schemaVersion: FORECAST_RECEIVABLES_SCHEMA_VERSION,
         createdAt,
       });
@@ -742,16 +836,11 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
       )
     `);
     for (const diagnostic of result.diagnostics) {
-      const inputIndex = diagnostic.rentalLineId == null
-        ? -1
-        : plan.inputs.findIndex(input => (
-          input.rentalLineId === diagnostic.rentalLineId
-          && (diagnostic.componentKind == null || input.componentKind === diagnostic.componentKind)
-        ));
+      const inputIndex = diagnostic.inputIndex;
       insert.run({
         id: idFactory('forecast-diagnostic'),
         forecastRunId: runId,
-        inputSnapshotId: inputIndex < 0 ? null : snapshotIds[inputIndex],
+        inputSnapshotId: inputIndex == null ? null : snapshotIds[inputIndex],
         companyId: context.companyId,
         branchId: plan.branchId,
         ...diagnostic,
@@ -787,6 +876,160 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
         createdAt,
       });
     }
+  }
+
+  function readPersistedInputSet(context, runId, originallyCalculatedInputSetHash) {
+    const run = db.prepare(`
+      SELECT * FROM ${FORECAST_RECEIVABLE_RUNS_TABLE}
+      WHERE companyId = ? AND branchId = ? AND id = ?
+    `).get(context.companyId, context.branchId, runId);
+    if (!run || run.inputContractVersion !== FORECAST_INPUT_CONTRACT_VERSION) {
+      fail('FORECAST_RECONCILIATION_FAILED', 'Persisted forecast input-set run is unavailable.', 'inputSetHash', 500);
+    }
+
+    let inputSetManifest = null;
+    if (Number(run.inputSetManifestPresent) === 1) {
+      inputSetManifest = {
+        sourceSystem: run.inputSetManifestSourceSystem,
+        sourceSnapshotVersion: Number(run.inputSetManifestSourceSnapshotVersion),
+        coveredBranchId: run.inputSetManifestCoveredBranchId,
+        coveredStartDate: run.inputSetManifestCoveredStartDate,
+        coveredEndDateExclusive: run.inputSetManifestCoveredEndDateExclusive,
+        rentalStatusesCovered: parseCanonicalJson(
+          run.inputSetManifestRentalStatusesJson,
+          'inputSetManifestRentalStatusesJson',
+          'array',
+        ),
+        authorityStatus: run.inputSetManifestAuthorityStatus,
+        policyRef: run.inputSetManifestPolicyRef,
+        sourceHash: run.inputSetManifestSourceHash,
+      };
+      if (
+        Number(run.inputSetManifestSchemaVersion) !== FORECAST_RECEIVABLES_SCHEMA_VERSION
+        || fingerprint(inputSetManifest) !== run.inputSetManifestHash
+      ) fail('FORECAST_RECONCILIATION_FAILED', 'Persisted input-set manifest hash mismatch.', 'inputSetManifestHash', 500);
+    } else if (Number(run.inputSetManifestPresent) !== 0) {
+      fail('FORECAST_RECONCILIATION_FAILED', 'Persisted input-set manifest state is invalid.', 'inputSetManifestPresent', 500);
+    }
+
+    const snapshotRows = db.prepare(`
+      SELECT * FROM ${FORECAST_RECEIVABLE_INPUT_SNAPSHOTS_TABLE}
+      WHERE companyId = ? AND branchId = ? AND forecastRunId = ?
+      ORDER BY id
+    `).all(context.companyId, context.branchId, runId);
+    const eventRows = db.prepare(`
+      SELECT * FROM ${FORECAST_RECEIVABLE_INPUT_EVENTS_TABLE}
+      WHERE companyId = ? AND branchId = ? AND forecastRunId = ?
+      ORDER BY inputSnapshotId, id
+    `).all(context.companyId, context.branchId, runId);
+    const manifestCount = snapshotRows.filter(row => Number(row.completenessManifestPresent) === 1).length;
+    if (
+      snapshotRows.length !== Number(run.inputSnapshotCount)
+      || eventRows.length !== Number(run.inputEventCount)
+      || manifestCount !== Number(run.inputCompletenessManifestCount)
+    ) fail('FORECAST_RECONCILIATION_FAILED', 'Persisted forecast input-set counts mismatch.', 'inputSnapshotCount', 500);
+
+    const snapshotsById = new Map(snapshotRows.map(row => [row.id, row]));
+    const eventsBySnapshotId = new Map(snapshotRows.map(row => [row.id, []]));
+    for (const row of eventRows) {
+      const target = eventsBySnapshotId.get(row.inputSnapshotId);
+      if (!target || !snapshotsById.has(row.inputSnapshotId)) {
+        fail('FORECAST_RECONCILIATION_FAILED', 'Persisted input event has no exact snapshot.', 'inputSnapshotId', 500);
+      }
+      target.push(canonicalEvent(row));
+    }
+
+    const inputs = snapshotRows.map(row => {
+      let completenessManifest = null;
+      if (Number(row.completenessManifestPresent) === 1) {
+        completenessManifest = {
+          sourceSystem: row.manifestSourceSystem,
+          sourceSnapshotVersion: Number(row.manifestSourceSnapshotVersion),
+          sourceEventWatermarkVersion: Number(row.manifestSourceEventWatermarkVersion),
+          eventKindsCovered: parseCanonicalJson(
+            row.manifestEventKindsCoveredJson,
+            'manifestEventKindsCoveredJson',
+            'array',
+          ),
+          coveredStartDate: row.manifestCoveredStartDate,
+          coveredEndDateExclusive: row.manifestCoveredEndDateExclusive,
+          sourceHash: row.manifestSourceHash,
+          authorityStatus: row.manifestAuthorityStatus,
+          policyRef: row.manifestPolicyRef,
+        };
+        if (fingerprint(completenessManifest) !== row.eventManifestHash) {
+          fail('FORECAST_RECONCILIATION_FAILED', 'Persisted completeness manifest hash mismatch.', 'eventManifestHash', 500);
+        }
+      } else if (Number(row.completenessManifestPresent) !== 0) {
+        fail('FORECAST_RECONCILIATION_FAILED', 'Persisted completeness manifest state is invalid.', 'completenessManifestPresent', 500);
+      }
+      const input = {
+        rentalLineId: row.rentalLineId,
+        activationBoundaryId: row.activationBoundaryId,
+        activationBoundarySourceHash: row.activationBoundarySourceHash,
+        effectiveTermsVersionId: row.effectiveTermsVersionId,
+        effectiveTermsSourceVersion: Number(row.effectiveTermsSourceVersion),
+        effectiveTermsSourceHash: row.effectiveTermsSourceHash,
+        clientId: row.clientId,
+        contractId: row.contractId,
+        rentalId: row.rentalId,
+        equipmentId: row.equipmentId,
+        rentalStatus: row.rentalStatus,
+        componentKind: row.componentKind,
+        serviceStartDate: row.serviceStartDate,
+        serviceEndDateExclusive: row.serviceEndDateExclusive,
+        candidateStartDate: row.candidateStartDate,
+        candidateEndDateExclusive: row.candidateEndDateExclusive,
+        sourceSystem: row.sourceSystem,
+        sourceIdentity: row.sourceIdentity,
+        sourceEventId: row.sourceEventId,
+        sourceEventVersion: Number(row.sourceEventVersion),
+        sourceHash: row.sourceHash,
+        completenessManifest,
+        events: eventsBySnapshotId.get(row.id),
+      };
+      if (inputSourceHash(input) !== row.inputSourceHash) {
+        fail('FORECAST_RECONCILIATION_FAILED', 'Persisted input source hash mismatch.', 'inputSourceHash', 500);
+      }
+      return input;
+    });
+
+    const reconstructedInputSetHash = fingerprint(canonicalInputSet({
+      branchId: run.branchId,
+      asOfDate: run.asOfDate,
+      horizonStartDate: run.horizonStartDate,
+      horizonEndDateExclusive: run.horizonEndDateExclusive,
+      inputSetManifest,
+      inputs,
+    }));
+    if (
+      reconstructedInputSetHash !== run.inputSetHash
+      || reconstructedInputSetHash !== originallyCalculatedInputSetHash
+    ) fail('FORECAST_INPUT_SET_HASH_MISMATCH', 'Persisted forecast input set does not match the calculated input set.', 'inputSetHash', 500);
+    return Object.freeze({ run, inputSetHash: reconstructedInputSetHash });
+  }
+
+  function assertFinalizedInputSetHashes(context, ids, inputSetHash) {
+    const operation = db.prepare(`
+      SELECT inputSetHash, resultRunId, auditEventId
+      FROM ${FORECAST_RECEIVABLE_OPERATIONS_TABLE}
+      WHERE companyId = ? AND branchId = ? AND id = ?
+    `).get(context.companyId, context.branchId, ids.operationId);
+    const audit = db.prepare(`
+      SELECT inputSetHash, aggregateId, operationId
+      FROM ${FORECAST_RECEIVABLE_AUDIT_EVENTS_TABLE}
+      WHERE companyId = ? AND branchId = ? AND id = ?
+    `).get(context.companyId, context.branchId, ids.auditEventId);
+    if (
+      !operation
+      || !audit
+      || operation.inputSetHash !== inputSetHash
+      || audit.inputSetHash !== inputSetHash
+      || operation.resultRunId !== ids.runId
+      || operation.auditEventId !== ids.auditEventId
+      || audit.aggregateId !== ids.runId
+      || audit.operationId !== ids.operationId
+    ) fail('FORECAST_INPUT_SET_HASH_MISMATCH', 'Finalized operation or audit input hash mismatch.', 'inputSetHash', 500);
   }
 
   function readPersistedResult(context, runId) {
@@ -1024,16 +1267,26 @@ function createForecastReceivablesPlanningRepository(db, options = {}) {
         insertItems(context, plan, result, ids.runId, snapshotIds, createdAt);
         insertDiagnostics(context, plan, result, ids.runId, snapshotIds, createdAt);
         insertSupersessions(context, plan, predecessors, ids, createdAt);
+        const persistedInputSet = readPersistedInputSet(
+          { ...context, branchId: plan.branchId },
+          ids.runId,
+          calculatedInputSetHash,
+        );
         const run = readPersistedResult({ ...context, branchId: plan.branchId }, ids.runId);
         insertOperationAndAudit(
           context,
           plan,
           ids,
-          calculatedInputSetHash,
+          persistedInputSet.inputSetHash,
           calculatedCommandFingerprint,
           result,
           predecessors,
           createdAt,
+        );
+        assertFinalizedInputSetHashes(
+          { ...context, branchId: plan.branchId },
+          ids,
+          persistedInputSet.inputSetHash,
         );
         return Object.freeze({
           ...projectRun(run),

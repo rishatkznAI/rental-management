@@ -88,23 +88,38 @@ function assertNotSecretKey(key, field) {
   }
 }
 
+function addInertBytes(state, value, field) {
+  state.bytes += Buffer.byteLength(value, 'utf8');
+  if (state.bytes > FORECAST_COMMAND_MAX_BYTES) {
+    fail(
+      'FORECAST_COMMAND_MAX_BYTES',
+      'Forecast command exceeds the inert JSON byte budget.',
+      field,
+      400,
+    );
+  }
+}
+
 function materializeInertValue(value, field, depth, ancestors, state) {
   if (depth > FORECAST_COMMAND_MAX_DEPTH) inertFailure(field);
   state.nodes += 1;
   if (state.nodes > FORECAST_COMMAND_MAX_NODES) inertFailure(field);
 
   if (value === null) {
-    state.bytes += 4;
+    addInertBytes(state, 'null', field);
     return null;
   }
   if (typeof value === 'string') {
-    state.bytes += Buffer.byteLength(value, 'utf8') + 2;
-    if (state.bytes > FORECAST_COMMAND_MAX_BYTES) inertFailure(field);
+    addInertBytes(state, JSON.stringify(value), field);
     return value;
   }
-  if (typeof value === 'boolean') return value;
+  if (typeof value === 'boolean') {
+    addInertBytes(state, value ? 'true' : 'false', field);
+    return value;
+  }
   if (typeof value === 'number') {
     if (!Number.isFinite(value) || !Number.isSafeInteger(value)) inertFailure(field);
+    addInertBytes(state, String(value), field);
     return value;
   }
   if (typeof value !== 'object' || types.isProxy(value) || ancestors.has(value)) inertFailure(field);
@@ -127,6 +142,7 @@ function materializeInertValue(value, field, depth, ancestors, state) {
       const length = descriptors.length?.value;
       const propertyNames = Object.keys(descriptors).filter(key => key !== 'length');
       if (!Number.isSafeInteger(length) || length < 0 || propertyNames.length !== length) inertFailure(field);
+      addInertBytes(state, '[]'.padEnd(length > 0 ? length + 1 : 2, ','), field);
       const result = [];
       for (let index = 0; index < length; index += 1) {
         const descriptor = descriptors[String(index)];
@@ -145,12 +161,15 @@ function materializeInertValue(value, field, depth, ancestors, state) {
     }
 
     const result = {};
-    for (const key of Object.keys(descriptors).sort()) {
+    const keys = Object.keys(descriptors).sort();
+    addInertBytes(state, '{}'.padEnd(keys.length > 0 ? keys.length + 1 : 2, ','), field);
+    for (const key of keys) {
       const descriptor = descriptors[key];
       if (!descriptor.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
         inertFailure(`${field}.${key}`);
       }
       assertNotSecretKey(key, `${field}.${key}`);
+      addInertBytes(state, `${JSON.stringify(key)}:`, `${field}.${key}`);
       Object.defineProperty(result, key, {
         configurable: false,
         enumerable: true,
@@ -428,6 +447,17 @@ function normalizePlanningInput(value, index) {
     `${field}.candidateStartDate`,
     `${field}.candidateEndDateExclusive`,
   );
+  if (
+    candidateStartDate < serviceStartDate
+    || candidateEndDateExclusive > serviceEndDateExclusive
+  ) {
+    fail(
+      'FORECAST_CANDIDATE_OUTSIDE_SERVICE_INTERVAL',
+      `${field} candidate interval must be contained by its service interval.`,
+      `${field}.candidateStartDate`,
+      400,
+    );
+  }
   const componentKind = requiredText(value.componentKind, `${field}.componentKind`, 80);
   if (!COMPONENT_KINDS.has(componentKind)) {
     fail('FORECAST_COMPONENT_KIND_INVALID', `${field}.componentKind is invalid.`, `${field}.componentKind`, 400);
@@ -509,7 +539,7 @@ function materializeForecastCalculationCommand(input) {
 function normalizeDiagnostic(value, index) {
   const field = `diagnostics[${index}]`;
   assertExactKeys(value, new Set([
-    'rentalLineId', 'componentKind', 'affectedStartDate', 'affectedEndDateExclusive',
+    'inputIndex', 'rentalLineId', 'componentKind', 'affectedStartDate', 'affectedEndDateExclusive',
     'severity', 'reasonCode', 'sourceIdentity', 'sourceHash', 'policyRef',
   ]), field);
   const severity = requiredText(value.severity, `${field}.severity`, 32);
@@ -527,6 +557,14 @@ function normalizeDiagnostic(value, index) {
     );
   }
   return Object.freeze({
+    inputIndex: value.inputIndex == null
+      ? null
+      : (() => {
+          if (!Number.isSafeInteger(value.inputIndex) || value.inputIndex < 0) {
+            fail('FORECAST_INPUT_INDEX_INVALID', `${field}.inputIndex is invalid.`, `${field}.inputIndex`, 400);
+          }
+          return value.inputIndex;
+        })(),
     rentalLineId: optionalId(value.rentalLineId, `${field}.rentalLineId`),
     componentKind: optionalText(value.componentKind, `${field}.componentKind`, 80),
     affectedStartDate,
@@ -613,6 +651,30 @@ function createPreparedForecastPlan(commandPlan, evaluation) {
   const diagnostics = Object.freeze(inert.diagnostics.map(normalizeDiagnostic));
   if (calculatedSlices.some(slice => slice.inputIndex >= commandPlan.inputs.length)) {
     fail('FORECAST_INPUT_INDEX_INVALID', 'Calculated slice references an unavailable input.', 'calculatedSlices', 400);
+  }
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.inputIndex == null) {
+      if (
+        diagnostic.rentalLineId != null
+        || diagnostic.componentKind != null
+        || diagnostic.affectedStartDate != null
+        || diagnostic.affectedEndDateExclusive != null
+        || diagnostic.sourceIdentity != null
+        || diagnostic.sourceHash != null
+      ) fail('FORECAST_INPUT_INDEX_INVALID', 'Global diagnostics cannot carry input lineage.', 'diagnostics', 400);
+      continue;
+    }
+    const input = commandPlan.inputs[diagnostic.inputIndex];
+    if (
+      !input
+      || diagnostic.rentalLineId !== input.rentalLineId
+      || diagnostic.componentKind !== input.componentKind
+      || diagnostic.affectedStartDate == null
+      || diagnostic.affectedStartDate < input.candidateStartDate
+      || diagnostic.affectedEndDateExclusive > input.candidateEndDateExclusive
+      || diagnostic.sourceIdentity !== input.sourceIdentity
+      || diagnostic.sourceHash !== input.sourceHash
+    ) fail('FORECAST_INPUT_INDEX_INVALID', 'Diagnostic input lineage is invalid.', 'diagnostics', 400);
   }
   const prepared = Object.freeze({
     ...commandPlan,

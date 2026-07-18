@@ -259,14 +259,14 @@ function createForecastReceivablesPlanningReadRepository(db) {
       FROM ${FORECAST_RECEIVABLE_INPUT_SNAPSHOTS_TABLE}
       WHERE companyId = ? AND branchId = ? AND forecastRunId = ?
       ORDER BY rentalLineId, componentKind, candidateStartDate, id
-      LIMIT 200
+      LIMIT 201
     `).all(scope.companyId, row.branchId, row.id);
     return Object.freeze({
       ...runProjection(row),
       predecessorRunIds: Object.freeze(predecessorRows.map(item => item.predecessorRunId)),
       successorRunId: successor?.successorRunId || null,
-      inputSnapshots: Object.freeze(inputs.map(item => Object.freeze(item))),
-      inputSnapshotsTruncated: inputs.length >= 200 && Number(row.itemCount) > 200,
+      inputSnapshots: Object.freeze(inputs.slice(0, 200).map(item => Object.freeze(item))),
+      inputSnapshotsTruncated: inputs.length > 200,
     });
   }
 

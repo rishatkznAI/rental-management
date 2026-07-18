@@ -52,10 +52,16 @@ const REQUIRED_COLUMNS = Object.freeze({
     'id', 'companyId', 'branchId', 'companyTimezone', 'planningSeriesKey', 'asOfDate',
     'horizonStartDate', 'horizonEndDateExclusive', 'horizonDays', 'currency',
     'calculationVersion', 'inputContractVersion', 'confidencePolicyVersion',
-    'coveragePolicyVersion', 'inputSetHash', 'resultHash', 'status', 'completenessState',
+    'coveragePolicyVersion', 'inputSetManifestPresent', 'inputSetManifestSourceSystem',
+    'inputSetManifestSourceSnapshotVersion', 'inputSetManifestCoveredBranchId',
+    'inputSetManifestCoveredStartDate', 'inputSetManifestCoveredEndDateExclusive',
+    'inputSetManifestRentalStatusesJson', 'inputSetManifestAuthorityStatus',
+    'inputSetManifestPolicyRef', 'inputSetManifestSourceHash', 'inputSetManifestHash',
+    'inputSetManifestSchemaVersion', 'inputSetHash', 'resultHash', 'status', 'completenessState',
     'openPeriodForecastNetMinor', 'openPeriodForecastVatMinor',
     'openPeriodForecastGrossMinor', 'plannedFutureNetMinor', 'plannedFutureVatMinor',
-    'plannedFutureGrossMinor', 'primaryForecastMinor', 'itemCount', 'diagnosticCount',
+    'plannedFutureGrossMinor', 'primaryForecastMinor', 'inputSnapshotCount',
+    'inputEventCount', 'inputCompletenessManifestCount', 'itemCount', 'diagnosticCount',
     'blockingDiagnosticCount', 'predecessorCount', 'operationId', 'calculatedAt',
     'correlationId', 'schemaVersion',
   ],
@@ -65,11 +71,16 @@ const REQUIRED_COLUMNS = Object.freeze({
   ],
   [FORECAST_RECEIVABLE_INPUT_SNAPSHOTS_TABLE]: [
     'id', 'forecastRunId', 'companyId', 'branchId', 'rentalLineId',
-    'activationBoundaryId', 'effectiveTermsVersionId', 'clientId', 'contractId', 'rentalId',
+    'activationBoundaryId', 'activationBoundarySourceHash', 'effectiveTermsVersionId',
+    'effectiveTermsSourceVersion', 'effectiveTermsSourceHash', 'clientId', 'contractId', 'rentalId',
     'equipmentId', 'rentalStatus', 'componentKind', 'serviceStartDate',
     'serviceEndDateExclusive', 'candidateStartDate', 'candidateEndDateExclusive',
     'sourceSystem', 'sourceIdentity', 'sourceEventId', 'sourceEventVersion', 'sourceHash',
-    'eventManifestHash', 'policyBundleRefsJson', 'inputSourceHash', 'authorityStatus',
+    'completenessManifestPresent', 'manifestSourceSystem', 'manifestSourceSnapshotVersion',
+    'manifestSourceEventWatermarkVersion', 'manifestEventKindsCoveredJson',
+    'manifestCoveredStartDate', 'manifestCoveredEndDateExclusive', 'manifestSourceHash',
+    'manifestAuthorityStatus', 'manifestPolicyRef', 'eventManifestHash',
+    'policyBundleRefsJson', 'inputSourceHash', 'authorityStatus',
     'completenessStatus', 'schemaVersion', 'createdAt',
   ],
   [FORECAST_RECEIVABLE_INPUT_EVENTS_TABLE]: [
@@ -317,6 +328,18 @@ function ensureForecastReceivablesPlanningSchema(db) {
         inputContractVersion TEXT NOT NULL,
         confidencePolicyVersion TEXT NOT NULL,
         coveragePolicyVersion TEXT NOT NULL,
+        inputSetManifestPresent INTEGER NOT NULL,
+        inputSetManifestSourceSystem TEXT,
+        inputSetManifestSourceSnapshotVersion INTEGER,
+        inputSetManifestCoveredBranchId TEXT,
+        inputSetManifestCoveredStartDate TEXT,
+        inputSetManifestCoveredEndDateExclusive TEXT,
+        inputSetManifestRentalStatusesJson TEXT,
+        inputSetManifestAuthorityStatus TEXT,
+        inputSetManifestPolicyRef TEXT,
+        inputSetManifestSourceHash TEXT,
+        inputSetManifestHash TEXT,
+        inputSetManifestSchemaVersion INTEGER,
         inputSetHash TEXT NOT NULL,
         resultHash TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -328,6 +351,9 @@ function ensureForecastReceivablesPlanningSchema(db) {
         plannedFutureVatMinor INTEGER NOT NULL,
         plannedFutureGrossMinor INTEGER NOT NULL,
         primaryForecastMinor INTEGER NOT NULL,
+        inputSnapshotCount INTEGER NOT NULL,
+        inputEventCount INTEGER NOT NULL,
+        inputCompletenessManifestCount INTEGER NOT NULL,
         itemCount INTEGER NOT NULL,
         diagnosticCount INTEGER NOT NULL,
         blockingDiagnosticCount INTEGER NOT NULL,
@@ -348,6 +374,45 @@ function ensureForecastReceivablesPlanningSchema(db) {
         CHECK (horizonDays = 30),
         CHECK (currency = 'RUB'),
         CHECK (length(planningSeriesKey) = 64 AND length(inputSetHash) = 64 AND length(resultHash) = 64),
+        CHECK (inputSetManifestPresent IN (0, 1)),
+        CHECK ((inputSetManifestPresent = 0
+          AND inputSetManifestSourceSystem IS NULL
+          AND inputSetManifestSourceSnapshotVersion IS NULL
+          AND inputSetManifestCoveredBranchId IS NULL
+          AND inputSetManifestCoveredStartDate IS NULL
+          AND inputSetManifestCoveredEndDateExclusive IS NULL
+          AND inputSetManifestRentalStatusesJson IS NULL
+          AND inputSetManifestAuthorityStatus IS NULL
+          AND inputSetManifestPolicyRef IS NULL
+          AND inputSetManifestSourceHash IS NULL
+          AND inputSetManifestHash IS NULL
+          AND inputSetManifestSchemaVersion IS NULL)
+          OR (inputSetManifestPresent = 1
+          AND inputSetManifestSourceSystem IS NOT NULL
+          AND inputSetManifestSourceSnapshotVersion IS NOT NULL
+          AND inputSetManifestCoveredBranchId IS NOT NULL
+          AND inputSetManifestCoveredStartDate IS NOT NULL
+          AND inputSetManifestCoveredEndDateExclusive IS NOT NULL
+          AND inputSetManifestRentalStatusesJson IS NOT NULL
+          AND inputSetManifestAuthorityStatus IS NOT NULL
+          AND inputSetManifestSourceHash IS NOT NULL
+          AND inputSetManifestHash IS NOT NULL
+          AND inputSetManifestSchemaVersion IS NOT NULL
+          AND length(trim(inputSetManifestSourceSystem)) BETWEEN 1 AND 160
+          AND typeof(inputSetManifestSourceSnapshotVersion) = 'integer' AND inputSetManifestSourceSnapshotVersion >= 1
+          AND inputSetManifestCoveredBranchId = branchId
+          AND length(inputSetManifestCoveredBranchId) <= 160
+          AND date(inputSetManifestCoveredStartDate) = inputSetManifestCoveredStartDate
+          AND date(inputSetManifestCoveredEndDateExclusive) = inputSetManifestCoveredEndDateExclusive
+          AND inputSetManifestCoveredStartDate < inputSetManifestCoveredEndDateExclusive
+          AND json_valid(inputSetManifestRentalStatusesJson)
+          AND json_type(inputSetManifestRentalStatusesJson) = 'array'
+          AND length(inputSetManifestRentalStatusesJson) <= 4096
+          AND inputSetManifestAuthorityStatus IN ('approved_by_reference', 'unresolved', 'rejected')
+          AND (inputSetManifestPolicyRef IS NULL OR length(trim(inputSetManifestPolicyRef)) BETWEEN 1 AND 160)
+          AND length(inputSetManifestSourceHash) = 64
+          AND length(inputSetManifestHash) = 64
+          AND inputSetManifestSchemaVersion = 1)),
         CHECK (status IN ('calculated', 'calculated_with_gaps', 'insufficient')),
         CHECK (completenessState IN ('complete', 'gaps', 'insufficient')),
         CHECK ((status = 'calculated' AND completenessState = 'complete' AND blockingDiagnosticCount = 0)
@@ -362,6 +427,11 @@ function ensureForecastReceivablesPlanningSchema(db) {
         CHECK (openPeriodForecastNetMinor + openPeriodForecastVatMinor = openPeriodForecastGrossMinor),
         CHECK (plannedFutureNetMinor + plannedFutureVatMinor = plannedFutureGrossMinor),
         CHECK (primaryForecastMinor = openPeriodForecastGrossMinor),
+        CHECK (typeof(inputSnapshotCount) = 'integer' AND inputSnapshotCount >= 0),
+        CHECK (typeof(inputEventCount) = 'integer' AND inputEventCount >= 0),
+        CHECK (typeof(inputCompletenessManifestCount) = 'integer'
+          AND inputCompletenessManifestCount >= 0
+          AND inputCompletenessManifestCount <= inputSnapshotCount),
         CHECK (typeof(itemCount) = 'integer' AND itemCount >= 0),
         CHECK (typeof(diagnosticCount) = 'integer' AND diagnosticCount >= 0),
         CHECK (typeof(blockingDiagnosticCount) = 'integer' AND blockingDiagnosticCount >= 0 AND blockingDiagnosticCount <= diagnosticCount),
@@ -407,7 +477,10 @@ function ensureForecastReceivablesPlanningSchema(db) {
         branchId TEXT NOT NULL,
         rentalLineId TEXT NOT NULL,
         activationBoundaryId TEXT NOT NULL,
+        activationBoundarySourceHash TEXT NOT NULL,
         effectiveTermsVersionId TEXT NOT NULL,
+        effectiveTermsSourceVersion INTEGER NOT NULL,
+        effectiveTermsSourceHash TEXT NOT NULL,
         clientId TEXT NOT NULL,
         contractId TEXT,
         rentalId TEXT NOT NULL,
@@ -423,6 +496,16 @@ function ensureForecastReceivablesPlanningSchema(db) {
         sourceEventId TEXT NOT NULL,
         sourceEventVersion INTEGER NOT NULL,
         sourceHash TEXT NOT NULL,
+        completenessManifestPresent INTEGER NOT NULL,
+        manifestSourceSystem TEXT,
+        manifestSourceSnapshotVersion INTEGER,
+        manifestSourceEventWatermarkVersion INTEGER,
+        manifestEventKindsCoveredJson TEXT,
+        manifestCoveredStartDate TEXT,
+        manifestCoveredEndDateExclusive TEXT,
+        manifestSourceHash TEXT,
+        manifestAuthorityStatus TEXT,
+        manifestPolicyRef TEXT,
         eventManifestHash TEXT,
         policyBundleRefsJson TEXT NOT NULL,
         inputSourceHash TEXT NOT NULL,
@@ -447,8 +530,47 @@ function ensureForecastReceivablesPlanningSchema(db) {
         CHECK (componentKind IN ('open_period_forecast', 'planned_future')),
         CHECK (date(serviceStartDate) = serviceStartDate AND date(serviceEndDateExclusive) = serviceEndDateExclusive AND serviceStartDate < serviceEndDateExclusive),
         CHECK (date(candidateStartDate) = candidateStartDate AND date(candidateEndDateExclusive) = candidateEndDateExclusive AND candidateStartDate < candidateEndDateExclusive),
+        CHECK (serviceStartDate <= candidateStartDate AND candidateEndDateExclusive <= serviceEndDateExclusive),
+        CHECK (length(activationBoundarySourceHash) = 64),
+        CHECK (typeof(effectiveTermsSourceVersion) = 'integer' AND effectiveTermsSourceVersion >= 1),
+        CHECK (length(effectiveTermsSourceHash) = 64),
         CHECK (typeof(sourceEventVersion) = 'integer' AND sourceEventVersion >= 1),
         CHECK (length(sourceHash) = 64 AND (eventManifestHash IS NULL OR length(eventManifestHash) = 64) AND length(inputSourceHash) = 64),
+        CHECK (completenessManifestPresent IN (0, 1)),
+        CHECK ((completenessManifestPresent = 0
+          AND manifestSourceSystem IS NULL
+          AND manifestSourceSnapshotVersion IS NULL
+          AND manifestSourceEventWatermarkVersion IS NULL
+          AND manifestEventKindsCoveredJson IS NULL
+          AND manifestCoveredStartDate IS NULL
+          AND manifestCoveredEndDateExclusive IS NULL
+          AND manifestSourceHash IS NULL
+          AND manifestAuthorityStatus IS NULL
+          AND manifestPolicyRef IS NULL
+          AND eventManifestHash IS NULL)
+          OR (completenessManifestPresent = 1
+          AND manifestSourceSystem IS NOT NULL
+          AND manifestSourceSnapshotVersion IS NOT NULL
+          AND manifestSourceEventWatermarkVersion IS NOT NULL
+          AND manifestEventKindsCoveredJson IS NOT NULL
+          AND manifestCoveredStartDate IS NOT NULL
+          AND manifestCoveredEndDateExclusive IS NOT NULL
+          AND manifestSourceHash IS NOT NULL
+          AND manifestAuthorityStatus IS NOT NULL
+          AND eventManifestHash IS NOT NULL
+          AND length(trim(manifestSourceSystem)) BETWEEN 1 AND 160
+          AND typeof(manifestSourceSnapshotVersion) = 'integer' AND manifestSourceSnapshotVersion >= 1
+          AND typeof(manifestSourceEventWatermarkVersion) = 'integer' AND manifestSourceEventWatermarkVersion >= 1
+          AND json_valid(manifestEventKindsCoveredJson)
+          AND json_type(manifestEventKindsCoveredJson) = 'array'
+          AND length(manifestEventKindsCoveredJson) <= 4096
+          AND date(manifestCoveredStartDate) = manifestCoveredStartDate
+          AND date(manifestCoveredEndDateExclusive) = manifestCoveredEndDateExclusive
+          AND manifestCoveredStartDate < manifestCoveredEndDateExclusive
+          AND length(manifestSourceHash) = 64
+          AND manifestAuthorityStatus IN ('approved_by_reference', 'unresolved', 'rejected')
+          AND (manifestPolicyRef IS NULL OR length(trim(manifestPolicyRef)) BETWEEN 1 AND 160)
+          AND length(eventManifestHash) = 64)),
         CHECK (json_valid(policyBundleRefsJson)),
         CHECK (authorityStatus IN ('approved_by_reference', 'unresolved', 'rejected')),
         CHECK (completenessStatus IN ('complete', 'incomplete', 'missing')),
@@ -759,6 +881,8 @@ function ensureForecastReceivablesPlanningSchema(db) {
           AND run.branchId = NEW.branchId
           AND NEW.candidateStartDate >= run.horizonStartDate
           AND NEW.candidateEndDateExclusive <= run.horizonEndDateExclusive
+          AND NEW.candidateStartDate >= NEW.serviceStartDate
+          AND NEW.candidateEndDateExclusive <= NEW.serviceEndDateExclusive
       )
       BEGIN
         SELECT RAISE(ABORT, 'forecast input outside run horizon');
@@ -844,7 +968,20 @@ function ensureForecastReceivablesPlanningSchema(db) {
           AND input.forecastRunId = NEW.forecastRunId
           AND input.companyId = NEW.companyId
           AND input.branchId = NEW.branchId
-          AND (NEW.rentalLineId IS NULL OR input.rentalLineId = NEW.rentalLineId)
+          AND input.rentalLineId = NEW.rentalLineId
+          AND input.componentKind = NEW.componentKind
+          AND NEW.affectedStartDate >= input.candidateStartDate
+          AND NEW.affectedEndDateExclusive <= input.candidateEndDateExclusive
+          AND input.sourceIdentity = NEW.sourceIdentity
+          AND input.sourceHash = NEW.sourceHash
+      ))
+      OR (NEW.inputSnapshotId IS NULL AND (
+        NEW.rentalLineId IS NOT NULL
+        OR NEW.componentKind IS NOT NULL
+        OR NEW.affectedStartDate IS NOT NULL
+        OR NEW.affectedEndDateExclusive IS NOT NULL
+        OR NEW.sourceIdentity IS NOT NULL
+        OR NEW.sourceHash IS NOT NULL
       ))
       BEGIN
         SELECT RAISE(ABORT, 'forecast diagnostic lineage invalid');
@@ -862,6 +999,9 @@ function ensureForecastReceivablesPlanningSchema(db) {
           AND run.inputSetHash = NEW.inputSetHash
           AND run.resultHash = NEW.resultHash
           AND run.correlationId = NEW.correlationId
+          AND run.inputSnapshotCount = (SELECT COUNT(*) FROM ${FORECAST_RECEIVABLE_INPUT_SNAPSHOTS_TABLE} input WHERE input.forecastRunId = run.id)
+          AND run.inputEventCount = (SELECT COUNT(*) FROM ${FORECAST_RECEIVABLE_INPUT_EVENTS_TABLE} event WHERE event.forecastRunId = run.id)
+          AND run.inputCompletenessManifestCount = (SELECT COUNT(*) FROM ${FORECAST_RECEIVABLE_INPUT_SNAPSHOTS_TABLE} input WHERE input.forecastRunId = run.id AND input.completenessManifestPresent = 1)
           AND run.itemCount = (SELECT COUNT(*) FROM ${FORECAST_RECEIVABLE_ITEMS_TABLE} item WHERE item.forecastRunId = run.id)
           AND run.diagnosticCount = (SELECT COUNT(*) FROM ${FORECAST_RECEIVABLE_DIAGNOSTICS_TABLE} diagnostic WHERE diagnostic.forecastRunId = run.id)
           AND run.blockingDiagnosticCount = (SELECT COUNT(*) FROM ${FORECAST_RECEIVABLE_DIAGNOSTICS_TABLE} diagnostic WHERE diagnostic.forecastRunId = run.id AND diagnostic.severity = 'blocking')

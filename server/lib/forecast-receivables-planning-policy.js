@@ -19,6 +19,7 @@ const UNAVAILABLE_COVERAGE_VERSION = 'forecast-coverage-policy-unavailable-v1';
 
 function diagnostic(input, reasonCode, options = {}) {
   return Object.freeze({
+    inputIndex: input ? options.inputIndex : null,
     rentalLineId: input?.rentalLineId || null,
     componentKind: input?.componentKind || null,
     affectedStartDate: input?.candidateStartDate || null,
@@ -89,23 +90,23 @@ function inputSetDiagnostics(plan, horizon) {
   return [];
 }
 
-function inputContractDiagnostics(input, horizon) {
+function inputContractDiagnostics(input, horizon, inputIndex) {
   const diagnostics = [];
   const openStatusAllowed = input.componentKind === 'open_period_forecast'
     && PRIMARY_RENTAL_STATUSES.has(input.rentalStatus);
   const futureStatusAllowed = input.componentKind === 'planned_future'
     && input.rentalStatus === 'planned_future';
   if (!openStatusAllowed && !futureStatusAllowed) {
-    diagnostics.push(diagnostic(input, 'FORECAST_UNSUPPORTED_RENTAL_STATUS'));
+    diagnostics.push(diagnostic(input, 'FORECAST_UNSUPPORTED_RENTAL_STATUS', { inputIndex }));
   }
   if (
     input.candidateStartDate < horizon.horizonStartDate
     || input.candidateEndDateExclusive > horizon.horizonEndDateExclusive
-  ) diagnostics.push(diagnostic(input, 'FORECAST_COVERAGE_PARTITION_UNRESOLVED'));
+  ) diagnostics.push(diagnostic(input, 'FORECAST_COVERAGE_PARTITION_UNRESOLVED', { inputIndex }));
 
   const manifest = input.completenessManifest;
   if (!manifest) {
-    diagnostics.push(diagnostic(input, 'FORECAST_INPUT_MANIFEST_MISSING'));
+    diagnostics.push(diagnostic(input, 'FORECAST_INPUT_MANIFEST_MISSING', { inputIndex }));
   } else {
     const missingKinds = REQUIRED_MANIFEST_EVENT_KINDS.filter(
       kind => !manifest.eventKindsCovered.includes(kind),
@@ -117,6 +118,7 @@ function inputContractDiagnostics(input, horizon) {
       || manifest.coveredEndDateExclusive < input.candidateEndDateExclusive
       || missingKinds.length > 0
     ) diagnostics.push(diagnostic(input, 'FORECAST_INPUT_MANIFEST_INCOMPLETE', {
+      inputIndex,
       policyRef: manifest.policyRef,
     }));
   }
@@ -134,7 +136,7 @@ function inputContractDiagnostics(input, horizon) {
         kind === 'effective_terms'
           ? 'FORECAST_EFFECTIVE_TERMS_UNRESOLVED'
           : 'FORECAST_EVENT_PRECEDENCE_UNRESOLVED',
-        { policyRef: applicable[0]?.authorityPolicyRef || null },
+        { inputIndex, policyRef: applicable[0]?.authorityPolicyRef || null },
       ));
     }
   }
@@ -153,7 +155,7 @@ function inputContractDiagnostics(input, horizon) {
       diagnostics.push(diagnostic(
         input,
         unresolvedEventReasons[event.eventKind] || 'FORECAST_EVENT_PRECEDENCE_UNRESOLVED',
-        { policyRef: event.authorityPolicyRef },
+        { inputIndex, policyRef: event.authorityPolicyRef },
       ));
     }
   }
@@ -198,6 +200,23 @@ function normalizePartitionResult(value, input) {
     if (slices[index - 1].coverageEndDateExclusive > slices[index].coverageStartDate) {
       fail('FORECAST_COVERAGE_POLICY_INVALID', 'Coverage policy returned overlapping slices.', 'coveragePolicyResult.slices', 400);
     }
+  }
+  if (
+    slices.length > 0
+    && (
+      slices[0].coverageStartDate !== input.candidateStartDate
+      || slices[slices.length - 1].coverageEndDateExclusive !== input.candidateEndDateExclusive
+      || slices.some((slice, index) => (
+        index > 0 && slices[index - 1].coverageEndDateExclusive !== slice.coverageStartDate
+      ))
+    )
+  ) {
+    fail(
+      'FORECAST_COVERAGE_POLICY_INVALID',
+      'Coverage slices must form an exact contiguous cover of the authoritative candidate.',
+      'coveragePolicyResult.slices',
+      400,
+    );
   }
   return Object.freeze({ policyVersion, slices: Object.freeze(slices) });
 }
@@ -273,17 +292,17 @@ function evaluateForecastPolicy(context, commandPlan, registry) {
   const calculatedSlices = [];
 
   commandPlan.inputs.forEach((input, inputIndex) => {
-    const blockers = inputContractDiagnostics(input, horizon);
+    const blockers = inputContractDiagnostics(input, horizon, inputIndex);
     diagnostics.push(...blockers);
     if (blockers.some(item => item.severity === 'blocking')) return;
 
     if (!registry?.available) {
       diagnostics.push(
-        diagnostic(input, 'FORECAST_COVERAGE_PARTITION_UNRESOLVED'),
-        diagnostic(input, 'FORECAST_MINIMUM_TERM_POLICY_UNAVAILABLE'),
-        diagnostic(input, 'FORECAST_VAT_POLICY_UNAVAILABLE'),
-        diagnostic(input, 'FORECAST_ROUNDING_POLICY_UNAVAILABLE'),
-        diagnostic(input, 'FORECAST_CONFIDENCE_POLICY_UNAVAILABLE'),
+        diagnostic(input, 'FORECAST_COVERAGE_PARTITION_UNRESOLVED', { inputIndex }),
+        diagnostic(input, 'FORECAST_MINIMUM_TERM_POLICY_UNAVAILABLE', { inputIndex }),
+        diagnostic(input, 'FORECAST_VAT_POLICY_UNAVAILABLE', { inputIndex }),
+        diagnostic(input, 'FORECAST_ROUNDING_POLICY_UNAVAILABLE', { inputIndex }),
+        diagnostic(input, 'FORECAST_CONFIDENCE_POLICY_UNAVAILABLE', { inputIndex }),
       );
       return;
     }
@@ -296,7 +315,7 @@ function evaluateForecastPolicy(context, commandPlan, registry) {
       fail('FORECAST_COVERAGE_POLICY_INVALID', 'Coverage policy version drifted.', 'coveragePolicyResult.policyVersion', 400);
     }
     if (partition.slices.length === 0) {
-      diagnostics.push(diagnostic(input, 'FORECAST_COVERAGE_PARTITION_UNRESOLVED'));
+      diagnostics.push(diagnostic(input, 'FORECAST_COVERAGE_PARTITION_UNRESOLVED', { inputIndex }));
       return;
     }
     for (const slice of partition.slices) {

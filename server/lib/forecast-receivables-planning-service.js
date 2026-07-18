@@ -1,4 +1,5 @@
 const {
+  assertForecastCommandContext,
   createForecastReceivablesCommandContext,
   materializeForecastCalculationCommand,
 } = require('./forecast-receivables-planning-domain');
@@ -26,6 +27,7 @@ function createForecastReceivablesPlanningService({
   return Object.freeze({
     createCommandContext: createForecastReceivablesCommandContext,
     calculateForecastRun(context, command) {
+      assertForecastCommandContext(context);
       const commandPlan = materializeForecastCalculationCommand(command);
       // All injected policy callbacks execute before repository-owned transactional
       // revalidation begins. The repository receives only a branded inert plan.

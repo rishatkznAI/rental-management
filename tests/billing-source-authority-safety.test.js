@@ -91,11 +91,11 @@ test('production resolver stays unconditional null and canonical read feature se
   assert.doesNotMatch(adapter, /billing-source-authority|platform-authorization/);
 });
 
-test('Finance, Company Health/Risks, feature flags, deployment, and frontend have no PR6 change', () => {
+test('Finance, Company Health/Risks, deployment, and frontend have no post-PR6 change', () => {
   const unchanged = execFileSync('git', [
     'diff', '--name-only', 'origin/main', '--',
     'src', 'server/routes/finance.js', 'server/lib/finance-core.js',
-    'server/lib/feature-flags.js', 'server/server.js', 'server/lib/startup.js',
+    'server/lib/startup.js',
   ], { cwd: root, encoding: 'utf8' }).trim();
   assert.equal(unchanged, '');
 });

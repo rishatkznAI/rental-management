@@ -68,7 +68,7 @@ test('internal read repository exposes complete diagnostic provenance without ca
   }
 });
 test('read scope is branded, concrete, branch-confined, bounded, and rejects arbitrary filters', () => {
-  const context = createActualSourceDryRunContext();
+  const context = createActualSourceDryRunContext({ branchIds: ['branch-a-1', 'branch-a-2'] });
   try {
     seedPositiveSource(context);
     const result = context.dryRunService.evaluateActualSourceDryRun(
@@ -78,6 +78,14 @@ test('read scope is branded, concrete, branch-confined, bounded, and rejects arb
     assert.throws(
       () => context.readRepository.getDryRun({ ...context.readScope }, result.dryRunId),
       error => error.code === 'ACTUAL_SOURCE_READ_SCOPE_REQUIRED',
+    );
+    assert.throws(
+      () => createActualSourceEligibilityDryRunReadScope(
+        context.db,
+        { ...context.readActorContext },
+        { branchId: 'branch-a-1' },
+      ),
+      error => error.code === 'PLATFORM_IDENTITY_ACTOR_CONTEXT_REJECTED',
     );
     assert.throws(
       () => context.readRepository.listDryRuns(context.readScope, { rawSql: '1=1' }),
@@ -92,10 +100,11 @@ test('read scope is branded, concrete, branch-confined, bounded, and rejects arb
       error => error.code === 'ACTUAL_SOURCE_READ_NOT_FOUND',
     );
 
-    const otherBranchScope = createActualSourceEligibilityDryRunReadScope({
-      ...context.platformScope,
-      allowedBranchIds: ['branch-a-2'],
-    });
+    const otherBranchScope = createActualSourceEligibilityDryRunReadScope(
+      context.db,
+      context.readActorContext,
+      { branchId: 'branch-a-2' },
+    );
     const repository = createActualSourceEligibilityDryRunReadRepository(context.db);
     assert.equal(repository.getDryRun(otherBranchScope, result.dryRunId), null);
     assert.deepEqual(repository.listCandidates(otherBranchScope, result.dryRunId), []);

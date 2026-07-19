@@ -10,6 +10,8 @@ const {
 } = require('./canonical-receivables-settlement-schema');
 const {
   CAPABILITY_CATALOG_V1,
+  CAPABILITY_CATALOG_ENTRIES_TABLE,
+  COMPANY_MEMBERSHIPS_TABLE,
   FINANCIAL_TABLES,
   PLATFORM_IDENTITY_MIGRATION_ID,
   PLATFORM_IDENTITY_SCHEMA_VERSION,
@@ -18,6 +20,7 @@ const {
 const {
   BILLING_SOURCE_AUTHORITY_MIGRATION_ID,
   BILLING_SOURCE_AUTHORITY_SCHEMA_VERSION,
+  BILLING_SOURCE_ACTIVATION_BOUNDARIES_TABLE,
   BILLING_SOURCE_COVERAGE_SETS_TABLE,
   BILLING_SOURCE_COVERAGE_SLICES_TABLE,
   BILLING_SOURCE_PERIODS_TABLE,
@@ -161,6 +164,78 @@ const REQUIRED_TRIGGERS = Object.freeze([
   'trg_actual_source_operation_finalize_run',
 ]);
 
+function foreignKey(from, table, to) {
+  return Object.freeze({
+    table,
+    from: Object.freeze(from),
+    to: Object.freeze(to),
+    onUpdate: 'RESTRICT',
+    onDelete: 'RESTRICT',
+    match: 'NONE',
+  });
+}
+
+const ROOT_FOREIGN_KEYS = Object.freeze([
+  foreignKey(['companyId'], CANONICAL_COMPANIES_TABLE, ['id']),
+  foreignKey(['companyId', 'branchId'], CANONICAL_BRANCHES_TABLE, ['companyId', 'id']),
+]);
+
+const EXPECTED_FOREIGN_KEYS = Object.freeze({
+  [ACTUAL_SOURCE_DRY_RUNS_TABLE]: [
+    ...ROOT_FOREIGN_KEYS,
+    foreignKey(['operationId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE, ['id', 'companyId', 'branchId']),
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE]: [
+    ...ROOT_FOREIGN_KEYS,
+    foreignKey(['runId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUNS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['activationBoundaryId', 'companyId', 'branchId'], BILLING_SOURCE_ACTIVATION_BOUNDARIES_TABLE, ['id', 'companyId', 'branchId']),
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE]: [
+    ...ROOT_FOREIGN_KEYS,
+    foreignKey(['runId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUNS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['activationBoundaryId', 'companyId', 'branchId'], BILLING_SOURCE_ACTIVATION_BOUNDARIES_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['rentalLineId', 'companyId', 'branchId'], BILLING_SOURCE_RENTAL_LINES_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['periodId', 'companyId', 'branchId'], BILLING_SOURCE_PERIODS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['closedPeriodVersionId', 'companyId', 'branchId'], BILLING_SOURCE_PERIOD_VERSIONS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['snapshotId', 'companyId', 'branchId'], BILLING_SOURCE_SNAPSHOTS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['updId', 'companyId', 'branchId'], BILLING_SOURCE_UPDS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['formedUpdVersionId', 'companyId', 'branchId'], BILLING_SOURCE_UPD_VERSIONS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['currentConductedUpdVersionId', 'companyId', 'branchId'], BILLING_SOURCE_UPD_VERSIONS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['updLineId', 'companyId', 'branchId'], BILLING_SOURCE_UPD_LINES_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['updLineVersionId', 'companyId', 'branchId'], BILLING_SOURCE_UPD_LINE_VERSIONS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['coverageSetId', 'companyId', 'branchId'], BILLING_SOURCE_COVERAGE_SETS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['coverageSliceId', 'companyId', 'branchId'], BILLING_SOURCE_COVERAGE_SLICES_TABLE, ['id', 'companyId', 'branchId']),
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE]: [
+    ...ROOT_FOREIGN_KEYS,
+    foreignKey(['runId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUNS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['candidateId', 'runId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE, ['id', 'runId', 'companyId', 'branchId']),
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE]: [
+    ...ROOT_FOREIGN_KEYS,
+    foreignKey(['runId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUNS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['candidateId', 'runId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE, ['id', 'runId', 'companyId', 'branchId']),
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE]: [
+    ...ROOT_FOREIGN_KEYS,
+    foreignKey(['runId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUNS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['candidateId', 'runId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE, ['id', 'runId', 'companyId', 'branchId']),
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE]: [
+    ...ROOT_FOREIGN_KEYS,
+    foreignKey(['actorMembershipId', 'companyId'], COMPANY_MEMBERSHIPS_TABLE, ['id', 'companyId']),
+    foreignKey(['capabilityCatalogVersion', 'capabilityKey'], CAPABILITY_CATALOG_ENTRIES_TABLE, ['catalogVersion', 'capabilityKey']),
+    foreignKey(['resultRunId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUNS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['auditEventId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE, ['id', 'companyId', 'branchId']),
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE]: [
+    ...ROOT_FOREIGN_KEYS,
+    foreignKey(['operationId', 'companyId', 'branchId'], ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE, ['id', 'companyId', 'branchId']),
+    foreignKey(['actorMembershipId', 'companyId'], COMPANY_MEMBERSHIPS_TABLE, ['id', 'companyId']),
+    foreignKey(['capabilityCatalogVersion', 'capabilityKey'], CAPABILITY_CATALOG_ENTRIES_TABLE, ['catalogVersion', 'capabilityKey']),
+  ],
+});
+
 function tableExists(db, table) {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
 }
@@ -240,6 +315,105 @@ function hasUnexpectedPartialState(db) {
   `).get() != null;
 }
 
+function canonicalForeignKeys(db, table) {
+  const groups = new Map();
+  for (const row of db.prepare(`PRAGMA foreign_key_list(${table})`).all()) {
+    if (!groups.has(row.id)) groups.set(row.id, []);
+    groups.get(row.id).push(row);
+  }
+  return [...groups.values()].map(rows => {
+    const ordered = [...rows].sort((left, right) => Number(left.seq) - Number(right.seq));
+    return {
+      table: ordered[0].table,
+      from: ordered.map(row => row.from),
+      to: ordered.map(row => row.to),
+      onUpdate: ordered[0].on_update,
+      onDelete: ordered[0].on_delete,
+      match: ordered[0].match,
+    };
+  }).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+}
+
+function assertExactForeignKeys(db) {
+  for (const [table, expected] of Object.entries(EXPECTED_FOREIGN_KEYS)) {
+    const actual = canonicalForeignKeys(db, table);
+    const canonicalExpected = [...expected]
+      .map(item => ({ ...item, from: [...item.from], to: [...item.to] }))
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+    if (JSON.stringify(actual) !== JSON.stringify(canonicalExpected)) {
+      throw new Error(`ACTUAL_SOURCE_PR8_FOREIGN_KEY_STRUCTURE_MISMATCH:${table}`);
+    }
+  }
+}
+
+function assertUniqueKey(db, table, expectedColumns) {
+  const matches = db.prepare(`PRAGMA index_list(${table})`).all()
+    .filter(index => Number(index.unique) === 1)
+    .some(index => {
+      const columns = db.prepare(`PRAGMA index_info(${index.name})`).all()
+        .sort((left, right) => Number(left.seqno) - Number(right.seqno))
+        .map(row => row.name);
+      return JSON.stringify(columns) === JSON.stringify(expectedColumns);
+    });
+  if (!matches) {
+    throw new Error(`ACTUAL_SOURCE_PR8_UNIQUE_KEY_MISMATCH:${table}:${expectedColumns.join(',')}`);
+  }
+}
+
+function normalizeSql(value) {
+  return String(value || '').toLowerCase().replace(/[\s"`\[\]]+/g, '');
+}
+
+function assertSqlContains(db, type, name, fragments) {
+  const row = db.prepare('SELECT tbl_name, sql FROM sqlite_master WHERE type = ? AND name = ?')
+    .get(type, name);
+  const normalized = normalizeSql(row?.sql);
+  if (!row || fragments.some(fragment => !normalized.includes(normalizeSql(fragment)))) {
+    throw new Error(`ACTUAL_SOURCE_PR8_SQL_STRUCTURE_MISMATCH:${name}`);
+  }
+}
+
+function assertExactIndexAndTriggerStructure(db) {
+  const indexes = {
+    uq_actual_source_input_identity: `ON ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE}(runId, sourceKind, sourceId)`,
+    uq_actual_source_candidate_key: `ON ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(runId, candidateKey)`,
+    uq_actual_source_check_identity: `ON ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE}(runId, ifnull(candidateId, ''), gateCode)`,
+    uq_actual_source_reconciliation_identity: `ON ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE}(runId, ifnull(candidateId, ''), dimensionKind, dimensionIdsJson)`,
+    uq_actual_source_diagnostic_identity: `ON ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE}(runId, ifnull(candidateId, ''), diagnosticHash)`,
+    uq_actual_source_operation_identity: `ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}(companyId, operationType, idempotencyKey)`,
+    uq_actual_source_operation_result: `ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}(resultRunId)`,
+    idx_actual_source_runs_scope: `ON ${ACTUAL_SOURCE_DRY_RUNS_TABLE}(companyId, branchId, createdAt, id)`,
+    idx_actual_source_candidates_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(companyId, branchId, runId, status, candidateKey)`,
+    idx_actual_source_checks_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE}(companyId, branchId, runId, candidateId, gateCode)`,
+    idx_actual_source_reconciliations_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE}(companyId, branchId, runId, candidateId, dimensionKind)`,
+    idx_actual_source_diagnostics_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE}(companyId, branchId, runId, candidateId, code)`,
+    idx_actual_source_inputs_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE}(companyId, branchId, runId, sourceKind, deterministicOrderKey)`,
+    idx_actual_source_audit_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE}(companyId, branchId, aggregateId, createdAt, id)`,
+  };
+  for (const [name, signature] of Object.entries(indexes)) {
+    assertSqlContains(db, 'index', name, [signature]);
+  }
+  for (const table of ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_TABLES) {
+    assertSqlContains(db, 'trigger', `trg_${table}_no_update`, [
+      `BEFORE UPDATE ON ${table}`,
+      `RAISE(ABORT, '${table} is immutable')`,
+    ]);
+    assertSqlContains(db, 'trigger', `trg_${table}_no_delete`, [
+      `BEFORE DELETE ON ${table}`,
+      `RAISE(ABORT, '${table} is append-only')`,
+    ]);
+  }
+  assertSqlContains(db, 'trigger', 'trg_actual_source_operation_finalize_run', [
+    `BEFORE INSERT ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}`,
+    'run.policyManifestHash = NEW.policyManifestHash',
+    'run.sourceInputManifestHash = NEW.inputSetHash',
+    'run.resultHash = NEW.resultHash',
+    'run.sourceInputCount = (SELECT COUNT(*)',
+    'run.eligibleCandidateGrossMinor = ifnull((SELECT SUM(sourceGrossMinor)',
+    'audit.diagnosticCount = run.diagnosticCount',
+  ]);
+}
+
 function assertActualSourceEligibilityDryRunStructure(db, { requireMigration = true } = {}) {
   assertForeignKeysEnabled(db);
   assertNoCompetingRoots(db);
@@ -249,9 +423,9 @@ function assertActualSourceEligibilityDryRunStructure(db, { requireMigration = t
   assertCapabilityCatalogExact(db);
   for (const [table, columns] of Object.entries(REQUIRED_COLUMNS)) {
     if (!tableExists(db, table)) throw new Error(`ACTUAL_SOURCE_PR8_SCHEMA_INCOMPLETE:${table}`);
-    const actual = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name));
-    for (const column of columns) {
-      if (!actual.has(column)) throw new Error(`ACTUAL_SOURCE_PR8_SCHEMA_INCOMPLETE:${table}.${column}`);
+    const actual = db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name);
+    if (JSON.stringify(actual) !== JSON.stringify(columns)) {
+      throw new Error(`ACTUAL_SOURCE_PR8_SCHEMA_INCOMPLETE:${table}:columns`);
     }
   }
   for (const index of REQUIRED_INDEXES) {
@@ -260,6 +434,11 @@ function assertActualSourceEligibilityDryRunStructure(db, { requireMigration = t
   for (const trigger of REQUIRED_TRIGGERS) {
     if (!objectExists(db, 'trigger', trigger)) throw new Error(`ACTUAL_SOURCE_PR8_SCHEMA_INCOMPLETE:${trigger}`);
   }
+  assertUniqueKey(db, ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE, [
+    'id', 'runId', 'companyId', 'branchId',
+  ]);
+  assertExactForeignKeys(db);
+  assertExactIndexAndTriggerStructure(db);
   if (requireMigration) {
     const row = migrationRow(db, ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_MIGRATION_ID);
     if (Number(row?.version) !== ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_SCHEMA_VERSION) {
@@ -448,6 +627,9 @@ function ensureActualSourceEligibilityDryRunSchema(db) {
         FOREIGN KEY (runId, companyId, branchId)
           REFERENCES ${ACTUAL_SOURCE_DRY_RUNS_TABLE}(id, companyId, branchId)
           ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (activationBoundaryId, companyId, branchId)
+          REFERENCES ${BILLING_SOURCE_ACTIVATION_BOUNDARIES_TABLE}(id, companyId, branchId)
+          ON UPDATE RESTRICT ON DELETE RESTRICT,
         CHECK (sourceTableIdentity = sourceKind),
         CHECK (length(trim(sourceId)) > 0),
         CHECK (sourceVersion IS NULL OR (typeof(sourceVersion) = 'integer' AND sourceVersion >= 1)),
@@ -499,10 +681,13 @@ function ensureActualSourceEligibilityDryRunSchema(db) {
         productionActivationAuthorized INTEGER NOT NULL DEFAULT 0,
         schemaVersion INTEGER NOT NULL,
         createdAt TEXT NOT NULL,
-        UNIQUE (id, companyId, branchId),
+        UNIQUE (id, runId, companyId, branchId),
         ${scopedRootForeignKeys()},
         FOREIGN KEY (runId, companyId, branchId)
           REFERENCES ${ACTUAL_SOURCE_DRY_RUNS_TABLE}(id, companyId, branchId)
+          ON UPDATE RESTRICT ON DELETE RESTRICT,
+        FOREIGN KEY (activationBoundaryId, companyId, branchId)
+          REFERENCES ${BILLING_SOURCE_ACTIVATION_BOUNDARIES_TABLE}(id, companyId, branchId)
           ON UPDATE RESTRICT ON DELETE RESTRICT,
         FOREIGN KEY (rentalLineId, companyId, branchId)
           REFERENCES ${BILLING_SOURCE_RENTAL_LINES_TABLE}(id, companyId, branchId)
@@ -581,9 +766,10 @@ function ensureActualSourceEligibilityDryRunSchema(db) {
         FOREIGN KEY (runId, companyId, branchId)
           REFERENCES ${ACTUAL_SOURCE_DRY_RUNS_TABLE}(id, companyId, branchId)
           ON UPDATE RESTRICT ON DELETE RESTRICT,
-        FOREIGN KEY (candidateId, companyId, branchId)
-          REFERENCES ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(id, companyId, branchId)
+        FOREIGN KEY (candidateId, runId, companyId, branchId)
+          REFERENCES ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(id, runId, companyId, branchId)
           ON UPDATE RESTRICT ON DELETE RESTRICT,
+        CHECK (candidateId IS NULL OR length(trim(candidateId)) > 0),
         CHECK (outcome IN ('passed', 'blocked', 'not_applicable')),
         CHECK (policyDecisionVersion IS NULL OR (typeof(policyDecisionVersion) = 'integer' AND policyDecisionVersion >= 1)),
         CHECK (policyDecisionHash IS NULL OR length(policyDecisionHash) = 64),
@@ -625,9 +811,10 @@ function ensureActualSourceEligibilityDryRunSchema(db) {
         FOREIGN KEY (runId, companyId, branchId)
           REFERENCES ${ACTUAL_SOURCE_DRY_RUNS_TABLE}(id, companyId, branchId)
           ON UPDATE RESTRICT ON DELETE RESTRICT,
-        FOREIGN KEY (candidateId, companyId, branchId)
-          REFERENCES ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(id, companyId, branchId)
+        FOREIGN KEY (candidateId, runId, companyId, branchId)
+          REFERENCES ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(id, runId, companyId, branchId)
           ON UPDATE RESTRICT ON DELETE RESTRICT,
+        CHECK (candidateId IS NULL OR length(trim(candidateId)) > 0),
         CHECK (dimensionKind IN ('snapshot_equation', 'upd_line_equation', 'coverage_slice_equation', 'upd_line_aggregate', 'closed_period_snapshot_aggregate', 'coverage_set_delta')),
         CHECK (json_valid(dimensionIdsJson) AND json_type(dimensionIdsJson) = 'object'),
         CHECK (typeof(expectedNetMinor) = 'integer' AND typeof(expectedVatMinor) = 'integer' AND typeof(expectedGrossMinor) = 'integer'),
@@ -666,9 +853,10 @@ function ensureActualSourceEligibilityDryRunSchema(db) {
         FOREIGN KEY (runId, companyId, branchId)
           REFERENCES ${ACTUAL_SOURCE_DRY_RUNS_TABLE}(id, companyId, branchId)
           ON UPDATE RESTRICT ON DELETE RESTRICT,
-        FOREIGN KEY (candidateId, companyId, branchId)
-          REFERENCES ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(id, companyId, branchId)
+        FOREIGN KEY (candidateId, runId, companyId, branchId)
+          REFERENCES ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(id, runId, companyId, branchId)
           ON UPDATE RESTRICT ON DELETE RESTRICT,
+        CHECK (candidateId IS NULL OR length(trim(candidateId)) > 0),
         CHECK (severity IN ('blocking', 'info')),
         CHECK (length(trim(code)) > 0),
         CHECK (sourceVersion IS NULL OR (typeof(sourceVersion) = 'integer' AND sourceVersion >= 1)),

@@ -65,6 +65,138 @@ function parseCanonicalJson(value, field, expectedType) {
   return parsed;
 }
 
+function reconciliationFail(message, field) {
+  repositoryFail('ACTUAL_SOURCE_RECONCILIATION_FAILED', message, field, 500);
+}
+
+function candidateResultCanonical(row, blockerCodes) {
+  return {
+    candidateKey: row.candidateKey,
+    sourceNetMinor: Number(row.sourceNetMinor),
+    sourceVatMinor: Number(row.sourceVatMinor),
+    sourceGrossMinor: Number(row.sourceGrossMinor),
+    proposedOriginalAmountMinor: row.proposedOriginalAmountMinor == null
+      ? null
+      : Number(row.proposedOriginalAmountMinor),
+    status: row.status,
+    blockerCodes,
+    policyManifestHash: row.policyManifestHash,
+    inputLineageHash: row.inputLineageHash,
+    diagnosticOnly: true,
+    canonicalWriteAuthorized: false,
+    productionActivationAuthorized: false,
+  };
+}
+
+function candidatePersistenceCanonical(row, blockerCodes) {
+  return {
+    candidateKey: row.candidateKey,
+    activationBoundaryId: row.activationBoundaryId,
+    rentalLineId: row.rentalLineId,
+    rentalId: row.rentalId,
+    clientId: row.clientId,
+    contractId: row.contractId ?? null,
+    periodId: row.periodId,
+    closedPeriodVersionId: row.closedPeriodVersionId,
+    snapshotId: row.snapshotId,
+    updId: row.updId,
+    formedUpdVersionId: row.formedUpdVersionId,
+    currentConductedUpdVersionId: row.currentConductedUpdVersionId ?? null,
+    updLineId: row.updLineId,
+    updLineVersionId: row.updLineVersionId,
+    coverageSetId: row.coverageSetId,
+    coverageSliceId: row.coverageSliceId,
+    sliceStartDate: row.sliceStartDate,
+    sliceEndDateExclusive: row.sliceEndDateExclusive,
+    sourceNetMinor: Number(row.sourceNetMinor),
+    sourceVatMinor: Number(row.sourceVatMinor),
+    sourceGrossMinor: Number(row.sourceGrossMinor),
+    currency: row.currency,
+    contractualDueDate: row.contractualDueDate ?? null,
+    dueDateProvenance: row.dueDateProvenance,
+    dueDateEvidenceRef: row.dueDateEvidenceRef ?? null,
+    proposedOriginalAmountMinor: row.proposedOriginalAmountMinor == null
+      ? null
+      : Number(row.proposedOriginalAmountMinor),
+    status: row.status,
+    blockerCodes,
+    policyManifestHash: row.policyManifestHash,
+    inputLineageHash: row.inputLineageHash,
+    resultHash: row.resultHash,
+    diagnosticOnly: Boolean(row.diagnosticOnly),
+    canonicalWriteAuthorized: Boolean(row.canonicalWriteAuthorized),
+    productionActivationAuthorized: Boolean(row.productionActivationAuthorized),
+    schemaVersion: Number(row.schemaVersion),
+  };
+}
+
+function checkCanonical(row, candidateKey, sourceEvidenceRefs) {
+  return {
+    candidateKey,
+    gateCode: row.gateCode,
+    outcome: row.outcome,
+    policyDecisionRef: row.policyDecisionRef ?? null,
+    policyDecisionVersion: row.policyDecisionVersion == null
+      ? null
+      : Number(row.policyDecisionVersion),
+    policyDecisionHash: row.policyDecisionHash ?? null,
+    sourceEvidenceRefs,
+    expectedFingerprint: row.expectedFingerprint ?? null,
+    observedFingerprint: row.observedFingerprint ?? null,
+    reasonCode: row.reasonCode ?? null,
+  };
+}
+
+function reconciliationCanonical(row, candidateKey, dimensionIds) {
+  return {
+    candidateKey,
+    dimensionKind: row.dimensionKind,
+    dimensionIds,
+    expected: {
+      netMinor: Number(row.expectedNetMinor),
+      vatMinor: Number(row.expectedVatMinor),
+      grossMinor: Number(row.expectedGrossMinor),
+    },
+    observed: {
+      netMinor: Number(row.observedNetMinor),
+      vatMinor: Number(row.observedVatMinor),
+      grossMinor: Number(row.observedGrossMinor),
+    },
+    delta: {
+      netMinor: Number(row.deltaNetMinor),
+      vatMinor: Number(row.deltaVatMinor),
+      grossMinor: Number(row.deltaGrossMinor),
+    },
+    currency: row.currency,
+    reconciliationRuleVersion: row.reconciliationRuleVersion,
+    sourceInputHash: row.sourceInputHash,
+    blockerState: Boolean(row.blockerState),
+  };
+}
+
+function diagnosticCanonical(row, candidateKey, expectedEvidence, observedEvidence, policyReferences) {
+  return {
+    candidateKey,
+    severity: row.severity,
+    code: row.code,
+    sourceKind: row.sourceKind ?? null,
+    sourceId: row.sourceId ?? null,
+    sourceVersion: row.sourceVersion == null ? null : Number(row.sourceVersion),
+    affectedStartDate: row.affectedStartDate ?? null,
+    affectedEndDateExclusive: row.affectedEndDateExclusive ?? null,
+    expectedEvidence,
+    observedEvidence,
+    policyReferences,
+    detectorVersion: row.detectorVersion,
+  };
+}
+
+function exactCanonicalMatch(actual, expected, field) {
+  if (stableJson(actual) !== stableJson(expected)) {
+    reconciliationFail(`Persisted ${field} content drifted.`, field);
+  }
+}
+
 function sourceVersion(row) {
   for (const field of ['version', 'sourceVersion', 'sourceEventVersion', 'resultVersion', 'aggregateVersion']) {
     if (Number.isSafeInteger(Number(row[field])) && Number(row[field]) >= 1) return Number(row[field]);
@@ -637,7 +769,7 @@ function createActualSourceEligibilityDryRunRepository(db) {
       SELECT * FROM ${ACTUAL_SOURCE_DRY_RUNS_TABLE}
       WHERE companyId = ? AND branchId = ? AND id = ?
     `).get(context.companyId, plan.branchId, runId);
-    if (!run) repositoryFail('ACTUAL_SOURCE_RECONCILIATION_FAILED', 'Persisted run is unavailable.', 'runId', 500);
+    if (!run) reconciliationFail('Persisted run is unavailable.', 'runId');
     const persistedPolicy = parseCanonicalJson(run.policyManifestJson, 'policyManifestJson', 'object');
     const persistedManifest = parseCanonicalJson(run.sourceInputManifestJson, 'sourceInputManifestJson', 'array');
     if (
@@ -645,7 +777,7 @@ function createActualSourceEligibilityDryRunRepository(db) {
       || stableJson(persistedManifest) !== stableJson(plan.sourceInputManifest)
       || run.sourceInputManifestHash !== plan.sourceInputManifestHash
       || run.resultHash !== plan.result.resultHash
-    ) repositoryFail('ACTUAL_SOURCE_RECONCILIATION_FAILED', 'Persisted run hashes drifted.', 'run', 500);
+    ) reconciliationFail('Persisted run hashes drifted.', 'run');
 
     const inputRows = db.prepare(`
       SELECT sourceKind, sourceId, sourceVersion, externalAssertionHash, normalizedInputHash,
@@ -655,7 +787,7 @@ function createActualSourceEligibilityDryRunRepository(db) {
       ORDER BY deterministicOrderKey
     `).all(context.companyId, plan.branchId, runId);
     if (inputRows.length !== plan.sourceInputs.length) {
-      repositoryFail('ACTUAL_SOURCE_RECONCILIATION_FAILED', 'Persisted source input count drifted.', 'sourceInputCount', 500);
+      reconciliationFail('Persisted source input count drifted.', 'sourceInputCount');
     }
     for (let index = 0; index < inputRows.length; index += 1) {
       const row = inputRows[index];
@@ -669,28 +801,187 @@ function createActualSourceEligibilityDryRunRepository(db) {
         || row.normalizedInputHash !== expected.normalizedInputHash
         || row.deterministicOrderKey !== expected.deterministicOrderKey
         || row.relationshipJson !== stableJson(expected.relationships)
-      ) repositoryFail('ACTUAL_SOURCE_RECONCILIATION_FAILED', 'Persisted source input drifted.', 'inputs', 500);
+      ) reconciliationFail('Persisted source input drifted.', 'inputs');
     }
 
     const candidates = db.prepare(`
-      SELECT status, sourceNetMinor, sourceVatMinor, sourceGrossMinor, candidateKey,
-             resultHash, blockerCodesJson
+      SELECT *
       FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}
       WHERE companyId = ? AND branchId = ? AND runId = ? ORDER BY candidateKey
     `).all(context.companyId, plan.branchId, runId);
+    if (candidates.length !== plan.candidates.length) {
+      reconciliationFail('Persisted candidate count drifted.', 'candidates');
+    }
+    const candidateKeysById = new Map();
+    const persistedCandidates = candidates.map((row, index) => {
+      if (candidateKeysById.has(row.id)) reconciliationFail('Persisted candidate ID is duplicated.', 'candidates');
+      candidateKeysById.set(row.id, row.candidateKey);
+      const blockerCodes = parseCanonicalJson(
+        row.blockerCodesJson,
+        `candidates[${index}].blockerCodesJson`,
+        'array',
+      );
+      const resultCanonical = candidateResultCanonical(row, blockerCodes);
+      if (fingerprint(resultCanonical) !== row.resultHash) {
+        reconciliationFail('Persisted candidate hash does not match its relational content.', 'candidate.resultHash');
+      }
+      const persisted = candidatePersistenceCanonical(row, blockerCodes);
+      const expectedCandidate = plan.candidates[index];
+      const expected = candidatePersistenceCanonical({
+        ...expectedCandidate,
+        diagnosticOnly: 1,
+        canonicalWriteAuthorized: 0,
+        productionActivationAuthorized: 0,
+        schemaVersion: ACTUAL_SOURCE_DRY_RUN_SCHEMA_VERSION,
+      }, expectedCandidate.blockerCodes);
+      exactCanonicalMatch(persisted, expected, `candidates[${index}]`);
+      return { row, canonical: persisted, resultCanonical };
+    });
+
+    function resolveCandidateKey(candidateId, field) {
+      if (candidateId == null) return null;
+      const candidateKey = candidateKeysById.get(candidateId);
+      if (!candidateKey) reconciliationFail(`Persisted ${field} references an unknown candidate.`, field);
+      return candidateKey;
+    }
+
+    const checkRows = db.prepare(`
+      SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE}
+      WHERE companyId = ? AND branchId = ? AND runId = ?
+    `).all(context.companyId, plan.branchId, runId);
+    const persistedChecks = checkRows.map((row, index) => {
+      const candidateKey = resolveCandidateKey(row.candidateId, `checks[${index}].candidateId`);
+      const sourceEvidenceRefs = parseCanonicalJson(
+        row.sourceEvidenceRefsJson,
+        `checks[${index}].sourceEvidenceRefsJson`,
+        'array',
+      );
+      const canonical = checkCanonical(row, candidateKey, sourceEvidenceRefs);
+      if (fingerprint(canonical) !== row.checkHash) {
+        reconciliationFail('Persisted check hash does not match its relational content.', 'check.checkHash');
+      }
+      return { ...canonical, checkHash: row.checkHash };
+    }).sort((left, right) => (
+      `${left.candidateKey}:${left.gateCode}`.localeCompare(`${right.candidateKey}:${right.gateCode}`)
+    ));
+    const expectedChecks = plan.checks.map(item => ({
+      ...checkCanonical(item, item.candidateKey, item.sourceEvidenceRefs),
+      checkHash: item.checkHash,
+    })).sort((left, right) => (
+      `${left.candidateKey}:${left.gateCode}`.localeCompare(`${right.candidateKey}:${right.gateCode}`)
+    ));
+    exactCanonicalMatch(persistedChecks, expectedChecks, 'checks');
+
+    const reconciliationRows = db.prepare(`
+      SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE}
+      WHERE companyId = ? AND branchId = ? AND runId = ?
+    `).all(context.companyId, plan.branchId, runId);
+    const persistedReconciliations = reconciliationRows.map((row, index) => {
+      const candidateKey = resolveCandidateKey(
+        row.candidateId,
+        `reconciliations[${index}].candidateId`,
+      );
+      const dimensionIds = parseCanonicalJson(
+        row.dimensionIdsJson,
+        `reconciliations[${index}].dimensionIdsJson`,
+        'object',
+      );
+      const canonical = reconciliationCanonical(row, candidateKey, dimensionIds);
+      if (fingerprint(canonical) !== row.reconciliationHash) {
+        reconciliationFail(
+          'Persisted reconciliation hash does not match its relational content.',
+          'reconciliation.reconciliationHash',
+        );
+      }
+      return { ...canonical, reconciliationHash: row.reconciliationHash };
+    }).sort((left, right) => left.reconciliationHash.localeCompare(right.reconciliationHash));
+    const expectedReconciliations = plan.reconciliations.map(item => ({
+      ...reconciliationCanonical({
+        dimensionKind: item.dimensionKind,
+        expectedNetMinor: item.expected.netMinor,
+        expectedVatMinor: item.expected.vatMinor,
+        expectedGrossMinor: item.expected.grossMinor,
+        observedNetMinor: item.observed.netMinor,
+        observedVatMinor: item.observed.vatMinor,
+        observedGrossMinor: item.observed.grossMinor,
+        deltaNetMinor: item.delta.netMinor,
+        deltaVatMinor: item.delta.vatMinor,
+        deltaGrossMinor: item.delta.grossMinor,
+        currency: item.currency,
+        reconciliationRuleVersion: item.reconciliationRuleVersion,
+        sourceInputHash: item.sourceInputHash,
+        blockerState: item.blockerState ? 1 : 0,
+      }, item.candidateKey, item.dimensionIds),
+      reconciliationHash: item.reconciliationHash,
+    })).sort((left, right) => left.reconciliationHash.localeCompare(right.reconciliationHash));
+    exactCanonicalMatch(persistedReconciliations, expectedReconciliations, 'reconciliations');
+
+    const diagnosticRows = db.prepare(`
+      SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE}
+      WHERE companyId = ? AND branchId = ? AND runId = ?
+    `).all(context.companyId, plan.branchId, runId);
+    const persistedDiagnostics = diagnosticRows.map((row, index) => {
+      const candidateKey = resolveCandidateKey(row.candidateId, `diagnostics[${index}].candidateId`);
+      const expectedEvidence = parseCanonicalJson(
+        row.expectedEvidenceJson,
+        `diagnostics[${index}].expectedEvidenceJson`,
+        'object',
+      );
+      const observedEvidence = parseCanonicalJson(
+        row.observedEvidenceJson,
+        `diagnostics[${index}].observedEvidenceJson`,
+        'object',
+      );
+      const policyReferences = parseCanonicalJson(
+        row.policyReferencesJson,
+        `diagnostics[${index}].policyReferencesJson`,
+        'array',
+      );
+      const canonical = diagnosticCanonical(
+        row,
+        candidateKey,
+        expectedEvidence,
+        observedEvidence,
+        policyReferences,
+      );
+      if (fingerprint(canonical) !== row.diagnosticHash) {
+        reconciliationFail(
+          'Persisted diagnostic hash does not match its relational content.',
+          'diagnostic.diagnosticHash',
+        );
+      }
+      return { ...canonical, diagnosticHash: row.diagnosticHash };
+    }).sort((left, right) => (
+      `${left.candidateKey || ''}:${left.diagnosticHash}`
+        .localeCompare(`${right.candidateKey || ''}:${right.diagnosticHash}`)
+    ));
+    const expectedDiagnostics = plan.diagnostics.map(item => ({
+      ...diagnosticCanonical(
+        item,
+        item.candidateKey,
+        item.expectedEvidence,
+        item.observedEvidence,
+        item.policyReferences,
+      ),
+      diagnosticHash: item.diagnosticHash,
+    })).sort((left, right) => (
+      `${left.candidateKey || ''}:${left.diagnosticHash}`
+        .localeCompare(`${right.candidateKey || ''}:${right.diagnosticHash}`)
+    ));
+    exactCanonicalMatch(persistedDiagnostics, expectedDiagnostics, 'diagnostics');
+
     const counts = {
       sourceInputCount: inputRows.length,
       candidateCount: candidates.length,
-      checkCount: Number(db.prepare(`SELECT COUNT(*) AS count FROM ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE} WHERE runId = ?`).get(runId).count),
-      reconciliationCount: Number(db.prepare(`SELECT COUNT(*) AS count FROM ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE} WHERE runId = ?`).get(runId).count),
-      diagnosticCount: Number(db.prepare(`SELECT COUNT(*) AS count FROM ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE} WHERE runId = ?`).get(runId).count),
+      checkCount: persistedChecks.length,
+      reconciliationCount: persistedReconciliations.length,
+      diagnosticCount: persistedDiagnostics.length,
       eligibleCandidateCount: candidates.filter(row => row.status === 'eligible_candidate').length,
       blockedCandidateCount: candidates.filter(row => row.status === 'blocked').length,
     };
     if (stableJson(counts) !== stableJson(plan.result.counts)) {
-      repositoryFail('ACTUAL_SOURCE_RECONCILIATION_FAILED', 'Persisted result counts drifted.', 'counts', 500);
+      reconciliationFail('Persisted result counts drifted.', 'counts');
     }
-    for (const row of candidates) parseCanonicalJson(row.blockerCodesJson, 'blockerCodesJson', 'array');
     const totals = rows => ({
       netMinor: safeAdd(rows.map(row => Number(row.sourceNetMinor)), 'persistedNetMinor'),
       vatMinor: safeAdd(rows.map(row => Number(row.sourceVatMinor)), 'persistedVatMinor'),
@@ -701,7 +992,71 @@ function createActualSourceEligibilityDryRunRepository(db) {
     if (
       stableJson(runTotals) !== stableJson(plan.result.runTotals)
       || stableJson(eligibleTotals) !== stableJson(plan.result.eligibleTotals)
-    ) repositoryFail('ACTUAL_SOURCE_RECONCILIATION_FAILED', 'Persisted result totals drifted.', 'totals', 500);
+    ) reconciliationFail('Persisted result totals drifted.', 'totals');
+
+    const status = candidates.length === 0
+      ? 'completed_no_candidates'
+      : (counts.blockedCandidateCount > 0
+        || persistedDiagnostics.some(item => item.severity === 'blocking')
+        ? 'completed_with_blockers'
+        : 'completed');
+    const resultCanonical = {
+      resultContractVersion: 'actual-source-dry-run-result-v1',
+      policyManifestHash: run.policyManifestHash,
+      sourceInputManifestHash: run.sourceInputManifestHash,
+      status,
+      counts,
+      runTotals,
+      eligibleTotals,
+      candidateResults: persistedCandidates.map(item => ({
+        candidateKey: item.row.candidateKey,
+        resultHash: item.row.resultHash,
+      })),
+      checkHashes: persistedChecks.map(item => item.checkHash),
+      reconciliationHashes: persistedReconciliations.map(item => item.reconciliationHash),
+      diagnosticHashes: persistedDiagnostics.map(item => item.diagnosticHash),
+      diagnosticOnly: true,
+      canonicalWriteAuthorized: false,
+      productionActivationAuthorized: false,
+    };
+    const { resultHash: expectedResultHash, ...expectedResultCanonical } = plan.result;
+    exactCanonicalMatch(resultCanonical, expectedResultCanonical, 'resultManifest');
+    if (fingerprint(resultCanonical) !== run.resultHash || run.resultHash !== expectedResultHash) {
+      reconciliationFail('Persisted complete result hash drifted.', 'run.resultHash');
+    }
+
+    const runFacts = {
+      sourceInputCount: Number(run.sourceInputCount),
+      candidateCount: Number(run.candidateCount),
+      checkCount: Number(run.checkCount),
+      reconciliationCount: Number(run.reconciliationCount),
+      diagnosticCount: Number(run.diagnosticCount),
+      eligibleCandidateCount: Number(run.eligibleCandidateCount),
+      blockedCandidateCount: Number(run.blockedCandidateCount),
+      runNetMinor: Number(run.runNetMinor),
+      runVatMinor: Number(run.runVatMinor),
+      runGrossMinor: Number(run.runGrossMinor),
+      eligibleCandidateNetMinor: Number(run.eligibleCandidateNetMinor),
+      eligibleCandidateVatMinor: Number(run.eligibleCandidateVatMinor),
+      eligibleCandidateGrossMinor: Number(run.eligibleCandidateGrossMinor),
+      status: run.status,
+      diagnosticOnly: Boolean(run.diagnosticOnly),
+      canonicalWriteAuthorized: Boolean(run.canonicalWriteAuthorized),
+      productionActivationAuthorized: Boolean(run.productionActivationAuthorized),
+    };
+    exactCanonicalMatch(runFacts, {
+      ...counts,
+      runNetMinor: runTotals.netMinor,
+      runVatMinor: runTotals.vatMinor,
+      runGrossMinor: runTotals.grossMinor,
+      eligibleCandidateNetMinor: eligibleTotals.netMinor,
+      eligibleCandidateVatMinor: eligibleTotals.vatMinor,
+      eligibleCandidateGrossMinor: eligibleTotals.grossMinor,
+      status,
+      diagnosticOnly: true,
+      canonicalWriteAuthorized: false,
+      productionActivationAuthorized: false,
+    }, 'run');
     return run;
   }
 
@@ -792,6 +1147,128 @@ function createActualSourceEligibilityDryRunRepository(db) {
     });
   }
 
+  function assertPersistedSeal(context, plan, ids, commandHash, createdAt, run) {
+    const operation = db.prepare(`
+      SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}
+      WHERE companyId = ? AND branchId = ? AND id = ?
+    `).get(context.companyId, plan.branchId, ids.operationId);
+    const audit = db.prepare(`
+      SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE}
+      WHERE companyId = ? AND branchId = ? AND id = ?
+    `).get(context.companyId, plan.branchId, ids.auditEventId);
+    if (!operation || !audit) {
+      reconciliationFail('Operation/audit sealing rows are unavailable.', 'operation');
+    }
+    exactCanonicalMatch({
+      id: operation.id,
+      companyId: operation.companyId,
+      branchId: operation.branchId,
+      operationType: operation.operationType,
+      idempotencyKey: operation.idempotencyKey,
+      commandFingerprint: operation.commandFingerprint,
+      policyManifestHash: operation.policyManifestHash,
+      inputSetHash: operation.inputSetHash,
+      actorPrincipalId: operation.actorPrincipalId,
+      actorMembershipId: operation.actorMembershipId,
+      actorMembershipVersion: Number(operation.actorMembershipVersion),
+      roleTemplateKey: operation.roleTemplateKey,
+      roleTemplateVersion: Number(operation.roleTemplateVersion),
+      capabilityCatalogVersion: Number(operation.capabilityCatalogVersion),
+      capabilityKey: operation.capabilityKey,
+      resultRunId: operation.resultRunId,
+      resultHash: operation.resultHash,
+      auditEventId: operation.auditEventId,
+      correlationId: operation.correlationId,
+      schemaVersion: Number(operation.schemaVersion),
+      createdAt: operation.createdAt,
+    }, {
+      id: ids.operationId,
+      companyId: context.companyId,
+      branchId: plan.branchId,
+      operationType: OPERATION_TYPE,
+      idempotencyKey: plan.idempotencyKey,
+      commandFingerprint: commandHash,
+      policyManifestHash: plan.policyManifestHash,
+      inputSetHash: plan.sourceInputManifestHash,
+      actorPrincipalId: context.principalId,
+      actorMembershipId: context.membershipId,
+      actorMembershipVersion: context.membershipVersion,
+      roleTemplateKey: context.roleTemplateKey,
+      roleTemplateVersion: context.roleTemplateVersion,
+      capabilityCatalogVersion: context.capabilityCatalogVersion,
+      capabilityKey: CAPABILITY_KEY,
+      resultRunId: ids.runId,
+      resultHash: run.resultHash,
+      auditEventId: ids.auditEventId,
+      correlationId: plan.correlationId,
+      schemaVersion: ACTUAL_SOURCE_DRY_RUN_SCHEMA_VERSION,
+      createdAt,
+    }, 'operation');
+    exactCanonicalMatch({
+      id: audit.id,
+      companyId: audit.companyId,
+      branchId: audit.branchId,
+      aggregateType: audit.aggregateType,
+      aggregateId: audit.aggregateId,
+      aggregateVersion: Number(audit.aggregateVersion),
+      eventType: audit.eventType,
+      actorType: audit.actorType,
+      actorPrincipalId: audit.actorPrincipalId,
+      actorMembershipId: audit.actorMembershipId,
+      actorMembershipVersion: Number(audit.actorMembershipVersion),
+      roleTemplateKey: audit.roleTemplateKey,
+      roleTemplateVersion: Number(audit.roleTemplateVersion),
+      capabilityCatalogVersion: Number(audit.capabilityCatalogVersion),
+      capabilityKey: audit.capabilityKey,
+      correlationId: audit.correlationId,
+      reasonCode: audit.reasonCode,
+      reasonText: audit.reasonText,
+      beforeFingerprint: audit.beforeFingerprint ?? null,
+      afterFingerprint: audit.afterFingerprint,
+      inputSetHash: audit.inputSetHash,
+      resultHash: audit.resultHash,
+      inputCount: Number(audit.inputCount),
+      candidateCount: Number(audit.candidateCount),
+      checkCount: Number(audit.checkCount),
+      reconciliationCount: Number(audit.reconciliationCount),
+      diagnosticCount: Number(audit.diagnosticCount),
+      operationId: audit.operationId,
+      schemaVersion: Number(audit.schemaVersion),
+      createdAt: audit.createdAt,
+    }, {
+      id: ids.auditEventId,
+      companyId: context.companyId,
+      branchId: plan.branchId,
+      aggregateType: 'actual_source_dry_run',
+      aggregateId: ids.runId,
+      aggregateVersion: 1,
+      eventType: 'actual_source_dry_run_evaluated',
+      actorType: 'user',
+      actorPrincipalId: context.principalId,
+      actorMembershipId: context.membershipId,
+      actorMembershipVersion: context.membershipVersion,
+      roleTemplateKey: context.roleTemplateKey,
+      roleTemplateVersion: context.roleTemplateVersion,
+      capabilityCatalogVersion: context.capabilityCatalogVersion,
+      capabilityKey: CAPABILITY_KEY,
+      correlationId: plan.correlationId,
+      reasonCode: plan.reasonCode,
+      reasonText: plan.reasonText,
+      beforeFingerprint: null,
+      afterFingerprint: run.resultHash,
+      inputSetHash: plan.sourceInputManifestHash,
+      resultHash: run.resultHash,
+      inputCount: plan.result.counts.sourceInputCount,
+      candidateCount: plan.result.counts.candidateCount,
+      checkCount: plan.result.counts.checkCount,
+      reconciliationCount: plan.result.counts.reconciliationCount,
+      diagnosticCount: plan.result.counts.diagnosticCount,
+      operationId: ids.operationId,
+      schemaVersion: ACTUAL_SOURCE_DRY_RUN_SCHEMA_VERSION,
+      createdAt,
+    }, 'audit');
+  }
+
   function evaluateDryRun(context, executionPlan) {
     assertActualSourceDryRunContext(context);
     assertActualSourceExecutionPlan(executionPlan);
@@ -833,24 +1310,14 @@ function createActualSourceEligibilityDryRunRepository(db) {
         const run = assertPersistedResult(context, executionPlan, ids.runId);
         insertAudit(context, executionPlan, ids, createdAt);
         insertOperation(context, executionPlan, ids, commandHash, createdAt);
-        const operation = db.prepare(`
-          SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}
-          WHERE companyId = ? AND branchId = ? AND id = ?
-        `).get(context.companyId, executionPlan.branchId, ids.operationId);
-        const audit = db.prepare(`
-          SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE}
-          WHERE companyId = ? AND branchId = ? AND id = ?
-        `).get(context.companyId, executionPlan.branchId, ids.auditEventId);
-        if (
-          !operation
-          || !audit
-          || operation.resultHash !== run.resultHash
-          || audit.resultHash !== run.resultHash
-          || operation.inputSetHash !== run.sourceInputManifestHash
-          || audit.inputSetHash !== run.sourceInputManifestHash
-          || operation.auditEventId !== audit.id
-          || audit.operationId !== operation.id
-        ) repositoryFail('ACTUAL_SOURCE_RECONCILIATION_FAILED', 'Operation/audit sealing failed.', 'operation', 500);
+        assertPersistedSeal(
+          context,
+          executionPlan,
+          ids,
+          commandHash,
+          createdAt,
+          run,
+        );
         return projectRun(run, ids.operationId, false);
       }).immediate();
     } catch (error) {

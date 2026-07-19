@@ -17,6 +17,13 @@ const REQUIRED_SNAPSHOT_EVIDENCE_TYPES = Object.freeze([
   'rounding_policy',
   'vat_policy',
 ]);
+const ADAPTER_SOURCE_KINDS = new Set([
+  'billing_source_rental_lines',
+  'billing_source_effective_terms',
+  'billing_source_snapshot_evidence',
+  'billing_source_upds',
+  'billing_source_upd_line_versions',
+]);
 
 const GATE_BLOCKERS = Object.freeze({
   accounting_source_sufficiency: 'ACCOUNTING_SOURCE_SUFFICIENCY_UNRESOLVED',
@@ -200,7 +207,7 @@ function applyReconciliation(state, candidate, reconciliation) {
   }
 }
 
-function candidateSourceInputs(candidate, maps) {
+function candidateSourceInputs(candidate, maps, { latestUpdVersionId = null } = {}) {
   const references = [
     ['billing_source_activation_boundaries', candidate.activationBoundaryId],
     ['billing_source_rental_lines', candidate.rentalLineId],
@@ -214,10 +221,51 @@ function candidateSourceInputs(candidate, maps) {
     ['billing_source_coverage_sets', candidate.coverageSetId],
     ['billing_source_coverage_slices', candidate.coverageSliceId],
   ];
-  if (candidate.currentConductedUpdVersionId) {
-    references.push(['billing_source_upd_versions', candidate.currentConductedUpdVersionId]);
+  if (latestUpdVersionId || candidate.currentConductedUpdVersionId) {
+    references.push([
+      'billing_source_upd_versions',
+      latestUpdVersionId || candidate.currentConductedUpdVersionId,
+    ]);
   }
-  return references.map(([kind, id]) => maps.map(kind).get(id)).filter(Boolean);
+  const resolved = references.map(([kind, id]) => maps.map(kind).get(id)).filter(Boolean);
+  const snapshot = maps.map('billing_source_snapshots').get(candidate.snapshotId);
+  if (snapshot?.row.effectiveTermsVersionId) {
+    const terms = maps.map('billing_source_effective_terms').get(snapshot.row.effectiveTermsVersionId);
+    if (terms) resolved.push(terms);
+  }
+  resolved.push(...maps.rows('billing_source_snapshot_evidence')
+    .filter(input => input.row.snapshotId === candidate.snapshotId));
+  resolved.push(...maps.rows('billing_source_coverage_supersessions').filter(input => (
+    input.row.originalCoverageSetId === candidate.coverageSetId
+    || input.row.replacementCoverageSetId === candidate.coverageSetId
+  )));
+
+  const operationIds = new Set(resolved.map(input => input.row.operationId).filter(Boolean));
+  for (const operationId of operationIds) {
+    const operation = maps.map('billing_source_operations').get(operationId);
+    if (operation) resolved.push(operation);
+  }
+  resolved.push(...maps.rows('billing_source_audit_events')
+    .filter(input => operationIds.has(input.row.operationId)));
+
+  const unique = new Map(resolved.map(input => [`${input.sourceKind}:${input.sourceId}`, input]));
+  return [...unique.values()].sort((left, right) => (
+    `${left.sourceKind}:${left.sourceId}`.localeCompare(`${right.sourceKind}:${right.sourceId}`)
+  ));
+}
+
+function adapterOwnershipManifest(inputs) {
+  return inputs.map(input => Object.freeze({
+    sourceKind: input.sourceKind,
+    sourceId: input.sourceId,
+    ownership: ADAPTER_SOURCE_KINDS.has(input.sourceKind)
+      ? 'source_system'
+      : 'pr6_repository_lineage',
+    sourceSystem: ADAPTER_SOURCE_KINDS.has(input.sourceKind)
+      ? (input.row.sourceSystem || null)
+      : null,
+    normalizedInputHash: input.normalizedInputHash,
+  }));
 }
 
 function evaluateExactSlice(context, commandPlan, maps, source, lifecycle, latestPeriods, latestUpds, latestLines, activeSlices) {
@@ -278,6 +326,9 @@ function evaluateExactSlice(context, commandPlan, maps, source, lifecycle, lates
     coverageSetVersion: coverage?.row.version || null,
   });
   const candidate = { ...candidateBase, candidateKey };
+  const candidateInputs = candidateSourceInputs(candidate, maps, {
+    latestUpdVersionId: latestUpd?.sourceId || null,
+  });
   const state = { blockers: new Set(), checks: [], reconciliations: [], diagnostics: [] };
   const gates = evaluateGateChecks(context, commandPlan, candidate, state);
 
@@ -291,7 +342,7 @@ function evaluateExactSlice(context, commandPlan, maps, source, lifecycle, lates
     'source_lineage_complete',
     completeLineage,
     'SOURCE_EVIDENCE_INCOMPLETE',
-    candidateSourceInputs(candidate, maps).map(input => `${input.sourceKind}:${input.sourceId}`),
+    candidateInputs.map(input => `${input.sourceKind}:${input.sourceId}`),
     { complete: true },
     { complete: completeLineage },
   );
@@ -426,18 +477,55 @@ function evaluateExactSlice(context, commandPlan, maps, source, lifecycle, lates
   );
 
   const signatureGate = gates.get('client_signature_requirement');
+  const signatureSourceRef = latestUpd?.row.signatureRequirementPolicyRef || null;
+  const signatureExpectedRef = signatureGate?.expectedSourceRef || null;
+  const signaturePolicyPresent = Boolean(signatureSourceRef && signatureExpectedRef);
+  const signaturePolicyExact = completeLineage
+    && signatureGate?.status === 'approved_by_reference'
+    && gateApplies(signatureGate, context, candidate)
+    && signaturePolicyPresent
+    && signatureExpectedRef === signatureSourceRef;
+  const signaturePolicyReason = signaturePolicyPresent
+    ? 'SIGNATURE_POLICY_REFERENCE_MISMATCH'
+    : 'SIGNATURE_POLICY_REFERENCE_MISSING';
+  sourceCheck(
+    state,
+    candidate,
+    'client_signature_policy_exact_match',
+    signaturePolicyExact,
+    signaturePolicyReason,
+    [signatureSourceRef].filter(Boolean),
+    {
+      policyRef: signatureExpectedRef,
+      scope: {
+        companyId: context.companyId,
+        branchId: context.branchId,
+        contractId: candidate.contractId,
+      },
+      decisionVersion: signatureGate?.decisionVersion || null,
+      decisionHash: signatureGate?.decisionHash || null,
+      schemaVersion: signatureGate?.schemaVersion || null,
+    },
+    {
+      policyRef: signatureSourceRef,
+      scopeApplicable: signatureGate ? gateApplies(signatureGate, context, candidate) : false,
+    },
+  );
   const signatureRuleKnown = ['required', 'not_required'].includes(signatureGate?.decisionValue);
-  const signatureSatisfied = signatureRuleKnown
+  const signatureSatisfied = signaturePolicyExact
+    && signatureRuleKnown
     && (signatureGate.decisionValue === 'not_required' || Boolean(latestUpd?.row.clientSignatureEvidenceRef));
   sourceCheck(
     state,
     candidate,
     'client_signature_evidence',
     signatureSatisfied,
-    signatureRuleKnown ? 'REQUIRED_SIGNATURE_EVIDENCE_MISSING' : 'SIGNATURE_REQUIREMENT_UNRESOLVED',
+    signaturePolicyExact && signatureRuleKnown
+      ? 'REQUIRED_SIGNATURE_EVIDENCE_MISSING'
+      : (signaturePolicyExact ? 'SIGNATURE_REQUIREMENT_UNRESOLVED' : signaturePolicyReason),
     [latestUpd?.row.clientSignatureEvidenceRef].filter(Boolean),
-    { rule: signatureGate?.decisionValue },
-    { evidenceRef: latestUpd?.row.clientSignatureEvidenceRef || null },
+    { rule: signatureGate?.decisionValue, policyRef: signatureExpectedRef },
+    { evidenceRef: latestUpd?.row.clientSignatureEvidenceRef || null, policyRef: signatureSourceRef },
   );
 
   const coverageActive = completeLineage
@@ -547,19 +635,46 @@ function evaluateExactSlice(context, commandPlan, maps, source, lifecycle, lates
   );
 
   const adapterGate = gates.get('source_adapter_authority');
-  const adapterMatches = completeLineage
-    && adapterGate?.decisionValue
-    && adapterGate.decisionValue === rentalLine.row.sourceSystem
-    && adapterGate.decisionValue === upd.row.sourceSystem;
+  const ownershipManifest = adapterOwnershipManifest(candidateInputs);
+  const adapterOwnedInputs = ownershipManifest.filter(input => input.ownership === 'source_system');
+  const requiredAdapterKinds = [
+    'billing_source_rental_lines',
+    'billing_source_effective_terms',
+    'billing_source_snapshot_evidence',
+    'billing_source_upds',
+    'billing_source_upd_line_versions',
+  ];
+  const adapterOwnershipComplete = completeLineage
+    && requiredAdapterKinds.every(kind => adapterOwnedInputs.some(input => input.sourceKind === kind))
+    && adapterOwnedInputs.every(input => typeof input.sourceSystem === 'string' && input.sourceSystem.length > 0);
+  const adapterGateApproved = adapterGate?.status === 'approved_by_reference'
+    && gateApplies(adapterGate, context, candidate)
+    && Boolean(adapterGate.decisionValue);
+  const adapterMatches = adapterOwnershipComplete
+    && adapterGateApproved
+    && adapterOwnedInputs.every(input => input.sourceSystem === adapterGate.decisionValue);
+  const adapterReason = !adapterGateApproved
+    ? 'SOURCE_ADAPTER_AUTHORITY_UNRESOLVED'
+    : (adapterOwnershipComplete
+      ? 'SOURCE_ADAPTER_AUTHORITY_MISMATCH'
+      : 'SOURCE_ADAPTER_AUTHORITY_INCOMPLETE');
   sourceCheck(
     state,
     candidate,
     'source_adapter_exact_match',
     Boolean(adapterMatches),
-    'SOURCE_ADAPTER_AUTHORITY_UNRESOLVED',
-    [],
-    { sourceSystem: adapterGate?.decisionValue },
-    completeLineage ? { rentalLineSourceSystem: rentalLine.row.sourceSystem, updSourceSystem: upd.row.sourceSystem } : null,
+    adapterReason,
+    candidateInputs.map(input => `${input.sourceKind}:${input.sourceId}`),
+    {
+      approvedSourceSystem: adapterGate?.decisionValue || null,
+      ownershipContractVersion: 'pr8-source-adapter-ownership-v1',
+      complete: true,
+    },
+    {
+      ownershipContractVersion: 'pr8-source-adapter-ownership-v1',
+      complete: adapterOwnershipComplete,
+      inputs: ownershipManifest,
+    },
   );
 
   const duplicates = activeSlices.filter(input => (
@@ -606,7 +721,7 @@ function evaluateExactSlice(context, commandPlan, maps, source, lifecycle, lates
   );
 
   if (completeLineage) {
-    const inputLineageHash = fingerprint(candidateSourceInputs(candidate, maps)
+    const inputLineageHash = fingerprint(candidateInputs
       .map(input => ({ sourceKind: input.sourceKind, sourceId: input.sourceId, normalizedInputHash: input.normalizedInputHash }))
       .sort((left, right) => stableJson(left).localeCompare(stableJson(right))));
 
@@ -687,7 +802,7 @@ function evaluateExactSlice(context, commandPlan, maps, source, lifecycle, lates
     }));
   }
   const status = blockerCodes.length === 0 ? 'eligible_candidate' : 'blocked';
-  const inputLineageHash = fingerprint(candidateSourceInputs(candidate, maps)
+  const inputLineageHash = fingerprint(candidateInputs
     .map(input => ({ sourceKind: input.sourceKind, sourceId: input.sourceId, normalizedInputHash: input.normalizedInputHash }))
     .sort((left, right) => stableJson(left).localeCompare(stableJson(right))));
   const resultCanonical = {

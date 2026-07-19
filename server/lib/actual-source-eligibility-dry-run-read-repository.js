@@ -2,6 +2,17 @@ const {
   materializeInert,
 } = require('./actual-source-eligibility-dry-run-domain');
 const {
+  assertBranchScope,
+  assertCapability,
+  assertCompanyScope,
+  assertScopeFresh,
+  resolveTrustedScope,
+} = require('./platform-authorization');
+const {
+  assertTrustedUserActorContext,
+  createPlatformIdentityRepository,
+} = require('./platform-identity-repository');
+const {
   ACTUAL_SOURCE_DRY_RUNS_TABLE,
   ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE,
   ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE,
@@ -13,6 +24,7 @@ const {
 } = require('./actual-source-eligibility-dry-run-schema');
 
 const ACTUAL_SOURCE_READ_SCOPES = new WeakSet();
+const ACTUAL_SOURCE_READ_SCOPE_AUTHORITY = new WeakMap();
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 const FORBIDDEN_BRANCH_IDS = new Set(['*', 'all', 'global', 'company-wide', 'company_wide', 'any', 'null']);
@@ -56,45 +68,83 @@ function normalizeLimit(value) {
   return limit;
 }
 
-function createActualSourceEligibilityDryRunReadScope(platformScope, options = {}) {
-  const inert = materializeInert(platformScope, 'platformScope');
+function readUsersFromDatabase(db) {
+  const row = db.prepare("SELECT json FROM app_data WHERE name = 'users'").get();
+  if (!row) return [];
+  try {
+    const users = JSON.parse(row.json);
+    return Array.isArray(users) ? users : [];
+  } catch {
+    return [];
+  }
+}
+
+function createActualSourceEligibilityDryRunReadScope(db, actorContext, options = {}) {
+  if (!db || typeof db.prepare !== 'function' || typeof db.transaction !== 'function') {
+    fail('ACTUAL_SOURCE_READ_DATABASE_REQUIRED', 'A better-sqlite3 database is required.', 'db', 500);
+  }
+  assertActualSourceEligibilityDryRunStructure(db);
+  assertTrustedUserActorContext(actorContext);
+  if (!actorContext.membershipId || !Number.isSafeInteger(actorContext.expectedMembershipVersion)) {
+    fail('ACTUAL_SOURCE_READ_SCOPE_DENIED', 'Exact live membership authority is required.', 'scope', 403);
+  }
+  const inertOptions = materializeInert(options || {}, 'options');
+  const unknownOption = Object.keys(inertOptions).find(key => key !== 'branchId');
+  if (unknownOption) {
+    fail('ACTUAL_SOURCE_READ_SCOPE_DENIED', 'Read scope options are unsupported.', `options.${unknownOption}`, 403);
+  }
+  const readUsers = () => readUsersFromDatabase(db);
+  const platformRepository = createPlatformIdentityRepository(db, { readUsers });
+  const membership = platformRepository.getMembership(actorContext.membershipId);
   if (
-    !inert
-    || inert.authenticated !== true
-    || inert.principalType !== 'user'
-    || !Array.isArray(inert.capabilities)
-    || !inert.capabilities.includes('receivables.read')
-    || !Array.isArray(inert.allowedBranchIds)
-    || inert.allowedBranchIds.length === 0
-  ) fail('ACTUAL_SOURCE_READ_SCOPE_DENIED', 'Actual-source dry-run read scope is unavailable.', 'scope', 403);
-  const companyId = requiredId(inert.companyId, 'scope.companyId');
-  let branchIds = [...new Set(inert.allowedBranchIds.map((value, index) => (
+    !membership
+    || membership.principalId !== actorContext.principalId
+    || membership.status !== 'active'
+    || Number(membership.version) !== actorContext.expectedMembershipVersion
+  ) fail('ACTUAL_SOURCE_READ_SCOPE_DENIED', 'Exact live membership authority is required.', 'scope', 403);
+  const requestedBranchId = inertOptions.branchId == null || inertOptions.branchId === ''
+    ? undefined
+    : requiredId(inertOptions.branchId, 'branchId');
+  const platformScope = resolveTrustedScope({
+    req: { user: { userId: actorContext.principalId } },
+    repository: platformRepository,
+    readUsers,
+    requestedCompanyId: membership.companyId,
+    requestedBranchId,
+  });
+  if (
+    platformScope.membershipId !== actorContext.membershipId
+    || platformScope.membershipVersion !== actorContext.expectedMembershipVersion
+  ) fail('ACTUAL_SOURCE_READ_SCOPE_DENIED', 'Exact live membership authority is required.', 'scope', 403);
+  assertCapability(platformScope, 'receivables.read');
+  const companyId = requiredId(platformScope.companyId, 'scope.companyId');
+  const branchIds = [...new Set(platformScope.allowedBranchIds.map((value, index) => (
     requiredId(value, `scope.allowedBranchIds[${index}]`)
   )))].sort();
   if (branchIds.some(branchId => FORBIDDEN_BRANCH_IDS.has(branchId.toLowerCase()))) {
     fail('ACTUAL_SOURCE_READ_SCOPE_DENIED', 'Concrete branch scope is required.', 'scope.allowedBranchIds', 403);
   }
-  if (options.branchId !== undefined && options.branchId !== null && options.branchId !== '') {
-    const branchId = requiredId(options.branchId, 'branchId');
-    if (!branchIds.includes(branchId)) {
-      fail('ACTUAL_SOURCE_READ_NOT_FOUND', 'Actual-source dry-run data was not found.', 'branchId', 404);
-    }
-    branchIds = [branchId];
-  }
   const scope = Object.freeze({
     companyId,
-    principalId: requiredId(inert.principalId, 'scope.principalId'),
-    membershipId: requiredId(inert.membershipId, 'scope.membershipId'),
-    membershipVersion: inert.membershipVersion,
-    capabilityCatalogVersion: inert.capabilityCatalogVersion,
+    principalId: requiredId(platformScope.principalId, 'scope.principalId'),
+    membershipId: requiredId(platformScope.membershipId, 'scope.membershipId'),
+    membershipVersion: platformScope.membershipVersion,
+    roleTemplateKey: platformScope.roleTemplateKey,
+    roleTemplateVersion: platformScope.roleTemplateVersion,
+    capabilityCatalogVersion: platformScope.capabilityCatalogVersion,
     branchIds: Object.freeze(branchIds),
   });
   ACTUAL_SOURCE_READ_SCOPES.add(scope);
+  ACTUAL_SOURCE_READ_SCOPE_AUTHORITY.set(scope, platformScope);
   return scope;
 }
 
 function assertReadScope(scope) {
-  if (!scope || !ACTUAL_SOURCE_READ_SCOPES.has(scope)) {
+  if (
+    !scope
+    || !ACTUAL_SOURCE_READ_SCOPES.has(scope)
+    || !ACTUAL_SOURCE_READ_SCOPE_AUTHORITY.has(scope)
+  ) {
     fail('ACTUAL_SOURCE_READ_SCOPE_REQUIRED', 'A branded internal dry-run read scope is required.', 'scope', 403);
   }
   return scope;
@@ -258,9 +308,21 @@ function createActualSourceEligibilityDryRunReadRepository(db) {
     fail('ACTUAL_SOURCE_READ_DATABASE_REQUIRED', 'A better-sqlite3 database is required.', 'db', 500);
   }
   assertActualSourceEligibilityDryRunStructure(db);
+  const readUsers = () => readUsersFromDatabase(db);
+  const platformRepository = createPlatformIdentityRepository(db, { readUsers });
+
+  function reauthorize(scope) {
+    assertReadScope(scope);
+    const platformScope = ACTUAL_SOURCE_READ_SCOPE_AUTHORITY.get(scope);
+    assertScopeFresh(platformScope, { repository: platformRepository, readUsers });
+    assertCapability(platformScope, 'receivables.read');
+    assertCompanyScope(platformScope, scope.companyId);
+    for (const branchId of scope.branchIds) assertBranchScope(platformScope, branchId);
+    return platformScope;
+  }
 
   function scoped(scope, requestedBranchId) {
-    assertReadScope(scope);
+    reauthorize(scope);
     const branches = requestedBranchId ? [requestedBranchId] : scope.branchIds;
     if (requestedBranchId && !scope.branchIds.includes(requestedBranchId)) {
       fail('ACTUAL_SOURCE_READ_NOT_FOUND', 'Actual-source dry-run data was not found.', 'branchId', 404);

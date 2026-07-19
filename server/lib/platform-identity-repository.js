@@ -487,6 +487,16 @@ function createTrustedUserActorContext(input = {}) {
   return context;
 }
 
+function assertTrustedUserActorContext(context) {
+  if (!context || !TRUSTED_USER_ACTOR_CONTEXTS.has(context)) {
+    fail(
+      'PLATFORM_IDENTITY_ACTOR_CONTEXT_REJECTED',
+      'A trusted server-created user actor context is required.',
+    );
+  }
+  return context;
+}
+
 function isEligiblePlatformUser(user) {
   return Boolean(
     user
@@ -2282,6 +2292,7 @@ module.exports = {
   assertIanaTimezone,
   assertNoSecrets,
   auditJson,
+  assertTrustedUserActorContext,
   createPlatformIdentityRepository,
   createTrustedUserActorContext,
   isEligiblePlatformUser,

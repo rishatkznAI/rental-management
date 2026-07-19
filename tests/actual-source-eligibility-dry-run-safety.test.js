@@ -97,8 +97,10 @@ test('PR8 never writes canonical, PR6 source, PR7 forecast, settlement, or legac
   ];
   const source = files.map(read).join('\n');
   const repository = read('server/lib/actual-source-eligibility-dry-run-repository.js');
-  const withoutOwnedUsersReader = source.replace("SELECT json FROM app_data WHERE name = 'users'", '');
+  const readRepository = read('server/lib/actual-source-eligibility-dry-run-read-repository.js');
+  const withoutOwnedUsersReader = source.replaceAll("SELECT json FROM app_data WHERE name = 'users'", '');
   assert.equal(repository.match(/SELECT json FROM app_data WHERE name = 'users'/g)?.length, 1);
+  assert.equal(readRepository.match(/SELECT json FROM app_data WHERE name = 'users'/g)?.length, 1);
   assert.doesNotMatch(withoutOwnedUsersReader, /app_data|gantt_rentals|rentalBillingSnapshot|expectedPaymentDate|manager forecast/i);
   assert.doesNotMatch(source, /(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:canonical_|financial_audit_events|billing_source_|forecast_receivable_)/i);
   assert.doesNotMatch(source, /canonical-receivables-repository|canonical-receivables-settlement-repository|forecast-receivables-planning-repository/);

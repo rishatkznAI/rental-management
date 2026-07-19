@@ -14,6 +14,9 @@ const {
   ensureForecastReceivablesPlanningSchema,
 } = require('../server/lib/forecast-receivables-planning-schema.js');
 const {
+  createTrustedUserActorContext,
+} = require('../server/lib/platform-identity-repository.js');
+const {
   ensureActualSourceEligibilityDryRunSchema,
 } = require('../server/lib/actual-source-eligibility-dry-run-schema.js');
 const {
@@ -29,7 +32,7 @@ export const PR8_CAPABILITIES = Object.freeze([...SOURCE_CAPABILITIES, 'receivab
 function evidence(type, overrides = {}) {
   return {
     evidenceType: type,
-    sourceSystem: 'isolated_test_adapter',
+    sourceSystem: overrides.sourceSystem || 'isolated_test_adapter',
     sourceId: `${type}-source-1`,
     sourceVersion: 1,
     sourceEventId: `${type}-event-1`,
@@ -65,7 +68,10 @@ export function approvedTestPolicyManifest(overrides = {}) {
       decisionValue: 'exact_conduct_event_required',
       expectedSourceRef: 'conduct-policy-decision-test-v1',
     },
-    client_signature_requirement: { decisionValue: 'not_required' },
+    client_signature_requirement: {
+      decisionValue: 'not_required',
+      expectedSourceRef: 'signature-policy-test-v1',
+    },
     contractual_due_date: { expectedSourceRef: 'contractual_payment_due_date' },
     unknown_due_date_treatment: { decisionValue: 'allow_unknown_without_aging' },
     vat_selection: { expectedSourceRef: 'vat-policy-test-v1' },
@@ -133,7 +139,13 @@ export function createActualSourceDryRunContext(options = {}) {
   const dryRunService = createActualSourceEligibilityDryRunService({ db: base.db });
   const dryRunContext = dryRunService.createCommandContext(base.platformScope);
   const readRepository = createActualSourceEligibilityDryRunReadRepository(base.db);
-  const readScope = createActualSourceEligibilityDryRunReadScope(base.platformScope, {
+  const readActorContext = createTrustedUserActorContext({
+    principalId: base.platformScope.principalId,
+    membershipId: base.platformScope.membershipId,
+    expectedMembershipVersion: base.platformScope.membershipVersion,
+    correlationId: 'actual-source-read-fixture',
+  });
+  const readScope = createActualSourceEligibilityDryRunReadScope(base.db, readActorContext, {
     branchId: options.readBranchId || 'branch-a-1',
   });
   return {
@@ -141,6 +153,7 @@ export function createActualSourceDryRunContext(options = {}) {
     dryRunService,
     dryRunContext,
     readRepository,
+    readActorContext,
     readScope,
   };
 }

@@ -20,6 +20,10 @@
 
 **Remediation implementation commit/head:** `d1aec5445f3f6eccafe7c21903b99d9b1cf09a38`
 
+**Previous remediated/reviewed head:** `285d32e24b8eb0c97e95b5d84c8d7d74cb365ef0`
+
+**Second focused remediation starting head:** `285d32e24b8eb0c97e95b5d84c8d7d74cb365ef0` (exact match)
+
 **Migration:** `actual_source_eligibility_dry_run_pr8`, version `1`
 
 This record describes a fail-closed diagnostic foundation proposed for review. It is not a release record, source-authority approval, accounting or legal approval, production activation, canonical-write authorization, PR9 authorization, deployment, or cutover.
@@ -36,9 +40,14 @@ All five merge-blocking findings were addressed without widening the PR8 runtime
 4. **P1 read authorization:** scopes are issued only from server-branded PR5 human authority, and every diagnostic query freshly checks user, membership/version, role/version, catalog, capability, company, branch grant, and branch state.
 5. **P1 FK lineage:** candidate/input activation boundaries are scope-safe PR6 references, children cannot cross runs, and startup verifies the exact ordered FK graph and critical structural signatures.
 
+The second focused remediation closes two follow-up findings without changing that boundary:
+
+1. **P1 registered-schema validation:** startup now compares the exact canonical critical `CHECK` expression sets, the complete canonical SQL and SQLite metadata for every named PR8 index, every unique key, and the complete canonical SQL for every PR8 trigger. A registered v1 schema with a removed or weakened constraint, a partial/non-unique/expression/misdirected index, or a disabled/weakened trigger fails closed on both direct assertion and repeated startup; no automatic repair is attempted and `applied_at` is unchanged.
+2. **P2 audit attribution description:** PR6 audit rows do have a required `sourceSystem`. That value is repository-generated audit attribution metadata; it is not a separate economic or evidence source-owner assertion. The v1 ownership manifest therefore intentionally classifies audit rows as PR6 repository lineage and does not use their attribution value as adapter authority.
+
 ## Repository and source audit
 
-For remediation, `git fetch origin --prune` confirmed `origin/main` at `66659c1296e05424179e2b4cc6ee1924ece4fbc9`. GitHub PR #216 and `origin/codex/pr8-actual-source-eligibility-dry-run` both pointed to `3f498cf3cfa513b923cfdc0e7a8c21ecaae84e55`, exactly the independently reviewed head. The target worktree was clean. The complete PR diff and commits were reread; GitHub comments, reviews, and review threads were empty. The five findings therefore remained directly applicable without rebasing or adapting to unreviewed changes.
+For the first remediation, `git fetch origin --prune` confirmed `origin/main` at `66659c1296e05424179e2b4cc6ee1924ece4fbc9`. GitHub PR #216 and `origin/codex/pr8-actual-source-eligibility-dry-run` both pointed to `3f498cf3cfa513b923cfdc0e7a8c21ecaae84e55`, exactly the independently reviewed head. For the second focused remediation, `origin/main` remained at the same SHA and the local branch, remote branch, and PR head all exactly matched `285d32e24b8eb0c97e95b5d84c8d7d74cb365ef0`; the target worktree was clean. The complete PR diff and commits were reread, and GitHub comments, reviews, and review threads remained empty. The follow-up findings therefore remained directly applicable without rebasing or adapting to unreviewed changes.
 
 The PR6 and PR7 release boundaries remain intact. PR6 is an isolated Billing Source Authority foundation; PR7 is an isolated Forecast Receivables Planning foundation. Neither release enabled canonical writes, production source/forecast adapters, production policy, production bootstrap, consumer switching, deployment, or cutover.
 
@@ -78,7 +87,7 @@ One immediate transaction creates exactly these eight tables and registers the m
 7. `actual_source_dry_run_operations`
 8. `actual_source_dry_run_audit_events`
 
-Every table rejects `UPDATE` and `DELETE`. Operations and audit rows also reject replacement. Operation insertion is the final seal: later input, candidate, check, reconciliation, diagnostic, or audit-link insertion is rejected. Candidate and input activation-boundary lineage has an exact `(activationBoundaryId, companyId, branchId)` foreign key to the PR6 activation boundary. Candidate children use `(candidateId, runId, companyId, branchId)` so a child cannot combine one run with another run's candidate; nullable `candidateId` remains reserved for complete run-level rows. Startup reconstructs the exact foreign-key map from `PRAGMA foreign_key_list`, including tables, ordered from/to columns, and `RESTRICT` behavior, and verifies exact columns plus critical unique-index/check/trigger signatures. Registered weakened or misdirected schemas fail closed on initial and repeated startup. Repeated valid startup preserves the original `applied_at`. There is no down/delete migration, TTL, purge, cleanup worker, or finite retention.
+Every table rejects `UPDATE` and `DELETE`. Operations and audit rows also reject replacement. Operation insertion is the final seal: later input, candidate, check, reconciliation, diagnostic, or audit-link insertion is rejected. Candidate and input activation-boundary lineage has an exact `(activationBoundaryId, companyId, branchId)` foreign key to the PR6 activation boundary. Candidate children use `(candidateId, runId, companyId, branchId)` so a child cannot combine one run with another run's candidate; nullable `candidateId` remains reserved for complete run-level rows. Startup reconstructs the exact foreign-key map from `PRAGMA foreign_key_list`, including tables, ordered from/to columns, and `RESTRICT` behavior. It also compares the exact canonical critical `CHECK` set for every PR8 table, all expected unique keys, the complete canonical `sqlite_master.sql` for all 14 named indexes and every PR8 trigger, and index table/uniqueness/partial/ordered-key/expression/collation/direction metadata from `PRAGMA index_list`, `index_info`, and `index_xinfo`. Normal whitespace and SQL-keyword case are insignificant, while predicates, constants, expressions, events, targets, bodies, and conflict behavior remain significant. Registered weakened or misdirected schemas fail closed on initial and repeated startup. Repeated valid startup preserves the original `applied_at`. There is no down/delete migration, TTL, purge, cleanup worker, or finite retention.
 
 No `actual_receivable_eligible_events`, `ActualReceivableEligibleV1`, canonical posting queue/outbox, canonical adapter, source-adapter state, or activation state exists.
 
@@ -123,7 +132,7 @@ Each gate is `approved_by_reference`, `unresolved`, or `rejected`. Missing is no
 
 The client-signature decision is additionally bound to the exact conducted source `signatureRequirementPolicyRef`. The approved gate must carry an exact `expectedSourceRef`, approved decision reference/version/hash/schema, and applicable company/branch/contract scope. Missing source/expected references emit `SIGNATURE_POLICY_REFERENCE_MISSING`; identity or scope mismatch emits `SIGNATURE_POLICY_REFERENCE_MISMATCH`. Only after exact identity matching may allow-listed `required` or `not_required` semantics be evaluated, and `required` still requires signature evidence.
 
-Source-adapter authority is evaluated over a canonical sorted ownership manifest for every candidate input. Source-owned rental lines, effective terms, all relevant snapshot evidence, UPDs, and UPD line versions must disclose a known source system exactly approved by the versioned gate. Activation boundaries, periods/events, snapshots, UPD-version/conducted evidence, coverage/mapping rows, operations, and audits that have no `sourceSystem` prove ownership through exact PR6 repository lineage and hashes instead of receiving an invented adapter identity. Missing ownership emits `SOURCE_ADAPTER_AUTHORITY_INCOMPLETE`; any unknown, extra, or unapproved source system emits `SOURCE_ADAPTER_AUTHORITY_MISMATCH`.
+Source-adapter authority is evaluated over a canonical sorted ownership manifest for every candidate input. Source-owned economic/evidence rows — rental lines, effective terms, all relevant snapshot evidence, UPDs, and UPD line versions — must disclose a known source system exactly approved by the versioned gate. Activation boundaries, periods/events, snapshots, UPD-version/conducted evidence, coverage/mapping rows, and operations prove ownership through exact PR6 repository-owned relational lineage and hashes instead of receiving an invented adapter identity. PR6 audit rows are also classified as repository lineage even though `billing_source_audit_events.sourceSystem` is required: the repository generates that value as attribution metadata for the audited operation (falling back to `billing_source_authority`), so it is neither a separate economic/evidence authority nor an adapter-owner claim. Missing source-owned attribution emits `SOURCE_ADAPTER_AUTHORITY_INCOMPLETE`; any unknown, extra, or unapproved source system on a source-owned economic/evidence row emits `SOURCE_ADAPTER_AUTHORITY_MISMATCH`.
 
 All caller-controlled policy work finishes before `BEGIN IMMEDIATE`. No caller callback, custom clock, ID generator, transaction hook, repository option, raw request, or dynamic policy callback can enter the repository transaction. The repository owns UUIDs, timestamps, canonical hashes, the SQLite user read, and fresh evaluation.
 
@@ -214,6 +223,7 @@ Implementation and tests:
 - `tests/actual-source-eligibility-dry-run-read-repository.test.js`
 - `tests/actual-source-eligibility-dry-run-safety.test.js`
 - `tests/actual-source-eligibility-dry-run-sealing-remediation.test.js`
+- `tests/actual-source-eligibility-dry-run-structural-remediation.test.js`
 - `tests/billing-source-authority-fixtures.js`
 
 Documentation:

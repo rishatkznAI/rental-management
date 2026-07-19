@@ -131,22 +131,221 @@ const REQUIRED_COLUMNS = Object.freeze({
   ],
 });
 
-const REQUIRED_INDEXES = Object.freeze([
-  'uq_actual_source_input_identity',
-  'uq_actual_source_candidate_key',
-  'uq_actual_source_check_identity',
-  'uq_actual_source_reconciliation_identity',
-  'uq_actual_source_diagnostic_identity',
-  'uq_actual_source_operation_identity',
-  'uq_actual_source_operation_result',
-  'idx_actual_source_runs_scope',
-  'idx_actual_source_candidates_scope',
-  'idx_actual_source_checks_scope',
-  'idx_actual_source_reconciliations_scope',
-  'idx_actual_source_diagnostics_scope',
-  'idx_actual_source_inputs_scope',
-  'idx_actual_source_audit_scope',
-]);
+const CRITICAL_TABLE_CHECKS = Object.freeze({
+  [ACTUAL_SOURCE_DRY_RUNS_TABLE]: [
+    "lower(branchId) NOT IN ('*', 'all', 'global', 'company-wide', 'company_wide', 'any', 'null')",
+    'date(asOfDate) = asOfDate',
+    "json_valid(policyManifestJson) AND json_type(policyManifestJson) = 'object'",
+    "json_valid(sourceInputManifestJson) AND json_type(sourceInputManifestJson) = 'array'",
+    'length(policyManifestHash) = 64 AND length(sourceInputManifestHash) = 64 AND length(resultHash) = 64',
+    "typeof(sourceInputCount) = 'integer' AND sourceInputCount >= 0",
+    "typeof(candidateCount) = 'integer' AND candidateCount >= 0",
+    "typeof(checkCount) = 'integer' AND checkCount >= 0",
+    "typeof(reconciliationCount) = 'integer' AND reconciliationCount >= 0",
+    "typeof(diagnosticCount) = 'integer' AND diagnosticCount >= 0",
+    "typeof(eligibleCandidateCount) = 'integer' AND eligibleCandidateCount >= 0",
+    "typeof(blockedCandidateCount) = 'integer' AND blockedCandidateCount >= 0",
+    'candidateCount = eligibleCandidateCount + blockedCandidateCount',
+    "typeof(runNetMinor) = 'integer' AND runNetMinor BETWEEN 0 AND 9007199254740991",
+    "typeof(runVatMinor) = 'integer' AND runVatMinor BETWEEN 0 AND 9007199254740991",
+    "typeof(runGrossMinor) = 'integer' AND runGrossMinor BETWEEN 0 AND 9007199254740991",
+    'runNetMinor + runVatMinor = runGrossMinor',
+    "typeof(eligibleCandidateNetMinor) = 'integer' AND eligibleCandidateNetMinor BETWEEN 0 AND 9007199254740991",
+    "typeof(eligibleCandidateVatMinor) = 'integer' AND eligibleCandidateVatMinor BETWEEN 0 AND 9007199254740991",
+    "typeof(eligibleCandidateGrossMinor) = 'integer' AND eligibleCandidateGrossMinor BETWEEN 0 AND 9007199254740991",
+    'eligibleCandidateNetMinor + eligibleCandidateVatMinor = eligibleCandidateGrossMinor',
+    "status IN ('completed', 'completed_with_blockers', 'completed_no_candidates')",
+    "(status = 'completed' AND candidateCount > 0 AND blockedCandidateCount = 0) OR (status = 'completed_with_blockers' AND (blockedCandidateCount > 0 OR diagnosticCount > 0)) OR (status = 'completed_no_candidates' AND candidateCount = 0)",
+    'diagnosticOnly = 1 AND canonicalWriteAuthorized = 0 AND productionActivationAuthorized = 0',
+    "createdAt GLOB '????-??-??T??:??:??.???Z'",
+    'finalizedAt = createdAt',
+    'schemaVersion = 1',
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE]: [
+    'sourceTableIdentity = sourceKind',
+    'length(trim(sourceId)) > 0',
+    "sourceVersion IS NULL OR (typeof(sourceVersion) = 'integer' AND sourceVersion >= 1)",
+    'externalAssertionHash IS NULL OR length(externalAssertionHash) = 64',
+    'length(normalizedInputHash) = 64 AND length(deterministicOrderKey) = 64',
+    "json_valid(relationshipJson) AND json_type(relationshipJson) = 'object'",
+    "createdAt GLOB '????-??-??T??:??:??.???Z'",
+    'schemaVersion = 1',
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE]: [
+    'length(candidateKey) = 64 AND length(policyManifestHash) = 64 AND length(inputLineageHash) = 64 AND length(resultHash) = 64',
+    'date(sliceStartDate) = sliceStartDate AND date(sliceEndDateExclusive) = sliceEndDateExclusive AND sliceStartDate < sliceEndDateExclusive',
+    "typeof(sourceNetMinor) = 'integer' AND sourceNetMinor BETWEEN 0 AND 9007199254740991",
+    "typeof(sourceVatMinor) = 'integer' AND sourceVatMinor BETWEEN 0 AND 9007199254740991",
+    "typeof(sourceGrossMinor) = 'integer' AND sourceGrossMinor BETWEEN 0 AND 9007199254740991",
+    'sourceNetMinor + sourceVatMinor = sourceGrossMinor',
+    "currency = 'RUB'",
+    "dueDateProvenance IN ('invoice_due_date', 'contractual_payment_due_date', 'installment_due_date', 'unknown')",
+    "(dueDateProvenance = 'unknown' AND contractualDueDate IS NULL AND dueDateEvidenceRef IS NULL) OR (dueDateProvenance != 'unknown' AND date(contractualDueDate) = contractualDueDate AND length(trim(dueDateEvidenceRef)) > 0)",
+    "proposedOriginalAmountMinor IS NULL OR (typeof(proposedOriginalAmountMinor) = 'integer' AND proposedOriginalAmountMinor BETWEEN 0 AND 9007199254740991)",
+    "status IN ('eligible_candidate', 'blocked')",
+    "json_valid(blockerCodesJson) AND json_type(blockerCodesJson) = 'array'",
+    "(status = 'eligible_candidate' AND json_array_length(blockerCodesJson) = 0 AND sourceGrossMinor > 0 AND currentConductedUpdVersionId IS NOT NULL AND proposedOriginalAmountMinor IS NOT NULL) OR (status = 'blocked' AND json_array_length(blockerCodesJson) > 0)",
+    'diagnosticOnly = 1 AND canonicalWriteAuthorized = 0 AND productionActivationAuthorized = 0',
+    "createdAt GLOB '????-??-??T??:??:??.???Z'",
+    'schemaVersion = 1',
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE]: [
+    'candidateId IS NULL OR length(trim(candidateId)) > 0',
+    "outcome IN ('passed', 'blocked', 'not_applicable')",
+    "policyDecisionVersion IS NULL OR (typeof(policyDecisionVersion) = 'integer' AND policyDecisionVersion >= 1)",
+    'policyDecisionHash IS NULL OR length(policyDecisionHash) = 64',
+    "json_valid(sourceEvidenceRefsJson) AND json_type(sourceEvidenceRefsJson) = 'array'",
+    'expectedFingerprint IS NULL OR length(expectedFingerprint) = 64',
+    'observedFingerprint IS NULL OR length(observedFingerprint) = 64',
+    "(outcome = 'blocked' AND length(trim(reasonCode)) > 0) OR outcome != 'blocked'",
+    'length(checkHash) = 64',
+    "createdAt GLOB '????-??-??T??:??:??.???Z'",
+    'schemaVersion = 1',
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE]: [
+    'candidateId IS NULL OR length(trim(candidateId)) > 0',
+    "dimensionKind IN ('snapshot_equation', 'upd_line_equation', 'coverage_slice_equation', 'upd_line_aggregate', 'closed_period_snapshot_aggregate', 'coverage_set_delta')",
+    "json_valid(dimensionIdsJson) AND json_type(dimensionIdsJson) = 'object'",
+    "typeof(expectedNetMinor) = 'integer' AND typeof(expectedVatMinor) = 'integer' AND typeof(expectedGrossMinor) = 'integer'",
+    "typeof(observedNetMinor) = 'integer' AND typeof(observedVatMinor) = 'integer' AND typeof(observedGrossMinor) = 'integer'",
+    "typeof(deltaNetMinor) = 'integer' AND typeof(deltaVatMinor) = 'integer' AND typeof(deltaGrossMinor) = 'integer'",
+    "currency = 'RUB'",
+    'length(sourceInputHash) = 64 AND length(reconciliationHash) = 64',
+    'blockerState IN (0, 1)',
+    '(blockerState = 0 AND deltaNetMinor = 0 AND deltaVatMinor = 0 AND deltaGrossMinor = 0) OR blockerState = 1',
+    "createdAt GLOB '????-??-??T??:??:??.???Z'",
+    'schemaVersion = 1',
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE]: [
+    'candidateId IS NULL OR length(trim(candidateId)) > 0',
+    "severity IN ('blocking', 'info')",
+    'length(trim(code)) > 0',
+    "sourceVersion IS NULL OR (typeof(sourceVersion) = 'integer' AND sourceVersion >= 1)",
+    '(affectedStartDate IS NULL AND affectedEndDateExclusive IS NULL) OR (date(affectedStartDate) = affectedStartDate AND date(affectedEndDateExclusive) = affectedEndDateExclusive AND affectedStartDate < affectedEndDateExclusive)',
+    'json_valid(expectedEvidenceJson) AND json_valid(observedEvidenceJson) AND json_valid(policyReferencesJson)',
+    "detectedAt GLOB '????-??-??T??:??:??.???Z'",
+    'length(diagnosticHash) = 64',
+    'schemaVersion = 1',
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE]: [
+    "operationType = 'evaluate_actual_source_dry_run'",
+    "capabilityKey = 'receivables.read'",
+    'length(commandFingerprint) = 64 AND length(policyManifestHash) = 64 AND length(inputSetHash) = 64 AND length(resultHash) = 64',
+    "typeof(actorMembershipVersion) = 'integer' AND actorMembershipVersion >= 1",
+    "typeof(roleTemplateVersion) = 'integer' AND roleTemplateVersion >= 1",
+    "typeof(capabilityCatalogVersion) = 'integer' AND capabilityCatalogVersion = 1",
+    "createdAt GLOB '????-??-??T??:??:??.???Z'",
+    'schemaVersion = 1',
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE]: [
+    "aggregateType = 'actual_source_dry_run' AND aggregateVersion = 1",
+    "eventType = 'actual_source_dry_run_evaluated' AND actorType = 'user'",
+    "capabilityKey = 'receivables.read'",
+    'beforeFingerprint IS NULL OR length(beforeFingerprint) = 64',
+    'length(afterFingerprint) = 64 AND length(inputSetHash) = 64 AND length(resultHash) = 64',
+    "typeof(inputCount) = 'integer' AND inputCount >= 0",
+    "typeof(candidateCount) = 'integer' AND candidateCount >= 0",
+    "typeof(checkCount) = 'integer' AND checkCount >= 0",
+    "typeof(reconciliationCount) = 'integer' AND reconciliationCount >= 0",
+    "typeof(diagnosticCount) = 'integer' AND diagnosticCount >= 0",
+    "createdAt GLOB '????-??-??T??:??:??.???Z'",
+    'schemaVersion = 1',
+  ],
+});
+
+const EXPECTED_INDEX_DEFINITIONS = Object.freeze({
+  uq_actual_source_input_identity: `CREATE UNIQUE INDEX uq_actual_source_input_identity
+    ON ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE}(runId, sourceKind, sourceId);`,
+  uq_actual_source_candidate_key: `CREATE UNIQUE INDEX uq_actual_source_candidate_key
+    ON ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(runId, candidateKey);`,
+  uq_actual_source_check_identity: `CREATE UNIQUE INDEX uq_actual_source_check_identity
+    ON ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE}(runId, ifnull(candidateId, ''), gateCode);`,
+  uq_actual_source_reconciliation_identity: `CREATE UNIQUE INDEX uq_actual_source_reconciliation_identity
+    ON ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE}(runId, ifnull(candidateId, ''), dimensionKind, dimensionIdsJson);`,
+  uq_actual_source_diagnostic_identity: `CREATE UNIQUE INDEX uq_actual_source_diagnostic_identity
+    ON ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE}(runId, ifnull(candidateId, ''), diagnosticHash);`,
+  uq_actual_source_operation_identity: `CREATE UNIQUE INDEX uq_actual_source_operation_identity
+    ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}(companyId, operationType, idempotencyKey);`,
+  uq_actual_source_operation_result: `CREATE UNIQUE INDEX uq_actual_source_operation_result
+    ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}(resultRunId);`,
+  idx_actual_source_runs_scope: `CREATE INDEX idx_actual_source_runs_scope
+    ON ${ACTUAL_SOURCE_DRY_RUNS_TABLE}(companyId, branchId, createdAt, id);`,
+  idx_actual_source_candidates_scope: `CREATE INDEX idx_actual_source_candidates_scope
+    ON ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(companyId, branchId, runId, status, candidateKey);`,
+  idx_actual_source_checks_scope: `CREATE INDEX idx_actual_source_checks_scope
+    ON ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE}(companyId, branchId, runId, candidateId, gateCode);`,
+  idx_actual_source_reconciliations_scope: `CREATE INDEX idx_actual_source_reconciliations_scope
+    ON ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE}(companyId, branchId, runId, candidateId, dimensionKind);`,
+  idx_actual_source_diagnostics_scope: `CREATE INDEX idx_actual_source_diagnostics_scope
+    ON ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE}(companyId, branchId, runId, candidateId, code);`,
+  idx_actual_source_inputs_scope: `CREATE INDEX idx_actual_source_inputs_scope
+    ON ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE}(companyId, branchId, runId, sourceKind, deterministicOrderKey);`,
+  idx_actual_source_audit_scope: `CREATE INDEX idx_actual_source_audit_scope
+    ON ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE}(companyId, branchId, aggregateId, createdAt, id);`,
+});
+
+const EXPECTED_INDEX_METADATA = Object.freeze({
+  uq_actual_source_input_identity: { table: ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE, unique: 1, columns: ['runId', 'sourceKind', 'sourceId'] },
+  uq_actual_source_candidate_key: { table: ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE, unique: 1, columns: ['runId', 'candidateKey'] },
+  uq_actual_source_check_identity: { table: ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE, unique: 1, columns: ['runId', null, 'gateCode'] },
+  uq_actual_source_reconciliation_identity: { table: ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE, unique: 1, columns: ['runId', null, 'dimensionKind', 'dimensionIdsJson'] },
+  uq_actual_source_diagnostic_identity: { table: ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE, unique: 1, columns: ['runId', null, 'diagnosticHash'] },
+  uq_actual_source_operation_identity: { table: ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE, unique: 1, columns: ['companyId', 'operationType', 'idempotencyKey'] },
+  uq_actual_source_operation_result: { table: ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE, unique: 1, columns: ['resultRunId'] },
+  idx_actual_source_runs_scope: { table: ACTUAL_SOURCE_DRY_RUNS_TABLE, unique: 0, columns: ['companyId', 'branchId', 'createdAt', 'id'] },
+  idx_actual_source_candidates_scope: { table: ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE, unique: 0, columns: ['companyId', 'branchId', 'runId', 'status', 'candidateKey'] },
+  idx_actual_source_checks_scope: { table: ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE, unique: 0, columns: ['companyId', 'branchId', 'runId', 'candidateId', 'gateCode'] },
+  idx_actual_source_reconciliations_scope: { table: ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE, unique: 0, columns: ['companyId', 'branchId', 'runId', 'candidateId', 'dimensionKind'] },
+  idx_actual_source_diagnostics_scope: { table: ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE, unique: 0, columns: ['companyId', 'branchId', 'runId', 'candidateId', 'code'] },
+  idx_actual_source_inputs_scope: { table: ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE, unique: 0, columns: ['companyId', 'branchId', 'runId', 'sourceKind', 'deterministicOrderKey'] },
+  idx_actual_source_audit_scope: { table: ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE, unique: 0, columns: ['companyId', 'branchId', 'aggregateId', 'createdAt', 'id'] },
+});
+
+const EXPECTED_UNIQUE_KEYS = Object.freeze({
+  [ACTUAL_SOURCE_DRY_RUNS_TABLE]: [
+    ['id'],
+    ['id', 'companyId', 'branchId'],
+    ['operationId', 'companyId', 'branchId'],
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE]: [
+    ['id'],
+    ['id', 'companyId', 'branchId'],
+    ['runId', 'sourceKind', 'sourceId'],
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE]: [
+    ['id'],
+    ['id', 'runId', 'companyId', 'branchId'],
+    ['runId', 'candidateKey'],
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE]: [
+    ['id'],
+    ['id', 'companyId', 'branchId'],
+    ['runId', null, 'gateCode'],
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE]: [
+    ['id'],
+    ['id', 'companyId', 'branchId'],
+    ['runId', null, 'dimensionKind', 'dimensionIdsJson'],
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE]: [
+    ['id'],
+    ['id', 'companyId', 'branchId'],
+    ['runId', null, 'diagnosticHash'],
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE]: [
+    ['id'],
+    ['id', 'companyId', 'branchId'],
+    ['auditEventId', 'companyId', 'branchId'],
+    ['companyId', 'operationType', 'idempotencyKey'],
+    ['resultRunId'],
+  ],
+  [ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE]: [
+    ['id'],
+    ['id', 'companyId', 'branchId'],
+  ],
+});
+
+const REQUIRED_INDEXES = Object.freeze(Object.keys(EXPECTED_INDEX_DEFINITIONS));
 
 const REQUIRED_TRIGGERS = Object.freeze([
   ...ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_TABLES.flatMap(table => [
@@ -346,72 +545,152 @@ function assertExactForeignKeys(db) {
   }
 }
 
-function assertUniqueKey(db, table, expectedColumns) {
-  const matches = db.prepare(`PRAGMA index_list(${table})`).all()
-    .filter(index => Number(index.unique) === 1)
-    .some(index => {
-      const columns = db.prepare(`PRAGMA index_info(${index.name})`).all()
-        .sort((left, right) => Number(left.seqno) - Number(right.seqno))
-        .map(row => row.name);
-      return JSON.stringify(columns) === JSON.stringify(expectedColumns);
-    });
-  if (!matches) {
-    throw new Error(`ACTUAL_SOURCE_PR8_UNIQUE_KEY_MISMATCH:${table}:${expectedColumns.join(',')}`);
+function canonicalSql(value) {
+  const sql = String(value || '');
+  let result = '';
+  let quote = null;
+  for (let index = 0; index < sql.length; index += 1) {
+    const character = sql[index];
+    if (quote) {
+      result += character;
+      if (character === quote) {
+        if (sql[index + 1] === quote) {
+          result += sql[index + 1];
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+    if (character === "'") {
+      quote = character;
+      result += character;
+    } else if (!/\s/.test(character)) {
+      result += character.toLowerCase();
+    }
+  }
+  if (quote) return null;
+  return result.replace(/;+$/, '');
+}
+
+function extractCheckExpressions(sql) {
+  const expressions = [];
+  const pattern = /\bCHECK\s*\(/gi;
+  let match;
+  while ((match = pattern.exec(sql)) !== null) {
+    const openIndex = match.index + match[0].lastIndexOf('(');
+    let depth = 0;
+    let quote = null;
+    let closeIndex = -1;
+    for (let index = openIndex; index < sql.length; index += 1) {
+      const character = sql[index];
+      if (quote) {
+        if (character === quote) {
+          if (sql[index + 1] === quote) index += 1;
+          else quote = null;
+        }
+        continue;
+      }
+      if (character === "'") quote = character;
+      else if (character === '(') depth += 1;
+      else if (character === ')') {
+        depth -= 1;
+        if (depth === 0) {
+          closeIndex = index;
+          break;
+        }
+      }
+    }
+    if (closeIndex < 0 || quote) return null;
+    expressions.push(sql.slice(openIndex + 1, closeIndex));
+    pattern.lastIndex = closeIndex + 1;
+  }
+  return expressions;
+}
+
+function canonicalList(values) {
+  return values.map(canonicalSql).sort();
+}
+
+function assertExactCriticalChecks(db) {
+  for (const [table, expectedChecks] of Object.entries(CRITICAL_TABLE_CHECKS)) {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+    const actualChecks = row ? extractCheckExpressions(row.sql) : null;
+    const canonicalActual = actualChecks ? canonicalList(actualChecks) : null;
+    if (
+      !canonicalActual
+      || canonicalActual.includes(null)
+      || JSON.stringify(canonicalActual) !== JSON.stringify(canonicalList(expectedChecks))
+    ) {
+      throw new Error(`ACTUAL_SOURCE_PR8_TABLE_CONSTRAINT_MISMATCH:${table}`);
+    }
   }
 }
 
-function normalizeSql(value) {
-  return String(value || '').toLowerCase().replace(/[\s"`\[\]]+/g, '');
-}
-
-function assertSqlContains(db, type, name, fragments) {
-  const row = db.prepare('SELECT tbl_name, sql FROM sqlite_master WHERE type = ? AND name = ?')
-    .get(type, name);
-  const normalized = normalizeSql(row?.sql);
-  if (!row || fragments.some(fragment => !normalized.includes(normalizeSql(fragment)))) {
-    throw new Error(`ACTUAL_SOURCE_PR8_SQL_STRUCTURE_MISMATCH:${name}`);
+function assertExactUniqueKeys(db) {
+  for (const [table, expectedKeys] of Object.entries(EXPECTED_UNIQUE_KEYS)) {
+    const actual = db.prepare(`PRAGMA index_list(${table})`).all()
+      .filter(index => Number(index.unique) === 1)
+      .map(index => ({
+        columns: db.prepare(`PRAGMA index_info(${index.name})`).all()
+          .sort((left, right) => Number(left.seqno) - Number(right.seqno))
+          .map(row => row.name),
+        partial: Number(index.partial),
+      }))
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+    const expected = expectedKeys.map(columns => ({ columns, partial: 0 }))
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new Error(`ACTUAL_SOURCE_PR8_INDEX_STRUCTURE_MISMATCH:${table}:unique_keys`);
+    }
   }
 }
 
-function assertExactIndexAndTriggerStructure(db) {
-  const indexes = {
-    uq_actual_source_input_identity: `ON ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE}(runId, sourceKind, sourceId)`,
-    uq_actual_source_candidate_key: `ON ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(runId, candidateKey)`,
-    uq_actual_source_check_identity: `ON ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE}(runId, ifnull(candidateId, ''), gateCode)`,
-    uq_actual_source_reconciliation_identity: `ON ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE}(runId, ifnull(candidateId, ''), dimensionKind, dimensionIdsJson)`,
-    uq_actual_source_diagnostic_identity: `ON ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE}(runId, ifnull(candidateId, ''), diagnosticHash)`,
-    uq_actual_source_operation_identity: `ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}(companyId, operationType, idempotencyKey)`,
-    uq_actual_source_operation_result: `ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}(resultRunId)`,
-    idx_actual_source_runs_scope: `ON ${ACTUAL_SOURCE_DRY_RUNS_TABLE}(companyId, branchId, createdAt, id)`,
-    idx_actual_source_candidates_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(companyId, branchId, runId, status, candidateKey)`,
-    idx_actual_source_checks_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE}(companyId, branchId, runId, candidateId, gateCode)`,
-    idx_actual_source_reconciliations_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE}(companyId, branchId, runId, candidateId, dimensionKind)`,
-    idx_actual_source_diagnostics_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE}(companyId, branchId, runId, candidateId, code)`,
-    idx_actual_source_inputs_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE}(companyId, branchId, runId, sourceKind, deterministicOrderKey)`,
-    idx_actual_source_audit_scope: `ON ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE}(companyId, branchId, aggregateId, createdAt, id)`,
-  };
-  for (const [name, signature] of Object.entries(indexes)) {
-    assertSqlContains(db, 'index', name, [signature]);
+function assertExactIndexStructure(db) {
+  for (const [name, expectedSql] of Object.entries(EXPECTED_INDEX_DEFINITIONS)) {
+    const metadata = EXPECTED_INDEX_METADATA[name];
+    const row = db.prepare("SELECT tbl_name, sql FROM sqlite_master WHERE type = 'index' AND name = ?")
+      .get(name);
+    const index = db.prepare(`PRAGMA index_list(${metadata.table})`).all()
+      .find(item => item.name === name);
+    const info = row ? db.prepare(`PRAGMA index_info(${name})`).all()
+      .sort((left, right) => Number(left.seqno) - Number(right.seqno)) : [];
+    const keyInfo = row ? db.prepare(`PRAGMA index_xinfo(${name})`).all()
+      .filter(item => Number(item.key) === 1)
+      .sort((left, right) => Number(left.seqno) - Number(right.seqno)) : [];
+    const expectedKeyInfo = metadata.columns.map(column => ({
+      name: column,
+      desc: 0,
+      coll: 'BINARY',
+    }));
+    if (
+      !row
+      || row.tbl_name !== metadata.table
+      || canonicalSql(row.sql) !== canonicalSql(expectedSql)
+      || !index
+      || Number(index.unique) !== metadata.unique
+      || Number(index.partial) !== 0
+      || JSON.stringify(info.map(item => item.name)) !== JSON.stringify(metadata.columns)
+      || JSON.stringify(keyInfo.map(item => ({
+        name: item.name,
+        desc: Number(item.desc),
+        coll: item.coll,
+      }))) !== JSON.stringify(expectedKeyInfo)
+    ) {
+      throw new Error(`ACTUAL_SOURCE_PR8_INDEX_STRUCTURE_MISMATCH:${name}`);
+    }
   }
-  for (const table of ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_TABLES) {
-    assertSqlContains(db, 'trigger', `trg_${table}_no_update`, [
-      `BEFORE UPDATE ON ${table}`,
-      `RAISE(ABORT, '${table} is immutable')`,
-    ]);
-    assertSqlContains(db, 'trigger', `trg_${table}_no_delete`, [
-      `BEFORE DELETE ON ${table}`,
-      `RAISE(ABORT, '${table} is append-only')`,
-    ]);
+}
+
+function assertExactTriggerStructure(db) {
+  for (const [name, expectedSql] of Object.entries(expectedTriggerDefinitions())) {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+      .get(name);
+    if (!row || canonicalSql(row.sql) !== canonicalSql(expectedSql)) {
+      throw new Error(`ACTUAL_SOURCE_PR8_TRIGGER_STRUCTURE_MISMATCH:${name}`);
+    }
   }
-  assertSqlContains(db, 'trigger', 'trg_actual_source_operation_finalize_run', [
-    `BEFORE INSERT ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}`,
-    'run.policyManifestHash = NEW.policyManifestHash',
-    'run.sourceInputManifestHash = NEW.inputSetHash',
-    'run.resultHash = NEW.resultHash',
-    'run.sourceInputCount = (SELECT COUNT(*)',
-    'run.eligibleCandidateGrossMinor = ifnull((SELECT SUM(sourceGrossMinor)',
-    'audit.diagnosticCount = run.diagnosticCount',
-  ]);
 }
 
 function assertActualSourceEligibilityDryRunStructure(db, { requireMigration = true } = {}) {
@@ -434,11 +713,11 @@ function assertActualSourceEligibilityDryRunStructure(db, { requireMigration = t
   for (const trigger of REQUIRED_TRIGGERS) {
     if (!objectExists(db, 'trigger', trigger)) throw new Error(`ACTUAL_SOURCE_PR8_SCHEMA_INCOMPLETE:${trigger}`);
   }
-  assertUniqueKey(db, ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE, [
-    'id', 'runId', 'companyId', 'branchId',
-  ]);
   assertExactForeignKeys(db);
-  assertExactIndexAndTriggerStructure(db);
+  assertExactCriticalChecks(db);
+  assertExactIndexStructure(db);
+  assertExactUniqueKeys(db);
+  assertExactTriggerStructure(db);
   if (requireMigration) {
     const row = migrationRow(db, ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_MIGRATION_ID);
     if (Number(row?.version) !== ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_SCHEMA_VERSION) {
@@ -458,17 +737,37 @@ function scopedRootForeignKeys() {
   `;
 }
 
-function immutableTriggersSql(table) {
+function immutableUpdateTriggerSql(table) {
   return `
     CREATE TRIGGER trg_${table}_no_update
     BEFORE UPDATE ON ${table}
     BEGIN
       SELECT RAISE(ABORT, '${table} is immutable');
     END;
+  `;
+}
+
+function immutableDeleteTriggerSql(table) {
+  return `
     CREATE TRIGGER trg_${table}_no_delete
     BEFORE DELETE ON ${table}
     BEGIN
       SELECT RAISE(ABORT, '${table} is append-only');
+    END;
+  `;
+}
+
+function immutableTriggersSql(table) {
+  return `${immutableUpdateTriggerSql(table)}\n${immutableDeleteTriggerSql(table)}`;
+}
+
+function noReplaceTriggerSql(name, table, message) {
+  return `
+    CREATE TRIGGER ${name}
+    BEFORE INSERT ON ${table}
+    WHEN EXISTS (SELECT 1 FROM ${table} WHERE id = NEW.id)
+    BEGIN
+      SELECT RAISE(ABORT, '${message}');
     END;
   `;
 }
@@ -485,6 +784,113 @@ function beforeSealTriggerSql(name, table, runColumn) {
       SELECT RAISE(ABORT, 'actual source dry run is sealed');
     END;
   `;
+}
+
+function auditBeforeSealTriggerSql() {
+  return `
+    CREATE TRIGGER trg_actual_source_audit_before_seal
+    BEFORE INSERT ON ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE}
+    WHEN EXISTS (
+      SELECT 1 FROM ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE} operation
+      WHERE operation.resultRunId = NEW.aggregateId
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'actual source dry run is sealed');
+    END;
+  `;
+}
+
+function operationFinalizeTriggerSql() {
+  return `
+    CREATE TRIGGER trg_actual_source_operation_finalize_run
+    BEFORE INSERT ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}
+    WHEN NOT EXISTS (
+      SELECT 1
+      FROM ${ACTUAL_SOURCE_DRY_RUNS_TABLE} run
+      JOIN ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE} audit
+        ON audit.id = NEW.auditEventId
+       AND audit.companyId = NEW.companyId
+       AND audit.branchId = NEW.branchId
+       AND audit.aggregateId = NEW.resultRunId
+       AND audit.operationId = NEW.id
+      WHERE run.id = NEW.resultRunId
+        AND run.companyId = NEW.companyId
+        AND run.branchId = NEW.branchId
+        AND run.operationId = NEW.id
+        AND run.policyManifestHash = NEW.policyManifestHash
+        AND run.sourceInputManifestHash = NEW.inputSetHash
+        AND run.resultHash = NEW.resultHash
+        AND audit.inputSetHash = NEW.inputSetHash
+        AND audit.resultHash = NEW.resultHash
+        AND run.sourceInputCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE} input WHERE input.runId = run.id)
+        AND run.candidateCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id)
+        AND run.checkCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE} checkRow WHERE checkRow.runId = run.id)
+        AND run.reconciliationCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE} reconciliation WHERE reconciliation.runId = run.id)
+        AND run.diagnosticCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE} diagnostic WHERE diagnostic.runId = run.id)
+        AND run.eligibleCandidateCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id AND candidate.status = 'eligible_candidate')
+        AND run.blockedCandidateCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id AND candidate.status = 'blocked')
+        AND run.runNetMinor = ifnull((SELECT SUM(sourceNetMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id), 0)
+        AND run.runVatMinor = ifnull((SELECT SUM(sourceVatMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id), 0)
+        AND run.runGrossMinor = ifnull((SELECT SUM(sourceGrossMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id), 0)
+        AND run.eligibleCandidateNetMinor = ifnull((SELECT SUM(sourceNetMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id AND candidate.status = 'eligible_candidate'), 0)
+        AND run.eligibleCandidateVatMinor = ifnull((SELECT SUM(sourceVatMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id AND candidate.status = 'eligible_candidate'), 0)
+        AND run.eligibleCandidateGrossMinor = ifnull((SELECT SUM(sourceGrossMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id AND candidate.status = 'eligible_candidate'), 0)
+        AND audit.inputCount = run.sourceInputCount
+        AND audit.candidateCount = run.candidateCount
+        AND audit.checkCount = run.checkCount
+        AND audit.reconciliationCount = run.reconciliationCount
+        AND audit.diagnosticCount = run.diagnosticCount
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'actual source dry run finalization mismatch');
+    END;
+  `;
+}
+
+function expectedTriggerDefinitions() {
+  const definitions = {};
+  for (const table of ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_TABLES) {
+    definitions[`trg_${table}_no_update`] = immutableUpdateTriggerSql(table);
+    definitions[`trg_${table}_no_delete`] = immutableDeleteTriggerSql(table);
+  }
+  definitions.trg_actual_source_dry_run_operations_no_replace = noReplaceTriggerSql(
+    'trg_actual_source_dry_run_operations_no_replace',
+    ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE,
+    'actual source dry run operations are append-only',
+  );
+  definitions.trg_actual_source_dry_run_audit_events_no_replace = noReplaceTriggerSql(
+    'trg_actual_source_dry_run_audit_events_no_replace',
+    ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE,
+    'actual source dry run audit events are append-only',
+  );
+  definitions.trg_actual_source_input_before_seal = beforeSealTriggerSql(
+    'trg_actual_source_input_before_seal',
+    ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE,
+    'runId',
+  );
+  definitions.trg_actual_source_candidate_before_seal = beforeSealTriggerSql(
+    'trg_actual_source_candidate_before_seal',
+    ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE,
+    'runId',
+  );
+  definitions.trg_actual_source_check_before_seal = beforeSealTriggerSql(
+    'trg_actual_source_check_before_seal',
+    ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE,
+    'runId',
+  );
+  definitions.trg_actual_source_reconciliation_before_seal = beforeSealTriggerSql(
+    'trg_actual_source_reconciliation_before_seal',
+    ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE,
+    'runId',
+  );
+  definitions.trg_actual_source_diagnostic_before_seal = beforeSealTriggerSql(
+    'trg_actual_source_diagnostic_before_seal',
+    ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE,
+    'runId',
+  );
+  definitions.trg_actual_source_audit_before_seal = auditBeforeSealTriggerSql();
+  definitions.trg_actual_source_operation_finalize_run = operationFinalizeTriggerSql();
+  return definitions;
 }
 
 function ensureActualSourceEligibilityDryRunSchema(db) {
@@ -972,50 +1378,20 @@ function ensureActualSourceEligibilityDryRunSchema(db) {
         CHECK (schemaVersion = 1)
       );
 
-      CREATE UNIQUE INDEX uq_actual_source_input_identity
-        ON ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE}(runId, sourceKind, sourceId);
-      CREATE UNIQUE INDEX uq_actual_source_candidate_key
-        ON ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(runId, candidateKey);
-      CREATE UNIQUE INDEX uq_actual_source_check_identity
-        ON ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE}(runId, ifnull(candidateId, ''), gateCode);
-      CREATE UNIQUE INDEX uq_actual_source_reconciliation_identity
-        ON ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE}(runId, ifnull(candidateId, ''), dimensionKind, dimensionIdsJson);
-      CREATE UNIQUE INDEX uq_actual_source_diagnostic_identity
-        ON ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE}(runId, ifnull(candidateId, ''), diagnosticHash);
-      CREATE UNIQUE INDEX uq_actual_source_operation_identity
-        ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}(companyId, operationType, idempotencyKey);
-      CREATE UNIQUE INDEX uq_actual_source_operation_result
-        ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}(resultRunId);
-
-      CREATE INDEX idx_actual_source_runs_scope
-        ON ${ACTUAL_SOURCE_DRY_RUNS_TABLE}(companyId, branchId, createdAt, id);
-      CREATE INDEX idx_actual_source_candidates_scope
-        ON ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}(companyId, branchId, runId, status, candidateKey);
-      CREATE INDEX idx_actual_source_checks_scope
-        ON ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE}(companyId, branchId, runId, candidateId, gateCode);
-      CREATE INDEX idx_actual_source_reconciliations_scope
-        ON ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE}(companyId, branchId, runId, candidateId, dimensionKind);
-      CREATE INDEX idx_actual_source_diagnostics_scope
-        ON ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE}(companyId, branchId, runId, candidateId, code);
-      CREATE INDEX idx_actual_source_inputs_scope
-        ON ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE}(companyId, branchId, runId, sourceKind, deterministicOrderKey);
-      CREATE INDEX idx_actual_source_audit_scope
-        ON ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE}(companyId, branchId, aggregateId, createdAt, id);
+      ${Object.values(EXPECTED_INDEX_DEFINITIONS).join('\n')}
 
       ${ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_TABLES.map(immutableTriggersSql).join('\n')}
 
-      CREATE TRIGGER trg_actual_source_dry_run_operations_no_replace
-      BEFORE INSERT ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}
-      WHEN EXISTS (SELECT 1 FROM ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE} WHERE id = NEW.id)
-      BEGIN
-        SELECT RAISE(ABORT, 'actual source dry run operations are append-only');
-      END;
-      CREATE TRIGGER trg_actual_source_dry_run_audit_events_no_replace
-      BEFORE INSERT ON ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE}
-      WHEN EXISTS (SELECT 1 FROM ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE} WHERE id = NEW.id)
-      BEGIN
-        SELECT RAISE(ABORT, 'actual source dry run audit events are append-only');
-      END;
+      ${noReplaceTriggerSql(
+    'trg_actual_source_dry_run_operations_no_replace',
+    ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE,
+    'actual source dry run operations are append-only',
+  )}
+      ${noReplaceTriggerSql(
+    'trg_actual_source_dry_run_audit_events_no_replace',
+    ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE,
+    'actual source dry run audit events are append-only',
+  )}
 
       ${beforeSealTriggerSql('trg_actual_source_input_before_seal', ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE, 'runId')}
       ${beforeSealTriggerSql('trg_actual_source_candidate_before_seal', ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE, 'runId')}
@@ -1023,58 +1399,8 @@ function ensureActualSourceEligibilityDryRunSchema(db) {
       ${beforeSealTriggerSql('trg_actual_source_reconciliation_before_seal', ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE, 'runId')}
       ${beforeSealTriggerSql('trg_actual_source_diagnostic_before_seal', ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE, 'runId')}
 
-      CREATE TRIGGER trg_actual_source_audit_before_seal
-      BEFORE INSERT ON ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE}
-      WHEN EXISTS (
-        SELECT 1 FROM ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE} operation
-        WHERE operation.resultRunId = NEW.aggregateId
-      )
-      BEGIN
-        SELECT RAISE(ABORT, 'actual source dry run is sealed');
-      END;
-
-      CREATE TRIGGER trg_actual_source_operation_finalize_run
-      BEFORE INSERT ON ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}
-      WHEN NOT EXISTS (
-        SELECT 1
-        FROM ${ACTUAL_SOURCE_DRY_RUNS_TABLE} run
-        JOIN ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE} audit
-          ON audit.id = NEW.auditEventId
-         AND audit.companyId = NEW.companyId
-         AND audit.branchId = NEW.branchId
-         AND audit.aggregateId = NEW.resultRunId
-         AND audit.operationId = NEW.id
-        WHERE run.id = NEW.resultRunId
-          AND run.companyId = NEW.companyId
-          AND run.branchId = NEW.branchId
-          AND run.operationId = NEW.id
-          AND run.policyManifestHash = NEW.policyManifestHash
-          AND run.sourceInputManifestHash = NEW.inputSetHash
-          AND run.resultHash = NEW.resultHash
-          AND audit.inputSetHash = NEW.inputSetHash
-          AND audit.resultHash = NEW.resultHash
-          AND run.sourceInputCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE} input WHERE input.runId = run.id)
-          AND run.candidateCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id)
-          AND run.checkCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE} checkRow WHERE checkRow.runId = run.id)
-          AND run.reconciliationCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE} reconciliation WHERE reconciliation.runId = run.id)
-          AND run.diagnosticCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE} diagnostic WHERE diagnostic.runId = run.id)
-          AND run.eligibleCandidateCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id AND candidate.status = 'eligible_candidate')
-          AND run.blockedCandidateCount = (SELECT COUNT(*) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id AND candidate.status = 'blocked')
-          AND run.runNetMinor = ifnull((SELECT SUM(sourceNetMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id), 0)
-          AND run.runVatMinor = ifnull((SELECT SUM(sourceVatMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id), 0)
-          AND run.runGrossMinor = ifnull((SELECT SUM(sourceGrossMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id), 0)
-          AND run.eligibleCandidateNetMinor = ifnull((SELECT SUM(sourceNetMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id AND candidate.status = 'eligible_candidate'), 0)
-          AND run.eligibleCandidateVatMinor = ifnull((SELECT SUM(sourceVatMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id AND candidate.status = 'eligible_candidate'), 0)
-          AND run.eligibleCandidateGrossMinor = ifnull((SELECT SUM(sourceGrossMinor) FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} candidate WHERE candidate.runId = run.id AND candidate.status = 'eligible_candidate'), 0)
-          AND audit.inputCount = run.sourceInputCount
-          AND audit.candidateCount = run.candidateCount
-          AND audit.checkCount = run.checkCount
-          AND audit.reconciliationCount = run.reconciliationCount
-          AND audit.diagnosticCount = run.diagnosticCount
-      )
-      BEGIN
-        SELECT RAISE(ABORT, 'actual source dry run finalization mismatch');
-      END;
+      ${auditBeforeSealTriggerSql()}
+      ${operationFinalizeTriggerSql()}
     `);
 
     assertActualSourceEligibilityDryRunStructure(db, { requireMigration: false });

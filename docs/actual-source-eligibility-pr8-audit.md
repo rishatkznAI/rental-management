@@ -1,6 +1,6 @@
-# PR8 Actual-Source Eligibility Dry Run implementation audit
+# PR8 Actual-Source Eligibility Dry Run remediation audit
 
-**Status:** `PR8: DRY-RUN FOUNDATION IMPLEMENTED FOR REVIEW — NOT RELEASED.`
+**Status:** `PR8: REMEDIATED FOR REVIEW — NOT RELEASED`
 
 **Implementation date:** 2026-07-19
 
@@ -12,7 +12,13 @@
 
 **Implementation branch:** `codex/pr8-actual-source-eligibility-dry-run`
 
-**Implementation commit/head:** `90f0db113c475c2342a9197d8dbb96c1f5472116`
+**Original implementation commit:** `90f0db113c475c2342a9197d8dbb96c1f5472116`
+
+**Previous independently reviewed head:** `3f498cf3cfa513b923cfdc0e7a8c21ecaae84e55`
+
+**Actual remediation starting head:** `3f498cf3cfa513b923cfdc0e7a8c21ecaae84e55` (exact match)
+
+**Remediation implementation commit/head:** `d1aec5445f3f6eccafe7c21903b99d9b1cf09a38`
 
 **Migration:** `actual_source_eligibility_dry_run_pr8`, version `1`
 
@@ -20,9 +26,19 @@ This record describes a fail-closed diagnostic foundation proposed for review. I
 
 No production actual-source dry run was performed. Test-fixture zero-delta evidence does not satisfy the production PR8 reconciliation gate.
 
+## Independent-review remediation
+
+All five merge-blocking findings were addressed without widening the PR8 runtime boundary:
+
+1. **P0 signature policy binding:** `client_signature_requirement` now requires the exact conducted source policy reference, approved decision identity/version/hash/schema, and applicable company/branch/contract scope before `required` or `not_required` may be evaluated.
+2. **P0 adapter authority:** eligibility now validates the complete canonical sorted source-ownership manifest, including the monetary UPD line version and every relevant evidence row; PR6 relational rows without `sourceSystem` remain governed by repository-owned lineage and hashes.
+3. **P1 persisted sealing:** all persisted candidates, checks, reconciliations, diagnostics, run aggregates, operation, and audit are reread, canonically reconstructed, rehashed, and exactly compared before commit; all fault injections roll back without partial rows.
+4. **P1 read authorization:** scopes are issued only from server-branded PR5 human authority, and every diagnostic query freshly checks user, membership/version, role/version, catalog, capability, company, branch grant, and branch state.
+5. **P1 FK lineage:** candidate/input activation boundaries are scope-safe PR6 references, children cannot cross runs, and startup verifies the exact ordered FK graph and critical structural signatures.
+
 ## Repository and source audit
 
-Before implementation, GitHub's default branch was verified as `main`; `origin/main` was fetched and matched the expected baseline exactly. The clean implementation worktree and branch were created directly from that commit. PR6 implementation PR #212 was squash-merged as `485808d24b8c5f6481e0520eec5c8985b71ffeab`, with its release-marker PR #213 merged as `b582b9d2ac4eb0f4bb5ced04d74fbb016e437659`. PR7 implementation PR #214 was squash-merged as `cb90e09f26c5b9916a4818fd96048070a6a1a662`, with release-marker PR #215 merged as the starting SHA. Open and closed PRs, remote branches, commits, runtime wiring, migrations, documentation, and tests were searched; no existing PR8 branch, PR, migration, or overlapping actual-source eligibility implementation was present.
+For remediation, `git fetch origin --prune` confirmed `origin/main` at `66659c1296e05424179e2b4cc6ee1924ece4fbc9`. GitHub PR #216 and `origin/codex/pr8-actual-source-eligibility-dry-run` both pointed to `3f498cf3cfa513b923cfdc0e7a8c21ecaae84e55`, exactly the independently reviewed head. The target worktree was clean. The complete PR diff and commits were reread; GitHub comments, reviews, and review threads were empty. The five findings therefore remained directly applicable without rebasing or adapting to unreviewed changes.
 
 The PR6 and PR7 release boundaries remain intact. PR6 is an isolated Billing Source Authority foundation; PR7 is an isolated Forecast Receivables Planning foundation. Neither release enabled canonical writes, production source/forecast adapters, production policy, production bootstrap, consumer switching, deployment, or cutover.
 
@@ -45,7 +61,7 @@ The dry-run input universe is a complete, deterministically ordered and untrunca
 15. `billing_source_operations`
 16. `billing_source_audit_events`
 
-There is no PR7, canonical, settlement, Finance, document, rental, payment, or other legacy fallback source. The only `app_data` read is the repository-owned `users` reader required for fresh PR5 human-principal authorization. Names, labels, document filenames, array positions, mutable settings, environment policy values, and external source hashes are not treated as authority.
+There is no PR7, canonical, settlement, Finance, document, rental, payment, or other legacy fallback source. The only `app_data` access in the PR8 execution/read repositories is their repository-owned `users` read required for fresh PR5 human-principal authorization. Names, labels, document filenames, array positions, mutable settings, environment policy values, and external source hashes are not treated as authority.
 
 ## Migration and exact tables
 
@@ -62,7 +78,7 @@ One immediate transaction creates exactly these eight tables and registers the m
 7. `actual_source_dry_run_operations`
 8. `actual_source_dry_run_audit_events`
 
-Every table rejects `UPDATE` and `DELETE`. Operations and audit rows also reject replacement. Operation insertion is the final seal: later input, candidate, check, reconciliation, diagnostic, or audit-link insertion is rejected. Structural assertions cover required columns, indexes, triggers, foreign keys, prerequisite registrations, exact table set, catalog conservation, registry-last atomicity, final counts, links, totals, and hashes. Repeated startup validates the complete structure and preserves the original `applied_at`. There is no down/delete migration, TTL, purge, cleanup worker, or finite retention.
+Every table rejects `UPDATE` and `DELETE`. Operations and audit rows also reject replacement. Operation insertion is the final seal: later input, candidate, check, reconciliation, diagnostic, or audit-link insertion is rejected. Candidate and input activation-boundary lineage has an exact `(activationBoundaryId, companyId, branchId)` foreign key to the PR6 activation boundary. Candidate children use `(candidateId, runId, companyId, branchId)` so a child cannot combine one run with another run's candidate; nullable `candidateId` remains reserved for complete run-level rows. Startup reconstructs the exact foreign-key map from `PRAGMA foreign_key_list`, including tables, ordered from/to columns, and `RESTRICT` behavior, and verifies exact columns plus critical unique-index/check/trigger signatures. Registered weakened or misdirected schemas fail closed on initial and repeated startup. Repeated valid startup preserves the original `applied_at`. There is no down/delete migration, TTL, purge, cleanup worker, or finite retention.
 
 No `actual_receivable_eligible_events`, `ActualReceivableEligibleV1`, canonical posting queue/outbox, canonical adapter, source-adapter state, or activation state exists.
 
@@ -105,6 +121,10 @@ The exact versioned gate keys are:
 
 Each gate is `approved_by_reference`, `unresolved`, or `rejected`. Missing is normalized to unresolved. An approval claim without decision reference, version, hash/fingerprint, schema version, and exact applicable scope is normalized to unresolved rather than accepted. Unknown or duplicate keys and conflicting identities are rejected. Unresolved and rejected gates block candidates. The production policy registry is intentionally unavailable; isolated tests inject explicit versioned artificial policy manifests. Test policy is not production, accountant, legal, or product-owner approval.
 
+The client-signature decision is additionally bound to the exact conducted source `signatureRequirementPolicyRef`. The approved gate must carry an exact `expectedSourceRef`, approved decision reference/version/hash/schema, and applicable company/branch/contract scope. Missing source/expected references emit `SIGNATURE_POLICY_REFERENCE_MISSING`; identity or scope mismatch emits `SIGNATURE_POLICY_REFERENCE_MISMATCH`. Only after exact identity matching may allow-listed `required` or `not_required` semantics be evaluated, and `required` still requires signature evidence.
+
+Source-adapter authority is evaluated over a canonical sorted ownership manifest for every candidate input. Source-owned rental lines, effective terms, all relevant snapshot evidence, UPDs, and UPD line versions must disclose a known source system exactly approved by the versioned gate. Activation boundaries, periods/events, snapshots, UPD-version/conducted evidence, coverage/mapping rows, operations, and audits that have no `sourceSystem` prove ownership through exact PR6 repository lineage and hashes instead of receiving an invented adapter identity. Missing ownership emits `SOURCE_ADAPTER_AUTHORITY_INCOMPLETE`; any unknown, extra, or unapproved source system emits `SOURCE_ADAPTER_AUTHORITY_MISMATCH`.
+
 All caller-controlled policy work finishes before `BEGIN IMMEDIATE`. No caller callback, custom clock, ID generator, transaction hook, repository option, raw request, or dynamic policy callback can enter the repository transaction. The repository owns UUIDs, timestamps, canonical hashes, the SQLite user read, and fresh evaluation.
 
 ## Candidate and result semantics
@@ -134,13 +154,13 @@ Each exact slice persists separate reconciliation rows for:
 
 Run conservation requires candidate count to equal eligible-candidate plus blocked-candidate counts, run totals to equal all candidate source totals, explicitly named eligible-candidate totals to equal only that subset, and every input/check/reconciliation/diagnostic count and hash to match the relational rows. Each dimension retains expected, observed, delta, currency, source/input hashes, blocker state, and repository-owned hash. A non-zero net, VAT, or gross delta blocks independently.
 
-The complete source input manifest includes every allow-listed PR6 row in deterministic order, with external provenance assertions separated from repository-owned normalized integrity hashes. Before persistence the service creates an immutable branded plan. After `BEGIN IMMEDIATE`, the repository freshly revalidates PR5 authority and PR6 rows, recomputes the full manifest and policy/source evaluation, rejects source or policy drift, persists the result, rereads all relational inputs/results, recomputes hashes/counts/totals, inserts audit, inserts the sealing operation, rereads operation/audit links, and commits only on exact equality. Any mismatch or SQLite failure rolls back all PR8 rows.
+The complete source input manifest includes every allow-listed PR6 row in deterministic order, with external provenance assertions separated from repository-owned normalized integrity hashes. Before persistence the service creates an immutable branded plan. After `BEGIN IMMEDIATE`, the repository freshly revalidates PR5 authority and PR6 rows, recomputes the full manifest and policy/source evaluation, and rejects source or policy drift. Before sealing it rereads every persisted candidate, check, reconciliation, and diagnostic; reconstructs canonical content only from relational columns; maps generated IDs back to business candidate keys; recomputes each repository-owned child hash; rejects missing, extra, duplicate, reordered-logical, status, blocker, identity, content, lineage, or hash drift; and rebuilds deterministic child manifests, counts, eligible/blocked totals, run status, and the complete result hash. It then inserts audit and the sealing operation, rereads both rows, and exactly verifies authorization identity, links, aggregate identity, hashes, counts, and timestamps. Any mismatch or SQLite failure rolls back the complete transaction without operation/audit or partial PR8 rows.
 
 ## Authorization, reads, idempotency, and concurrency
 
 Evaluation requires a branded server-created context for a live authenticated human principal, active exact-version membership, live exact-version role template, current catalog version, `receivables.read`, exact company scope, and one concrete active authorized branch. Administrator display labels grant nothing. Integration/system actors are unsupported. Client company IDs are not authority; branch filters can only narrow trusted scope. Fresh authority is checked again on the same connection inside the locked transaction.
 
-The internal read repository exposes only `listDryRuns`, `getDryRun`, `listCandidates`, `listChecks`, `listReconciliations`, `listDiagnostics`, `inspectOperation`, and `inspectAuditHistory`. Reads require a branded company-and-concrete-branch scope, deterministic ordering, allow-listed filters, and a 200-row maximum. They neither recalculate eligibility nor project debt, aging, overdue, activation, canonical, settlement, or forecast semantics.
+The internal read repository exposes only `listDryRuns`, `getDryRun`, `listCandidates`, `listChecks`, `listReconciliations`, `listDiagnostics`, `inspectOperation`, and `inspectAuditHistory`. A read scope can be issued only from a server-branded PR5 human actor and a live exact membership through the PR5 resolver; caller-provided principal, membership, company, capabilities, or a forged scope confer no authority. Before every query the repository uses its own same-connection user reader and rechecks legacy user state, active exact-version membership and role template, current catalog, `receivables.read`, exact company, concrete branch grants, and active branches. Membership/role/catalog/capability/branch/user revocation invalidates an already issued scope before diagnostic data is returned. Reads remain deterministically ordered, use allow-listed filters and a 200-row maximum, and neither recalculate eligibility nor project debt, aging, overdue, activation, canonical, settlement, or forecast semantics.
 
 Idempotency is `companyId + evaluate_actual_source_dry_run + idempotencyKey` and binds branch, principal, membership/version, role-template/version, catalog version, `receivables.read`, policy-manifest hash, complete input-set hash, command fingerprint, correlation ID, and result run/hash. Exact replay returns the original logical result with `replayed = true` and creates no row. Changed authority, branch, policy, source, content, or hash yields a deterministic domain conflict.
 
@@ -152,10 +172,13 @@ All verification used Node `v20.20.2` and npm `10.9.4` from an isolated Node 20 
 
 | Check | Result |
 |---|---:|
-| Focused PR8 suites | 51 passed, 0 failed |
-| PR1/PR2/PR3/PR5/PR6/PR7/PR8 compatibility suites | 487 passed, 0 failed |
-| `npm test` | 2,229 passed, 0 failed |
-| Repeated `node --test tests/*.test.js` | 2,229 passed, 0 failed |
+| New focused remediation suites | 55 passed, 0 failed |
+| All focused PR8 suites | 106 passed, 0 failed |
+| Persisted-sealing fault regressions | 14 passed, 0 failed |
+| Direct FK/altered-schema SQL probes | 12 passed, 0 failed |
+| PR1/PR2/PR3/PR5/PR6/PR7/PR8 compatibility suites | 562 passed, 0 failed |
+| `npm test` | 2,284 passed, 0 failed |
+| Repeated `node --test tests/*.test.js` | 2,284 passed, 0 failed |
 | `npm run build` | passed |
 | `git diff --check` | passed |
 | Fresh `PRAGMA foreign_keys` | `1` |
@@ -174,27 +197,24 @@ All verification used Node `v20.20.2` and npm `10.9.4` from an isolated Node 20 
 
 The positive control is a fully artificial fixture with explicit test-only gate references, a current closed period, complete approved-by-test evidence, a current conducted UPD, active validated exact mapping, positive RUB amounts, and zero deltas. It can yield `eligible_candidate`, while canonical, PR6, and PR7 tables remain unchanged and both authorization flags remain false. This is engine/schema/test-fixture evidence only.
 
-## Changed files
+## Remediation changed files
 
 Implementation and tests:
 
-- `server/db.js`
 - `server/lib/actual-source-eligibility-dry-run-domain.js`
 - `server/lib/actual-source-eligibility-dry-run-policy.js`
 - `server/lib/actual-source-eligibility-dry-run-read-repository.js`
 - `server/lib/actual-source-eligibility-dry-run-repository.js`
 - `server/lib/actual-source-eligibility-dry-run-schema.js`
-- `server/lib/actual-source-eligibility-dry-run-service.js`
-- `tests/actual-source-eligibility-dry-run-concurrency.test.js`
-- `tests/actual-source-eligibility-dry-run-domain.test.js`
+- `server/lib/platform-identity-repository.js`
+- `tests/actual-source-eligibility-dry-run-eligibility-remediation.test.js`
 - `tests/actual-source-eligibility-dry-run-fixtures.js`
-- `tests/actual-source-eligibility-dry-run-policy.test.js`
+- `tests/actual-source-eligibility-dry-run-fk-remediation.test.js`
+- `tests/actual-source-eligibility-dry-run-read-authorization-remediation.test.js`
 - `tests/actual-source-eligibility-dry-run-read-repository.test.js`
-- `tests/actual-source-eligibility-dry-run-remediation.test.js`
-- `tests/actual-source-eligibility-dry-run-repository.test.js`
 - `tests/actual-source-eligibility-dry-run-safety.test.js`
-- `tests/actual-source-eligibility-dry-run-schema.test.js`
-- `tests/helpers/actual-source-eligibility-dry-run-concurrency-worker.mjs`
+- `tests/actual-source-eligibility-dry-run-sealing-remediation.test.js`
+- `tests/billing-source-authority-fixtures.js`
 
 Documentation:
 
@@ -210,6 +230,8 @@ No production identity/bootstrap/source population occurred. No production actua
 
 PR9 remains blocked until explicit accountant/legal confirmations, approved production source evidence, approved VAT/rounding and due-date/signature/correction policy, approved activation boundary/cohort and named adapter authority, real production identity/source population, a successful production dry run, zero unexplained net/VAT/gross delta, approved reconciliation/rollback and retention-control runbooks, consumer/release sign-off, and a separate explicit product-owner canonical-write authorization. PR8 emits no future posting event and authorizes no canonical write.
 
+Future runtime activation has an additional explicit P2 blocker: it requires a separate governed execution capability, admission/rate controls, concurrency limits, storage telemetry, and approved retention/legal-hold controls. Existing `receivables.read` is acceptable only inside this isolated foundation/test boundary; it is not approval of a future runtime execution contract. No HTTP API or runtime consumer was added, and PR9/activation remain blocked.
+
 Rollback of this code means disabling/reverting unreachable code while retaining all immutable PR8 history. Financial/audit rows are never deleted as a rollback mechanism. Failed migrations and failed runs roll back atomically; successful diagnostic rows are conserved indefinitely.
 
-**Final status:** `PR8: DRY-RUN FOUNDATION IMPLEMENTED FOR REVIEW — NOT RELEASED.`
+**Final status:** `PR8: REMEDIATED FOR REVIEW — NOT RELEASED`

@@ -24,6 +24,8 @@
 
 **Second focused remediation starting head:** `285d32e24b8eb0c97e95b5d84c8d7d74cb365ef0` (exact match)
 
+**Second focused remediation implementation commit/head:** `974c3407e9b1a54f99beacfdd123ff070227210e`
+
 **Migration:** `actual_source_eligibility_dry_run_pr8`, version `1`
 
 This record describes a fail-closed diagnostic foundation proposed for review. It is not a release record, source-authority approval, accounting or legal approval, production activation, canonical-write authorization, PR9 authorization, deployment, or cutover.
@@ -181,19 +183,22 @@ All verification used Node `v20.20.2` and npm `10.9.4` from an isolated Node 20 
 
 | Check | Result |
 |---|---:|
-| New focused remediation suites | 55 passed, 0 failed |
-| All focused PR8 suites | 106 passed, 0 failed |
+| First focused remediation suites | 55 passed, 0 failed |
+| Second registered-schema structural remediation suite | 24 passed, 0 failed |
+| Weakened-schema mutation matrix | 20 mutations rejected: 8 `CHECK`, 6 index, 6 trigger; valid/repeated/formatting/`applied_at` controls passed |
+| All PR8 remediation suites | 91 passed, 0 failed |
+| All focused PR8 suites | 130 passed, 0 failed |
 | Persisted-sealing fault regressions | 14 passed, 0 failed |
 | Direct FK/altered-schema SQL probes | 12 passed, 0 failed |
-| PR1/PR2/PR3/PR5/PR6/PR7/PR8 compatibility suites | 562 passed, 0 failed |
-| `npm test` | 2,284 passed, 0 failed |
-| Repeated `node --test tests/*.test.js` | 2,284 passed, 0 failed |
+| PR1/PR2/PR3/PR5/PR6/PR7/PR8 compatibility suites | 586 passed, 0 failed |
+| `npm test` | 2,308 passed, 0 failed |
+| Repeated `node --test tests/*.test.js` | 2,308 passed, 0 failed |
 | `npm run build` | passed |
 | `git diff --check` | passed |
 | Fresh `PRAGMA foreign_keys` | `1` |
 | Fresh `PRAGMA foreign_key_check` | clean (`0` rows) |
 | Fresh `PRAGMA integrity_check` | `ok` |
-| Fresh PR8 migration registration | exactly one v1 row; second startup preserved `applied_at` |
+| Fresh PR8 migration registration | exactly one v1 row; repeated startup and file-backed reopen preserved `applied_at` |
 | Fresh PR8 tables | exact eight-table set; all `0` rows |
 | Fresh PR6 tables | all sixteen `0` rows |
 | Fresh PR7 tables | all eight `0` rows |

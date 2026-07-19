@@ -1,10 +1,10 @@
 # Canonical receivables backend contract
 
-**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; PR4 **DESIGN APPROVED** as a historical design gate and not released; PR5 **RELEASED** as the neutral platform identity and fail-closed authorization foundation only; **PR6: RELEASED — Billing Source Authority foundation only**; **PR7: REMEDIATED FOR REVIEW — NOT RELEASED.**
+**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; PR4 **DESIGN APPROVED** as a historical design gate and not released; PR5 **RELEASED** as the neutral platform identity and fail-closed authorization foundation only; **PR6: RELEASED — Billing Source Authority foundation only**; **PR7: RELEASED — Forecast Receivables Planning foundation only.**
 
 **Audit date:** 2026-07-15
 
-**Current-state update / PR7 implementation date:** 2026-07-18
+**Current-state update / PR7 release-marker date:** 2026-07-19
 
 **PR1 merge commit:** `ae9d8a8a286307f5d6e701585750af94d631edc1`
 
@@ -16,7 +16,11 @@
 
 **PR6 migration / bounded scope:** `billing_source_authority_pr6`, version `1`; 16 append-only Billing Source Authority tables.
 
-**Implementation status:** PR1, PR2, and PR3 are released within their recorded foundation-only boundaries. PR4 remains a design-approved historical gate and was not released. PR5 is released only as the neutral platform identity and fail-closed authorization foundation. **PR6: RELEASED — Billing Source Authority foundation only. PR7: REMEDIATED FOR REVIEW — NOT RELEASED.** PR7 adds only an isolated default-disabled planning foundation. Canonical production reads and writes, production settlement, production identity/bootstrap/source activation, production forecast calculation/read enablement, Finance or Company Health/Risks switching, deployment, and cutover remain disabled, blocked, or unperformed.
+**PR7 implementation PR / reviewed head / released squash commit:** [#214](https://github.com/rishatkznAI/rental-management/pull/214); `c9bd77ddd5398af801e8781dbd2602b862703333`; `cb90e09f26c5b9916a4818fd96048070a6a1a662`
+
+**PR7 migration / bounded scope:** `forecast_receivables_planning_pr7`, version `1`; 8 append-only Forecast Receivables Planning tables.
+
+**Implementation status:** PR1, PR2, and PR3 are released within their recorded foundation-only boundaries. PR4 remains a design-approved historical gate and was not released. PR5 is released only as the neutral platform identity and fail-closed authorization foundation. **PR6: RELEASED — Billing Source Authority foundation only. PR7: RELEASED — Forecast Receivables Planning foundation only.** PR7 remains an isolated default-disabled planning foundation. Canonical production reads and writes, production settlement, production identity/bootstrap/source activation, production forecast calculation/read enablement, Finance, Dashboard, or Company Health/Risks switching, deployment, and cutover remain disabled, blocked, or unperformed.
 
 ## Product-owner baseline
 
@@ -34,7 +38,7 @@
 
 **No silent assumptions:** unresolved source evidence/sufficiency, proven-date evidence, exact money/VAT/rounding, source compensation, downtime/extension authority, coverage precedence, activation date/cohort, concrete membership records, audited capability assignments, named integration contracts, approval thresholds, or expanded permission details remain disabled, fail-closed, or escalated. Implementation must not invent a finite retention period.
 
-**Current product-owner status:** PR1 is **RELEASED**; PR2 is **RELEASED**; PR3 is **RELEASED**; PR4 is **DESIGN APPROVED** as a historical design gate and is not released; PR5 is **RELEASED, foundation only**; **PR6 is RELEASED, foundation only**; and **PR7 is REMEDIATED FOR REVIEW — NOT RELEASED** as a planning-only foundation. The production ledger remains inactive, with canonical production reads and writes disabled and existing systems continuing to serve production behavior. Production settlement, canonical writes, canonical/forecast read switches, production forecast calculation, backfill, dual write, shadow reads, deployment, bootstrap, cutover, PR8, and PR9 remain blocked or unperformed.
+**Current product-owner status:** PR1 is **RELEASED**; PR2 is **RELEASED**; PR3 is **RELEASED**; PR4 is **DESIGN APPROVED** as a historical design gate and is not released; PR5 and PR6 are **RELEASED, foundation only**; and **PR7: RELEASED — Forecast Receivables Planning foundation only.** The production ledger remains inactive, with canonical production reads and writes disabled and existing systems continuing to serve production behavior. Production settlement, canonical writes, canonical/forecast read switches, production forecast calculation, backfill, dual write, shadow reads, deployment, bootstrap, cutover, PR8, and PR9 remain blocked or unperformed.
 
 ## PR1 implementation record
 
@@ -261,6 +265,16 @@ The implementation and audit are recorded in `docs/billing-source-authority-pr6-
 - switch Finance or Company Health;
 - run production bootstrap;
 - implement PR7.
+
+## PR7 release record
+
+**PR7: RELEASED — Forecast Receivables Planning foundation only.**
+
+Implementation PR [#214](https://github.com/rishatkznAI/rental-management/pull/214), independently reviewed at head `c9bd77ddd5398af801e8781dbd2602b862703333`, was squash-merged as `cb90e09f26c5b9916a4818fd96048070a6a1a662` on 2026-07-19. Its `lightweight-pr-check` completed successfully. The released migration remains `forecast_receivables_planning_pr7` version 1 and creates exactly 8 append-only planning tables for immutable runs, input snapshots/events, items, diagnostics, supersessions, operations, and audit. Persisted input lineage and business hashes are repository-owned; exact coverage/service containment, transactional PR5 authorization, PR6 source revalidation, concurrency, and rollback safeguards remain enforced.
+
+Release marks only the isolated Forecast Receivables Planning foundation. It is not production activation, a production calculation adapter, read-API enablement, canonical debt, actual receivables, a closed-unbilled lane, combined three-lane reporting, `totalExpectedClientLoadMinor`, a Finance/Dashboard/Company Health/Risks switch, deployment, cutover, or PR8. `FORECAST_RECEIVABLES_READ_API_ENABLED` remains false by default, the production forecast resolver remains unconditional `null`, and production calculation remains unreachable. No canonical financial or PR6 source business rows were created.
+
+Production VAT, rounding, minimum-term, event-authority/precedence, accountant/legal, activation, and consumer gates remain unresolved and fail closed. The approved indefinite retention/no-delete rule remains in force. PR8 is not started or automatically unblocked by this foundation release.
 
 ## 1. Purpose and decisions at a glance
 
@@ -1239,7 +1253,7 @@ Remaining conditional items are narrow and must not be filled by implementation 
 | Item | Approved baseline | Still required | Blocks |
 |---|---|---|---|
 | D-01 source sufficiency | Actual only when the relevant billing period is closed **and** the matching UPD is formed and explicitly conducted; signed never implies conducted | Accountant/legal confirmation of the exact authoritative period/UPD statuses, evidence, date, and any additional signature requirement | PR6 source authority, PR8 source dry run, PR9 projection, and later cutover |
-| Forecast boundary/details | Forecast remains planning-only. Three lanes/components, total equation, 30-day horizon, status allow-list, `planned_future`, confidence levels/reasons, indefinite history, separate advances, return-line boundary, and minimum-term/discount order are approved | Exact coverage precedence/key enforcement and authoritative downtime/extension/return input lifecycle; schema/API details | PR7 forecast implementation and PR11 consumers |
+| Forecast boundary/details | Forecast remains planning-only. Three lanes/components, total equation, 30-day horizon, status allow-list, `planned_future`, confidence levels/reasons, indefinite history, separate advances, return-line boundary, and minimum-term/discount order are approved | Production VAT/rounding/minimum-term policy and authoritative downtime/extension/return input lifecycle; activation and consumer contracts | Production forecast calculation/activation and PR11 consumers; not the released fail-closed PR7 foundation |
 | Scope/RBAC | Revised sequence, neutral platform identity authority, stable branch semantics, stable memberships, explicit versioned capability model, and deny-by-default authorization are approved | PR5 implemented and verified the foundation by promoting the existing roots in place; production records, bootstrap, resolver connection, and enablement remain absent | PR5 **RELEASED — foundation only** |
 | D-24 retention | Financial and audit records are retained indefinitely; deletion, purge, TTL, scheduled cleanup, and rollback deletion are forbidden | Accountant/legal confirmation of legal hold, export, access, privacy, and tamper-evidence controls; no finite duration may be invented | PR6 where financial/audit records are created, PR8/PR9, and later activation as relevant; not PR5 scope/RBAC or the separately approved PR7 forecast-history policy |
 | D-25 approval policy | Mandatory dual approval is approved for refunds, credit/debit adjustments, reversals/corrections, write-offs, posted-receivable cancellations, post-allocation due-date changes, and cross-branch allocations; tightly constrained ordinary allocations follow the approved exception above | Monetary and age thresholds are deferred; concrete production users, memberships, roles, capabilities, and operation-specific enforcement remain required before production enablement | Future production authorization/operation integration; does not block released PR2 or PR5 foundations |
@@ -1254,7 +1268,7 @@ Remaining conditional items are narrow and must not be filled by implementation 
 | PR4 actual/forecast design gate | **DESIGN APPROVED — IMPLEMENTATION NOT STARTED** | Architecture, sequence, and named PR5 decisions approved; documentation only, not released, no production behavior |
 | PR5 scope/RBAC | **RELEASED — FOUNDATION ONLY** | Neutral identity, branch, membership, capability, audit, and fail-closed model implemented; no production records, bootstrap, canonical reads/writes, or financial behavior |
 | PR6 Billing Source Authority | **PR6: RELEASED — Billing Source Authority foundation only.** | Isolated source schema/domain/repositories and internal inspection only; no HTTP API, canonical writes, read enablement, product switch, bootstrap, production adapter, or PR7 |
-| PR7 forecast domain | **REMEDIATED FOR REVIEW — NOT RELEASED** | Isolated append-only planning storage with persisted/revalidated complete input lineage, exact coverage/service/diagnostic invariants, fail-closed unresolved-policy diagnostics, PR5 authorization, PR6 lineage, and a default-disabled read API; no production adapter, canonical write, or consumer switch |
+| PR7 forecast domain | **PR7: RELEASED — Forecast Receivables Planning foundation only.** | Isolated append-only planning storage with persisted/revalidated complete input lineage, exact coverage/service/diagnostic invariants, fail-closed unresolved-policy diagnostics, PR5 authorization, PR6 lineage, and a default-disabled read API; no production adapter, canonical write, or consumer switch |
 | PR8 source dry run | **BLOCKED pending actual-source gates** | Source sufficiency, proven-date evidence, exact money/VAT, mappings, activation date/cohort, idempotency, reconciliation, and zero-delta evidence; no writes/backfill |
 | PR9 blocked canonical adapter | **BLOCKED pending PR8 and separate explicit owner authorization** | Forward-only, default-disabled canonical projection; no backfill and no dual write |
 | PR10 settlement integration | **BLOCKED pending PR9** | Trusted production authorization and approved actual-receivable source projection |
@@ -1267,8 +1281,8 @@ No gate outcome authorizes product behavior beyond its named PR scope. PR1, PR2,
 
 - **PR5 is released, foundation only.** The neutral company/branch authority, dedicated Head Office semantics, stable membership model, explicit capability model, append-only authorization audit, controlled bootstrap tooling, and deny-by-default authorization are implemented without enabling canonical production reads or writes.
 - **PR6: RELEASED — Billing Source Authority foundation only.** Its isolated foundation covers closed billing periods, immutable billing snapshots, an explicit conducted-UPD lifecycle, stable UPD line IDs, and deterministic line-to-period mappings. Production use remains gated by the applicable close/reopen, conducted-UPD, signature, mapping/granularity, VAT/rounding, correction/cancellation, return-source, activation, adapter, and accountant/legal requirements.
-- **PR7: REMEDIATED FOR REVIEW — NOT RELEASED.** The separate implementation provides only the isolated Forecast Receivables Planning foundation documented in `docs/forecast-receivables-planning-pr7-audit.md`. Production policies/adapters remain absent, unresolved downtime/extension/return and coverage mechanics remain fail-closed, reads remain default-disabled behind an unconditional-null resolver, and canonical writes, Finance or Company Health/Risks switching, and production activation remain forbidden.
-- **PR8 and PR9 remain blocked** by all actual-source sufficiency, reconciliation, exact activation, legal/accounting, idempotency/replay, and zero-unexplained-delta gates. PR9 additionally requires separate explicit canonical-write authorization.
+- **PR7: RELEASED — Forecast Receivables Planning foundation only.** The bounded foundation is documented in `docs/forecast-receivables-planning-pr7-audit.md`. Production policies/adapters remain absent, unresolved VAT/rounding/minimum-term and downtime/extension/return authority remain fail-closed, reads remain default-disabled behind an unconditional-null resolver, and canonical writes, combined reporting, Finance/Dashboard/Company Health/Risks switching, and production activation remain forbidden.
+- **PR8 and PR9 remain blocked** by all actual-source sufficiency, reconciliation, exact activation, legal/accounting, idempotency/replay, and zero-unexplained-delta gates. The PR7 foundation release does not automatically unblock or start PR8. PR9 additionally requires separate explicit canonical-write authorization.
 
 PR6 created no canonical receivable, performs no canonical write, does not run PR8 eligibility or canonical posting, perform settlement/payment allocation, enable the canonical read API or forecast, switch Finance or Company Health/Risks, run production bootstrap, deploy, cut over production, or implement PR7. Future eligibility, canonical posting, settlement, and production activation remain inactive and require their own later gates.
 

@@ -1,6 +1,6 @@
 # PR7 Forecast Receivables Planning implementation audit
 
-**Status:** `PR7: REMEDIATED FOR REVIEW — NOT RELEASED`
+**Status:** `PR7: RELEASED — Forecast Receivables Planning foundation only.`
 
 **Implementation date:** 2026-07-18
 
@@ -10,9 +10,13 @@
 
 **Implementation branch:** `codex/pr7-forecast-receivables-planning`
 
-This record describes an isolated planning foundation. It does not authorize release, production activation, a production calculation adapter, canonical writes, a reporting cutover, or any consumer switch.
+**Implementation PR / final reviewed head / squash merge:** [#214](https://github.com/rishatkznAI/rental-management/pull/214); `c9bd77ddd5398af801e8781dbd2602b862703333`; `cb90e09f26c5b9916a4818fd96048070a6a1a662`
 
-The first focused remediation was applied to the existing PR #214 from head `2c82fc96f2eb78838de2b7e7d1d21e39928d5dc7`. This final focused remediation used previously reviewed head `8e583f9eece42e8cf33149ab92faf0f56e21496e` as both the verified remote head and actual remediation start. The callback-boundary implementation commit is `22e461592fa4ed407dfa0dcfa03f91487a09f9f2`; the final branch head, which necessarily includes this audit update, is recorded in the PR #214 body after push. The branch, PR, migration identity, eight-table boundary, production isolation, and unreleased status were preserved.
+**Release-marker date:** 2026-07-19
+
+This record describes an isolated planning foundation. Its foundation-only release does not authorize production activation, a production calculation adapter, canonical writes, a reporting cutover, or any consumer switch.
+
+The first focused remediation was applied to the existing PR #214 from head `2c82fc96f2eb78838de2b7e7d1d21e39928d5dc7`. The final focused remediation used previously reviewed head `8e583f9eece42e8cf33149ab92faf0f56e21496e` as both the verified remote head and actual remediation start. The callback-boundary implementation commit was `22e461592fa4ed407dfa0dcfa03f91487a09f9f2`, and the final independently reviewed implementation head was `c9bd77ddd5398af801e8781dbd2602b862703333`. Until the separate release-marker event, the implementation status remained `PR7: REMEDIATED FOR REVIEW — NOT RELEASED`. PR #214 was then squash-merged from that exact head as `cb90e09f26c5b9916a4818fd96048070a6a1a662`. The branch, migration identity, eight-table boundary, production isolation, and review history were preserved.
 
 ## Baseline audit
 
@@ -129,8 +133,8 @@ All verification used Node `v20.20.2` and npm `10.9.4` from an isolated `node@20
 
 ## Explicit exclusions and unresolved gates
 
-This PR performs no production identity/bootstrap/source population; no source adapter; no actual-source eligibility or PR8 work; no canonical/source/legacy financial write; no settlement/payment/allocation/adjustment/write-off/refund; no import, backfill, dual write, shadow read, posting, or conversion; no canonical/forecast read enablement; no production calculation; no scheduler or workflow; no Finance, Dashboard, Company Health, or Risks switch; no frontend/UI; no deploy, cutover, merge, or release marker.
+The implementation PR performed no production identity/bootstrap/source population; no source adapter; no actual-source eligibility or PR8 work; no canonical/source/legacy financial write; no settlement/payment/allocation/adjustment/write-off/refund; no import, backfill, dual write, shadow read, posting, or conversion; no canonical/forecast read enablement; no production calculation; no scheduler or workflow; no Finance, Dashboard, Company Health, or Risks switch; no frontend/UI; and no deploy or cutover.
 
-Previously unresolved accountant/legal decisions remain unresolved. Production VAT, rounding, minimum-term, evidence sufficiency, return/downtime/extension authority and precedence, activation, consumer aggregation, and retention controls beyond the already approved indefinite no-delete rule remain separate gates. PR8 is not started or automatically unblocked.
+Previously unresolved accountant/legal decisions remain unresolved. Production VAT, rounding, minimum-term, evidence sufficiency, return/downtime/extension authority and precedence, activation, consumer aggregation, and retention controls beyond the already approved indefinite no-delete rule remain separate gates. The production read flag remains false by default, the resolver remains unconditional `null`, production calculation remains unreachable, and no canonical financial or PR6 source rows were created. The release marker is documentation only; it did not deploy, cut over, activate production behavior, implement the closed-unbilled or combined three-lane reporting lanes, expose `totalExpectedClientLoadMinor`, or switch Finance/Dashboard/Company Health/Risks. PR8 is not started or automatically unblocked.
 
-**Final status:** `PR7: REMEDIATED FOR REVIEW — NOT RELEASED`
+**Final status:** `PR7: RELEASED — Forecast Receivables Planning foundation only.`

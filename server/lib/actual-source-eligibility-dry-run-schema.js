@@ -514,6 +514,14 @@ function hasUnexpectedPartialState(db) {
   `).get() != null;
 }
 
+function compareSerialized(left, right) {
+  const serializedLeft = JSON.stringify(left);
+  const serializedRight = JSON.stringify(right);
+  if (serializedLeft < serializedRight) return -1;
+  if (serializedLeft > serializedRight) return 1;
+  return 0;
+}
+
 function canonicalForeignKeys(db, table) {
   const groups = new Map();
   for (const row of db.prepare(`PRAGMA foreign_key_list(${table})`).all()) {
@@ -530,7 +538,7 @@ function canonicalForeignKeys(db, table) {
       onDelete: ordered[0].on_delete,
       match: ordered[0].match,
     };
-  }).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  }).sort(compareSerialized);
 }
 
 function assertExactForeignKeys(db) {
@@ -538,7 +546,7 @@ function assertExactForeignKeys(db) {
     const actual = canonicalForeignKeys(db, table);
     const canonicalExpected = [...expected]
       .map(item => ({ ...item, from: [...item.from], to: [...item.to] }))
-      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+      .sort(compareSerialized);
     if (JSON.stringify(actual) !== JSON.stringify(canonicalExpected)) {
       throw new Error(`ACTUAL_SOURCE_PR8_FOREIGN_KEY_STRUCTURE_MISMATCH:${table}`);
     }
@@ -558,7 +566,14 @@ const SQLITE_KEYWORDS = new Set(`
   trigger unbounded union unique update using vacuum values view virtual when where window with without
 `.trim().split(/\s+/));
 
-const SIMPLE_SQLITE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]*$/;
+const SIMPLE_ASCII_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const NON_ASCII_CHARACTER = /[^\x00-\x7f]/;
+
+function asciiFoldIdentifier(value) {
+  return String(value).replace(/[A-Z]/g, character => (
+    String.fromCharCode(character.charCodeAt(0) + 0x20)
+  ));
+}
 
 function isIdentifierStart(character) {
   return /[A-Za-z_]/.test(character) || character.codePointAt(0) >= 0x80;
@@ -568,12 +583,17 @@ function isIdentifierPart(character) {
   return /[A-Za-z0-9_$]/.test(character) || character.codePointAt(0) >= 0x80;
 }
 
-function semanticIdentifierToken(value) {
-  const lower = value.toLowerCase();
-  if (SIMPLE_SQLITE_IDENTIFIER.test(value) && !SQLITE_KEYWORDS.has(lower)) {
-    return { kind: 'word', value: lower };
+function semanticIdentifierToken(value, { quoted = false } = {}) {
+  if (SIMPLE_ASCII_IDENTIFIER.test(value)) {
+    const folded = asciiFoldIdentifier(value);
+    if (!quoted || !SQLITE_KEYWORDS.has(folded)) {
+      return { kind: 'word', value: folded };
+    }
   }
-  return { kind: 'quoted_identifier', value };
+  if (NON_ASCII_CHARACTER.test(value)) {
+    return { kind: 'non_ascii_identifier', value };
+  }
+  return { kind: 'exact_identifier', value };
 }
 
 function tokenizeSql(value) {
@@ -648,14 +668,14 @@ function tokenizeSql(value) {
         }
       }
       if (!closed) return null;
-      tokens.push(semanticIdentifierToken(decoded));
+      tokens.push(semanticIdentifierToken(decoded, { quoted: true }));
       continue;
     }
 
     if (character === '[') {
       const closeIndex = sql.indexOf(']', index + 1);
       if (closeIndex < 0) return null;
-      tokens.push(semanticIdentifierToken(sql.slice(index + 1, closeIndex)));
+      tokens.push(semanticIdentifierToken(sql.slice(index + 1, closeIndex), { quoted: true }));
       index = closeIndex + 1;
       continue;
     }
@@ -686,7 +706,7 @@ function tokenizeSql(value) {
       const start = index;
       index += 1;
       while (index < sql.length && isIdentifierPart(sql[index])) index += 1;
-      tokens.push({ kind: 'word', value: sql.slice(start, index).toLowerCase() });
+      tokens.push(semanticIdentifierToken(sql.slice(start, index)));
       continue;
     }
 
@@ -798,9 +818,9 @@ function assertExactUniqueKeys(db) {
           .map(row => row.name),
         partial: Number(index.partial),
       }))
-      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+      .sort(compareSerialized);
     const expected = expectedKeys.map(columns => ({ columns, partial: 0 }))
-      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+      .sort(compareSerialized);
     if (JSON.stringify(actual) !== JSON.stringify(expected)) {
       throw new Error(`ACTUAL_SOURCE_PR8_INDEX_STRUCTURE_MISMATCH:${table}:unique_keys`);
     }
@@ -844,10 +864,15 @@ function assertExactIndexStructure(db) {
 }
 
 function assertExactTriggerStructure(db) {
+  const expectedTables = expectedTriggerTables();
   for (const [name, expectedSql] of Object.entries(expectedTriggerDefinitions())) {
-    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+    const row = db.prepare("SELECT tbl_name, sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
       .get(name);
-    if (!row || canonicalSql(row.sql) !== canonicalSql(expectedSql)) {
+    if (
+      !row
+      || row.tbl_name !== expectedTables[name]
+      || canonicalSql(row.sql) !== canonicalSql(expectedSql)
+    ) {
       throw new Error(`ACTUAL_SOURCE_PR8_TRIGGER_STRUCTURE_MISMATCH:${name}`);
     }
   }
@@ -1051,6 +1076,24 @@ function expectedTriggerDefinitions() {
   definitions.trg_actual_source_audit_before_seal = auditBeforeSealTriggerSql();
   definitions.trg_actual_source_operation_finalize_run = operationFinalizeTriggerSql();
   return definitions;
+}
+
+function expectedTriggerTables() {
+  const tables = {};
+  for (const table of ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_TABLES) {
+    tables[`trg_${table}_no_update`] = table;
+    tables[`trg_${table}_no_delete`] = table;
+  }
+  tables.trg_actual_source_dry_run_operations_no_replace = ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE;
+  tables.trg_actual_source_dry_run_audit_events_no_replace = ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE;
+  tables.trg_actual_source_input_before_seal = ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE;
+  tables.trg_actual_source_candidate_before_seal = ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE;
+  tables.trg_actual_source_check_before_seal = ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE;
+  tables.trg_actual_source_reconciliation_before_seal = ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE;
+  tables.trg_actual_source_diagnostic_before_seal = ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE;
+  tables.trg_actual_source_audit_before_seal = ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE;
+  tables.trg_actual_source_operation_finalize_run = ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE;
+  return tables;
 }
 
 function ensureActualSourceEligibilityDryRunSchema(db) {

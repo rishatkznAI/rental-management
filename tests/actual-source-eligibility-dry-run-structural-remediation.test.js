@@ -109,6 +109,7 @@ function assertRegisteredSchemaRejected(scenario) {
     }
     db = reopen(file, db);
     const mutatedSchemaFingerprint = registeredSchemaFingerprint(db);
+    scenario.assertMutation?.(db);
     assert.throws(
       () => assertActualSourceEligibilityDryRunStructure(db),
       scenario.expectedError,
@@ -120,6 +121,7 @@ function assertRegisteredSchemaRejected(scenario) {
     );
     assert.equal(registeredAt(db), appliedAt);
     assert.equal(registeredSchemaFingerprint(db), mutatedSchemaFingerprint);
+    scenario.assertMutation?.(db);
   } finally {
     db?.close();
     fs.rmSync(directory, { recursive: true, force: true });
@@ -196,10 +198,18 @@ test('semantic SQL canonicalization preserves literals, operators and meaningful
     canonicalSql(canonicalIndex),
   );
   assert.equal(canonicalSql('SELECT "RUNID"'), canonicalSql('select runId'));
+  assert.equal(canonicalSql('SELECT RUNID'), canonicalSql('select runId'));
+  assert.equal(canonicalSql('SELECT `RUNID`'), canonicalSql('select runId'));
+  assert.equal(canonicalSql('SELECT [RUNID]'), canonicalSql('select runId'));
+  assert.notEqual(canonicalSql('SELECT Key'), canonicalSql('SELECT key'));
+  assert.notEqual(canonicalSql('SELECT "Key"'), canonicalSql('SELECT key'));
+  assert.notEqual(canonicalSql('SELECT Ä'), canonicalSql('SELECT ä'));
+  assert.notEqual(canonicalSql('SELECT ｒunId'), canonicalSql('SELECT runId'));
   assert.notEqual(canonicalSql('SELECT "select"'), canonicalSql('SELECT select'));
   assert.notEqual(canonicalSql('SELECT "two words"'), canonicalSql('SELECT two words'));
   assert.notEqual(canonicalSql('SELECT "run""Id"'), canonicalSql('SELECT runId'));
   assert.notEqual(canonicalSql('SELECT `run``Id`'), canonicalSql('SELECT runId'));
+  assert.notEqual(canonicalSql('SELECT [run]]Id]'), canonicalSql('SELECT runId'));
   assert.notEqual(canonicalSql("CHECK (value = 'CHECK')"), canonicalSql("CHECK (value = 'check')"));
   assert.notEqual(canonicalSql('CHECK (value = 0)'), canonicalSql('CHECK (value = 0.0)'));
   assert.notEqual(canonicalSql('CHECK (value = 1)'), canonicalSql('CHECK (value = 01)'));
@@ -462,6 +472,42 @@ test('registered schema rejects disabled or weakened critical triggers', async t
       expectedError: /ACTUAL_SOURCE_PR8_TRIGGER_STRUCTURE_MISMATCH:trg_actual_source_operation_finalize_run/,
       rewrite: sql => sql.replace('WHEN NOT EXISTS (', 'WHEN 0 AND NOT EXISTS ('),
     },
+    {
+      name: 'operation finalization column uses Unicode lookalike',
+      type: 'trigger',
+      object: 'trg_actual_source_operation_finalize_run',
+      expectedError: /ACTUAL_SOURCE_PR8_TRIGGER_STRUCTURE_MISMATCH:trg_actual_source_operation_finalize_run/,
+      rewrite: sql => sql.replace('blockedCandidateCount', 'blocKedCandidateCount'),
+    },
+    {
+      name: 'checks no-update trigger targets a Unicode lookalike table',
+      expectedError: /ACTUAL_SOURCE_PR8_TRIGGER_STRUCTURE_MISMATCH:trg_actual_source_dry_run_checks_no_update/,
+      mutate(db) {
+        const triggerName = 'trg_actual_source_dry_run_checks_no_update';
+        const expectedTable = 'actual_source_dry_run_checks';
+        const lookalikeTable = 'actual_source_dry_run_checKs';
+        const triggerSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+          .get(triggerName).sql;
+        db.exec(`
+          DROP TRIGGER ${triggerName};
+          CREATE TABLE "${lookalikeTable}" (id TEXT);
+          ${triggerSql.replace(`ON ${expectedTable}`, `ON ${lookalikeTable}`)}
+        `);
+      },
+      assertMutation(db) {
+        const row = db.prepare(`
+          SELECT tbl_name AS tableName FROM sqlite_master
+          WHERE type = 'trigger' AND name = 'trg_actual_source_dry_run_checks_no_update'
+        `).get();
+        assert.equal(row.tableName, 'actual_source_dry_run_checKs');
+        assert.equal(db.prepare(`
+          SELECT COUNT(*) AS count FROM sqlite_master
+          WHERE type = 'trigger'
+            AND name = 'trg_actual_source_dry_run_checks_no_update'
+            AND tbl_name = 'actual_source_dry_run_checks'
+        `).get().count, 0);
+      },
+    },
   ];
   for (const scenario of scenarios) {
     await t.test(scenario.name, () => assertRegisteredSchemaRejected(scenario));
@@ -523,7 +569,14 @@ test('registered schema rejects partial, non-unique, expression or misdirected i
   }
 });
 
-test('semantically equivalent quoted index identifiers remain accepted', async t => {
+test('semantically equivalent ASCII index identifiers remain accepted', async t => {
+  await t.test('unquoted ASCII case', () => assertRegisteredSchemaAcceptedAfterMutation(db => {
+    db.exec(`
+      DROP INDEX uq_actual_source_candidate_key;
+      CREATE UNIQUE INDEX uq_actual_source_candidate_key
+      ON ACTUAL_SOURCE_DRY_RUN_CANDIDATES(RUNID, CANDIDATEKEY);
+    `);
+  }));
   const quoteStyles = [
     {
       name: 'double quotes',

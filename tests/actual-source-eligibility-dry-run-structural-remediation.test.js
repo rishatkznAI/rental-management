@@ -217,6 +217,54 @@ test('semantic SQL canonicalization preserves literals, operators and meaningful
   assert.notEqual(canonicalSql('CHECK (a AND b)'), canonicalSql('CHECK (a OR b)'));
 });
 
+test('semantic SQL canonicalization permits only explicit ASCII formatting whitespace', () => {
+  const expectedWord = canonicalSql('SELECT runId');
+  const expectedQualifiedWord = canonicalSql('SELECT run.blockedCandidateCount');
+  for (const whitespace of [' ', '\t', '\n', '\r', '\f']) {
+    assert.equal(canonicalSql(`SELECT${whitespace}runId`), expectedWord);
+    assert.equal(
+      canonicalSql(`SELECT run.${whitespace}blockedCandidateCount`),
+      expectedQualifiedWord,
+    );
+  }
+
+  const unexpectedSpacingCodePoints = [
+    '\u000b',
+    '\u0085',
+    '\u00a0',
+    '\u1680',
+    '\u2000',
+    '\u2001',
+    '\u2002',
+    '\u2003',
+    '\u2004',
+    '\u2005',
+    '\u2006',
+    '\u2007',
+    '\u2008',
+    '\u2009',
+    '\u200a',
+    '\u200b',
+    '\u2028',
+    '\u2029',
+    '\u202f',
+    '\u205f',
+    '\u2060',
+    '\u3000',
+    '\ufeff',
+  ];
+  for (const character of unexpectedSpacingCodePoints) {
+    const codePoint = `U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
+    assert.notEqual(canonicalSql(`SELECT ${character}runId`), expectedWord, codePoint);
+    assert.notEqual(
+      canonicalSql(`SELECT run.${character}blockedCandidateCount`),
+      expectedQualifiedWord,
+      codePoint,
+    );
+    assert.notEqual(canonicalSql(`SELECT runId${character}`), expectedWord, codePoint);
+  }
+});
+
 test('SQLite-aware scanner fails closed on unterminated lexical regions and CHECK parentheses', () => {
   for (const sql of [
     'CREATE TABLE t (value INTEGER) /* unterminated',
@@ -478,6 +526,16 @@ test('registered schema rejects disabled or weakened critical triggers', async t
       object: 'trg_actual_source_operation_finalize_run',
       expectedError: /ACTUAL_SOURCE_PR8_TRIGGER_STRUCTURE_MISMATCH:trg_actual_source_operation_finalize_run/,
       rewrite: sql => sql.replace('blockedCandidateCount', 'blocKedCandidateCount'),
+    },
+    {
+      name: 'operation finalization column starts with Unicode non-breaking space',
+      type: 'trigger',
+      object: 'trg_actual_source_operation_finalize_run',
+      expectedError: /ACTUAL_SOURCE_PR8_TRIGGER_STRUCTURE_MISMATCH:trg_actual_source_operation_finalize_run/,
+      rewrite: sql => sql.replace(
+        'run.blockedCandidateCount',
+        'run.\u00a0blockedCandidateCount',
+      ),
     },
     {
       name: 'checks no-update trigger targets a Unicode lookalike table',

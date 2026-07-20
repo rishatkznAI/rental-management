@@ -553,7 +553,30 @@ function assertExactForeignKeys(db) {
   }
 }
 
-const SQLITE_KEYWORDS = new Set(`
+function isAsciiSqlWhitespace(character) {
+  return character === ' '
+    || character === '\t'
+    || character === '\n'
+    || character === '\r'
+    || character === '\f';
+}
+
+function splitAsciiSqlWords(value) {
+  const words = [];
+  let word = '';
+  for (const character of String(value)) {
+    if (isAsciiSqlWhitespace(character)) {
+      if (word) words.push(word);
+      word = '';
+    } else {
+      word += character;
+    }
+  }
+  if (word) words.push(word);
+  return words;
+}
+
+const SQLITE_KEYWORDS = new Set(splitAsciiSqlWords(`
   abort action add after all alter always analyze and as asc attach autoincrement before begin between by
   cascade case cast check collate column commit conflict constraint create cross current current_date
   current_time current_timestamp database default deferrable deferred delete desc detach distinct do
@@ -564,7 +587,7 @@ const SQLITE_KEYWORDS = new Set(`
   preceding primary query raise range recursive references regexp reindex release rename replace restrict
   returning right rollback row rows savepoint select set table temp temporary then ties to transaction
   trigger unbounded union unique update using vacuum values view virtual when where window with without
-`.trim().split(/\s+/));
+`));
 
 const SIMPLE_ASCII_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const NON_ASCII_CHARACTER = /[^\x00-\x7f]/;
@@ -605,7 +628,7 @@ function tokenizeSql(value) {
     const character = sql[index];
     const next = sql[index + 1];
 
-    if (/\s/.test(character)) {
+    if (isAsciiSqlWhitespace(character)) {
       index += 1;
       continue;
     }

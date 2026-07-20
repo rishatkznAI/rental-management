@@ -15,6 +15,9 @@ const { ensureBillingSourceAuthoritySchema } = require('../server/lib/billing-so
 const { ensureForecastReceivablesPlanningSchema } = require('../server/lib/forecast-receivables-planning-schema.js');
 const {
   ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_MIGRATION_ID,
+  canonicalSql,
+  extractCheckExpressions,
+  tokenizeSql,
   assertActualSourceEligibilityDryRunStructure,
   ensureActualSourceEligibilityDryRunSchema,
 } = require('../server/lib/actual-source-eligibility-dry-run-schema.js');
@@ -41,6 +44,34 @@ function createFreshDatabase(file) {
 function registeredAt(db) {
   return db.prepare('SELECT applied_at FROM sql_shadow_schema_migrations WHERE name = ?')
     .get(ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_MIGRATION_ID).applied_at;
+}
+
+function registeredSchemaFingerprint(db) {
+  return JSON.stringify(db.prepare(`
+    SELECT type, name, tbl_name AS tableName, sql
+    FROM sqlite_master
+    WHERE name LIKE 'actual_source_%' OR name LIKE 'trg_actual_source_%'
+    ORDER BY type, name
+  `).all());
+}
+
+function readWithMalformedSchemaSuppressed(db, read) {
+  db.unsafeMode(true);
+  db.pragma('writable_schema = ON');
+  try {
+    return read();
+  } finally {
+    db.pragma('writable_schema = OFF');
+    db.unsafeMode(false);
+  }
+}
+
+function malformedSchemaFingerprint(db) {
+  return readWithMalformedSchemaSuppressed(db, () => registeredSchemaFingerprint(db));
+}
+
+function malformedRegisteredAt(db) {
+  return readWithMalformedSchemaSuppressed(db, () => registeredAt(db));
 }
 
 function rewriteRegisteredSql(db, type, name, rewrite) {
@@ -77,20 +108,214 @@ function assertRegisteredSchemaRejected(scenario) {
       scenario.mutate(db);
     }
     db = reopen(file, db);
+    const mutatedSchemaFingerprint = registeredSchemaFingerprint(db);
     assert.throws(
       () => assertActualSourceEligibilityDryRunStructure(db),
       scenario.expectedError,
     );
+    assert.equal(registeredSchemaFingerprint(db), mutatedSchemaFingerprint);
     assert.throws(
       () => ensureActualSourceEligibilityDryRunSchema(db),
       scenario.expectedError,
     );
     assert.equal(registeredAt(db), appliedAt);
+    assert.equal(registeredSchemaFingerprint(db), mutatedSchemaFingerprint);
   } finally {
     db?.close();
     fs.rmSync(directory, { recursive: true, force: true });
   }
 }
+
+function assertRegisteredSchemaAcceptedAfterMutation(mutate) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pr8-structure-positive-'));
+  const file = path.join(directory, 'app.sqlite');
+  let db = createFreshDatabase(file);
+  const appliedAt = registeredAt(db);
+  try {
+    mutate(db);
+    db = reopen(file, db);
+    const mutatedSchemaFingerprint = registeredSchemaFingerprint(db);
+    assert.equal(assertActualSourceEligibilityDryRunStructure(db), true);
+    assert.equal(registeredSchemaFingerprint(db), mutatedSchemaFingerprint);
+    assert.equal(ensureActualSourceEligibilityDryRunSchema(db), false);
+    assert.equal(registeredAt(db), appliedAt);
+    assert.equal(registeredSchemaFingerprint(db), mutatedSchemaFingerprint);
+  } finally {
+    db?.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function assertMalformedRegisteredSchemaRejected(scenario) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pr8-structure-malformed-'));
+  const file = path.join(directory, 'app.sqlite');
+  let db = createFreshDatabase(file);
+  const appliedAt = registeredAt(db);
+  try {
+    rewriteRegisteredSql(db, scenario.type, scenario.object, scenario.rewrite);
+    db = reopen(file, db);
+    const mutatedSchemaFingerprint = malformedSchemaFingerprint(db);
+    assert.throws(() => assertActualSourceEligibilityDryRunStructure(db), scenario.expectedError);
+    assert.equal(malformedRegisteredAt(db), appliedAt);
+    assert.equal(malformedSchemaFingerprint(db), mutatedSchemaFingerprint);
+    assert.throws(() => ensureActualSourceEligibilityDryRunSchema(db), scenario.expectedError);
+    assert.equal(malformedRegisteredAt(db), appliedAt);
+    assert.equal(malformedSchemaFingerprint(db), mutatedSchemaFingerprint);
+  } finally {
+    db?.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test('SQLite-aware scanner ignores CHECK text in non-executable lexical regions', () => {
+  const sql = `
+    CREATE TABLE scanner_probe (
+      value INTEGER,
+      note TEXT DEFAULT 'CHECK (literal_decoy)',
+      "CHECK (double_quoted_decoy)" TEXT,
+      \`CHECK (backtick_decoy)\` TEXT,
+      [CHECK (bracket_decoy)] TEXT,
+      CHECK (coalesce((value + 1), 0) > 0 AND note != 'CHECK (nested_literal)')
+      /* CHECK (block_comment_decoy) */
+      -- CHECK (line_comment_decoy)
+    )
+  `;
+  assert.deepEqual(extractCheckExpressions(sql), [
+    canonicalSql("coalesce((value + 1), 0) > 0 AND note != 'CHECK (nested_literal)'"),
+  ]);
+});
+
+test('semantic SQL canonicalization preserves literals, operators and meaningful quoting', () => {
+  const canonicalIndex = 'CREATE UNIQUE INDEX uq_probe ON actual_source_dry_run_candidates(runId, candidateKey)';
+  assert.equal(
+    canonicalSql('create unique index "uq_probe" on "actual_source_dry_run_candidates"("runId", "candidateKey")'),
+    canonicalSql(canonicalIndex),
+  );
+  assert.equal(
+    canonicalSql('CREATE UNIQUE INDEX `uq_probe` ON [actual_source_dry_run_candidates](`runId`, [candidateKey])'),
+    canonicalSql(canonicalIndex),
+  );
+  assert.equal(canonicalSql('SELECT "RUNID"'), canonicalSql('select runId'));
+  assert.notEqual(canonicalSql('SELECT "select"'), canonicalSql('SELECT select'));
+  assert.notEqual(canonicalSql('SELECT "two words"'), canonicalSql('SELECT two words'));
+  assert.notEqual(canonicalSql('SELECT "run""Id"'), canonicalSql('SELECT runId'));
+  assert.notEqual(canonicalSql('SELECT `run``Id`'), canonicalSql('SELECT runId'));
+  assert.notEqual(canonicalSql("CHECK (value = 'CHECK')"), canonicalSql("CHECK (value = 'check')"));
+  assert.notEqual(canonicalSql('CHECK (value = 0)'), canonicalSql('CHECK (value = 0.0)'));
+  assert.notEqual(canonicalSql('CHECK (value = 1)'), canonicalSql('CHECK (value = 01)'));
+  assert.notEqual(canonicalSql('CHECK (value = 1)'), canonicalSql('CHECK (value == 1)'));
+  assert.notEqual(canonicalSql('CHECK (a AND b)'), canonicalSql('CHECK (a OR b)'));
+});
+
+test('SQLite-aware scanner fails closed on unterminated lexical regions and CHECK parentheses', () => {
+  for (const sql of [
+    'CREATE TABLE t (value INTEGER) /* unterminated',
+    "CREATE TABLE t (value TEXT DEFAULT 'unterminated)",
+    'CREATE TABLE t ("unterminated TEXT)',
+    'CREATE TABLE t (`unterminated TEXT)',
+    'CREATE TABLE t ([unterminated TEXT)',
+  ]) {
+    assert.equal(tokenizeSql(sql), null, sql);
+    assert.equal(extractCheckExpressions(sql), null, sql);
+  }
+  assert.equal(extractCheckExpressions('CREATE TABLE t (value INTEGER CHECK ((value > 0)'), null);
+});
+
+test('registered startup fails closed on malformed persisted CHECK SQL without repair', async t => {
+  const table = 'actual_source_dry_run_candidates';
+  const inertnessCheck = 'CHECK (diagnosticOnly = 1 AND canonicalWriteAuthorized = 0 AND productionActivationAuthorized = 0)';
+  const malformedSqlError = /ACTUAL_SOURCE_PR8_(?:TABLE_CONSTRAINT_MISMATCH|SCHEMA_INCOMPLETE)|malformed database schema|unrecognized token|incomplete input/i;
+  const scenarios = [
+    {
+      name: 'unterminated block comment',
+      type: 'table',
+      object: table,
+      expectedError: malformedSqlError,
+      rewrite: sql => `${sql} /* unterminated`,
+    },
+    {
+      name: 'unterminated string literal',
+      type: 'table',
+      object: table,
+      expectedError: malformedSqlError,
+      rewrite: sql => `${sql} 'unterminated`,
+    },
+    {
+      name: 'unbalanced CHECK parentheses',
+      type: 'table',
+      object: table,
+      expectedError: malformedSqlError,
+      rewrite: sql => sql.replace(`${inertnessCheck},`, `${inertnessCheck.slice(0, -1)},`),
+    },
+  ];
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, () => assertMalformedRegisteredSchemaRejected(scenario));
+  }
+});
+
+test('registered schema rejects critical CHECK text found only in non-executable regions', async t => {
+  const table = 'actual_source_dry_run_candidates';
+  const expectedError = /ACTUAL_SOURCE_PR8_TABLE_CONSTRAINT_MISMATCH:actual_source_dry_run_candidates/;
+  const inertnessCheck = 'CHECK (diagnosticOnly = 1 AND canonicalWriteAuthorized = 0 AND productionActivationAuthorized = 0)';
+  const addConstraintNameDecoy = (sql, open, close) => sql
+    .replace(`${inertnessCheck},`, '')
+    .replace(
+      "CHECK (createdAt GLOB '????-??-??T??:??:??.???Z')",
+      `CONSTRAINT ${open}${inertnessCheck}${close} CHECK (createdAt GLOB '????-??-??T??:??:??.???Z')`,
+    );
+  const scenarios = [
+    {
+      name: 'block comment decoy',
+      type: 'table',
+      object: table,
+      expectedError,
+      rewrite: sql => sql.replace(`${inertnessCheck},`, `/* ${inertnessCheck} */`),
+    },
+    {
+      name: 'line comment decoy',
+      type: 'table',
+      object: table,
+      expectedError,
+      rewrite: sql => sql.replace(`${inertnessCheck},`, `-- ${inertnessCheck}\n`),
+    },
+    {
+      name: 'single-quoted DEFAULT decoy',
+      type: 'table',
+      object: table,
+      expectedError,
+      rewrite: sql => sql
+        .replace(
+          'currentConductedUpdVersionId TEXT,',
+          `currentConductedUpdVersionId TEXT DEFAULT '${inertnessCheck}',`,
+        )
+        .replace(`${inertnessCheck},`, ''),
+    },
+    {
+      name: 'double-quoted identifier decoy',
+      type: 'table',
+      object: table,
+      expectedError,
+      rewrite: sql => addConstraintNameDecoy(sql, '"', '"'),
+    },
+    {
+      name: 'backtick-quoted identifier decoy',
+      type: 'table',
+      object: table,
+      expectedError,
+      rewrite: sql => addConstraintNameDecoy(sql, '`', '`'),
+    },
+    {
+      name: 'bracket-quoted identifier decoy',
+      type: 'table',
+      object: table,
+      expectedError,
+      rewrite: sql => addConstraintNameDecoy(sql, '[', ']'),
+    },
+  ];
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, () => assertRegisteredSchemaRejected(scenario));
+  }
+});
 
 test('registered schema rejects weakened critical CHECK expressions', async t => {
   const candidateTable = 'actual_source_dry_run_candidates';
@@ -295,6 +520,36 @@ test('registered schema rejects partial, non-unique, expression or misdirected i
   ];
   for (const scenario of scenarios) {
     await t.test(scenario.name, () => assertRegisteredSchemaRejected(scenario));
+  }
+});
+
+test('semantically equivalent quoted index identifiers remain accepted', async t => {
+  const quoteStyles = [
+    {
+      name: 'double quotes',
+      identifier: value => `"${value}"`,
+    },
+    {
+      name: 'backticks',
+      identifier: value => `\`${value}\``,
+    },
+    {
+      name: 'brackets',
+      identifier: value => `[${value}]`,
+    },
+  ];
+  for (const quoteStyle of quoteStyles) {
+    await t.test(quoteStyle.name, () => assertRegisteredSchemaAcceptedAfterMutation(db => {
+      const identifier = quoteStyle.identifier;
+      db.exec(`
+        DROP INDEX uq_actual_source_candidate_key;
+        CREATE UNIQUE INDEX ${identifier('uq_actual_source_candidate_key')}
+        ON ${identifier('actual_source_dry_run_candidates')}(
+          ${identifier('runId')},
+          ${identifier('candidateKey')}
+        );
+      `);
+    }));
   }
 });
 

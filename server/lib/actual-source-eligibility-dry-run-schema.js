@@ -545,67 +545,227 @@ function assertExactForeignKeys(db) {
   }
 }
 
-function canonicalSql(value) {
+const SQLITE_KEYWORDS = new Set(`
+  abort action add after all alter always analyze and as asc attach autoincrement before begin between by
+  cascade case cast check collate column commit conflict constraint create cross current current_date
+  current_time current_timestamp database default deferrable deferred delete desc detach distinct do
+  drop each else end escape except exclude exclusive exists explain fail filter first following for
+  foreign from full generated glob group groups having if ignore immediate in index indexed initially
+  inner insert instead intersect into is isnull join key last left like limit match materialized natural
+  no not nothing notnull null nulls of offset on or order others outer over partition plan pragma
+  preceding primary query raise range recursive references regexp reindex release rename replace restrict
+  returning right rollback row rows savepoint select set table temp temporary then ties to transaction
+  trigger unbounded union unique update using vacuum values view virtual when where window with without
+`.trim().split(/\s+/));
+
+const SIMPLE_SQLITE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]*$/;
+
+function isIdentifierStart(character) {
+  return /[A-Za-z_]/.test(character) || character.codePointAt(0) >= 0x80;
+}
+
+function isIdentifierPart(character) {
+  return /[A-Za-z0-9_$]/.test(character) || character.codePointAt(0) >= 0x80;
+}
+
+function semanticIdentifierToken(value) {
+  const lower = value.toLowerCase();
+  if (SIMPLE_SQLITE_IDENTIFIER.test(value) && !SQLITE_KEYWORDS.has(lower)) {
+    return { kind: 'word', value: lower };
+  }
+  return { kind: 'quoted_identifier', value };
+}
+
+function tokenizeSql(value) {
   const sql = String(value || '');
-  let result = '';
-  let quote = null;
-  for (let index = 0; index < sql.length; index += 1) {
+  const tokens = [];
+  let index = 0;
+
+  while (index < sql.length) {
     const character = sql[index];
-    if (quote) {
-      result += character;
-      if (character === quote) {
-        if (sql[index + 1] === quote) {
-          result += sql[index + 1];
-          index += 1;
-        } else {
-          quote = null;
-        }
-      }
+    const next = sql[index + 1];
+
+    if (/\s/.test(character)) {
+      index += 1;
       continue;
     }
-    if (character === "'") {
-      quote = character;
-      result += character;
-    } else if (!/\s/.test(character)) {
-      result += character.toLowerCase();
+
+    if (character === '-' && next === '-') {
+      index += 2;
+      while (index < sql.length && sql[index] !== '\n' && sql[index] !== '\r') index += 1;
+      continue;
     }
+
+    if (character === '/' && next === '*') {
+      const closeIndex = sql.indexOf('*/', index + 2);
+      if (closeIndex < 0) return null;
+      index = closeIndex + 2;
+      continue;
+    }
+
+    if (character === "'") {
+      let decoded = '';
+      let closed = false;
+      index += 1;
+      while (index < sql.length) {
+        if (sql[index] === "'") {
+          if (sql[index + 1] === "'") {
+            decoded += "'";
+            index += 2;
+          } else {
+            index += 1;
+            closed = true;
+            break;
+          }
+        } else {
+          decoded += sql[index];
+          index += 1;
+        }
+      }
+      if (!closed) return null;
+      tokens.push({ kind: 'string', value: decoded });
+      continue;
+    }
+
+    if (character === '"' || character === '`') {
+      const delimiter = character;
+      let decoded = '';
+      let closed = false;
+      index += 1;
+      while (index < sql.length) {
+        if (sql[index] === delimiter) {
+          if (sql[index + 1] === delimiter) {
+            decoded += delimiter;
+            index += 2;
+          } else {
+            index += 1;
+            closed = true;
+            break;
+          }
+        } else {
+          decoded += sql[index];
+          index += 1;
+        }
+      }
+      if (!closed) return null;
+      tokens.push(semanticIdentifierToken(decoded));
+      continue;
+    }
+
+    if (character === '[') {
+      const closeIndex = sql.indexOf(']', index + 1);
+      if (closeIndex < 0) return null;
+      tokens.push(semanticIdentifierToken(sql.slice(index + 1, closeIndex)));
+      index = closeIndex + 1;
+      continue;
+    }
+
+    if (/[0-9]/.test(character) || (character === '.' && /[0-9]/.test(next || ''))) {
+      const start = index;
+      if (character === '0' && (next === 'x' || next === 'X')) {
+        index += 2;
+        while (index < sql.length && /[0-9A-Fa-f]/.test(sql[index])) index += 1;
+      } else {
+        if (character === '.') index += 1;
+        while (index < sql.length && /[0-9]/.test(sql[index])) index += 1;
+        if (sql[index] === '.') {
+          index += 1;
+          while (index < sql.length && /[0-9]/.test(sql[index])) index += 1;
+        }
+        if (sql[index] === 'e' || sql[index] === 'E') {
+          index += 1;
+          if (sql[index] === '+' || sql[index] === '-') index += 1;
+          while (index < sql.length && /[0-9]/.test(sql[index])) index += 1;
+        }
+      }
+      tokens.push({ kind: 'number', value: sql.slice(start, index) });
+      continue;
+    }
+
+    if (isIdentifierStart(character)) {
+      const start = index;
+      index += 1;
+      while (index < sql.length && isIdentifierPart(sql[index])) index += 1;
+      tokens.push({ kind: 'word', value: sql.slice(start, index).toLowerCase() });
+      continue;
+    }
+
+    const multiCharacterOperator = ['->>', '||', '<<', '>>', '<=', '>=', '==', '!=', '<>', '->']
+      .find(operator => sql.startsWith(operator, index));
+    if (multiCharacterOperator) {
+      tokens.push({ kind: 'operator', value: multiCharacterOperator });
+      index += multiCharacterOperator.length;
+      continue;
+    }
+
+    if ('+-*/%~&|<>='.includes(character)) {
+      tokens.push({ kind: 'operator', value: character });
+      index += 1;
+      continue;
+    }
+
+    if ('(),;.'.includes(character)) {
+      tokens.push({ kind: 'punctuation', value: character });
+      index += 1;
+      continue;
+    }
+
+    tokens.push({ kind: 'symbol', value: character });
+    index += 1;
   }
-  if (quote) return null;
-  return result.replace(/;+$/, '');
+
+  return tokens;
+}
+
+function canonicalizeSqlTokens(tokens, { stripTrailingSemicolons = true } = {}) {
+  const canonicalTokens = [...tokens];
+  if (stripTrailingSemicolons) {
+    while (
+      canonicalTokens.length > 0
+      && canonicalTokens.at(-1).kind === 'punctuation'
+      && canonicalTokens.at(-1).value === ';'
+    ) canonicalTokens.pop();
+  }
+  return JSON.stringify(canonicalTokens.map(token => [token.kind, token.value]));
+}
+
+function canonicalSql(value) {
+  const tokens = tokenizeSql(value);
+  return tokens ? canonicalizeSqlTokens(tokens) : null;
 }
 
 function extractCheckExpressions(sql) {
+  const tokens = tokenizeSql(sql);
+  if (!tokens) return null;
   const expressions = [];
-  const pattern = /\bCHECK\s*\(/gi;
-  let match;
-  while ((match = pattern.exec(sql)) !== null) {
-    const openIndex = match.index + match[0].lastIndexOf('(');
-    let depth = 0;
-    let quote = null;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token.kind !== 'word' || token.value !== 'check') continue;
+    const open = tokens[index + 1];
+    if (!open || open.kind !== 'punctuation' || open.value !== '(') return null;
+
+    let depth = 1;
     let closeIndex = -1;
-    for (let index = openIndex; index < sql.length; index += 1) {
-      const character = sql[index];
-      if (quote) {
-        if (character === quote) {
-          if (sql[index + 1] === quote) index += 1;
-          else quote = null;
-        }
-        continue;
-      }
-      if (character === "'") quote = character;
-      else if (character === '(') depth += 1;
-      else if (character === ')') {
+    for (let cursor = index + 2; cursor < tokens.length; cursor += 1) {
+      const current = tokens[cursor];
+      if (current.kind !== 'punctuation') continue;
+      if (current.value === '(') depth += 1;
+      else if (current.value === ')') {
         depth -= 1;
         if (depth === 0) {
-          closeIndex = index;
+          closeIndex = cursor;
           break;
         }
       }
     }
-    if (closeIndex < 0 || quote) return null;
-    expressions.push(sql.slice(openIndex + 1, closeIndex));
-    pattern.lastIndex = closeIndex + 1;
+    if (closeIndex < 0) return null;
+    expressions.push(canonicalizeSqlTokens(tokens.slice(index + 2, closeIndex), {
+      stripTrailingSemicolons: false,
+    }));
+    index = closeIndex;
   }
+
   return expressions;
 }
 
@@ -617,7 +777,7 @@ function assertExactCriticalChecks(db) {
   for (const [table, expectedChecks] of Object.entries(CRITICAL_TABLE_CHECKS)) {
     const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
     const actualChecks = row ? extractCheckExpressions(row.sql) : null;
-    const canonicalActual = actualChecks ? canonicalList(actualChecks) : null;
+    const canonicalActual = actualChecks ? [...actualChecks].sort() : null;
     if (
       !canonicalActual
       || canonicalActual.includes(null)
@@ -1431,6 +1591,9 @@ module.exports = {
   REQUIRED_COLUMNS,
   REQUIRED_INDEXES,
   REQUIRED_TRIGGERS,
+  canonicalSql,
+  extractCheckExpressions,
+  tokenizeSql,
   assertActualSourceEligibilityDryRunStructure,
   ensureActualSourceEligibilityDryRunSchema,
 };

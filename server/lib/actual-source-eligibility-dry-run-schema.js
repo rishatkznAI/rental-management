@@ -435,12 +435,46 @@ const EXPECTED_FOREIGN_KEYS = Object.freeze({
   ],
 });
 
+function isAsciiIdentifier(value) {
+  for (const character of String(value)) {
+    if (character.codePointAt(0) > 0x7f) return false;
+  }
+  return true;
+}
+
+function foldAsciiIdentifier(value) {
+  let folded = '';
+  for (const character of String(value)) {
+    const codePoint = character.codePointAt(0);
+    folded += codePoint >= 0x41 && codePoint <= 0x5a
+      ? String.fromCodePoint(codePoint + 0x20)
+      : character;
+  }
+  return folded;
+}
+
+function sameBoundedSqliteIdentifier(left, right) {
+  const leftText = String(left);
+  const rightText = String(right);
+  if (isAsciiIdentifier(leftText) && isAsciiIdentifier(rightText)) {
+    return foldAsciiIdentifier(leftText) === foldAsciiIdentifier(rightText);
+  }
+  return leftText === rightText;
+}
+
+function sqliteMasterObject(db, type, name) {
+  const matches = db.prepare(`
+    SELECT name, tbl_name, sql FROM sqlite_master WHERE type = ?
+  `).all(type).filter(row => sameBoundedSqliteIdentifier(row.name, name));
+  return matches.length === 1 ? matches[0] : null;
+}
+
 function tableExists(db, table) {
-  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
+  return sqliteMasterObject(db, 'table', table) != null;
 }
 
 function objectExists(db, type, name) {
-  return Boolean(db.prepare('SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?').get(type, name));
+  return sqliteMasterObject(db, type, name) != null;
 }
 
 function migrationRow(db, name) {
@@ -592,12 +626,6 @@ const SQLITE_KEYWORDS = new Set(splitAsciiSqlWords(`
 const SIMPLE_ASCII_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const NON_ASCII_CHARACTER = /[^\x00-\x7f]/;
 
-function asciiFoldIdentifier(value) {
-  return String(value).replace(/[A-Z]/g, character => (
-    String.fromCharCode(character.charCodeAt(0) + 0x20)
-  ));
-}
-
 function isIdentifierStart(character) {
   return /[A-Za-z_]/.test(character) || character.codePointAt(0) >= 0x80;
 }
@@ -608,7 +636,7 @@ function isIdentifierPart(character) {
 
 function semanticIdentifierToken(value, { quoted = false } = {}) {
   if (SIMPLE_ASCII_IDENTIFIER.test(value)) {
-    const folded = asciiFoldIdentifier(value);
+    const folded = foldAsciiIdentifier(value);
     if (!quoted || !SQLITE_KEYWORDS.has(folded)) {
       return { kind: 'word', value: folded };
     }
@@ -818,7 +846,7 @@ function canonicalList(values) {
 
 function assertExactCriticalChecks(db) {
   for (const [table, expectedChecks] of Object.entries(CRITICAL_TABLE_CHECKS)) {
-    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+    const row = sqliteMasterObject(db, 'table', table);
     const actualChecks = row ? extractCheckExpressions(row.sql) : null;
     const canonicalActual = actualChecks ? [...actualChecks].sort() : null;
     if (
@@ -853,10 +881,9 @@ function assertExactUniqueKeys(db) {
 function assertExactIndexStructure(db) {
   for (const [name, expectedSql] of Object.entries(EXPECTED_INDEX_DEFINITIONS)) {
     const metadata = EXPECTED_INDEX_METADATA[name];
-    const row = db.prepare("SELECT tbl_name, sql FROM sqlite_master WHERE type = 'index' AND name = ?")
-      .get(name);
+    const row = sqliteMasterObject(db, 'index', name);
     const index = db.prepare(`PRAGMA index_list(${metadata.table})`).all()
-      .find(item => item.name === name);
+      .find(item => sameBoundedSqliteIdentifier(item.name, name));
     const info = row ? db.prepare(`PRAGMA index_info(${name})`).all()
       .sort((left, right) => Number(left.seqno) - Number(right.seqno)) : [];
     const keyInfo = row ? db.prepare(`PRAGMA index_xinfo(${name})`).all()
@@ -869,7 +896,7 @@ function assertExactIndexStructure(db) {
     }));
     if (
       !row
-      || row.tbl_name !== metadata.table
+      || !sameBoundedSqliteIdentifier(row.tbl_name, metadata.table)
       || canonicalSql(row.sql) !== canonicalSql(expectedSql)
       || !index
       || Number(index.unique) !== metadata.unique
@@ -889,11 +916,10 @@ function assertExactIndexStructure(db) {
 function assertExactTriggerStructure(db) {
   const expectedTables = expectedTriggerTables();
   for (const [name, expectedSql] of Object.entries(expectedTriggerDefinitions())) {
-    const row = db.prepare("SELECT tbl_name, sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
-      .get(name);
+    const row = sqliteMasterObject(db, 'trigger', name);
     if (
       !row
-      || row.tbl_name !== expectedTables[name]
+      || !sameBoundedSqliteIdentifier(row.tbl_name, expectedTables[name])
       || canonicalSql(row.sql) !== canonicalSql(expectedSql)
     ) {
       throw new Error(`ACTUAL_SOURCE_PR8_TRIGGER_STRUCTURE_MISMATCH:${name}`);
@@ -1657,6 +1683,7 @@ module.exports = {
   REQUIRED_COLUMNS,
   REQUIRED_INDEXES,
   REQUIRED_TRIGGERS,
+  sameBoundedSqliteIdentifier,
   canonicalSql,
   extractCheckExpressions,
   tokenizeSql,

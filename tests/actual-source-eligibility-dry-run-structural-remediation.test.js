@@ -15,6 +15,7 @@ const { ensureBillingSourceAuthoritySchema } = require('../server/lib/billing-so
 const { ensureForecastReceivablesPlanningSchema } = require('../server/lib/forecast-receivables-planning-schema.js');
 const {
   ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_MIGRATION_ID,
+  sameBoundedSqliteIdentifier,
   canonicalSql,
   extractCheckExpressions,
   tokenizeSql,
@@ -263,6 +264,40 @@ test('semantic SQL canonicalization permits only explicit ASCII formatting white
     );
     assert.notEqual(canonicalSql(`SELECT runId${character}`), expectedWord, codePoint);
   }
+});
+
+test('bounded SQLite identifier comparison folds only all-ASCII identifiers', () => {
+  const expected = 'actual_source_dry_run_checks';
+  for (const equivalent of [
+    expected,
+    'ACTUAL_SOURCE_DRY_RUN_CHECKS',
+    'AcTuAl_SoUrCe_DrY_RuN_ChEcKs',
+  ]) {
+    assert.equal(sameBoundedSqliteIdentifier(equivalent, expected), true, equivalent);
+    assert.equal(sameBoundedSqliteIdentifier(expected, equivalent), true, equivalent);
+  }
+
+  const distinct = [
+    'actual_sourсe_dry_run_checks',
+    'actuαl_source_dry_run_checks',
+    'actual_source_dry_run_checkİ',
+    'actual_source_dry_run_checkı',
+    'actual_source_dry_run_checkß',
+    'actual_source_dry_run_checKs',
+    'ａｃｔｕａｌ_source_dry_run_checks',
+    'actual_source_dry_run_chécks',
+    'actual_source_dry_run_chécks',
+    'actual_source_dry_run_check𝕤',
+    'actual_source_dry_run_check\u200bs',
+    'actual_source_dry_run_check\u00a0s',
+    'actual_source_dry_run_checks\u3000',
+  ];
+  for (const identifier of distinct) {
+    assert.equal(sameBoundedSqliteIdentifier(identifier, expected), false, identifier);
+    assert.equal(sameBoundedSqliteIdentifier(expected, identifier), false, identifier);
+  }
+  assert.equal(sameBoundedSqliteIdentifier('Ä', 'ä'), false);
+  assert.equal(sameBoundedSqliteIdentifier('Ä', 'Ä'), true);
 });
 
 test('SQLite-aware scanner fails closed on unterminated lexical regions and CHECK parentheses', () => {
@@ -566,6 +601,30 @@ test('registered schema rejects disabled or weakened critical triggers', async t
         `).get().count, 0);
       },
     },
+    {
+      name: 'checks no-update trigger uses a Unicode lookalike name',
+      expectedError: /ACTUAL_SOURCE_PR8_SCHEMA_INCOMPLETE:trg_actual_source_dry_run_checks_no_update/,
+      mutate(db) {
+        const triggerName = 'trg_actual_source_dry_run_checks_no_update';
+        const lookalikeName = 'trg_actual_source_dry_run_checKs_no_update';
+        const triggerSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+          .get(triggerName).sql;
+        db.exec(`
+          DROP TRIGGER ${triggerName};
+          ${triggerSql.replace(`CREATE TRIGGER ${triggerName}`, `CREATE TRIGGER ${lookalikeName}`)}
+        `);
+      },
+      assertMutation(db) {
+        assert.equal(db.prepare(`
+          SELECT COUNT(*) AS count FROM sqlite_master
+          WHERE type = 'trigger' AND name = 'trg_actual_source_dry_run_checKs_no_update'
+        `).get().count, 1);
+        assert.equal(db.prepare(`
+          SELECT COUNT(*) AS count FROM sqlite_master
+          WHERE type = 'trigger' AND name = 'trg_actual_source_dry_run_checks_no_update'
+        `).get().count, 0);
+      },
+    },
   ];
   for (const scenario of scenarios) {
     await t.test(scenario.name, () => assertRegisteredSchemaRejected(scenario));
@@ -659,6 +718,48 @@ test('semantically equivalent ASCII index identifiers remain accepted', async t 
           ${identifier('runId')},
           ${identifier('candidateKey')}
         );
+      `);
+    }));
+  }
+});
+
+test('semantically equivalent ASCII trigger names and targets remain accepted', async t => {
+  const triggerName = 'trg_actual_source_dry_run_checks_no_update';
+  const mixedCaseTriggerName = 'TrG_Actual_Source_Dry_Run_Checks_No_Update';
+  const targetTable = 'actual_source_dry_run_checks';
+  const mixedCaseTargetTable = 'AcTuAl_SoUrCe_DrY_RuN_ChEcKs';
+  const quoteStyles = [
+    {
+      name: 'unquoted',
+      identifier: value => value,
+    },
+    {
+      name: 'double quotes',
+      identifier: value => `"${value}"`,
+    },
+    {
+      name: 'backticks',
+      identifier: value => `\`${value}\``,
+    },
+    {
+      name: 'brackets',
+      identifier: value => `[${value}]`,
+    },
+  ];
+  for (const quoteStyle of quoteStyles) {
+    await t.test(quoteStyle.name, () => assertRegisteredSchemaAcceptedAfterMutation(db => {
+      const triggerSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+        .get(triggerName).sql;
+      const identifier = quoteStyle.identifier;
+      const mixedCaseTriggerSql = triggerSql
+        .replace(
+          `CREATE TRIGGER ${triggerName}`,
+          `CREATE TRIGGER ${identifier(mixedCaseTriggerName)}`,
+        )
+        .replace(`ON ${targetTable}`, `ON ${identifier(mixedCaseTargetTable)}`);
+      db.exec(`
+        DROP TRIGGER ${triggerName};
+        ${mixedCaseTriggerSql}
       `);
     }));
   }

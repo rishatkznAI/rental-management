@@ -26,6 +26,10 @@
 
 **Second focused remediation implementation commit/head:** `974c3407e9b1a54f99beacfdd123ff070227210e`
 
+**Third focused remediation starting head:** `0ed8f18f4786c94d1ce769871bfebabbe1432c0e` (exact match)
+
+**Third focused remediation implementation commit/head:** `1dd5aca4634651f4708bc9ac5b3ca6062f8efc44`
+
 **Migration:** `actual_source_eligibility_dry_run_pr8`, version `1`
 
 This record describes a fail-closed diagnostic foundation proposed for review. It is not a release record, source-authority approval, accounting or legal approval, production activation, canonical-write authorization, PR9 authorization, deployment, or cutover.
@@ -47,9 +51,14 @@ The second focused remediation closes two follow-up findings without changing th
 1. **P1 registered-schema validation:** startup now compares the exact canonical critical `CHECK` expression sets, the complete canonical SQL and SQLite metadata for every named PR8 index, every unique key, and the complete canonical SQL for every PR8 trigger. A registered v1 schema with a removed or weakened constraint, a partial/non-unique/expression/misdirected index, or a disabled/weakened trigger fails closed on both direct assertion and repeated startup; no automatic repair is attempted and `applied_at` is unchanged.
 2. **P2 audit attribution description:** PR6 audit rows do have a required `sourceSystem`. That value is repository-generated audit attribution metadata; it is not a separate economic or evidence source-owner assertion. The v1 ownership manifest therefore intentionally classifies audit rows as PR6 repository lineage and does not use their attribution value as adapter authority.
 
+The third focused remediation closes two structural-review findings without changing the migration, table set, or runtime boundary:
+
+1. **P1 executable `CHECK` extraction:** registered table SQL is now read through one deterministic SQLite-aware lexical scanner. Line and block comments are discarded; single-quoted literals and double-, backtick-, or bracket-quoted identifiers remain atomic tokens; only an executable `CHECK` keyword followed by a balanced parenthesized token stream contributes to the exact constraint multiset. Unterminated lexical regions and unbalanced `CHECK` expressions fail closed. Textual decoys in comments, defaults, or quoted constraint names cannot replace an executable critical constraint.
+2. **P2 quoted identifier equivalence:** index and trigger definitions now use semantic token canonicalization instead of lowercased whitespace stripping. Keyword and unquoted-identifier case and harmless comments/formatting are insignificant. Double-, backtick-, and bracket-quoted simple non-keyword identifiers normalize to the same case-insensitive identifier value, while string values, numeric spellings, operators, keyword-as-identifier quoting, spaces, and embedded escaped delimiters remain significant.
+
 ## Repository and source audit
 
-For the first remediation, `git fetch origin --prune` confirmed `origin/main` at `66659c1296e05424179e2b4cc6ee1924ece4fbc9`. GitHub PR #216 and `origin/codex/pr8-actual-source-eligibility-dry-run` both pointed to `3f498cf3cfa513b923cfdc0e7a8c21ecaae84e55`, exactly the independently reviewed head. For the second focused remediation, `origin/main` remained at the same SHA and the local branch, remote branch, and PR head all exactly matched `285d32e24b8eb0c97e95b5d84c8d7d74cb365ef0`; the target worktree was clean. The complete PR diff and commits were reread, and GitHub comments, reviews, and review threads remained empty. The follow-up findings therefore remained directly applicable without rebasing or adapting to unreviewed changes.
+For the first remediation, `git fetch origin --prune` confirmed `origin/main` at `66659c1296e05424179e2b4cc6ee1924ece4fbc9`. GitHub PR #216 and `origin/codex/pr8-actual-source-eligibility-dry-run` both pointed to `3f498cf3cfa513b923cfdc0e7a8c21ecaae84e55`, exactly the independently reviewed head. For the second focused remediation, `origin/main` remained at the same SHA and the local branch, remote branch, and PR head all exactly matched `285d32e24b8eb0c97e95b5d84c8d7d74cb365ef0`; the target worktree was clean. For the third focused remediation, `origin/main` and the merge base remained unchanged, while the local branch, remote branch, and PR head exactly matched the independently reviewed `0ed8f18f4786c94d1ce769871bfebabbe1432c0e`; the target worktree was clean. The complete PR diff and commits were reread, and GitHub comments, reviews, and review threads remained empty. The follow-up findings therefore remained directly applicable without rebasing or adapting to unreviewed changes.
 
 The PR6 and PR7 release boundaries remain intact. PR6 is an isolated Billing Source Authority foundation; PR7 is an isolated Forecast Receivables Planning foundation. Neither release enabled canonical writes, production source/forecast adapters, production policy, production bootstrap, consumer switching, deployment, or cutover.
 
@@ -89,7 +98,7 @@ One immediate transaction creates exactly these eight tables and registers the m
 7. `actual_source_dry_run_operations`
 8. `actual_source_dry_run_audit_events`
 
-Every table rejects `UPDATE` and `DELETE`. Operations and audit rows also reject replacement. Operation insertion is the final seal: later input, candidate, check, reconciliation, diagnostic, or audit-link insertion is rejected. Candidate and input activation-boundary lineage has an exact `(activationBoundaryId, companyId, branchId)` foreign key to the PR6 activation boundary. Candidate children use `(candidateId, runId, companyId, branchId)` so a child cannot combine one run with another run's candidate; nullable `candidateId` remains reserved for complete run-level rows. Startup reconstructs the exact foreign-key map from `PRAGMA foreign_key_list`, including tables, ordered from/to columns, and `RESTRICT` behavior. It also compares the exact canonical critical `CHECK` set for every PR8 table, all expected unique keys, the complete canonical `sqlite_master.sql` for all 14 named indexes and every PR8 trigger, and index table/uniqueness/partial/ordered-key/expression/collation/direction metadata from `PRAGMA index_list`, `index_info`, and `index_xinfo`. Normal whitespace and SQL-keyword case are insignificant, while predicates, constants, expressions, events, targets, bodies, and conflict behavior remain significant. Registered weakened or misdirected schemas fail closed on initial and repeated startup. Repeated valid startup preserves the original `applied_at`. There is no down/delete migration, TTL, purge, cleanup worker, or finite retention.
+Every table rejects `UPDATE` and `DELETE`. Operations and audit rows also reject replacement. Operation insertion is the final seal: later input, candidate, check, reconciliation, diagnostic, or audit-link insertion is rejected. Candidate and input activation-boundary lineage has an exact `(activationBoundaryId, companyId, branchId)` foreign key to the PR6 activation boundary. Candidate children use `(candidateId, runId, companyId, branchId)` so a child cannot combine one run with another run's candidate; nullable `candidateId` remains reserved for complete run-level rows. Startup reconstructs the exact foreign-key map from `PRAGMA foreign_key_list`, including tables, ordered from/to columns, and `RESTRICT` behavior. It also compares the exact executable semantic-token `CHECK` multiset for every PR8 table, all expected unique keys, the complete semantic-token `sqlite_master.sql` for all 14 named indexes and every PR8 trigger, and index table/uniqueness/partial/ordered-key/expression/collation/direction metadata from `PRAGMA index_list`, `index_info`, and `index_xinfo`. Comments and `CHECK` text inside string literals or quoted identifiers are never executable constraints. Normal whitespace, keyword/unquoted-identifier case, comments, and semantically equivalent quoting of simple non-keyword identifiers are insignificant, while string values, numeric spellings, operators, predicates, constants, expressions, events, targets, bodies, conflict behavior, keyword quoting, spaces, and escaped identifier delimiters remain significant. Malformed SQL and registered weakened or misdirected schemas fail closed on initial and repeated startup. Repeated valid startup preserves the original `applied_at`. There is no down/delete migration, TTL, purge, cleanup worker, or finite retention.
 
 No `actual_receivable_eligible_events`, `ActualReceivableEligibleV1`, canonical posting queue/outbox, canonical adapter, source-adapter state, or activation state exists.
 
@@ -184,15 +193,16 @@ All verification used Node `v20.20.2` and npm `10.9.4` from an isolated Node 20 
 | Check | Result |
 |---|---:|
 | First focused remediation suites | 55 passed, 0 failed |
-| Second registered-schema structural remediation suite | 24 passed, 0 failed |
-| Weakened-schema mutation matrix | 20 mutations rejected: 8 `CHECK`, 6 index, 6 trigger; valid/repeated/formatting/`applied_at` controls passed |
-| All PR8 remediation suites | 91 passed, 0 failed |
-| All focused PR8 suites | 130 passed, 0 failed |
+| Third registered-schema structural remediation suite | 42 passed, 0 failed |
+| Persisted structural rejection matrix | 29 mutations rejected: 8 original `CHECK`, 6 lexical decoy, 3 malformed SQL, 6 index, 6 trigger; direct/repeated/`applied_at`/no-repair fingerprint controls passed |
+| Semantic SQL controls | nested expressions and literal `CHECK` tokens parsed correctly; equivalent double/backtick/bracket-quoted indexes accepted; meaningful quoting, strings, numbers, and operators remain distinct |
+| All PR8 remediation suites | 109 passed, 0 failed |
+| All focused PR8 suites | 148 passed, 0 failed |
 | Persisted-sealing fault regressions | 14 passed, 0 failed |
 | Direct FK/altered-schema SQL probes | 12 passed, 0 failed |
-| PR1/PR2/PR3/PR5/PR6/PR7/PR8 compatibility suites | 586 passed, 0 failed |
-| `npm test` | 2,308 passed, 0 failed |
-| Repeated `node --test tests/*.test.js` | 2,308 passed, 0 failed |
+| PR1/PR2/PR3/PR5/PR6/PR7/PR8 compatibility suites | 604 passed, 0 failed |
+| `npm test` | 2,326 passed, 0 failed |
+| Repeated `node --test tests/*.test.js` | 2,326 passed, 0 failed |
 | `npm run build` | passed |
 | `git diff --check` | passed |
 | Fresh `PRAGMA foreign_keys` | `1` |

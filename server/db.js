@@ -21,6 +21,9 @@ const {
   ensureForecastReceivablesPlanningSchema,
 } = require('./lib/forecast-receivables-planning-schema');
 const {
+  ensureActualSourceEligibilityDryRunSchema,
+} = require('./lib/actual-source-eligibility-dry-run-schema');
+const {
   assertClientInnListUnique,
   assertClientInnWriteAllowed,
   buildClientInnDuplicateReport,
@@ -139,6 +142,7 @@ function ensureDb() {
   ensurePlatformIdentitySchema(db);
   ensureBillingSourceAuthoritySchema(db);
   ensureForecastReceivablesPlanningSchema(db);
+  ensureActualSourceEligibilityDryRunSchema(db);
   syncClientInnIndex({ throwOnDuplicates: false });
   return db;
 }

@@ -26,7 +26,7 @@
 
 **PR8 migration / bounded scope:** `actual_source_eligibility_dry_run_pr8`, version `1`; exactly 8 append-only diagnostic dry-run tables.
 
-**Implementation status:** PR1, PR2, and PR3 are released within their recorded foundation-only boundaries. PR4 remains a design-approved historical gate and was not released. PR5 is released only as the neutral platform identity and fail-closed authorization foundation. **PR6: RELEASED — Billing Source Authority foundation only. PR7: RELEASED — Forecast Receivables Planning foundation only. PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.** PR8 remains an isolated, default-disabled, production-unreachable diagnostic foundation. The PRE-PR9 audit recorded proposed D-28–D-33 contracts but approved none of them. `pr9ImplementationAuthorized`, `pr9DisabledDeploymentAuthorized`, and `productionCanonicalWritesAuthorized` are all false. Canonical production reads and writes, production settlement, production identity/bootstrap/source activation, production forecast calculation/read enablement, production actual-source execution, Finance, Dashboard, or Company Health/Risks switching, deployment, and cutover remain disabled, blocked, or unperformed.
+**Implementation status:** PR1, PR2, and PR3 are released within their recorded foundation-only boundaries. PR4 remains a design-approved historical gate and was not released. PR5 is released only as the neutral platform identity and fail-closed authorization foundation. **PR6: RELEASED — Billing Source Authority foundation only. PR7: RELEASED — Forecast Receivables Planning foundation only. PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.** PR8 remains an isolated, default-disabled, production-unreachable diagnostic foundation. The PRE-PR9 audit recorded proposed D-28–D-33 contracts but approved none of them; design-gate PR #218 was squash-merged as `7892ea68193fa5357733ca0d554dc84af82e6200`. The later read-only production evidence recovery is `EVIDENCE_PR_READY_COMPLETE`: it verifies that production still runs PR3 SHA `6a38582f...`, has exact empty PR1/PR2 schema, and has no deployed PR5–PR8 schema or authority/run rows. `pr9ImplementationAuthorized`, `pr9DisabledDeploymentAuthorized`, and `productionCanonicalWritesAuthorized` are all false. Canonical production reads and writes, production settlement, production identity/bootstrap/source activation, production forecast calculation/read enablement, production actual-source execution, Finance, Dashboard, or Company Health/Risks switching, deployment, and cutover remain disabled, blocked, or unperformed.
 
 ## Product-owner baseline
 
@@ -315,13 +315,21 @@ no execution/posting/activation capabilities. PR8 remains fixed to
 `productionActivationAuthorized=false`. The canonical read flag remains
 default-disabled and the production scope resolver remains unconditional `null`.
 
-The latest reproducible GitHub deployment record for Railway production is deployment
-`5453098690`, successful on PR3 SHA
-`6a38582f5f90b85734884b6b12ad8e306b24619e`. The current backend did not answer
-read-only health/version probes and current Railway/SQLite access was unavailable.
-Current deployed SHA, database identity, migrations/integrity/counts, production PR5
-identity, PR6 source rows and PR8 runs therefore have no accepted evidence. The
-explicit pack result is `PRODUCTION_PR8_DRY_RUN_EVIDENCE = MISSING`.
+In the original PRE-PR9 audit window, the latest reproducible GitHub deployment
+record for Railway production was deployment `5453098690`, successful on PR3 SHA
+`6a38582f5f90b85734884b6b12ad8e306b24619e`; public probes timed out and direct
+Railway/SQLite access was then unavailable. The later recovery below supersedes
+that accessibility result while leaving evidence acceptance blocked. The explicit
+pack result remains `PRODUCTION_PR8_DRY_RUN_EVIDENCE = MISSING`.
+
+The follow-up read-only capture is recorded in
+`docs/pre-pr9-production-evidence-pack.md` with status
+`EVIDENCE_PR_READY_COMPLETE`. Official Railway access, the active runtime and the
+live SQLite database verify deployed PR3 SHA `6a38582f...`, exact empty PR1/PR2
+schema, absent PR5–PR8 migrations/tables, absent production identity/source
+authority and PR8 runs, disabled/absent read routes, and no reachable canonical
+writer. The drift is `DOCUMENTED_ALLOWED_DRIFT`; public ingress still times out;
+and no authorization field becomes true.
 
 Four authorities remain separate: source-system authority, eligibility-producer
 authority, canonical-posting-adapter authority and human activation/approval

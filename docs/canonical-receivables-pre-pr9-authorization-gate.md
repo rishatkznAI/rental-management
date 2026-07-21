@@ -10,6 +10,12 @@
 
 **Audit timestamp:** `2026-07-21T09:36:24Z`
 
+**Read-only production evidence recovery:** `EVIDENCE_PR_READY_COMPLETE`; see
+`docs/pre-pr9-production-evidence-pack.md`.
+
+**Design-gate lineage:** PR #218 was squash-merged as
+`7892ea68193fa5357733ca0d554dc84af82e6200` on `2026-07-21T13:21:33Z`.
+
 **Repository:** `rishatkznAI/rental-management`
 
 **Starting `origin/main`:** `c3b20fcb5375894f900a31b70a1f36b2d4b524fe`
@@ -20,6 +26,14 @@ permission to deploy or write. The burden of proof rests on canonical-write
 authorization. Missing, stale, inaccessible, ambiguous, synthetic, local-only, or
 unapproved evidence means deny.
 
+The later read-only recovery capture restored official Railway access and verified
+the active runtime and live SQLite database. Production runs PR3 SHA `6a38582f...`,
+the exact PR1/PR2 schema is present with all eight financial tables empty, and
+PR5–PR8 migrations/tables are not deployed. Therefore production identity and
+source authority are `MISSING`, `PRODUCTION_PR8_SCHEMA = NOT_DEPLOYED`, and
+`PRODUCTION_PR8_DRY_RUN_EVIDENCE = MISSING`. Internal health/version probes pass,
+but public ingress times out. No authorization status changed.
+
 The factual audit found a released but production-unreachable PR8 diagnostic
 foundation. The current repository has no production PR8 execution path, production
 policy registry, `ActualReceivableEligibleV1` repository or producer, canonical
@@ -28,8 +42,8 @@ contract, catalog-v2 execution/posting/activation capabilities, or explicit
 `CanonicalWriteAuthorizationV1`. The latest independently reproducible GitHub
 deployment record for the Railway production environment points to PR3 SHA
 `6a38582f5f90b85734884b6b12ad8e306b24619e`, before PR4–PR8. Current runtime and
-database state could not be accessed. No current production PR6 source rows or PR8
-run can therefore be proven.
+database evidence is now recorded by the separate recovery pack: PR5–PR8 schema is
+not deployed, PR6 authority is missing, and no PR8 run exists.
 
 ## 2. Scope and non-goals
 
@@ -111,7 +125,15 @@ connecting. At `2026-07-21T09:36:24Z`, read-only `railway status --json` failed
 because the local Railway OAuth refresh was unauthorized. No login, configuration
 change, deploy, restart, or variable read was attempted.
 
-Consequences:
+That last sentence describes this gate's original audit window. During the later
+evidence-recovery task, official Railway browserless OAuth login completed after
+the authorized user signed in. No credential was retained, and no project setting,
+deployment, restart, variable or database state was changed. Public probes still
+timed out, while read-only inspection inside the already-running container returned
+`200` for health/version, `401` for the unauthenticated auth boundary and `404` for
+canonical/forecast read routes.
+
+Consequences in the original `09:36:24Z` audit window:
 
 - exact currently running backend SHA: `UNKNOWN / NOT ACCESSIBLE`;
 - current deployment ID/status: `UNKNOWN / NOT ACCESSIBLE`;
@@ -123,7 +145,11 @@ Consequences:
   runtime**: not independently provable; the audited current source tree contains
   none of those paths and the last reproducible deployed SHA predates PR8.
 
-This is a fail-closed deployment-lineage failure.
+The later recovery pack supersedes those accessibility results for current factual
+state: the active deployment is `b74623ec...` at `6a38582f...`, Node is
+`v20.18.1`, current PR5–PR8 migrations are absent, allow-listed read flags are
+absent/default-disabled, and the runtime has no PR8/PR9/canonical-write path. The
+remaining public-ingress timeout is fail closed and independently recorded.
 
 ## 5. Production evidence pack
 
@@ -163,10 +189,9 @@ before/after proof, and is not accepted as current evidence. The local
 `server/data/app.sqlite`, local fresh databases, and CI databases were deliberately
 excluded from this pack.
 
-Required current counts remain unavailable for canonical companies/branches,
-memberships/grants/catalog/templates/bootstrap/audit, all 16 PR6 tables, all eight
-PR7 tables, all eight PR8 tables, canonical receivables/audit, and all four settlement
-tables. Read-only inspection therefore has no provable before/after equality.
+Those counts were unavailable in the original gate capture. The later recovery
+pack proves canonical companies/branches and all six financial tables are zero,
+PR5–PR8 tables are absent, and before/after fingerprints and counts are equal.
 
 ### 5.4 Production identity evidence
 
@@ -178,7 +203,8 @@ tables. Read-only inspection therefore has no provable before/after equality.
 
 The PR5 release explicitly states that production bootstrap was not run and concrete
 production records, approvals, and future integration/system contracts were absent.
-No newer qualifying production evidence supersedes that boundary.
+The later qualifying production evidence confirms that boundary: PR5 schema and
+authority rows are not deployed and legacy users are not PR5 identity authority.
 
 ### 5.5 Production PR6 source evidence
 
@@ -188,9 +214,9 @@ No newer qualifying production evidence supersedes that boundary.
 | `PROD-SRC-002` | current source at `c3b20fcb...` | dependency/static audit | PR6 foundation | schema has 16 append-only tables and commands but startup reaches only schema; no HTTP/runtime source adapter, worker, route, CLI activation path, or legacy fallback | source Git SHA | independently reproducible | **FAIL** for governed production source adapter |
 
 No exact approved source-system cohort, source-owner contract, adapter artifact,
-production source rows, or activation boundary can be accepted. The gate remains
-blocked even if the unavailable database later proves to contain rows; those rows
-must still have governed adapter and approval lineage.
+production source rows, or activation boundary can be accepted. The later recovery
+proves all sixteen PR6 tables are absent. The gate remains blocked; missing rows
+must not be created without governed adapter and approval lineage.
 
 ### 5.6 Production PR8 evidence
 
@@ -215,20 +241,23 @@ results are excluded from production evidence.
 
 ### 5.8 Evidence-pack disposition
 
-No evidence row is PASS. No approved immutable evidence-pack artifact or independent
-review signature exists. Therefore `approvedEvidencePackHash = MISSING`. A checksum
-of this Markdown file would prove only file bytes, not production truth, and must not
-be substituted.
+No evidence row was PASS in this gate's original audit window. The later
+`EVIDENCE_PR_READY_COMPLETE` recovery contains reproducible PASS/FAIL/MISSING
+records, but no independent acceptance signature exists. Therefore
+`approvedEvidencePackHash = MISSING`. A checksum of either Markdown file proves
+only file bytes and is not a substitute for independent production-evidence
+acceptance.
 
 ## 6. Missing evidence
 
-The blocking missing evidence is:
+The later recovery resolved runtime/database accessibility. Blocking evidence or
+authority still missing is:
 
-- current running backend deployment and exact SHA/artifact/config identity;
-- current production SQLite database/volume/WAL identity and read-only integrity,
-  structural, migration, size, count, and before/after checks;
-- production PR5 company/branch/membership/template/grant/deny/bootstrap/audit state;
-- production PR6 populated governed source universe and named source adapter;
+- a successful public-ingress health/version/auth-boundary response;
+- production PR5 company/branch/membership/template/grant/deny/bootstrap/audit
+  authority, confirmed absent in the active database;
+- production PR6 governed source universe and named source adapter, confirmed
+  absent in the active database/runtime graph;
 - approved production policy registry and all 15 PR8 policy decisions;
 - authorized production PR8 execution and real sealed production runs;
 - a named eligibility producer and canonical posting adapter;
@@ -605,7 +634,7 @@ append-only and supersedable/revocable. An absent record is deny.
 | Field | Value | Exact evidence / reason |
 |---|---|---|
 | `architectureDesignApproved` | **BLOCKED** | design recorded here; D-28–D-33 lack durable named approval |
-| `productionEvidenceAccepted` | **BLOCKED** | `PROD-DEP-001` stale; `PROD-DEP-002/003`, `PROD-DB-*` inaccessible; no accepted pack hash |
+| `productionEvidenceAccepted` | **BLOCKED** | `docs/pre-pr9-production-evidence-pack.md` is `EVIDENCE_PR_READY_COMPLETE`, but it is not independently accepted and public ingress remains a P1 finding |
 | `productionIdentityReady` | **BLOCKED** | `PROD-ID-001/002`; bootstrap and concrete authority unproven |
 | `productionSourceAuthorityReady` | **BLOCKED** | `PROD-SRC-001/002`; rows and governed adapter absent/unproven |
 | `productionDryRunExecutionAuthorized` | **BLOCKED** | no capability, policy registry, activation/cohort or named approval |
@@ -654,24 +683,29 @@ reads and cutover remain separate later gates.
 
 ## 22. Explicit blockers
 
-The current blockers are production runtime/database inaccessibility; unknown current
-deployed SHA and database identity; missing current integrity/migration/count proof;
-missing production identity/bootstrap; missing PR6 rows and source adapter; missing
-policy registry and PR8 production run; missing named producer/posting identities and
-integration authority; missing v2 capabilities; missing exact boundary/cohort and
-amount basis; missing operational thresholds/telemetry; missing current backup and
-restore drill; missing retention/legal-hold controls; and all named approvals.
+The current blockers are missing production identity/bootstrap; missing PR6 rows
+and source adapter; missing policy registry and PR8 production run; missing named
+producer/posting identities and integration authority; missing v2 capabilities;
+missing exact boundary/cohort and amount basis; missing operational
+thresholds/telemetry; public ingress timeout; missing current backup and restore
+drill; missing retention/legal-hold controls; and all named approvals.
 
 Any one is sufficient to deny. No bypass, synthetic evidence or prompt approval is
 permitted.
 
+The recovery pack replaces the prior inaccessible facts with verified negatives:
+PR5/PR6/PR8 schema and authority/run rows are absent, all eight PR1/PR2 financial
+tables are empty, and the runtime graph is fail closed. Confirmed blockers are the
+missing production identity/source authority and PR8 evidence, absent durable
+approvals/contracts/adapters/controls, and repeated public endpoint timeout.
+
 ## 23. Next permitted step
 
-Restore independently reproducible **read-only** access to the current production
-deployment metadata and SQLite database, then capture one immutable, redacted
-evidence pack covering exact runtime/deployment/database identity, integrity,
-migrations, sizes/counts and current PR5/PR6/PR8 state, with before/after counts equal
-and no dry-run, bootstrap, flag, source, identity or data mutation.
+Obtain an independent review of the merged design gate and the rebased factual
+evidence pack. After PR #219 is manually merged, a separate PR5–PR8 foundation
+deployment-readiness gate may assess migration simulation, rollback, backup/restore,
+storage, artifact pinning and public-ingress health without deploying or activating
+anything.
 
 PR9 implementation is not a permitted next step.
 

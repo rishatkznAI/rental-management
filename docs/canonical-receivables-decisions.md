@@ -1,18 +1,18 @@
 # Canonical receivables: product-owner decision memo
 
-**Status:** product-owner baseline approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; PR4 **DESIGN APPROVED** as a historical design gate and not released; PR5 **RELEASED** as the neutral platform identity and fail-closed authorization foundation only; **PR6: RELEASED — Billing Source Authority foundation only**; **PR7: RELEASED — Forecast Receivables Planning foundation only**; **PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.** Conditional confirmations remain.
+**Status:** product-owner baseline D-01–D-27 approved; PR1 schema/domain foundation **RELEASED**; PR2 settlement/domain foundation **RELEASED**; PR3 read API/aging infrastructure **RELEASED**; PR4 **DESIGN APPROVED** as a historical design gate and not released; PR5 **RELEASED** as the neutral platform identity and fail-closed authorization foundation only; **PR6: RELEASED — Billing Source Authority foundation only**; **PR7: RELEASED — Forecast Receivables Planning foundation only**; **PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only**; D-28–D-33 are **DESIGN RECORDED — OWNER/EXTERNAL APPROVAL REQUIRED** and authorize neither PR9 nor production writes.
 
-**Prepared:** 2026-07-13; PR4 product-owner clarifications, design-detail decisions, and architecture/PR5 foundation approval updated 2026-07-15; PR5 release status updated 2026-07-17; PR6 release-marker status updated 2026-07-18; PR7 foundation release-marker status updated 2026-07-19; PR8 foundation release-marker status updated 2026-07-21
+**Prepared:** 2026-07-13; PR4 product-owner clarifications, design-detail decisions, and architecture/PR5 foundation approval updated 2026-07-15; PR5 release status updated 2026-07-17; PR6 release-marker status updated 2026-07-18; PR7 foundation release-marker status updated 2026-07-19; PR8 foundation release-marker and PRE-PR9 D-28–D-33 design status updated 2026-07-21
 
 **Source specification:** `docs/canonical-receivables-contract.md`
 
-**Scope:** approved product-owner rules plus factual PR1/PR2/PR3/PR5/PR6/PR7/PR8 foundation release metadata and the historical PR4 design gate; implementation/test evidence remains distinct from approved decisions and production evidence
+**Scope:** approved product-owner rules D-01–D-27 plus factual PR1/PR2/PR3/PR5/PR6/PR7/PR8 foundation release metadata, the historical PR4 design gate, and unapproved PRE-PR9 design records D-28–D-33; implementation/test/design evidence remains distinct from production evidence and durable business authorization
 
 ## Product-owner baseline
 
 **Decision date:** 2026-07-13; D-01, D-24, forecast-domain, PR4 design-detail, and final PR4 architecture/PR5 foundation decisions dated 2026-07-15
 
-**Approved decisions:** D-01 through D-27. The product owner approved every decision in this memo as recorded in the Owner answer column and detailed answer fields. On 2026-07-15 the product owner clarified D-01, D-24, and D-26's forecast-domain boundary as recorded below.
+**Approved decisions:** D-01 through D-27 only. The product owner approved those decisions as recorded in the Owner answer column and detailed answer fields. On 2026-07-15 the product owner clarified D-01, D-24, and D-26's forecast-domain boundary as recorded below. D-28 through D-33 were added by the PRE-PR9 factual/design audit and remain unapproved.
 
 **Conditional approvals:** D-01 now fixes the source combination: the relevant rental billing period must be closed and a UPD must be formed and explicitly conducted. Accountant and legal confirmation is still required for the exact evidence and sufficiency of those states, any additional signature requirement, due-date provenance, and correction/cancellation treatment. D-24 now requires indefinite retention and forbids deletion, purge, TTL, scheduled cleanup, and rollback deletion until a separate accountant-and-lawyer decision is approved; no finite duration is pending as an implementation default. Legal-hold, export, access/privacy, and tamper-evidence controls still require accountant/legal confirmation. D-25's mandatory dual-approval policy for sensitive initial-release operations is approved for PR2; exact monetary and age thresholds are deferred.
 
@@ -20,7 +20,7 @@
 
 **No silent assumptions:** implementation may encode only the answers in this baseline. Missing source sufficiency/evidence, proven-date evidence, exact money/VAT/rounding, compensation details, downtime/extension authority, lane-precedence mechanics, activation date/cohort, financial thresholds, concrete membership records, audited capability assignments, named integration contracts, or other unapproved details must remain disabled, fail-closed, or explicitly escalated. No finite retention period may be invented.
 
-**Current status summary:** PR1 is **RELEASED**; PR2 is **RELEASED**; PR3 is **RELEASED**; PR4 is **DESIGN APPROVED** as a historical design gate and is not released; PR5 and PR6 are **RELEASED, foundation only**; **PR7: RELEASED — Forecast Receivables Planning foundation only**; and **PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.** The production ledger remains inactive, with canonical production reads and writes disabled and existing systems continuing to serve production behavior. Production identity/bootstrap/source activation, settlement, every canonical/forecast write/read switch, production forecast calculation or actual-source dry run, source-data population, Finance, Dashboard, and Company Health/Risks switches, PR9, deployment, and cutover remain blocked or unperformed.
+**Current status summary:** PR1 is **RELEASED**; PR2 is **RELEASED**; PR3 is **RELEASED**; PR4 is **DESIGN APPROVED** as a historical design gate and is not released; PR5 and PR6 are **RELEASED, foundation only**; **PR7: RELEASED — Forecast Receivables Planning foundation only**; and **PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.** The PRE-PR9 gate is `DESIGN RECORDED — AUTHORIZATION BLOCKED`; D-28–D-33 are not approvals. The production ledger remains inactive, with canonical production reads and writes disabled. Production identity/bootstrap/source activation, settlement, every canonical/forecast write/read switch, production forecast calculation or actual-source dry run, source-data population, Finance, Dashboard, and Company Health/Risks switches, PR9, deployment, and cutover remain blocked or unperformed.
 
 ## PR4 design-detail product-owner decisions
 
@@ -214,6 +214,12 @@ No recommendation in this memo is a legal or accounting conclusion.
 | D-25 | Who approves sensitive actions? | Mandatory dual approval for sensitive initial-release operations, with a constrained ordinary-allocation exception and strict separation of duties | Initial-release policy approved for PR2; numerical limits deferred | approved for PR2; numerical limits deferred | PR5 authority, PR10 enforcement; not PR2 domain implementation |
 | D-26 | Do plans belong here? | Separate non-debt forecast domain with approved three-component load view, 30-day horizon, statuses, `planned_future`, confidence/history, and advance treatment | Approved and clarified on 2026-07-15; exact coverage precedence and downtime/extension/return authority remain | approved detail boundaries; remaining PR7 decisions gated | PR7 forecast domain, PR11 reporting |
 | D-27 | Source of truth after cutover | Canonical ledger is operational authority after a separately authorized cutover; accounting remains reconciled external source | Approved; 2026-07-15 sequence forbids dual write | approved; future activation blocked | PR9 posting authorization, PR12 cutover |
+| D-28 | Production evidence acceptance | Current immutable redacted pack with deployment/DB/identity/source/PR8/controls/approval lineage; missing means deny | No owner/external answer; current evidence inaccessible/missing | design recorded; approval required | PR9 implementation/deployment/writes |
+| D-29 | Four authority classes | Separate source adapter, eligibility producer, posting adapter and human approvals; no generic bypass | No owner/external answer; no contracts exist | design recorded; approval required | PR8 execution/event production/PR9 |
+| D-30 | Canonical write projection | Forward-only direct `posted` initial creation in one locked transaction; amount basis requires exact approval | No owner/accountant/legal/tax answer | design recorded; amount basis unresolved | PR9 contract/implementation |
+| D-31 | Capability/activation/cohort | Exact additive v2 concepts, integration contracts separate from memberships, exact boundary/cohort/activation | No owner/security/operations answer | design recorded; approval required | PR8 production execution/PR9 |
+| D-32 | Operational/retention/backup controls | Approved admission/concurrency/circuit/storage/telemetry/retention/backup/restore/rollback controls; no invented thresholds | No owner/external answer; production evidence missing | design recorded; approval required | production dry run and writes |
+| D-33 | Authorization levels | Design, implementation, disabled deployment and production writes are separate; writes require `CanonicalWriteAuthorizationV1` | No owner/external answer | design recorded; authorization blocked | PR9 and all later activation |
 
 ## Detailed decisions
 
@@ -760,6 +766,72 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **2026-07-15 sequencing clarification:** Dual write is forbidden. A future default-disabled canonical posting adapter may consume only authoritative eligibility events after separate owner approval; no legacy/canonical dual-write stage is authorized.
 - **Status:** approved; future activation remains gated
 
+### D-28 — What qualifies as production evidence for canonical-write authorization?
+
+- **Question:** Which evidence may carry the burden of proof for PR9 implementation, disabled deployment, or production canonical writes?
+- **Why the decision matters:** Tests, fixtures, documents, local databases, deployment assumptions, and stale screenshots can look persuasive while proving nothing about the current production runtime or data.
+- **Proposed decision:** Accept only an immutable, redacted pack whose individual records identify environment, exact timestamp, read-only source/tool, deployed commit and artifact identity, database/volume identity, query class, result, checksum where applicable, reviewer, and independent reproducibility. Current deployment lineage, SQLite integrity/FK/migrations/schema/size/counts with equal before/after counts, production identity, PR6 source, PR8 sealed real-data run, operational/backup/retention controls and named approvals are mandatory. Missing or inaccessible evidence is deny.
+- **Explicit exclusions:** artificial fixtures, test manifests, CI/local tests, fresh/local SQLite, developer data, manually constructed JSON, unlineaged screenshots, documentation claims, prompt text and Codex inference.
+- **Current factual result:** The latest reproducible Railway production deployment metadata points to PR3 SHA `6a38582f5f90b85734884b6b12ad8e306b24619e`. Current runtime and database inspection were inaccessible; production PR8 evidence is missing. See `docs/canonical-receivables-pre-pr9-authorization-gate.md`.
+- **Required approvals:** Product owner, accountant/finance, legal, security/identity, release/operations and independent reconciliation reviewer must accept the exact pack/hash and scope.
+- **What becomes impossible if postponed:** PR9 implementation, disabled deployment and production writes cannot be authorized.
+- **Status:** **DESIGN RECORDED — OWNER/EXTERNAL APPROVAL REQUIRED**; production evidence not accepted
+
+### D-29 — How are source, eligibility-producer and canonical-adapter authorities separated?
+
+- **Question:** Which actors may create PR6 source facts, eligibility events and canonical rows?
+- **Why the decision matters:** A generic `system`, Administrator label, human membership or `receivables.read` bypass would collapse separation of duties and permit fabricated debt.
+- **Proposed decision:** Use separate append-only `GovernedAdapterAuthorityV1` contracts for `source_adapter`, `eligibility_producer` and `canonical_posting_adapter`. Each contract binds one environment, integration actor, company, explicit branches, source systems/row classes/event versions/operations, artifact/commit/config/policy/activation digests, deployment/runtime/credential identity, named owners/approvers, audit and revocation. Wildcards and user impersonation are forbidden. Human activation/approval remains a fourth independent authority and never serves as a service identity.
+- **Proposed named design identities:** eligibility producer `rentcore.actual-receivable-eligibility-producer.production.v1` / `integration:rentcore-actual-receivable-eligibility-producer`; posting adapter `rentcore.canonical-receivable-posting.production.v1` / `integration:rentcore-canonical-receivable-posting`. These are reserved design names only, not provisioned or approved actors. A source-adapter identity cannot be named until its real source system/owner/artifact is approved.
+- **Current factual result:** PR5 issues only fresh human scopes; integration/system actors have audit vocabulary but no authority issuance contract. No three adapter contracts exist.
+- **Required approvals:** Security/identity owner, product owner, accountant/finance authority, release/operations owner, source-adapter owner, eligibility-producer owner and posting-adapter owner.
+- **What becomes impossible if postponed:** No production PR8 execution, event emission or canonical posting may occur.
+- **Status:** **DESIGN RECORDED — OWNER/EXTERNAL APPROVAL REQUIRED**; all concrete adapter authorities blocked
+
+### D-30 — What is the exact canonical write projection contract?
+
+- **Question:** What may future PR9 create, with which workflow/amount semantics and atomicity?
+- **Why the decision matters:** Leaving draft-vs-posted, amount basis, source identity, correction behavior or transaction ownership ambiguous can create false, duplicate or mutable debt.
+- **Proposed decision:** PR9 is forward-only and may create exactly one initial canonical receivable per immutable authorized UPD source slice and contractual due date. Creation is direct `posted`; the adapter may not create `draft`. It never backfills, dual-writes, mutates legacy data, converts forecast, settles, adjusts, cancels, refunds, writes off or compensates. One repository-owned immediate transaction freshly validates event/source/policy/adapter/authorization/schema/uniqueness and atomically inserts the receivable, one proposed `canonical_receivable_posting_operations` seal and one `financial_audit_events` row. IDs, times, hashes, idempotency and reread reconstruction are repository-owned. Same identity/content replays; different content is a P0 conflict.
+- **Amount-basis boundary:** net, VAT, gross or another exact basis for `originalAmountMinor` remains unresolved. Gross must not be assumed. The event carries all three values and an approved amount-basis reference; no event/post is admissible without that durable reference.
+- **Correction boundary:** reopen/cancel/correction before posting blocks; after posting creates a P0 discrepancy and requires a separate later append-only compensation strategy. Existing canonical facts are never deleted or rewritten.
+- **Required approvals:** Product owner and accountant/finance must approve direct-posted creation and exact amount basis; legal/tax must approve evidence, due-date and VAT treatment; security/operations must approve transaction/admission controls.
+- **What becomes impossible if postponed:** `canonicalWriteContractApproved` and PR9 implementation remain blocked.
+- **Status:** **DESIGN RECORDED — OWNER/ACCOUNTANT/LEGAL/TAX APPROVAL REQUIRED**; direct-posted design selected, amount basis unresolved
+
+### D-31 — What capabilities, activation boundary and cohort authorize future execution?
+
+- **Question:** Which exact capability concepts and activation records govern evaluation, inspection, posting, activation and reconciliation?
+- **Why the decision matters:** Catalog v1 has only `receivables.read`; using it for execution/posting/activation would silently over-authorize human users and adapters.
+- **Proposed decision:** An additive catalog v2 separates `receivables.actual_source.evaluate` (integration contract), `receivables.diagnostics.read` (human), `receivables.canonical.post` (integration contract), `receivables.canonical.activation.manage` (human) and `receivables.reconciliation.review` (human). All are branch-scoped. Integration grants exist only through named adapter contracts, never memberships. Human grants retain PR5 freshness/deny semantics. Adapter grant/activation/revocation and every production activation/reconciliation acceptance require the dual named approvals defined by the PRE-PR9 gate.
+- **Activation:** A server-owned default-disabled flag plus append-only activation record must match an exact company, explicit branches, forward-only boundary, durable pre-run cohort definition/hash, source systems, policy and adapter/write-authorization versions. Deployment or request input never activates.
+- **Current factual result:** Catalog v1 remains exact with 11 entries and no execution/posting/activation keys. No production boundary/cohort or activation record exists.
+- **Required approvals:** Product owner, accountant/finance, security/identity and release/operations; source/adapter owners for their exact contracts.
+- **What becomes impossible if postponed:** Production PR8 execution, PR9 implementation and production writes remain blocked.
+- **Status:** **DESIGN RECORDED — OWNER/EXTERNAL APPROVAL REQUIRED**; catalog v2 is proposal only
+
+### D-32 — Which operational, retention, backup and rollback controls are mandatory?
+
+- **Question:** Which controls must exist before a production evaluation or canonical write?
+- **Why the decision matters:** PR8 amplifies storage and PR9 creates indefinite financial facts; unbounded execution or untested recovery can damage availability and evidence.
+- **Proposed decision:** Approval must fix maximum runs/window, candidates/run, writes/batch, bytes/input rows, schedule, retry/backoff, queue depth and stop thresholds; one lease per governed scope; immediate-transaction conflict behavior; circuit breakers for every money delta, duplicate/overlap, drift, revoked authority, schema/FK/integrity/storage/audit/backup/event failure and blocker-rate threshold; complete metrics and version visibility; free-space/WAL/table growth telemetry and capacity forecast; immutable export/archive, legal hold, privacy/access and tamper evidence; verified backup/checksum, restore drill, RPO/RTO, incident/kill switch and adapter revocation.
+- **No invented numbers:** No numerical operational threshold is approved. All remain owner inputs and block activation.
+- **Retention/rollback:** Indefinite no-delete retention remains the baseline. TTL/purge/cleanup and rollback deletion are forbidden. Rollback disables/revokes future execution, retains facts/evidence and uses only separately approved append-only corrections.
+- **Current factual result:** Repository runbooks describe backup/rollback concepts, but current backup, restore-drill, thresholds, telemetry, storage forecast and legal-hold controls were not available as production evidence.
+- **Required approvals:** Release/operations, security, product, accountant/finance and legal; adapter owner for revocation/incident procedures.
+- **What becomes impossible if postponed:** Production dry-run execution and canonical writes remain blocked.
+- **Status:** **DESIGN RECORDED — OWNER/EXTERNAL APPROVAL REQUIRED**
+
+### D-33 — Which authorization level permits PR9 implementation, disabled deployment and production writes?
+
+- **Question:** How are design approval, implementation, disabled deployment and actual production writes kept independent?
+- **Why the decision matters:** A merged design or successful deployment must never imply permission to create receivables.
+- **Proposed decision:** Record four separate decisions: `canonicalWriteContractApproved`, `pr9ImplementationAuthorized`, `pr9DisabledDeploymentAuthorized`, and `productionCanonicalWritesAuthorized`. Production writes additionally require an effective append-only `CanonicalWriteAuthorizationV1` binding company/branches/cohort, source systems, producer/posting artifacts, event/policy/evidence/run hashes, exact operation/tables, controls, backup/runbooks/retention and all named approvals. Revocation appends a new record. Reads, settlement, shadow reads and cutover are still separate later decisions.
+- **Current authorization values:** contract `BLOCKED`; PR9 implementation `FALSE`; disabled deployment `FALSE`; production writes `FALSE`; canonical reads/settlement/backfill/dual write/shadow read/cutover all `FALSE`.
+- **Required approvals:** Product owner, accountant/finance, legal, tax where applicable, security/identity, release/operations, source-adapter owner, eligibility-producer owner, posting-adapter owner and independent reconciliation reviewer, each with stable identity/time/reference/version/hash/scope/limitations/revocation.
+- **What becomes impossible if postponed:** PR9 implementation is not a permitted next step.
+- **Status:** **DESIGN RECORDED — AUTHORIZATION BLOCKED**
+
 ## Implementation gates
 
 The outcomes below distinguish a product-decision baseline from later operational evidence. A `PASS` authorizes only the named PR scope; it does not authorize production enablement, migration, or cutover.
@@ -855,6 +927,7 @@ Record the durable approval identity and later conditional confirmations here wi
 | PR4 clarification batch | D-01, D-24, D-26 forecast boundary | Direction recorded; approver identity not supplied in repository | Pending | Pending | 2026-07-15 | Source/retention/forecast clarifications preserved unchanged; final PR4 approval recorded below |
 | PR4 design-detail batch | Billing/source/forecast/branch/correction/activation details listed above | Approved direction supplied; approver identity not supplied in repository | Pending where section 18/PR6–PR9 requires it | Pending where section 18/PR6–PR9 requires it | 2026-07-15 | Detail decisions preserved unchanged; final architecture/sequence/PR5 approval recorded below |
 | Final PR4 architecture/PR5 foundation batch | PR4 architecture; revised sequence; neutral identity; branch; membership; capability; default deny; PR5 start boundary | Approved direction supplied; approver identity not supplied in repository | Not required for PR5; downstream confirmations remain pending | Not required for PR5; downstream confirmations remain pending | 2026-07-15 | Historical gate: `PR4: DESIGN APPROVED — IMPLEMENTATION NOT STARTED`; only later PR5 foundation work was authorized, with no production behavior |
+| PRE-PR9 design/evidence gate | D-28–D-33 | Missing | Missing | Missing | 2026-07-21 factual audit | `DESIGN RECORDED — AUTHORIZATION BLOCKED`; security, operations, adapter-owner, tax and independent-review approvals also missing; no PR9 authorization |
 | — | — | — | — | — | — | — |
 
 This memo records the product-owner baseline. Conditional confirmations and blocked gates must not be bypassed through implementation defaults.

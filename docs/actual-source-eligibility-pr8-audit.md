@@ -1,8 +1,10 @@
-# PR8 Actual-Source Eligibility Dry Run remediation audit
+# PR8 Actual-Source Eligibility Dry Run release and remediation audit
 
-**Status:** `PR8: REMEDIATED FOR REVIEW — NOT RELEASED`
+**Status:** **PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.**
 
 **Implementation date:** 2026-07-20
+
+**Release-marker date:** 2026-07-21
 
 **Repository:** `rishatkznAI/rental-management`
 
@@ -44,11 +46,30 @@
 
 **Migration:** `actual_source_eligibility_dry_run_pr8`, version `1`
 
-This record describes a fail-closed diagnostic foundation proposed for review. It is not a release record, source-authority approval, accounting or legal approval, production activation, canonical-write authorization, PR9 authorization, deployment, or cutover.
+This record preserves the complete historical remediation evidence and records the foundation-only release. Release is not source-authority approval, accounting/legal/tax approval, production activation, canonical-write authorization, PR9 authorization, deployment, or cutover.
 
 No production actual-source dry run was performed. Test-fixture zero-delta evidence does not satisfy the production PR8 reconciliation gate.
 
-## Independent-review remediation
+## Release record
+
+**PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.**
+
+- Implementation PR: [#216](https://github.com/rishatkznAI/rental-management/pull/216)
+- Reviewed implementation head: `fb66d27208dc810d5ccf60e11b3a5498daf7239d`
+- Squash merge SHA: `afeac4de9b2711d9c6493855a8e3632443844f61`
+- Previous `main`: `66659c1296e05424179e2b4cc6ee1924ece4fbc9`
+- Merge method: squash merge with exact-head protection
+- Required check: `lightweight-pr-check` completed successfully for the reviewed head
+
+The released scope is only the additive `actual_source_eligibility_dry_run_pr8` migration version 1 and its exact eight append-only PR8 tables; the diagnostic dry-run domain/repository foundation; a fail-closed 15-gate eligibility evaluation whose only candidate statuses are `eligible_candidate` and `blocked`; persisted candidates, checks, reconciliations, and diagnostics; append-only operation/audit sealing; exact source-policy and adapter-authority validation; scoped PR6 lineage; live PR5 read reauthorization; strict registered-schema structural validation; and the default-disabled runtime boundary with no production execution path.
+
+The diagnostic contract remains fixed: `diagnosticOnly = true`, `canonicalWriteAuthorized = false`, and `productionActivationAuthorized = false`.
+
+This release marker is not a production actual-source dry run, production source-adapter approval, production source-data population, accounting/legal/tax approval, approval of all 15 business-policy gates, actual-source reconciliation approval, zero-delta production evidence, activation boundary/cohort approval, retention/legal-hold approval, execution capability, admission/rate/concurrency controls, HTTP/API consumer, canonical write, `ActualReceivableEligibleV1`, backfill, dual write, consumer switch, deployment, or cutover. No production execution or deployment occurred.
+
+**PR9 remains BLOCKED pending production evidence, governed source/adapter approval, explicit canonical-write authorization, operational controls, and a separate architecture gate.** The PR8 foundation release does not authorize a PR9 branch, implementation, event contract, or runtime consumer.
+
+## Independent-review remediation (historical pre-release evidence)
 
 All five merge-blocking findings were addressed without widening the PR8 runtime boundary:
 
@@ -273,14 +294,14 @@ Documentation:
 
 ## Unresolved decisions, exclusions, and PR9 boundary
 
-The implementation resolves none of the accountant, legal, tax, evidence, activation, operating-procedure, release, or canonical-write decisions. Source/accounting sufficiency, original-amount basis, conducted evidence authority, client-signature requirements/evidence, contractual due-date provenance, unknown-date treatment, VAT selection/basis, rounding mode/order/residual allocation, operational-event authority/precedence, correction/cancellation/reopen/replacement effect, activation date/boundary/cohort, named production adapter/actor, concrete production identity/grants, legal-hold/export/access/tamper controls, runbooks, consumer sign-off, and release authorization remain fail closed.
+The foundation-only release marker resolves documentation lifecycle status only. It resolves none of the accountant, legal, tax, evidence, production activation, operating-procedure, execution, or canonical-write decisions. Source/accounting sufficiency, original-amount basis, conducted evidence authority, client-signature requirements/evidence, contractual due-date provenance, unknown-date treatment, VAT selection/basis, rounding mode/order/residual allocation, operational-event authority/precedence, correction/cancellation/reopen/replacement effect, activation date/boundary/cohort, named production adapter/actor, concrete production identity/grants, legal-hold/export/access/tamper controls, runbooks, consumer sign-off, and production execution/activation authorization remain fail closed.
 
-No production identity/bootstrap/source population occurred. No production actual-source data was evaluated. No canonical receivable, canonical financial audit, settlement/payment/allocation/adjustment/refund/write-off, source mutation, forecast mutation, legacy mutation, `ActualReceivableEligibleV1`, posting event, outbox, source adapter, activation command, import, backfill, dual write, shadow read, route, worker, scheduler, timer, queue, CLI, frontend change, Finance/Dashboard/Company Health/Risks switch, deployment, cutover, merge, or release marker is part of PR8.
+The merged implementation performed no production identity/bootstrap/source population and evaluated no production actual-source data. It created no canonical receivable, canonical financial audit, settlement/payment/allocation/adjustment/refund/write-off, source mutation, forecast mutation, legacy mutation, `ActualReceivableEligibleV1`, posting event, outbox, source adapter, activation command, import, backfill, dual write, shadow read, route, worker, scheduler, timer, queue, CLI, frontend change, Finance/Dashboard/Company Health/Risks switch, deployment, or cutover. This docs-only release marker changes none of those boundaries.
 
-PR9 remains blocked until explicit accountant/legal confirmations, approved production source evidence, approved VAT/rounding and due-date/signature/correction policy, approved activation boundary/cohort and named adapter authority, real production identity/source population, a successful production dry run, zero unexplained net/VAT/gross delta, approved reconciliation/rollback and retention-control runbooks, consumer/release sign-off, and a separate explicit product-owner canonical-write authorization. PR8 emits no future posting event and authorizes no canonical write.
+**PR9 remains BLOCKED pending production evidence, governed source/adapter approval, explicit canonical-write authorization, operational controls, and a separate architecture gate.** Those gates include explicit accountant/legal confirmations, approved VAT/rounding and due-date/signature/correction policy, approved activation boundary/cohort and named adapter authority, real production identity/source population, a successful production dry run, zero unexplained net/VAT/gross delta, and approved reconciliation/rollback and retention-control runbooks. PR8 emits no future posting event and authorizes no canonical write.
 
 Future runtime activation has an additional explicit P2 blocker: it requires a separate governed execution capability, admission/rate controls, concurrency limits, storage telemetry, and approved retention/legal-hold controls. Existing `receivables.read` is acceptable only inside this isolated foundation/test boundary; it is not approval of a future runtime execution contract. No HTTP API or runtime consumer was added, and PR9/activation remain blocked.
 
 Rollback of this code means disabling/reverting unreachable code while retaining all immutable PR8 history. Financial/audit rows are never deleted as a rollback mechanism. Failed migrations and failed runs roll back atomically; successful diagnostic rows are conserved indefinitely.
 
-**Final status:** `PR8: REMEDIATED FOR REVIEW — NOT RELEASED`
+**Final status:** **PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.**

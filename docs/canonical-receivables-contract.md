@@ -10,6 +10,10 @@
 
 **Foundation deployment readiness date:** 2026-07-22
 
+**Foundation readiness PR / reviewed head / squash commit:** [#220](https://github.com/rishatkznAI/rental-management/pull/220); `4d2e141a696c30860646c40026afc35aeb0b5115`; `94d9963e5cd18d75bde3414c3a7e05687a2c3ef3`
+
+**Shadow startup remediation PR / reviewed head / squash commit:** [#221](https://github.com/rishatkznAI/rental-management/pull/221); `11f824ccdda63213cc71808bfc42b48b9e51996b`; `bbabfdc0bff89953ff746b9a09e0d38147e83085`
+
 **PR1 merge commit:** `ae9d8a8a286307f5d6e701585750af94d631edc1`
 
 **PR2 merge commit:** `ee2c1b6e1340acb3fc3149c6a39487a283db829c`
@@ -28,7 +32,7 @@
 
 **PR8 migration / bounded scope:** `actual_source_eligibility_dry_run_pr8`, version `1`; exactly 8 append-only diagnostic dry-run tables.
 
-**Implementation status:** PR1, PR2, and PR3 are released within their recorded foundation-only boundaries. PR4 remains a design-approved historical gate and was not released. PR5 is released only as the neutral platform identity and fail-closed authorization foundation. **PR6: RELEASED — Billing Source Authority foundation only. PR7: RELEASED — Forecast Receivables Planning foundation only. PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.** PR8 remains an isolated, default-disabled, production-unreachable diagnostic foundation. The PRE-PR9 audit recorded proposed D-28–D-33 contracts but approved none of them; design-gate PR #218 was squash-merged as `7892ea68193fa5357733ca0d554dc84af82e6200`. Evidence PR #219 was then squash-merged as `da9ade9d2921f2a7120118714ffd68863b8445ee`. The read-only production evidence verifies that production still runs PR3 SHA `6a38582f...`, has exact empty PR1/PR2 schema, and has no deployed PR5–PR8 schema or authority/run rows. The separate readiness gate recorded unapproved D-34–D-35 and result `FOUNDATION_DEPLOYMENT_BLOCKED`. `foundationDeploymentAuthorized`, `pr9ImplementationAuthorized`, `pr9DisabledDeploymentAuthorized`, and `productionCanonicalWritesAuthorized` are all false. Canonical production reads and writes, production settlement, production identity/bootstrap/source activation, production forecast calculation/read enablement, production actual-source execution, Finance, Dashboard, or Company Health/Risks switching, deployment, and cutover remain disabled, blocked, or unperformed.
+**Implementation status:** PR1, PR2, and PR3 are released within their recorded foundation-only boundaries. PR4 remains a design-approved historical gate and was not released. PR5 is released only as the neutral platform identity and fail-closed authorization foundation. **PR6: RELEASED — Billing Source Authority foundation only. PR7: RELEASED — Forecast Receivables Planning foundation only. PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.** PR8 remains an isolated, default-disabled, production-unreachable diagnostic foundation. The PRE-PR9 audit recorded proposed D-28–D-33 contracts but approved none of them; design-gate PR #218 was squash-merged as `7892ea68193fa5357733ca0d554dc84af82e6200`. Evidence PR #219 was then squash-merged as `da9ade9d2921f2a7120118714ffd68863b8445ee`, readiness PR #220 as `94d9963e5cd18d75bde3414c3a7e05687a2c3ef3`, and shadow remediation PR #221 as `bbabfdc0bff89953ff746b9a09e0d38147e83085`. The read-only production evidence verifies that production still runs PR3 SHA `6a38582f...`, has exact empty PR1/PR2 schema, and has no deployed PR5–PR8 schema or authority/run rows. The separate readiness gate recorded unapproved D-34–D-35 and result `FOUNDATION_DEPLOYMENT_BLOCKED`. PR #221 closed only the repeated-startup technical blocker: `documents_gantt_shadow_indexes.applied_at` is now preserved exactly and `repeatedStartupPassed = TRUE`. `foundationDeploymentAuthorized`, `pr9ImplementationAuthorized`, `pr9DisabledDeploymentAuthorized`, and `productionCanonicalWritesAuthorized` are all false. Canonical production reads and writes, production settlement, production identity/bootstrap/source activation, production forecast calculation/read enablement, production actual-source execution, Finance, Dashboard, or Company Health/Risks switching, deployment, and cutover remain disabled, blocked, or unperformed.
 
 ## Product-owner baseline
 
@@ -360,12 +364,16 @@ statuses are:
 - canonical production reads, settlement, backfill, dual write, shadow read and
   cutover: `FALSE`.
 
-Evidence PR #219 is merged as `da9ade9d...`. The separate readiness gate at
+Evidence PR #219 is merged as `da9ade9d...`; readiness PR #220 is merged as
+`94d9963...`; and the exact #221 shadow remediation is merged as `bbabfdc...`.
+The separate readiness gate at
 `docs/pr5-pr8-foundation-deployment-readiness-gate.md` confirms the exact additive
-plan and successful first-start/rollback simulations, but repeated startup mutates
-the shadow migration timestamp; public ingress, durable backup/accepted restore,
-storage, artifact, smoke and owner/release approvals remain blocked. Its result is
-`FOUNDATION_DEPLOYMENT_BLOCKED`; no deployment occurred.
+plan, successful migration/failure/rollback evidence, and
+`repeatedStartupPassed = TRUE`: repeated startup preserves the exact
+`documents_gantt_shadow_indexes.applied_at`, while registered drift fails closed
+without repair. Public ingress, durable backup/accepted restore, storage threshold,
+pinned artifact, smoke and owner/release approvals remain blocked. Its result is
+still `FOUNDATION_DEPLOYMENT_BLOCKED`; no deployment occurred.
 
 The only next permitted step is: restore public HTTPS ingress and establish an
 owner-approved coherent backup plus independently verified restore drill, then
@@ -1366,7 +1374,7 @@ Remaining conditional items are narrow and must not be filled by implementation 
 | PR6 Billing Source Authority | **PR6: RELEASED — Billing Source Authority foundation only.** | Isolated source schema/domain/repositories and internal inspection only; no HTTP API, canonical writes, read enablement, product switch, bootstrap, production adapter, or PR7 |
 | PR7 forecast domain | **PR7: RELEASED — Forecast Receivables Planning foundation only.** | Isolated append-only planning storage with persisted/revalidated complete input lineage, exact coverage/service/diagnostic invariants, fail-closed unresolved-policy diagnostics, PR5 authorization, PR6 lineage, and a default-disabled read API; no production adapter, canonical write, or consumer switch |
 | PR8 source dry run | **PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.** | Isolated default-disabled diagnostic tables/domain/repositories only; production policy, source data/run, approvals, activation, canonical writes, adapters, consumers, deployment, and cutover remain blocked |
-| PR5–PR8 foundation deployment readiness | **FOUNDATION_DEPLOYMENT_BLOCKED** | First-start migration and prior-code rollback simulations passed; repeated-start timestamp, ingress, backup/restore, storage, artifact, smoke and owner/release approvals block deployment |
+| PR5–PR8 foundation deployment readiness | **FOUNDATION_DEPLOYMENT_BLOCKED** | Migration, failure, repeated-start and prior-code rollback evidence passed after #221; ingress, approved durable backup/restore, storage threshold, pinned artifact, smoke and owner/release approvals still block deployment |
 | PR9 blocked canonical adapter | **BLOCKED pending production evidence, governed source/adapter approval, explicit canonical-write authorization, operational controls, and a separate architecture gate** | Forward-only, default-disabled canonical projection; no backfill and no dual write |
 | PR10 settlement integration | **BLOCKED pending PR9** | Trusted production authorization and approved actual-receivable source projection |
 | PR11 shadow reads | **BLOCKED pending PR9–PR10** | Read-only comparison with existing Finance/Company Health; no user-visible switch |

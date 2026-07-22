@@ -24,6 +24,13 @@
 **Foundation readiness:** `FOUNDATION_DEPLOYMENT_BLOCKED`; see
 `docs/pr5-pr8-foundation-deployment-readiness-gate.md`.
 
+**Foundation readiness lineage:** PR #220 reviewed head
+`4d2e141a696c30860646c40026afc35aeb0b5115` was squash-merged as
+`94d9963e5cd18d75bde3414c3a7e05687a2c3ef3`; PR #221 reviewed head
+`11f824ccdda63213cc71808bfc42b48b9e51996b` was squash-merged as
+`bbabfdc0bff89953ff746b9a09e0d38147e83085`. The latter closes only the
+repeated-startup technical blocker; it grants no authorization.
+
 **Foundation deployment authorization:** `FALSE`
 
 **Repository:** `rishatkznAI/rental-management`
@@ -712,10 +719,13 @@ approvals/contracts/adapters/controls, and repeated public endpoint timeout.
 ## 23. Next permitted step
 
 PR #219 is merged and the separate PR5–PR8 foundation-deployment readiness gate
-has completed without deploying or activating anything. Its first-start migration
-and rollback simulations passed, but repeated startup changed an existing shadow
-migration timestamp; public ingress, durable backup/accepted restore, storage,
-artifact, smoke and owner/release approvals remain blocked.
+was merged through PR #220 without deploying or activating anything. PR #221 then
+closed its repeated-startup technical finding: exact
+`documents_gantt_shadow_indexes.applied_at` is preserved, registered drift fails
+closed without repair, the migration/failure/rollback evidence remains successful,
+and `repeatedStartupPassed = TRUE`. Public ingress, durable approved production
+backup, accepted restore drill, approved storage threshold, pinned artifact,
+approved post-deployment smoke and owner/release approval remain blocked.
 
 Restore public HTTPS ingress and establish an owner-approved coherent backup plus
 independently verified restore drill, then rerun the foundation deployment

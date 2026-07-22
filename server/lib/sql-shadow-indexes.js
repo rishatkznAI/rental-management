@@ -1,7 +1,85 @@
 const SHADOW_SCHEMA_VERSION = 2;
+const SHADOW_MIGRATION_NAME = 'documents_gantt_shadow_indexes';
 
 const DOCUMENTS_TABLE = 'documents_sql';
 const GANTT_TABLE = 'gantt_rentals_sql';
+
+const EXPECTED_TABLE_COLUMNS = Object.freeze({
+  [DOCUMENTS_TABLE]: Object.freeze([
+    ['id', 'TEXT', 0, 1],
+    ['number', 'TEXT', 0, 0],
+    ['type', 'TEXT', 0, 0],
+    ['status', 'TEXT', 0, 0],
+    ['clientId', 'TEXT', 0, 0],
+    ['rentalId', 'TEXT', 0, 0],
+    ['equipmentId', 'TEXT', 0, 0],
+    ['objectId', 'TEXT', 0, 0],
+    ['contractId', 'TEXT', 0, 0],
+    ['date', 'TEXT', 0, 0],
+    ['documentDate', 'TEXT', 0, 0],
+    ['createdAt', 'TEXT', 0, 0],
+    ['updatedAt', 'TEXT', 0, 0],
+    ['signedAt', 'TEXT', 0, 0],
+    ['sentAt', 'TEXT', 0, 0],
+    ['managerId', 'TEXT', 0, 0],
+    ['ownerId', 'TEXT', 0, 0],
+    ['parentDocumentId', 'TEXT', 0, 0],
+    ['searchText', 'TEXT', 0, 0],
+    ['rawJson', 'TEXT', 1, 0],
+  ]),
+  [GANTT_TABLE]: Object.freeze([
+    ['id', 'TEXT', 0, 1],
+    ['rentalId', 'TEXT', 0, 0],
+    ['sourceRentalId', 'TEXT', 0, 0],
+    ['originalRentalId', 'TEXT', 0, 0],
+    ['equipmentId', 'TEXT', 0, 0],
+    ['clientId', 'TEXT', 0, 0],
+    ['managerId', 'TEXT', 0, 0],
+    ['ownerId', 'TEXT', 0, 0],
+    ['status', 'TEXT', 0, 0],
+    ['startDate', 'TEXT', 0, 0],
+    ['endDate', 'TEXT', 0, 0],
+    ['plannedReturnDate', 'TEXT', 0, 0],
+    ['objectId', 'TEXT', 0, 0],
+    ['contractId', 'TEXT', 0, 0],
+    ['searchText', 'TEXT', 0, 0],
+    ['rawJson', 'TEXT', 1, 0],
+  ]),
+});
+
+const EXPECTED_INDEXES = Object.freeze({
+  idx_gantt_rentals_sql_rental: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['rentalId']) }),
+  idx_gantt_rentals_sql_source_rental: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['sourceRentalId']) }),
+  idx_gantt_rentals_sql_original_rental: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['originalRentalId']) }),
+  idx_gantt_rentals_sql_equipment: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['equipmentId']) }),
+  idx_gantt_rentals_sql_client: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['clientId']) }),
+  idx_gantt_rentals_sql_manager: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['managerId']) }),
+  idx_gantt_rentals_sql_owner: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['ownerId']) }),
+  idx_gantt_rentals_sql_status: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['status']) }),
+  idx_gantt_rentals_sql_start: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['startDate']) }),
+  idx_gantt_rentals_sql_end: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['endDate']) }),
+  idx_gantt_rentals_sql_equipment_overlap: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['equipmentId', 'startDate', 'endDate']) }),
+  idx_gantt_rentals_sql_overlap: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['startDate', 'endDate']) }),
+  idx_gantt_rentals_sql_status_overlap: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['status', 'startDate', 'endDate']) }),
+  idx_documents_sql_type: Object.freeze({ table: DOCUMENTS_TABLE, columns: Object.freeze(['type']) }),
+  idx_documents_sql_status: Object.freeze({ table: DOCUMENTS_TABLE, columns: Object.freeze(['status']) }),
+  idx_documents_sql_client: Object.freeze({ table: DOCUMENTS_TABLE, columns: Object.freeze(['clientId']) }),
+  idx_documents_sql_rental: Object.freeze({ table: DOCUMENTS_TABLE, columns: Object.freeze(['rentalId']) }),
+  idx_documents_sql_equipment: Object.freeze({ table: DOCUMENTS_TABLE, columns: Object.freeze(['equipmentId']) }),
+  idx_documents_sql_contract: Object.freeze({ table: DOCUMENTS_TABLE, columns: Object.freeze(['contractId']) }),
+  idx_documents_sql_date: Object.freeze({ table: DOCUMENTS_TABLE, columns: Object.freeze(['date']) }),
+  idx_documents_sql_document_date: Object.freeze({ table: DOCUMENTS_TABLE, columns: Object.freeze(['documentDate']) }),
+  idx_documents_sql_created: Object.freeze({ table: DOCUMENTS_TABLE, columns: Object.freeze(['createdAt']) }),
+  idx_documents_sql_updated: Object.freeze({ table: DOCUMENTS_TABLE, columns: Object.freeze(['updatedAt']) }),
+  idx_documents_sql_number: Object.freeze({ table: DOCUMENTS_TABLE, columns: Object.freeze(['number']) }),
+  idx_documents_sql_refs: Object.freeze({
+    table: DOCUMENTS_TABLE,
+    columns: Object.freeze([
+      'type', 'status', 'clientId', 'rentalId', 'equipmentId', 'contractId',
+      'date', 'documentDate', 'createdAt',
+    ]),
+  }),
+});
 
 function text(value) {
   return String(value ?? '').trim();
@@ -139,7 +217,95 @@ function normalizeGanttRecord(record) {
   };
 }
 
-function ensureSqlShadowSchema(db) {
+function schemaObjectExists(db, type, name) {
+  return Boolean(db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?
+  `).get(type, name));
+}
+
+function getSqlShadowMigration(db) {
+  if (!schemaObjectExists(db, 'table', 'sql_shadow_schema_migrations')) return null;
+  return db.prepare(`
+    SELECT name, version, applied_at
+    FROM sql_shadow_schema_migrations
+    WHERE name = ?
+  `).get(SHADOW_MIGRATION_NAME) || null;
+}
+
+function tableColumns(db, table) {
+  return db.prepare(`PRAGMA table_xinfo("${table}")`).all().map(column => [
+    column.name,
+    String(column.type || '').toUpperCase(),
+    Number(column.notnull),
+    Number(column.pk),
+  ]).sort(([left], [right]) => left.localeCompare(right));
+}
+
+function assertSqlShadowStructure(db) {
+  for (const [table, expectedColumns] of Object.entries(EXPECTED_TABLE_COLUMNS)) {
+    if (!schemaObjectExists(db, 'table', table)) {
+      throw new Error(`SQL_SHADOW_SCHEMA_INCOMPLETE:table:${table}`);
+    }
+    const normalizedExpected = [...expectedColumns]
+      .sort(([left], [right]) => left.localeCompare(right));
+    if (JSON.stringify(tableColumns(db, table)) !== JSON.stringify(normalizedExpected)) {
+      throw new Error(`SQL_SHADOW_TABLE_STRUCTURE_MISMATCH:${table}`);
+    }
+  }
+
+  const expectedIndexNames = Object.keys(EXPECTED_INDEXES).sort();
+  const actualIndexNames = db.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'index'
+      AND tbl_name IN (?, ?)
+      AND name NOT LIKE 'sqlite_autoindex_%'
+    ORDER BY name
+  `).all(DOCUMENTS_TABLE, GANTT_TABLE).map(row => row.name);
+  if (JSON.stringify(actualIndexNames) !== JSON.stringify(expectedIndexNames)) {
+    throw new Error('SQL_SHADOW_INDEX_SET_MISMATCH');
+  }
+
+  for (const [name, expected] of Object.entries(EXPECTED_INDEXES)) {
+    const index = db.prepare(`
+      SELECT tbl_name AS tableName
+      FROM sqlite_master
+      WHERE type = 'index' AND name = ?
+    `).get(name);
+    const metadata = db.prepare(`PRAGMA index_list("${expected.table}")`).all()
+      .find(row => row.name === name);
+    const columns = db.prepare(`PRAGMA index_info("${name}")`).all().map(row => row.name);
+    if (!index || index.tableName !== expected.table || !metadata ||
+        Number(metadata.unique) !== 0 || Number(metadata.partial) !== 0 ||
+        metadata.origin !== 'c' ||
+        JSON.stringify(columns) !== JSON.stringify(expected.columns)) {
+      throw new Error(`SQL_SHADOW_INDEX_STRUCTURE_MISMATCH:${name}`);
+    }
+  }
+
+  return true;
+}
+
+function assertSqlShadowMigration(db, migration) {
+  if (!migration || migration.name !== SHADOW_MIGRATION_NAME) {
+    throw new Error('SQL_SHADOW_MIGRATION_REGISTRATION_MISSING');
+  }
+  if (migration.version !== SHADOW_SCHEMA_VERSION) {
+    throw new Error(`SQL_SHADOW_MIGRATION_VERSION_MISMATCH:${migration.version}`);
+  }
+  if (!text(migration.applied_at)) {
+    throw new Error('SQL_SHADOW_MIGRATION_TIMESTAMP_MISSING');
+  }
+  assertSqlShadowStructure(db);
+}
+
+function applySqlShadowMigration(db) {
+  const concurrentRegistration = getSqlShadowMigration(db);
+  if (concurrentRegistration) {
+    assertSqlShadowMigration(db, concurrentRegistration);
+    return false;
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS sql_shadow_schema_migrations (
       name TEXT PRIMARY KEY,
@@ -210,40 +376,26 @@ function ensureSqlShadowSchema(db) {
   ]) {
     ensureTableColumn(db, GANTT_TABLE, name, definition);
   }
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_rental ON ${GANTT_TABLE}(rentalId);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_source_rental ON ${GANTT_TABLE}(sourceRentalId);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_original_rental ON ${GANTT_TABLE}(originalRentalId);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_equipment ON ${GANTT_TABLE}(equipmentId);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_client ON ${GANTT_TABLE}(clientId);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_manager ON ${GANTT_TABLE}(managerId);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_owner ON ${GANTT_TABLE}(ownerId);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_status ON ${GANTT_TABLE}(status);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_start ON ${GANTT_TABLE}(startDate);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_end ON ${GANTT_TABLE}(endDate);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_equipment_overlap ON ${GANTT_TABLE}(equipmentId, startDate, endDate);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_overlap ON ${GANTT_TABLE}(startDate, endDate);
-    CREATE INDEX IF NOT EXISTS idx_gantt_rentals_sql_status_overlap ON ${GANTT_TABLE}(status, startDate, endDate);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_type ON ${DOCUMENTS_TABLE}(type);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_status ON ${DOCUMENTS_TABLE}(status);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_client ON ${DOCUMENTS_TABLE}(clientId);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_rental ON ${DOCUMENTS_TABLE}(rentalId);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_equipment ON ${DOCUMENTS_TABLE}(equipmentId);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_contract ON ${DOCUMENTS_TABLE}(contractId);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_date ON ${DOCUMENTS_TABLE}(date);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_document_date ON ${DOCUMENTS_TABLE}(documentDate);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_created ON ${DOCUMENTS_TABLE}(createdAt);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_updated ON ${DOCUMENTS_TABLE}(updatedAt);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_number ON ${DOCUMENTS_TABLE}(number);
-    CREATE INDEX IF NOT EXISTS idx_documents_sql_refs ON ${DOCUMENTS_TABLE}(type, status, clientId, rentalId, equipmentId, contractId, date, documentDate, createdAt);
-  `);
+  db.exec(Object.entries(EXPECTED_INDEXES).map(([name, definition]) =>
+    `CREATE INDEX IF NOT EXISTS ${name} ON ${definition.table}(${definition.columns.join(', ')});`
+  ).join('\n'));
+
+  assertSqlShadowStructure(db);
   db.prepare(`
     INSERT INTO sql_shadow_schema_migrations (name, version)
-    VALUES ('documents_gantt_shadow_indexes', ?)
-    ON CONFLICT(name) DO UPDATE SET
-      version = excluded.version,
-      applied_at = CURRENT_TIMESTAMP
-  `).run(SHADOW_SCHEMA_VERSION);
+    VALUES (?, ?)
+  `).run(SHADOW_MIGRATION_NAME, SHADOW_SCHEMA_VERSION);
+  assertSqlShadowMigration(db, getSqlShadowMigration(db));
+  return true;
+}
+
+function ensureSqlShadowSchema(db) {
+  const migration = getSqlShadowMigration(db);
+  if (migration) {
+    assertSqlShadowMigration(db, migration);
+    return false;
+  }
+  return db.transaction(() => applySqlShadowMigration(db)).immediate();
 }
 
 function readAppDataCollection(db, name) {
@@ -631,8 +783,11 @@ function diagnoseSqlShadowConsistency(db) {
 
 module.exports = {
   DOCUMENTS_TABLE,
+  EXPECTED_INDEXES,
   GANTT_TABLE,
+  SHADOW_MIGRATION_NAME,
   SHADOW_SCHEMA_VERSION,
+  assertSqlShadowStructure,
   backfillSqlShadowIndexes,
   diagnoseSqlShadowConsistency,
   ensureSqlShadowSchema,

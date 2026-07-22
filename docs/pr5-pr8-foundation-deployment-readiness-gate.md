@@ -20,10 +20,10 @@ The first local startup applied the expected additive migrations and created no
 production identity, source, forecast, dry-run, canonical or settlement business
 rows. PR #221 closed the repeated-startup timestamp defect identified by this gate:
 the registered shadow migration now follows a validated read-only path and retains
-its exact original `applied_at`. The gate remains blocked because public HTTPS
-ingress is unhealthy, no durable owner-approved backup or independently accepted
-restore drill is evidenced, and storage, artifact, smoke and release approvals are
-absent.
+its exact original `applied_at`. Public HTTPS ingress was independently reverified
+healthy without a Railway or application change. The gate remains blocked because
+no durable owner-approved backup or independently accepted restore drill is
+evidenced, and storage, artifact, smoke and release approvals are absent.
 
 ## 2. Scope
 
@@ -31,11 +31,14 @@ The original readiness simulation inspected repository state
 `da9ade9d2921f2a7120118714ffd68863b8445ee`. Its documentation was squash-merged
 through PR #220 as `94d9963e5cd18d75bde3414c3a7e05687a2c3ef3`. The shadow
 initializer remediation was independently reviewed and squash-merged through PR
-#221 as `bbabfdc0bff89953ff746b9a09e0d38147e83085`, which is the repository
-state for this evidence update. The production baseline remains the running PR3
+#221 as `bbabfdc0bff89953ff746b9a09e0d38147e83085`. PR #222 then merged the
+corresponding four-document readiness update as
+`c0fd6b51938ff66ec9b81cc2f5cc501c6a52e995`, which is the repository state for
+this ingress evidence update. The production baseline remains the running PR3
 artifact `6a38582f5f90b85734884b6b12ad8e306b24619e` and its read-only SQLite state.
-Permitted work was limited to repository/GitHub inspection, the already recorded
-read-only evidence, disposable local simulations, tests, build and documentation.
+Permitted work was limited to repository/GitHub inspection, Railway metadata and
+log reads, safe DNS/TCP/TLS/HTTP probes, read-only production consistency checks,
+tests, build and documentation.
 
 The gate covers:
 
@@ -56,7 +59,7 @@ source rows; calculate a PR7 forecast; execute PR8; create canonical or settleme
 rows; enable routes or flags; switch Finance, Dashboard or Company Health; implement
 PR9; or authorize any activation. The gate changes documentation only.
 
-## 4. PR #218–#221 merged lineage
+## 4. PR #218–#222 merged lineage
 
 | PR | Reviewed head / role | Squash merge | Merged at | Result |
 |---|---|---|---|---|
@@ -64,6 +67,7 @@ PR9; or authorize any activation. The gate changes documentation only.
 | #219 | `0ee1cbcfd87867eb212b35263d4201a09d1de920`; four-document production evidence pack | `da9ade9d2921f2a7120118714ffd68863b8445ee` | `2026-07-22T05:07:35Z` | merged in `main` |
 | #220 | `4d2e141a696c30860646c40026afc35aeb0b5115`; five-document foundation readiness gate | `94d9963e5cd18d75bde3414c3a7e05687a2c3ef3` | `2026-07-22T06:29:57Z` | merged in `main`; readiness remained blocked |
 | #221 | `11f824ccdda63213cc71808bfc42b48b9e51996b`; shadow startup idempotency remediation | `bbabfdc0bff89953ff746b9a09e0d38147e83085` | `2026-07-22T06:58:41Z` | merged in `main`; repeated-startup blocker closed |
+| #222 | `1706587aa0ccd28818ff946d5a817a760e0e62c6`; four-document post-#221 readiness update | `c0fd6b51938ff66ec9b81cc2f5cc501c6a52e995` | `2026-07-22T10:59:37Z` | squash-merged unchanged in `main`; no deployment or activation |
 
 Before #219 was merged, its base was #218, it contained one commit and exactly the
 four approved documents, was non-draft and `MERGEABLE/CLEAN`, had no comments,
@@ -81,14 +85,22 @@ reviewed head contained one commit and only `server/lib/sql-shadow-indexes.js` a
 conditions were independently reconfirmed. Both merges used squash and exact-head
 protection. Neither merge authorized deployment or activation.
 
+PR #222 was found already squash-merged when its final independent check ran. Its
+reviewed head still matched the expected SHA, contained one commit and exactly the
+four declared Markdown files, its check had succeeded, and comments, reviews,
+unresolved threads and auto-merge were absent. The one-parent merge commit confirms
+the squash result. It granted no deployment or activation authority.
+
 ## 5. Repository starting SHA
 
 The original readiness branch was created from freshly fetched and hard-reset
 `origin/main` at `da9ade9d2921f2a7120118714ffd68863b8445ee`; #218 and #219 are
 ancestors of that SHA. Its result was merged by #220, and the separate #221
 remediation then advanced `main` to
-`bbabfdc0bff89953ff746b9a09e0d38147e83085`. This evidence update starts from
-that resulting `origin/main`; no topic branch was used as its base.
+`bbabfdc0bff89953ff746b9a09e0d38147e83085`; #222 then advanced `main` to
+`c0fd6b51938ff66ec9b81cc2f5cc501c6a52e995` through documentation only. This
+evidence update starts from that resulting `origin/main`; no topic branch was used
+as its base.
 
 ## 6. Current production baseline
 
@@ -103,7 +115,7 @@ that resulting `origin/main`; no topic branch was used as its base.
 | Database | `/data/app.sqlite`; SQLite `3.53.1`; WAL journal; foreign keys enabled |
 | Files | DB `11,927,552`; WAL `7,453,112`; SHM `32,768` bytes |
 | File hashes | DB `b487d8a5534665aa896a8eea1788342b16969c2e10441e3857296505c3c7cf2b`; WAL `35445701ec00718d8c7c8adfee013580b964b4aa8c6c4063bf10c1b67f491e38`; SHM `bc2e7b214d1a4f19c928d82f452e316c8a61ab75f6646613cea34b7ba32be8c1` |
-| Health | internal `/health` `200`; internal `/api/version` `200`; external ingress timeout |
+| Health | internal and external `/health` `200`; internal and external `/api/version` `200`; external HEAD for both paths `200` |
 | Baseline migrations | `documents_gantt_shadow_indexes` v2, `canonical_receivables_pr1_schema` v1, `canonical_receivables_pr2_settlement` v1 |
 | Production authority/data | PR5 identity `MISSING`; PR6 source authority `MISSING`; PR8 schema `NOT_DEPLOYED`; PR8 evidence `MISSING`; all canonical/settlement row counts `0` |
 | Runtime gates | canonical and forecast read flags absent/default false; trusted resolvers return null; canonical write path absent |
@@ -115,10 +127,10 @@ returned `ok`. No production state was changed while re-verifying this baseline.
 ## 7. Deployment drift
 
 Production runs PR3 source `6a38582f...`; the current repository point is
-`bbabfdc...`. It contains the released PR5 identity, PR6 billing-source, PR7
+`c0fd6b...`. It contains the released PR5 identity, PR6 billing-source, PR7
 forecast and PR8 diagnostic foundations, fail-closed read wiring, and the narrowly
-scoped #221 shadow-startup remediation. There is no PR9 source or canonical posting
-route in that diff.
+scoped #221 shadow-startup remediation; #222 changed documentation only. There is
+no PR9 source or canonical posting route in that diff.
 
 This is expected version drift, not authorization to deliver it. A deployment
 would execute startup DDL automatically, so the migration, storage, rollback and
@@ -558,16 +570,65 @@ reintroduce its known timestamp rewrite, but it does not require a down migratio
 
 ## 19. Public ingress
 
-Railway metadata still maps
-`rental-management-production-35bc.up.railway.app` to target port `8080`. DNS A
-resolved to `69.46.46.87`. External `HEAD /`, `GET /health`, and
-`GET /api/version` each timed out after approximately eight seconds with curl exit
-28 and HTTP `000`; TCP connection timed out before TLS, so no HTTP response was
-available. The running container's internal `/health` and `/api/version` both
-returned `200` and exact deployment/build identity.
+Historical evidence on `2026-07-21` recorded repeated curl exit `28` before TCP/TLS
+completion while the running container remained healthy. Railway retained no HTTP
+request record for those failed probes, so they did not enter the service's edge
+HTTP pipeline. The exact supportable root-cause boundary is therefore a transient
+failure on the client-to-Railway-edge network path before HTTP/TLS handling, not an
+application, SQLite, deployment-target or service-upstream failure.
+[Railway's public status history](https://status.railway.com/historical) records no
+widespread incident in that window, and the available service telemetry cannot
+responsibly attribute the transient path failure to a narrower carrier or edge
+component.
 
-Ingress was not changed or repaired. Independent post-deployment verification is
-therefore unavailable: `publicIngressHealthy = FALSE`.
+The separate investigation on `2026-07-22` found every persistent ingress
+component valid and unchanged:
+
+- production service domain
+  `rental-management-production-35bc.up.railway.app`, domain ID
+  `a7d3ebee-eaac-41f1-9dfb-7a7da2889f50`, still targets `8080`; there is no custom
+  domain or TCP proxy required for this Railway HTTP service;
+- the active deployment is still
+  `b74623ec-d20d-4c50-ab40-0e0a494c5bc5`, instance
+  `54afd747-1bd1-4069-9320-31e03db1f5ea`, source
+  `6a38582f5f90b85734884b6b12ad8e306b24619e`, with uninterrupted application
+  `startedAt = 2026-07-15T07:09:34.047Z`;
+- runtime `PORT=8080`; no `HOST` override is set; Node listens on wildcard
+  `[::]:8080`, not loopback; internal `/health` and `/api/version` remained `200`;
+- system, Cloudflare `1.1.1.1` and Google `8.8.8.8` DNS lookups agreed on A
+  `69.46.46.87` with no AAAA record;
+- TLS completed with TLS 1.2 and a valid Let's Encrypt `YE1` certificate for
+  `*.up.railway.app`, valid from `2026-07-03T14:01:30Z` through
+  `2026-10-01T14:01:29Z`.
+
+Final independent external evidence began at `2026-07-22T11:12:43.704302Z`:
+
+| Probe | HTTP | Railway request ID | Marker / edge result |
+|---|---:|---|---|
+| `GET /health` | `200` | `PTgPPB-TQBenMdDNnbOCzg` | exact deployment/SHA; edge `europe-west4-drams3a`; no upstream error |
+| `GET /api/version` | `200` | `snu9zYjNSqK9yrQEYqdHTg` | exact deployment/SHA; `app.disabled=false`; no upstream error |
+| `HEAD /health` | `200` | `jn7uTqhkQoeRJO0FnbOCzg` | Railway edge and upstream both completed normally |
+| `HEAD /api/version` | `200` | `ZoWRS1aSSmCntB78YqdHTg` | Railway edge and upstream both completed normally |
+
+Railway edge logs independently correlate all four requests to the same deployment
+and instance and show HTTP/2 downstream, HTTP/1.1 upstream to internal
+`[fd12:94ee:ee6e:1:4000:b3:d7a7:48e5]:8080`, total edge durations `8`–`15` ms,
+and empty `upstreamErrors` / `responseDetails`.
+
+No repair mutation was warranted: the correct domain, target, listener and running
+deployment had self-recovered before intervention. No Railway variable, domain,
+network, service, deployment or source setting changed; no restart or redeploy ran.
+The 33-variable configuration compared exactly equal before/after. Read-only SQLite
+captures at `2026-07-22T11:11:11.971Z` and `2026-07-22T11:14:08.405Z` preserved DB,
+WAL and SHM inode/size/mtime, all table counts, all three migration rows and exact
+`applied_at` values, schema fingerprint
+`53a3c1cb87935323cc165575ce3574184d77c4169a723b54e32aa9af1b101e46`, and
+`app_data` fingerprint
+`dc7f3cb9ef72099dc7b43327c248ae08b6032cd25e029f3f1e3fae41ab94b2fb`; foreign-key
+violations remained `0`.
+
+`publicIngressHealthy = TRUE`. This closes only the ingress readiness blocker; it
+does not authorize deployment or activation.
 
 ## 20. Feature flags/path matrix
 
@@ -664,6 +725,7 @@ and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
 | `pr219Merged` | `TRUE` |
 | `pr220Merged` | `TRUE` |
 | `pr221Merged` | `TRUE` |
+| `pr222Merged` | `TRUE` |
 | `productionBaselineReverified` | `TRUE` |
 | `migrationPlanVerified` | `TRUE` |
 | `migrationSimulationPassed` | `TRUE` |
@@ -674,7 +736,7 @@ and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
 | `storageCapacityAccepted` | `BLOCKED` |
 | `backupAvailable` | `FALSE` |
 | `restoreDrillPassed` | `FALSE` |
-| `publicIngressHealthy` | `FALSE` |
+| `publicIngressHealthy` | `TRUE` |
 | `postDeploymentSmokeApproved` | `FALSE` |
 | `pinnedArtifactApproved` | `FALSE` |
 | `ownerReleaseApprovalRecorded` | `FALSE` |
@@ -690,16 +752,17 @@ and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
 
 ## 24. Blockers
 
-The repeated-startup timestamp defect is closed by #221 and is no longer a blocker.
+The repeated-startup timestamp defect is closed by #221 and public ingress is
+healthy under the separate no-mutation evidence above; neither is a current
+blocker.
 Any one of the following remaining conditions still denies deployment authorization:
 
-1. public HTTPS ingress times out before TLS;
-2. no durable approved production backup is evidenced;
-3. no independently accepted restore drill is evidenced;
-4. the storage safety threshold and reserve are not owner/operations-approved;
-5. no exact source/image deployment artifact is approved and pinned;
-6. the post-deployment smoke plan is not approved;
-7. no durable owner/release approval authorizes foundation deployment.
+1. no durable approved production backup is evidenced;
+2. no independently accepted restore drill is evidenced;
+3. the storage safety threshold and reserve are not owner/operations-approved;
+4. no exact source/image deployment artifact is approved and pinned;
+5. the post-deployment smoke plan is not approved;
+6. no durable owner/release approval authorizes foundation deployment.
 
 Successful local migration and rollback simulations do not replace these
 operational and authorization requirements.
@@ -715,6 +778,7 @@ this document.
 
 ## 26. Next permitted step
 
-Restore public HTTPS ingress and establish an owner-approved coherent backup plus
-independently verified restore drill, then rerun the foundation deployment
-authorization gate.
+Establish an owner-approved coherent backup plus independently verified restore
+drill, approve the storage threshold, pin the exact artifact, approve the
+post-deployment smoke plan and record owner/release authorization, then rerun the
+foundation deployment authorization gate.

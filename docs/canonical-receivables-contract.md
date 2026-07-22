@@ -335,8 +335,11 @@ The follow-up read-only capture is recorded in
 live SQLite database verify deployed PR3 SHA `6a38582f...`, exact empty PR1/PR2
 schema, absent PR5–PR8 migrations/tables, absent production identity/source
 authority and PR8 runs, disabled/absent read routes, and no reachable canonical
-writer. The drift is `DOCUMENTED_ALLOWED_DRIFT`; public ingress still times out;
-and no authorization field becomes true.
+writer. The drift is `DOCUMENTED_ALLOWED_DRIFT`. That pack's public-ingress
+timeout remains historical evidence; a separate `2026-07-22` investigation
+reverified external and internal health/version at `200`, valid TLS/DNS and the
+same deployed SHA without any Railway, code, deployment, environment or database
+mutation. No production-evidence acceptance or authorization field becomes true.
 
 Four authorities remain separate: source-system authority, eligibility-producer
 authority, canonical-posting-adapter authority and human activation/approval
@@ -365,20 +368,22 @@ statuses are:
   cutover: `FALSE`.
 
 Evidence PR #219 is merged as `da9ade9d...`; readiness PR #220 is merged as
-`94d9963...`; and the exact #221 shadow remediation is merged as `bbabfdc...`.
+`94d9963...`; the exact #221 shadow remediation is merged as `bbabfdc...`; and
+its reviewed four-document update #222 is squash-merged as `c0fd6b5...`.
 The separate readiness gate at
 `docs/pr5-pr8-foundation-deployment-readiness-gate.md` confirms the exact additive
 plan, successful migration/failure/rollback evidence, and
 `repeatedStartupPassed = TRUE`: repeated startup preserves the exact
 `documents_gantt_shadow_indexes.applied_at`, while registered drift fails closed
-without repair. Public ingress, durable backup/accepted restore, storage threshold,
-pinned artifact, smoke and owner/release approvals remain blocked. Its result is
-still `FOUNDATION_DEPLOYMENT_BLOCKED`; no deployment occurred.
+without repair. `publicIngressHealthy = TRUE` now closes the ingress blocker;
+durable backup/accepted restore, storage threshold, pinned artifact, smoke and
+owner/release approvals remain blocked. Its result is still
+`FOUNDATION_DEPLOYMENT_BLOCKED`; no deployment occurred.
 
-The only next permitted step is: restore public HTTPS ingress and establish an
-owner-approved coherent backup plus independently verified restore drill, then
-rerun the foundation deployment authorization gate. PR9 implementation is not
-permitted.
+The only next permitted step is: establish an owner-approved coherent backup plus
+independently verified restore drill and complete the remaining storage, artifact,
+smoke and owner/release approvals, then rerun the foundation deployment
+authorization gate. PR9 implementation is not permitted.
 
 ## 1. Purpose and decisions at a glance
 
@@ -1374,7 +1379,7 @@ Remaining conditional items are narrow and must not be filled by implementation 
 | PR6 Billing Source Authority | **PR6: RELEASED — Billing Source Authority foundation only.** | Isolated source schema/domain/repositories and internal inspection only; no HTTP API, canonical writes, read enablement, product switch, bootstrap, production adapter, or PR7 |
 | PR7 forecast domain | **PR7: RELEASED — Forecast Receivables Planning foundation only.** | Isolated append-only planning storage with persisted/revalidated complete input lineage, exact coverage/service/diagnostic invariants, fail-closed unresolved-policy diagnostics, PR5 authorization, PR6 lineage, and a default-disabled read API; no production adapter, canonical write, or consumer switch |
 | PR8 source dry run | **PR8: RELEASED — Actual-Source Eligibility Dry Run foundation only.** | Isolated default-disabled diagnostic tables/domain/repositories only; production policy, source data/run, approvals, activation, canonical writes, adapters, consumers, deployment, and cutover remain blocked |
-| PR5–PR8 foundation deployment readiness | **FOUNDATION_DEPLOYMENT_BLOCKED** | Migration, failure, repeated-start and prior-code rollback evidence passed after #221; ingress, approved durable backup/restore, storage threshold, pinned artifact, smoke and owner/release approvals still block deployment |
+| PR5–PR8 foundation deployment readiness | **FOUNDATION_DEPLOYMENT_BLOCKED** | Migration, failure, repeated-start and prior-code rollback evidence passed after #221; ingress is healthy after a no-mutation recheck, while approved durable backup/restore, storage threshold, pinned artifact, smoke and owner/release approvals still block deployment |
 | PR9 blocked canonical adapter | **BLOCKED pending production evidence, governed source/adapter approval, explicit canonical-write authorization, operational controls, and a separate architecture gate** | Forward-only, default-disabled canonical projection; no backfill and no dual write |
 | PR10 settlement integration | **BLOCKED pending PR9** | Trusted production authorization and approved actual-receivable source projection |
 | PR11 shadow reads | **BLOCKED pending PR9–PR10** | Read-only comparison with existing Finance/Company Health; no user-visible switch |

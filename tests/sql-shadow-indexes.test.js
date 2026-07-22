@@ -1,16 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const Database = serverRequire('better-sqlite3');
 const {
   DOCUMENTS_TABLE,
+  EXPECTED_INDEXES,
   GANTT_TABLE,
+  SHADOW_MIGRATION_NAME,
   backfillSqlShadowIndexes,
   diagnoseSqlShadowConsistency,
   ensureSqlShadowSchema,
@@ -18,6 +23,8 @@ const {
   queryGanttIndex,
   syncSqlShadowIndexForCollection,
 } = require('../server/lib/sql-shadow-indexes.js');
+
+const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 function makeDb() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rental-sql-shadow-'));
@@ -41,21 +48,280 @@ function setCollection(db, name, value) {
   `).run(name, JSON.stringify(value));
 }
 
+function migrationRow(db) {
+  return db.prepare(`
+    SELECT rowid, name, version, applied_at
+    FROM sql_shadow_schema_migrations
+    WHERE name = ?
+  `).get(SHADOW_MIGRATION_NAME);
+}
+
+function schemaFingerprint(db) {
+  const sql = db.prepare(`
+    SELECT type, name, tbl_name, sql
+    FROM sqlite_master
+    WHERE sql IS NOT NULL
+    ORDER BY type, name
+  `).all();
+  return crypto.createHash('sha256').update(JSON.stringify(sql)).digest('hex');
+}
+
+function runConcurrentEnsure(dbPath) {
+  const source = `
+    const Database = require('./server/node_modules/better-sqlite3');
+    const { ensureSqlShadowSchema } = require('./server/lib/sql-shadow-indexes');
+    const db = new Database(process.env.SHADOW_TEST_DB);
+    db.pragma('busy_timeout = 5000');
+    try {
+      const applied = ensureSqlShadowSchema(db);
+      process.stdout.write(JSON.stringify({ ok: true, applied }));
+    } catch (error) {
+      process.stdout.write(JSON.stringify({ ok: false, code: error.code || null, message: error.message }));
+      process.exitCode = 1;
+    } finally {
+      db.close();
+    }
+  `;
+  return new Promise(resolve => {
+    const child = spawn(process.execPath, ['-e', source], {
+      cwd: root,
+      env: { ...process.env, SHADOW_TEST_DB: dbPath },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('close', status => {
+      let result;
+      try {
+        result = JSON.parse(stdout);
+      } catch {
+        result = { ok: false, message: stderr || stdout || `worker exited ${status}` };
+      }
+      resolve({ ...result, status, stderr });
+    });
+  });
+}
+
+function runFullInitializer(dbPath) {
+  return spawnSync(process.execPath, ['-e', "require('./server/db.js').ensureDb()"], {
+    cwd: root,
+    env: { ...process.env, DB_PATH: dbPath },
+    encoding: 'utf8',
+  });
+}
+
 test('SQL shadow schema creates documents and gantt tables idempotently', () => {
   const { db, dir } = makeDb();
   try {
-    ensureSqlShadowSchema(db);
-    ensureSqlShadowSchema(db);
+    assert.equal(ensureSqlShadowSchema(db), true);
+    assert.equal(ensureSqlShadowSchema(db), false);
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(row => row.name);
     assert.ok(tables.includes(DOCUMENTS_TABLE));
     assert.ok(tables.includes(GANTT_TABLE));
-    const migration = db.prepare("SELECT version FROM sql_shadow_schema_migrations WHERE name = 'documents_gantt_shadow_indexes'").get();
+    const migration = migrationRow(db);
     assert.equal(migration.version, 2);
+    assert.match(migration.applied_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM sql_shadow_schema_migrations
+      WHERE name = ?
+    `).get(SHADOW_MIGRATION_NAME).count, 1);
+    assert.deepEqual(
+      db.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'index'
+          AND tbl_name IN (?, ?)
+          AND name NOT LIKE 'sqlite_autoindex_%'
+        ORDER BY name
+      `).all(DOCUMENTS_TABLE, GANTT_TABLE).map(row => row.name),
+      Object.keys(EXPECTED_INDEXES).sort(),
+    );
     const documentColumns = db.prepare(`PRAGMA table_info(${DOCUMENTS_TABLE})`).all().map(row => row.name);
     assert.ok(documentColumns.includes('date'));
     assert.ok(documentColumns.includes('documentDate'));
   } finally {
     db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('repeated SQL shadow startup preserves exact registration, schema, rows, and change count', () => {
+  const { db, dir } = makeDb();
+  try {
+    assert.equal(ensureSqlShadowSchema(db), true);
+    db.prepare(`INSERT INTO ${DOCUMENTS_TABLE} (id, rawJson) VALUES (?, ?)`)
+      .run('D-preserved', '{"id":"D-preserved"}');
+    db.exec(`
+      CREATE TRIGGER deny_shadow_registration_update
+      BEFORE UPDATE ON sql_shadow_schema_migrations
+      FOR EACH ROW WHEN OLD.name = '${SHADOW_MIGRATION_NAME}'
+      BEGIN
+        SELECT RAISE(ABORT, 'shadow migration registration is immutable');
+      END;
+      CREATE TRIGGER deny_shadow_registration_delete
+      BEFORE DELETE ON sql_shadow_schema_migrations
+      FOR EACH ROW WHEN OLD.name = '${SHADOW_MIGRATION_NAME}'
+      BEGIN
+        SELECT RAISE(ABORT, 'shadow migration registration is immutable');
+      END;
+    `);
+    const before = {
+      migration: migrationRow(db),
+      schema: schemaFingerprint(db),
+      documents: db.prepare(`SELECT * FROM ${DOCUMENTS_TABLE} ORDER BY id`).all(),
+      gantt: db.prepare(`SELECT * FROM ${GANTT_TABLE} ORDER BY id`).all(),
+      changes: db.prepare('SELECT total_changes() AS count').get().count,
+    };
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      assert.equal(ensureSqlShadowSchema(db), false);
+    }
+
+    assert.deepEqual(migrationRow(db), before.migration);
+    assert.equal(schemaFingerprint(db), before.schema);
+    assert.deepEqual(db.prepare(`SELECT * FROM ${DOCUMENTS_TABLE} ORDER BY id`).all(), before.documents);
+    assert.deepEqual(db.prepare(`SELECT * FROM ${GANTT_TABLE} ORDER BY id`).all(), before.gantt);
+    assert.equal(db.prepare('SELECT total_changes() AS count').get().count, before.changes);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('registered SQL shadow schema drift fails closed without repair or timestamp mutation', () => {
+  const { db, dir } = makeDb();
+  try {
+    ensureSqlShadowSchema(db);
+    const beforeMigration = migrationRow(db);
+    db.exec('DROP INDEX idx_documents_sql_type');
+    const driftedSchema = schemaFingerprint(db);
+
+    assert.throws(
+      () => ensureSqlShadowSchema(db),
+      /SQL_SHADOW_INDEX_SET_MISMATCH/,
+    );
+    assert.deepEqual(migrationRow(db), beforeMigration);
+    assert.equal(schemaFingerprint(db), driftedSchema);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'index' AND name = 'idx_documents_sql_type'").get().count,
+      0,
+    );
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('SQL shadow migration failure rolls back registration and partial objects', () => {
+  const { db, dir } = makeDb();
+  try {
+    db.exec(`CREATE VIEW ${GANTT_TABLE} AS SELECT 'blocked' AS id`);
+    assert.throws(() => ensureSqlShadowSchema(db));
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'sql_shadow_schema_migrations'").get().count,
+      0,
+    );
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?").get(DOCUMENTS_TABLE).count,
+      0,
+    );
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'view' AND name = ?").get(GANTT_TABLE).count,
+      1,
+    );
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('concurrent SQL shadow startup creates one valid registration', async () => {
+  const { db, dbPath, dir } = makeDb();
+  db.close();
+  try {
+    const results = await Promise.all(Array.from({ length: 6 }, () => runConcurrentEnsure(dbPath)));
+    assert.equal(results.filter(result => result.ok && result.applied === true).length, 1, JSON.stringify(results));
+    assert.equal(results.filter(result => result.ok && result.applied === false).length, 5, JSON.stringify(results));
+    assert.ok(results.every(result => result.status === 0), JSON.stringify(results));
+
+    const verified = new Database(dbPath, { readonly: true });
+    try {
+      assert.equal(verified.prepare(`
+        SELECT COUNT(*) AS count FROM sql_shadow_schema_migrations
+        WHERE name = ? AND version = 2
+      `).get(SHADOW_MIGRATION_NAME).count, 1);
+      assert.equal(migrationRow(verified).name, SHADOW_MIGRATION_NAME);
+      assert.doesNotThrow(() => require('../server/lib/sql-shadow-indexes.js').assertSqlShadowStructure(verified));
+    } finally {
+      verified.close();
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('full PR1-PR8 startup chain preserves shadow registration on a new process restart', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rental-sql-shadow-chain-'));
+  const dbPath = path.join(dir, 'app.sqlite');
+  try {
+    const first = runFullInitializer(dbPath);
+    assert.equal(first.status, 0, first.stderr || first.stdout);
+    const afterFirst = new Database(dbPath);
+    const firstMigration = migrationRow(afterFirst);
+    const firstSchema = schemaFingerprint(afterFirst);
+    afterFirst.exec(`
+      CREATE TRIGGER deny_shadow_registration_update
+      BEFORE UPDATE ON sql_shadow_schema_migrations
+      FOR EACH ROW WHEN OLD.name = '${SHADOW_MIGRATION_NAME}'
+      BEGIN
+        SELECT RAISE(ABORT, 'shadow migration registration is immutable');
+      END;
+    `);
+    const protectedSchema = schemaFingerprint(afterFirst);
+    afterFirst.close();
+
+    const second = runFullInitializer(dbPath);
+    assert.equal(second.status, 0, second.stderr || second.stdout);
+
+    const verified = new Database(dbPath, { readonly: true });
+    try {
+      assert.deepEqual(migrationRow(verified), firstMigration);
+      assert.notEqual(protectedSchema, firstSchema);
+      assert.equal(schemaFingerprint(verified), protectedSchema);
+      assert.equal(verified.prepare(`
+        SELECT COUNT(*) AS count FROM sql_shadow_schema_migrations
+        WHERE name IN (
+          'documents_gantt_shadow_indexes',
+          'canonical_receivables_pr1_schema',
+          'canonical_receivables_pr2_settlement',
+          'platform_identity_pr5',
+          'billing_source_authority_pr6',
+          'forecast_receivables_planning_pr7',
+          'actual_source_eligibility_dry_run_pr8'
+        )
+      `).get().count, 7);
+      for (const table of [
+        'canonical_receivables',
+        'financial_audit_events',
+        'canonical_payments',
+        'canonical_payment_allocations',
+        'canonical_receivable_adjustments',
+        'canonical_approval_requests',
+        'company_memberships',
+        'billing_source_operations',
+        'forecast_receivable_runs',
+        'actual_source_dry_runs',
+      ]) {
+        assert.equal(verified.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0, table);
+      }
+      assert.deepEqual(verified.pragma('foreign_key_check'), []);
+      assert.equal(verified.pragma('integrity_check', { simple: true }), 'ok');
+    } finally {
+      verified.close();
+    }
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

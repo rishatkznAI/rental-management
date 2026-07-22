@@ -11,6 +11,10 @@
 **Factual starting `origin/main`:**
 `c3b20fcb5375894f900a31b70a1f36b2d4b524fe`
 
+**Post-capture merge lineage:** PR #218
+`7892ea68193fa5357733ca0d554dc84af82e6200`; PR #219
+`da9ade9d2921f2a7120118714ffd68863b8445ee`
+
 **Verified active production SHA:**
 `6a38582f5f90b85734884b6b12ad8e306b24619e`
 
@@ -75,7 +79,12 @@ PR #218 was subsequently squash-merged as
 `7892ea68193fa5357733ca0d554dc84af82e6200` on `2026-07-21T13:21:33Z`.
 This evidence branch was then rebased onto that exact `origin/main`; the three-file
 documentation overlap was resolved manually by retaining the full design gate and
-the factual recovery evidence.
+the factual recovery evidence. After exact-head and scope re-verification, evidence
+PR #219 was squash-merged unchanged as
+`da9ade9d2921f2a7120118714ffd68863b8445ee` on
+`2026-07-22T05:07:35Z`. The separate readiness gate is recorded in
+`docs/pr5-pr8-foundation-deployment-readiness-gate.md`; its result is
+`FOUNDATION_DEPLOYMENT_BLOCKED`.
 
 ## 4. PR #218 status
 
@@ -94,6 +103,24 @@ Evidence `REP-002`, queried `2026-07-21T10:25:57Z`:
 
 #218 is docs-only, contains no PR9 implementation, and its merge changes no
 authorization value.
+
+### PR #219 final status
+
+Evidence `REP-003`, queried and merged `2026-07-22`:
+
+| Field | Result |
+|---|---|
+| State / draft | `MERGED` / `false` |
+| Reviewed head | `0ee1cbcfd87867eb212b35263d4201a09d1de920` |
+| Base at review | `7892ea68193fa5357733ca0d554dc84af82e6200` |
+| Scope | one commit; exactly the four PRE-PR9/evidence documents |
+| Checks | `lightweight-pr-check`: `SUCCESS`, completed `2026-07-21T13:31:09Z` |
+| Reviews/comments/threads | none |
+| Auto-merge | absent |
+| Squash merge | `da9ade9d2921f2a7120118714ffd68863b8445ee`; `2026-07-22T05:07:35Z` |
+
+#219 changed no production state and authorized neither foundation deployment nor
+PR9.
 
 ## 5. Railway authentication and access state
 
@@ -155,10 +182,12 @@ this capture.
 
 ## 7. Deployed SHA versus current main
 
-Production is at the PR3 implementation merge. Current main is ahead by the
-documented PR4 design record and PR5–PR8 foundation releases. PR5–PR8 implementation
-commits have no production deployment, and their docs-only release markers were
-skipped by Railway because watched runtime files did not change.
+Production is at the PR3 implementation merge. Current main at
+`da9ade9d2921f2a7120118714ffd68863b8445ee` is ahead by the documented PR4
+design record, PR5–PR8 foundation releases, #218 design gate and #219 evidence
+pack. PR5–PR8 implementation commits have no production deployment, and their
+docs-only release markers were skipped by Railway because watched runtime files
+did not change.
 
 | Comparison | Result |
 |---|---|
@@ -166,7 +195,8 @@ skipped by Railway because watched runtime files did not change.
 | Deployed SHA vs PR4–PR8 | later repository work is not deployed |
 | Deployed SHA vs current main | current main is ahead |
 | Current main vs #218 | #218 is present as squash merge `7892ea68...` |
-| PR9 code | absent in deployed SHA, current main and merged #218 |
+| Current main vs #219 | #219 is present as squash merge `da9ade9d...` |
+| PR9 code | absent in deployed SHA and current main after #218/#219 |
 | Classification | `DOCUMENTED_ALLOWED_DRIFT` |
 
 This is evidence of version drift, not permission to deploy current main.
@@ -487,8 +517,9 @@ run, no integrity/FK failure, no PR9 code and no reachable canonical write path.
    `6a38582f...`.
 2. Backup/restore, retention/legal-hold and complete public-ingress operational
    evidence are missing.
-3. The #218/#219 documentation overlap required manual rebase resolution; the
-   resulting #219 head requires a fresh independent review.
+3. The #218/#219 documentation overlap was manually resolved, the exact #219 head
+   passed its lightweight check, and #219 is now squash-merged; this repository
+   fact does not accept the production evidence or authorize deployment.
 
 Expected version drift (PR5–PR8 not deployed) is not classified as unexpected
 drift and is not authorization to deploy.
@@ -511,6 +542,7 @@ No field is `TRUE`. Evidence collection does not approve D-28–D-33.
 | `operationalControlsApproved` | `BLOCKED` | public ingress failure; runbook/restore/telemetry approvals incomplete |
 | `retentionAndLegalHoldControlsApproved` | `BLOCKED` | restore/retention/legal-hold approvals missing |
 | `canonicalWriteContractApproved` | `BLOCKED` | durable D-30 approval missing |
+| `foundationDeploymentAuthorized` | `FALSE` | separate readiness gate is blocked; no owner/release approval |
 | `pr9ImplementationAuthorized` | `FALSE` | explicit PRE-PR9 boundary |
 | `pr9DisabledDeploymentAuthorized` | `FALSE` | no separate durable approval |
 | `productionCanonicalWritesAuthorized` | `FALSE` | no authority/activation/approval |
@@ -535,10 +567,9 @@ not remove these blockers.
 
 ## 25. Next permitted step
 
-The Railway project owner should restore public HTTPS ingress for the existing
-deployment `b74623ec...` without changing code, schema or feature flags, then attach
-a fresh external `GET`/`HEAD` health/version/auth-boundary capture to this evidence
-pack. This does not authorize PR9 or deployment of current main.
+Restore public HTTPS ingress and establish an owner-approved coherent backup plus
+independently verified restore drill, then rerun the foundation deployment
+authorization gate.
 
 ## Local repository verification
 
@@ -563,6 +594,7 @@ WAL `35445701...` unless stated otherwise.
 |---|---|---|---|---|---|---|---|---|---|
 | `REP-001` | repository lineage | local Git/GitHub | `2026-07-21T10:25:57Z` | repo / main `c3b20fcb...` | n/a | fetch/status/log reads | main and merge lineage verified | reproducible | PASS |
 | `REP-002` | PR status | GitHub app/CLI | final `2026-07-21T13:21:33Z` | repo | n/a | PR metadata GET + authorized squash merge | #218 merged as `7892ea68...`; check passed; no auto-merge | reproducible | PASS |
+| `REP-003` | evidence PR status | GitHub app/CLI | final `2026-07-22T05:07:35Z` | repo / main `da9ade9d...` | n/a | PR metadata GET + authorized exact-head squash merge | #219 merged unchanged; check passed; no auto-merge | reproducible | PASS |
 | `RWY-AUTH-001` | authentication | Railway CLI/OAuth | `2026-07-21` | production / `6a38582f...` | n/a | official login/whoami | authenticated identity redacted | reproducible for authorized operator | PASS |
 | `RWY-LINK-001` | linked identities | Railway status | `2026-07-21` | production / `6a38582f...` | n/a | metadata GET | exact project/env/service/region | reproducible | PASS |
 | `DEP-001/002` | active deployment | GitHub + Railway + runtime | `2026-07-21` | production / `6a38582f...` | n/a | metadata/log/env/GET | deployment, image, runtime and marker agree | reproducible | PASS |

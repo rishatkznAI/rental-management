@@ -16,6 +16,16 @@
 **Design-gate lineage:** PR #218 was squash-merged as
 `7892ea68193fa5357733ca0d554dc84af82e6200` on `2026-07-21T13:21:33Z`.
 
+**Evidence-pack lineage:** PR #219 reviewed head
+`0ee1cbcfd87867eb212b35263d4201a09d1de920` was squash-merged unchanged as
+`da9ade9d2921f2a7120118714ffd68863b8445ee` on
+`2026-07-22T05:07:35Z`.
+
+**Foundation readiness:** `FOUNDATION_DEPLOYMENT_BLOCKED`; see
+`docs/pr5-pr8-foundation-deployment-readiness-gate.md`.
+
+**Foundation deployment authorization:** `FALSE`
+
 **Repository:** `rishatkznAI/rental-management`
 
 **Starting `origin/main`:** `c3b20fcb5375894f900a31b70a1f36b2d4b524fe`
@@ -701,17 +711,19 @@ approvals/contracts/adapters/controls, and repeated public endpoint timeout.
 
 ## 23. Next permitted step
 
-Obtain an independent review of the merged design gate and the rebased factual
-evidence pack. After PR #219 is manually merged, a separate PR5–PR8 foundation
-deployment-readiness gate may assess migration simulation, rollback, backup/restore,
-storage, artifact pinning and public-ingress health without deploying or activating
-anything.
+PR #219 is merged and the separate PR5–PR8 foundation-deployment readiness gate
+has completed without deploying or activating anything. Its first-start migration
+and rollback simulations passed, but repeated startup changed an existing shadow
+migration timestamp; public ingress, durable backup/accepted restore, storage,
+artifact, smoke and owner/release approvals remain blocked.
 
-PR9 implementation is not a permitted next step.
+Restore public HTTPS ingress and establish an owner-approved coherent backup plus
+independently verified restore drill, then rerun the foundation deployment
+authorization gate. PR9 implementation is not a permitted next step.
 
 ## 24. Explicit non-goals
 
-This document does not approve architecture, D-28–D-33, production evidence, source
+This document does not approve architecture, D-28–D-35, production evidence, source
 authority, adapter identity, capabilities, policy, event production, amount basis,
 PR9 implementation, disabled deployment, production writes, canonical reads,
 settlement, backfill, dual write, shadow reads or cutover. It does not create evidence

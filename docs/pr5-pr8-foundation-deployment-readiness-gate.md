@@ -21,9 +21,11 @@ production identity, source, forecast, dry-run, canonical or settlement business
 rows. PR #221 closed the repeated-startup timestamp defect identified by this gate:
 the registered shadow migration now follows a validated read-only path and retains
 its exact original `applied_at`. Public HTTPS ingress was independently reverified
-healthy without a Railway or application change. The gate remains blocked because
-no durable owner-approved backup or independently accepted restore drill is
-evidenced, and storage, artifact, smoke and release approvals are absent.
+healthy without a Railway or application change. The separate operational closure
+evaluation in `docs/pr5-pr8-operational-readiness-closure-gate.md` confirms that the
+gate remains blocked: no durable owner-approved current backup or independently
+accepted restore drill is evidenced, and storage, artifact, smoke and release
+approvals are absent.
 
 ## 2. Scope
 
@@ -57,9 +59,13 @@ domains, network or configuration; run a production initializer; apply a product
 migration; create or restore a production backup; bootstrap identity; create PR6
 source rows; calculate a PR7 forecast; execute PR8; create canonical or settlement
 rows; enable routes or flags; switch Finance, Dashboard or Company Health; implement
-PR9; or authorize any activation. The gate changes documentation only.
+PR9; or authorize any activation. Repository changes from the gate are
+documentation only. The later operational closure inspection created two inert
+SQLite sidecars beside a historical backup despite a read-only open; no live DB or
+business data changed, and the exact pending human cleanup is recorded in
+`docs/pr5-pr8-operational-readiness-closure-gate.md`.
 
-## 4. PR #218–#222 merged lineage
+## 4. PR #218–#223 merged lineage
 
 | PR | Reviewed head / role | Squash merge | Merged at | Result |
 |---|---|---|---|---|
@@ -68,6 +74,7 @@ PR9; or authorize any activation. The gate changes documentation only.
 | #220 | `4d2e141a696c30860646c40026afc35aeb0b5115`; five-document foundation readiness gate | `94d9963e5cd18d75bde3414c3a7e05687a2c3ef3` | `2026-07-22T06:29:57Z` | merged in `main`; readiness remained blocked |
 | #221 | `11f824ccdda63213cc71808bfc42b48b9e51996b`; shadow startup idempotency remediation | `bbabfdc0bff89953ff746b9a09e0d38147e83085` | `2026-07-22T06:58:41Z` | merged in `main`; repeated-startup blocker closed |
 | #222 | `1706587aa0ccd28818ff946d5a817a760e0e62c6`; four-document post-#221 readiness update | `c0fd6b51938ff66ec9b81cc2f5cc501c6a52e995` | `2026-07-22T10:59:37Z` | squash-merged unchanged in `main`; no deployment or activation |
+| #223 | `1a5dfee9dcd42f28b189017361a3223aeef9d25c`; four-document ingress-readiness evidence | `1d59992315f1b7f4ff2d370fc17345a459ac52e3` | `2026-07-22T11:26:06Z` | squash-merged unchanged in `main`; ingress blocker closed only |
 
 Before #219 was merged, its base was #218, it contained one commit and exactly the
 four approved documents, was non-draft and `MERGEABLE/CLEAN`, had no comments,
@@ -91,6 +98,12 @@ four declared Markdown files, its check had succeeded, and comments, reviews,
 unresolved threads and auto-merge were absent. The one-parent merge commit confirms
 the squash result. It granted no deployment or activation authority.
 
+Before #223 was merged, its exact reviewed head was non-draft, one commit ahead of
+`main` and changed exactly the same four authorized Markdown files. Its lightweight
+check completed successfully, GitHub reported `CLEAN` / `MERGEABLE`, auto-merge was
+disabled, and comments, reviews and unresolved review threads were absent. The
+manual exact-head squash merge granted no deployment or activation authority.
+
 ## 5. Repository starting SHA
 
 The original readiness branch was created from freshly fetched and hard-reset
@@ -98,9 +111,10 @@ The original readiness branch was created from freshly fetched and hard-reset
 ancestors of that SHA. Its result was merged by #220, and the separate #221
 remediation then advanced `main` to
 `bbabfdc0bff89953ff746b9a09e0d38147e83085`; #222 then advanced `main` to
-`c0fd6b51938ff66ec9b81cc2f5cc501c6a52e995` through documentation only. This
-evidence update starts from that resulting `origin/main`; no topic branch was used
-as its base.
+`c0fd6b51938ff66ec9b81cc2f5cc501c6a52e995` through documentation only; #223
+then advanced `main` to `1d59992315f1b7f4ff2d370fc17345a459ac52e3`, again through
+documentation only. The operational closure evaluation starts from that resulting
+`origin/main`; no topic branch was used as its base.
 
 ## 6. Current production baseline
 
@@ -726,6 +740,9 @@ and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
 | `pr220Merged` | `TRUE` |
 | `pr221Merged` | `TRUE` |
 | `pr222Merged` | `TRUE` |
+| `pr223Merged` | `TRUE` |
+| `operationalClosureEvaluated` | `TRUE` |
+| `productionVolumeMutationCleanup` | `BLOCKED` |
 | `productionBaselineReverified` | `TRUE` |
 | `migrationPlanVerified` | `TRUE` |
 | `migrationSimulationPassed` | `TRUE` |
@@ -757,12 +774,13 @@ healthy under the separate no-mutation evidence above; neither is a current
 blocker.
 Any one of the following remaining conditions still denies deployment authorization:
 
-1. no durable approved production backup is evidenced;
-2. no independently accepted restore drill is evidenced;
-3. the storage safety threshold and reserve are not owner/operations-approved;
-4. no exact source/image deployment artifact is approved and pinned;
-5. the post-deployment smoke plan is not approved;
-6. no durable owner/release approval authorizes foundation deployment.
+1. two inert sidecars created beside a historical backup require human cleanup;
+2. no durable approved production backup is evidenced;
+3. no independently accepted restore drill is evidenced;
+4. the storage safety threshold and reserve are not owner/operations-approved;
+5. no exact source/image deployment artifact is approved and pinned;
+6. the post-deployment smoke plan is not approved;
+7. no durable owner/release approval authorizes foundation deployment.
 
 Successful local migration and rollback simulations do not replace these
 operational and authorization requirements.
@@ -778,7 +796,9 @@ this document.
 
 ## 26. Next permitted step
 
-Establish an owner-approved coherent backup plus independently verified restore
-drill, approve the storage threshold, pin the exact artifact, approve the
-post-deployment smoke plan and record owner/release authorization, then rerun the
-foundation deployment authorization gate.
+The one next permitted step is for a human Railway operator to delete exactly the
+two inert historical-backup sidecars named in
+`docs/pr5-pr8-operational-readiness-closure-gate.md`, re-list the volume root and
+reconfirm the recorded backup plus live DB/WAL/SHM checksums. No broader delete or
+database operation is permitted. A fresh approved off-volume backup can be created
+only after that cleanup is verified.

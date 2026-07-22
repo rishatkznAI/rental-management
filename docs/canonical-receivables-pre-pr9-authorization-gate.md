@@ -28,8 +28,10 @@
 `4d2e141a696c30860646c40026afc35aeb0b5115` was squash-merged as
 `94d9963e5cd18d75bde3414c3a7e05687a2c3ef3`; PR #221 reviewed head
 `11f824ccdda63213cc71808bfc42b48b9e51996b` was squash-merged as
-`bbabfdc0bff89953ff746b9a09e0d38147e83085`. The latter closes only the
-repeated-startup technical blocker; it grants no authorization.
+`bbabfdc0bff89953ff746b9a09e0d38147e83085`; and the reviewed four-document
+update #222 head `1706587aa0ccd28818ff946d5a817a760e0e62c6` was squash-merged as
+`c0fd6b51938ff66ec9b81cc2f5cc501c6a52e995`. These close only the recorded
+technical/evidence findings; they grant no authorization.
 
 **Foundation deployment authorization:** `FALSE`
 
@@ -48,8 +50,10 @@ the active runtime and live SQLite database. Production runs PR3 SHA `6a38582f..
 the exact PR1/PR2 schema is present with all eight financial tables empty, and
 PR5–PR8 migrations/tables are not deployed. Therefore production identity and
 source authority are `MISSING`, `PRODUCTION_PR8_SCHEMA = NOT_DEPLOYED`, and
-`PRODUCTION_PR8_DRY_RUN_EVIDENCE = MISSING`. Internal health/version probes pass,
-but public ingress times out. No authorization status changed.
+`PRODUCTION_PR8_DRY_RUN_EVIDENCE = MISSING`. A separate `2026-07-22` recheck now
+proves internal and external health/version `200`, valid TLS/DNS and
+`publicIngressHealthy = TRUE` without Railway, code, deployment, environment or
+database mutation. No authorization status changed.
 
 The factual audit found a released but production-unreachable PR8 diagnostic
 foundation. The current repository has no production PR8 execution path, production
@@ -166,7 +170,8 @@ The later recovery pack supersedes those accessibility results for current factu
 state: the active deployment is `b74623ec...` at `6a38582f...`, Node is
 `v20.18.1`, current PR5–PR8 migrations are absent, allow-listed read flags are
 absent/default-disabled, and the runtime has no PR8/PR9/canonical-write path. The
-remaining public-ingress timeout is fail closed and independently recorded.
+historical public-ingress timeout remains recorded, while the separate readiness
+evidence now verifies that ingress is healthy without a production mutation.
 
 ## 5. Production evidence pack
 
@@ -270,7 +275,8 @@ acceptance.
 The later recovery resolved runtime/database accessibility. Blocking evidence or
 authority still missing is:
 
-- a successful public-ingress health/version/auth-boundary response;
+- an independently accepted public auth-boundary response; the separate ingress
+  recovery proves health/version only;
 - production PR5 company/branch/membership/template/grant/deny/bootstrap/audit
   authority, confirmed absent in the active database;
 - production PR6 governed source universe and named source adapter, confirmed
@@ -651,7 +657,7 @@ append-only and supersedable/revocable. An absent record is deny.
 | Field | Value | Exact evidence / reason |
 |---|---|---|
 | `architectureDesignApproved` | **BLOCKED** | design recorded here; D-28–D-33 lack durable named approval |
-| `productionEvidenceAccepted` | **BLOCKED** | `docs/pre-pr9-production-evidence-pack.md` is `EVIDENCE_PR_READY_COMPLETE`, but it is not independently accepted and public ingress remains a P1 finding |
+| `productionEvidenceAccepted` | **BLOCKED** | `docs/pre-pr9-production-evidence-pack.md` is `EVIDENCE_PR_READY_COMPLETE`, but it is not independently accepted; the separate ingress recheck does not approve the pack |
 | `productionIdentityReady` | **BLOCKED** | `PROD-ID-001/002`; bootstrap and concrete authority unproven |
 | `productionSourceAuthorityReady` | **BLOCKED** | `PROD-SRC-001/002`; rows and governed adapter absent/unproven |
 | `productionDryRunExecutionAuthorized` | **BLOCKED** | no capability, policy registry, activation/cohort or named approval |
@@ -704,8 +710,8 @@ The current blockers are missing production identity/bootstrap; missing PR6 rows
 and source adapter; missing policy registry and PR8 production run; missing named
 producer/posting identities and integration authority; missing v2 capabilities;
 missing exact boundary/cohort and amount basis; missing operational
-thresholds/telemetry; public ingress timeout; missing current backup and restore
-drill; missing retention/legal-hold controls; and all named approvals.
+thresholds/telemetry; missing current backup and restore drill; missing
+retention/legal-hold controls; and all named approvals.
 
 Any one is sufficient to deny. No bypass, synthetic evidence or prompt approval is
 permitted.
@@ -714,7 +720,8 @@ The recovery pack replaces the prior inaccessible facts with verified negatives:
 PR5/PR6/PR8 schema and authority/run rows are absent, all eight PR1/PR2 financial
 tables are empty, and the runtime graph is fail closed. Confirmed blockers are the
 missing production identity/source authority and PR8 evidence, absent durable
-approvals/contracts/adapters/controls, and repeated public endpoint timeout.
+approvals/contracts/adapters/controls. The repeated public endpoint timeout is a
+closed historical finding, not a current blocker.
 
 ## 23. Next permitted step
 
@@ -723,13 +730,15 @@ was merged through PR #220 without deploying or activating anything. PR #221 the
 closed its repeated-startup technical finding: exact
 `documents_gantt_shadow_indexes.applied_at` is preserved, registered drift fails
 closed without repair, the migration/failure/rollback evidence remains successful,
-and `repeatedStartupPassed = TRUE`. Public ingress, durable approved production
-backup, accepted restore drill, approved storage threshold, pinned artifact,
-approved post-deployment smoke and owner/release approval remain blocked.
+and `repeatedStartupPassed = TRUE`. The separate ingress investigation records
+`publicIngressHealthy = TRUE`; durable approved production backup, accepted restore
+drill, approved storage threshold, pinned artifact, approved post-deployment smoke
+and owner/release approval remain blocked.
 
-Restore public HTTPS ingress and establish an owner-approved coherent backup plus
-independently verified restore drill, then rerun the foundation deployment
-authorization gate. PR9 implementation is not a permitted next step.
+Establish an owner-approved coherent backup plus independently verified restore
+drill and complete the remaining storage, artifact, smoke and owner/release
+approvals, then rerun the foundation deployment authorization gate. PR9
+implementation is not a permitted next step.
 
 ## 24. Explicit non-goals
 

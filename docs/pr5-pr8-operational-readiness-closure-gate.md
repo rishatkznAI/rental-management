@@ -228,61 +228,80 @@ no approved numerical policy. Current free space does not substitute for approva
 
 ## 7. Pinned artifact closure
 
-The exact proposed source candidate is
-`1d59992315f1b7f4ff2d370fc17345a459ac52e3`, never floating `main` or
-`latest`. The diff from the #221 runtime remediation merge
-`bbabfdc0bff89953ff746b9a09e0d38147e83085` to this candidate contains only four
-Markdown files, so its runtime tree is the reviewed #221 tree.
+The only source SHA currently eligible for later owner approval is
+`1d59992315f1b7f4ff2d370fc17345a459ac52e3`, never floating `main`, a branch name
+or `latest`. `origin/main` was independently reconfirmed at that exact SHA on
+`2026-07-23`. Its diff from the #221 runtime remediation merge
+`bbabfdc0bff89953ff746b9a09e0d38147e83085` contains only the four #222/#223
+Markdown files, so its runtime tree is the reviewed #221 tree. Designating a
+candidate is not release approval.
 
-| Component | Candidate value |
+### 7.1 Candidate release manifest
+
+| Field | Required exact candidate value / state |
 |---|---|
-| Source SHA | `1d59992315f1b7f4ff2d370fc17345a459ac52e3` |
-| Image digest | `MISSING / NOT BUILT`; the current PR3 image digest is not reusable |
-| Build | Nixpacks; Node `20.x`; `npm ci`; root `/server`; start `node scripts/start-with-release-type.cjs` |
-| Target runtime | production reference Node `v20.18.1`, npm `10.8.2`; exact built values must be captured |
-| Migration set | shadow v2, PR1 v1, PR2 v1, then PR5 v1, PR6 v1, PR7 v1, PR8 v1 |
+| Candidate source SHA | `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; `candidateSourceShaApproved = FALSE` |
+| Expected image digest | `UNSET / NOT BUILT`; approval requires one immutable lowercase `sha256:<64-hex>` digest built only from the candidate SHA; floating tag comparison is forbidden |
+| Build contract | Nixpacks, runtime V2, root plus `/server` dependency installs with `npm ci`, start `node scripts/start-with-release-type.cjs` |
+| Exact target Node/npm | Node `v20.18.1`; npm `10.8.2`; build output and `/api/version` must record both before approval |
+| Ordered migration set | `documents_gantt_shadow_indexes` v2; `canonical_receivables_pr1_schema` v1; `canonical_receivables_pr2_settlement` v1; `platform_identity_pr5` v1; `billing_source_authority_pr6` v1; `forecast_receivables_planning_pr7` v1; `actual_source_eligibility_dry_run_pr8` v1 |
 | Ordered migration-set hash | `e8c207bef0b157b058fa56fa594f3e5c697bcdb60c3b5c75834b357f79b282da` |
-| Safe existing-config fingerprint | `146eb3d634c7d3a667c6aa56905714c5c8ca2e738eed784e91c90bd5ea64b6e8` |
-| Root package / lock | `78cd0bb5...` / `064721ed...` |
-| Server package / lock | `fd9826da...` / `faaf55b6...` |
-| `server/db.js` / shadow initializer | `f3fb2ad9...` / `49a7a361...` |
-| PR5 / PR6 / PR7 / PR8 schema source | `88ff3120...` / `621c8534...` / `dbb3005f...` / `e37e4fbd...` |
+| Safe config fingerprint reference | `146eb3d634c7d3a667c6aa56905714c5c8ca2e738eed784e91c90bd5ea64b6e8`; secret-free approved-key/value boundary from the readiness evidence |
+| Environment comparison reference | 33-variable raw-value canonical hash `0f23a29e44e7729e37c2e7420619db16980bb3e640d15352babf7dfc97d44816`; hash only, never raw secret values |
+| Root package / lock | `78cd0bb5474cae32ff9cd77b3087d7b1ab720819d1ba967a9250e90b23694c2f` / `064721ed5c462a0561adfd50cbdbb08ea0cba4fb128ff0d5d43e2324fe355fd3` |
+| Server package / lock | `fd9826dab816540813841353f581ce3644e058a88b1e70740ae1ca2e164809cd` / `faaf55b6718804ba2814ef0b02e8664a2b38278413a8c81dba74df94861db4d8` |
+| `server/db.js` / shadow initializer | `f3fb2ad911e99ac17ee26f7e6520ad5a5c3f4fdb8bffaf79303e42f09938d25f` / `49a7a36105b99a36e994074ddc4b3c844d694f2ae377ba8435fc519f35cf9ac6` |
+| Candidate approval owner | `MISSING`; one named release owner must approve the complete source/image/build/migration/config manifest, with named operations co-approval |
 
-The source candidate is identified, but no immutable image was built for it and no
-owner/release record approves the source, image, build/runtime manifest, migration
-set or configuration fingerprint. Building later does not imply approval.
+### 7.2 Rollback artifact
+
+The application rollback target is the current proven production artifact, not a
+floating deployment: source `6a38582f5f90b85734884b6b12ad8e306b24619e`, image
+`sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650`
+and deployment `b74623ec-d20d-4c50-ab40-0e0a494c5bc5`. Rollback means application
+artifact rollback only; the previously verified additive foundation schema is
+retained. The rollback owner, command/runbook, stop authority and acceptance
+evidence are `MISSING / NOT APPROVED`.
+
+No candidate image digest or named approval record exists. A later build does not
+approve itself, and neither this document nor PR #224 is an owner decision.
+
+`pinnedArtifactCandidateDefined = TRUE`.
 
 `pinnedArtifactApproved = FALSE`.
 
 ## 8. Post-deployment smoke closure
 
-The following checklist is the minimum read-only verification for a separately
-authorized future foundation deployment. Its existence is not approval and none of
-the deployment-dependent rows was executed by this gate.
+`pr5-pr8-foundation-post-deployment-smoke-v1` is the proposed minimum read-only
+acceptance plan for a separately authorized future foundation deployment. It is
+defined now but not approved, and no deployment-dependent check was executed by
+this docs-only gate.
 
-| Area | Required check | Exact expected result |
-|---|---|---|
-| Deployment SHA | Railway metadata plus `/api/version` | approved exact source SHA, never floating `main` |
-| Image | Railway deployment metadata | approved immutable image digest exactly matches release record |
-| Runtime | metadata and `/api/version` | approved Node/npm/build/start command |
-| Replica / region | Railway metadata | one approved replica in `europe-west4-drams3a` |
-| Database migrations | read-only ordered registry query | shadow/PR1/PR2 retained; exact PR5–PR8 v1 rows added once with approved timestamps |
-| Database integrity | `foreign_key_check`, `integrity_check`, `quick_check` | 0 / `ok` / `ok` |
-| Database schema | normalized `sqlite_master` fingerprint | exact approved post-migration fingerprint |
-| Database counts | before/after allow-list | 63 legacy collections conserved; no unauthorized business-row delta |
-| PR5 identity | roots, memberships, access, roles, grants, audit, bootstrap | catalog 1/11 only; company/branch/authority/bootstrap rows `0` |
-| PR5 resolver | runtime path/read probe | production trusted resolver remains `null`; no read authorization |
-| PR6 | 16 source tables and runtime import graph | every row count `0`; no adapter, route, worker or population |
-| PR7 | 8 planning tables and runtime import graph | every row count `0`; no calculation, run, consumer or enabled read |
-| PR8 | 8 diagnostic tables and runtime import graph | every row count `0`; no policy registry, execution or dry run |
-| Canonical reads | route and flag/resolver evidence | flags absent/default false; canonical and forecast routes remain unavailable |
-| Canonical writes | deployed import/route/worker graph and financial counts | write path absent; all eight canonical/settlement tables remain `0` |
-| Consumers | deployed artifact/UI smoke | no Finance, Dashboard or Company Health/Risks switch |
+| Area | Required check | Exact pass condition | Failure action / evidence owner |
+|---|---|---|---|
+| Deployment identity | Railway deployment metadata plus `/api/version` | exact approved source SHA, deployment ID and immutable image digest; no branch or tag substitution | P0 stop; signed release capture; release owner |
+| Deployment placement | metadata for runtime V2, Node/npm, replica, region and `/data` mount | approved Node `v20.18.1`, npm `10.8.2`, one approved replica in `europe-west4-drams3a` | P0/P1 stop; metadata JSON; operations owner |
+| Runtime health | internal and public GET/HEAD `/health` and `/api/version`; startup/log review | independent HTTP 200, one deployment/version marker, valid TLS, no crash/restart loop or migration error | P1 stop; timestamped probes/log extract; operations owner |
+| Auth boundary | unauthenticated `/api/auth/me` and protected-route probes | expected 401/403; never 200 or secret-bearing output | P0 stop; redacted transcript; security owner |
+| DB integrity | read-only/query-only `foreign_key_check`, `integrity_check`, `quick_check` | 0 FK rows; `ok`; `ok`; no checkpoint, vacuum or write | P0 stop; redacted transcript; database owner |
+| DB schema/count conservation | approved normalized `sqlite_master` fingerprint plus before/after count allow-list | exact approved schema hash; all 63 legacy `app_data` collections conserved; no unauthorized business delta | P0 stop; hash/count record; database/release owners |
+| Migration registry | ordered read of `sql_shadow_schema_migrations` | exact seven-row ordered set in section 7.1; original shadow/PR1/PR2 timestamps retained and PR5–PR8 each present once with approved timestamps | P0/P1 stop; registry CSV/hash; release owner |
+| Repeated-start evidence | only under a separately approved controlled restart window | registry/schema/counts unchanged and exact `documents_gantt_shadow_indexes.applied_at` preserved | P1 stop; signed before/after diff; operations owner |
+| PR5 identity | read-only roots, memberships, branch access, roles, grants, audit, bootstrap and resolver checks | catalog 1/11 only; company/branch/authority/bootstrap rows `0`; trusted resolver `null` | P0 stop; count JSON; security/identity owner |
+| PR6 source | read-only counts of all 16 PR6 tables and deployed import/route/worker graph | all rows `0`; no adapter, population, route, worker or consumer | P0 stop; count/import transcript; source owner |
+| PR7 forecast | read-only counts of all 8 PR7 tables, route/resolver and import graph | all rows `0`; no calculation/run/consumer; forecast read unavailable and resolver `null` | P0 stop; count/probe transcript; finance owner |
+| PR8 diagnostic | read-only counts of all 8 PR8 tables and route/import graph | all rows `0`; no policy registry, execution or dry run | P0 stop; count/import transcript; source/security owners |
+| Canonical reads | canonical/forecast flag inventory, resolver and unauthenticated route probes | flags absent/default false; both resolvers `null`; routes unavailable | P0 stop; config hash and probe transcript; security owner |
+| Canonical writes | deployed import/route/worker graph plus eight canonical/settlement counts | write path absent; all eight financial tables remain `0` | P0 stop; count/import transcript; accountant/release owner |
+| Consumers | deployed artifact manifest and UI smoke for Finance, Dashboard and Company Health/Risks | no consumer switch or canonical/forecast projection | P0 stop; manifest/screenshots; product owner |
 
-Any P0 discrepancy stops acceptance and rolls back only the application artifact,
-retaining additive schema; any P1 leaves readiness unaccepted and invokes the
-approved incident procedure. No named owner has approved this checklist, its
-commands, evidence retention or rollback/stop authority.
+Approval requires one immutable plan record binding the exact artifact manifest,
+commands, evidence destination/retention, named release/operations/database/
+security/product owners, change window, P0/P1 stop rules and application-only
+rollback target. All required approval identities and signatures are currently
+missing. A smoke run cannot approve the plan retroactively.
+
+`postDeploymentSmokePlanDefined = TRUE`.
 
 `postDeploymentSmokeApproved = FALSE`.
 
@@ -303,7 +322,9 @@ approval. Repository design records explicitly say missing approval is deny.
 | `backupAvailable` | `FALSE` | mechanism and stale artifacts exist; no current durable approved artifact/checksum/destination/owner |
 | `restoreDrillPassed` | `FALSE` | local rehearsal passed technically but no approved backup or named independent acceptance |
 | `storageCapacityAccepted` | `BLOCKED` | measurements exist; threshold, reserve, retention and restore workspace are unapproved |
+| `pinnedArtifactCandidateDefined` | `TRUE` | exact source, build/runtime, migration, fingerprint and rollback contract is defined; image digest and named approval remain missing |
 | `pinnedArtifactApproved` | `FALSE` | exact source candidate exists; image digest/build manifest and approval are missing |
+| `postDeploymentSmokePlanDefined` | `TRUE` | complete fail-closed deployment/runtime/DB/PR5–PR8/canonical checklist and approval contract is defined |
 | `postDeploymentSmokeApproved` | `FALSE` | checklist exists; no named approval and deployment-dependent checks were not run |
 | `ownerReleaseApprovalRecorded` | `FALSE` | no durable scoped owner/release/operations decision |
 | `productionVolumeMutationCleanup` | `COMPLETE` | exact two sidecars are absent; root listing and unchanged live/backup hashes, metadata, runtime and config independently verified |

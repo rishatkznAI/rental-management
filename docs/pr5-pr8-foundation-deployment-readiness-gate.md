@@ -665,15 +665,17 @@ registration gates. No enabling flag was set during simulation.
 
 ## 21. Pinned artifact proposal
 
-The pre-remediation #220 evidence proposed exact SHA
-`da9ade9d2921f2a7120118714ffd68863b8445ee`. PR #221 superseded that source with
-current `main` `bbabfdc0bff89953ff746b9a09e0d38147e83085`, so the earlier proposal
-is not a current release manifest. Neither SHA nor any floating `main` reference is
-owner-approved or pinned. The table below is retained as historical #220 component
-evidence; unchanged values are not sufficient to approve the #221 artifact:
+The pre-remediation #220 SHA is superseded. The only source currently eligible for
+later owner approval is exact `origin/main`
+`1d59992315f1b7f4ff2d370fc17345a459ac52e3`; a branch name, floating `main` or
+`latest` is forbidden. Its runtime tree is exact #221 because all later changes
+through #223 are the four readiness Markdown files. Candidate designation is not
+approval.
 
 | Artifact component | SHA-256 / value |
 |---|---|
+| Candidate source SHA | `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; eligible for approval, not approved |
+| Expected candidate image digest | `UNSET / NOT BUILT`; must become one immutable lowercase `sha256:<64-hex>` digest built only from the candidate SHA |
 | root `package.json` | `78cd0bb5474cae32ff9cd77b3087d7b1ab720819d1ba967a9250e90b23694c2f` |
 | root `package-lock.json` | `064721ed5c462a0561adfd50cbdbb08ea0cba4fb128ff0d5d43e2324fe355fd3` |
 | `server/package.json` | `fd9826dab816540813841353f581ce3644e058a88b1e70740ae1ca2e164809cd` |
@@ -684,36 +686,41 @@ evidence; unchanged values are not sufficient to approve the #221 artifact:
 | PR8 schema source | `e37e4fbdc23956402224657bc80cc3f5959973401922b9c5872e5516907dcdbe` |
 | `server/db.js` | `f3fb2ad911e99ac17ee26f7e6520ad5a5c3f4fdb8bffaf79303e42f09938d25f` |
 | #221 shadow initializer source | `49a7a36105b99a36e994074ddc4b3c844d694f2ae377ba8435fc519f35cf9ac6` |
+| Exact ordered migration set | `documents_gantt_shadow_indexes` v2; `canonical_receivables_pr1_schema`, `canonical_receivables_pr2_settlement`, `platform_identity_pr5`, `billing_source_authority_pr6`, `forecast_receivables_planning_pr7`, `actual_source_eligibility_dry_run_pr8` each v1 |
 | Ordered migration-set hash | `e8c207bef0b157b058fa56fa594f3e5c697bcdb60c3b5c75834b357f79b282da` |
-| Build/start | Nixpacks, Node 20, `npm ci`; `node scripts/start-with-release-type.cjs` |
-| Proposed runtime target | Node `v20.18.1`; npm `10.8.2`; exact versions require artifact approval |
-| Safe environment fingerprint | `146eb3d634c7d3a667c6aa56905714c5c8ca2e738eed784e91c90bd5ea64b6e8`; existing configuration only |
+| Build/start | Nixpacks, runtime V2, Node `v20.18.1`, npm `10.8.2`, root plus `/server` `npm ci`; `node scripts/start-with-release-type.cjs` |
+| Safe config fingerprint reference | `146eb3d634c7d3a667c6aa56905714c5c8ca2e738eed784e91c90bd5ea64b6e8`; secret-free approved-key/value boundary |
+| Environment comparison reference | raw 33-variable canonical hash `0f23a29e44e7729e37c2e7420619db16980bb3e640d15352babf7dfc97d44816`; hash only |
+| Rollback artifact | source `6a38582f5f90b85734884b6b12ad8e306b24619e`; image `sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650`; deployment `b74623ec-d20d-4c50-ab40-0e0a494c5bc5`; application rollback only, additive schema retained |
+| Approval owner | `MISSING`; named release owner plus named operations co-approval required |
 | Placement | `europe-west4-drams3a`; one replica; `/data`; DB `/data/app.sqlite` |
 
-Before approval, a complete manifest must be regenerated from one exact approved
-post-#221 commit and attached to the release record; the historical ordered-set
-hash above must not be reused as a current approval. The safe variable boundary is
-no variable change: `APP_DISABLED=false`, `BOT_DISABLED=true`,
+Before approval, a complete manifest must bind this source SHA, the resulting image
+digest, exact build/runtime versions, migration set, both fingerprint references,
+rollback artifact and named approvers in one durable release record. The safe
+variable boundary is no variable change: `APP_DISABLED=false`, `BOT_DISABLED=true`,
 `GSM_ENABLED=false`, `DB_PATH=/data/app.sqlite`, and canonical/forecast read flags
 absent/default false. Enabling read flags or adding any bootstrap, source,
 calculation, dry-run, posting or activation variable is forbidden.
 
-The image digest cannot be known until the exact approved source is built. The
-release procedure must capture the resulting immutable image digest and prove that
-Railway deployment metadata and `/api/version` report the approved source SHA,
-runtime and deployment ID. `pinnedArtifactApproved = FALSE`.
+The image digest cannot be known before the candidate is built; it must not be
+invented or inferred from the current PR3 image. The release procedure must prove
+that Railway metadata and `/api/version` match the approved manifest.
+`pinnedArtifactCandidateDefined = TRUE`; `pinnedArtifactApproved = FALSE`.
 
 ## 22. Post-deployment smoke plan
 
-These are future read-only checks for a separately authorized foundation
-deployment. `$APP_URL`, `$DEPLOYMENT_ID`, `$EXPECTED_SHA`, `$EXPECTED_IMAGE` and
-`$DB_PATH` must be replaced by approved immutable values in the release record.
+`pr5-pr8-foundation-post-deployment-smoke-v1` defines future read-only checks for a
+separately authorized foundation deployment. `$APP_URL`, `$DEPLOYMENT_ID`,
+`$EXPECTED_SHA`, `$EXPECTED_IMAGE` and `$DB_PATH` must be replaced by approved
+immutable values in the release record. Defining this plan is not approval and no
+deployment-dependent check was executed by PR #224.
 
 | Area | Exact command/check | Expected result | Failure classification | Evidence artifact | Responsible owner |
 |---|---|---|---|---|---|
 | Deployment identity | Railway deployment metadata for `$DEPLOYMENT_ID` plus `curl -fsS "$APP_URL/api/version"` | approved SHA, deployment ID and image digest all match | P0 artifact drift | signed release capture | release owner |
 | Runtime placement | Railway read-only service/deployment metadata | approved Node/npm, region, one replica and `/data` mount | P0/P1 configuration drift | metadata JSON | operations |
-| Public health | `curl -fsS "$APP_URL/health"` | HTTP 200 | P1 ingress/runtime failure | timestamped curl transcript | operations |
+| Runtime health | independent internal/public GET/HEAD for `/health` and `/api/version`, startup/log review | HTTP 200, exact marker, valid TLS, no crash/restart loop or migration error | P1 ingress/runtime failure | timestamped probe/log transcript | operations |
 | Auth boundary | `curl -sS -o /dev/null -w '%{http_code}\n' "$APP_URL/api/auth/me"` | 401 | P0 auth exposure if 200 | timestamped curl transcript | security |
 | Database core | readonly `better-sqlite3` query with `query_only=1`: `PRAGMA foreign_key_check; PRAGMA integrity_check; PRAGMA quick_check;` | 0 FK rows; `ok`; `ok` | P0 integrity | redacted query transcript | DBA/operations |
 | Migration registry | readonly query of `sql_shadow_schema_migrations` ordered by name | exact shadow v2, PR1–PR8 v1 set and approved timestamps | P0/P1 migration drift | registry CSV/hash | release owner |
@@ -727,10 +734,14 @@ deployment. `$APP_URL`, `$DEPLOYMENT_ID`, `$EXPECTED_SHA`, `$EXPECTED_IMAGE` and
 | Canonical route | unauthenticated canonical endpoint probe | 404 while flag false | P0 unauthorized read surface | timestamped probe | security |
 | Consumers | static deployed-artifact import/route manifest and UI smoke | no Finance, Dashboard or Company Health switch | P0 unauthorized activation | manifest/screenshots | product owner |
 
-This plan itself is not approved, and the repeated-start step is not executable
-until a future release authorizes a controlled restart. Any P0 stops/rolls back the
-application artifact while preserving additive tables; any P1 blocks acceptance
-and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
+Approval requires a durable record binding the exact artifact, commands, evidence
+destination/retention, named release/operations/database/security/product owners,
+change window, P0/P1 stop rules and application-only rollback target. The
+repeated-start step remains non-executable until a future release separately
+authorizes a controlled restart. Any P0 stops/rolls back the application artifact
+while preserving additive tables; any P1 blocks acceptance and invokes the
+approved incident path. Required named approvers and signatures are absent.
+`postDeploymentSmokePlanDefined = TRUE`; `postDeploymentSmokeApproved = FALSE`.
 
 ## 23. Authorization matrix
 
@@ -755,6 +766,8 @@ and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
 | `backupAvailable` | `FALSE` |
 | `restoreDrillPassed` | `FALSE` |
 | `publicIngressHealthy` | `TRUE` |
+| `pinnedArtifactCandidateDefined` | `TRUE` |
+| `postDeploymentSmokePlanDefined` | `TRUE` |
 | `postDeploymentSmokeApproved` | `FALSE` |
 | `pinnedArtifactApproved` | `FALSE` |
 | `ownerReleaseApprovalRecorded` | `FALSE` |

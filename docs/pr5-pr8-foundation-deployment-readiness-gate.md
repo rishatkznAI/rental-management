@@ -62,7 +62,8 @@ rows; enable routes or flags; switch Finance, Dashboard or Company Health; imple
 PR9; or authorize any activation. Repository changes from the gate are
 documentation only. The later operational closure inspection created two inert
 SQLite sidecars beside a historical backup despite a read-only open; no live DB or
-business data changed, and the exact pending human cleanup is recorded in
+business data changed. Exact manual deletion plus independent read-only cleanup
+verification is recorded in
 `docs/pr5-pr8-operational-readiness-closure-gate.md`.
 
 ## 4. PR #218–#223 merged lineage
@@ -742,7 +743,7 @@ and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
 | `pr222Merged` | `TRUE` |
 | `pr223Merged` | `TRUE` |
 | `operationalClosureEvaluated` | `TRUE` |
-| `productionVolumeMutationCleanup` | `BLOCKED` |
+| `productionVolumeMutationCleanup` | `COMPLETE` |
 | `productionBaselineReverified` | `TRUE` |
 | `migrationPlanVerified` | `TRUE` |
 | `migrationSimulationPassed` | `TRUE` |
@@ -769,18 +770,17 @@ and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
 
 ## 24. Blockers
 
-The repeated-startup timestamp defect is closed by #221 and public ingress is
-healthy under the separate no-mutation evidence above; neither is a current
-blocker.
+The repeated-startup timestamp defect is closed by #221, public ingress is healthy
+under the separate no-mutation evidence above, and the exact historical-backup
+sidecar cleanup is independently verified; none is a current blocker.
 Any one of the following remaining conditions still denies deployment authorization:
 
-1. two inert sidecars created beside a historical backup require human cleanup;
-2. no durable approved production backup is evidenced;
-3. no independently accepted restore drill is evidenced;
-4. the storage safety threshold and reserve are not owner/operations-approved;
-5. no exact source/image deployment artifact is approved and pinned;
-6. the post-deployment smoke plan is not approved;
-7. no durable owner/release approval authorizes foundation deployment.
+1. no durable approved production backup is evidenced;
+2. no independently accepted restore drill is evidenced;
+3. the storage safety threshold and reserve are not owner/operations-approved;
+4. no exact source/image deployment artifact is approved and pinned;
+5. the post-deployment smoke plan is not approved;
+6. no durable owner/release approval authorizes foundation deployment.
 
 Successful local migration and rollback simulations do not replace these
 operational and authorization requirements.
@@ -796,9 +796,7 @@ this document.
 
 ## 26. Next permitted step
 
-The one next permitted step is for a human Railway operator to delete exactly the
-two inert historical-backup sidecars named in
-`docs/pr5-pr8-operational-readiness-closure-gate.md`, re-list the volume root and
-reconfirm the recorded backup plus live DB/WAL/SHM checksums. No broader delete or
-database operation is permitted. A fresh approved off-volume backup can be created
-only after that cleanup is verified.
+The one next permitted step is the final owner/release operational review,
+beginning with a fresh current approved off-volume backup and independently
+accepted restore evidence, followed by storage, pinned artifact, smoke and owner
+approval decisions. This review does not authorize deployment, activation or PR9.

@@ -4,7 +4,7 @@
 
 **Status:** `FOUNDATION_DEPLOYMENT_BLOCKED`
 
-**Evaluated:** `2026-07-22`
+**Evaluated:** `2026-07-22`; cleanup independently verified `2026-07-23`
 
 **Repository baseline:** `1d59992315f1b7f4ff2d370fc17345a459ac52e3`
 
@@ -42,10 +42,11 @@ domains, variables or network; create a production backup; restore a database; r
 a production initializer or migration; bootstrap identity; populate PR6; calculate
 PR7; execute PR8; enable canonical/forecast reads; create canonical or settlement
 writes; switch a consumer; implement PR9; or grant approval. The new and updated
-repository files are documentation only. Section 4.3 separately records an
-unintended SQLite sidecar-file creation on one historical backup and the blocked
-cleanup; it changed no live database, backup payload or business row, but means a
-strict claim of zero production-volume file mutation cannot yet be made.
+repository files are documentation only. Section 4.3 records an unintended SQLite
+sidecar-file creation on one historical backup and the later exact manual cleanup.
+The incident changed no live database, backup payload or business row; the two
+sidecars are now absent and the strict post-cleanup production-volume baseline has
+been restored.
 
 The prompt requesting this evaluation is authority to inspect and document, not an
 owner, release, operations, database, security or product approval record. Missing
@@ -53,7 +54,9 @@ or ambiguous approval remains deny.
 
 ## 3. Current production baseline
 
-Read-only evidence captured on `2026-07-22` reconfirmed:
+Read-only baseline evidence was captured on `2026-07-22`. Cleanup-specific
+read-only verification on `2026-07-23` reconfirmed the protected volume,
+database-file, runtime and configuration rows below:
 
 | Item | Value |
 |---|---|
@@ -65,7 +68,8 @@ Read-only evidence captured on `2026-07-22` reconfirmed:
 | Placement | `europe-west4-drams3a`; one replica; `/data` mount |
 | Database | `/data/app.sqlite`; DB `11,927,552`, WAL `7,453,112`, SHM `32,768` bytes |
 | Schema/data boundary | shadow v2 plus PR1/PR2 v1 only; PR5–PR8 not deployed; all eight canonical/settlement tables empty |
-| Public/internal health | `200` for `/health` and `/api/version`; public GET/HEAD evidence accepted for ingress readiness only |
+| Public/internal health | prior accepted `2026-07-22` evidence: `200` for `/health` and `/api/version`; public GET/HEAD evidence applies to ingress readiness only |
+| Cleanup runtime/config | deployment and replica unchanged; startup `2026-07-15T07:09:34.047Z`; canonical raw 33-variable comparison fingerprint `0f23a29e44e7729e37c2e7420619db16980bb3e640d15352babf7dfc97d44816` unchanged |
 
 The active deployment, source and database boundary are evidence inputs. They were
 not changed by this gate.
@@ -135,13 +139,37 @@ files at `2026-07-22T11:28:32Z`:
   `fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb`.
 
 The Railway CLI refused agent deletion and required a human operator. No safety
-guard was bypassed. Raw file reads reconfirmed that the historical backup payload
-remained exact SHA-256 `c4586ca1...`, and the live DB/WAL/SHM remained exact
-`b487d8a5...` / `35445701...` / `bc2e7b21...`, matching the pre-gate evidence.
-Thus there was no live SQLite, schema, registry or business-data mutation, but the
-two inert sidecars remain a production-volume file mutation pending human cleanup.
+guard was bypassed. The operator later deleted exactly those two paths, without a
+glob or broader volume operation. A read-only root listing on `2026-07-23`
+confirmed that both paths are absent. The remaining root entries are exactly the
+live DB/WAL/SHM, the unchanged May 21 backup, and the pre-existing `backups`,
+`lost+found` and `uploads` directories; no unexpected root entry is present. The
+root directory inode remains `2`; its cleanup mtime is
+`2026-07-23T15:51:05.903726049Z`.
 
-`productionVolumeMutationCleanup = BLOCKED`.
+| Artifact | Inode | Size | Mtime | Before SHA-256 | After SHA-256 / state |
+|---|---:|---:|---|---|---|
+| `/data/app.sqlite` | 13 | 11,927,552 | `2026-07-15T07:16:56.915091367Z` | `b487d8a5534665aa896a8eea1788342b16969c2e10441e3857296505c3c7cf2b` | same exact hash |
+| `/data/app.sqlite-wal` | 14 | 7,453,112 | `2026-07-15T17:09:34.230828238Z` | `35445701ec00718d8c7c8adfee013580b964b4aa8c6c4063bf10c1b67f491e38` | same exact hash |
+| `/data/app.sqlite-shm` | 15 | 32,768 | `2026-07-15T18:09:34.259223202Z` | `bc2e7b214d1a4f19c928d82f452e316c8a61ab75f6646613cea34b7ba32be8c1` | same exact hash |
+| `/data/app.sqlite.backup-before-action-execution-rollout-20260521-040225.sqlite` | 1,645 | 11,276,288 | `2026-05-21T04:02:25.694084219Z` | `c4586ca1206da11cbf6cbd6eb88760f1643efb42970a3aaa905f2810356088b9` | same exact hash |
+| exact historical-backup `-wal` sidecar | 1,649 | 0 | `2026-07-22T11:28:32.784864697Z` | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | `ABSENT` |
+| exact historical-backup `-shm` sidecar | 1,650 | 32,768 | `2026-07-22T11:28:32.789116707Z` | `fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb` | `ABSENT` |
+
+No SQLite API or command was used for cleanup verification. Because the complete
+live DB/WAL/SHM byte set, inode, size and mtime match the previously accepted
+read-only capture, its schema fingerprint
+`53a3c1cb87935323cc165575ce3574184d77c4169a723b54e32aa9af1b101e46`,
+migration registry and business counts remain unchanged. Canonical and settlement
+rows, PR5 business identity rows and every PR6, PR7 and PR8 row remain `0`.
+Internal `/api/version` independently reported the same deployment
+`b74623ec-d20d-4c50-ab40-0e0a494c5bc5`, source
+`6a38582f5f90b85734884b6b12ad8e306b24619e`, replica
+`54afd747-1bd1-4069-9320-31e03db1f5ea`, production environment and original
+startup timestamp. There was no restart, redeploy, variable, flag, code, database
+or business-data change.
+
+`productionVolumeMutationCleanup = COMPLETE`.
 
 ## 5. Restore drill closure
 
@@ -278,7 +306,7 @@ approval. Repository design records explicitly say missing approval is deny.
 | `pinnedArtifactApproved` | `FALSE` | exact source candidate exists; image digest/build manifest and approval are missing |
 | `postDeploymentSmokeApproved` | `FALSE` | checklist exists; no named approval and deployment-dependent checks were not run |
 | `ownerReleaseApprovalRecorded` | `FALSE` | no durable scoped owner/release/operations decision |
-| `productionVolumeMutationCleanup` | `BLOCKED` | two inert historical-backup sidecars require human deletion and listing verification |
+| `productionVolumeMutationCleanup` | `COMPLETE` | exact two sidecars are absent; root listing and unchanged live/backup hashes, metadata, runtime and config independently verified |
 | `foundationDeploymentAuthorized` | `FALSE` | one or more prerequisites are false/blocked; no authorization record |
 | `productionActivationAuthorized` | `FALSE` | explicitly outside foundation delivery |
 | `pr9ImplementationAuthorized` | `FALSE` | explicitly outside this gate |
@@ -294,11 +322,11 @@ approval. Repository design records explicitly say missing approval is deny.
 | Runtime-code diff | `NONE` |
 | Production deployment / restart / configuration change | `NONE` |
 | Production live DB, WAL, SHM, schema, registry or business-data mutation | `NONE`; exact checksums and boundaries remained unchanged |
-| Strict production-volume file mutation check | `BLOCKED`; the two inert historical-backup sidecars in section 4.3 remain pending human cleanup |
+| Strict post-cleanup production-volume baseline | `PASS`; exact sidecars are absent, expected root entries remain and all protected file hashes/metadata are unchanged |
 
-The gate therefore does not claim an unqualified zero-mutation result. The
-sidecar-file incident is fail-closed even though it did not change the active
-database, application, deployment, configuration or business state.
+The temporary sidecar-file incident is closed. Its exact creation and deletion
+remain recorded for audit, while the verified post-cleanup volume contains no
+unintended root file and the protected database/application state is unchanged.
 
 ## 12. Result and next permitted step
 
@@ -306,20 +334,14 @@ database, application, deployment, configuration or business state.
 
 The exact remaining blockers are:
 
-1. cleanup of the two inert historical-backup sidecars is not yet verified;
-2. no current durable approved production backup;
-3. no independently accepted restore drill from that backup;
-4. no approved storage threshold and operational reserve;
-5. no approved immutable image/build/config artifact manifest;
-6. no approved post-deployment smoke procedure;
-7. no durable owner/release/operations authorization.
+1. no current durable approved production backup;
+2. no independently accepted restore drill from that backup;
+3. no approved storage threshold and operational reserve;
+4. no approved immutable image/build/config artifact manifest;
+5. no approved post-deployment smoke procedure;
+6. no durable owner/release/operations authorization.
 
-**One next permitted step:** a human Railway operator must delete exactly
-`/app.sqlite.backup-before-action-execution-rollout-20260521-040225.sqlite-wal`
-and
-`/app.sqlite.backup-before-action-execution-rollout-20260521-040225.sqlite-shm`
-from volume `rental-management-volume`, then re-list `/` and reconfirm the
-historical backup and live DB/WAL/SHM checksums recorded above. No broader delete,
-glob or database operation is permitted. After cleanup, the named backup/release
-owner can create and approve a fresh off-volume backup as the next readiness
-closure activity.
+**One next permitted step:** conduct the final owner/release operational review,
+beginning with creation and approval of a fresh current off-volume backup and its
+independent restore evidence, then evaluate storage, artifact, smoke and owner
+approvals. This is a readiness review, not deployment authority.

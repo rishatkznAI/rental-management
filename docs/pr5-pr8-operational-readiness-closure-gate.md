@@ -4,7 +4,8 @@
 
 **Status:** `FOUNDATION_DEPLOYMENT_BLOCKED`
 
-**Evaluated:** `2026-07-22`; cleanup independently verified `2026-07-23`
+**Evaluated:** `2026-07-22`; cleanup and immutable candidate evidence independently
+verified `2026-07-23`
 
 **Repository baseline:** `1d59992315f1b7f4ff2d370fc17345a459ac52e3`
 
@@ -25,9 +26,10 @@ successful, and no runtime source changed after the #221 remediation.
 
 The remaining operational conditions are not closed. There is no current,
 durable, independently verifiable and owner-approved production backup; no accepted
-restore drill; no approved storage threshold/reserve; no built and owner-approved
-pinned foundation image; no approved post-deployment smoke record; and no durable
-owner/release authorization. Any one is sufficient to deny deployment.
+restore drill; no approved storage threshold/reserve; the locally built immutable
+foundation candidate is not published or owner-approved; there is no approved
+post-deployment smoke record; and there is no durable owner/release authorization.
+Any one is sufficient to deny deployment.
 
 ## 2. Scope and fail-closed boundary
 
@@ -41,12 +43,15 @@ This work did **not** deploy or restart production; change Railway configuration
 domains, variables or network; create a production backup; restore a database; run
 a production initializer or migration; bootstrap identity; populate PR6; calculate
 PR7; execute PR8; enable canonical/forecast reads; create canonical or settlement
-writes; switch a consumer; implement PR9; or grant approval. The new and updated
-repository files are documentation only. Section 4.3 records an unintended SQLite
-sidecar-file creation on one historical backup and the later exact manual cleanup.
-The incident changed no live database, backup payload or business row; the two
-sidecars are now absent and the strict post-cleanup production-volume baseline has
-been restored.
+writes; switch a consumer; implement PR9; or grant approval. A local isolated
+`linux/amd64` OCI build used only a Git archive of the candidate `/server` tree;
+its validation overrode the entrypoint and did not start the application, open
+SQLite or execute a migration. A later read-only Railway metadata query only
+reconfirmed the rollback identity. The new and updated repository files are
+documentation only. Section 4.3 records an unintended SQLite sidecar-file creation
+on one historical backup and the later exact manual cleanup. The incident changed
+no live database, backup payload or business row; the two sidecars are now absent
+and the strict post-cleanup production-volume baseline has been restored.
 
 The prompt requesting this evaluation is authority to inspect and document, not an
 owner, release, operations, database, security or product approval record. Missing
@@ -241,9 +246,18 @@ candidate is not release approval.
 | Field | Required exact candidate value / state |
 |---|---|
 | Candidate source SHA | `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; `candidateSourceShaApproved = FALSE` |
-| Expected image digest | `UNSET / NOT BUILT`; approval requires one immutable lowercase `sha256:<64-hex>` digest built only from the candidate SHA; floating tag comparison is forbidden |
-| Build contract | Nixpacks, runtime V2, root plus `/server` dependency installs with `npm ci`, start `node scripts/start-with-release-type.cjs` |
-| Exact target Node/npm | Node `v20.18.1`; npm `10.8.2`; build output and `/api/version` must record both before approval |
+| Candidate OCI manifest digest | `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`; exact `linux/amd64` manifest, never a floating tag |
+| OCI config digest | `sha256:6cf603c99a44c01c5acfe4665fbf8a0e57b38db93fdab081429f39f03d7717a6` |
+| OCI archive SHA-256 | `3a7fdb95c605f5fa94e0f6c269784e469f3b73bef3143fd7e7d0e5af51a4e2f9`; both consecutive exports were byte-identical |
+| Build evidence timestamp | completed `2026-07-23T16:33:20Z`; reproducible OCI `created` value is source commit time `2026-07-22T11:26:06Z` (`SOURCE_DATE_EPOCH=1784719566`) |
+| Target / builder | `linux/amd64`; local non-production Colima `0.10.3`, Docker `29.6.2`, Buildx `0.35.0`, BuildKit `0.30.0` |
+| Dockerfile frontend / recipe | `docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e`; exact ephemeral Dockerfile SHA-256 `59ecb6886b0da436ecd3537f4ee8cb153b7cd85d053e14c99fa828dd67528b8b` |
+| `.dockerignore` | exact content `Dockerfile`; SHA-256 `c750b6d776c1db92b55fcecbb51c80be008aae877e78a28691b3ae79be9ea63e` |
+| Base image | `node:20.18.1-bookworm@sha256:968ca0550acc7589a8b1324401ec6e39ace53b2c82d2aed3a278e9ff491c2b1c` |
+| Image process | exact `git archive <candidate>:server` context; two-stage pinned-base build; `npm ci --omit=dev`; copy production dependencies and server tree; OCI export with provenance/SBOM disabled; command `node scripts/start-with-release-type.cjs` |
+| Expected Railway execution contract | runtime V2; `/server` service root; one replica; start `node scripts/start-with-release-type.cjs`; no pre-deploy command |
+| Exact target Node/npm | Node `v20.18.1`; npm `10.8.2`; checked in both pinned base and final image |
+| Runtime load check | final image `node`/`npm` check passed and `require("better-sqlite3")` passed; application entrypoint was not invoked |
 | Ordered migration set | `documents_gantt_shadow_indexes` v2; `canonical_receivables_pr1_schema` v1; `canonical_receivables_pr2_settlement` v1; `platform_identity_pr5` v1; `billing_source_authority_pr6` v1; `forecast_receivables_planning_pr7` v1; `actual_source_eligibility_dry_run_pr8` v1 |
 | Ordered migration-set hash | `e8c207bef0b157b058fa56fa594f3e5c697bcdb60c3b5c75834b357f79b282da` |
 | Safe config fingerprint reference | `146eb3d634c7d3a667c6aa56905714c5c8ca2e738eed784e91c90bd5ea64b6e8`; secret-free approved-key/value boundary from the readiness evidence |
@@ -252,6 +266,83 @@ candidate is not release approval.
 | Server package / lock | `fd9826dab816540813841353f581ce3644e058a88b1e70740ae1ca2e164809cd` / `faaf55b6718804ba2814ef0b02e8664a2b38278413a8c81dba74df94861db4d8` |
 | `server/db.js` / shadow initializer | `f3fb2ad911e99ac17ee26f7e6520ad5a5c3f4fdb8bffaf79303e42f09938d25f` / `49a7a36105b99a36e994074ddc4b3c844d694f2ae377ba8435fc519f35cf9ac6` |
 | Candidate approval owner | `MISSING`; one named release owner must approve the complete source/image/build/migration/config manifest, with named operations co-approval |
+
+The reproducible build recipe fixes every digest-bearing input: the Dockerfile
+frontend, base image, source tree, server lockfile, source timestamp, migration-set
+hash, safe config-fingerprint reference and builder metadata. Its dependency stage
+asserts the runtime versions and runs `npm ci --omit=dev`; its runtime stage copies
+the resulting `node_modules` plus the exact `/server` archive, repeats the version
+assertions, exposes `8080` and records
+`CMD ["node", "scripts/start-with-release-type.cjs"]`. The exact source context
+was exported with
+`git archive 1d59992315f1b7f4ff2d370fc17345a459ac52e3:server | tar -x -C <context>`.
+The exact Dockerfile was:
+
+```Dockerfile
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+
+ARG BASE_IMAGE=node:20.18.1-bookworm@sha256:968ca0550acc7589a8b1324401ec6e39ace53b2c82d2aed3a278e9ff491c2b1c
+
+FROM --platform=$TARGETPLATFORM ${BASE_IMAGE} AS dependencies
+WORKDIR /app
+ENV NODE_ENV=production \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
+COPY package.json package-lock.json ./
+RUN test "$(node --version)" = "v20.18.1" \
+    && test "$(npm --version)" = "10.8.2" \
+    && npm ci --omit=dev
+
+FROM --platform=$TARGETPLATFORM ${BASE_IMAGE} AS runtime
+ARG SOURCE_SHA
+ARG SOURCE_DATE
+ARG MIGRATION_SET_SHA256
+ARG CONFIG_FINGERPRINT_SHA256
+ARG PACKAGE_LOCK_SHA256
+ARG BUILDER_ID
+LABEL org.opencontainers.image.title="rentCore foundation deployment candidate" \
+      org.opencontainers.image.revision="${SOURCE_SHA}" \
+      org.opencontainers.image.created="${SOURCE_DATE}" \
+      org.opencontainers.image.source="https://github.com/rishatkznAI/rental-management" \
+      rentcore.runtime.node="v20.18.1" \
+      rentcore.runtime.npm="10.8.2" \
+      rentcore.migration-set.sha256="${MIGRATION_SET_SHA256}" \
+      rentcore.config-fingerprint.sha256="${CONFIG_FINGERPRINT_SHA256}" \
+      rentcore.package-lock.sha256="${PACKAGE_LOCK_SHA256}" \
+      rentcore.builder="${BUILDER_ID}"
+WORKDIR /app
+ENV NODE_ENV=production \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY . .
+RUN test "$(node --version)" = "v20.18.1" \
+    && test "$(npm --version)" = "10.8.2"
+EXPOSE 8080
+CMD ["node", "scripts/start-with-release-type.cjs"]
+```
+
+The build command was:
+
+```text
+docker-buildx build --builder colima-rentcore-build --platform linux/amd64 \
+  --provenance=false --sbom=false --build-arg SOURCE_DATE_EPOCH=1784719566 \
+  --build-arg SOURCE_SHA=1d59992315f1b7f4ff2d370fc17345a459ac52e3 \
+  --build-arg SOURCE_DATE=2026-07-22T11:26:06Z \
+  --build-arg MIGRATION_SET_SHA256=e8c207bef0b157b058fa56fa594f3e5c697bcdb60c3b5c75834b357f79b282da \
+  --build-arg CONFIG_FINGERPRINT_SHA256=146eb3d634c7d3a667c6aa56905714c5c8ca2e738eed784e91c90bd5ea64b6e8 \
+  --build-arg PACKAGE_LOCK_SHA256=faaf55b6718804ba2814ef0b02e8664a2b38278413a8c81dba74df94861db4d8 \
+  --build-arg 'BUILDER_ID=local-colima/0.10.3;docker/29.6.2;buildx/0.35.0;buildkit/0.30.0' \
+  --output type=oci,dest=rentcore-foundation-1d599923.oci.tar <context>
+```
+
+Two consecutive exports from the same fixed build graph produced the same manifest
+digest and the same archive SHA-256. The OCI labels bind source, source time,
+builder, Node/npm, server lockfile, migration-set hash and safe config fingerprint.
+The archive remains local non-production evidence: it was not pushed to a registry,
+uploaded to Railway or assigned to a production service. A future Railway source/
+Nixpacks rebuild is a distinct artifact and must not claim this OCI digest; the
+owner-approved release record must choose and preserve the exact delivery artifact.
 
 ### 7.2 Rollback artifact
 
@@ -263,8 +354,12 @@ artifact rollback only; the previously verified additive foundation schema is
 retained. The rollback owner, command/runbook, stop authority and acceptance
 evidence are `MISSING / NOT APPROVED`.
 
-No candidate image digest or named approval record exists. A later build does not
-approve itself, and neither this document nor PR #224 is an owner decision.
+Read-only Railway metadata at `2026-07-23T16:33:50Z` independently reconfirmed that
+deployment and image identity, instance
+`54afd747-1bd1-4069-9320-31e03db1f5ea` `RUNNING`, deployment `SUCCESS`, Nixpacks,
+runtime V2, `/server`, `/data` and the same start command. No Railway mutation was
+requested. The candidate digest now exists, but a local build does not approve or
+durably publish itself, and neither this document nor PR #224 is an owner decision.
 
 `pinnedArtifactCandidateDefined = TRUE`.
 
@@ -322,8 +417,8 @@ approval. Repository design records explicitly say missing approval is deny.
 | `backupAvailable` | `FALSE` | mechanism and stale artifacts exist; no current durable approved artifact/checksum/destination/owner |
 | `restoreDrillPassed` | `FALSE` | local rehearsal passed technically but no approved backup or named independent acceptance |
 | `storageCapacityAccepted` | `BLOCKED` | measurements exist; threshold, reserve, retention and restore workspace are unapproved |
-| `pinnedArtifactCandidateDefined` | `TRUE` | exact source, build/runtime, migration, fingerprint and rollback contract is defined; image digest and named approval remain missing |
-| `pinnedArtifactApproved` | `FALSE` | exact source candidate exists; image digest/build manifest and approval are missing |
+| `pinnedArtifactCandidateDefined` | `TRUE` | exact source, OCI digest, reproducible build/runtime, migration, fingerprint and rollback contract are evidenced |
+| `pinnedArtifactApproved` | `FALSE` | candidate is local-only and not durably published; named release/operations approval is missing |
 | `postDeploymentSmokePlanDefined` | `TRUE` | complete fail-closed deployment/runtime/DB/PR5–PR8/canonical checklist and approval contract is defined |
 | `postDeploymentSmokeApproved` | `FALSE` | checklist exists; no named approval and deployment-dependent checks were not run |
 | `ownerReleaseApprovalRecorded` | `FALSE` | no durable scoped owner/release/operations decision |
@@ -339,6 +434,10 @@ approval. Repository design records explicitly say missing approval is deny.
 | `git diff --check` | `PASS` |
 | `npm test` | `PASS`; 2,343 tests passed, 0 failed |
 | `npm run build` | `PASS`; production Vite build completed |
+| Exact candidate context | `PASS`; `/server` exported only from `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; server lockfile SHA-256 matched the manifest |
+| OCI build and repeat export | `PASS`; both `linux/amd64` exports produced manifest `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5` and archive SHA-256 `3a7fdb95c605f5fa94e0f6c269784e469f3b73bef3143fd7e7d0e5af51a4e2f9` |
+| Final image inspection | `PASS`; source/runtime/migration/config/lock labels exact; Node `v20.18.1`, npm `10.8.2` and native `better-sqlite3` load passed without application startup |
+| Rollback identity read | `PASS`; exact production deployment/source/image/instance remained current at `2026-07-23T16:33:50Z` |
 | Changed-file allow-list | `PASS`; this branch changes only this document and `docs/pr5-pr8-foundation-deployment-readiness-gate.md` |
 | Runtime-code diff | `NONE` |
 | Production deployment / restart / configuration change | `NONE` |
@@ -358,7 +457,7 @@ The exact remaining blockers are:
 1. no current durable approved production backup;
 2. no independently accepted restore drill from that backup;
 3. no approved storage threshold and operational reserve;
-4. no approved immutable image/build/config artifact manifest;
+4. the immutable candidate is built and pinned by digest but is not durably published or owner-approved;
 5. no approved post-deployment smoke procedure;
 6. no durable owner/release/operations authorization.
 

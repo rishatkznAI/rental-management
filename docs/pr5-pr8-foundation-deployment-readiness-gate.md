@@ -4,7 +4,7 @@
 
 **Gate status:** `FOUNDATION_DEPLOYMENT_BLOCKED`
 
-**Gate timestamp:** `2026-07-22`
+**Gate timestamp:** `2026-07-22`; immutable candidate evidence updated `2026-07-23`
 
 **Foundation deployment performed:** `NO`
 
@@ -25,7 +25,9 @@ healthy without a Railway or application change. The separate operational closur
 evaluation in `docs/pr5-pr8-operational-readiness-closure-gate.md` confirms that the
 gate remains blocked: no durable owner-approved current backup or independently
 accepted restore drill is evidenced, and storage, artifact, smoke and release
-approvals are absent.
+approvals are absent. A reproducible local OCI candidate is now bound to an exact
+digest, but it is not published or owner-approved and therefore grants no deployment
+authority.
 
 ## 2. Scope
 
@@ -675,7 +677,14 @@ approval.
 | Artifact component | SHA-256 / value |
 |---|---|
 | Candidate source SHA | `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; eligible for approval, not approved |
-| Expected candidate image digest | `UNSET / NOT BUILT`; must become one immutable lowercase `sha256:<64-hex>` digest built only from the candidate SHA |
+| Candidate OCI manifest digest | `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`; exact `linux/amd64` manifest |
+| OCI config digest | `sha256:6cf603c99a44c01c5acfe4665fbf8a0e57b38db93fdab081429f39f03d7717a6` |
+| OCI archive SHA-256 | `3a7fdb95c605f5fa94e0f6c269784e469f3b73bef3143fd7e7d0e5af51a4e2f9`; consecutive exports byte-identical |
+| Build/source time | evidence completed `2026-07-23T16:33:20Z`; OCI created/source time `2026-07-22T11:26:06Z`; `SOURCE_DATE_EPOCH=1784719566` |
+| Builder | local non-production Colima `0.10.3`; Docker `29.6.2`; Buildx `0.35.0`; BuildKit `0.30.0`; target `linux/amd64` |
+| Dockerfile frontend / recipe | `docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e`; Dockerfile SHA-256 `59ecb6886b0da436ecd3537f4ee8cb153b7cd85d053e14c99fa828dd67528b8b` |
+| `.dockerignore` | exact content `Dockerfile`; SHA-256 `c750b6d776c1db92b55fcecbb51c80be008aae877e78a28691b3ae79be9ea63e` |
+| Base image | `node:20.18.1-bookworm@sha256:968ca0550acc7589a8b1324401ec6e39ace53b2c82d2aed3a278e9ff491c2b1c` |
 | root `package.json` | `78cd0bb5474cae32ff9cd77b3087d7b1ab720819d1ba967a9250e90b23694c2f` |
 | root `package-lock.json` | `064721ed5c462a0561adfd50cbdbb08ea0cba4fb128ff0d5d43e2324fe355fd3` |
 | `server/package.json` | `fd9826dab816540813841353f581ce3644e058a88b1e70740ae1ca2e164809cd` |
@@ -688,24 +697,29 @@ approval.
 | #221 shadow initializer source | `49a7a36105b99a36e994074ddc4b3c844d694f2ae377ba8435fc519f35cf9ac6` |
 | Exact ordered migration set | `documents_gantt_shadow_indexes` v2; `canonical_receivables_pr1_schema`, `canonical_receivables_pr2_settlement`, `platform_identity_pr5`, `billing_source_authority_pr6`, `forecast_receivables_planning_pr7`, `actual_source_eligibility_dry_run_pr8` each v1 |
 | Ordered migration-set hash | `e8c207bef0b157b058fa56fa594f3e5c697bcdb60c3b5c75834b357f79b282da` |
-| Build/start | Nixpacks, runtime V2, Node `v20.18.1`, npm `10.8.2`, root plus `/server` `npm ci`; `node scripts/start-with-release-type.cjs` |
+| Candidate image build/start | exact `git archive <candidate>:server`; pinned two-stage OCI build; `npm ci --omit=dev`; Node `v20.18.1`; npm `10.8.2`; `node scripts/start-with-release-type.cjs` |
+| Final-image verification | exact Node/npm passed; native `better-sqlite3` load passed; application entrypoint and migrations were not run |
+| Expected Railway execution | Nixpacks source baseline is distinct; runtime V2, `/server`, one replica and the same start command; any Railway rebuild must receive its own digest approval |
 | Safe config fingerprint reference | `146eb3d634c7d3a667c6aa56905714c5c8ca2e738eed784e91c90bd5ea64b6e8`; secret-free approved-key/value boundary |
 | Environment comparison reference | raw 33-variable canonical hash `0f23a29e44e7729e37c2e7420619db16980bb3e640d15352babf7dfc97d44816`; hash only |
-| Rollback artifact | source `6a38582f5f90b85734884b6b12ad8e306b24619e`; image `sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650`; deployment `b74623ec-d20d-4c50-ab40-0e0a494c5bc5`; application rollback only, additive schema retained |
+| Rollback artifact | source `6a38582f5f90b85734884b6b12ad8e306b24619e`; image `sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650`; deployment `b74623ec-d20d-4c50-ab40-0e0a494c5bc5`; read-only Railway metadata reconfirmed `2026-07-23T16:33:50Z`; application rollback only, additive schema retained |
 | Approval owner | `MISSING`; named release owner plus named operations co-approval required |
 | Placement | `europe-west4-drams3a`; one replica; `/data`; DB `/data/app.sqlite` |
 
-Before approval, a complete manifest must bind this source SHA, the resulting image
-digest, exact build/runtime versions, migration set, both fingerprint references,
-rollback artifact and named approvers in one durable release record. The safe
+Before approval, a complete manifest must bind this source SHA, built OCI digest,
+exact build/runtime versions, migration set, both fingerprint references, rollback
+artifact and named approvers in one durable release record. The safe
 variable boundary is no variable change: `APP_DISABLED=false`, `BOT_DISABLED=true`,
 `GSM_ENABLED=false`, `DB_PATH=/data/app.sqlite`, and canonical/forecast read flags
 absent/default false. Enabling read flags or adding any bootstrap, source,
 calculation, dry-run, posting or activation variable is forbidden.
 
-The image digest cannot be known before the candidate is built; it must not be
-invented or inferred from the current PR3 image. The release procedure must prove
-that Railway metadata and `/api/version` match the approved manifest.
+The digest was measured from the local non-production OCI artifact and reproduced
+by a second byte-identical export; it was not inferred from the current PR3 image.
+It has not been pushed to a durable registry or uploaded to Railway. A Railway
+source/Nixpacks build is a different artifact and must receive its own pinned digest
+and approval. The release procedure must prove that Railway metadata and
+`/api/version` match whichever complete artifact manifest is explicitly approved.
 `pinnedArtifactCandidateDefined = TRUE`; `pinnedArtifactApproved = FALSE`.
 
 ## 22. Post-deployment smoke plan
@@ -791,7 +805,7 @@ Any one of the following remaining conditions still denies deployment authorizat
 1. no durable approved production backup is evidenced;
 2. no independently accepted restore drill is evidenced;
 3. the storage safety threshold and reserve are not owner/operations-approved;
-4. no exact source/image deployment artifact is approved and pinned;
+4. the exact source/image candidate is built and pinned by digest but not durably published or owner-approved;
 5. the post-deployment smoke plan is not approved;
 6. no durable owner/release approval authorizes foundation deployment.
 

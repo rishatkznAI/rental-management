@@ -2,19 +2,20 @@
 
 ## 1. Status
 
-**Status:** `FOUNDATION_DEPLOYMENT_BLOCKED`
+**Status:** `FOUNDATION_DEPLOYMENT_READY`
 
 **Evaluated:** `2026-07-22`; cleanup and immutable candidate evidence independently
 verified `2026-07-23`; coherent backup, restore drill, storage calculation and
 security-exposure review updated `2026-07-24`; disabled-integration execution
 audit completed `2026-07-24T05:52:47Z`; immutable GHCR publication independently
-verified `2026-07-24T08:54:25Z`
+verified `2026-07-24T08:54:25Z`; scoped owner deployment approval recorded
+`2026-07-24T12:00:08Z`
 
 **Repository baseline:** `1d59992315f1b7f4ff2d370fc17345a459ac52e3`
 
 **Foundation deployment performed:** `NO`
 
-**Foundation deployment authorized:** `NO`
+**Foundation deployment authorized:** `YES`
 
 **Production activation authorized:** `NO`
 
@@ -33,8 +34,8 @@ exact immutable foundation candidate is now published unchanged to a private GHC
 package and its remote manifest digest is independently verified and approved. The
 encrypted current backup now has independently verified private Google Drive
 custody, the smoke-evidence retention policy is approved and Rishat is the security
-owner. The only remaining pre-deployment decision is explicit foundation deployment
-authorization, which remains deferred. Potential prior secret exposure is not
+owner. Rishat approved the exact foundation-only deployment scope at
+`2026-07-24T12:00:08Z`. Potential prior secret exposure is not
 remediated, but rotation is deferred under a foundation-only
 scoped owner risk acceptance. The owner's clarified boundary permits the existing
 in-process environment lookups while both integrations fail closed. The reviewed
@@ -430,7 +431,8 @@ or `latest`. `origin/main` was independently reconfirmed at that exact SHA on
 `2026-07-23`. Its diff from the #221 runtime remediation merge
 `bbabfdc0bff89953ff746b9a09e0d38147e83085` contains only the four #222/#223
 Markdown files, so its runtime tree is the reviewed #221 tree. Registry publication
-and artifact approval do not authorize deployment.
+and artifact approval did not by themselves authorize deployment; the separate
+scoped owner decision recorded in section 9 now does.
 
 ### 7.1 Candidate release manifest
 
@@ -573,10 +575,11 @@ production artifact.
 ## 8. Post-deployment smoke closure
 
 `pr5-pr8-foundation-post-deployment-smoke-v1` is the owner-approved minimum
-read-only acceptance plan for a separately authorized future foundation deployment.
-Codex/operations agent is the executor and Rishat is the independent reviewer. Its
-evidence destination/retention remains undecided, and no deployment-dependent check
-was executed by this docs-only gate.
+read-only acceptance plan for the now separately authorized foundation deployment.
+Codex/operations agent is the executor and Rishat is the independent reviewer. The
+signed/redacted report and checksums have approved indefinite retention in the
+repository release record; no deployment-dependent check was executed by this
+docs-only gate.
 
 | Area | Required check | Exact pass condition | Failure action / evidence owner |
 |---|---|---|---|
@@ -603,8 +606,9 @@ Approval requires one immutable plan record binding the exact artifact manifest,
 commands, evidence destination/retention, named release/operations/database/
 security/product owners, change window, P0/P1 stop rules and application-only
 rollback target. The plan, executor and independent reviewer are approved; the
-evidence destination/retention, security owner and final release authorization are
-still missing. A smoke run cannot supply those prerequisites retroactively.
+evidence destination/retention, security owner and exact foundation-only release
+authorization are now recorded. The smoke result remains pending until the
+authorized deployment is separately executed.
 
 `postDeploymentSmokePlanDefined = TRUE`.
 
@@ -615,11 +619,12 @@ still missing. A smoke run cannot supply those prerequisites retroactively.
 The owner packet names Rishat as product, release, operations, database/backup and
 security owner and records the approved durable Google Drive backup custody,
 restore drill, storage policy, smoke plan, indefinite release-record retention for
-signed/redacted smoke evidence and exact private GHCR artifact. The explicit
-foundation deployment authorization remains deferred. Repository design records
-explicitly say a deferred release decision is deny.
+signed/redacted smoke evidence and exact private GHCR artifact. Rishat explicitly
+approved the exact foundation-only deployment scope at `2026-07-24T12:00:08Z`.
+No activation, bootstrap, population, calculation, dry run, canonical read/write,
+integration activation or PR9 authority is implied.
 
-`ownerReleaseApprovalRecorded = FALSE`.
+`ownerReleaseApprovalRecorded = TRUE`.
 
 ## 10. Authorization matrix
 
@@ -647,10 +652,16 @@ explicitly say a deferred release decision is deny.
 | `smokeEvidenceRetentionApproved` | `TRUE` | signed/redacted smoke report and checksums will be retained indefinitely in the repository release record with the deployment audit |
 | `postDeploymentSmokeApproved` | `FALSE` | plan, executor, reviewer and evidence retention are approved, but deployment-dependent checks were not run |
 | `securityOwner` | `Rishat` | Rishat accepted security ownership for this foundation gate |
-| `ownerReleaseApprovalRecorded` | `FALSE` | all operational owner decisions are recorded, but the separate foundation deployment decision remains deferred |
+| `ownerReleaseApprovalRecorded` | `TRUE` | Rishat recorded the separate exact foundation-only deployment approval at `2026-07-24T12:00:08Z` |
 | `productionVolumeMutationCleanup` | `COMPLETE` | exact two sidecars are absent; root listing and unchanged live/backup hashes, metadata, runtime and config independently verified |
-| `foundationDeploymentAuthorized` | `FALSE` | one or more prerequisites are false/blocked; no authorization record |
+| `foundationDeploymentAuthorized` | `TRUE` | approved only for source `1d59992315f1b7f4ff2d370fc17345a459ac52e3`, OCI digest `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`, verified Google Drive backup and smoke plan `pr5-pr8-foundation-post-deployment-smoke-v1` |
 | `productionActivationAuthorized` | `FALSE` | explicitly outside foundation delivery |
+| `pr5BootstrapAuthorized` | `FALSE` | explicitly excluded from the owner approval |
+| `pr6SourcePopulationAuthorized` | `FALSE` | explicitly excluded from the owner approval |
+| `pr7ProductionCalculationAuthorized` | `FALSE` | explicitly excluded from the owner approval |
+| `pr8ProductionDryRunAuthorized` | `FALSE` | explicitly excluded from the owner approval |
+| `canonicalProductionReadsAuthorized` | `FALSE` | explicitly excluded from the owner approval |
+| `productionCanonicalWritesAuthorized` | `FALSE` | explicitly excluded from the owner approval |
 | `pr9ImplementationAuthorized` | `FALSE` | explicitly outside this gate |
 
 ## 11. Verification
@@ -689,18 +700,26 @@ unintended root file and the protected database/application state is unchanged.
 
 ## 12. Result and next permitted step
 
-`FOUNDATION_DEPLOYMENT_BLOCKED`.
+`FOUNDATION_DEPLOYMENT_READY`.
 
-The exact remaining blocker is:
+There is no remaining pre-deployment readiness blocker for the exact approved
+foundation-only scope. The authorization is immutable-artifact-specific and does
+not permit a rebuild, floating branch deployment, configuration/flag change,
+bootstrap, source population, calculation, dry run, canonical read/write,
+integration activation, production activation or PR9 implementation.
 
-1. `foundationDeploymentDecision` remains `DEFERRED`; no explicit foundation
-   deployment authorization exists.
+`foundationDeploymentDecision = APPROVED`.
+
+`foundationDeploymentAuthorized = TRUE`.
 
 `postDeploymentSmokeApproved` remains `FALSE` because the deployment-dependent
 smoke has not run; the plan, executor, reviewer and evidence retention are approved,
 so that post-deployment state is not a missing pre-deployment decision.
 
-**One next permitted step:** Rishat may issue a separate explicit `APPROVED`
-decision for the exact foundation-only deployment, bound to the pinned GHCR
-artifact, verified Google Drive backup and approved smoke plan. This documentation
-update does not authorize deployment or integration activation.
+**Exact next deployment step:** in a separately executed production change, deploy
+the already published immutable image
+`ghcr.io/rishatkznai/rental-management@sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
+to the existing Railway `rental-management` production service without rebuilding,
+changing variables/flags or activating integrations; then execute
+`pr5-pr8-foundation-post-deployment-smoke-v1` under its P0/P1 stop and rollback
+rules. This docs-only task performs no deployment.

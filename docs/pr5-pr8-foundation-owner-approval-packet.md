@@ -22,14 +22,15 @@ authorship, silence or this packet's creation. An `APPROVED` decision is valid o
 with approver name, accountable role, UTC timestamp and durable decision reference.
 Missing information remains `UNDECIDED`.
 
-The owner decisions below were explicitly supplied by Rishat and recorded at
-`2026-07-24T08:30:17Z`. This record changes approval state only; it performs no
-deployment, artifact publication, Railway change, production operation, migration,
-integration activation or PR9 work.
+The owner decisions below were explicitly supplied by Rishat. The initial decision
+set was recorded at `2026-07-24T08:30:17Z`; the exact foundation-only deployment
+approval was recorded at `2026-07-24T12:00:08Z`. This record changes approval state
+only; it performs no deployment, artifact publication, Railway change, production
+operation, migration, integration activation or PR9 work.
 
 Current authorization state:
 
-`foundationDeploymentAuthorized = FALSE`
+`foundationDeploymentAuthorized = TRUE`
 
 `productionActivationAuthorized = FALSE`
 
@@ -121,7 +122,8 @@ The only candidate presented for approval is:
 Rishat approved `ghcr.io/rishatkznai/rental-management` as the durable registry
 destination. The already-built OCI archive was pushed there without rebuilding,
 and the private remote manifest was independently resolved to the exact approved
-digest. Registry publication and artifact approval do not authorize deployment.
+digest. Registry publication and artifact approval did not by themselves authorize
+deployment; the separate scoped owner decision in section 8 now does.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
@@ -180,7 +182,8 @@ The existing scoped owner decision is recorded, not expanded:
 | `gsmIntegrationActivationDecision` | `REJECTED` | no ingest, gateway, worker or external GSM use is authorized |
 
 This is risk acceptance only. It does not resolve potential prior exposure, approve
-an artifact, authorize foundation deployment or authorize production activation.
+an artifact or authorize foundation deployment/production activation by itself;
+the separate section 8 decision is the sole foundation authorization.
 Token values must not be copied into this packet or any approval record.
 
 `potentialSecretExposureResolved = FALSE`
@@ -198,7 +201,7 @@ These decisions are independent. Approval of one row must not change another row
 | Decision field | Status | Current authorization | Required scope |
 |---|---|---|---|
 | `artifactApprovalDecision` | `APPROVED` | `pinnedArtifactApproved = TRUE` | exact source and digest are approved under the immutable private GHCR reference only |
-| `foundationDeploymentDecision` | `DEFERRED` | `foundationDeploymentAuthorized = FALSE` | operational prerequisites are closed, but no foundation deployment occurs until a later separate explicit authorization is recorded |
+| `foundationDeploymentDecision` | `APPROVED` | `foundationDeploymentAuthorized = TRUE` | deploy only the exact approved PR5–PR8 foundation artifact and immediately follow the approved smoke plan; no activation authority is implied |
 | `productionActivationDecision` | `REJECTED` | `productionActivationAuthorized = FALSE` | business/read/write/integration activation remains forbidden |
 | `pr9ImplementationDecision` | `REJECTED` | `pr9ImplementationAuthorized = FALSE` | PR9 implementation remains forbidden and is not implied by any foundation decision |
 
@@ -209,28 +212,50 @@ Final release decision record:
 - Operations owner name: `Rishat`
 - Database/backup owner name: `Rishat`
 - Security owner name: `Rishat`
-- Latest owner record UTC timestamp: `2026-07-24T10:59:00Z`
+- Latest owner record UTC timestamp: `2026-07-24T12:00:08Z`
+- Approved source SHA: `1d59992315f1b7f4ff2d370fc17345a459ac52e3`
+- Approved OCI digest: `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
+- Approved backup reference: `Google Drive / Rentcore / 20260724T045252Z`; encrypted file ID `1zQmObkd6tbZ3a51q5ALf61VoPam90m3f`; manifest file ID `1LJboUA3LoLsptMqx0s4Q7JpM9xxobl6I`
+- Approved smoke plan: `pr5-pr8-foundation-post-deployment-smoke-v1`
 - Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
-Until the named decisions above are durably recorded, the effective state remains:
+The effective state is:
 
-`FOUNDATION_DEPLOYMENT_BLOCKED`
+`FOUNDATION_DEPLOYMENT_READY`
 
-`foundationDeploymentAuthorized = FALSE`
+`foundationDeploymentAuthorized = TRUE`
 
 `productionActivationAuthorized = FALSE`
 
 `pr9ImplementationAuthorized = FALSE`
 
-## 9. Exact remaining actions before foundation deployment authorization
+The foundation approval does not alter any excluded authority:
 
-1. Rishat must issue a separate explicit `APPROVED` decision for
-   `foundationDeploymentDecision`, bound to source SHA
-   `1d59992315f1b7f4ff2d370fc17345a459ac52e3`, OCI digest
-   `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`,
-   the verified Google Drive backup objects and
-   `pr5-pr8-foundation-post-deployment-smoke-v1`. Until that named decision is
-   recorded, `foundationDeploymentAuthorized = FALSE`.
+`pr5BootstrapAuthorized = FALSE`
+
+`pr6SourcePopulationAuthorized = FALSE`
+
+`pr7ProductionCalculationAuthorized = FALSE`
+
+`pr8ProductionDryRunAuthorized = FALSE`
+
+`canonicalProductionReadsAuthorized = FALSE`
+
+`productionCanonicalWritesAuthorized = FALSE`
+
+`botIntegrationActivationAuthorized = FALSE`
+
+`gsmIntegrationActivationAuthorized = FALSE`
+
+## 9. Exact next deployment step
+
+In a separately executed production change, deploy the already published immutable
+image
+`ghcr.io/rishatkznai/rental-management@sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
+to the existing Railway `rental-management` production service without rebuilding,
+changing variables/flags or activating integrations. Immediately execute
+`pr5-pr8-foundation-post-deployment-smoke-v1` under its documented P0/P1 stop and
+rollback rules. This packet update performs no deployment.
 
 Production activation and PR9 remain `REJECTED`; they are not prerequisites to, and
-cannot be implied by, a future foundation-only deployment authorization.
+cannot be implied by, the current foundation-only deployment authorization.

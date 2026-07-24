@@ -22,9 +22,15 @@ authorship, silence or this packet's creation. An `APPROVED` decision is valid o
 with approver name, accountable role, UTC timestamp and durable decision reference.
 Missing information remains `UNDECIDED`.
 
+The owner decisions below were explicitly supplied by Rishat. The initial decision
+set was recorded at `2026-07-24T08:30:17Z`; the exact foundation-only deployment
+approval was recorded at `2026-07-24T12:00:08Z`. This record changes approval state
+only; it performs no deployment, artifact publication, Railway change, production
+operation, migration, integration activation or PR9 work.
+
 Current authorization state:
 
-`foundationDeploymentAuthorized = FALSE`
+`foundationDeploymentAuthorized = TRUE`
 
 `productionActivationAuthorized = FALSE`
 
@@ -32,24 +38,35 @@ Current authorization state:
 
 ## 2. Backup custody decisions
 
-Technical context: a coherent encrypted off-production-volume artifact and checksum
-exist, but the current single-workstation custody is not an approved durable backup.
+Technical context: the coherent encrypted off-production-volume artifact and its
+manifest are now in approved private Google Drive custody outside Railway and the
+local workstation. An independent download, checksum, decrypt and SQLite integrity
+verification passed; the temporary plaintext was deleted.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
-| `backupDurableDestinationApproved` | `UNDECIDED` | destination class and immutable reference; failure-domain separation; accountable backup owner |
-| `backupRetentionApproved` | `UNDECIDED` | retention period, expiry/deletion policy and exception authority |
-| `backupEncryptionAccessApproved` | `UNDECIDED` | encryption boundary, key custodian, reader/writer allow-list and access-review procedure; no secret value in this record |
-| `backupResponsibleOwnerAccepted` | `UNDECIDED` | owner name, role, on-call/escalation boundary and durable approval reference |
-| `backupCustodyApproved` | `UNDECIDED` | may become `APPROVED` only when all four rows above are approved for one exact artifact custody contract |
+| `backupDurableDestinationApproved` | `APPROVED` | private Google Drive; folder ID `19t2TxbDFb7AczCBxNvPNFXW9KcKxIoke`; encrypted file ID `1zQmObkd6tbZ3a51q5ALf61VoPam90m3f`; manifest file ID `1LJboUA3LoLsptMqx0s4Q7JpM9xxobl6I` |
+| `backupRetentionApproved` | `APPROVED` | 30-day retention; expiry/deletion exceptions remain under the responsible backup owner |
+| `backupEncryptionAccessApproved` | `APPROVED` | `age`/X25519 encryption with restricted access; no key or secret value belongs in this record |
+| `backupResponsibleOwnerAccepted` | `APPROVED` | Rishat is the responsible backup owner |
+| `backupCustodyApproved` | `APPROVED` | restricted Drive objects, 30-day retention and exact checksum/restorability verification satisfy durable custody; identity and plaintext are excluded |
 
 Decision record:
 
-- Approver name: `UNDECIDED`
-- Accountable role: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
-- Durable destination/reference: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- Approver name: `Rishat`
+- Accountable role: `responsible backup owner`
+- Approval/verification UTC timestamp: `2026-07-24T10:59:00Z`
+- Durable destination/reference: Google Drive folder ID `19t2TxbDFb7AczCBxNvPNFXW9KcKxIoke`; encrypted object ID `1zQmObkd6tbZ3a51q5ALf61VoPam90m3f`; manifest object ID `1LJboUA3LoLsptMqx0s4Q7JpM9xxobl6I`
+- Access: `restricted`; only Rishat; no public link; age identity is held separately and plaintext is not uploaded
+- Retention expiry: `2026-08-23T04:55:14.852Z`
+- Independent download verification: encrypted size `11,930,648` and SHA-256 `6a4bfdded51a475b3090bb485a74fd903967d3278536ea2aa49714ab4431b720`; manifest SHA-256 `72ee5f8ab77c40759c0bcb346374ca9f1bef391d665abc7dbc1e7e4e30d7657f`; plaintext SHA-256 `f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774`; integrity/quick `ok`; zero FK violations; temporary plaintext deleted
+- Durable decision reference: `explicit owner approval of Google Drive custody plus independently verified object evidence recorded in this packet`
+
+`backupAvailable = TRUE`
+
+`backupResponsibleOwnerAccepted = TRUE`
+
+`backupCustodyApproved = TRUE`
 
 ## 3. Restore drill acceptance decisions
 
@@ -60,16 +77,16 @@ previous-code rollback compatibility. Technical success is not owner acceptance.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
-| `restoreDrillOwnerAcceptance` | `UNDECIDED` | explicit acceptance of the completed technical drill and its evidence reference |
-| `restoreOperationsOwnerAccepted` | `UNDECIDED` | responsible operations owner, restoration duty and escalation boundary |
+| `restoreDrillOwnerAcceptance` | `APPROVED` | Rishat accepts the completed technical drill evidenced by `restoreDrillPassed = TRUE` |
+| `restoreOperationsOwnerAccepted` | `APPROVED` | Rishat accepts responsibility as operations owner for restoration and escalation |
 
 Decision record:
 
-- Operations owner name: `UNDECIDED`
-- Accountable role: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
-- Accepted drill evidence reference: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- Operations owner name: `Rishat`
+- Accountable role: `operations owner`
+- UTC timestamp: `2026-07-24T08:30:17Z`
+- Accepted drill evidence reference: `docs/pr5-pr8-operational-readiness-closure-gate.md`; `restoreDrillPassed = TRUE`
+- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 ## 4. Storage policy decisions
 
@@ -80,19 +97,19 @@ policy.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
-| `storageThirtyPercentReserveApproved` | `UNDECIDED` | approve or reject the 30% minimum reserve and record exception/stop authority |
-| `storageThirtyFivePercentAlertApproved` | `UNDECIDED` | approve or reject the 35% alert threshold, alert destination and response time |
-| `storageOperationsOwnerAccepted` | `UNDECIDED` | operations owner responsible for capacity, alerts and stop decisions |
-| `storageCapacityAccepted` | `UNDECIDED` | may become `APPROVED` only with the reserve, alert and named-owner rows resolved |
+| `storageThirtyPercentReserveApproved` | `APPROVED` | 30% available-space minimum reserve; deployment must stop before projected available space falls below it |
+| `storageThirtyFivePercentAlertApproved` | `APPROVED` | alert threshold is 35% available space |
+| `storageOperationsOwnerAccepted` | `APPROVED` | Rishat is responsible for capacity, alerts and stop decisions |
+| `storageCapacityAccepted` | `APPROVED` | reserve, alert and accountable operations owner are all explicitly approved |
 
 Decision record:
 
-- Operations owner name: `UNDECIDED`
-- Accountable role: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
-- Reserve decision rationale: `UNDECIDED`
-- Alert decision rationale: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- Operations owner name: `Rishat`
+- Accountable role: `operations owner`
+- UTC timestamp: `2026-07-24T08:30:17Z`
+- Reserve decision rationale: `APPROVED`; preserve the measured 30% operational floor and stop before violation
+- Alert decision rationale: `APPROVED`; warn at 35% to preserve response headroom above the floor
+- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 ## 5. Pinned artifact decisions
 
@@ -102,25 +119,32 @@ The only candidate presented for approval is:
 - OCI digest:
   `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
 
-Durable registry publication of this exact digest is a mandatory pre-deployment
-condition. This packet does not publish the artifact, select a registry or treat the
-local OCI build as durable publication.
+Rishat approved `ghcr.io/rishatkznai/rental-management` as the durable registry
+destination. The already-built OCI archive was pushed there without rebuilding,
+and the private remote manifest was independently resolved to the exact approved
+digest. Registry publication and artifact approval did not by themselves authorize
+deployment; the separate scoped owner decision in section 8 now does.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
-| `candidateSourceShaApproved` | `UNDECIDED` | approve or reject the exact source SHA above |
-| `candidateOciDigestApproved` | `UNDECIDED` | approve or reject the exact OCI digest above |
-| `durableRegistryDestinationApproved` | `UNDECIDED` | approved restricted registry/repository and retention/access policy |
-| `durableRegistryPublicationVerified` | `UNDECIDED` | immutable digest-qualified registry reference recorded before deployment |
-| `pinnedArtifactApproved` | `UNDECIDED` | may become `APPROVED` only after both identities and durable publication are approved |
+| `candidateSourceShaApproved` | `APPROVED` | exact source SHA above is approved; no branch, tag or floating `main` substitution |
+| `candidateOciDigestApproved` | `APPROVED` | published manifest digest exactly matches the approved local OCI manifest digest |
+| `durableRegistryDestinationApproved` | `APPROVED` | private `ghcr.io/rishatkznai/rental-management` approved by Rishat |
+| `durableRegistryPublicationVerified` | `TRUE` | push plus independent authenticated pull and GitHub Packages metadata returned the exact digest/tag |
+| `artifactReleaseOwnerAccepted` | `APPROVED` | Rishat is the artifact/release owner |
+| `pinnedArtifactApproved` | `TRUE` | source, digest, private destination and immutable reference are approved and verified |
 
 Decision record:
 
-- Release owner name: `UNDECIDED`
-- Operations co-approver name: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
-- Digest-qualified registry reference: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- Release owner name: `Rishat`
+- Operations co-approver name: `Rishat`
+- Publication/verification UTC timestamp: `2026-07-24T08:54:25Z`
+- Registry destination: `ghcr.io/rishatkznai/rental-management`
+- Publication tag: `foundation-1d59992315f1b7f4ff2d370fc17345a459ac52e3`
+- Digest-qualified registry reference: `ghcr.io/rishatkznai/rental-management@sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
+- Visibility/access: `private`; no anonymous/public access; restricted to Rishat and explicitly authorized GitHub Packages principals
+- Verification: push response and independent authenticated pull returned the expected digest; GitHub Packages API reported the matching version/tag and private visibility
+- Durable decision reference: `explicit owner instruction approving the GHCR destination, recorded with independently verified publication evidence`
 
 ## 6. Post-deployment smoke plan decisions
 
@@ -131,17 +155,18 @@ read/write safety checks remain defined in the merged readiness evidence.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
-| `postDeploymentSmokePlanApproved` | `UNDECIDED` | explicit approval or rejection of the exact plan identifier |
-| `postDeploymentSmokeExecutorAccepted` | `UNDECIDED` | named executor, execution window and stop/rollback authority |
-| `postDeploymentSmokeReviewerAccepted` | `UNDECIDED` | independent named reviewer and evidence acceptance responsibility |
+| `postDeploymentSmokePlanApproved` | `APPROVED` | exact plan `pr5-pr8-foundation-post-deployment-smoke-v1` is approved |
+| `postDeploymentSmokeExecutorAccepted` | `APPROVED` | executor is Codex/operations agent, constrained by the approved plan and stop/rollback rules |
+| `postDeploymentSmokeReviewerAccepted` | `APPROVED` | Rishat is the independent reviewer and evidence acceptor |
+| `smokeEvidenceRetentionApproved` | `APPROVED` | signed/redacted smoke report and checksums are retained indefinitely in the repository release record with the deployment audit |
 
 Decision record:
 
-- Executor name and role: `UNDECIDED`
-- Reviewer name and role: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
-- Evidence destination/retention: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- Executor name and role: `Codex/operations agent`
+- Reviewer name and role: `Rishat`; independent reviewer
+- UTC timestamp: `2026-07-24T08:30:17Z`
+- Evidence destination/retention: repository release record; signed/redacted smoke report and checksums retained indefinitely with the deployment audit
+- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 `postDeploymentSmokeApproved = FALSE`
 
@@ -157,7 +182,8 @@ The existing scoped owner decision is recorded, not expanded:
 | `gsmIntegrationActivationDecision` | `REJECTED` | no ingest, gateway, worker or external GSM use is authorized |
 
 This is risk acceptance only. It does not resolve potential prior exposure, approve
-an artifact, authorize foundation deployment or authorize production activation.
+an artifact or authorize foundation deployment/production activation by itself;
+the separate section 8 decision is the sole foundation authorization.
 Token values must not be copied into this packet or any approval record.
 
 `potentialSecretExposureResolved = FALSE`
@@ -174,27 +200,62 @@ These decisions are independent. Approval of one row must not change another row
 
 | Decision field | Status | Current authorization | Required scope |
 |---|---|---|---|
-| `artifactApprovalDecision` | `UNDECIDED` | `pinnedArtifactApproved = FALSE` | exact source, digest and durable registry reference only |
-| `foundationDeploymentDecision` | `UNDECIDED` | `foundationDeploymentAuthorized = FALSE` | PR5–PR8 additive foundation delivery only; no activation |
-| `productionActivationDecision` | `UNDECIDED` | `productionActivationAuthorized = FALSE` | separate future business/read/write/integration activation decision |
-| `pr9ImplementationDecision` | `UNDECIDED` | `pr9ImplementationAuthorized = FALSE` | separate future implementation decision; not deployment approval |
+| `artifactApprovalDecision` | `APPROVED` | `pinnedArtifactApproved = TRUE` | exact source and digest are approved under the immutable private GHCR reference only |
+| `foundationDeploymentDecision` | `APPROVED` | `foundationDeploymentAuthorized = TRUE` | deploy only the exact approved PR5–PR8 foundation artifact and immediately follow the approved smoke plan; no activation authority is implied |
+| `productionActivationDecision` | `REJECTED` | `productionActivationAuthorized = FALSE` | business/read/write/integration activation remains forbidden |
+| `pr9ImplementationDecision` | `REJECTED` | `pr9ImplementationAuthorized = FALSE` | PR9 implementation remains forbidden and is not implied by any foundation decision |
 
 Final release decision record:
 
-- Product owner name: `UNDECIDED`
-- Release owner name: `UNDECIDED`
-- Operations owner name: `UNDECIDED`
-- Database/backup owner name: `UNDECIDED`
-- Security owner name: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- Product owner name: `Rishat`
+- Release owner name: `Rishat`
+- Operations owner name: `Rishat`
+- Database/backup owner name: `Rishat`
+- Security owner name: `Rishat`
+- Latest owner record UTC timestamp: `2026-07-24T12:00:08Z`
+- Approved source SHA: `1d59992315f1b7f4ff2d370fc17345a459ac52e3`
+- Approved OCI digest: `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
+- Approved backup reference: `Google Drive / Rentcore / 20260724T045252Z`; encrypted file ID `1zQmObkd6tbZ3a51q5ALf61VoPam90m3f`; manifest file ID `1LJboUA3LoLsptMqx0s4Q7JpM9xxobl6I`
+- Approved smoke plan: `pr5-pr8-foundation-post-deployment-smoke-v1`
+- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
-Until the named decisions above are durably recorded, the effective state remains:
+The effective state is:
 
-`FOUNDATION_DEPLOYMENT_BLOCKED`
+`FOUNDATION_DEPLOYMENT_READY`
 
-`foundationDeploymentAuthorized = FALSE`
+`foundationDeploymentAuthorized = TRUE`
 
 `productionActivationAuthorized = FALSE`
 
 `pr9ImplementationAuthorized = FALSE`
+
+The foundation approval does not alter any excluded authority:
+
+`pr5BootstrapAuthorized = FALSE`
+
+`pr6SourcePopulationAuthorized = FALSE`
+
+`pr7ProductionCalculationAuthorized = FALSE`
+
+`pr8ProductionDryRunAuthorized = FALSE`
+
+`canonicalProductionReadsAuthorized = FALSE`
+
+`productionCanonicalWritesAuthorized = FALSE`
+
+`botIntegrationActivationAuthorized = FALSE`
+
+`gsmIntegrationActivationAuthorized = FALSE`
+
+## 9. Exact next deployment step
+
+In a separately executed production change, deploy the already published immutable
+image
+`ghcr.io/rishatkznai/rental-management@sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
+to the existing Railway `rental-management` production service without rebuilding,
+changing variables/flags or activating integrations. Immediately execute
+`pr5-pr8-foundation-post-deployment-smoke-v1` under its documented P0/P1 stop and
+rollback rules. This packet update performs no deployment.
+
+Production activation and PR9 remain `REJECTED`; they are not prerequisites to, and
+cannot be implied by, the current foundation-only deployment authorization.

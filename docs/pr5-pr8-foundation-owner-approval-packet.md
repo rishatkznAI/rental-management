@@ -56,6 +56,8 @@ Decision record:
 - Durable destination/reference: `UNDECIDED`
 - Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
+`backupAvailable = FALSE`
+
 ## 3. Restore drill acceptance decisions
 
 Technical context: `restoreDrillPassed = TRUE`; the isolated drill verified backup
@@ -107,26 +109,31 @@ The only candidate presented for approval is:
 - OCI digest:
   `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
 
-Durable registry publication of this exact digest is a mandatory pre-deployment
-condition. This packet does not publish the artifact, select a registry or treat the
-local OCI build as durable publication.
+Rishat approved `ghcr.io/rishatkznai/rental-management` as the durable registry
+destination. The already-built OCI archive was pushed there without rebuilding,
+and the private remote manifest was independently resolved to the exact approved
+digest. Registry publication and artifact approval do not authorize deployment.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
 | `candidateSourceShaApproved` | `APPROVED` | exact source SHA above is approved; no branch, tag or floating `main` substitution |
-| `candidateOciDigestApproved` | `DEFERRED` | approval remains deferred until durable registry publication of the exact digest is verified |
-| `durableRegistryDestinationApproved` | `UNDECIDED` | approved restricted registry/repository and retention/access policy |
-| `durableRegistryPublicationVerified` | `UNDECIDED` | immutable digest-qualified registry reference recorded before deployment |
+| `candidateOciDigestApproved` | `APPROVED` | published manifest digest exactly matches the approved local OCI manifest digest |
+| `durableRegistryDestinationApproved` | `APPROVED` | private `ghcr.io/rishatkznai/rental-management` approved by Rishat |
+| `durableRegistryPublicationVerified` | `TRUE` | push plus independent authenticated pull and GitHub Packages metadata returned the exact digest/tag |
 | `artifactReleaseOwnerAccepted` | `APPROVED` | Rishat is the artifact/release owner |
-| `pinnedArtifactApproved` | `DEFERRED` | source is approved, but digest approval and aggregate artifact approval wait for verified durable publication |
+| `pinnedArtifactApproved` | `TRUE` | source, digest, private destination and immutable reference are approved and verified |
 
 Decision record:
 
 - Release owner name: `Rishat`
 - Operations co-approver name: `Rishat`
-- UTC timestamp: `2026-07-24T08:30:17Z`
-- Digest-qualified registry reference: `UNDECIDED`
-- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
+- Publication/verification UTC timestamp: `2026-07-24T08:54:25Z`
+- Registry destination: `ghcr.io/rishatkznai/rental-management`
+- Publication tag: `foundation-1d59992315f1b7f4ff2d370fc17345a459ac52e3`
+- Digest-qualified registry reference: `ghcr.io/rishatkznai/rental-management@sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
+- Visibility/access: `private`; no anonymous/public access; restricted to Rishat and explicitly authorized GitHub Packages principals
+- Verification: push response and independent authenticated pull returned the expected digest; GitHub Packages API reported the matching version/tag and private visibility
+- Durable decision reference: `explicit owner instruction approving the GHCR destination, recorded with independently verified publication evidence`
 
 ## 6. Post-deployment smoke plan decisions
 
@@ -180,8 +187,8 @@ These decisions are independent. Approval of one row must not change another row
 
 | Decision field | Status | Current authorization | Required scope |
 |---|---|---|---|
-| `artifactApprovalDecision` | `DEFERRED` | `pinnedArtifactApproved = FALSE` | source is approved; exact digest and aggregate artifact approval require verified durable registry publication |
-| `foundationDeploymentDecision` | `DEFERRED` | `foundationDeploymentAuthorized = FALSE` | no foundation deployment until remaining backup/artifact prerequisites close and a later explicit authorization is recorded |
+| `artifactApprovalDecision` | `APPROVED` | `pinnedArtifactApproved = TRUE` | exact source and digest are approved under the immutable private GHCR reference only |
+| `foundationDeploymentDecision` | `DEFERRED` | `foundationDeploymentAuthorized = FALSE` | no foundation deployment until remaining backup, smoke-evidence and owner prerequisites close and a later explicit authorization is recorded |
 | `productionActivationDecision` | `REJECTED` | `productionActivationAuthorized = FALSE` | business/read/write/integration activation remains forbidden |
 | `pr9ImplementationDecision` | `REJECTED` | `pr9ImplementationAuthorized = FALSE` | PR9 implementation remains forbidden and is not implied by any foundation decision |
 
@@ -210,15 +217,10 @@ Until the named decisions above are durably recorded, the effective state remain
 1. Select and approve an exact durable external backup destination, transfer the
    existing encrypted artifact under the approved 30-day retention/access policy,
    record its immutable destination/checksum and independently verify integrity.
-2. Select and approve a restricted durable OCI registry destination, publish the
-   exact candidate digest there, and verify the digest-qualified registry reference.
-3. After verified publication, change `candidateOciDigestApproved`,
-   `pinnedArtifactApproved` and `artifactApprovalDecision` from `DEFERRED` only by a
-   new explicit owner decision bound to that immutable registry reference.
-4. Choose the durable destination and retention for future smoke evidence before
+2. Choose the durable destination and retention for future smoke evidence before
    executing `pr5-pr8-foundation-post-deployment-smoke-v1`.
-5. Name the security owner for the final release record.
-6. After all preceding prerequisites are durably recorded, issue a separate explicit
+3. Name the security owner for the final release record.
+4. After all preceding prerequisites are durably recorded, issue a separate explicit
    `APPROVED` decision for `foundationDeploymentDecision`. Until then,
    `foundationDeploymentAuthorized = FALSE`.
 

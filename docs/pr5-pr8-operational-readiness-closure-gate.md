@@ -7,7 +7,8 @@
 **Evaluated:** `2026-07-22`; cleanup and immutable candidate evidence independently
 verified `2026-07-23`; coherent backup, restore drill, storage calculation and
 security-exposure review updated `2026-07-24`; disabled-integration execution
-audit completed `2026-07-24T05:52:47Z`
+audit completed `2026-07-24T05:52:47Z`; immutable GHCR publication independently
+verified `2026-07-24T08:54:25Z`
 
 **Repository baseline:** `1d59992315f1b7f4ff2d370fc17345a459ac52e3`
 
@@ -26,18 +27,21 @@ was independently reconfirmed and squash-merged as
 repeated-startup, failure-matrix and previous-code compatibility evidence remains
 successful, and no runtime source changed after the #221 remediation.
 
-The technical restore drill is now complete and reproducible. The remaining
-operational conditions are not closed: the encrypted current backup has only
-single-workstation custody and no approved retention or responsible owner; the
-proposed storage threshold/reserve lacks named operations approval; the locally
-built immutable foundation candidate is not published or owner-approved; the
-post-deployment smoke plan is not approved; potential prior secret exposure is not
-remediated, but its rotation is now deferred under a foundation-only scoped owner
-risk acceptance; and there is no durable owner/release authorization. The owner's
-clarified boundary permits the existing in-process environment lookups while both
-integrations fail closed. The reviewed candidate satisfies that boundary, so the
-deferral no longer independently blocks foundation-only deployment readiness. It
-grants no bot/GSM activation authority and does not resolve the exposure.
+The technical restore drill is complete, reproducible and owner-accepted. The 30%
+minimum reserve, 35% alert threshold and named operations owner are approved. The
+exact immutable foundation candidate is now published unchanged to a private GHCR
+package and its remote manifest digest is independently verified and approved. The
+remaining operational conditions are not closed: the encrypted current backup has
+only single-workstation custody because its exact durable external destination is
+undecided; the smoke plan is approved but its evidence destination/retention is
+undecided and deployment-dependent checks have not run; the security owner is not
+named; and foundation deployment authorization remains deferred. Potential prior
+secret exposure is not remediated, but rotation is deferred under a foundation-only
+scoped owner risk acceptance. The owner's clarified boundary permits the existing
+in-process environment lookups while both integrations fail closed. The reviewed
+candidate satisfies that boundary, so the deferral no longer independently blocks
+foundation-only deployment readiness. It grants no bot/GSM activation authority
+and does not resolve the exposure.
 
 ## 2. Scope and fail-closed boundary
 
@@ -58,9 +62,11 @@ All restore, startup, migration and rollback checks used disposable local copies
 A local isolated
 `linux/amd64` OCI build used only a Git archive of the candidate `/server` tree;
 its validation overrode the entrypoint and did not start the application, open
-SQLite or execute a migration. A later read-only Railway metadata query only
-reconfirmed the rollback identity. The new and updated repository files are
-documentation only. Section 4.4 records an unintended SQLite sidecar-file creation
+SQLite or execute a migration. On `2026-07-24` that already-built OCI archive was
+uploaded unchanged to the approved private GHCR destination; no build command ran.
+A later read-only Railway metadata query only reconfirmed the rollback identity.
+The new and updated repository files are documentation only. Section 4.4 records an
+unintended SQLite sidecar-file creation
 on one historical backup and the later exact manual cleanup. The incident changed
 no live database, backup payload or business row; the two sidecars are now absent
 and the strict post-cleanup production-volume baseline has been restored.
@@ -114,8 +120,8 @@ migration, restart or configuration change occurred.
 | Encrypted artifact identity | `11,930,648` bytes; SHA-256 `6a4bfdded51a475b3090bb485a74fd903967d3278536ea2aa49714ab4431b720` |
 | Destination reference | `local-restricted://rentCore-production-backups/20260724T045252Z/app.sqlite.coherent-20260724T045252Z.sqlite.age`; outside repository and production volume |
 | Encryption / access | age v1 X25519; artifact and manifest mode `0600`; directory mode `0700`; identity file held separately in a mode-`0700` key directory |
-| Retention | proposed 30 days or until superseded; review/delete `2026-08-23T04:55:14.852Z`; not owner-approved |
-| Custody / owner | technical custodian: local OS account `rishat`; responsible backup owner and approval reference: `UNASSIGNED` |
+| Retention | owner-approved 30 days; review/delete `2026-08-23T04:55:14.852Z` |
+| Custody / owner | technical custodian: local OS account `rishat`; responsible backup owner: Rishat; exact durable external destination remains `UNDECIDED` |
 | Manifest | restricted local `manifest.json`; SHA-256 `72ee5f8ab77c40759c0bcb346374ca9f1bef391d665abc7dbc1e7e4e30d7657f` after final plaintext cleanup |
 
 Source DB/WAL/SHM SHA-256 remained respectively
@@ -134,8 +140,9 @@ metadata/evidence remain. No database artifact or secret is stored in Git or
 published to GitHub.
 
 The artifact is current, encrypted, independently restorable and off the production
-failure domain, but it remains a single-workstation copy with unapproved retention
-and no responsible owner. Under this gate's strict approved/durable definition:
+failure domain. Its 30-day retention, age/X25519 restricted-access policy and owner
+Rishat are approved, but it remains a single-workstation copy without an approved
+durable external destination. Under this gate's strict approved/durable definition:
 
 `backupAvailable = FALSE`.
 
@@ -262,12 +269,12 @@ The candidate repeated-start test itself retained the exact original shadow time
 Restricted, checksum-addressed JSON evidence for the raw restore, both candidate
 starts and rollback probe is stored beside the encrypted artifact. The recipe is
 reproducible from the manifest, encrypted artifact, exact two source SHAs and locked
-dependencies. Technical execution passed; named owner acceptance remains absent
-and does not grant deployment authorization.
+dependencies. Technical execution passed and Rishat accepted the completed drill as
+the named operations owner. That acceptance does not grant deployment authorization.
 
 `restoreDrillPassed = TRUE`.
 
-`restoreDrillOwnerAccepted = FALSE`.
+`restoreDrillOwnerAccepted = TRUE`.
 
 ## 6. Storage closure
 
@@ -299,11 +306,11 @@ response. Backup and restore workspace remain off-volume and must separately hav
 at least `48,866,744` bytes free; the measured local destination had more than
 `127,004,807,168` bytes available.
 
-The current facts satisfy the proposed numerical floor, but the policy, alert,
-reserve and exception authority have no named operations-owner approval reference.
-Measurement does not approve itself.
+The current facts satisfy the numerical floor. Rishat approved the 30% minimum
+reserve, the 35% alert threshold and operations ownership. This storage acceptance
+does not grant deployment authorization.
 
-`storageCapacityAccepted = BLOCKED`.
+`storageCapacityAccepted = TRUE`.
 
 ## 6A. Potential secret exposure
 
@@ -396,20 +403,25 @@ deployment remains `b74623ec-d20d-4c50-ab40-0e0a494c5bc5` at source
 
 ## 7. Pinned artifact closure
 
-The only source SHA currently eligible for later owner approval is
+The owner-approved source SHA is
 `1d59992315f1b7f4ff2d370fc17345a459ac52e3`, never floating `main`, a branch name
 or `latest`. `origin/main` was independently reconfirmed at that exact SHA on
 `2026-07-23`. Its diff from the #221 runtime remediation merge
 `bbabfdc0bff89953ff746b9a09e0d38147e83085` contains only the four #222/#223
-Markdown files, so its runtime tree is the reviewed #221 tree. Designating a
-candidate is not release approval.
+Markdown files, so its runtime tree is the reviewed #221 tree. Registry publication
+and artifact approval do not authorize deployment.
 
 ### 7.1 Candidate release manifest
 
 | Field | Required exact candidate value / state |
 |---|---|
-| Candidate source SHA | `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; `candidateSourceShaApproved = FALSE` |
+| Candidate source SHA | `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; `candidateSourceShaApproved = APPROVED` |
 | Candidate OCI manifest digest | `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`; exact `linux/amd64` manifest, never a floating tag |
+| Durable registry destination | `ghcr.io/rishatkznai/rental-management`; owner-approved private GHCR package |
+| Immutable GHCR reference | `ghcr.io/rishatkznai/rental-management@sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5` |
+| Publication tag | `foundation-1d59992315f1b7f4ff2d370fc17345a459ac52e3`; convenience lookup only, never a deployment identity substitute |
+| Publication / verification | GitHub Packages version created `2026-07-24T08:54:25Z`; independent authenticated pull resolved the exact expected digest |
+| Visibility / access | `private`; no anonymous/public access; access restricted to Rishat and principals explicitly granted GitHub Packages access |
 | OCI config digest | `sha256:6cf603c99a44c01c5acfe4665fbf8a0e57b38db93fdab081429f39f03d7717a6` |
 | OCI archive SHA-256 | `3a7fdb95c605f5fa94e0f6c269784e469f3b73bef3143fd7e7d0e5af51a4e2f9`; both consecutive exports were byte-identical |
 | Build evidence timestamp | completed `2026-07-23T16:33:20Z`; reproducible OCI `created` value is source commit time `2026-07-22T11:26:06Z` (`SOURCE_DATE_EPOCH=1784719566`) |
@@ -428,7 +440,7 @@ candidate is not release approval.
 | Root package / lock | `78cd0bb5474cae32ff9cd77b3087d7b1ab720819d1ba967a9250e90b23694c2f` / `064721ed5c462a0561adfd50cbdbb08ea0cba4fb128ff0d5d43e2324fe355fd3` |
 | Server package / lock | `fd9826dab816540813841353f581ce3644e058a88b1e70740ae1ca2e164809cd` / `faaf55b6718804ba2814ef0b02e8664a2b38278413a8c81dba74df94861db4d8` |
 | `server/db.js` / shadow initializer | `f3fb2ad911e99ac17ee26f7e6520ad5a5c3f4fdb8bffaf79303e42f09938d25f` / `49a7a36105b99a36e994074ddc4b3c844d694f2ae377ba8435fc519f35cf9ac6` |
-| Candidate approval owner | `MISSING`; one named release owner must approve the complete source/image/build/migration/config manifest, with named operations co-approval |
+| Candidate approval owner | Rishat; release owner and operations co-approver; exact source, digest and private registry publication approved |
 
 The reproducible build recipe fixes every digest-bearing input: the Dockerfile
 frontend, base image, source tree, server lockfile, source timestamp, migration-set
@@ -502,10 +514,13 @@ docker-buildx build --builder colima-rentcore-build --platform linux/amd64 \
 Two consecutive exports from the same fixed build graph produced the same manifest
 digest and the same archive SHA-256. The OCI labels bind source, source time,
 builder, Node/npm, server lockfile, migration-set hash and safe config fingerprint.
-The archive remains local non-production evidence: it was not pushed to a registry,
-uploaded to Railway or assigned to a production service. A future Railway source/
-Nixpacks rebuild is a distinct artifact and must not claim this OCI digest; the
-owner-approved release record must choose and preserve the exact delivery artifact.
+The already-built archive was pushed without rebuilding to the private GHCR package.
+The push response and a separate authenticated pull both resolved manifest digest
+`sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`;
+GitHub Packages API independently reported the exact tag, digest, private visibility
+and creation timestamp. It was not uploaded to Railway or assigned to a production
+service. A future Railway source/Nixpacks rebuild is a distinct artifact and must
+not claim this OCI digest; only the immutable GHCR reference is approved.
 
 ### 7.2 Rollback artifact
 
@@ -514,26 +529,33 @@ floating deployment: source `6a38582f5f90b85734884b6b12ad8e306b24619e`, image
 `sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650`
 and deployment `b74623ec-d20d-4c50-ab40-0e0a494c5bc5`. Rollback means application
 artifact rollback only; the previously verified additive foundation schema is
-retained. The rollback owner, command/runbook, stop authority and acceptance
-evidence are `MISSING / NOT APPROVED`.
+retained. Rishat is the release/operations owner; the exact rollback command/runbook,
+stop authority and acceptance evidence remain `MISSING / NOT APPROVED`.
 
 Read-only Railway metadata at `2026-07-23T16:33:50Z` independently reconfirmed that
 deployment and image identity, instance
 `54afd747-1bd1-4069-9320-31e03db1f5ea` `RUNNING`, deployment `SUCCESS`, Nixpacks,
 runtime V2, `/server`, `/data` and the same start command. No Railway mutation was
-requested. The candidate digest now exists, but a local build does not approve or
-durably publish itself, and neither this document nor PR #224 is an owner decision.
+requested. The private GHCR publication did not change Railway or the current
+production artifact.
 
 `pinnedArtifactCandidateDefined = TRUE`.
 
-`pinnedArtifactApproved = FALSE`.
+`durableRegistryDestinationApproved = APPROVED`.
+
+`durableRegistryPublicationVerified = TRUE`.
+
+`candidateOciDigestApproved = APPROVED`.
+
+`pinnedArtifactApproved = TRUE`.
 
 ## 8. Post-deployment smoke closure
 
-`pr5-pr8-foundation-post-deployment-smoke-v1` is the proposed minimum read-only
-acceptance plan for a separately authorized future foundation deployment. It is
-defined now but not approved, and no deployment-dependent check was executed by
-this docs-only gate.
+`pr5-pr8-foundation-post-deployment-smoke-v1` is the owner-approved minimum
+read-only acceptance plan for a separately authorized future foundation deployment.
+Codex/operations agent is the executor and Rishat is the independent reviewer. Its
+evidence destination/retention remains undecided, and no deployment-dependent check
+was executed by this docs-only gate.
 
 | Area | Required check | Exact pass condition | Failure action / evidence owner |
 |---|---|---|---|
@@ -559,8 +581,9 @@ this docs-only gate.
 Approval requires one immutable plan record binding the exact artifact manifest,
 commands, evidence destination/retention, named release/operations/database/
 security/product owners, change window, P0/P1 stop rules and application-only
-rollback target. All required approval identities and signatures are currently
-missing. A smoke run cannot approve the plan retroactively.
+rollback target. The plan, executor and independent reviewer are approved; the
+evidence destination/retention, security owner and final release authorization are
+still missing. A smoke run cannot supply those prerequisites retroactively.
 
 `postDeploymentSmokePlanDefined = TRUE`.
 
@@ -568,11 +591,12 @@ missing. A smoke run cannot approve the plan retroactively.
 
 ## 9. Owner and release approval
 
-No durable record names and binds the product owner, release owner, operations
-owner, database/backup owner and security/identity owner to the exact source/image,
-backup checksum/destination, restore evidence, storage threshold/reserve and smoke
-plan. PR #223 had no comments, reviews or unresolved threads and granted no
-approval. Repository design records explicitly say missing approval is deny.
+The owner packet names Rishat as product, release, operations and database/backup
+owner and records the approved restore drill, storage policy, smoke plan and exact
+private GHCR artifact. The security owner, durable backup destination, smoke
+evidence destination/retention and explicit foundation deployment authorization
+remain missing or deferred. Repository design records explicitly say missing or
+deferred approval is deny.
 
 `ownerReleaseApprovalRecorded = FALSE`.
 
@@ -580,20 +604,24 @@ approval. Repository design records explicitly say missing approval is deny.
 
 | Field | Value | Closure reason |
 |---|---|---|
-| `backupAvailable` | `FALSE` | current encrypted off-volume artifact and checksum exist, but custody is single-workstation and retention/responsible owner are unapproved |
+| `backupAvailable` | `FALSE` | 30-day retention, age/X25519 restricted access and owner Rishat are approved, but the exact durable external destination remains undecided and custody is still single-workstation |
 | `restoreDrillPassed` | `TRUE` | encrypted restore, raw validation, both exact-SHA startups, candidate migration/repeat and previous-code compatibility passed reproducibly |
-| `restoreDrillOwnerAccepted` | `FALSE` | technical evidence exists; no named owner acceptance reference |
-| `storageCapacityAccepted` | `BLOCKED` | exact measurements and a 30% reserve proposal exist; operations-owner approval is missing |
+| `restoreDrillOwnerAccepted` | `TRUE` | Rishat accepted the completed technical drill and is the named operations owner |
+| `storageCapacityAccepted` | `TRUE` | Rishat approved the 30% minimum reserve, 35% alert threshold and operations ownership |
 | `potentialSecretExposureResolved` | `FALSE` | scoped deferral is risk acceptance, not credential remediation |
 | `secretRotationDeferredByOwner` | `TRUE` | owner accepts temporary bot/GSM unavailability for foundation-only delivery; rotation remains mandatory before integration enablement |
 | `secretRotationDeferralFoundationExemptionEffective` | `TRUE` | exact candidate satisfies the clarified owner boundary: in-process lookups occur, but disabled paths make no external authenticated request, invoke no integration business handler and disclose no token value |
 | `botIntegrationActivationAuthorized` | `FALSE` | `BOT_DISABLED=true`; no bot activation authority is granted |
 | `gsmIntegrationActivationAuthorized` | `FALSE` | `GSM_ENABLED=false`; no GSM activation authority is granted |
 | `pinnedArtifactCandidateDefined` | `TRUE` | exact source, OCI digest, reproducible build/runtime, migration, fingerprint and rollback contract are evidenced |
-| `pinnedArtifactApproved` | `FALSE` | candidate is local-only and not durably published; named release/operations approval is missing |
+| `durableRegistryDestinationApproved` | `APPROVED` | Rishat approved private `ghcr.io/rishatkznai/rental-management` |
+| `durableRegistryPublicationVerified` | `TRUE` | GitHub Packages API and an independent authenticated pull verified the immutable reference, exact digest, tag, timestamp and private visibility |
+| `candidateOciDigestApproved` | `APPROVED` | exact manifest digest matches the locally verified archive and the independently resolved remote manifest |
+| `pinnedArtifactApproved` | `TRUE` | exact source and digest are owner-approved and durably published under the immutable private GHCR reference |
+| `artifactApprovalDecision` | `APPROVED` | Rishat is the named artifact/release owner; approval is bound to the immutable GHCR reference only |
 | `postDeploymentSmokePlanDefined` | `TRUE` | complete fail-closed deployment/runtime/DB/PR5–PR8/canonical checklist and approval contract is defined |
-| `postDeploymentSmokeApproved` | `FALSE` | checklist exists; no named approval and deployment-dependent checks were not run |
-| `ownerReleaseApprovalRecorded` | `FALSE` | no durable scoped owner/release/operations decision |
+| `postDeploymentSmokeApproved` | `FALSE` | plan, executor and reviewer are approved, but evidence destination/retention is undecided and deployment-dependent checks were not run |
+| `ownerReleaseApprovalRecorded` | `FALSE` | scoped owner decisions exist, but security ownership, durable backup custody, smoke-evidence storage and explicit foundation authorization remain incomplete/deferred |
 | `productionVolumeMutationCleanup` | `COMPLETE` | exact two sidecars are absent; root listing and unchanged live/backup hashes, metadata, runtime and config independently verified |
 | `foundationDeploymentAuthorized` | `FALSE` | one or more prerequisites are false/blocked; no authorization record |
 | `productionActivationAuthorized` | `FALSE` | explicitly outside foundation delivery |
@@ -618,8 +646,10 @@ approval. Repository design records explicitly say missing approval is deny.
 | Exact candidate context | `PASS`; `/server` exported only from `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; server lockfile SHA-256 matched the manifest |
 | OCI build and repeat export | `PASS`; both `linux/amd64` exports produced manifest `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5` and archive SHA-256 `3a7fdb95c605f5fa94e0f6c269784e469f3b73bef3143fd7e7d0e5af51a4e2f9` |
 | Final image inspection | `PASS`; source/runtime/migration/config/lock labels exact; Node `v20.18.1`, npm `10.8.2` and native `better-sqlite3` load passed without application startup |
+| Immutable GHCR publication | `PASS`; prebuilt archive pushed without rebuild; private package, exact source tag and immutable digest-qualified reference created `2026-07-24T08:54:25Z` |
+| Independent registry verification | `PASS`; separate authenticated pull returned expected digest exactly; GitHub Packages API returned matching version name/tag and `visibility=private` |
 | Rollback identity read | `PASS`; exact production deployment/source/image/instance remained current at `2026-07-23T16:33:50Z` |
-| Changed-file allow-list | `PASS`; this branch changes only this document and `docs/pr5-pr8-foundation-deployment-readiness-gate.md` |
+| Changed-file allow-list | `PASS`; this branch changes only this document, `docs/pr5-pr8-foundation-deployment-readiness-gate.md` and `docs/pr5-pr8-foundation-owner-approval-packet.md` |
 | Runtime-code diff | `NONE` |
 | Production deployment / restart / configuration change | `NONE` |
 | Production live DB, WAL, SHM, schema, registry or business-data mutation | `NONE`; exact checksums and boundaries remained unchanged |
@@ -635,13 +665,12 @@ unintended root file and the protected database/application state is unchanged.
 
 The exact remaining blockers are:
 
-1. the current encrypted backup has only single-workstation custody and lacks approved retention and a responsible owner;
-2. the proposed 30% storage threshold and reserve lack named operations approval;
-3. the immutable candidate is built and pinned by digest but is not durably published or owner-approved;
-4. no approved post-deployment smoke procedure exists;
-5. no durable owner/release/operations authorization exists.
+1. the current encrypted backup has only single-workstation custody because its exact durable external destination remains undecided;
+2. the approved post-deployment smoke plan still lacks a durable evidence destination and retention record;
+3. the final release record lacks a named security owner;
+4. `foundationDeploymentDecision` remains `DEFERRED`; no explicit foundation deployment authorization exists.
 
-**One next permitted step:** obtain a named operations/release review of the
-off-volume backup custody/retention, 30% storage reserve, immutable artifact and
-smoke plan. This does not authorize deployment or integration activation; all five
-listed blockers remain until durably approved.
+**One next permitted step:** select and approve the exact durable external backup
+destination, transfer the existing encrypted artifact there, record its immutable
+reference/checksum and independently verify integrity. This does not authorize
+deployment or integration activation; all four listed blockers remain until closed.

@@ -574,13 +574,29 @@ The artifact, manifest and restore JSON have restricted `0600` access, with the
 identity stored separately. Production DB/WAL/SHM and deployment identity remained
 unchanged.
 
-The destination is still a single local workstation. The 30-day retention,
-age/X25519 restricted-access policy and responsible owner Rishat are approved, but
-the exact durable external destination remains undecided. It is therefore not a
-qualifying durable approved backup despite being technically coherent and
-restorable.
+Rishat approved private Google Drive custody outside Railway and the local
+workstation. The encrypted object is file ID
+`1zQmObkd6tbZ3a51q5ALf61VoPam90m3f`; the manifest is file ID
+`1LJboUA3LoLsptMqx0s4Q7JpM9xxobl6I`; both are under folder ID
+`19t2TxbDFb7AczCBxNvPNFXW9KcKxIoke` (`My Drive / Rentcore /
+20260724T045252Z`). Both objects have restricted access with Rishat as the only
+principal and no public/link access. The age identity remains in separate local
+custody, and no plaintext SQLite is stored in Drive.
 
-`backupAvailable = FALSE`.
+An independent Drive download verified encrypted size `11,930,648`, encrypted
+SHA-256 `6a4bfdded51a475b3090bb485a74fd903967d3278536ea2aa49714ab4431b720`
+and manifest SHA-256
+`72ee5f8ab77c40759c0bcb346374ca9f1bef391d665abc7dbc1e7e4e30d7657f`.
+Separate-identity decryption produced the exact expected plaintext SHA-256
+`f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774`;
+immutable read-only SQLite integrity and quick checks were `ok`, with zero foreign
+key violations. The temporary plaintext was deleted and no WAL/SHM was created.
+The 30-day retention, age/X25519 restricted-access policy, backup owner Rishat and
+security owner Rishat are approved.
+
+`backupDurableDestinationApproved = APPROVED`;
+`backupResponsibleOwnerAccepted = TRUE`; `backupCustodyApproved = TRUE`;
+`backupAvailable = TRUE`.
 
 ## 17. Restore rehearsal/drill
 
@@ -865,9 +881,11 @@ repeated-start step remains non-executable until a future release separately
 authorizes a controlled restart. Any P0 stops/rolls back the application artifact
 while preserving additive tables; any P1 blocks acceptance and invokes the
 approved incident path. The plan, executor and independent reviewer are approved;
-the evidence destination/retention, security owner and final deployment
-authorization remain missing or deferred.
-`postDeploymentSmokePlanDefined = TRUE`; `postDeploymentSmokeApproved = FALSE`.
+the signed/redacted report and checksums will be retained indefinitely in the
+repository release record with the deployment audit; Rishat is the security owner.
+Only final deployment authorization remains deferred.
+`postDeploymentSmokePlanDefined = TRUE`; `postDeploymentSmokeApproved = FALSE`;
+`smokeEvidenceRetentionApproved = TRUE`.
 
 ## 23. Authorization matrix
 
@@ -889,7 +907,10 @@ authorization remain missing or deferred.
 | `migrationFailureMatrixPassed` | `TRUE` |
 | `previousCodeRollbackCompatibilityPassed` | `TRUE` |
 | `storageCapacityAccepted` | `TRUE` |
-| `backupAvailable` | `FALSE` |
+| `backupDurableDestinationApproved` | `APPROVED` |
+| `backupResponsibleOwnerAccepted` | `TRUE` |
+| `backupCustodyApproved` | `TRUE` |
+| `backupAvailable` | `TRUE` |
 | `restoreDrillPassed` | `TRUE` |
 | `restoreDrillOwnerAccepted` | `TRUE` |
 | `potentialSecretExposureResolved` | `FALSE` |
@@ -904,8 +925,10 @@ authorization remain missing or deferred.
 | `candidateOciDigestApproved` | `APPROVED` |
 | `artifactApprovalDecision` | `APPROVED` |
 | `postDeploymentSmokePlanDefined` | `TRUE` |
+| `smokeEvidenceRetentionApproved` | `TRUE` |
 | `postDeploymentSmokeApproved` | `FALSE` |
 | `pinnedArtifactApproved` | `TRUE` |
+| `securityOwner` | `Rishat` |
 | `ownerReleaseApprovalRecorded` | `FALSE` |
 | `foundationDeploymentAuthorized` | `FALSE` |
 | `productionActivationAuthorized` | `FALSE` |
@@ -922,12 +945,14 @@ authorization remain missing or deferred.
 The repeated-startup timestamp defect is closed by #221, public ingress is healthy
 under the separate no-mutation evidence above, and the exact historical-backup
 sidecar cleanup is independently verified; none is a current blocker.
-Any one of the following remaining conditions still denies deployment authorization:
+The following remaining condition denies deployment authorization:
 
-1. the current encrypted backup has only single-workstation custody because its exact durable external destination remains undecided;
-2. the approved post-deployment smoke plan lacks a durable evidence destination and retention record;
-3. the final release record lacks a named security owner;
-4. `foundationDeploymentDecision` remains `DEFERRED`; no explicit foundation deployment authorization exists.
+1. `foundationDeploymentDecision` remains `DEFERRED`; no explicit foundation
+   deployment authorization exists.
+
+`postDeploymentSmokeApproved` remains `FALSE` because its deployment-dependent
+checks cannot run before deployment; its plan, executor, reviewer and evidence
+retention are approved and are not a missing pre-deployment decision.
 
 Successful local migration and rollback simulations do not replace these
 operational and authorization requirements.
@@ -943,8 +968,8 @@ this document.
 
 ## 26. Next permitted step
 
-The one next permitted step is to select and approve the exact durable external
-backup destination, transfer the existing encrypted artifact there, record its
-immutable reference/checksum and independently verify integrity. This step does not
-authorize deployment, activation or PR9; all four listed blockers remain until
-closed.
+The one next permitted step is for Rishat to issue a separate explicit `APPROVED`
+decision for the exact foundation-only deployment, bound to the pinned GHCR
+artifact, verified Google Drive backup and approved smoke plan. This step is an
+authorization record only; it does not itself deploy, activate integrations or
+authorize PR9.

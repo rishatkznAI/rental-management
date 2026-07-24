@@ -31,12 +31,11 @@ The technical restore drill is complete, reproducible and owner-accepted. The 30
 minimum reserve, 35% alert threshold and named operations owner are approved. The
 exact immutable foundation candidate is now published unchanged to a private GHCR
 package and its remote manifest digest is independently verified and approved. The
-remaining operational conditions are not closed: the encrypted current backup has
-only single-workstation custody because its exact durable external destination is
-undecided; the smoke plan is approved but its evidence destination/retention is
-undecided and deployment-dependent checks have not run; the security owner is not
-named; and foundation deployment authorization remains deferred. Potential prior
-secret exposure is not remediated, but rotation is deferred under a foundation-only
+encrypted current backup now has independently verified private Google Drive
+custody, the smoke-evidence retention policy is approved and Rishat is the security
+owner. The only remaining pre-deployment decision is explicit foundation deployment
+authorization, which remains deferred. Potential prior secret exposure is not
+remediated, but rotation is deferred under a foundation-only
 scoped owner risk acceptance. The owner's clarified boundary permits the existing
 in-process environment lookups while both integrations fail closed. The reviewed
 candidate satisfies that boundary, so the deferral no longer independently blocks
@@ -118,11 +117,11 @@ migration, restart or configuration change occurred.
 | Source image / instance | `sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650` / `54afd747-1bd1-4069-9320-31e03db1f5ea` |
 | Plain coherent SQLite identity | `11,927,552` bytes; SHA-256 `f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774` |
 | Encrypted artifact identity | `11,930,648` bytes; SHA-256 `6a4bfdded51a475b3090bb485a74fd903967d3278536ea2aa49714ab4431b720` |
-| Destination reference | `local-restricted://rentCore-production-backups/20260724T045252Z/app.sqlite.coherent-20260724T045252Z.sqlite.age`; outside repository and production volume |
-| Encryption / access | age v1 X25519; artifact and manifest mode `0600`; directory mode `0700`; identity file held separately in a mode-`0700` key directory |
+| Destination reference | Local source: `local-restricted://rentCore-production-backups/20260724T045252Z/app.sqlite.coherent-20260724T045252Z.sqlite.age`; durable copy: Google Drive file ID `1zQmObkd6tbZ3a51q5ALf61VoPam90m3f` under folder ID `19t2TxbDFb7AczCBxNvPNFXW9KcKxIoke` (`My Drive / Rentcore / 20260724T045252Z`) |
+| Encryption / access | age v1 X25519; local artifact and manifest mode `0600`; local directory mode `0700`; identity file held separately in a mode-`0700` key directory; both Drive objects are restricted to the single owner Rishat with no public/link access |
 | Retention | owner-approved 30 days; review/delete `2026-08-23T04:55:14.852Z` |
-| Custody / owner | technical custodian: local OS account `rishat`; responsible backup owner: Rishat; exact durable external destination remains `UNDECIDED` |
-| Manifest | restricted local `manifest.json`; SHA-256 `72ee5f8ab77c40759c0bcb346374ca9f1bef391d665abc7dbc1e7e4e30d7657f` after final plaintext cleanup |
+| Custody / owner | durable external Google Drive custody approved by owner Rishat; encrypted object file ID `1zQmObkd6tbZ3a51q5ALf61VoPam90m3f`; manifest file ID `1LJboUA3LoLsptMqx0s4Q7JpM9xxobl6I` |
+| Manifest | restricted Google Drive object `1LJboUA3LoLsptMqx0s4Q7JpM9xxobl6I`; SHA-256 `72ee5f8ab77c40759c0bcb346374ca9f1bef391d665abc7dbc1e7e4e30d7657f` after final plaintext cleanup |
 
 Source DB/WAL/SHM SHA-256 remained respectively
 `b487d8a5534665aa896a8eea1788342b16969c2e10441e3857296505c3c7cf2b`,
@@ -139,12 +138,33 @@ were deleted after verification; only the encrypted artifact and restricted
 metadata/evidence remain. No database artifact or secret is stored in Git or
 published to GitHub.
 
-The artifact is current, encrypted, independently restorable and off the production
-failure domain. Its 30-day retention, age/X25519 restricted-access policy and owner
-Rishat are approved, but it remains a single-workstation copy without an approved
-durable external destination. Under this gate's strict approved/durable definition:
+On `2026-07-24T10:59:00Z`, both Google Drive objects were independently downloaded
+to an isolated temporary directory. The encrypted object was exactly `11,930,648`
+bytes with SHA-256
+`6a4bfdded51a475b3090bb485a74fd903967d3278536ea2aa49714ab4431b720`;
+the downloaded manifest matched SHA-256
+`72ee5f8ab77c40759c0bcb346374ca9f1bef391d665abc7dbc1e7e4e30d7657f`.
+Using the separately held identity, the encrypted download produced a
+`11,927,552`-byte plaintext with SHA-256
+`f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774`.
+SQLite immutable read-only checks returned `integrity_check=ok`, `quick_check=ok`
+and zero foreign-key violations; no WAL or SHM was created. The temporary plaintext
+and isolated downloaded copies were then deleted by exact path. The Drive folder
+listing contains no plaintext SQLite or age identity/private key.
 
-`backupAvailable = FALSE`.
+The artifact is current, encrypted, independently restorable, durably stored
+outside Railway and the local workstation, and bound to stable Drive file IDs plus
+exact checksums. Its 30-day retention, age/X25519 restricted-access policy,
+security ownership and backup ownership are approved. Under this gate's strict
+approved/durable definition:
+
+`backupAvailable = TRUE`.
+
+`backupDurableDestinationApproved = APPROVED`.
+
+`backupResponsibleOwnerAccepted = TRUE`.
+
+`backupCustodyApproved = TRUE`.
 
 ### 4.2 Mechanism
 
@@ -190,10 +210,11 @@ stale, incomplete for the current production schema/data, colocated with the liv
 database and therefore share its failure domain. None has approved retention,
 encryption/access evidence or a named responsible owner.
 
-The mechanism and historical artifacts do not satisfy the qualifying definition
-of an approved, current, durable and independently recoverable backup.
+The mechanism and historical artifacts do not themselves satisfy the qualifying
+definition of an approved, current, durable and independently recoverable backup.
+The separately verified Google Drive custody in section 4.1 does satisfy it.
 
-`backupAvailable = FALSE`.
+`historicalArtifactsQualifyAsBackup = FALSE`.
 
 ### 4.4 Read-only sidecar incident
 
@@ -591,12 +612,12 @@ still missing. A smoke run cannot supply those prerequisites retroactively.
 
 ## 9. Owner and release approval
 
-The owner packet names Rishat as product, release, operations and database/backup
-owner and records the approved restore drill, storage policy, smoke plan and exact
-private GHCR artifact. The security owner, durable backup destination, smoke
-evidence destination/retention and explicit foundation deployment authorization
-remain missing or deferred. Repository design records explicitly say missing or
-deferred approval is deny.
+The owner packet names Rishat as product, release, operations, database/backup and
+security owner and records the approved durable Google Drive backup custody,
+restore drill, storage policy, smoke plan, indefinite release-record retention for
+signed/redacted smoke evidence and exact private GHCR artifact. The explicit
+foundation deployment authorization remains deferred. Repository design records
+explicitly say a deferred release decision is deny.
 
 `ownerReleaseApprovalRecorded = FALSE`.
 
@@ -604,7 +625,10 @@ deferred approval is deny.
 
 | Field | Value | Closure reason |
 |---|---|---|
-| `backupAvailable` | `FALSE` | 30-day retention, age/X25519 restricted access and owner Rishat are approved, but the exact durable external destination remains undecided and custody is still single-workstation |
+| `backupDurableDestinationApproved` | `APPROVED` | Rishat approved private Google Drive custody outside Railway and the local workstation; stable folder/file IDs and exact checksums are recorded |
+| `backupResponsibleOwnerAccepted` | `TRUE` | Rishat is the responsible backup owner |
+| `backupCustodyApproved` | `TRUE` | encrypted artifact and manifest are restricted to Rishat, independently downloaded and checksum/restorability verified; identity and plaintext are not stored there |
+| `backupAvailable` | `TRUE` | current coherent encrypted artifact has approved 30-day retention and independently verified durable external custody |
 | `restoreDrillPassed` | `TRUE` | encrypted restore, raw validation, both exact-SHA startups, candidate migration/repeat and previous-code compatibility passed reproducibly |
 | `restoreDrillOwnerAccepted` | `TRUE` | Rishat accepted the completed technical drill and is the named operations owner |
 | `storageCapacityAccepted` | `TRUE` | Rishat approved the 30% minimum reserve, 35% alert threshold and operations ownership |
@@ -620,8 +644,10 @@ deferred approval is deny.
 | `pinnedArtifactApproved` | `TRUE` | exact source and digest are owner-approved and durably published under the immutable private GHCR reference |
 | `artifactApprovalDecision` | `APPROVED` | Rishat is the named artifact/release owner; approval is bound to the immutable GHCR reference only |
 | `postDeploymentSmokePlanDefined` | `TRUE` | complete fail-closed deployment/runtime/DB/PR5–PR8/canonical checklist and approval contract is defined |
-| `postDeploymentSmokeApproved` | `FALSE` | plan, executor and reviewer are approved, but evidence destination/retention is undecided and deployment-dependent checks were not run |
-| `ownerReleaseApprovalRecorded` | `FALSE` | scoped owner decisions exist, but security ownership, durable backup custody, smoke-evidence storage and explicit foundation authorization remain incomplete/deferred |
+| `smokeEvidenceRetentionApproved` | `TRUE` | signed/redacted smoke report and checksums will be retained indefinitely in the repository release record with the deployment audit |
+| `postDeploymentSmokeApproved` | `FALSE` | plan, executor, reviewer and evidence retention are approved, but deployment-dependent checks were not run |
+| `securityOwner` | `Rishat` | Rishat accepted security ownership for this foundation gate |
+| `ownerReleaseApprovalRecorded` | `FALSE` | all operational owner decisions are recorded, but the separate foundation deployment decision remains deferred |
 | `productionVolumeMutationCleanup` | `COMPLETE` | exact two sidecars are absent; root listing and unchanged live/backup hashes, metadata, runtime and config independently verified |
 | `foundationDeploymentAuthorized` | `FALSE` | one or more prerequisites are false/blocked; no authorization record |
 | `productionActivationAuthorized` | `FALSE` | explicitly outside foundation delivery |
@@ -648,6 +674,8 @@ deferred approval is deny.
 | Final image inspection | `PASS`; source/runtime/migration/config/lock labels exact; Node `v20.18.1`, npm `10.8.2` and native `better-sqlite3` load passed without application startup |
 | Immutable GHCR publication | `PASS`; prebuilt archive pushed without rebuild; private package, exact source tag and immutable digest-qualified reference created `2026-07-24T08:54:25Z` |
 | Independent registry verification | `PASS`; separate authenticated pull returned expected digest exactly; GitHub Packages API returned matching version name/tag and `visibility=private` |
+| Durable backup custody | `PASS`; private Google Drive file IDs recorded; encrypted and manifest downloads matched exact hashes/size; decrypted plaintext matched and immutable read-only SQLite integrity/quick/FK checks passed |
+| Downloaded plaintext cleanup | `PASS`; temporary plaintext and isolated copies deleted by exact path; no WAL/SHM created; age identity remained separate and was not uploaded |
 | Rollback identity read | `PASS`; exact production deployment/source/image/instance remained current at `2026-07-23T16:33:50Z` |
 | Changed-file allow-list | `PASS`; this branch changes only this document, `docs/pr5-pr8-foundation-deployment-readiness-gate.md` and `docs/pr5-pr8-foundation-owner-approval-packet.md` |
 | Runtime-code diff | `NONE` |
@@ -663,14 +691,16 @@ unintended root file and the protected database/application state is unchanged.
 
 `FOUNDATION_DEPLOYMENT_BLOCKED`.
 
-The exact remaining blockers are:
+The exact remaining blocker is:
 
-1. the current encrypted backup has only single-workstation custody because its exact durable external destination remains undecided;
-2. the approved post-deployment smoke plan still lacks a durable evidence destination and retention record;
-3. the final release record lacks a named security owner;
-4. `foundationDeploymentDecision` remains `DEFERRED`; no explicit foundation deployment authorization exists.
+1. `foundationDeploymentDecision` remains `DEFERRED`; no explicit foundation
+   deployment authorization exists.
 
-**One next permitted step:** select and approve the exact durable external backup
-destination, transfer the existing encrypted artifact there, record its immutable
-reference/checksum and independently verify integrity. This does not authorize
-deployment or integration activation; all four listed blockers remain until closed.
+`postDeploymentSmokeApproved` remains `FALSE` because the deployment-dependent
+smoke has not run; the plan, executor, reviewer and evidence retention are approved,
+so that post-deployment state is not a missing pre-deployment decision.
+
+**One next permitted step:** Rishat may issue a separate explicit `APPROVED`
+decision for the exact foundation-only deployment, bound to the pinned GHCR
+artifact, verified Google Drive backup and approved smoke plan. This documentation
+update does not authorize deployment or integration activation.

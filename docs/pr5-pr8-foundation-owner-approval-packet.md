@@ -37,26 +37,35 @@ Current authorization state:
 
 ## 2. Backup custody decisions
 
-Technical context: a coherent encrypted off-production-volume artifact and checksum
-exist, but the current single-workstation custody is not an approved durable backup.
+Technical context: the coherent encrypted off-production-volume artifact and its
+manifest are now in approved private Google Drive custody outside Railway and the
+local workstation. An independent download, checksum, decrypt and SQLite integrity
+verification passed; the temporary plaintext was deleted.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
-| `backupDurableDestinationApproved` | `UNDECIDED` | destination class and immutable reference; failure-domain separation; accountable backup owner |
+| `backupDurableDestinationApproved` | `APPROVED` | private Google Drive; folder ID `19t2TxbDFb7AczCBxNvPNFXW9KcKxIoke`; encrypted file ID `1zQmObkd6tbZ3a51q5ALf61VoPam90m3f`; manifest file ID `1LJboUA3LoLsptMqx0s4Q7JpM9xxobl6I` |
 | `backupRetentionApproved` | `APPROVED` | 30-day retention; expiry/deletion exceptions remain under the responsible backup owner |
 | `backupEncryptionAccessApproved` | `APPROVED` | `age`/X25519 encryption with restricted access; no key or secret value belongs in this record |
 | `backupResponsibleOwnerAccepted` | `APPROVED` | Rishat is the responsible backup owner |
-| `backupCustodyApproved` | `UNDECIDED` | exact external durable destination remains undecided; the three approvals above do not make single-workstation custody durable |
+| `backupCustodyApproved` | `APPROVED` | restricted Drive objects, 30-day retention and exact checksum/restorability verification satisfy durable custody; identity and plaintext are excluded |
 
 Decision record:
 
 - Approver name: `Rishat`
 - Accountable role: `responsible backup owner`
-- UTC timestamp: `2026-07-24T08:30:17Z`
-- Durable destination/reference: `UNDECIDED`
-- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
+- Approval/verification UTC timestamp: `2026-07-24T10:59:00Z`
+- Durable destination/reference: Google Drive folder ID `19t2TxbDFb7AczCBxNvPNFXW9KcKxIoke`; encrypted object ID `1zQmObkd6tbZ3a51q5ALf61VoPam90m3f`; manifest object ID `1LJboUA3LoLsptMqx0s4Q7JpM9xxobl6I`
+- Access: `restricted`; only Rishat; no public link; age identity is held separately and plaintext is not uploaded
+- Retention expiry: `2026-08-23T04:55:14.852Z`
+- Independent download verification: encrypted size `11,930,648` and SHA-256 `6a4bfdded51a475b3090bb485a74fd903967d3278536ea2aa49714ab4431b720`; manifest SHA-256 `72ee5f8ab77c40759c0bcb346374ca9f1bef391d665abc7dbc1e7e4e30d7657f`; plaintext SHA-256 `f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774`; integrity/quick `ok`; zero FK violations; temporary plaintext deleted
+- Durable decision reference: `explicit owner approval of Google Drive custody plus independently verified object evidence recorded in this packet`
 
-`backupAvailable = FALSE`
+`backupAvailable = TRUE`
+
+`backupResponsibleOwnerAccepted = TRUE`
+
+`backupCustodyApproved = TRUE`
 
 ## 3. Restore drill acceptance decisions
 
@@ -147,13 +156,14 @@ read/write safety checks remain defined in the merged readiness evidence.
 | `postDeploymentSmokePlanApproved` | `APPROVED` | exact plan `pr5-pr8-foundation-post-deployment-smoke-v1` is approved |
 | `postDeploymentSmokeExecutorAccepted` | `APPROVED` | executor is Codex/operations agent, constrained by the approved plan and stop/rollback rules |
 | `postDeploymentSmokeReviewerAccepted` | `APPROVED` | Rishat is the independent reviewer and evidence acceptor |
+| `smokeEvidenceRetentionApproved` | `APPROVED` | signed/redacted smoke report and checksums are retained indefinitely in the repository release record with the deployment audit |
 
 Decision record:
 
 - Executor name and role: `Codex/operations agent`
 - Reviewer name and role: `Rishat`; independent reviewer
 - UTC timestamp: `2026-07-24T08:30:17Z`
-- Evidence destination/retention: `UNDECIDED`
+- Evidence destination/retention: repository release record; signed/redacted smoke report and checksums retained indefinitely with the deployment audit
 - Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 `postDeploymentSmokeApproved = FALSE`
@@ -188,7 +198,7 @@ These decisions are independent. Approval of one row must not change another row
 | Decision field | Status | Current authorization | Required scope |
 |---|---|---|---|
 | `artifactApprovalDecision` | `APPROVED` | `pinnedArtifactApproved = TRUE` | exact source and digest are approved under the immutable private GHCR reference only |
-| `foundationDeploymentDecision` | `DEFERRED` | `foundationDeploymentAuthorized = FALSE` | no foundation deployment until remaining backup, smoke-evidence and owner prerequisites close and a later explicit authorization is recorded |
+| `foundationDeploymentDecision` | `DEFERRED` | `foundationDeploymentAuthorized = FALSE` | operational prerequisites are closed, but no foundation deployment occurs until a later separate explicit authorization is recorded |
 | `productionActivationDecision` | `REJECTED` | `productionActivationAuthorized = FALSE` | business/read/write/integration activation remains forbidden |
 | `pr9ImplementationDecision` | `REJECTED` | `pr9ImplementationAuthorized = FALSE` | PR9 implementation remains forbidden and is not implied by any foundation decision |
 
@@ -198,8 +208,8 @@ Final release decision record:
 - Release owner name: `Rishat`
 - Operations owner name: `Rishat`
 - Database/backup owner name: `Rishat`
-- Security owner name: `UNDECIDED`
-- UTC timestamp: `2026-07-24T08:30:17Z`
+- Security owner name: `Rishat`
+- Latest owner record UTC timestamp: `2026-07-24T10:59:00Z`
 - Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 Until the named decisions above are durably recorded, the effective state remains:
@@ -214,15 +224,13 @@ Until the named decisions above are durably recorded, the effective state remain
 
 ## 9. Exact remaining actions before foundation deployment authorization
 
-1. Select and approve an exact durable external backup destination, transfer the
-   existing encrypted artifact under the approved 30-day retention/access policy,
-   record its immutable destination/checksum and independently verify integrity.
-2. Choose the durable destination and retention for future smoke evidence before
-   executing `pr5-pr8-foundation-post-deployment-smoke-v1`.
-3. Name the security owner for the final release record.
-4. After all preceding prerequisites are durably recorded, issue a separate explicit
-   `APPROVED` decision for `foundationDeploymentDecision`. Until then,
-   `foundationDeploymentAuthorized = FALSE`.
+1. Rishat must issue a separate explicit `APPROVED` decision for
+   `foundationDeploymentDecision`, bound to source SHA
+   `1d59992315f1b7f4ff2d370fc17345a459ac52e3`, OCI digest
+   `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`,
+   the verified Google Drive backup objects and
+   `pr5-pr8-foundation-post-deployment-smoke-v1`. Until that named decision is
+   recorded, `foundationDeploymentAuthorized = FALSE`.
 
 Production activation and PR9 remain `REJECTED`; they are not prerequisites to, and
 cannot be implied by, a future foundation-only deployment authorization.

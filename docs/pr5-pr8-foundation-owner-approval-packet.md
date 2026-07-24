@@ -22,6 +22,11 @@ authorship, silence or this packet's creation. An `APPROVED` decision is valid o
 with approver name, accountable role, UTC timestamp and durable decision reference.
 Missing information remains `UNDECIDED`.
 
+The owner decisions below were explicitly supplied by Rishat and recorded at
+`2026-07-24T08:30:17Z`. This record changes approval state only; it performs no
+deployment, artifact publication, Railway change, production operation, migration,
+integration activation or PR9 work.
+
 Current authorization state:
 
 `foundationDeploymentAuthorized = FALSE`
@@ -38,18 +43,18 @@ exist, but the current single-workstation custody is not an approved durable bac
 | Decision field | Status | Required named-owner record |
 |---|---|---|
 | `backupDurableDestinationApproved` | `UNDECIDED` | destination class and immutable reference; failure-domain separation; accountable backup owner |
-| `backupRetentionApproved` | `UNDECIDED` | retention period, expiry/deletion policy and exception authority |
-| `backupEncryptionAccessApproved` | `UNDECIDED` | encryption boundary, key custodian, reader/writer allow-list and access-review procedure; no secret value in this record |
-| `backupResponsibleOwnerAccepted` | `UNDECIDED` | owner name, role, on-call/escalation boundary and durable approval reference |
-| `backupCustodyApproved` | `UNDECIDED` | may become `APPROVED` only when all four rows above are approved for one exact artifact custody contract |
+| `backupRetentionApproved` | `APPROVED` | 30-day retention; expiry/deletion exceptions remain under the responsible backup owner |
+| `backupEncryptionAccessApproved` | `APPROVED` | `age`/X25519 encryption with restricted access; no key or secret value belongs in this record |
+| `backupResponsibleOwnerAccepted` | `APPROVED` | Rishat is the responsible backup owner |
+| `backupCustodyApproved` | `UNDECIDED` | exact external durable destination remains undecided; the three approvals above do not make single-workstation custody durable |
 
 Decision record:
 
-- Approver name: `UNDECIDED`
-- Accountable role: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
+- Approver name: `Rishat`
+- Accountable role: `responsible backup owner`
+- UTC timestamp: `2026-07-24T08:30:17Z`
 - Durable destination/reference: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 ## 3. Restore drill acceptance decisions
 
@@ -60,16 +65,16 @@ previous-code rollback compatibility. Technical success is not owner acceptance.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
-| `restoreDrillOwnerAcceptance` | `UNDECIDED` | explicit acceptance of the completed technical drill and its evidence reference |
-| `restoreOperationsOwnerAccepted` | `UNDECIDED` | responsible operations owner, restoration duty and escalation boundary |
+| `restoreDrillOwnerAcceptance` | `APPROVED` | Rishat accepts the completed technical drill evidenced by `restoreDrillPassed = TRUE` |
+| `restoreOperationsOwnerAccepted` | `APPROVED` | Rishat accepts responsibility as operations owner for restoration and escalation |
 
 Decision record:
 
-- Operations owner name: `UNDECIDED`
-- Accountable role: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
-- Accepted drill evidence reference: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- Operations owner name: `Rishat`
+- Accountable role: `operations owner`
+- UTC timestamp: `2026-07-24T08:30:17Z`
+- Accepted drill evidence reference: `docs/pr5-pr8-operational-readiness-closure-gate.md`; `restoreDrillPassed = TRUE`
+- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 ## 4. Storage policy decisions
 
@@ -80,19 +85,19 @@ policy.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
-| `storageThirtyPercentReserveApproved` | `UNDECIDED` | approve or reject the 30% minimum reserve and record exception/stop authority |
-| `storageThirtyFivePercentAlertApproved` | `UNDECIDED` | approve or reject the 35% alert threshold, alert destination and response time |
-| `storageOperationsOwnerAccepted` | `UNDECIDED` | operations owner responsible for capacity, alerts and stop decisions |
-| `storageCapacityAccepted` | `UNDECIDED` | may become `APPROVED` only with the reserve, alert and named-owner rows resolved |
+| `storageThirtyPercentReserveApproved` | `APPROVED` | 30% available-space minimum reserve; deployment must stop before projected available space falls below it |
+| `storageThirtyFivePercentAlertApproved` | `APPROVED` | alert threshold is 35% available space |
+| `storageOperationsOwnerAccepted` | `APPROVED` | Rishat is responsible for capacity, alerts and stop decisions |
+| `storageCapacityAccepted` | `APPROVED` | reserve, alert and accountable operations owner are all explicitly approved |
 
 Decision record:
 
-- Operations owner name: `UNDECIDED`
-- Accountable role: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
-- Reserve decision rationale: `UNDECIDED`
-- Alert decision rationale: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- Operations owner name: `Rishat`
+- Accountable role: `operations owner`
+- UTC timestamp: `2026-07-24T08:30:17Z`
+- Reserve decision rationale: `APPROVED`; preserve the measured 30% operational floor and stop before violation
+- Alert decision rationale: `APPROVED`; warn at 35% to preserve response headroom above the floor
+- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 ## 5. Pinned artifact decisions
 
@@ -108,19 +113,20 @@ local OCI build as durable publication.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
-| `candidateSourceShaApproved` | `UNDECIDED` | approve or reject the exact source SHA above |
-| `candidateOciDigestApproved` | `UNDECIDED` | approve or reject the exact OCI digest above |
+| `candidateSourceShaApproved` | `APPROVED` | exact source SHA above is approved; no branch, tag or floating `main` substitution |
+| `candidateOciDigestApproved` | `DEFERRED` | approval remains deferred until durable registry publication of the exact digest is verified |
 | `durableRegistryDestinationApproved` | `UNDECIDED` | approved restricted registry/repository and retention/access policy |
 | `durableRegistryPublicationVerified` | `UNDECIDED` | immutable digest-qualified registry reference recorded before deployment |
-| `pinnedArtifactApproved` | `UNDECIDED` | may become `APPROVED` only after both identities and durable publication are approved |
+| `artifactReleaseOwnerAccepted` | `APPROVED` | Rishat is the artifact/release owner |
+| `pinnedArtifactApproved` | `DEFERRED` | source is approved, but digest approval and aggregate artifact approval wait for verified durable publication |
 
 Decision record:
 
-- Release owner name: `UNDECIDED`
-- Operations co-approver name: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
+- Release owner name: `Rishat`
+- Operations co-approver name: `Rishat`
+- UTC timestamp: `2026-07-24T08:30:17Z`
 - Digest-qualified registry reference: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 ## 6. Post-deployment smoke plan decisions
 
@@ -131,17 +137,17 @@ read/write safety checks remain defined in the merged readiness evidence.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
-| `postDeploymentSmokePlanApproved` | `UNDECIDED` | explicit approval or rejection of the exact plan identifier |
-| `postDeploymentSmokeExecutorAccepted` | `UNDECIDED` | named executor, execution window and stop/rollback authority |
-| `postDeploymentSmokeReviewerAccepted` | `UNDECIDED` | independent named reviewer and evidence acceptance responsibility |
+| `postDeploymentSmokePlanApproved` | `APPROVED` | exact plan `pr5-pr8-foundation-post-deployment-smoke-v1` is approved |
+| `postDeploymentSmokeExecutorAccepted` | `APPROVED` | executor is Codex/operations agent, constrained by the approved plan and stop/rollback rules |
+| `postDeploymentSmokeReviewerAccepted` | `APPROVED` | Rishat is the independent reviewer and evidence acceptor |
 
 Decision record:
 
-- Executor name and role: `UNDECIDED`
-- Reviewer name and role: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
+- Executor name and role: `Codex/operations agent`
+- Reviewer name and role: `Rishat`; independent reviewer
+- UTC timestamp: `2026-07-24T08:30:17Z`
 - Evidence destination/retention: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 `postDeploymentSmokeApproved = FALSE`
 
@@ -174,20 +180,20 @@ These decisions are independent. Approval of one row must not change another row
 
 | Decision field | Status | Current authorization | Required scope |
 |---|---|---|---|
-| `artifactApprovalDecision` | `UNDECIDED` | `pinnedArtifactApproved = FALSE` | exact source, digest and durable registry reference only |
-| `foundationDeploymentDecision` | `UNDECIDED` | `foundationDeploymentAuthorized = FALSE` | PR5–PR8 additive foundation delivery only; no activation |
-| `productionActivationDecision` | `UNDECIDED` | `productionActivationAuthorized = FALSE` | separate future business/read/write/integration activation decision |
-| `pr9ImplementationDecision` | `UNDECIDED` | `pr9ImplementationAuthorized = FALSE` | separate future implementation decision; not deployment approval |
+| `artifactApprovalDecision` | `DEFERRED` | `pinnedArtifactApproved = FALSE` | source is approved; exact digest and aggregate artifact approval require verified durable registry publication |
+| `foundationDeploymentDecision` | `DEFERRED` | `foundationDeploymentAuthorized = FALSE` | no foundation deployment until remaining backup/artifact prerequisites close and a later explicit authorization is recorded |
+| `productionActivationDecision` | `REJECTED` | `productionActivationAuthorized = FALSE` | business/read/write/integration activation remains forbidden |
+| `pr9ImplementationDecision` | `REJECTED` | `pr9ImplementationAuthorized = FALSE` | PR9 implementation remains forbidden and is not implied by any foundation decision |
 
 Final release decision record:
 
-- Product owner name: `UNDECIDED`
-- Release owner name: `UNDECIDED`
-- Operations owner name: `UNDECIDED`
-- Database/backup owner name: `UNDECIDED`
+- Product owner name: `Rishat`
+- Release owner name: `Rishat`
+- Operations owner name: `Rishat`
+- Database/backup owner name: `Rishat`
 - Security owner name: `UNDECIDED`
-- UTC timestamp: `UNDECIDED`
-- Durable decision reference: `UNDECIDED`
+- UTC timestamp: `2026-07-24T08:30:17Z`
+- Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 Until the named decisions above are durably recorded, the effective state remains:
 
@@ -198,3 +204,23 @@ Until the named decisions above are durably recorded, the effective state remain
 `productionActivationAuthorized = FALSE`
 
 `pr9ImplementationAuthorized = FALSE`
+
+## 9. Exact remaining actions before foundation deployment authorization
+
+1. Select and approve an exact durable external backup destination, transfer the
+   existing encrypted artifact under the approved 30-day retention/access policy,
+   record its immutable destination/checksum and independently verify integrity.
+2. Select and approve a restricted durable OCI registry destination, publish the
+   exact candidate digest there, and verify the digest-qualified registry reference.
+3. After verified publication, change `candidateOciDigestApproved`,
+   `pinnedArtifactApproved` and `artifactApprovalDecision` from `DEFERRED` only by a
+   new explicit owner decision bound to that immutable registry reference.
+4. Choose the durable destination and retention for future smoke evidence before
+   executing `pr5-pr8-foundation-post-deployment-smoke-v1`.
+5. Name the security owner for the final release record.
+6. After all preceding prerequisites are durably recorded, issue a separate explicit
+   `APPROVED` decision for `foundationDeploymentDecision`. Until then,
+   `foundationDeploymentAuthorized = FALSE`.
+
+Production activation and PR9 remain `REJECTED`; they are not prerequisites to, and
+cannot be implied by, a future foundation-only deployment authorization.

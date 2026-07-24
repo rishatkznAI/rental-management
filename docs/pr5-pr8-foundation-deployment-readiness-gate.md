@@ -27,9 +27,11 @@ evaluation in `docs/pr5-pr8-operational-readiness-closure-gate.md` confirms that
 gate remains blocked. A current encrypted off-volume SQLite artifact and complete
 isolated technical restore drill now exist, but backup custody/retention/ownership
 and the proposed storage reserve are not approved. Potential prior secret exposure
-also remains unresolved. Artifact, smoke and release approvals are absent. A
-reproducible local OCI candidate is bound to an exact digest, but it is not published
-or owner-approved and therefore grants no deployment authority.
+also remains unresolved: the two required rotations depend on an owner-controlled
+provider token and coordinated external gateway cutover, so safe automation stopped
+before any production mutation. Artifact, smoke and release approvals are absent.
+A reproducible local OCI candidate is bound to an exact digest, but it is not
+published or owner-approved and therefore grants no deployment authority.
 
 ## 2. Scope
 
@@ -687,12 +689,27 @@ does not authorize deployment or activation.
 
 ## 19A. Potential secret exposure
 
-An earlier runtime-variable inspection may have exposed values in tool output.
-This follow-up recorded names only and did not print values. The affected
-secret-bearing names are `BOT_TOKEN`, `GSM_INGEST_TOKEN`, and any credential-bearing
-component of `WEBHOOK_URL`. No Railway variable was changed. Until a security owner
-records either credential rotation or explicit acceptance that rotation is not
-required, the gate remains fail-closed.
+An earlier runtime-variable inspection may have exposed values in tool output. The
+`2026-07-24` names-only audit classified the complete 33-name inventory without
+printing or persisting a value. `BOT_TOKEN` and `GSM_INGEST_TOKEN` are the only
+affected credentials and both are `MUST_ROTATE`. `WEBHOOK_URL` is a public HTTPS URL
+without user-info, query credentials or an embedded known token; it requires no
+rotation. No affected authentication/session secret, signing/encryption key or
+database credential exists in the inventory.
+
+Safe automation is blocked. A valid `BOT_TOKEN` must be issued/replaced in the
+owner-controlled MAX partner/business control plane. `GSM_INGEST_TOKEN` requires a
+named owner to generate the replacement and coordinate the same approved secret
+with every production gateway; a Railway-only change would reject legitimate
+traffic. No token was created, printed, persisted or changed; no rotation actor,
+timestamp or post-rotation fingerprint exists. No Railway restart/deployment was
+triggered. The active source stayed
+`6a38582f5f90b85734884b6b12ad8e306b24619e`, internal health/version remained
+`200`, and exact DB/WAL/SHM hashes and metadata matched the accepted baseline.
+
+Closure requires either the named-owner two-token manual cutover and full
+post-change verification recorded in the operational closure gate, or a durable
+scoped security-owner acceptance that rotation is unnecessary. Neither exists.
 
 `potentialSecretExposureResolved = FALSE`.
 
@@ -855,7 +872,7 @@ Any one of the following remaining conditions still denies deployment authorizat
 
 1. the current encrypted backup has only single-workstation custody and lacks approved retention and a responsible owner;
 2. the proposed 30% storage threshold and reserve are not owner/operations-approved;
-3. potential prior secret exposure lacks rotation evidence or security-owner acceptance;
+3. `BOT_TOKEN` and `GSM_INGEST_TOKEN` lack coordinated rotation evidence or named security-owner acceptance;
 4. the exact source/image candidate is built and pinned by digest but not durably published or owner-approved;
 5. the post-deployment smoke plan is not approved;
 6. no durable owner/release approval authorizes foundation deployment.
@@ -874,7 +891,8 @@ this document.
 
 ## 26. Next permitted step
 
-The one next permitted step is a named security/operations/backup-owner review that
-resolves credential rotation, establishes redundant durable backup custody and
-retention, and accepts or rejects the proposed 30% reserve. This review does not
-authorize deployment, activation or PR9.
+The one next permitted step is a named security-owner manual cutover of the
+provider-issued MAX token and coordinated GSM token exactly as specified in the
+operational closure gate, or a durable scoped no-rotation acceptance. This step
+does not authorize deployment, activation or PR9; backup, storage, artifact, smoke
+and release blockers remain.

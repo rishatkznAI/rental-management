@@ -31,8 +31,9 @@ single-workstation custody and no approved retention or responsible owner; the
 proposed storage threshold/reserve lacks named operations approval; the locally
 built immutable foundation candidate is not published or owner-approved; the
 post-deployment smoke plan is not approved; potential prior secret exposure is not
-resolved; and there is no durable owner/release authorization. Any one is
-sufficient to deny deployment.
+resolved because two required credential rotations need owner-controlled external
+systems; and there is no durable owner/release authorization. Any one is sufficient
+to deny deployment.
 
 ## 2. Scope and fail-closed boundary
 
@@ -67,9 +68,9 @@ or ambiguous approval remains deny.
 ## 3. Current production baseline
 
 Read-only baseline evidence was captured on `2026-07-22`. Cleanup-specific
-verification on `2026-07-23` and backup-specific before/after verification on
-`2026-07-24` reconfirmed the protected volume, database-file, runtime and
-configuration rows below:
+verification on `2026-07-23`, backup-specific before/after verification and the
+names-only secret-exposure audit on `2026-07-24` reconfirmed the protected volume,
+database-file, runtime and configuration rows below:
 
 | Item | Value |
 |---|---|
@@ -82,8 +83,9 @@ configuration rows below:
 | Database | `/data/app.sqlite`; DB `11,927,552`, WAL `7,453,112`, SHM `32,768` bytes |
 | Schema/data boundary | shadow v2 plus PR1/PR2 v1 only; PR5–PR8 not deployed; all eight canonical/settlement tables empty |
 | Public/internal health | prior accepted `2026-07-22` evidence: `200` for `/health` and `/api/version`; public GET/HEAD evidence applies to ingress readiness only |
-| Cleanup runtime/config | deployment and replica unchanged; startup `2026-07-15T07:09:34.047Z`; canonical raw 33-variable comparison fingerprint `0f23a29e44e7729e37c2e7420619db16980bb3e640d15352babf7dfc97d44816` unchanged |
+| Cleanup runtime/config (`2026-07-23`) | deployment and replica unchanged; startup `2026-07-15T07:09:34.047Z`; canonical raw 33-variable comparison fingerprint `0f23a29e44e7729e37c2e7420619db16980bb3e640d15352babf7dfc97d44816` unchanged |
 | Backup verification | deployment/source/image/instance and volume listing unchanged; DB/WAL/SHM inode, size, mtime and SHA-256 exact before/after; no Railway mutation command executed |
+| Secret audit verification (`2026-07-24T05:23:10Z`) | 33 variable names; sorted name-inventory SHA-256 `8f770e3a88235228693f7dcd106ed01f33d734608ea46c9caac36cd0eea2cc4f`; no variable-set command, restart or deployment |
 
 The active deployment, source and database boundary are evidence inputs. They were
 not changed by this gate.
@@ -300,13 +302,54 @@ Measurement does not approve itself.
 
 ## 6A. Potential secret exposure
 
-An earlier variable-inspection command may have placed runtime values in tool
-output. This review did not print any secret values. It identified only affected
-secret-bearing variable names: `BOT_TOKEN`, `GSM_INGEST_TOKEN`, and any
-credential-bearing component of `WEBHOOK_URL`. No rotation or acceptance action was
-authorized, and no Railway variable was changed. A security owner must either
-confirm and evidence rotation of affected credentials or explicitly accept, with a
-durable reference, that rotation is unnecessary.
+An earlier variable-inspection command may have placed production runtime values in
+tool output. The `2026-07-24` audit read the existing capture metadata and current
+33-name Railway inventory without printing or persisting any variable value. No
+authentication/session secret, signing/encryption key, database credential or
+additional external-service credential was present in the affected inventory.
+
+| Variable name | Classification | Rotation state | Reason / safe boundary |
+|---|---|---|---|
+| `BOT_TOKEN` | `MUST_ROTATE`; MAX external-service API credential | `BLOCKED_NOT_ROTATED` | a valid replacement is provider-issued from the owner-controlled MAX partner/business control plane; an arbitrary generated value would disable the production bot |
+| `GSM_INGEST_TOKEN` | `MUST_ROTATE`; production HTTP-ingest API token | `BLOCKED_NOT_ROTATED` | a new random credential must be securely delivered to every production tracker/gateway in the same approved cutover; Railway-only replacement would reject legitimate telemetry |
+| `WEBHOOK_URL` | `NO_ROTATION_REQUIRED`; ordinary public runtime URL | `AUDITED_NO_SECRET` | valid HTTPS URL with no user-info, query parameters, embedded `BOT_TOKEN` or embedded `GSM_INGEST_TOKEN` |
+
+`RAILWAY_PRIVATE_DOMAIN` is also an ordinary platform-generated domain, not a
+private key or credential. Ports, feature flags, service/project/environment IDs,
+volume metadata and other Railway runtime values are non-secret configuration and
+require no rotation.
+
+Safe automation stopped before mutation. No replacement token was created, no
+old/new token was printed or persisted, and therefore no rotation timestamp, actor
+or post-rotation redacted fingerprint exists. The exact manual closure sequence is:
+
+1. a named security owner must issue/revoke and replace the exact production MAX
+   bot token in the MAX owner control plane and store the replacement in an
+   approved secret manager; if the control plane only reveals the existing token,
+   use its revoke/regenerate path or open a MAX provider support request rather
+   than reusing the exposed credential;
+2. a named security/operations owner must generate a cryptographically random GSM
+   token in that secret manager, enumerate every production gateway consumer and
+   approve an atomic client/Railway cutover with rollback;
+3. in one approved window, update only `BOT_TOKEN` and `GSM_INGEST_TOKEN`; record
+   only variable name, UTC rotation time, named actor and a short redacted SHA-256
+   fingerprint, and prove all other variable fingerprints plus the 33-name
+   inventory are unchanged;
+4. record any Railway-generated restart/deployment and prove source SHA remains
+   `6a38582f5f90b85734884b6b12ad8e306b24619e`; validate the new MAX token through
+   the provider's read-only bot-identity endpoint and validate GSM client cutover
+   without creating a synthetic production packet;
+5. reconfirm internal/public health and version, DNS/TLS, DB/WAL/SHM byte identity,
+   schema/registry/count boundaries, disabled foundation paths and zero PR5–PR8 or
+   canonical activity, then destroy any transient plaintext secret material.
+
+No named security owner has accepted a no-rotation decision. At
+`2026-07-24T05:23:10Z`, the active deployment, instance, source and image were still
+the accepted baseline. Internal `/health` and `/api/version` returned `200`.
+DB/WAL/SHM inode, size, nanosecond mtime and SHA-256 were exact baseline matches;
+the volume root contained no unexpected file. A fresh client-side public probe
+resolved DNS but timed out before TLS/HTTP, so it did not create post-rotation
+public-ingress evidence; no ingress/config remediation was attempted.
 
 `potentialSecretExposureResolved = FALSE`.
 
@@ -497,7 +540,7 @@ approval. Repository design records explicitly say missing approval is deny.
 | `restoreDrillPassed` | `TRUE` | encrypted restore, raw validation, both exact-SHA startups, candidate migration/repeat and previous-code compatibility passed reproducibly |
 | `restoreDrillOwnerAccepted` | `FALSE` | technical evidence exists; no named owner acceptance reference |
 | `storageCapacityAccepted` | `BLOCKED` | exact measurements and a 30% reserve proposal exist; operations-owner approval is missing |
-| `potentialSecretExposureResolved` | `FALSE` | affected secret-bearing names are identified; rotation or security-owner no-rotation acceptance is absent |
+| `potentialSecretExposureResolved` | `FALSE` | `BOT_TOKEN` and `GSM_INGEST_TOKEN` require owner-controlled coordinated rotation; neither is rotated and no named security owner accepted no rotation |
 | `pinnedArtifactCandidateDefined` | `TRUE` | exact source, OCI digest, reproducible build/runtime, migration, fingerprint and rollback contract are evidenced |
 | `pinnedArtifactApproved` | `FALSE` | candidate is local-only and not durably published; named release/operations approval is missing |
 | `postDeploymentSmokePlanDefined` | `TRUE` | complete fail-closed deployment/runtime/DB/PR5–PR8/canonical checklist and approval contract is defined |
@@ -518,7 +561,10 @@ approval. Repository design records explicitly say missing approval is deny.
 | Coherent production capture | `PASS`; WAL-aware read-only serialization; exact DB/WAL/SHM before/after identity; encrypted off-volume artifact and manifest |
 | Isolated restore drill | `PASS`; raw decrypt/hash/integrity, production-SHA startup, candidate migration/repeat and previous-code compatibility |
 | Storage calculation | `PASS`; total/used/free, backup, DB growth, WAL peak, restore workspace, 30% reserve and projected peak recorded |
-| Secret-output handling | `BLOCKED`; names only recorded, values not printed; no rotation or security-owner acceptance |
+| Secret-output audit | `PASS`; 33-name inventory classified without printing/persisting values; only `BOT_TOKEN` and `GSM_INGEST_TOKEN` require rotation; `WEBHOOK_URL` is non-secret |
+| Secret rotation | `BLOCKED`; safe automation stopped before mutation because provider issuance and coordinated external-gateway cutover are unavailable; no owner acceptance |
+| Secret-audit no-mutation check | `PASS`; no Railway variable update, restart or deployment; internal health/version `200`; exact DB/WAL/SHM and volume-root baseline |
+| Fresh public DNS/TLS/HTTP probe | `INCONCLUSIVE`; DNS resolved but the client timed out before TLS/HTTP; no ingress mutation was attempted and no post-rotation evidence applies |
 | Exact candidate context | `PASS`; `/server` exported only from `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; server lockfile SHA-256 matched the manifest |
 | OCI build and repeat export | `PASS`; both `linux/amd64` exports produced manifest `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5` and archive SHA-256 `3a7fdb95c605f5fa94e0f6c269784e469f3b73bef3143fd7e7d0e5af51a4e2f9` |
 | Final image inspection | `PASS`; source/runtime/migration/config/lock labels exact; Node `v20.18.1`, npm `10.8.2` and native `better-sqlite3` load passed without application startup |
@@ -541,12 +587,13 @@ The exact remaining blockers are:
 
 1. the current encrypted backup has only single-workstation custody and lacks approved retention and a responsible owner;
 2. the proposed 30% storage threshold and reserve lack named operations approval;
-3. potential prior secret exposure lacks rotation evidence or security-owner acceptance;
+3. `BOT_TOKEN` and `GSM_INGEST_TOKEN` lack coordinated rotation evidence or named security-owner acceptance;
 4. the immutable candidate is built and pinned by digest but is not durably published or owner-approved;
 5. no approved post-deployment smoke procedure exists;
 6. no durable owner/release/operations authorization exists.
 
-**One next permitted step:** obtain a named security/operations/backup-owner review
-that resolves credential rotation, establishes durable redundant backup custody and
-retention, and accepts or rejects the proposed 30% storage reserve. This is a
-readiness review, not deployment authority.
+**One next permitted step:** a named security owner must perform the exact
+provider-issued MAX-token and coordinated GSM-token manual cutover in section 6A,
+or record a durable scoped no-rotation acceptance. This is credential remediation,
+not deployment authority; backup, storage, artifact, smoke and release blockers
+remain after it.

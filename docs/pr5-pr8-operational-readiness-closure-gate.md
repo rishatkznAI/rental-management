@@ -6,7 +6,8 @@
 
 **Evaluated:** `2026-07-22`; cleanup and immutable candidate evidence independently
 verified `2026-07-23`; coherent backup, restore drill, storage calculation and
-security-exposure review updated `2026-07-24`
+security-exposure review updated `2026-07-24`; disabled-integration execution
+audit completed `2026-07-24T05:52:47Z`
 
 **Repository baseline:** `1d59992315f1b7f4ff2d370fc17345a459ac52e3`
 
@@ -32,7 +33,10 @@ proposed storage threshold/reserve lacks named operations approval; the locally
 built immutable foundation candidate is not published or owner-approved; the
 post-deployment smoke plan is not approved; potential prior secret exposure is not
 remediated, but its rotation is now deferred under a foundation-only scoped owner
-risk acceptance; and there is no durable owner/release authorization. The deferral
+risk acceptance; and there is no durable owner/release authorization. The owner's
+clarified boundary permits the existing in-process environment lookups while both
+integrations fail closed. The reviewed candidate satisfies that boundary, so the
+deferral no longer independently blocks foundation-only deployment readiness. It
 grants no bot/GSM activation authority and does not resolve the exposure.
 
 ## 2. Scope and fail-closed boundary
@@ -86,6 +90,7 @@ database-file, runtime and configuration rows below:
 | Cleanup runtime/config (`2026-07-23`) | deployment and replica unchanged; startup `2026-07-15T07:09:34.047Z`; canonical raw 33-variable comparison fingerprint `0f23a29e44e7729e37c2e7420619db16980bb3e640d15352babf7dfc97d44816` unchanged |
 | Backup verification | deployment/source/image/instance and volume listing unchanged; DB/WAL/SHM inode, size, mtime and SHA-256 exact before/after; no Railway mutation command executed |
 | Secret audit verification (`2026-07-24T05:23:10Z`) | 33 variable names; sorted name-inventory SHA-256 `8f770e3a88235228693f7dcd106ed01f33d734608ea46c9caac36cd0eea2cc4f`; no variable-set command, restart or deployment |
+| Disabled-integration audit (`2026-07-24T05:52:47Z`) | read only `BOT_DISABLED=true`, `GSM_ENABLED=false`, deployment `b74623ec-d20d-4c50-ab40-0e0a494c5bc5` and source `6a38582f5f90b85734884b6b12ad8e306b24619e`; no token value requested; focused fail-closed/no-leak tests passed |
 
 The active deployment, source and database boundary are evidence inputs. They were
 not changed by this gate.
@@ -320,29 +325,58 @@ volume metadata and other Railway runtime values are non-secret configuration an
 require no rotation.
 
 The owner decision supplied for PR #224 on `2026-07-24` accepts the temporary
-integration-availability risk and defers both rotations. It is scoped risk
-acceptance, not secret remediation, foundation release approval or production
-activation approval. Rotation remains mandatory before either integration is
-enabled.
+integration-availability risk and defers both rotations. The later owner
+clarification defines “not read” as no operator, agent or tool reading/printing a
+token value, and no value being logged, persisted, copied, exposed or used for an
+external request. A normal in-process environment lookup during disabled startup or
+route construction is explicitly permitted. This is scoped risk acceptance, not
+secret remediation, foundation release approval or production activation approval.
+Rotation remains mandatory before either integration is enabled.
 
 The deferral may be non-blocking only while every condition below is continuously
 true:
 
 | Foundation-only deferral condition | Current evidence / state |
 |---|---|
-| `BOT_DISABLED` remains `true` | `PASS`; read directly as the non-sensitive production flag at `2026-07-24T05:33:42Z` |
-| `GSM_ENABLED` remains `false` | `PASS`; read directly as the non-sensitive production flag at `2026-07-24T05:33:42Z` |
-| token values are not read, changed or used | `FAIL` for the literal runtime-read condition: candidate `server/server.js` reads `process.env.BOT_TOKEN` during startup and `registerGsmRoutes()` resolves `process.env.GSM_INGEST_TOKEN` during route registration, before disabled integration use is evaluated; this docs-only task did not read/change/use either token value |
-| no bot/GSM route, worker or gateway is activated | `PASS` for current disabled behavior; bot webhook/polling/watchdog actions are skipped under `BOT_DISABLED=true`, and GSM ingest is disabled under `GSM_ENABLED=false` |
+| `BOT_DISABLED` remains `true` | `PASS`; read directly as the non-sensitive production flag and reconfirmed at `2026-07-24T05:52:47Z` |
+| `GSM_ENABLED` remains `false` | `PASS`; read directly as the non-sensitive production flag and reconfirmed at `2026-07-24T05:52:47Z` |
+| no operator/agent/tool reads, prints, persists, copies, changes or exposes either token value | `PASS`; neither token variable was requested by the audit command; the docs-only task did not obtain or mutate a token value |
+| no external request authenticates with a deferred token | `PASS`; `BOT_DISABLED=true` prevents webhook registration, watchdog, polling, notification sends and MAX fetches before the network client; `GSM_ENABLED=false` reaches the HTTP disabled response before ingest-token comparison and neither TCP gateway starts |
+| no bot/GSM scenario, worker, route action or gateway integration is activated | `PASS`; bot business handlers are not called, bot schedulers return/are not installed, GSM ingest processing is not called, and both TCP listeners return `null`; an inbound disabled MAX webhook can only append the bounded `bot_disabled_received` deny/audit record containing path, count and update-type names, not a payload or token |
+| token values are absent from logs, errors, audit events and diagnostics | `PASS`; startup and MAX diagnostics expose only configured/not-configured booleans; disabled-path messages contain flag state only; bot status exposes only presence; the bounded disabled audit schema has no token or payload field; focused secret-like output tests pass |
 | post-deployment smoke proves both remain disabled | `DEFINED_NOT_APPROVED`; section 8 now contains exact fail-closed checks |
 
-Because the literal token non-read condition is not satisfied by the exact candidate
-source, the owner deferral is recorded but its foundation-blocker exemption is not
-yet effective. It becomes effective only if a separately reviewed artifact avoids
-reading disabled-integration token values, or the owner explicitly narrows the
-condition to prohibit operator/tool reads and external token use rather than the
-current process-environment reads. This task does neither and changes no runtime
-code.
+The exact candidate satisfies the clarified owner condition. `server/server.js`
+looks up `BOT_TOKEN` only in process memory, but `BOT_DISABLED=true` makes webhook
+registration/watchdog/polling and send paths return before any MAX request.
+`registerGsmRoutes()` similarly closes over `GSM_INGEST_TOKEN`, but
+`requireGsmIngestToken()` returns `503 GSM_DISABLED` before reading the request
+credential or comparing it with the configured token. Both GSM TCP gateways are
+constructed with `enabled=false` and do not listen. Foundation migrations and
+health/version startup do not depend on either integration. No runtime-code change
+is required for this clarified boundary.
+
+Exact reviewed execution paths:
+
+| Code path | Disabled-state proof |
+|---|---|
+| `server/server.js:337-390` | the token is looked up in process memory; startup logging emits only `botTokenConfigured` and other booleans/paths, never the value |
+| `server/server.js:424-446`, `server/server.js:2080-2152`, `server/server.js:2655-2670` | outbound send, polling, webhook registration and watchdog branches stop on `botDisabledConfig.disabled` before `fetch`/MAX authentication |
+| `server/lib/max-api.js:94-132`, `server/lib/max-api.js:394-445` | the only MAX authorization header is created inside `maxRequest`; registration/ensure/watchdog return before calling it when disabled, and logs expose presence only |
+| `server/lib/bot-notifications.js:177-214`, `server/server.js:1783-1805` | both notification schedulers are not installed or return without evaluating/sending business events under `BOT_DISABLED=true` |
+| `server/routes/bot.js:763-815`, `server/server.js:1809-1824` | disabled webhook requests do not reach command/start/callback handlers; the optional bounded deny/audit event stores only path, count and update-type names |
+| `server/routes/bot.js:443-550`, `server/routes/system.js:1405-1421` | authenticated diagnostics derive online/configured presence only; neither response schema contains the token value |
+| `server/routes/gsm.js:17-20`, `server/routes/gsm.js:88-109`, `server/routes/gsm.js:502-531` | route construction closes over the environment value, but the disabled middleware returns `503 GSM_DISABLED` before request-token extraction/comparison or packet processing |
+| `server/server.js:467-479`, `server/lib/gprs-gateway.js:633-646`, `server/lib/gsm/wialon-ips-gateway.js:257-268` | `GSM_ENABLED=false` makes both constructed gateways disabled; `start()` returns `null` before `net.createServer` or `listen` |
+| `server/lib/startup.js:268-272`, `server/lib/startup.js:325-336` | application startup invokes integration hooks only after core initialization; every hook above fails closed, while health/version and foundation migration paths have no token dependency |
+
+Focused tests passed in `tests/bot-config-warning.test.js`,
+`tests/feature-flags.test.js`, `tests/delivery-bot.test.js`,
+`tests/gprs-gateway.test.js`, `tests/bot-notifications.test.js` and
+`tests/system-control-center.test.js`. They prove no MAX fetch during disabled
+registration, no bot scenario/business-state transition, no GSM packet/device
+write, no gateway ingest acceptance, no secret-like diagnostic output and continued
+health/version behavior.
 
 No replacement token was created, and neither old nor new token values were read,
 printed, persisted, changed or used by this task. No Railway variable, restart,
@@ -354,7 +388,7 @@ deployment remains `b74623ec-d20d-4c50-ab40-0e0a494c5bc5` at source
 
 `secretRotationDeferredByOwner = TRUE`.
 
-`secretRotationDeferralFoundationExemptionEffective = FALSE`.
+`secretRotationDeferralFoundationExemptionEffective = TRUE`.
 
 `botIntegrationActivationAuthorized = FALSE`.
 
@@ -507,9 +541,9 @@ this docs-only gate.
 | Deployment placement | metadata for runtime V2, Node/npm, replica, region and `/data` mount | approved Node `v20.18.1`, npm `10.8.2`, one approved replica in `europe-west4-drams3a` | P0/P1 stop; metadata JSON; operations owner |
 | Runtime health | internal and public GET/HEAD `/health` and `/api/version`; startup/log review | independent HTTP 200, one deployment/version marker, valid TLS, no crash/restart loop or migration error | P1 stop; timestamped probes/log extract; operations owner |
 | Auth boundary | unauthenticated `/api/auth/me` and protected-route probes | expected 401/403; never 200 or secret-bearing output | P0 stop; redacted transcript; security owner |
-| Bot disabled boundary | read only the non-secret `BOT_DISABLED` flag; inspect startup and bot transport logs without reading `BOT_TOKEN`; probe disabled bot entry points without a token | exact `BOT_DISABLED=true`; no polling, webhook registration/watchdog, outbound message, bot worker or token use; `botIntegrationActivationAuthorized=FALSE` | P0 stop; redacted flag/log/probe transcript; security/operations owners |
-| GSM disabled boundary | read only the non-secret `GSM_ENABLED` flag; inspect gateway/route state without reading `GSM_INGEST_TOKEN` or sending a packet | exact `GSM_ENABLED=false`; no HTTP ingest acceptance, TCP gateway, worker, synthetic packet or token use; `gsmIntegrationActivationAuthorized=FALSE` | P0 stop; redacted flag/log/probe transcript; security/operations owners |
-| Deferred-secret non-read condition | static/runtime evidence for disabled integration initialization | exact approved artifact must not read either deferred token value; current candidate fails this literal condition and cannot pass by merely showing both flags disabled | P0 stop; source/runtime trace; security/release owners |
+| Bot disabled boundary | read only the non-secret `BOT_DISABLED` flag; inspect startup and bot transport logs without reading or printing `BOT_TOKEN`; probe disabled bot entry points without a token | exact `BOT_DISABLED=true`; in-process lookup permitted; no polling, webhook registration/watchdog, outbound message, bot worker, external token use or token-bearing output; `botIntegrationActivationAuthorized=FALSE` | P0 stop; redacted flag/log/probe transcript; security/operations owners |
+| GSM disabled boundary | read only the non-secret `GSM_ENABLED` flag; inspect gateway/route state without reading or printing `GSM_INGEST_TOKEN` or sending a packet | exact `GSM_ENABLED=false`; in-process lookup permitted; HTTP ingest fails `503 GSM_DISABLED` before token comparison; no TCP gateway, worker, synthetic packet, external token use or token-bearing output; `gsmIntegrationActivationAuthorized=FALSE` | P0 stop; redacted flag/log/probe transcript; security/operations owners |
+| Deferred-secret clarified boundary | static/runtime evidence for disabled integration initialization | no operator/tool value access, mutation, disclosure, external authentication or integration/business action; ordinary in-process lookup is allowed; current candidate passes while both disable flags remain exact | P0 stop; source/runtime trace; security/release owners |
 | DB integrity | read-only/query-only `foreign_key_check`, `integrity_check`, `quick_check` | 0 FK rows; `ok`; `ok`; no checkpoint, vacuum or write | P0 stop; redacted transcript; database owner |
 | DB schema/count conservation | approved normalized `sqlite_master` fingerprint plus before/after count allow-list | exact approved schema hash; all 63 legacy `app_data` collections conserved; no unauthorized business delta | P0 stop; hash/count record; database/release owners |
 | Migration registry | ordered read of `sql_shadow_schema_migrations` | exact seven-row ordered set in section 7.1; original shadow/PR1/PR2 timestamps retained and PR5–PR8 each present once with approved timestamps | P0/P1 stop; registry CSV/hash; release owner |
@@ -552,7 +586,7 @@ approval. Repository design records explicitly say missing approval is deny.
 | `storageCapacityAccepted` | `BLOCKED` | exact measurements and a 30% reserve proposal exist; operations-owner approval is missing |
 | `potentialSecretExposureResolved` | `FALSE` | scoped deferral is risk acceptance, not credential remediation |
 | `secretRotationDeferredByOwner` | `TRUE` | owner accepts temporary bot/GSM unavailability for foundation-only delivery; rotation remains mandatory before integration enablement |
-| `secretRotationDeferralFoundationExemptionEffective` | `FALSE` | exact candidate reads both token environment values during startup/route registration, so the literal non-read precondition is unmet |
+| `secretRotationDeferralFoundationExemptionEffective` | `TRUE` | exact candidate satisfies the clarified owner boundary: in-process lookups occur, but disabled paths make no external authenticated request, invoke no integration business handler and disclose no token value |
 | `botIntegrationActivationAuthorized` | `FALSE` | `BOT_DISABLED=true`; no bot activation authority is granted |
 | `gsmIntegrationActivationAuthorized` | `FALSE` | `GSM_ENABLED=false`; no GSM activation authority is granted |
 | `pinnedArtifactCandidateDefined` | `TRUE` | exact source, OCI digest, reproducible build/runtime, migration, fingerprint and rollback contract are evidenced |
@@ -577,8 +611,8 @@ approval. Repository design records explicitly say missing approval is deny.
 | Storage calculation | `PASS`; total/used/free, backup, DB growth, WAL peak, restore workspace, 30% reserve and projected peak recorded |
 | Secret-output audit | `PASS`; 33-name inventory classified without printing/persisting values; only `BOT_TOKEN` and `GSM_INGEST_TOKEN` require rotation; `WEBHOOK_URL` is non-secret |
 | Secret rotation decision | `DEFERRED_BY_OWNER`; temporary integration unavailability accepted; this is not remediation and does not authorize either integration |
-| Disabled integration flags | `PASS`; non-sensitive production reads only: `BOT_DISABLED=true`, `GSM_ENABLED=false`; neither token value was read |
-| Deferred-secret non-read condition | `FAIL`; static candidate audit proves startup/route registration reads both token environment values before disabled use is evaluated |
+| Disabled integration flags | `PASS`; non-sensitive production reads only: `BOT_DISABLED=true`, `GSM_ENABLED=false`; deployment/source unchanged and neither token variable was requested |
+| Clarified deferred-secret condition | `PASS`; exact startup/route/gateway audit and focused tests prove permitted in-process lookups cause no external authentication, business handler, gateway listener or token-bearing output while disabled |
 | Secret-decision no-mutation check | `PASS`; no Railway variable update, restart or deployment; no integration/route/worker/gateway activation |
 | Fresh public DNS/TLS/HTTP probe | `INCONCLUSIVE`; DNS resolved but the client timed out before TLS/HTTP; no ingress mutation was attempted and no post-rotation evidence applies |
 | Exact candidate context | `PASS`; `/server` exported only from `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; server lockfile SHA-256 matched the manifest |
@@ -603,13 +637,11 @@ The exact remaining blockers are:
 
 1. the current encrypted backup has only single-workstation custody and lacks approved retention and a responsible owner;
 2. the proposed 30% storage threshold and reserve lack named operations approval;
-3. the scoped secret-rotation deferral is recorded, but its literal token non-read precondition is not satisfied by the exact candidate source;
-4. the immutable candidate is built and pinned by digest but is not durably published or owner-approved;
-5. no approved post-deployment smoke procedure exists;
-6. no durable owner/release/operations authorization exists.
+3. the immutable candidate is built and pinned by digest but is not durably published or owner-approved;
+4. no approved post-deployment smoke procedure exists;
+5. no durable owner/release/operations authorization exists.
 
-**One next permitted step:** clarify the scoped owner's literal token non-read
-condition or prepare a separately reviewed minimal artifact that does not read
-disabled-integration token values. Neither option authorizes deployment or
-integration activation; backup, storage, artifact, smoke and release blockers
-remain after it.
+**One next permitted step:** obtain a named operations/release review of the
+off-volume backup custody/retention, 30% storage reserve, immutable artifact and
+smoke plan. This does not authorize deployment or integration activation; all five
+listed blockers remain until durably approved.

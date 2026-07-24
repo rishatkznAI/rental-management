@@ -5,7 +5,8 @@
 **Gate status:** `FOUNDATION_DEPLOYMENT_BLOCKED`
 
 **Gate timestamp:** `2026-07-22`; immutable candidate evidence updated `2026-07-23`;
-coherent backup, restore, storage and security review updated `2026-07-24`
+coherent backup, restore, storage and security review updated `2026-07-24`;
+disabled-integration execution audit completed `2026-07-24T05:52:47Z`
 
 **Foundation deployment performed:** `NO`
 
@@ -29,11 +30,14 @@ isolated technical restore drill now exist, but backup custody/retention/ownersh
 and the proposed storage reserve are not approved. Potential prior secret exposure
 also remains unresolved, while rotation is deferred under a foundation-only scoped
 owner risk acceptance. That acceptance grants no bot/GSM activation authority and
-requires both integrations and token values to remain unused. The exact candidate
-still reads both token environment values during startup/route registration, so the
-literal non-read precondition is not yet met. Artifact, smoke and release approvals
-are absent. A reproducible local OCI candidate is bound to an exact digest, but it
-is not published or owner-approved and therefore grants no deployment authority.
+requires no operator/tool token access, no token disclosure or external token use,
+and both integrations to remain disabled. The exact candidate satisfies that
+clarified boundary: its permitted in-process lookups lead to no MAX request, GSM
+ingest action or gateway listener while the disable flags remain exact. The scoped
+deferral therefore no longer independently blocks foundation-only readiness, but
+artifact, smoke and release approvals are absent. A reproducible local OCI
+candidate is bound to an exact digest, but it is not published or owner-approved
+and therefore grants no deployment authority.
 
 ## 2. Scope
 
@@ -703,25 +707,29 @@ The owner decision supplied for PR #224 on `2026-07-24` defers both rotations an
 accepts temporary bot/GSM integration unavailability. This is scoped risk
 acceptance, not secret remediation, foundation release approval or production
 activation approval. `BOT_DISABLED=true` and `GSM_ENABLED=false` were reconfirmed
-from only those two non-sensitive production flags at `2026-07-24T05:33:42Z`.
-Neither secret value was read, changed or used by this task; no Railway mutation or
-restart occurred.
+from only those two non-sensitive production flags at `2026-07-24T05:52:47Z`;
+deployment `b74623ec-d20d-4c50-ab40-0e0a494c5bc5` and source
+`6a38582f5f90b85734884b6b12ad8e306b24619e` were unchanged. Neither token variable
+was requested and no Railway mutation or restart occurred.
 
-The acceptance says deferred tokens must not be read, changed or used. Static audit
-of the exact candidate shows `server/server.js` reads `process.env.BOT_TOKEN` at
-startup and `registerGsmRoutes()` resolves `process.env.GSM_INGEST_TOKEN` during
-route registration before disabled integration use is evaluated. Therefore the
-deferral is recorded, but its foundation-blocker exemption is not effective under
-the literal owner condition. A separately reviewed artifact must avoid those reads,
-or the owner must explicitly narrow the condition to operator/tool reads and
-external token use. Rotation remains mandatory before either integration is
-enabled.
+The owner clarification permits a normal in-process environment lookup while
+prohibiting operator/agent/tool value access, logging, persistence, copying,
+exposure, external authentication and integration/business activation. The exact
+candidate satisfies this boundary. `server/server.js` reads `BOT_TOKEN`, but
+`BOT_DISABLED=true` prevents webhook registration/watchdog, polling, schedulers and
+outbound sends before a MAX network request. `registerGsmRoutes()` closes over
+`GSM_INGEST_TOKEN`, but `requireGsmIngestToken()` returns `503 GSM_DISABLED` before
+credential extraction/comparison or packet processing; both TCP gateways are
+constructed disabled and do not listen. Startup diagnostics expose token presence
+only, and the disabled webhook audit contains only route, count and update-type
+metadata. Foundation migrations and health/version startup have no dependency on
+either integration. Rotation remains mandatory before either is enabled.
 
 `potentialSecretExposureResolved = FALSE`.
 
 `secretRotationDeferredByOwner = TRUE`.
 
-`secretRotationDeferralFoundationExemptionEffective = FALSE`.
+`secretRotationDeferralFoundationExemptionEffective = TRUE`.
 
 `botIntegrationActivationAuthorized = FALSE`.
 
@@ -794,9 +802,9 @@ variable boundary is no variable change: `APP_DISABLED=false`, `BOT_DISABLED=tru
 absent/default false. Enabling read flags or adding any bootstrap, source,
 calculation, dry-run, posting or activation variable is forbidden. The scoped
 secret deferral additionally requires no bot/GSM route, worker or gateway
-activation, no use of either deferred token, and an approved artifact that satisfies
-the owner's literal token non-read condition; the current candidate does not satisfy
-that last condition.
+activation, no operator/tool token-value access or disclosure and no external token
+use. Ordinary in-process lookup is permitted by the clarified owner decision; the
+current candidate satisfies this condition while both disable flags remain exact.
 
 The digest was measured from the local non-production OCI artifact and reproduced
 by a second byte-identical export; it was not inferred from the current PR3 image.
@@ -820,9 +828,9 @@ deployment-dependent check was executed by PR #224.
 | Runtime placement | Railway read-only service/deployment metadata | approved Node/npm, region, one replica and `/data` mount | P0/P1 configuration drift | metadata JSON | operations |
 | Runtime health | independent internal/public GET/HEAD for `/health` and `/api/version`, startup/log review | HTTP 200, exact marker, valid TLS, no crash/restart loop or migration error | P1 ingress/runtime failure | timestamped probe/log transcript | operations |
 | Auth boundary | `curl -sS -o /dev/null -w '%{http_code}\n' "$APP_URL/api/auth/me"` | 401 | P0 auth exposure if 200 | timestamped curl transcript | security |
-| Bot disabled boundary | read only `BOT_DISABLED`; inspect startup/transport logs and disabled bot entry points without reading `BOT_TOKEN` | `BOT_DISABLED=true`; no polling, webhook/watchdog registration, outbound message, worker or token use; activation authorization false | P0 unauthorized integration activation | redacted flag/log/probe transcript | security/operations |
-| GSM disabled boundary | read only `GSM_ENABLED`; inspect gateway/route state without reading `GSM_INGEST_TOKEN` or sending a packet | `GSM_ENABLED=false`; no ingest acceptance, TCP gateway, worker, synthetic packet or token use; activation authorization false | P0 unauthorized integration activation | redacted flag/log/probe transcript | security/operations |
-| Deferred-secret non-read | static/runtime trace of disabled integration initialization | exact approved artifact does not read either deferred token value; current candidate fails and cannot pass only by showing disabled flags | P0 owner-condition violation | source/runtime trace | security/release owners |
+| Bot disabled boundary | read only `BOT_DISABLED`; inspect startup/transport logs and disabled bot entry points without reading or printing `BOT_TOKEN` | `BOT_DISABLED=true`; in-process lookup permitted; no polling, webhook/watchdog registration, outbound message, worker, external token use or token-bearing output; activation authorization false | P0 unauthorized integration activation | redacted flag/log/probe transcript | security/operations |
+| GSM disabled boundary | read only `GSM_ENABLED`; inspect gateway/route state without reading or printing `GSM_INGEST_TOKEN` or sending a packet | `GSM_ENABLED=false`; in-process lookup permitted; ingest fails `503 GSM_DISABLED` before token comparison; no TCP gateway, worker, synthetic packet, external token use or token-bearing output; activation authorization false | P0 unauthorized integration activation | redacted flag/log/probe transcript | security/operations |
+| Clarified deferred-secret boundary | static/runtime trace of disabled integration initialization | no operator/tool value access, mutation, disclosure, external authentication or integration/business action; ordinary in-process lookup allowed; current candidate passes while disable flags remain exact | P0 owner-condition violation | source/runtime trace | security/release owners |
 | Database core | readonly `better-sqlite3` query with `query_only=1`: `PRAGMA foreign_key_check; PRAGMA integrity_check; PRAGMA quick_check;` | 0 FK rows; `ok`; `ok` | P0 integrity | redacted query transcript | DBA/operations |
 | Migration registry | readonly query of `sql_shadow_schema_migrations` ordered by name | exact shadow v2, PR1–PR8 v1 set and approved timestamps | P0/P1 migration drift | registry CSV/hash | release owner |
 | Schema fingerprint | hash normalized `sqlite_master` SQL in readonly mode | exact separately approved release fingerprint; #221 local evidence `466ce614...` | P0 schema drift | hash transcript | release owner |
@@ -869,7 +877,7 @@ approved incident path. Required named approvers and signatures are absent.
 | `restoreDrillOwnerAccepted` | `FALSE` |
 | `potentialSecretExposureResolved` | `FALSE` |
 | `secretRotationDeferredByOwner` | `TRUE` |
-| `secretRotationDeferralFoundationExemptionEffective` | `FALSE` |
+| `secretRotationDeferralFoundationExemptionEffective` | `TRUE` |
 | `botIntegrationActivationAuthorized` | `FALSE` |
 | `gsmIntegrationActivationAuthorized` | `FALSE` |
 | `publicIngressHealthy` | `TRUE` |
@@ -897,10 +905,9 @@ Any one of the following remaining conditions still denies deployment authorizat
 
 1. the current encrypted backup has only single-workstation custody and lacks approved retention and a responsible owner;
 2. the proposed 30% storage threshold and reserve are not owner/operations-approved;
-3. the scoped owner deferral exists, but the exact candidate does not satisfy its literal deferred-token non-read precondition;
-4. the exact source/image candidate is built and pinned by digest but not durably published or owner-approved;
-5. the post-deployment smoke plan is not approved;
-6. no durable owner/release approval authorizes foundation deployment.
+3. the exact source/image candidate is built and pinned by digest but not durably published or owner-approved;
+4. the post-deployment smoke plan is not approved;
+5. no durable owner/release approval authorizes foundation deployment.
 
 Successful local migration and rollback simulations do not replace these
 operational and authorization requirements.
@@ -916,7 +923,7 @@ this document.
 
 ## 26. Next permitted step
 
-The one next permitted step is to clarify the scoped owner's literal token non-read
-condition or prepare a separately reviewed minimal artifact that avoids reading
-disabled-integration token values. This step does not authorize deployment,
-activation or PR9; backup, storage, artifact, smoke and release blockers remain.
+The one next permitted step is to obtain a named operations/release review of the
+off-volume backup custody/retention, 30% storage reserve, immutable artifact and
+smoke plan. This step does not authorize deployment, activation or PR9; all five
+listed blockers remain until durably approved.

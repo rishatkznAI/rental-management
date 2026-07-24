@@ -5,7 +5,8 @@
 **Status:** `FOUNDATION_DEPLOYMENT_BLOCKED`
 
 **Evaluated:** `2026-07-22`; cleanup and immutable candidate evidence independently
-verified `2026-07-23`
+verified `2026-07-23`; coherent backup, restore drill, storage calculation and
+security-exposure review updated `2026-07-24`
 
 **Repository baseline:** `1d59992315f1b7f4ff2d370fc17345a459ac52e3`
 
@@ -24,12 +25,14 @@ was independently reconfirmed and squash-merged as
 repeated-startup, failure-matrix and previous-code compatibility evidence remains
 successful, and no runtime source changed after the #221 remediation.
 
-The remaining operational conditions are not closed. There is no current,
-durable, independently verifiable and owner-approved production backup; no accepted
-restore drill; no approved storage threshold/reserve; the locally built immutable
-foundation candidate is not published or owner-approved; there is no approved
-post-deployment smoke record; and there is no durable owner/release authorization.
-Any one is sufficient to deny deployment.
+The technical restore drill is now complete and reproducible. The remaining
+operational conditions are not closed: the encrypted current backup has only
+single-workstation custody and no approved retention or responsible owner; the
+proposed storage threshold/reserve lacks named operations approval; the locally
+built immutable foundation candidate is not published or owner-approved; the
+post-deployment smoke plan is not approved; potential prior secret exposure is not
+resolved; and there is no durable owner/release authorization. Any one is
+sufficient to deny deployment.
 
 ## 2. Scope and fail-closed boundary
 
@@ -40,15 +43,19 @@ existing historical backup files, and the already reviewed local migration/resto
 evidence.
 
 This work did **not** deploy or restart production; change Railway configuration,
-domains, variables or network; create a production backup; restore a database; run
-a production initializer or migration; bootstrap identity; populate PR6; calculate
-PR7; execute PR8; enable canonical/forecast reads; create canonical or settlement
-writes; switch a consumer; implement PR9; or grant approval. A local isolated
+domains, variables or network; write a backup file on the production volume;
+restore production; run a production initializer or migration; bootstrap identity;
+populate PR6; calculate PR7; execute PR8; enable canonical/forecast reads; create
+canonical or settlement writes; switch a consumer; implement PR9; or grant
+approval. A WAL-aware snapshot was serialized from a read-only/query-only
+production transaction and streamed directly to restricted off-volume storage.
+All restore, startup, migration and rollback checks used disposable local copies.
+A local isolated
 `linux/amd64` OCI build used only a Git archive of the candidate `/server` tree;
 its validation overrode the entrypoint and did not start the application, open
 SQLite or execute a migration. A later read-only Railway metadata query only
 reconfirmed the rollback identity. The new and updated repository files are
-documentation only. Section 4.3 records an unintended SQLite sidecar-file creation
+documentation only. Section 4.4 records an unintended SQLite sidecar-file creation
 on one historical backup and the later exact manual cleanup. The incident changed
 no live database, backup payload or business row; the two sidecars are now absent
 and the strict post-cleanup production-volume baseline has been restored.
@@ -60,8 +67,9 @@ or ambiguous approval remains deny.
 ## 3. Current production baseline
 
 Read-only baseline evidence was captured on `2026-07-22`. Cleanup-specific
-read-only verification on `2026-07-23` reconfirmed the protected volume,
-database-file, runtime and configuration rows below:
+verification on `2026-07-23` and backup-specific before/after verification on
+`2026-07-24` reconfirmed the protected volume, database-file, runtime and
+configuration rows below:
 
 | Item | Value |
 |---|---|
@@ -75,13 +83,56 @@ database-file, runtime and configuration rows below:
 | Schema/data boundary | shadow v2 plus PR1/PR2 v1 only; PR5–PR8 not deployed; all eight canonical/settlement tables empty |
 | Public/internal health | prior accepted `2026-07-22` evidence: `200` for `/health` and `/api/version`; public GET/HEAD evidence applies to ingress readiness only |
 | Cleanup runtime/config | deployment and replica unchanged; startup `2026-07-15T07:09:34.047Z`; canonical raw 33-variable comparison fingerprint `0f23a29e44e7729e37c2e7420619db16980bb3e640d15352babf7dfc97d44816` unchanged |
+| Backup verification | deployment/source/image/instance and volume listing unchanged; DB/WAL/SHM inode, size, mtime and SHA-256 exact before/after; no Railway mutation command executed |
 
 The active deployment, source and database boundary are evidence inputs. They were
 not changed by this gate.
 
 ## 4. Backup closure
 
-### 4.1 Mechanism
+### 4.1 Current coherent encrypted capture
+
+At `2026-07-24T04:55:14.852Z`, the live `/data/app.sqlite` was opened with
+`readonly=true`, `fileMustExist=true`, `query_only=ON` and a pinned read
+transaction. SQLite serialization produced a coherent logical image incorporating
+the WAL-visible state and streamed it over Railway SSH directly to a mode-`0700`
+off-volume local directory. No production destination file, checkpoint, `VACUUM`,
+migration, restart or configuration change occurred.
+
+| Evidence | Exact value |
+|---|---|
+| Source deployment / SHA | `b74623ec-d20d-4c50-ab40-0e0a494c5bc5` / `6a38582f5f90b85734884b6b12ad8e306b24619e` |
+| Source image / instance | `sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650` / `54afd747-1bd1-4069-9320-31e03db1f5ea` |
+| Plain coherent SQLite identity | `11,927,552` bytes; SHA-256 `f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774` |
+| Encrypted artifact identity | `11,930,648` bytes; SHA-256 `6a4bfdded51a475b3090bb485a74fd903967d3278536ea2aa49714ab4431b720` |
+| Destination reference | `local-restricted://rentCore-production-backups/20260724T045252Z/app.sqlite.coherent-20260724T045252Z.sqlite.age`; outside repository and production volume |
+| Encryption / access | age v1 X25519; artifact and manifest mode `0600`; directory mode `0700`; identity file held separately in a mode-`0700` key directory |
+| Retention | proposed 30 days or until superseded; review/delete `2026-08-23T04:55:14.852Z`; not owner-approved |
+| Custody / owner | technical custodian: local OS account `rishat`; responsible backup owner and approval reference: `UNASSIGNED` |
+| Manifest | restricted local `manifest.json`; SHA-256 `72ee5f8ab77c40759c0bcb346374ca9f1bef391d665abc7dbc1e7e4e30d7657f` after final plaintext cleanup |
+
+Source DB/WAL/SHM SHA-256 remained respectively
+`b487d8a5534665aa896a8eea1788342b16969c2e10441e3857296505c3c7cf2b`,
+`35445701ec00718d8c7c8adfee013580b964b4aa8c6c4063bf10c1b67f491e38`
+and `bc2e7b214d1a4f19c928d82f452e316c8a61ab75f6646613cea34b7ba32be8c1`
+with the same inode, size and nanosecond mtime before and after capture. The
+serialized image passed `integrity_check=ok`, `quick_check=ok`, zero FK violations,
+the exact three-row production registry, 63 `app_data` rows with content hash
+`5298b2f9b139dfd9885878cd8482d8d3455eccdd597f6a19ef54a532c9e9b312`
+and zero canonical/settlement rows.
+
+The disposable plaintext restore copies and the original local plaintext capture
+were deleted after verification; only the encrypted artifact and restricted
+metadata/evidence remain. No database artifact or secret is stored in Git or
+published to GitHub.
+
+The artifact is current, encrypted, independently restorable and off the production
+failure domain, but it remains a single-workstation copy with unapproved retention
+and no responsible owner. Under this gate's strict approved/durable definition:
+
+`backupAvailable = FALSE`.
+
+### 4.2 Mechanism
 
 The deployed PR3 source contains the admin-only
 `GET /api/admin/backup/full` mechanism. It creates a temporary ZIP containing a
@@ -105,12 +156,12 @@ recorded, and no encryption/access/retention/owner approval is linked. It predat
 the July PR1/PR2 production migrations and is not a current foundation-deployment
 backup.
 
-### 4.2 Existing volume artifacts and independent integrity read
+### 4.3 Existing volume artifacts and independent integrity read
 
 Three historical SQLite copies exist on the same production volume. They were
 opened with `readonly=true`, `fileMustExist=true` and `query_only=ON`; no WAL
 checkpoint, repair or SQL write was requested. The filesystem side effect from one
-WAL-mode open is recorded separately in section 4.3.
+WAL-mode open is recorded separately in section 4.4.
 
 | Artifact | Timestamp | Size | SHA-256 | Integrity / FK | Registry / scope |
 |---|---|---:|---|---|---|
@@ -130,7 +181,7 @@ of an approved, current, durable and independently recoverable backup.
 
 `backupAvailable = FALSE`.
 
-### 4.3 Read-only sidecar incident
+### 4.4 Read-only sidecar incident
 
 Opening the May 21 historical backup with SQLite `readonly=true` still caused
 SQLite's WAL-mode shared-memory handling to create two previously absent companion
@@ -178,34 +229,38 @@ or business-data change.
 
 ## 5. Restore drill closure
 
-The prior readiness work documented a local, disposable rehearsal rather than a
-production restore:
+The encrypted artifact was decrypted twice into a mode-`0700` disposable local
+workspace. The second independent decrypt completed in `0.04 s`; both plaintext
+images were exactly `11,927,552` bytes with SHA-256
+`f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774`.
+No production restore was attempted.
 
-- coherent production-derived source artifact SHA-256
-  `f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774`;
-- raw target initially matched the source; migrated target SHA-256
-  `43139a34049441c1fb120dfa925a3fbea898dfc013a897e1c98fc654f97f4083`;
-- the #221 repeated-start evidence produced final schema fingerprint
-  `466ce614c48d27b0d25ac2e38706d9cc74c8793d79fd1806c11cdb3f65a10a81`;
-- SQLite integrity/quick checks were `ok`, foreign-key violations were `0`, the
-  exact shadow/PR1/PR2/PR5–PR8 migration registry was present, 63 legacy
-  `app_data` rows were conserved and all authority/source/run/financial business
-  counts remained `0`;
-- current foundation source started successfully, and previous production SHA
-  `6a38582f5f90b85734884b6b12ad8e306b24619e` accepted the additive schema without
-  deleting unknown tables or registrations.
+| Drill stage | Result |
+|---|---|
+| Raw restore | `integrity_check=ok`; `quick_check=ok`; FK violations `0`; schema hash `b184599187300ba77ab372ec2a816c4aec0e258d14d7de0198c7424f1dc8819b`; exact shadow v2 + PR1/PR2 v1 registry |
+| Application data | 63 `app_data` rows; exact content hash `5298b2f9b139dfd9885878cd8482d8d3455eccdd597f6a19ef54a532c9e9b312`; canonical/settlement counts `0` |
+| Current production source startup | detached SHA `6a38582f5f90b85734884b6b12ad8e306b24619e`; `/health=200`; `/api/version=200` with exact SHA and isolated marker; observed WAL `16,512` bytes |
+| Candidate first startup | detached SHA `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; `/health=200`; `/api/version=200`; PR5–PR8 applied; original shadow/PR1/PR2 timestamps retained |
+| Candidate result | logical image SHA-256 `33d2909c5b42343495596c50ef522161bbf509bd1c26a5836d6397132331c120`; schema hash `30309e9655618597e901279969355069fb849a3709b1089f7c0c5cbc2af8c091`; seven registry rows; integrity/quick `ok`; FK `0` |
+| Foundation counts | capability catalog exactly `1`/`11`; all PR5 authority/bootstrap, all 16 PR6, all 8 PR7, all 8 PR8 and all canonical/settlement business counts `0`; 63 legacy collections conserved |
+| Repeated candidate startup | `/health=200`; `/api/version=200`; exact logical image, schema, seven timestamps, `app_data` hash and every count unchanged |
+| Previous-code rollback compatibility | migrated logical image serialized to a fresh target; SHA `6a38582f...` returned `/health=200` and `/api/version=200`; schema, table counts, migration names/versions, business emptiness and `app_data` hash conserved |
 
-A qualifying independent drill must start from the exact approved durable backup,
-verify its checksum and manifest, restore it to an isolated non-production target,
-verify files and SQLite integrity/FKs, compare the approved schema and migration
-registry, start both the previous production artifact and the proposed foundation
-artifact, execute the approved read-only smoke, record RPO/RTO and deletion of the
-temporary target, and carry named operator plus owner acceptance.
+The old production code predictably rewrote only the shadow migration's
+`applied_at` in the disposable rollback target, reproducing its already documented
+pre-#221 behavior. It did not remove or alter PR5–PR8 structures or business state.
+The candidate repeated-start test itself retained the exact original shadow time
+`2026-07-15 07:09:34` and all other registry timestamps.
 
-No qualifying source artifact or owner-accepted drill exists, and no production
-restore was attempted.
+Restricted, checksum-addressed JSON evidence for the raw restore, both candidate
+starts and rollback probe is stored beside the encrypted artifact. The recipe is
+reproducible from the manifest, encrypted artifact, exact two source SHAs and locked
+dependencies. Technical execution passed; named owner acceptance remains absent
+and does not grant deployment authorization.
 
-`restoreDrillPassed = FALSE`.
+`restoreDrillPassed = TRUE`.
+
+`restoreDrillOwnerAccepted = FALSE`.
 
 ## 6. Storage closure
 
@@ -215,21 +270,45 @@ restore was attempted.
 | Filesystem total | `921,432,064` bytes |
 | Used | `481,689,600` bytes |
 | Free / available to application | `439,742,464` / `422,965,248` bytes |
-| Railway current-size metric | `565.248 MB` |
+| Railway current-size metric | `565.28896 MB` |
+| Encrypted off-volume backup | `11,930,648` bytes; consumes no production-volume bytes |
 | PR5–PR8 logical database growth in simulation | `970,752` bytes |
-| Observed migration WAL peak | `1,112,432` bytes |
+| Persistent DB-file growth in simulation | `0` bytes; existing free pages supplied the DDL |
+| Observed migration/repeated-start WAL peak | `1,120,672` bytes |
 | SHM allowance | `32,768` bytes |
-| Current DB-only snapshot size | `11,927,552` bytes |
-| Raw DB snapshot + WAL peak + SHM subtotal | `13,072,752` bytes |
-| Observed full-backup archive size | `437,708,259` bytes |
+| Conservative temporary restore workspace | `48,866,744` bytes: encrypted artifact + three DB images + WAL peak + SHM |
+| Projected migration-peak used / available | `482,843,040` / `421,811,808` bytes |
+| Projected peak used / available as total percentage | `52.401%` / `45.778%` |
+| Proposed minimum production reserve | `276,429,620` bytes: 30% of filesystem total |
+| Projected headroom above proposed reserve | `145,382,188` bytes |
 
-The raw subtotal is not a safety threshold. A full backup materially exceeds the
-DB-only estimate because it includes local files. Required retention generations,
-off-volume destination capacity, restore workspace, concurrent WAL growth,
-application growth rate, emergency reserve, alert levels and stop threshold have
-no approved numerical policy. Current free space does not substitute for approval.
+The proposed fail-closed policy is: before and throughout a foundation window,
+available bytes must remain at least 30% of filesystem total
+(`276,429,620` bytes), with an alert at 35%; the window must stop before any action
+if projected available space falls below the 30% floor. Thirty percent is
+conservative relative to the measured migration peak, preserves more than eleven
+complete raw DB images, and leaves space for application growth and incident
+response. Backup and restore workspace remain off-volume and must separately have
+at least `48,866,744` bytes free; the measured local destination had more than
+`127,004,807,168` bytes available.
+
+The current facts satisfy the proposed numerical floor, but the policy, alert,
+reserve and exception authority have no named operations-owner approval reference.
+Measurement does not approve itself.
 
 `storageCapacityAccepted = BLOCKED`.
+
+## 6A. Potential secret exposure
+
+An earlier variable-inspection command may have placed runtime values in tool
+output. This review did not print any secret values. It identified only affected
+secret-bearing variable names: `BOT_TOKEN`, `GSM_INGEST_TOKEN`, and any
+credential-bearing component of `WEBHOOK_URL`. No rotation or acceptance action was
+authorized, and no Railway variable was changed. A security owner must either
+confirm and evidence rotation of affected credentials or explicitly accept, with a
+durable reference, that rotation is unnecessary.
+
+`potentialSecretExposureResolved = FALSE`.
 
 ## 7. Pinned artifact closure
 
@@ -414,9 +493,11 @@ approval. Repository design records explicitly say missing approval is deny.
 
 | Field | Value | Closure reason |
 |---|---|---|
-| `backupAvailable` | `FALSE` | mechanism and stale artifacts exist; no current durable approved artifact/checksum/destination/owner |
-| `restoreDrillPassed` | `FALSE` | local rehearsal passed technically but no approved backup or named independent acceptance |
-| `storageCapacityAccepted` | `BLOCKED` | measurements exist; threshold, reserve, retention and restore workspace are unapproved |
+| `backupAvailable` | `FALSE` | current encrypted off-volume artifact and checksum exist, but custody is single-workstation and retention/responsible owner are unapproved |
+| `restoreDrillPassed` | `TRUE` | encrypted restore, raw validation, both exact-SHA startups, candidate migration/repeat and previous-code compatibility passed reproducibly |
+| `restoreDrillOwnerAccepted` | `FALSE` | technical evidence exists; no named owner acceptance reference |
+| `storageCapacityAccepted` | `BLOCKED` | exact measurements and a 30% reserve proposal exist; operations-owner approval is missing |
+| `potentialSecretExposureResolved` | `FALSE` | affected secret-bearing names are identified; rotation or security-owner no-rotation acceptance is absent |
 | `pinnedArtifactCandidateDefined` | `TRUE` | exact source, OCI digest, reproducible build/runtime, migration, fingerprint and rollback contract are evidenced |
 | `pinnedArtifactApproved` | `FALSE` | candidate is local-only and not durably published; named release/operations approval is missing |
 | `postDeploymentSmokePlanDefined` | `TRUE` | complete fail-closed deployment/runtime/DB/PR5–PR8/canonical checklist and approval contract is defined |
@@ -434,6 +515,10 @@ approval. Repository design records explicitly say missing approval is deny.
 | `git diff --check` | `PASS` |
 | `npm test` | `PASS`; 2,343 tests passed, 0 failed |
 | `npm run build` | `PASS`; production Vite build completed |
+| Coherent production capture | `PASS`; WAL-aware read-only serialization; exact DB/WAL/SHM before/after identity; encrypted off-volume artifact and manifest |
+| Isolated restore drill | `PASS`; raw decrypt/hash/integrity, production-SHA startup, candidate migration/repeat and previous-code compatibility |
+| Storage calculation | `PASS`; total/used/free, backup, DB growth, WAL peak, restore workspace, 30% reserve and projected peak recorded |
+| Secret-output handling | `BLOCKED`; names only recorded, values not printed; no rotation or security-owner acceptance |
 | Exact candidate context | `PASS`; `/server` exported only from `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; server lockfile SHA-256 matched the manifest |
 | OCI build and repeat export | `PASS`; both `linux/amd64` exports produced manifest `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5` and archive SHA-256 `3a7fdb95c605f5fa94e0f6c269784e469f3b73bef3143fd7e7d0e5af51a4e2f9` |
 | Final image inspection | `PASS`; source/runtime/migration/config/lock labels exact; Node `v20.18.1`, npm `10.8.2` and native `better-sqlite3` load passed without application startup |
@@ -454,14 +539,14 @@ unintended root file and the protected database/application state is unchanged.
 
 The exact remaining blockers are:
 
-1. no current durable approved production backup;
-2. no independently accepted restore drill from that backup;
-3. no approved storage threshold and operational reserve;
+1. the current encrypted backup has only single-workstation custody and lacks approved retention and a responsible owner;
+2. the proposed 30% storage threshold and reserve lack named operations approval;
+3. potential prior secret exposure lacks rotation evidence or security-owner acceptance;
 4. the immutable candidate is built and pinned by digest but is not durably published or owner-approved;
-5. no approved post-deployment smoke procedure;
-6. no durable owner/release/operations authorization.
+5. no approved post-deployment smoke procedure exists;
+6. no durable owner/release/operations authorization exists.
 
-**One next permitted step:** conduct the final owner/release operational review,
-beginning with creation and approval of a fresh current off-volume backup and its
-independent restore evidence, then evaluate storage, artifact, smoke and owner
-approvals. This is a readiness review, not deployment authority.
+**One next permitted step:** obtain a named security/operations/backup-owner review
+that resolves credential rotation, establishes durable redundant backup custody and
+retention, and accepts or rejects the proposed 30% storage reserve. This is a
+readiness review, not deployment authority.

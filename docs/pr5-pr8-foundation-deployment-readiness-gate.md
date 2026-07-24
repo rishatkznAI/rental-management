@@ -4,7 +4,8 @@
 
 **Gate status:** `FOUNDATION_DEPLOYMENT_BLOCKED`
 
-**Gate timestamp:** `2026-07-22`; immutable candidate evidence updated `2026-07-23`
+**Gate timestamp:** `2026-07-22`; immutable candidate evidence updated `2026-07-23`;
+coherent backup, restore, storage and security review updated `2026-07-24`
 
 **Foundation deployment performed:** `NO`
 
@@ -23,11 +24,12 @@ the registered shadow migration now follows a validated read-only path and retai
 its exact original `applied_at`. Public HTTPS ingress was independently reverified
 healthy without a Railway or application change. The separate operational closure
 evaluation in `docs/pr5-pr8-operational-readiness-closure-gate.md` confirms that the
-gate remains blocked: no durable owner-approved current backup or independently
-accepted restore drill is evidenced, and storage, artifact, smoke and release
-approvals are absent. A reproducible local OCI candidate is now bound to an exact
-digest, but it is not published or owner-approved and therefore grants no deployment
-authority.
+gate remains blocked. A current encrypted off-volume SQLite artifact and complete
+isolated technical restore drill now exist, but backup custody/retention/ownership
+and the proposed storage reserve are not approved. Potential prior secret exposure
+also remains unresolved. Artifact, smoke and release approvals are absent. A
+reproducible local OCI candidate is bound to an exact digest, but it is not published
+or owner-approved and therefore grants no deployment authority.
 
 ## 2. Scope
 
@@ -391,6 +393,17 @@ the production-to-local direction. Production was not checkpointed or modified.
 
 The database artifact was kept outside the repository and was not published.
 
+The capture was independently repeated at `2026-07-24T04:55:14.852Z` using the
+same WAL-aware, read-only/query-only SQLite serialization method, streamed directly
+off production. It reproduced the exact logical SHA-256
+`f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774`.
+The resulting age-encrypted artifact is `11,930,648` bytes with SHA-256
+`6a4bfdded51a475b3090bb485a74fd903967d3278536ea2aa49714ab4431b720`.
+Source DB/WAL/SHM inode, size, mtime and hashes were byte-for-byte unchanged before
+and after; no production file, checkpoint, migration, restart or config mutation
+occurred. Destination, access, retention, custody and manifest details are recorded
+in the operational closure gate.
+
 ## 11. Migration simulation
 
 The exact current-main `ensureDb()` was run on a disposable copy with both read
@@ -521,46 +534,71 @@ Production volume allocation is `1,000 MB`. Read-only filesystem evidence report
 `921,432,064` total bytes, `481,689,600` used, `422,965,248` free and 54% used;
 inodes are 245,760 total, 1,648 used and 244,112 free (1% used).
 
-The local database file remained `11,927,552` bytes because DDL consumed existing
-free pages. Free pages fell by 237 pages at 4,096 bytes, or `970,752` bytes of
-logical database capacity. The original first-start WAL peak was `1,112,432` bytes
-and SHM was `32,768` bytes; its pre-remediation repeated-start WAL peak was `16,512`
-bytes. In the #221 evidence, isolated repeated shadow initialization created no
-WAL. A full second application startup briefly created `12,392` bytes of WAL from
-other existing startup activity, but clean close left WAL at `0`, preserved the
-database hash and made no persistent schema, registry or row change.
+The July 24 drill reconfirmed zero persistent DB-file growth: DDL consumed 237
+existing free pages, or `970,752` bytes of logical database capacity. Its maximum
+observed candidate first/repeated-start WAL was `1,120,672` bytes; SHM was `32,768`
+bytes. The encrypted off-volume backup is `11,930,648` bytes. A conservative
+restore workspace holding the encrypted input, raw target, candidate target,
+rollback target, WAL and SHM is `48,866,744` bytes.
 
-The proposed, not approved, minimum is: enough free space for one coherent
-`11,927,552`-byte database backup, the `1,112,432`-byte observed migration WAL
-peak, `32,768` bytes SHM, and an owner/operations-approved reserve and growth
-factor. The raw observed subtotal is `13,072,752` bytes, but it is not a safety
-threshold. Backup destination capacity and restore workspace must be assessed
-separately. `storageCapacityAccepted = BLOCKED` pending owner/operations approval.
+At migration peak, with no on-volume backup, projected production used/available
+bytes are `482,843,040` / `421,811,808`, or `52.401%` / `45.778%` of total. The
+proposed fail-closed floor is 30% of total available
+(`276,429,620` bytes), with an alert at 35% and a stop before work if projected
+available falls below the floor. Projected headroom is `145,382,188` bytes. This
+is conservative against measured migration and restore demands, but no named
+operations owner has approved the threshold, alert or exception authority.
+
+`storageCapacityAccepted = BLOCKED`.
 
 ## 16. Backup evidence
 
-No durable production backup artifact or approved mechanism was evidenced. The
-local coherent capture is a simulation input, not an accepted backup. Missing
-records include destination class, encryption and access policy, retention,
-operator, RPO, RTO, restore procedure, validation evidence and owner approval.
+A current WAL-aware logical snapshot was captured read-only at
+`2026-07-24T04:55:14.852Z`, encrypted with age X25519, stored off the production
+volume and verified at plaintext SHA-256
+`f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774`
+and encrypted SHA-256
+`6a4bfdded51a475b3090bb485a74fd903967d3278536ea2aa49714ab4431b720`.
+The artifact, manifest and restore JSON have restricted `0600` access, with the
+identity stored separately. Production DB/WAL/SHM and deployment identity remained
+unchanged.
+
+The destination is still a single local workstation. Retention is proposed, not
+approved, and the responsible backup owner is unassigned. It is therefore not a
+qualifying durable approved backup despite being technically coherent and
+restorable.
 
 `backupAvailable = FALSE`.
 
 ## 17. Restore rehearsal/drill
 
-A disposable target was created from the coherent local capture. Source and target
-initial hashes both matched `f196accf...`. The previous production initializer
-started successfully on the raw restored snapshot. Current-main initialization then
-applied PR5–PR8; the result had catalog counts 1/11, zero business rows, conserved
-legacy data, the expected schema, empty `foreign_key_check`, and `integrity_check`
-and `quick_check` equal to `ok`. The migrated restore target hash was
-`43139a34049441c1fb120dfa925a3fbea898dfc013a897e1c98fc654f97f4083`
-and size remained `11,927,552` bytes.
+The encrypted artifact was independently decrypted twice; each raw target matched
+`f196accf...`, and the replay decrypt completed in `0.04 s`. Raw integrity and quick
+checks were `ok`, FK violations were `0`, the three production migrations and their
+timestamps matched, the schema hash was
+`b184599187300ba77ab372ec2a816c4aec0e258d14d7de0198c7424f1dc8819b`,
+and 63 `app_data` rows had exact content hash
+`5298b2f9b139dfd9885878cd8482d8d3455eccdd597f6a19ef54a532c9e9b312`.
 
-This proves a local procedure only: coherent capture, hash verification, previous
-code validation, current migration, schema/count validation and integrity checks.
-It is not an independent restore from a durable production backup and has no named
-operator or owner acceptance. `restoreDrillPassed = FALSE`.
+The exact production SHA started with health/version `200`. The exact candidate SHA
+then applied PR5–PR8 on a fresh copy and started with health/version `200`; its
+logical image hash was
+`33d2909c5b42343495596c50ef522161bbf509bd1c26a5836d6397132331c120`
+and schema hash was
+`30309e9655618597e901279969355069fb849a3709b1089f7c0c5cbc2af8c091`.
+Catalog counts were 1/11, all PR5–PR8 and financial business counts remained zero,
+and all original data hashes were conserved. A second candidate startup retained
+the exact logical hash, schema, seven migration timestamps and counts. The previous
+production SHA then started successfully on the migrated image and preserved every
+additive object, migration name/version and business count; only its known pre-#221
+shadow timestamp rewrite recurred in the isolated copy.
+
+The complete technical drill is reproducible and passed. It has no named owner
+acceptance and authorizes no deployment.
+
+`restoreDrillPassed = TRUE`.
+
+`restoreDrillOwnerAccepted = FALSE`.
 
 ## 18. Previous-code rollback compatibility
 
@@ -646,6 +684,17 @@ violations remained `0`.
 
 `publicIngressHealthy = TRUE`. This closes only the ingress readiness blocker; it
 does not authorize deployment or activation.
+
+## 19A. Potential secret exposure
+
+An earlier runtime-variable inspection may have exposed values in tool output.
+This follow-up recorded names only and did not print values. The affected
+secret-bearing names are `BOT_TOKEN`, `GSM_INGEST_TOKEN`, and any credential-bearing
+component of `WEBHOOK_URL`. No Railway variable was changed. Until a security owner
+records either credential rotation or explicit acceptance that rotation is not
+required, the gate remains fail-closed.
+
+`potentialSecretExposureResolved = FALSE`.
 
 ## 20. Feature flags/path matrix
 
@@ -778,7 +827,9 @@ approved incident path. Required named approvers and signatures are absent.
 | `previousCodeRollbackCompatibilityPassed` | `TRUE` |
 | `storageCapacityAccepted` | `BLOCKED` |
 | `backupAvailable` | `FALSE` |
-| `restoreDrillPassed` | `FALSE` |
+| `restoreDrillPassed` | `TRUE` |
+| `restoreDrillOwnerAccepted` | `FALSE` |
+| `potentialSecretExposureResolved` | `FALSE` |
 | `publicIngressHealthy` | `TRUE` |
 | `pinnedArtifactCandidateDefined` | `TRUE` |
 | `postDeploymentSmokePlanDefined` | `TRUE` |
@@ -802,9 +853,9 @@ under the separate no-mutation evidence above, and the exact historical-backup
 sidecar cleanup is independently verified; none is a current blocker.
 Any one of the following remaining conditions still denies deployment authorization:
 
-1. no durable approved production backup is evidenced;
-2. no independently accepted restore drill is evidenced;
-3. the storage safety threshold and reserve are not owner/operations-approved;
+1. the current encrypted backup has only single-workstation custody and lacks approved retention and a responsible owner;
+2. the proposed 30% storage threshold and reserve are not owner/operations-approved;
+3. potential prior secret exposure lacks rotation evidence or security-owner acceptance;
 4. the exact source/image candidate is built and pinned by digest but not durably published or owner-approved;
 5. the post-deployment smoke plan is not approved;
 6. no durable owner/release approval authorizes foundation deployment.
@@ -823,7 +874,7 @@ this document.
 
 ## 26. Next permitted step
 
-The one next permitted step is the final owner/release operational review,
-beginning with a fresh current approved off-volume backup and independently
-accepted restore evidence, followed by storage, pinned artifact, smoke and owner
-approval decisions. This review does not authorize deployment, activation or PR9.
+The one next permitted step is a named security/operations/backup-owner review that
+resolves credential rotation, establishes redundant durable backup custody and
+retention, and accepts or rejects the proposed 30% reserve. This review does not
+authorize deployment, activation or PR9.

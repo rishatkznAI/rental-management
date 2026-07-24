@@ -4,7 +4,9 @@
 
 **Gate status:** `FOUNDATION_DEPLOYMENT_BLOCKED`
 
-**Gate timestamp:** `2026-07-22`
+**Gate timestamp:** `2026-07-22`; immutable candidate evidence updated `2026-07-23`;
+coherent backup, restore, storage and security review updated `2026-07-24`;
+disabled-integration execution audit completed `2026-07-24T05:52:47Z`
 
 **Foundation deployment performed:** `NO`
 
@@ -21,9 +23,21 @@ production identity, source, forecast, dry-run, canonical or settlement business
 rows. PR #221 closed the repeated-startup timestamp defect identified by this gate:
 the registered shadow migration now follows a validated read-only path and retains
 its exact original `applied_at`. Public HTTPS ingress was independently reverified
-healthy without a Railway or application change. The gate remains blocked because
-no durable owner-approved backup or independently accepted restore drill is
-evidenced, and storage, artifact, smoke and release approvals are absent.
+healthy without a Railway or application change. The separate operational closure
+evaluation in `docs/pr5-pr8-operational-readiness-closure-gate.md` confirms that the
+gate remains blocked. A current encrypted off-volume SQLite artifact and complete
+isolated technical restore drill now exist, but backup custody/retention/ownership
+and the proposed storage reserve are not approved. Potential prior secret exposure
+also remains unresolved, while rotation is deferred under a foundation-only scoped
+owner risk acceptance. That acceptance grants no bot/GSM activation authority and
+requires no operator/tool token access, no token disclosure or external token use,
+and both integrations to remain disabled. The exact candidate satisfies that
+clarified boundary: its permitted in-process lookups lead to no MAX request, GSM
+ingest action or gateway listener while the disable flags remain exact. The scoped
+deferral therefore no longer independently blocks foundation-only readiness, but
+artifact, smoke and release approvals are absent. A reproducible local OCI
+candidate is bound to an exact digest, but it is not published or owner-approved
+and therefore grants no deployment authority.
 
 ## 2. Scope
 
@@ -57,9 +71,14 @@ domains, network or configuration; run a production initializer; apply a product
 migration; create or restore a production backup; bootstrap identity; create PR6
 source rows; calculate a PR7 forecast; execute PR8; create canonical or settlement
 rows; enable routes or flags; switch Finance, Dashboard or Company Health; implement
-PR9; or authorize any activation. The gate changes documentation only.
+PR9; or authorize any activation. Repository changes from the gate are
+documentation only. The later operational closure inspection created two inert
+SQLite sidecars beside a historical backup despite a read-only open; no live DB or
+business data changed. Exact manual deletion plus independent read-only cleanup
+verification is recorded in
+`docs/pr5-pr8-operational-readiness-closure-gate.md`.
 
-## 4. PR #218–#222 merged lineage
+## 4. PR #218–#223 merged lineage
 
 | PR | Reviewed head / role | Squash merge | Merged at | Result |
 |---|---|---|---|---|
@@ -68,6 +87,7 @@ PR9; or authorize any activation. The gate changes documentation only.
 | #220 | `4d2e141a696c30860646c40026afc35aeb0b5115`; five-document foundation readiness gate | `94d9963e5cd18d75bde3414c3a7e05687a2c3ef3` | `2026-07-22T06:29:57Z` | merged in `main`; readiness remained blocked |
 | #221 | `11f824ccdda63213cc71808bfc42b48b9e51996b`; shadow startup idempotency remediation | `bbabfdc0bff89953ff746b9a09e0d38147e83085` | `2026-07-22T06:58:41Z` | merged in `main`; repeated-startup blocker closed |
 | #222 | `1706587aa0ccd28818ff946d5a817a760e0e62c6`; four-document post-#221 readiness update | `c0fd6b51938ff66ec9b81cc2f5cc501c6a52e995` | `2026-07-22T10:59:37Z` | squash-merged unchanged in `main`; no deployment or activation |
+| #223 | `1a5dfee9dcd42f28b189017361a3223aeef9d25c`; four-document ingress-readiness evidence | `1d59992315f1b7f4ff2d370fc17345a459ac52e3` | `2026-07-22T11:26:06Z` | squash-merged unchanged in `main`; ingress blocker closed only |
 
 Before #219 was merged, its base was #218, it contained one commit and exactly the
 four approved documents, was non-draft and `MERGEABLE/CLEAN`, had no comments,
@@ -91,6 +111,12 @@ four declared Markdown files, its check had succeeded, and comments, reviews,
 unresolved threads and auto-merge were absent. The one-parent merge commit confirms
 the squash result. It granted no deployment or activation authority.
 
+Before #223 was merged, its exact reviewed head was non-draft, one commit ahead of
+`main` and changed exactly the same four authorized Markdown files. Its lightweight
+check completed successfully, GitHub reported `CLEAN` / `MERGEABLE`, auto-merge was
+disabled, and comments, reviews and unresolved review threads were absent. The
+manual exact-head squash merge granted no deployment or activation authority.
+
 ## 5. Repository starting SHA
 
 The original readiness branch was created from freshly fetched and hard-reset
@@ -98,9 +124,10 @@ The original readiness branch was created from freshly fetched and hard-reset
 ancestors of that SHA. Its result was merged by #220, and the separate #221
 remediation then advanced `main` to
 `bbabfdc0bff89953ff746b9a09e0d38147e83085`; #222 then advanced `main` to
-`c0fd6b51938ff66ec9b81cc2f5cc501c6a52e995` through documentation only. This
-evidence update starts from that resulting `origin/main`; no topic branch was used
-as its base.
+`c0fd6b51938ff66ec9b81cc2f5cc501c6a52e995` through documentation only; #223
+then advanced `main` to `1d59992315f1b7f4ff2d370fc17345a459ac52e3`, again through
+documentation only. The operational closure evaluation starts from that resulting
+`origin/main`; no topic branch was used as its base.
 
 ## 6. Current production baseline
 
@@ -374,6 +401,17 @@ the production-to-local direction. Production was not checkpointed or modified.
 
 The database artifact was kept outside the repository and was not published.
 
+The capture was independently repeated at `2026-07-24T04:55:14.852Z` using the
+same WAL-aware, read-only/query-only SQLite serialization method, streamed directly
+off production. It reproduced the exact logical SHA-256
+`f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774`.
+The resulting age-encrypted artifact is `11,930,648` bytes with SHA-256
+`6a4bfdded51a475b3090bb485a74fd903967d3278536ea2aa49714ab4431b720`.
+Source DB/WAL/SHM inode, size, mtime and hashes were byte-for-byte unchanged before
+and after; no production file, checkpoint, migration, restart or config mutation
+occurred. Destination, access, retention, custody and manifest details are recorded
+in the operational closure gate.
+
 ## 11. Migration simulation
 
 The exact current-main `ensureDb()` was run on a disposable copy with both read
@@ -504,46 +542,71 @@ Production volume allocation is `1,000 MB`. Read-only filesystem evidence report
 `921,432,064` total bytes, `481,689,600` used, `422,965,248` free and 54% used;
 inodes are 245,760 total, 1,648 used and 244,112 free (1% used).
 
-The local database file remained `11,927,552` bytes because DDL consumed existing
-free pages. Free pages fell by 237 pages at 4,096 bytes, or `970,752` bytes of
-logical database capacity. The original first-start WAL peak was `1,112,432` bytes
-and SHM was `32,768` bytes; its pre-remediation repeated-start WAL peak was `16,512`
-bytes. In the #221 evidence, isolated repeated shadow initialization created no
-WAL. A full second application startup briefly created `12,392` bytes of WAL from
-other existing startup activity, but clean close left WAL at `0`, preserved the
-database hash and made no persistent schema, registry or row change.
+The July 24 drill reconfirmed zero persistent DB-file growth: DDL consumed 237
+existing free pages, or `970,752` bytes of logical database capacity. Its maximum
+observed candidate first/repeated-start WAL was `1,120,672` bytes; SHM was `32,768`
+bytes. The encrypted off-volume backup is `11,930,648` bytes. A conservative
+restore workspace holding the encrypted input, raw target, candidate target,
+rollback target, WAL and SHM is `48,866,744` bytes.
 
-The proposed, not approved, minimum is: enough free space for one coherent
-`11,927,552`-byte database backup, the `1,112,432`-byte observed migration WAL
-peak, `32,768` bytes SHM, and an owner/operations-approved reserve and growth
-factor. The raw observed subtotal is `13,072,752` bytes, but it is not a safety
-threshold. Backup destination capacity and restore workspace must be assessed
-separately. `storageCapacityAccepted = BLOCKED` pending owner/operations approval.
+At migration peak, with no on-volume backup, projected production used/available
+bytes are `482,843,040` / `421,811,808`, or `52.401%` / `45.778%` of total. The
+proposed fail-closed floor is 30% of total available
+(`276,429,620` bytes), with an alert at 35% and a stop before work if projected
+available falls below the floor. Projected headroom is `145,382,188` bytes. This
+is conservative against measured migration and restore demands, but no named
+operations owner has approved the threshold, alert or exception authority.
+
+`storageCapacityAccepted = BLOCKED`.
 
 ## 16. Backup evidence
 
-No durable production backup artifact or approved mechanism was evidenced. The
-local coherent capture is a simulation input, not an accepted backup. Missing
-records include destination class, encryption and access policy, retention,
-operator, RPO, RTO, restore procedure, validation evidence and owner approval.
+A current WAL-aware logical snapshot was captured read-only at
+`2026-07-24T04:55:14.852Z`, encrypted with age X25519, stored off the production
+volume and verified at plaintext SHA-256
+`f196accf243748133c59e69ab6c5a64d865b32e79778b2447c1603c701ed0774`
+and encrypted SHA-256
+`6a4bfdded51a475b3090bb485a74fd903967d3278536ea2aa49714ab4431b720`.
+The artifact, manifest and restore JSON have restricted `0600` access, with the
+identity stored separately. Production DB/WAL/SHM and deployment identity remained
+unchanged.
+
+The destination is still a single local workstation. Retention is proposed, not
+approved, and the responsible backup owner is unassigned. It is therefore not a
+qualifying durable approved backup despite being technically coherent and
+restorable.
 
 `backupAvailable = FALSE`.
 
 ## 17. Restore rehearsal/drill
 
-A disposable target was created from the coherent local capture. Source and target
-initial hashes both matched `f196accf...`. The previous production initializer
-started successfully on the raw restored snapshot. Current-main initialization then
-applied PR5–PR8; the result had catalog counts 1/11, zero business rows, conserved
-legacy data, the expected schema, empty `foreign_key_check`, and `integrity_check`
-and `quick_check` equal to `ok`. The migrated restore target hash was
-`43139a34049441c1fb120dfa925a3fbea898dfc013a897e1c98fc654f97f4083`
-and size remained `11,927,552` bytes.
+The encrypted artifact was independently decrypted twice; each raw target matched
+`f196accf...`, and the replay decrypt completed in `0.04 s`. Raw integrity and quick
+checks were `ok`, FK violations were `0`, the three production migrations and their
+timestamps matched, the schema hash was
+`b184599187300ba77ab372ec2a816c4aec0e258d14d7de0198c7424f1dc8819b`,
+and 63 `app_data` rows had exact content hash
+`5298b2f9b139dfd9885878cd8482d8d3455eccdd597f6a19ef54a532c9e9b312`.
 
-This proves a local procedure only: coherent capture, hash verification, previous
-code validation, current migration, schema/count validation and integrity checks.
-It is not an independent restore from a durable production backup and has no named
-operator or owner acceptance. `restoreDrillPassed = FALSE`.
+The exact production SHA started with health/version `200`. The exact candidate SHA
+then applied PR5–PR8 on a fresh copy and started with health/version `200`; its
+logical image hash was
+`33d2909c5b42343495596c50ef522161bbf509bd1c26a5836d6397132331c120`
+and schema hash was
+`30309e9655618597e901279969355069fb849a3709b1089f7c0c5cbc2af8c091`.
+Catalog counts were 1/11, all PR5–PR8 and financial business counts remained zero,
+and all original data hashes were conserved. A second candidate startup retained
+the exact logical hash, schema, seven migration timestamps and counts. The previous
+production SHA then started successfully on the migrated image and preserved every
+additive object, migration name/version and business count; only its known pre-#221
+shadow timestamp rewrite recurred in the isolated copy.
+
+The complete technical drill is reproducible and passed. It has no named owner
+acceptance and authorizes no deployment.
+
+`restoreDrillPassed = TRUE`.
+
+`restoreDrillOwnerAccepted = FALSE`.
 
 ## 18. Previous-code rollback compatibility
 
@@ -630,6 +693,48 @@ violations remained `0`.
 `publicIngressHealthy = TRUE`. This closes only the ingress readiness blocker; it
 does not authorize deployment or activation.
 
+## 19A. Potential secret exposure
+
+An earlier runtime-variable inspection may have exposed values in tool output. The
+`2026-07-24` names-only audit classified the complete 33-name inventory without
+printing or persisting a value. `BOT_TOKEN` and `GSM_INGEST_TOKEN` are the only
+affected credentials and both are `MUST_ROTATE`. `WEBHOOK_URL` is a public HTTPS URL
+without user-info, query credentials or an embedded known token; it requires no
+rotation. No affected authentication/session secret, signing/encryption key or
+database credential exists in the inventory.
+
+The owner decision supplied for PR #224 on `2026-07-24` defers both rotations and
+accepts temporary bot/GSM integration unavailability. This is scoped risk
+acceptance, not secret remediation, foundation release approval or production
+activation approval. `BOT_DISABLED=true` and `GSM_ENABLED=false` were reconfirmed
+from only those two non-sensitive production flags at `2026-07-24T05:52:47Z`;
+deployment `b74623ec-d20d-4c50-ab40-0e0a494c5bc5` and source
+`6a38582f5f90b85734884b6b12ad8e306b24619e` were unchanged. Neither token variable
+was requested and no Railway mutation or restart occurred.
+
+The owner clarification permits a normal in-process environment lookup while
+prohibiting operator/agent/tool value access, logging, persistence, copying,
+exposure, external authentication and integration/business activation. The exact
+candidate satisfies this boundary. `server/server.js` reads `BOT_TOKEN`, but
+`BOT_DISABLED=true` prevents webhook registration/watchdog, polling, schedulers and
+outbound sends before a MAX network request. `registerGsmRoutes()` closes over
+`GSM_INGEST_TOKEN`, but `requireGsmIngestToken()` returns `503 GSM_DISABLED` before
+credential extraction/comparison or packet processing; both TCP gateways are
+constructed disabled and do not listen. Startup diagnostics expose token presence
+only, and the disabled webhook audit contains only route, count and update-type
+metadata. Foundation migrations and health/version startup have no dependency on
+either integration. Rotation remains mandatory before either is enabled.
+
+`potentialSecretExposureResolved = FALSE`.
+
+`secretRotationDeferredByOwner = TRUE`.
+
+`secretRotationDeferralFoundationExemptionEffective = TRUE`.
+
+`botIntegrationActivationAuthorized = FALSE`.
+
+`gsmIntegrationActivationAuthorized = FALSE`.
+
 ## 20. Feature flags/path matrix
 
 | Capability/path | Env key | Missing value | Malformed value | Current production value | Current-main path state |
@@ -650,15 +755,24 @@ registration gates. No enabling flag was set during simulation.
 
 ## 21. Pinned artifact proposal
 
-The pre-remediation #220 evidence proposed exact SHA
-`da9ade9d2921f2a7120118714ffd68863b8445ee`. PR #221 superseded that source with
-current `main` `bbabfdc0bff89953ff746b9a09e0d38147e83085`, so the earlier proposal
-is not a current release manifest. Neither SHA nor any floating `main` reference is
-owner-approved or pinned. The table below is retained as historical #220 component
-evidence; unchanged values are not sufficient to approve the #221 artifact:
+The pre-remediation #220 SHA is superseded. The only source currently eligible for
+later owner approval is exact `origin/main`
+`1d59992315f1b7f4ff2d370fc17345a459ac52e3`; a branch name, floating `main` or
+`latest` is forbidden. Its runtime tree is exact #221 because all later changes
+through #223 are the four readiness Markdown files. Candidate designation is not
+approval.
 
 | Artifact component | SHA-256 / value |
 |---|---|
+| Candidate source SHA | `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; eligible for approval, not approved |
+| Candidate OCI manifest digest | `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`; exact `linux/amd64` manifest |
+| OCI config digest | `sha256:6cf603c99a44c01c5acfe4665fbf8a0e57b38db93fdab081429f39f03d7717a6` |
+| OCI archive SHA-256 | `3a7fdb95c605f5fa94e0f6c269784e469f3b73bef3143fd7e7d0e5af51a4e2f9`; consecutive exports byte-identical |
+| Build/source time | evidence completed `2026-07-23T16:33:20Z`; OCI created/source time `2026-07-22T11:26:06Z`; `SOURCE_DATE_EPOCH=1784719566` |
+| Builder | local non-production Colima `0.10.3`; Docker `29.6.2`; Buildx `0.35.0`; BuildKit `0.30.0`; target `linux/amd64` |
+| Dockerfile frontend / recipe | `docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e`; Dockerfile SHA-256 `59ecb6886b0da436ecd3537f4ee8cb153b7cd85d053e14c99fa828dd67528b8b` |
+| `.dockerignore` | exact content `Dockerfile`; SHA-256 `c750b6d776c1db92b55fcecbb51c80be008aae877e78a28691b3ae79be9ea63e` |
+| Base image | `node:20.18.1-bookworm@sha256:968ca0550acc7589a8b1324401ec6e39ace53b2c82d2aed3a278e9ff491c2b1c` |
 | root `package.json` | `78cd0bb5474cae32ff9cd77b3087d7b1ab720819d1ba967a9250e90b23694c2f` |
 | root `package-lock.json` | `064721ed5c462a0561adfd50cbdbb08ea0cba4fb128ff0d5d43e2324fe355fd3` |
 | `server/package.json` | `fd9826dab816540813841353f581ce3644e058a88b1e70740ae1ca2e164809cd` |
@@ -669,37 +783,54 @@ evidence; unchanged values are not sufficient to approve the #221 artifact:
 | PR8 schema source | `e37e4fbdc23956402224657bc80cc3f5959973401922b9c5872e5516907dcdbe` |
 | `server/db.js` | `f3fb2ad911e99ac17ee26f7e6520ad5a5c3f4fdb8bffaf79303e42f09938d25f` |
 | #221 shadow initializer source | `49a7a36105b99a36e994074ddc4b3c844d694f2ae377ba8435fc519f35cf9ac6` |
+| Exact ordered migration set | `documents_gantt_shadow_indexes` v2; `canonical_receivables_pr1_schema`, `canonical_receivables_pr2_settlement`, `platform_identity_pr5`, `billing_source_authority_pr6`, `forecast_receivables_planning_pr7`, `actual_source_eligibility_dry_run_pr8` each v1 |
 | Ordered migration-set hash | `e8c207bef0b157b058fa56fa594f3e5c697bcdb60c3b5c75834b357f79b282da` |
-| Build/start | Nixpacks, Node 20, `npm ci`; `node scripts/start-with-release-type.cjs` |
-| Proposed runtime target | Node `v20.18.1`; npm `10.8.2`; exact versions require artifact approval |
-| Safe environment fingerprint | `146eb3d634c7d3a667c6aa56905714c5c8ca2e738eed784e91c90bd5ea64b6e8`; existing configuration only |
+| Candidate image build/start | exact `git archive <candidate>:server`; pinned two-stage OCI build; `npm ci --omit=dev`; Node `v20.18.1`; npm `10.8.2`; `node scripts/start-with-release-type.cjs` |
+| Final-image verification | exact Node/npm passed; native `better-sqlite3` load passed; application entrypoint and migrations were not run |
+| Expected Railway execution | Nixpacks source baseline is distinct; runtime V2, `/server`, one replica and the same start command; any Railway rebuild must receive its own digest approval |
+| Safe config fingerprint reference | `146eb3d634c7d3a667c6aa56905714c5c8ca2e738eed784e91c90bd5ea64b6e8`; secret-free approved-key/value boundary |
+| Environment comparison reference | raw 33-variable canonical hash `0f23a29e44e7729e37c2e7420619db16980bb3e640d15352babf7dfc97d44816`; hash only |
+| Rollback artifact | source `6a38582f5f90b85734884b6b12ad8e306b24619e`; image `sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650`; deployment `b74623ec-d20d-4c50-ab40-0e0a494c5bc5`; read-only Railway metadata reconfirmed `2026-07-23T16:33:50Z`; application rollback only, additive schema retained |
+| Approval owner | `MISSING`; named release owner plus named operations co-approval required |
 | Placement | `europe-west4-drams3a`; one replica; `/data`; DB `/data/app.sqlite` |
 
-Before approval, a complete manifest must be regenerated from one exact approved
-post-#221 commit and attached to the release record; the historical ordered-set
-hash above must not be reused as a current approval. The safe variable boundary is
-no variable change: `APP_DISABLED=false`, `BOT_DISABLED=true`,
+Before approval, a complete manifest must bind this source SHA, built OCI digest,
+exact build/runtime versions, migration set, both fingerprint references, rollback
+artifact and named approvers in one durable release record. The safe
+variable boundary is no variable change: `APP_DISABLED=false`, `BOT_DISABLED=true`,
 `GSM_ENABLED=false`, `DB_PATH=/data/app.sqlite`, and canonical/forecast read flags
 absent/default false. Enabling read flags or adding any bootstrap, source,
-calculation, dry-run, posting or activation variable is forbidden.
+calculation, dry-run, posting or activation variable is forbidden. The scoped
+secret deferral additionally requires no bot/GSM route, worker or gateway
+activation, no operator/tool token-value access or disclosure and no external token
+use. Ordinary in-process lookup is permitted by the clarified owner decision; the
+current candidate satisfies this condition while both disable flags remain exact.
 
-The image digest cannot be known until the exact approved source is built. The
-release procedure must capture the resulting immutable image digest and prove that
-Railway deployment metadata and `/api/version` report the approved source SHA,
-runtime and deployment ID. `pinnedArtifactApproved = FALSE`.
+The digest was measured from the local non-production OCI artifact and reproduced
+by a second byte-identical export; it was not inferred from the current PR3 image.
+It has not been pushed to a durable registry or uploaded to Railway. A Railway
+source/Nixpacks build is a different artifact and must receive its own pinned digest
+and approval. The release procedure must prove that Railway metadata and
+`/api/version` match whichever complete artifact manifest is explicitly approved.
+`pinnedArtifactCandidateDefined = TRUE`; `pinnedArtifactApproved = FALSE`.
 
 ## 22. Post-deployment smoke plan
 
-These are future read-only checks for a separately authorized foundation
-deployment. `$APP_URL`, `$DEPLOYMENT_ID`, `$EXPECTED_SHA`, `$EXPECTED_IMAGE` and
-`$DB_PATH` must be replaced by approved immutable values in the release record.
+`pr5-pr8-foundation-post-deployment-smoke-v1` defines future read-only checks for a
+separately authorized foundation deployment. `$APP_URL`, `$DEPLOYMENT_ID`,
+`$EXPECTED_SHA`, `$EXPECTED_IMAGE` and `$DB_PATH` must be replaced by approved
+immutable values in the release record. Defining this plan is not approval and no
+deployment-dependent check was executed by PR #224.
 
 | Area | Exact command/check | Expected result | Failure classification | Evidence artifact | Responsible owner |
 |---|---|---|---|---|---|
 | Deployment identity | Railway deployment metadata for `$DEPLOYMENT_ID` plus `curl -fsS "$APP_URL/api/version"` | approved SHA, deployment ID and image digest all match | P0 artifact drift | signed release capture | release owner |
 | Runtime placement | Railway read-only service/deployment metadata | approved Node/npm, region, one replica and `/data` mount | P0/P1 configuration drift | metadata JSON | operations |
-| Public health | `curl -fsS "$APP_URL/health"` | HTTP 200 | P1 ingress/runtime failure | timestamped curl transcript | operations |
+| Runtime health | independent internal/public GET/HEAD for `/health` and `/api/version`, startup/log review | HTTP 200, exact marker, valid TLS, no crash/restart loop or migration error | P1 ingress/runtime failure | timestamped probe/log transcript | operations |
 | Auth boundary | `curl -sS -o /dev/null -w '%{http_code}\n' "$APP_URL/api/auth/me"` | 401 | P0 auth exposure if 200 | timestamped curl transcript | security |
+| Bot disabled boundary | read only `BOT_DISABLED`; inspect startup/transport logs and disabled bot entry points without reading or printing `BOT_TOKEN` | `BOT_DISABLED=true`; in-process lookup permitted; no polling, webhook/watchdog registration, outbound message, worker, external token use or token-bearing output; activation authorization false | P0 unauthorized integration activation | redacted flag/log/probe transcript | security/operations |
+| GSM disabled boundary | read only `GSM_ENABLED`; inspect gateway/route state without reading or printing `GSM_INGEST_TOKEN` or sending a packet | `GSM_ENABLED=false`; in-process lookup permitted; ingest fails `503 GSM_DISABLED` before token comparison; no TCP gateway, worker, synthetic packet, external token use or token-bearing output; activation authorization false | P0 unauthorized integration activation | redacted flag/log/probe transcript | security/operations |
+| Clarified deferred-secret boundary | static/runtime trace of disabled integration initialization | no operator/tool value access, mutation, disclosure, external authentication or integration/business action; ordinary in-process lookup allowed; current candidate passes while disable flags remain exact | P0 owner-condition violation | source/runtime trace | security/release owners |
 | Database core | readonly `better-sqlite3` query with `query_only=1`: `PRAGMA foreign_key_check; PRAGMA integrity_check; PRAGMA quick_check;` | 0 FK rows; `ok`; `ok` | P0 integrity | redacted query transcript | DBA/operations |
 | Migration registry | readonly query of `sql_shadow_schema_migrations` ordered by name | exact shadow v2, PR1–PR8 v1 set and approved timestamps | P0/P1 migration drift | registry CSV/hash | release owner |
 | Schema fingerprint | hash normalized `sqlite_master` SQL in readonly mode | exact separately approved release fingerprint; #221 local evidence `466ce614...` | P0 schema drift | hash transcript | release owner |
@@ -712,10 +843,14 @@ deployment. `$APP_URL`, `$DEPLOYMENT_ID`, `$EXPECTED_SHA`, `$EXPECTED_IMAGE` and
 | Canonical route | unauthenticated canonical endpoint probe | 404 while flag false | P0 unauthorized read surface | timestamped probe | security |
 | Consumers | static deployed-artifact import/route manifest and UI smoke | no Finance, Dashboard or Company Health switch | P0 unauthorized activation | manifest/screenshots | product owner |
 
-This plan itself is not approved, and the repeated-start step is not executable
-until a future release authorizes a controlled restart. Any P0 stops/rolls back the
-application artifact while preserving additive tables; any P1 blocks acceptance
-and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
+Approval requires a durable record binding the exact artifact, commands, evidence
+destination/retention, named release/operations/database/security/product owners,
+change window, P0/P1 stop rules and application-only rollback target. The
+repeated-start step remains non-executable until a future release separately
+authorizes a controlled restart. Any P0 stops/rolls back the application artifact
+while preserving additive tables; any P1 blocks acceptance and invokes the
+approved incident path. Required named approvers and signatures are absent.
+`postDeploymentSmokePlanDefined = TRUE`; `postDeploymentSmokeApproved = FALSE`.
 
 ## 23. Authorization matrix
 
@@ -726,6 +861,9 @@ and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
 | `pr220Merged` | `TRUE` |
 | `pr221Merged` | `TRUE` |
 | `pr222Merged` | `TRUE` |
+| `pr223Merged` | `TRUE` |
+| `operationalClosureEvaluated` | `TRUE` |
+| `productionVolumeMutationCleanup` | `COMPLETE` |
 | `productionBaselineReverified` | `TRUE` |
 | `migrationPlanVerified` | `TRUE` |
 | `migrationSimulationPassed` | `TRUE` |
@@ -735,8 +873,16 @@ and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
 | `previousCodeRollbackCompatibilityPassed` | `TRUE` |
 | `storageCapacityAccepted` | `BLOCKED` |
 | `backupAvailable` | `FALSE` |
-| `restoreDrillPassed` | `FALSE` |
+| `restoreDrillPassed` | `TRUE` |
+| `restoreDrillOwnerAccepted` | `FALSE` |
+| `potentialSecretExposureResolved` | `FALSE` |
+| `secretRotationDeferredByOwner` | `TRUE` |
+| `secretRotationDeferralFoundationExemptionEffective` | `TRUE` |
+| `botIntegrationActivationAuthorized` | `FALSE` |
+| `gsmIntegrationActivationAuthorized` | `FALSE` |
 | `publicIngressHealthy` | `TRUE` |
+| `pinnedArtifactCandidateDefined` | `TRUE` |
+| `postDeploymentSmokePlanDefined` | `TRUE` |
 | `postDeploymentSmokeApproved` | `FALSE` |
 | `pinnedArtifactApproved` | `FALSE` |
 | `ownerReleaseApprovalRecorded` | `FALSE` |
@@ -752,17 +898,16 @@ and invokes the approved incident path. `postDeploymentSmokeApproved = FALSE`.
 
 ## 24. Blockers
 
-The repeated-startup timestamp defect is closed by #221 and public ingress is
-healthy under the separate no-mutation evidence above; neither is a current
-blocker.
+The repeated-startup timestamp defect is closed by #221, public ingress is healthy
+under the separate no-mutation evidence above, and the exact historical-backup
+sidecar cleanup is independently verified; none is a current blocker.
 Any one of the following remaining conditions still denies deployment authorization:
 
-1. no durable approved production backup is evidenced;
-2. no independently accepted restore drill is evidenced;
-3. the storage safety threshold and reserve are not owner/operations-approved;
-4. no exact source/image deployment artifact is approved and pinned;
-5. the post-deployment smoke plan is not approved;
-6. no durable owner/release approval authorizes foundation deployment.
+1. the current encrypted backup has only single-workstation custody and lacks approved retention and a responsible owner;
+2. the proposed 30% storage threshold and reserve are not owner/operations-approved;
+3. the exact source/image candidate is built and pinned by digest but not durably published or owner-approved;
+4. the post-deployment smoke plan is not approved;
+5. no durable owner/release approval authorizes foundation deployment.
 
 Successful local migration and rollback simulations do not replace these
 operational and authorization requirements.
@@ -778,7 +923,7 @@ this document.
 
 ## 26. Next permitted step
 
-Establish an owner-approved coherent backup plus independently verified restore
-drill, approve the storage threshold, pin the exact artifact, approve the
-post-deployment smoke plan and record owner/release authorization, then rerun the
-foundation deployment authorization gate.
+The one next permitted step is to obtain a named operations/release review of the
+off-volume backup custody/retention, 30% storage reserve, immutable artifact and
+smoke plan. This step does not authorize deployment, activation or PR9; all five
+listed blockers remain until durably approved.

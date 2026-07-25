@@ -2,36 +2,40 @@
 
 ## 1. Executive status
 
-**Gate status:** `FOUNDATION_DEPLOYMENT_READY`
+**Gate status:** `FOUNDATION_REMEDIATION_REQUIRED`
 
 **Gate timestamp:** `2026-07-22`; immutable candidate evidence updated `2026-07-23`;
 coherent backup, restore, storage and security review updated `2026-07-24`;
 disabled-integration execution audit completed `2026-07-24T05:52:47Z`; private
 GHCR publication independently verified `2026-07-24T08:54:25Z`; exact scoped
-owner authorization recorded `2026-07-24T12:00:08Z`
+owner authorization recorded `2026-07-24T12:00:08Z`; deployment, rollback and
+post-rollback remediation recorded `2026-07-25`; post-rollback durable custody
+independently verified `2026-07-25T13:18:40Z`
 
-**Foundation deployment performed:** `NO`
+**Foundation deployment performed:** `YES`
 
-**Foundation deployment authorized:** `YES`
+**Foundation deployment authorized:** `NO`; the prior approval was exercised and
+cannot be reused
 
-This gate tests whether the already released PR5–PR8 foundation code could be
-delivered over the current PR3 production database without activating business
-behavior. It records code audit, read-only production metadata, a coherent local
-snapshot, local migration and failure simulations, rollback compatibility and an
-operator smoke plan. Rishat subsequently approved only the exact foundation
-deployment scope recorded here; this docs-only update does not perform it.
+This gate originally tested whether the already released PR5–PR8 foundation code
+could be delivered over the PR3 production database without activating business
+behavior. The foundation deployment
+`de3fa106-491a-4ddc-896d-a0f650626dc5` subsequently ran, registered PR5–PR8 and
+was rolled back to pinned PR3 deployment
+`0eec88f4-2338-4352-abc5-17b030aa6583`. The authoritative current facts and retry
+conditions are recorded in
+`docs/pr5-pr8-foundation-deployment-incident-2026-07-25.md`. This documentation
+update authorizes no retry.
 
-The first local startup applied the expected additive migrations and created no
+The production startup applied the expected additive migrations and created no
 production identity, source, forecast, dry-run, canonical or settlement business
-rows. PR #221 closed the repeated-startup timestamp defect identified by this gate:
-the registered shadow migration now follows a validated read-only path and retains
-its exact original `applied_at`. Public HTTPS ingress was independently reverified
-healthy without a Railway or application change. The separate operational closure
-evaluation in `docs/pr5-pr8-operational-readiness-closure-gate.md` confirms that the
-gate is ready for the exact approved foundation-only scope. A current encrypted
-SQLite artifact has independently verified private Google Drive custody, and the
-complete isolated technical restore drill passed. The restore drill, 30% reserve,
-35% alert threshold, named operations/security owners, backup custody and smoke
+rows. The PR3 rollback initializer rewrote the registered shadow migration time;
+the accepted post-rollback baseline is now exactly
+`documents_gantt_shadow_indexes.applied_at = 2026-07-25 11:44:20`, and a future
+retry must prove no change relative to that value. The historical pre-deployment
+encrypted SQLite artifact has independently verified private Google Drive custody,
+and the complete isolated technical restore drill passed. The restore drill, 30%
+reserve, 35% alert threshold, named operations/security owners, backup custody and smoke
 evidence retention are approved. Potential prior secret exposure remains unresolved,
 while rotation is deferred under a foundation-only scoped owner risk acceptance.
 That acceptance grants no bot/GSM activation authority and requires no
@@ -42,8 +46,12 @@ action or gateway listener while the disable flags remain exact. The scoped
 deferral therefore no longer independently blocks foundation-only readiness. The
 already-built OCI candidate is published unchanged to a private GHCR package and
 the exact remote digest is independently verified and owner-approved. Rishat's
-separate `2026-07-24T12:00:08Z` decision authorizes only deployment of that exact
-foundation artifact under the approved backup and smoke-plan boundary.
+separate `2026-07-24T12:00:08Z` decision authorized only deployment of that exact
+foundation artifact under the approved backup and smoke-plan boundary. That
+authorization was exercised and consumed. The fresh `20260725T121525Z`
+post-rollback artifact now has restricted, independently verified durable Google
+Drive custody. This closes only the backup-custody condition and authorizes no
+retry.
 
 ## 2. Scope
 
@@ -72,17 +80,35 @@ The gate covers:
 
 ## 3. Explicit non-goals
 
-This work did not deploy, restart or redeploy production; change Railway variables,
-domains, network or configuration; run a production initializer; apply a production
-migration; create or restore a production backup; bootstrap identity; create PR6
-source rows; calculate a PR7 forecast; execute PR8; create canonical or settlement
-rows; enable routes or flags; switch Finance, Dashboard or Company Health; implement
-PR9; or authorize any activation. Repository changes from the gate are
+The original readiness work did not deploy, restart or redeploy production; change
+Railway variables, domains, network or configuration; run a production initializer;
+apply a production migration; create or restore a production backup; bootstrap
+identity; create PR6 source rows; calculate a PR7 forecast; execute PR8; create
+canonical or settlement rows; enable routes or flags; switch Finance, Dashboard or
+Company Health; implement PR9; or authorize any activation. The separately
+authorized `2026-07-25` deployment and rollback are recorded in the incident
+document. Repository changes from this remediation are
 documentation only. The later operational closure inspection created two inert
 SQLite sidecars beside a historical backup despite a read-only open; no live DB or
 business data changed. Exact manual deletion plus independent read-only cleanup
 verification is recorded in
 `docs/pr5-pr8-operational-readiness-closure-gate.md`.
+
+## 3A. Current post-rollback baseline
+
+| Item | Current value |
+|---|---|
+| Runtime | PR3 deployment `0eec88f4-2338-4352-abc5-17b030aa6583`; instance `76d8ee34-7c31-49b7-ace3-1106f9c938cf`; `SUCCESS/RUNNING` |
+| Source / image | SHA `6a38582f5f90b85734884b6b12ad8e306b24619e`; `sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650` |
+| Railway source | `repo=null`, `image=null`; cleanup patch `5b037962-291c-4528-b2e8-1b4dd77d18c5` committed with deploys skipped; no staged or automatic source |
+| Health | internal `/health` and `/api/version` 200 after source cleanup; current PR3 deployment unchanged |
+| Database | seven registered migrations; shadow `applied_at = 2026-07-25 11:44:20`; integrity/quick `ok`; FK 0 |
+| Protected rows | PR5 catalog 1/11; PR5–PR8 and canonical/settlement business totals all 0 |
+| Fresh backup | `20260725T121525Z`; restricted Drive folder `1j8OLI_p3o7If0Mlu-zTbxFSCKWbwJ1Pk`, encrypted object `14tMB54nxClsrV3At7oeE0OAk41G3WPoX`, manifest object `1orsj7QIiqB2lYIgiEj1zCXhbW-_9uC0r`; independent checksum/decrypt/SQLite/boundary verification passed |
+
+The source cleanup changed only `source.image` from the foundation digest to null.
+Variables, volume, networking, port 8080 and feature flags were unchanged. The
+current PR3 runtime remained online and no cleanup deployment was triggered.
 
 ## 4. PR #218–#223 merged lineage
 
@@ -713,8 +739,21 @@ WAL and SHM inode/size/mtime, all table counts, all three migration rows and exa
 `dc7f3cb9ef72099dc7b43327c248ae08b6032cd25e029f3f1e3fae41ab94b2fb`; foreign-key
 violations remained `0`.
 
-`publicIngressHealthy = TRUE`. This closes only the ingress readiness blocker; it
-does not authorize deployment or activation.
+The `2026-07-22` result was `publicIngressHealthy = TRUE` for that historical
+baseline. During the `2026-07-25` foundation window, one operator path timed out
+before TCP/TLS both before and after rollback, no matching Railway request log was
+present, and review evidence reports six independent probes in Europe, North
+America and Asia returning `/health` 200. The operator timeout is therefore
+`INCONCLUSIVE_PROBE_PATH`, not an application P1 by itself.
+
+Future ingress classification requires both multi-vantage external probes and
+Railway edge/request-log correlation. Fail-closed rollback applies only when
+independent evidence indicates runtime failure: unhealthy deployment/internal
+health, matching failure from at least two independent external regions with
+correlated Railway logs, or deployment-correlated upstream/routing/5xx evidence in
+Railway logs. One failed operator path with healthy internal and independent
+external evidence must be investigated without classifying the application as
+failed.
 
 ## 19A. Potential secret exposure
 
@@ -914,6 +953,8 @@ The separate exact foundation-only deployment authorization is recorded.
 | `backupResponsibleOwnerAccepted` | `TRUE` |
 | `backupCustodyApproved` | `TRUE` |
 | `backupAvailable` | `TRUE` |
+| `postRollbackBackupCaptured` | `TRUE` |
+| `postRollbackBackupDurableCustody` | `TRUE` |
 | `restoreDrillPassed` | `TRUE` |
 | `restoreDrillOwnerAccepted` | `TRUE` |
 | `potentialSecretExposureResolved` | `FALSE` |
@@ -921,7 +962,8 @@ The separate exact foundation-only deployment authorization is recorded.
 | `secretRotationDeferralFoundationExemptionEffective` | `TRUE` |
 | `botIntegrationActivationAuthorized` | `FALSE` |
 | `gsmIntegrationActivationAuthorized` | `FALSE` |
-| `publicIngressHealthy` | `TRUE` |
+| `publicIngressHealthy` | `INCONCLUSIVE_PROBE_PATH` |
+| `multiVantageIngressPolicyApproved` | `FALSE` |
 | `pinnedArtifactCandidateDefined` | `TRUE` |
 | `durableRegistryDestinationApproved` | `APPROVED` |
 | `durableRegistryPublicationVerified` | `TRUE` |
@@ -933,8 +975,10 @@ The separate exact foundation-only deployment authorization is recorded.
 | `pinnedArtifactApproved` | `TRUE` |
 | `securityOwner` | `Rishat` |
 | `ownerReleaseApprovalRecorded` | `TRUE` |
-| `foundationDeploymentDecision` | `APPROVED` |
-| `foundationDeploymentAuthorized` | `TRUE` |
+| `foundationDeploymentPerformed` | `TRUE` |
+| `foundationDeploymentDecision` | `UNDECIDED` |
+| `foundationDeploymentAuthorized` | `FALSE` |
+| `foundationDeploymentRetryAuthorized` | `FALSE` |
 | `productionActivationAuthorized` | `FALSE` |
 | `pr5BootstrapAuthorized` | `FALSE` |
 | `pr6SourcePopulationAuthorized` | `FALSE` |
@@ -946,39 +990,29 @@ The separate exact foundation-only deployment authorization is recorded.
 
 ## 24. Blockers
 
-The repeated-startup timestamp defect is closed by #221, public ingress is healthy
-under the separate no-mutation evidence above, and the exact historical-backup
-sidecar cleanup is independently verified; none is a current blocker.
-There is no remaining pre-deployment readiness blocker for the exact approved
-foundation-only scope. The approval is bound to source SHA
-`1d59992315f1b7f4ff2d370fc17345a459ac52e3`, immutable OCI digest
-`sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`,
-the verified Google Drive backup under `Rentcore / 20260724T045252Z` and smoke plan
-`pr5-pr8-foundation-post-deployment-smoke-v1`.
-
-`postDeploymentSmokeApproved` remains `FALSE` because its deployment-dependent
-checks cannot run before deployment; its plan, executor, reviewer and evidence
-retention are approved and are not a missing pre-deployment decision.
-
-Successful local migration and rollback simulations do not replace these
-operational and authorization requirements.
+The prior deployment approval was exercised and consumed. The current blockers to
+one explicit retry are: approval of the incident, rollback-safe no-source state
+and exact previous-image rollback procedure; approval of the
+post-rollback shadow timestamp baseline; approval/provisioning of multi-vantage
+probes and Railway log correlation; an immediate pre-change config/flag/count
+reconfirmation; and a new digest-, backup-, window- and smoke-rule-bound owner
+authorization. Successful migration and rollback checks do not replace these
+requirements.
 
 ## 25. Deployment authorization status
 
-`FOUNDATION_DEPLOYMENT_READY`.
+`FOUNDATION_REMEDIATION_REQUIRED`.
 
-D-34 and D-35 are design records only and remain unapproved. The exact foundation
-delivery is authorized, but it remains distinct from activation, bootstrap, source
-population, calculations, dry runs, reads, writes, consumer switching and PR9; all
-of those authorities remain `FALSE`. This documentation update performs no
-production action.
+D-34 and D-35 are design records only and remain unapproved. The prior foundation
+delivery occurred, but no retry is authorized. Activation, bootstrap, source
+population, calculations, dry runs, reads, writes, consumer switching and PR9 all
+remain `FALSE`. This documentation update performs no production action.
 
 ## 26. Next permitted step
 
-In a separately executed production change, deploy the already published immutable
-image
-`ghcr.io/rishatkznai/rental-management@sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
-to the existing Railway `rental-management` production service without rebuilding,
-changing variables/flags or activating integrations. Immediately execute
-`pr5-pr8-foundation-post-deployment-smoke-v1` under its documented P0/P1 stop and
-rollback rules. This docs-only task performs no deployment.
+No deployment is the next permitted step. Complete and independently approve all
+five remaining conditions in
+`docs/pr5-pr8-foundation-deployment-incident-2026-07-25.md` section 10 while the
+Railway source remains disconnected. Only a later explicit owner instruction may
+authorize one digest retry. This docs-only task authorizes no deployment,
+activation or PR9 work.

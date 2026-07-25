@@ -5,18 +5,24 @@
 This packet records the owner decisions supplied after the foundation deployment
 incident was closed into `main` through PR #227. The evidence baseline is squash
 merge `8dc34629acdae6d959797873d4e66ad62a66eb46` at
-`2026-07-25T13:30:05Z`.
+`2026-07-25T13:30:05Z`. It now also records the explicit owner decision at
+`2026-07-25T14:10:43Z` authorizing exactly one controlled PR5–PR8 foundation
+deployment retry under the conditions in section 7.2.
 
-This is a retry-decision packet, not a retry authorization. Approval of incident,
-rollback, migration and backup evidence does not imply approval of a new
-deployment attempt. The required multi-vantage controls and immediate preflight
-remain outstanding, and no controlled retry window has been approved.
+This was a single-use retry authorization, not production activation. It became
+executable only after the required multi-vantage controls and immediate preflight
+passed. The execution was blocked before those conditions were met, so the
+authorization is consumed and has returned to `FALSE`.
 
-**Packet status:** `RETRY_AUTHORIZATION_PENDING`
+**Packet status:** `RETRY_CONSUMED_BLOCKED`
 
 `retryReadinessComplete = FALSE`
 
 `foundationDeploymentAuthorized = FALSE`
+
+`foundationDeploymentRetryDecision = APPROVED`
+
+`foundationDeploymentRetryAttemptOutcome = FOUNDATION_DEPLOYMENT_RETRY_BLOCKED`
 
 `foundationDeploymentRetryAuthorized = FALSE`
 
@@ -41,14 +47,17 @@ remain outstanding, and no controlled retry window has been approved.
 | Backup manifest object | ID `1orsj7QIiqB2lYIgiEj1zCXhbW-_9uC0r`; SHA-256 `43993962d18d95730e306ad76b54f1f4f53e72a5d120d38ac6f617c5c5ac22bf` |
 | Verified plaintext identity | SHA-256 `104a9436fcc625dd6eedaba4fe1d36b91984308518e276234b51e4ab5839ce0a`; plaintext deleted after verification |
 
-The exact candidate digest above is the only candidate that a later owner
-decision may authorize. Recording it here does not authorize its use.
+The exact candidate digest above is the only artifact authorized for the
+single controlled retry. Rebuilding it, substituting another digest or using
+`railway up` is outside this authorization.
 
 ## 3. Owner decisions recorded by this packet
 
-The decisions below were explicitly supplied by Rishat and recorded at
-`2026-07-25T13:30:55Z`. Rishat remains the named product, release, operations,
-database/backup and security owner in the merged owner approval packet.
+The baseline decisions below were explicitly supplied by Rishat and recorded at
+`2026-07-25T13:30:55Z`. The single-use retry decision and its conditions were
+explicitly supplied at `2026-07-25T14:10:43Z`. Rishat remains the named product,
+release, operations, database/backup and security owner in the merged owner
+approval packet.
 
 | Decision field | Status | Exact scope |
 |---|---|---|
@@ -57,14 +66,14 @@ database/backup and security owner in the merged owner approval packet.
 | `previousImageRollbackProcedureDecision` | `APPROVED` | rollback must reuse the exact previously deployed PR3 image; an ordinary source rebuild or redeploy is not an acceptable rollback |
 | `postRollbackMigrationBaselineDecision` | `APPROVED` | exact seven-row registry, including `documents_gantt_shadow_indexes.applied_at = 2026-07-25 11:44:20`, and the zero-business-row boundaries below |
 | `driveBackupCustodyDecision` | `APPROVED` | restricted durable custody under `Rentcore/20260725T121525Z`; encrypted backup and manifest only; plaintext and age identity excluded |
-| `multiVantageProbeAndLogCorrelationRequirement` | `REQUIRED` | must be provisioned and evidenced before any retry authorization decision |
-| `immediateRetryPreflightRequirement` | `REQUIRED` | must be run immediately before any separately authorized source change |
-| `controlledRetryWindowDecision` | `UNDECIDED` | no retry window, start time, operator or execution authority is approved |
-| `foundationRetryDecision` | `UNDECIDED` | `foundationDeploymentRetryAuthorized = FALSE` |
+| `multiVantageProbeAndLogCorrelationRequirement` | `REQUIRED` | run public `/health` and `/api/version` probes from multiple vantage paths and correlate them with Railway request logs before and after the retry |
+| `immediateRetryPreflightRequirement` | `REQUIRED` | run immediately before the authorized Railway source change; the execution was blocked before this could pass |
+| `controlledRetryWindowDecision` | `APPROVED_CONSUMED` | the one controlled execution was consumed with a blocked result; Codex / operations agent was executor and Rishat was owner and smoke reviewer |
+| `foundationRetryDecision` | `APPROVED_CONSUMED` | owner decision remains `APPROVED`; current `foundationDeploymentRetryAuthorized = FALSE` |
 
-The durable decision reference is the explicit owner instruction to create this
-packet with the statuses above. That instruction expressly does not approve a
-retry.
+The durable decision reference is the explicit owner instruction recorded in this
+packet. The later instruction expressly approves only the one controlled retry
+defined here and does not approve production activation or downstream work.
 
 ## 4. Approved rollback-safe baseline
 
@@ -83,8 +92,9 @@ reuse the exact previous deployed image. It must not perform an ordinary rebuild
 from PR3 source, because that produces a different image identity. A retry plan
 must bind the pinned rollback target above before execution begins.
 
-Approval of this baseline neither reconnects Railway source nor permits a
-deployment, restart or configuration mutation.
+Approval of this baseline alone neither reconnects Railway source nor permits a
+deployment, restart or configuration mutation. Only the separate single-use
+authorization in section 7.2 permits the exact retry after all preconditions pass.
 
 ## 5. Approved migration and zero-row baseline
 
@@ -114,9 +124,10 @@ manifest and plaintext checksums, independent download/decryption, SQLite checks
 registry comparison, zero-row verification and cleanup are recorded in the merged
 incident record.
 
-This custody approval authorizes neither a restore nor a deployment. The age
-identity remains separately held. Plaintext SQLite, credentials and environment
-material must not be uploaded to the custody folder.
+This custody approval does not authorize a restore. The age identity remains
+separately held. Plaintext SQLite, credentials and environment material must not
+be uploaded to the custody folder. The deployment authority, and only that
+authority, is defined separately in section 7.2.
 
 ## 7. Separate gates
 
@@ -125,8 +136,9 @@ material must not be uploaded to the custody folder.
 Incident acceptance, rollback-safe no-source state, the previous-image rollback
 procedure, post-rollback migration baseline and Drive custody are approved.
 
-Retry readiness is still incomplete. Both requirements below must be completed
-with retained evidence before an owner may decide on one controlled retry window:
+Retry readiness is incomplete at packet-merge time. Both requirements below must
+be completed with retained evidence during the authorized execution and before
+any Railway source change:
 
 1. Provision multi-vantage probes for `/health` and `/api/version` and bind their
    DNS/TCP/TLS/HTTP results to Railway deployment markers and edge/request-log
@@ -140,25 +152,49 @@ with retained evidence before an owner may decide on one controlled retry window
    forecast reads, the exact migration registry, catalog `1/11`, and all protected
    business-row totals at zero.
 
-`retryReadinessComplete = FALSE` until both requirements pass and their evidence
-is accepted.
+`retryReadinessComplete = FALSE`. The required sequence was not completed before
+an unintended deployment attempt was created. No approved source change is
+permitted, the result is `FOUNDATION_DEPLOYMENT_RETRY_BLOCKED`, and the single-use
+authorization is consumed.
 
 ### 7.2 Retry authorization
 
-Retry authorization is a later, independent owner decision.
+The owner has made the independent retry decision:
 
-`controlledRetryWindowDecision = UNDECIDED`
+`controlledRetryWindowDecision = APPROVED_CONSUMED`
+
+`foundationDeploymentRetryDecision = APPROVED`
 
 `foundationDeploymentRetryAuthorized = FALSE`
 
-The exact remaining owner decision is whether to authorize one controlled retry
-window after the required multi-vantage controls and immediate preflight have
-passed. A valid approval must bind the exact GHCR digest, source SHA, current
-backup folder/object IDs, accepted probe and preflight evidence, named operators,
-window start/end, revised smoke plan, P0/P1 stop rules and exact previous-image
-rollback target. Missing or ambiguous approval remains deny.
+The authorization scope was exactly one controlled PR5–PR8 foundation deployment
+retry using source `1d59992315f1b7f4ff2d370fc17345a459ac52e3` and immutable image
+`ghcr.io/rishatkznai/rental-management@sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`.
+The deployment executor is Codex / operations agent. Rishat is the owner and smoke
+reviewer.
 
-This prompt and this packet do not make that decision.
+The following conditions are mandatory:
+
+1. Final-review and squash-merge this authorization packet before any Railway
+   action.
+2. Immediately before any Railway source change, re-download and verify the
+   approved backup and manifest; verify variables, `/data` volume, networking,
+   port `8080` and flags without exposing secrets; prove `BOT_DISABLED=true`,
+   `GSM_ENABLED=false`, canonical and forecast flags absent or false, database
+   integrity, the exact migration registry and all approved zero-row boundaries.
+3. Run multi-vantage public `/health` and `/api/version` probes and correlate them
+   with Railway request logs.
+4. Configure only the approved immutable GHCR digest. Do not rebuild it and do
+   not use `railway up`.
+5. Execute `pr5-pr8-foundation-post-deployment-smoke-v1` immediately after the
+   deployment.
+6. Stop and use the pinned previous-image rollback target on any P0/P1 deviation:
+   deployment `0eec88f4-2338-4352-abc5-17b030aa6583`, source
+   `6a38582f5f90b85734884b6b12ad8e306b24619e`, image
+   `sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650`.
+7. The authorization expires after this single execution, whether it succeeds,
+   is blocked before or during deployment, or is rolled back. After the terminal
+   result, `foundationDeploymentRetryAuthorized` must be restored to `FALSE`.
 
 ### 7.3 Production activation
 
@@ -198,8 +234,10 @@ blocked.
 | `multiVantageProbeAndLogCorrelation` | `REQUIRED` |
 | `immediateRetryPreflight` | `REQUIRED` |
 | `retryReadinessComplete` | `FALSE` |
-| `controlledRetryWindowDecision` | `UNDECIDED` |
+| `controlledRetryWindowDecision` | `APPROVED_CONSUMED` |
 | `foundationDeploymentAuthorized` | `FALSE` |
+| `foundationDeploymentRetryDecision` | `APPROVED` |
+| `foundationDeploymentRetryAttemptOutcome` | `FOUNDATION_DEPLOYMENT_RETRY_BLOCKED` |
 | `foundationDeploymentRetryAuthorized` | `FALSE` |
 | `productionActivationAuthorized` | `FALSE` |
 | `canonicalProductionReadsAuthorized` | `FALSE` |
@@ -208,12 +246,40 @@ blocked.
 
 ## 9. Prohibited actions and next permitted step
 
-This packet performs and authorizes no Railway source reconnect, deployment,
-restart, variable change, manual migration, PR5 bootstrap, PR6 population, PR7
-calculation, PR8 execution, canonical read/write enablement, production activation
-or PR9 work.
+The single-use retry authorization in section 7.2 is consumed. This packet does
+not authorize another deployment attempt, variable changes, manual migrations,
+PR5 bootstrap, PR6 source population, PR7 production calculation, PR8 production
+dry run, canonical read/write enablement, bot or GSM activation, production
+activation or PR9 work.
 
-The next permitted work is limited to provisioning the required multi-vantage
-probe/log-correlation evidence and preparing the read-only immediate preflight.
-Only after both pass may the owner make the separate, explicit decision on one
-controlled retry window.
+No second attempt is authorized. A future retry would require a new owner decision
+and a new authorization packet after the blocked execution and credential-handling
+follow-up are closed.
+
+## 10. Blocked execution and authorization consumption
+
+At `2026-07-25T14:12:07.935Z`, before this packet was merged and before the
+required backup, preflight and multi-vantage controls passed, Markdown backticks
+in a local documentation-consistency command were interpreted by the shell as
+command substitution. This unintentionally invoked the expressly prohibited
+`railway up` command.
+
+Railway created deployment `6cce2aeb-6d63-4e02-96f0-df0452fce3a4`. Read-only
+metadata at `2026-07-25T14:14:03Z` showed it as `BUILDING` but stopped, with no
+instances, no image digest and no commit identity. The production service source
+remained `repo = null`, `image = null`. The approved rollback deployment
+`0eec88f4-2338-4352-abc5-17b030aa6583` remained `SUCCESS/RUNNING` on source
+`6a38582f5f90b85734884b6b12ad8e306b24619e` and image
+`sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650`.
+Traffic was not switched, so no application rollback was required.
+
+The unintended deployment creation violates the required ordering and artifact
+boundary. It consumes the one authorized execution with terminal result
+`FOUNDATION_DEPLOYMENT_RETRY_BLOCKED`. The approved immutable candidate was not
+deployed, `pr5-pr8-foundation-post-deployment-smoke-v1` was not run, and no second
+attempt is permitted.
+
+A subsequent raw Railway metadata read exposed a registry credential only in the
+restricted operator transcript; no credential value is recorded in this document,
+repository or PR. Credential rotation is a separate required security follow-up
+because this task does not authorize credential or variable changes.

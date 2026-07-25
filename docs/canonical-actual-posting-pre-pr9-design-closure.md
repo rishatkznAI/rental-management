@@ -325,8 +325,9 @@ Due-date identity envelope is:
 
 For `unknown`, the date and evidence ref are null and the explicit unknown-policy
 reference/hash are required. For proven dates, date and evidence ref are required.
-The envelope participates in `actualSourceKey`, `eventHash`, idempotency and posting
-result hash.
+The envelope participates in `eventHash` and posting result hash, but is expressly
+excluded from the policy-independent `economicSourceKey`. A due-date or policy
+change for the same economic source is therefore a conflict, never a second event.
 
 A different due date/provenance/evidence under the same source slice is a P0
 conflict, not a second receivable. A later proven date requires the separately
@@ -381,6 +382,12 @@ The source adapter contract binds exact owner, company, branch, upstream IDs, ro
 classes, event/schema versions, artifact digest, commit SHA, configuration hash,
 policy hash, effective interval and revocation lineage. `app_data`, generic rentals,
 generic documents, payments, labels and PR7 forecast are expressly forbidden.
+
+Every write authorization, event, posting operation and conflict evidence row binds
+the exact `sourceAdapterAuthorityRecordId`, authority version and authority record
+hash. That binding is relational, scope-qualified and revalidated against the latest
+authority row and the complete PR6 ownership/upstream-row universe while locked; a
+caller-provided adapter label or hash is never authority.
 
 No concrete production adapter instance is approved or created by this document.
 
@@ -502,6 +509,12 @@ production evidence. `diagnosticOnly = true` and `canonicalWriteAuthorized = fal
 remain unchanged. Acceptance authorizes only event eligibility under its exact scope;
 it does not authorize canonical posting.
 
+Accepted evidence is represented only as the ordered set
+`acceptedDryRuns=[{dryRunId,resultHash}]`. It is sorted lexicographically by
+`dryRunId`, rejects duplicate IDs (therefore also duplicate pairs), requires one
+exact result hash per ID, and is
+sealed as `acceptedDryRunsHash`; parallel identifier/hash arrays are forbidden.
+
 ## 14. D-PR9-09 — Exact database object set
 
 **Status:** `GATE A DESIGN ASSUMPTION PENDING`
@@ -561,10 +574,12 @@ createdAt TEXT NOT NULL
 Enums: adapter kind is `source_adapter`, `eligibility_producer` or
 `canonical_posting_adapter`; status is `authorized`, `revoked`, `expired` or
 `superseded`; environment is `production`; allowed operation is exact for the kind.
-Unique keys: `(authorityId, authorityVersion)`, `recordHash`.
-Composite FKs: `(companyId, branchId)` to canonical branches; `previousRecordId` to
-the same table. Checks enforce version sequence inputs, hashes, concrete branch,
-JSON arrays, time order and credential nullability.
+Unique keys: `(authorityId, authorityVersion)`, `recordHash`. The additional
+relational parent key `(recordId, authorityVersion, recordHash, companyId,
+branchId)` is unique so every consumer binds one exact scoped authority version
+without trusting caller JSON. Composite FKs: `(companyId, branchId)` to canonical
+branches; `previousRecordId` to the same table. Checks enforce version sequence
+inputs, hashes, concrete branch, JSON arrays, time order and credential nullability.
 
 ### `canonical_write_authorization_records`
 
@@ -583,16 +598,22 @@ activationCohortRef TEXT NOT NULL
 cohortHash TEXT NOT NULL
 boundaryHash TEXT NOT NULL
 sourceSystemIdsJson TEXT NOT NULL
+sourceAdapterAuthorityRecordId TEXT NOT NULL
+sourceAdapterAuthorityVersion INTEGER NOT NULL
+sourceAdapterAuthorityRecordHash TEXT NOT NULL
+sourceOwnershipManifestHash TEXT NOT NULL
 producerAuthorityRecordId TEXT NOT NULL
 postingAuthorityRecordId TEXT NOT NULL
 eventSchemaVersion TEXT NOT NULL
 operationType TEXT NOT NULL
-allowedTablesJson TEXT NOT NULL
+primaryEffectTablesJson TEXT NOT NULL
+denialEvidenceTable TEXT NOT NULL
+denialEvidencePermission TEXT NOT NULL
 forbiddenOperationsJson TEXT NOT NULL
 policyManifestHashesJson TEXT NOT NULL
 evidencePackHash TEXT NOT NULL
-acceptedDryRunIdsJson TEXT NOT NULL
-acceptedDryRunResultHashesJson TEXT NOT NULL
+acceptedDryRunsJson TEXT NOT NULL
+acceptedDryRunsHash TEXT NOT NULL
 amountBasisPolicyRef TEXT NOT NULL
 amountBasisPolicyHash TEXT NOT NULL
 dueDatePolicyRef TEXT NOT NULL
@@ -610,11 +631,15 @@ createdAt TEXT NOT NULL
 ```
 
 Status is `authorized`, `revoked`, `expired` or `superseded`; operation is exactly
-`canonical_receivable.initial_post.v1`; allowed tables are exactly sorted
+`canonical_receivable.initial_post.v1`; primary-effect tables are exactly sorted
 `canonical_receivable_posting_operations`, `canonical_receivables`,
-`financial_audit_events`. Unique keys: `(authorizationId, authorizationVersion)`,
-`recordHash`. Composite scope FKs plus FKs to producer/posting authority records and
-PR6 activation boundary are mandatory.
+`financial_audit_events`. The denial-evidence table is exactly
+`canonical_receivable_posting_conflicts` and its only permission is
+`canonical_receivable_posting_conflicts.append_after_denial.v1`; it is never a
+primary-effect table. Unique keys: `(authorizationId, authorizationVersion)`,
+`recordHash`. Composite scope FKs plus exact scoped/versioned/hash-bound FKs to the
+source, producer and posting authority records and PR6 activation boundary are
+mandatory.
 
 ### `canonical_posting_activation_records`
 
@@ -638,6 +663,7 @@ explicitExclusionsJson TEXT NOT NULL
 cohortHash TEXT NOT NULL
 boundaryHash TEXT NOT NULL
 policyManifestHashesJson TEXT NOT NULL
+acceptedDryRunsHash TEXT NOT NULL
 writeAuthorizationRecordId TEXT NOT NULL
 effectiveFrom TEXT NOT NULL
 expiresAt TEXT NOT NULL
@@ -660,7 +686,7 @@ Columns:
 id TEXT PRIMARY KEY
 companyId TEXT NOT NULL
 branchId TEXT NOT NULL
-actualSourceKey TEXT NOT NULL
+economicSourceKey TEXT NOT NULL
 eventSchemaVersion TEXT NOT NULL
 eventVersion INTEGER NOT NULL
 dryRunId TEXT NOT NULL
@@ -669,6 +695,7 @@ candidateResultHash TEXT NOT NULL
 completeInputSetHash TEXT NOT NULL
 policyManifestHash TEXT NOT NULL
 sourceOwnershipManifestHash TEXT NOT NULL
+acceptedDryRunsHash TEXT NOT NULL
 activationBoundaryId TEXT NOT NULL
 activationRecordId TEXT NOT NULL
 activationCohortRef TEXT NOT NULL
@@ -702,6 +729,9 @@ dueDateProvenance TEXT NOT NULL
 dueDateEvidenceRef TEXT NULL
 dueDatePolicyRef TEXT NOT NULL
 dueDatePolicyHash TEXT NOT NULL
+sourceAdapterAuthorityRecordId TEXT NOT NULL
+sourceAdapterAuthorityVersion INTEGER NOT NULL
+sourceAdapterAuthorityRecordHash TEXT NOT NULL
 producerAuthorityRecordId TEXT NOT NULL
 writeAuthorizationRecordId TEXT NOT NULL
 sourceLineageHash TEXT NOT NULL
@@ -712,7 +742,7 @@ occurredAt TEXT NOT NULL
 createdAt TEXT NOT NULL
 ```
 
-Unique keys: `(companyId, actualSourceKey)`, `(companyId, eventHash)`, and exact
+Unique keys: `(companyId, economicSourceKey)`, `(companyId, eventHash)`, and exact
 `(dryRunId, candidateId)`. Composite FKs connect candidate/run/scope, activation,
 producer authority, write authorization, PR6 activation boundary and exact PR6
 lineage. Checks enforce `ActualReceivableEligibleV1`, version 1, RUB,
@@ -730,14 +760,21 @@ operationType TEXT NOT NULL
 idempotencyKey TEXT NOT NULL
 eventId TEXT NOT NULL
 eventHash TEXT NOT NULL
-actualSourceKey TEXT NOT NULL
+economicSourceKey TEXT NOT NULL
+sourceAdapterAuthorityRecordId TEXT NOT NULL
+sourceAdapterAuthorityVersion INTEGER NOT NULL
+sourceAdapterAuthorityRecordHash TEXT NOT NULL
+sourceOwnershipManifestHash TEXT NOT NULL
 postingAuthorityRecordId TEXT NOT NULL
 writeAuthorizationRecordId TEXT NOT NULL
 activationRecordId TEXT NOT NULL
+acceptedDryRunsHash TEXT NOT NULL
 canonicalReceivableId TEXT NOT NULL
 canonicalReceivableFingerprint TEXT NOT NULL
 sourceLineageHash TEXT NOT NULL
 commandFingerprint TEXT NOT NULL
+auditPayloadFingerprint TEXT NOT NULL
+auditEventFingerprint TEXT NOT NULL
 resultHash TEXT NOT NULL
 financialAuditEventId TEXT NOT NULL
 correlationId TEXT NOT NULL
@@ -746,9 +783,10 @@ createdAt TEXT NOT NULL
 ```
 
 Operation is exactly `canonical_receivable.initial_post.v1`. Unique keys:
-`(companyId, operationType, idempotencyKey)`, `eventId`, `actualSourceKey`, and
-`canonicalReceivableId`. Composite FKs connect event, authority, authorization,
-activation, canonical receivable and financial audit.
+`(companyId, operationType, idempotencyKey)`, `eventId`, `economicSourceKey`, and
+`canonicalReceivableId`. Composite FKs connect event, source/producer/posting
+authority bindings, authorization, activation, canonical receivable and financial
+audit.
 
 ### `canonical_receivable_posting_conflicts`
 
@@ -762,14 +800,19 @@ conflictType TEXT NOT NULL
 severity TEXT NOT NULL
 eventId TEXT NULL
 eventHash TEXT NULL
-actualSourceKey TEXT NOT NULL
+economicSourceKey TEXT NOT NULL
 existingReceivableId TEXT NULL
 existingOperationId TEXT NULL
 expectedFingerprint TEXT NOT NULL
 observedFingerprint TEXT NOT NULL
+sourceAdapterAuthorityRecordId TEXT NOT NULL
+sourceAdapterAuthorityVersion INTEGER NOT NULL
+sourceAdapterAuthorityRecordHash TEXT NOT NULL
+sourceOwnershipManifestHash TEXT NOT NULL
 postingAuthorityRecordId TEXT NOT NULL
 writeAuthorizationRecordId TEXT NOT NULL
 activationRecordId TEXT NOT NULL
+acceptedDryRunsHash TEXT NOT NULL
 sourceLineageHash TEXT NOT NULL
 correlationId TEXT NOT NULL
 detectorVersion TEXT NOT NULL
@@ -808,7 +851,9 @@ Exact additional domains are:
 | authorization/activation `status` | `authorized`, `revoked`, `expired`, `superseded` |
 | authorization `eventSchemaVersion` | `ActualReceivableEligibleV1` |
 | authorization/operation `operationType` | `canonical_receivable.initial_post.v1` |
-| authorization `allowedTablesJson` | exactly sorted `canonical_receivable_posting_operations`, `canonical_receivables`, `financial_audit_events` |
+| authorization `primaryEffectTablesJson` | exactly sorted `canonical_receivable_posting_operations`, `canonical_receivables`, `financial_audit_events` |
+| authorization `denialEvidenceTable` | `canonical_receivable_posting_conflicts` |
+| authorization `denialEvidencePermission` | `canonical_receivable_posting_conflicts.append_after_denial.v1` |
 | authorization `forbiddenOperationsJson` | exactly sorted `adjust`, `allocate`, `backfill`, `cancel`, `correct`, `delete`, `dual_write`, `refund`, `settle`, `update`, `write_off` |
 | activation source systems | exactly `rentcore.billing_source_authority.v1` |
 | activation document/rental/currency | `rental_service_upd`, `equipment_rental_line`, `RUB` |
@@ -841,19 +886,25 @@ does not exist; otherwise scope and identity must match. Expected and observed
 fingerprints must differ. All source, policy, lineage, command, result, record,
 approval, cohort, boundary and evidence hashes are lowercase 64-hex values.
 
+`acceptedDryRunsJson` is a canonical JSON array of objects with exactly the keys
+`dryRunId` and `resultHash`, sorted by `dryRunId`, with no duplicate `dryRunId` and
+one lowercase 64-hex result hash per ID. `acceptedDryRunsHash` must equal the exact
+section 22 envelope in authorization, activation, event and operation/conflict
+records. An ID and result hash can never be validated independently.
+
 The exact foreign keys all use `ON UPDATE RESTRICT ON DELETE RESTRICT`:
 
 | Child | Child columns → exact parent columns |
 |---|---|
 | every PR9 table | `companyId` → `canonical_companies(id)`; `(companyId, branchId)` → `canonical_branches(companyId, id)` |
 | governed authority | `previousRecordId` → `governed_adapter_authority_records(recordId)` |
-| write authorization | `previousRecordId` → same table `recordId`; `(activationBoundaryId, companyId, branchId)` → `billing_source_activation_boundaries(id, companyId, branchId)`; producer/posting authority record IDs → governed authority `recordId` |
+| write authorization | `previousRecordId` → same table `recordId`; `(activationBoundaryId, companyId, branchId)` → `billing_source_activation_boundaries(id, companyId, branchId)`; source binding `(sourceAdapterAuthorityRecordId, sourceAdapterAuthorityVersion, sourceAdapterAuthorityRecordHash, companyId, branchId)` → the exact governed authority composite key; producer/posting IDs → governed authority `recordId` plus the scope/kind/current-version trigger checks below |
 | posting activation | `previousRecordId` → same table `recordId`; `(activationBoundaryId, companyId, branchId)` → `billing_source_activation_boundaries(id, companyId, branchId)`; `writeAuthorizationRecordId` → write authorization `recordId` |
 | eligible event PR8 | `(dryRunId, companyId, branchId)` → `actual_source_dry_runs(id, companyId, branchId)`; `(candidateId, dryRunId, companyId, branchId)` → `actual_source_dry_run_candidates(id, runId, companyId, branchId)` |
 | eligible event PR6 | each of `activationBoundaryId`, `rentalLineId`, `periodId`, `closedPeriodVersionId`, `snapshotId`, `updId`, `formedUpdVersionId`, `conductedUpdVersionId`, `updLineId`, `updLineVersionId`, `coverageSetId`, `coverageSliceId` with `(companyId, branchId)` → the same-ID scoped key of the corresponding `billing_source_*` table |
-| eligible event PR9 | `activationRecordId` → posting activation `recordId`; `producerAuthorityRecordId` → governed authority `recordId`; `writeAuthorizationRecordId` → write authorization `recordId` |
-| posting operation | `eventId` → eligible event `id`; `postingAuthorityRecordId` → governed authority `recordId`; `writeAuthorizationRecordId` → write authorization `recordId`; `activationRecordId` → posting activation `recordId`; `(companyId, canonicalReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; `financialAuditEventId` → `financial_audit_events(id)` deferred until commit |
-| posting conflict | nullable `eventId` → eligible event `id`; nullable `existingOperationId` → posting operation `id`; nullable `(companyId, existingReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; authority/authorization/activation IDs → their exact PR9 record IDs |
+| eligible event PR9 | `activationRecordId` → posting activation `recordId`; source binding composite → the exact governed authority composite key; `producerAuthorityRecordId` → governed authority `recordId` plus trigger checks; `writeAuthorizationRecordId` → write authorization `recordId` |
+| posting operation | `eventId` → eligible event `id`; source binding composite → exact governed authority composite key; `postingAuthorityRecordId` → governed authority `recordId` plus trigger checks; `writeAuthorizationRecordId` → write authorization `recordId`; `activationRecordId` → posting activation `recordId`; `(companyId, canonicalReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; `(financialAuditEventId, companyId, branchId)` → `financial_audit_events(id, companyId, branchId)` deferred until commit |
+| posting conflict | nullable `eventId` → eligible event `id`; nullable `existingOperationId` → posting operation `id`; nullable `(companyId, existingReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; source binding composite plus posting authority, authorization and activation IDs → their exact scoped PR9 records |
 
 Single-column PR9 record references are additionally guarded by before-insert
 triggers that require exact company, branch, logical kind/status and current version;
@@ -868,6 +919,7 @@ Exact additional index definitions:
 |---|---|---|
 | `uq_pr9_adapter_authority_version` | yes | `authorityId, authorityVersion` |
 | `uq_pr9_adapter_authority_hash` | yes | `recordHash` |
+| `uq_pr9_adapter_authority_binding` | yes | `recordId, authorityVersion, recordHash, companyId, branchId` |
 | `idx_pr9_adapter_authority_scope` | no | `companyId, branchId, adapterKind, status, expiresAt` |
 | `uq_pr9_write_authorization_version` | yes | `authorizationId, authorizationVersion` |
 | `uq_pr9_write_authorization_hash` | yes | `recordHash` |
@@ -875,17 +927,18 @@ Exact additional index definitions:
 | `uq_pr9_activation_version` | yes | `activationId, activationVersion` |
 | `uq_pr9_activation_hash` | yes | `recordHash` |
 | `idx_pr9_activation_scope` | no | `companyId, branchId, status, expiresAt` |
-| `uq_pr9_eligible_actual_source` | yes | `companyId, actualSourceKey` |
+| `uq_pr9_eligible_economic_source` | yes | `companyId, economicSourceKey` |
 | `uq_pr9_eligible_event_hash` | yes | `companyId, eventHash` |
 | `uq_pr9_eligible_candidate` | yes | `dryRunId, candidateId` |
 | `idx_pr9_eligible_scope` | no | `companyId, branchId, createdAt` |
 | `uq_pr9_posting_operation_idempotency` | yes | `companyId, operationType, idempotencyKey` |
 | `uq_pr9_posting_operation_event` | yes | `eventId` |
-| `uq_pr9_posting_operation_source` | yes | `companyId, actualSourceKey` |
+| `uq_pr9_posting_operation_source` | yes | `companyId, economicSourceKey` |
 | `uq_pr9_posting_operation_receivable` | yes | `canonicalReceivableId` |
 | `idx_pr9_posting_operation_scope` | no | `companyId, branchId, createdAt` |
 | `uq_pr9_posting_conflict_hash` | yes | `companyId, conflictHash` |
 | `idx_pr9_posting_conflict_scope` | no | `companyId, branchId, detectedAt` |
+| `uq_pr9_financial_audit_scope_parent` | yes | `financial_audit_events.id, companyId, branchId` |
 
 ### Triggers
 
@@ -918,22 +971,63 @@ The exact cross-object trigger names are:
 trg_pr9_adapter_authority_version_chain
 trg_pr9_write_authorization_version_chain
 trg_pr9_activation_version_chain
+trg_pr9_write_authorization_source_adapter_validate
+trg_pr9_event_source_adapter_validate
+trg_pr9_operation_source_adapter_validate
+trg_pr9_conflict_source_adapter_validate
 trg_pr9_event_before_operation_seal
 trg_pr9_operation_finalize
+trg_pr9_financial_audit_scope_validate_after_insert
 trg_pr9_canonical_receivable_no_delete
 trg_pr9_canonical_receivable_full_immutability
 ```
+
+Exact trigger table/timing is:
+
+| Trigger group | Table | Timing/event |
+|---|---|---|
+| each `*_no_update` / `*_no_delete` / `*_no_replace` | table named in trigger | `BEFORE UPDATE` / `BEFORE DELETE` / `BEFORE INSERT` |
+| `trg_pr9_adapter_authority_version_chain` | `governed_adapter_authority_records` | `BEFORE INSERT` |
+| `trg_pr9_write_authorization_version_chain` | `canonical_write_authorization_records` | `BEFORE INSERT` |
+| `trg_pr9_activation_version_chain` | `canonical_posting_activation_records` | `BEFORE INSERT` |
+| `trg_pr9_write_authorization_source_adapter_validate` | `canonical_write_authorization_records` | `BEFORE INSERT` |
+| `trg_pr9_event_source_adapter_validate` | `actual_receivable_eligible_events` | `BEFORE INSERT` |
+| `trg_pr9_operation_source_adapter_validate` | `canonical_receivable_posting_operations` | `BEFORE INSERT` |
+| `trg_pr9_conflict_source_adapter_validate` | `canonical_receivable_posting_conflicts` | `BEFORE INSERT` |
+| `trg_pr9_event_before_operation_seal` | `canonical_receivable_posting_operations` | `BEFORE INSERT` |
+| `trg_pr9_operation_finalize` | `canonical_receivable_posting_operations` | `BEFORE INSERT` |
+| `trg_pr9_financial_audit_scope_validate_after_insert` | `financial_audit_events` | `AFTER INSERT`, only for `canonical_receivable.initial_posted.v1` |
+| `trg_pr9_canonical_receivable_no_delete` | `canonical_receivables` | `BEFORE DELETE`, only for the PR9 source system |
+| `trg_pr9_canonical_receivable_full_immutability` | `canonical_receivables` | `BEFORE UPDATE`, only for the PR9 source system |
 
 Every table-local trigger aborts rather than ignores the prohibited statement.
 `no_replace` rejects an insert whose primary key or business unique key already
 exists; repositories must classify replay before insert. The version-chain triggers
 require version 1 with no predecessor or exact contiguous version N+1 linked to the
 latest N row. The event-before-operation trigger requires the exact event/hash and
-current authority chain. The operation-finalize trigger permits the operation row
-only when its canonical fingerprint and deferred audit reference match the same
-transaction result. The audit FK is `DEFERRABLE INITIALLY DEFERRED`, allowing the
-mandated canonical → operation → audit insertion order while still failing before
-commit if the audit row is absent or different.
+current authority chain. The four table-specific source-adapter binding triggers
+apply before insert on authorization, event, operation and conflict respectively.
+Each requires the composite ID, version, record hash, company and branch to name
+the exact scoped `source_adapter` record with operation `source_lineage.read.v1`,
+exact logical source system, source row classes, artifact digest, commit,
+configuration, policy and ownership manifest expected by the row. The first three
+also require the latest record to be currently `authorized`; the conflict trigger
+verifies the immutable denied-attempt binding even when a terminal lifecycle was
+the reason for denial and grants no primary effect.
+
+The operation-finalize trigger validates the internally constructed canonical,
+audit-payload and prospective audit-event fingerprints and the deferred audit
+reference; final persisted equality is enforced by the later audit trigger, deferred
+FK and repository reread. `trg_pr9_financial_audit_scope_validate_after_insert` is
+an audit-side `AFTER INSERT` guard for PR9 audit events: it rejects unless the exact
+operation already exists and company, branch, correlation, aggregate type/ID,
+actor identity, actor authority, authority bindings, event identity/type and
+canonical audit payload all
+match that operation. Equivalent enforcement must be proven if SQLite limitations
+require more than one named trigger. The audit FK is `DEFERRABLE INITIALLY
+DEFERRED`, allowing the mandated canonical → operation → audit insertion order
+while still failing before commit if the audit row is absent, cross-scope or
+different. Existing audit append-only guards remain authoritative.
 
 The last two cross-object triggers apply only when
 `canonical_receivables.sourceSystem = 'rentcore.billing_source_authority.v1'`.
@@ -963,8 +1057,8 @@ Recommended exact mapping:
 | `sourceLineId` | event `coverageSliceId` | exact smallest economic slice |
 | source document version | event `conductedUpdVersionId` in event/operation/audit | PR1 has no column; mismatch blocks |
 | rental line | event `rentalLineId` in event/operation/audit | PR1 has no column; mismatch blocks |
-| `externalId` | event `actualSourceKey` | unique within company |
-| actual source key | event `actualSourceKey`; mapped to `externalId` | changed content is P0 conflict |
+| `externalId` | event `economicSourceKey` | unique within company |
+| economic source key | event `economicSourceKey`; mapped to `externalId` | policy-independent identity; changed content is P0 conflict |
 | `idempotencyKey` | `sha256(canonicalJson({companyId, operationType, eventId, eventHash, authorizationId, authorizationVersion}))` | exact replay only |
 | `currency` | `RUB` | other currency blocks |
 | `originalAmountMinor` | event `grossAmountMinor` | must equal approved event basis |
@@ -1010,11 +1104,28 @@ rollback, a separate repository-owned `BEGIN IMMEDIATE` may append exactly one
 deduplicated `CanonicalPostingConflictV1` row. Failure to persist conflict evidence
 never permits posting; it raises a P0 telemetry failure and opens the circuit.
 
+Primary-effect authority and denial-evidence authority are separate. The write
+authorization enumerates the three primary-effect tables independently from the
+single denial table and grants only the exact repository-owned append permission
+`canonical_receivable_posting_conflicts.append_after_denial.v1`. After a
+deterministic denial, the repository must open a new transaction, reread that exact
+permission and all source/posting authority, authorization, activation and scope
+bindings, and derive the conflict internally. A caller cannot select the table,
+permission, operation, type, fingerprints or timestamps. A terminal primary-write
+authorization never permits a primary effect; the denial append is permitted only
+when the exact authorization version that governed the denied attempt remains
+verifiably bound to this explicit denial-evidence permission.
+
 Conflict evidence contains stable IDs and hashes only, no names, contact data,
 amount payload JSON, credentials or free-form source content. Required numeric
 amounts are represented only through expected/observed fingerprints. It is retained
 indefinitely, is legal-hold eligible, append-only and hash-deduplicated. Exact replay
 creates no conflict; same `conflictHash` returns the prior conflict identity.
+Admission is bounded by the same 30-attempt scope limit, conflict writes are
+deduplicated before insert, and five non-money conflicts in five minutes or any
+money/duplicate/source/schema conflict opens the circuit. Gate C must revalidate the
+retention period, legal-hold/privacy treatment, telemetry destination and incident
+ownership; Gate A supplies no production sufficiency for those controls.
 
 Financial audit records successful canonical effects. Conflict records prove denied
 attempts and are not financial effects.
@@ -1177,146 +1288,467 @@ production PR8 execution, Railway mutation or canonical write activation.
 
 ## 22. Exact contract envelopes
 
-### `GovernedAdapterAuthorityV1`
+### 22.1 Byte contract and envelope registry
 
-Required fields are every column in `governed_adapter_authority_records`; only
-`previousRecordId`, `credentialFingerprint`, `credentialIssuerRef` and
-`revocationReasonCode` are nullable under their enum rules. Identity is
-`authorityId + authorityVersion`. Hash envelope includes every field except
-`recordId`, `recordHash` and `createdAt`. Latest version is the highest contiguous
-version whose previous-record chain matches. Exact same identity/content replays;
-changed content at an existing version conflicts. Revoked/expired is terminal for
-that version and blocks immediately.
+Every envelope below is a plain object with exactly the listed keys and no extras.
+`domain` and `version` are mandatory anti-confusion fields. Canonical JSON applies
+section 5 recursively: object keys are emitted in ASCII byte order; arrays retain
+only their contract-defined order; JSON null is the four UTF-8 bytes `null` and is
+never omitted or replaced by an empty string; booleans are `true`/`false`; integers
+are base-10 JSON integers with no sign padding, exponent or decimal point; strings
+use JSON escaping and their original validated Unicode code points. Hash input is
+the exact UTF-8 byte sequence of that canonical JSON, with no BOM or trailing byte.
 
-### `ActualReceivableEligibleV1`
+For each envelope PR9a fixtures must publish the exact canonical byte string and
+lowercase SHA-256 hex, including null, escaping, array-order and maximum-safe-integer
+cases. A field not listed in an envelope is excluded; there are no implicit fields.
 
-Required fields are every event column except `contractId`,
-`contractualDueDate`, and `dueDateEvidenceRef` under the approved due-date rules.
-Identity is:
+### 22.2 `GovernedAdapterAuthorityV1`
+
+Required fields are every authority column; only `previousRecordId`,
+`credentialFingerprint`, `credentialIssuerRef` and `revocationReasonCode` may be
+null under their enum rules. Identity is `authorityId + authorityVersion`.
+`recordHash` uses domain `rentcore.governed_adapter_authority.record`, version `1`
+and exactly:
 
 ```text
-actualSourceKey = sha256(canonicalJson({
-  companyId, branchId, activationBoundaryId, cohortHash,
-  periodId, closedPeriodVersionId, snapshotId,
-  updId, conductedUpdVersionId, updLineId, updLineVersionId,
-  coverageSetId, coverageSliceId,
-  dueDateProvenance, contractualDueDate, dueDateEvidenceRef,
-  amountBasisPolicyHash
+{ actorId, adapterKind, allowedOperation, approvalHash, approvalRef,
+  artifactDigest, authorityId, authorityVersion, branchId, companyId,
+  configurationHash, credentialFingerprint, credentialIssuerRef, credentialType,
+  domain, effectiveFrom, environment, expiresAt, ownerRef, policyHash,
+  previousRecordId, revocationReasonCode, schemaVersion, sourceCommitSha,
+  sourceRowClassesJson, sourceSystemIdsJson, status, version }
+```
+
+The exact exclusions are `recordId`, `recordHash` and `createdAt`. Latest means the
+highest contiguous version whose
+predecessor chain matches; same identity/content replays, changed content conflicts,
+and a terminal/current mismatch blocks.
+
+### 22.3 Accepted PR8 pair set
+
+`acceptedDryRunsHash = sha256(canonicalJson({acceptedDryRuns,domain,version}))`,
+where `domain = rentcore.canonical_actual_posting.accepted_dry_runs`, `version = 1`
+and `acceptedDryRuns` is a non-empty array of objects with exactly `dryRunId` and
+`resultHash`, sorted ascending by `dryRunId` ASCII bytes with no duplicate ID.
+Authorization creation and every locked event/posting/conflict validation reread
+the persisted PR8 run result and match both members of every accepted pair.
+
+### 22.4 `sourceLineageHash`
+
+`sourceLineageHash` uses domain
+`rentcore.canonical_actual_posting.source_lineage`, version `1`, and exactly:
+
+```text
+{ acceptedDryRunsHash, activationBoundaryId, branchId, candidateId,
+  candidateResultHash, closedPeriodVersionId, companyId, completeInputSetHash,
+  conductedUpdVersionId, coverageSetId, coverageSliceId, domain, dryRunId,
+  formedUpdVersionId, periodId,
+  pr6LineageRows:[{rowFingerprint,rowId,rowVersion,tableName}],
+  snapshotId,
+  sourceAdapterAuthority:{authorityVersion,recordHash,recordId},
+  sourceOwnershipManifestHash, sourceSystem, updId, updLineId,
+  updLineVersionId, version }
+```
+
+`pr6LineageRows` is not a caller-selected path. It contains (a) every row reached by
+the event's explicit PR6 IDs, (b) every row sharing any reached logical identity,
+parent ID or coverage interval that can be its latest version, predecessor,
+successor, supersession, reopen, cancellation, correction, overlap or duplicate.
+An absent competing row contributes no array member; a later inserted matching row
+adds a member and therefore changes the hash. The repository reconstructs this set
+from all 16 PR6 tables:
+`billing_source_activation_boundaries`,
+`billing_source_rental_lines`, `billing_source_effective_terms`,
+`billing_source_periods`, `billing_source_period_versions`,
+`billing_source_snapshots`, `billing_source_snapshot_evidence`,
+`billing_source_upds`, `billing_source_upd_versions`,
+`billing_source_upd_lines`, `billing_source_upd_line_versions`,
+`billing_source_coverage_sets`, `billing_source_coverage_supersessions`,
+`billing_source_coverage_slices`, `billing_source_operations` and
+`billing_source_audit_events`. It is sorted by `tableName`, `rowId`, then
+`rowVersion`; table/ID use ascending ASCII bytes and JSON null sorts before positive
+integer versions. Nullable source versions are JSON null. The
+repository rereads each row class, its ownership/upstream ID, latest lifecycle and
+all competing successors/overlaps under lock and rejects any upstream ID or row
+class outside the bound source-adapter authority.
+
+For each member, `rowFingerprint` is SHA-256 of the exact canonical object
+`{columns,domain,rowId,rowVersion,tableName,version}` where domain is
+`rentcore.billing_source_authority.persisted_row`, version is `1`, and `columns` is
+an array of `{columnName,value}` for every stored `hidden=0` column returned by
+`PRAGMA table_xinfo(tableName)` in ascending `cid`, including IDs, scope, lifecycle,
+owner, upstream-source, policy, evidence, content hashes and timestamps. No column
+is excluded. `columnName` must equal the registered PR6 v1 schema; SQLite NULL maps
+to JSON null, INTEGER to a safe JSON integer and TEXT to its exact string; any REAL,
+BLOB, unknown column, missing column or schema drift denies before hashing. The
+array-order fixture for each of all 16 row classes is mandatory.
+
+### 22.5 `ActualReceivableEligibleV1`
+
+The policy-independent identity is:
+
+```text
+economicSourceKey = sha256(canonicalJson({
+  branchId, companyId, contractId, coverageEndExclusive, coverageStart,
+  currency, domain, rentalId, rentalLineId, schemaVersion, sourceDocumentId,
+  sourceDocumentType, sourceDocumentVersion, sourceLineId, sourceSystem, version
 }))
 ```
 
-`eventHash` covers every business field except generated `id`, `eventHash`,
-`occurredAt` and `createdAt`. Event version is exactly 1. Same actualSourceKey and
-same eventHash replay; same actualSourceKey with a different hash conflicts.
+Here `domain = rentcore.canonical_actual_posting.economic_source_key`, envelope
+`version = 1`, `sourceDocumentType = upd_coverage_slice_v1`,
+`sourceDocumentId = updId`, `sourceDocumentVersion = conductedUpdVersionId`,
+`sourceLineId = coverageSliceId`, `coverageStart = sliceStartDate`, and
+`coverageEndExclusive = sliceEndDateExclusive`. The key explicitly excludes amount,
+due date/provenance/evidence, every policy hash, PR8 acceptance, adapter/producer/
+posting authority, write authorization, activation, lifecycle status, timestamps,
+generated IDs and correlation. `(companyId, economicSourceKey)` is unique.
 
-### `CanonicalWriteAuthorizationV1`
+`eventHash` uses domain `rentcore.canonical_actual_posting.eligible_event`, version
+`1`, and every persisted event field in section 14 except exactly generated `id`
+and `eventHash`, plus `domain` and envelope `version`.
+Therefore its exact ordered member set is: `acceptedDryRunsHash`,
+`activationBoundaryId`, `activationCohortRef`, `activationRecordId`, `amountBasis`,
+`amountBasisPolicyHash`, `amountBasisPolicyRef`, `branchId`, `candidateId`,
+`candidateResultHash`, `clientId`, `closedPeriodVersionId`, `cohortHash`,
+`companyId`, `completeInputSetHash`, `conductedUpdVersionId`, `contractId`,
+`contractualDueDate`, `correlationId`, `coverageSetId`, `coverageSliceId`,
+`createdAt`, `currency`, `domain`, `dryRunId`, `dueDateEvidenceRef`, `dueDatePolicyHash`,
+`dueDatePolicyRef`, `dueDateProvenance`, `economicSourceKey`,
+`eventSchemaVersion`, `eventVersion`, `formedUpdVersionId`, `grossAmountMinor`,
+`netAmountMinor`, `occurredAt`, `originalAmountMinor`, `periodId`, `policyManifestHash`,
+`producerAuthorityRecordId`, `rentalId`, `rentalLineId`, `schemaVersion`,
+`sliceEndDateExclusive`, `sliceStartDate`, `snapshotId`,
+`sourceAdapterAuthorityRecordHash`, `sourceAdapterAuthorityRecordId`,
+`sourceAdapterAuthorityVersion`, `sourceLineageHash`,
+`sourceOwnershipManifestHash`, `updId`, `updLineId`, `updLineVersionId`,
+`vatAmountMinor`, `version`, `writeAuthorizationRecordId`.
 
-Required fields are every authorization column except `previousRecordId` and
-`revocationReasonCode`. Identity is `authorizationId + authorizationVersion`.
-Hash envelope excludes only generated `recordId`, `recordHash` and `createdAt`.
-Approval set must contain stable refs and hashes for product, accountant/finance,
-legal, tax, security/identity, release/operations, source-adapter owner,
-producer owner, posting-adapter owner and independent reconciliation reviewer.
-These are role-scoped production approvals, not a requirement for a distinct person
-per role. The same authenticated person may occupy multiple roles when their real
-mandate and the combination/conflict disclosure are durably recorded. The
-independent production evidence reviewer cannot be the evidence pack's sole author
-or producer, and the Gate D release authorizer cannot be the sole implementer or
-sole producer/reviewer of that evidence. Expiry or revocation blocks even exact
-replay. Gate A creates none of these records and satisfies none of these production
-approval entries.
+For a new event, `occurredAt = createdAt = attemptedAt` and `correlationId` is the
+pre-generated repository value. For replay comparison the repository uses the
+existing event's persisted `occurredAt`, `createdAt` and `correlationId`, not the new
+attempt clock or candidate ID, so generated attempt metadata remains sealed without
+forking identity. Same economic key and event hash is exact replay. Same economic
+key with any changed event content,
+including amount, due-date, policy, evidence or authority, is one deterministic
+conflict and never a second event.
 
-### `CanonicalPostingActivationV1`
+### 22.6 `CanonicalWriteAuthorizationV1` and activation
 
-Required fields are every activation column except `previousRecordId` and
-`revocationReasonCode`. Identity is `activationId + activationVersion`; hash envelope
-excludes generated record ID/hash/timestamp. It is default-denied when missing,
-ambiguous, not-yet-effective, expired, revoked, superseded or mismatched. Deployment
-does not create or select it.
-
-### `CanonicalPostingOperationV1`
-
-Every operation column is required. Identity is company + operation type +
-idempotency key. `commandFingerprint` covers selectors/assertions supplied before
-the lock. `canonicalReceivableFingerprint` covers the exact persisted PR1 row.
-`resultHash` covers event, authority, authorization, activation, source lineage,
-canonical fingerprint, audit ID and correlation. Operation insert seals the result;
-late mutation is impossible.
-
-### `CanonicalPostingConflictV1`
-
-Every conflict column is required except event/existing-row references when the
-corresponding record does not exist. Identity is company + `conflictHash`.
-`conflictHash` covers type, scope, actual source, expected/observed fingerprints,
-authority/authorization/activation records, source lineage and detector version.
-Exact replay returns the existing conflict; a changed observation is a new immutable
-conflict.
-
-### Repository-derived financial audit event
-
-The existing `financial_audit_events` row is constructed only by the PR9 repository:
+Required authorization fields are every column except nullable `previousRecordId`
+and `revocationReasonCode`. Identity is `authorizationId + authorizationVersion`.
+Its record hash uses domain `rentcore.canonical_actual_posting.write_authorization`,
+version `1`, and exactly:
 
 ```text
-aggregateType = canonical_receivable
-aggregateId = canonicalReceivableId
-eventType = canonical_receivable.initial_posted.v1
-actorType = integration
-actorId = integration:rentcore-canonical-receivable-posting
-occurredAt = posting transaction timestamp
-reason = NULL
-previousValueJson = NULL
-newValueJson = canonical JSON containing only receivable fingerprint,
-  event ID/hash, actualSourceKey, authority/authorization/activation record IDs,
-  sourceLineageHash and operation ID
-correlationId = event correlationId
-sourceSystem = rentcore.billing_source_authority.v1
-createdAt = posting transaction timestamp
+{ acceptedDryRunsHash, acceptedDryRunsJson, activationBoundaryId,
+  activationCohortRef, amountBasisPolicyHash, amountBasisPolicyRef,
+  approvalSetJson, authorizationId, authorizationVersion, backupEvidenceRef,
+  boundaryHash, branchId, cohortHash, companyId, denialEvidencePermission,
+  denialEvidenceTable, domain, dueDatePolicyHash, dueDatePolicyRef, effectiveFrom,
+  eventSchemaVersion, evidencePackHash, expiresAt, forbiddenOperationsJson,
+  operationType, operationalControlRef, policyManifestHashesJson,
+  postingAuthorityRecordId, previousRecordId, primaryEffectTablesJson,
+  producerAuthorityRecordId, retentionControlRef, revocationReasonCode,
+  schemaVersion, sourceAdapterAuthorityRecordHash,
+  sourceAdapterAuthorityRecordId, sourceAdapterAuthorityVersion,
+  sourceOwnershipManifestHash, sourceSystemIdsJson, status, version }
 ```
 
-Caller actor/audit JSON is never accepted. Audit insert failure rolls back the
-receivable and operation.
+The exact exclusions are `recordId`, `recordHash` and `createdAt`.
 
-## 23. Exact transaction algorithm
+The approval set must contain stable refs/hashes for product, accountant/finance,
+legal, tax, security/identity, release/operations, source-adapter owner, producer
+owner, posting-adapter owner and independent reconciliation reviewer. Gate A creates
+none. Expiry/revocation blocks primary effects even on replay; denial evidence is
+limited by section 17 and algorithm C.
 
-Before `BEGIN IMMEDIATE`, only deeply inert selector/assertion materialization,
-bounded validation and repository-owned immutable planning are allowed. No final
-security, source, policy, replay or write decision is made. No caller callback,
-clock, ID generator, hook or policy function can cross the lock boundary.
+`CanonicalPostingActivationV1` identity is `activationId + activationVersion`.
+Its record hash uses domain `rentcore.canonical_actual_posting.activation`, version
+`1`, and exactly:
+
+```text
+{ acceptedDryRunsHash, activationBoundaryId, activationId, activationVersion,
+  allowedDocumentClassesJson, allowedRentalClassesJson, approvalHash, approvalRef,
+  boundaryHash, branchId, cohortHash, companyId, currency, domain, effectiveFrom,
+  explicitExclusionsJson, expiresAt, forwardOnlyStartDate,
+  policyManifestHashesJson, previousRecordId, revocationReasonCode, schemaVersion,
+  sourceSystemIdsJson, status, version, writeAuthorizationRecordId }
+```
+
+The exact exclusions are `recordId`, `recordHash` and `createdAt`. It seals
+`acceptedDryRunsHash` and is default denied when missing, ambiguous, ineffective,
+expired, revoked, superseded or mismatched. Deployment creates or selects no
+activation.
+
+### 22.7 Posting fingerprints
+
+`commandFingerprint` has domain
+`rentcore.canonical_actual_posting.command`, version `1`, and exactly:
+
+```text
+{ assertedEventHash, assertedWriteAuthorizationRecordId, branchId, companyId,
+  domain, eventId, idempotencyKey, operationType,
+  requestedActivationRecordId, requestedPostingAuthorityRecordId,
+  requestedSourceAdapterAuthorityRecordId, version }
+```
+
+These are inert pre-lock selectors/assertions only; none decides authority.
+
+`canonicalReceivableFingerprint` has domain
+`rentcore.canonical_receivable.persisted_row`, version `1`, and every exact
+persisted/generated PR1 field after reread:
+
+```text
+{ branchId, cancellationReason, cancelledAt, clientId, closedAt, companyId,
+  companyTimezone, contractId, contractualDueDate, createdAt, currency,
+  description, domain, dueDateProvenance, externalId, id, idempotencyKey,
+  issuedAt, normalizedSourceLineId, originalAmountMinor, postedAt, rentalId,
+  sourceDocumentId, sourceDocumentType, sourceLineId, sourceSystem, updatedAt,
+  version, workflowStatus, writtenOffAt }
+```
+
+`auditPayloadFingerprint` uses domain
+`rentcore.canonical_actual_posting.audit_payload`, version `1`, and exactly:
+
+```text
+{ activationRecordId, acceptedDryRunsHash, canonicalReceivableFingerprint,
+  domain, economicSourceKey, eventHash, eventId, operationId,
+  postingAuthorityRecordId, sourceAdapterAuthorityRecordHash,
+  sourceAdapterAuthorityRecordId, sourceAdapterAuthorityVersion,
+  sourceLineageHash, sourceOwnershipManifestHash, version,
+  writeAuthorizationRecordId }
+```
+
+The repository stores `newValueJson` as that exact listed object without
+`domain`/`version` plus its `auditPayloadFingerprint`; no caller JSON is accepted.
+For the composite audit seal, `auditEventId = financial_audit_events.id`,
+`actorIdentityId = actorId = integration:rentcore-canonical-receivable-posting`, and
+`actorAuthorityRecordId = postingAuthorityRecordId` in the payload/operation.
+`aggregateType = canonical_receivable`, `aggregateId = canonicalReceivableId`,
+`eventType = canonical_receivable.initial_posted.v1`, and company, branch,
+correlation and payload fingerprint must all match the operation. The deferred FK
+seals audit ID/company/branch; the audit-side `AFTER INSERT` trigger seals the
+remaining fields after both rows exist.
+
+`auditEventFingerprint` uses domain
+`rentcore.canonical_actual_posting.financial_audit_event`, version `1`, and exactly:
+
+```text
+{ actorId, actorType, aggregateId, aggregateType, auditPayloadFingerprint,
+  branchId, companyId, correlationId, createdAt, domain, eventType, id,
+  occurredAt, previousValueJson, reason, sourceSystem, version }
+```
+
+This projection represents `newValueJson` only by its separately verified
+`auditPayloadFingerprint`; every other persisted audit field is listed. There are no
+other exclusions.
+
+`resultHash` uses domain `rentcore.canonical_actual_posting.result`, version `1`,
+and exactly:
+
+```text
+{ acceptedDryRunsHash, activationRecordHash, activationRecordId,
+  attemptedAt, auditEventFingerprint, auditPayloadFingerprint, branchId,
+  canonicalReceivableFingerprint, canonicalReceivableId, commandFingerprint,
+  companyId, correlationId, domain, economicSourceKey, eventHash, eventId,
+  financialAuditEventId, idempotencyKey, operationId, operationType,
+  postingAuthorityRecordHash, postingAuthorityRecordId, schemaVersion,
+  sourceAdapterAuthorityRecordHash, sourceAdapterAuthorityRecordId,
+  sourceAdapterAuthorityVersion, sourceLineageHash,
+  sourceOwnershipManifestHash, version,
+  writeAuthorizationRecordHash, writeAuthorizationRecordId }
+```
+
+`CanonicalPostingOperationV1` identity is company + operation type + idempotency
+key. Every operation column is required. `resultHash` excludes exactly itself; all
+other projections above are reread and recomputed before commit. `resultHash` is the
+operation's immutable seal hash; this is the operation hash for the posting chain,
+and its literal source-adapter ID/version/hash fields satisfy the required authority
+binding without introducing a second ambiguous operation hash.
+Within that envelope, `attemptedAt` equals the persisted operation `createdAt`; for
+a new result both equal the one locked clock value, while replay reuses that sealed
+persisted value rather than the new attempt clock. Authority and activation record
+hash members are obtained from the exact relational parents during persisted reread.
+
+### 22.8 `CanonicalPostingConflictV1`
+
+`conflictHash` uses domain `rentcore.canonical_actual_posting.conflict`, version
+`1`, and exactly:
+
+```text
+{ acceptedDryRunsHash, activationRecordHash, activationRecordId, branchId,
+  companyId, conflictType, detectorVersion, domain, economicSourceKey,
+  eventHash, eventId,
+  existingOperationId, existingReceivableId, expectedFingerprint,
+  observedFingerprint, postingAuthorityRecordHash, postingAuthorityRecordId,
+  schemaVersion,
+  sourceAdapterAuthorityRecordHash, sourceAdapterAuthorityRecordId,
+  sourceAdapterAuthorityVersion, sourceLineageHash,
+  sourceOwnershipManifestHash, version,
+  writeAuthorizationRecordHash, writeAuthorizationRecordId }
+```
+
+Generated `id`, `correlationId`, `detectedAt`, `createdAt`, `conflictHash`, and
+severity (fixed `p0`) are the exact exclusions, so repeat detection deduplicates
+despite a new attempt timestamp/correlation. Required nullable references are JSON
+null when the row does not exist. The three parent record hashes are repository
+values from the relational activation/posting-authority/write-authorization reread,
+not caller fields. Changed semantic observation produces a new immutable conflict.
+
+### 22.9 Cross-contract field matrix
+
+| Field/binding | Authoritative source | Persisted contracts | Hash envelopes | Locked reread | Replay/conflict role |
+|---|---|---|---|---|---|
+| `companyId`,`branchId` | PR5 relational scope | all six PR9 contracts + audit | every row/content hash | A, B and C reread composite parents | mismatch is conflict/denial, never cross-scope replay |
+| source adapter ID/version/hash | latest governed source-adapter chain | authorization, event, operation, conflict; audit payload | authority record, event, audit payload/event, result, conflict | A/B verify active latest; C verifies exact immutable denial binding | terminal/drift denies primary; changed binding conflicts |
+| `sourceOwnershipManifestHash` + upstream/row classes | complete PR6 ownership universe constrained by source adapter | authorization/event/operation/conflict; lineage rows | authorization record, source lineage, event, audit payload, result, conflict | A/B reconstruct all 16 tables; C verifies denial hashes | drift is deterministic source/authority conflict |
+| accepted `{dryRunId,resultHash}` pairs | accepted PR8 record plus persisted PR8 result | authorization pairs/hash, activation/event/operation/conflict hash | accepted set, authorization/activation records, event, audit payload, result, conflict | A/B verify both members; C verifies denial binding | pair mix-and-match denies; exact set may replay |
+| `economicSourceKey` | repository projection of immutable PR6 coverage identity | event, canonical `externalId`, operation, conflict, audit payload | economic key, event, audit payload/event, result, conflict | A builds/queries; B recomputes; C verifies | same key/same hash replay; same key/different content conflicts |
+| amount, due date and policy fields | sealed PR6/PR8 source and approved policy records | event; mapped canonical row; operation/audit fingerprints | event, canonical, audit payload/event, result; conflict observations | A/B reconstruct under lock | excluded from economic key; any change conflicts |
+| producer authority | latest eligibility-producer chain | authorization and event | authority/authorization/event, then result through event | A/B reread latest; C verifies denial binding | terminal/drift denies event/posting |
+| posting authority / audit actor authority | latest posting-adapter chain | authorization, operation, conflict, audit payload | authority/authorization, audit payload/event, result, conflict | B rereads active latest; C rereads exact denial binding | mismatch denies; exact prior result may replay only while current |
+| write authorization + primary/denial permissions | latest authorization chain | authorization, activation, event, operation, conflict, audit payload | authorization/activation, event, audit payload/event, result, conflict | A/B require active primary; C rereads evidence-only permission | primary expiry denies; denial permission never creates success |
+| `attemptedAt` | one repository clock read after each begin | new event/operation/canonical/audit or conflict timestamps | new event timestamps enter event hash; new posting time enters result; conflict timestamps remain excluded from dedupe | A, B and C validate range/floor once | replay hashes use original persisted event/operation timestamps, so a later attempt never forks identity |
+
+No row may substitute a caller hash for a relational reread. The matrix is an
+obligation to compare both sides inside the applicable locked transaction.
+
+## 23. Exact transaction algorithms
+
+Before either primary transaction the repository may perform only bounded deeply
+inert validation, copy selector/assertion strings, compute `commandFingerprint`, and
+pre-generate candidate UUIDs for rows that might be inserted. It makes no authority,
+source, acceptance, time-window, replay, conflict or write decision. No caller
+object, proxy, accessor, callback, policy function, hook, clock or ID generator is
+reachable after `BEGIN IMMEDIATE`; statements receive only repository-owned inert
+primitives.
+
+For every algorithm below, immediately after `BEGIN IMMEDIATE` the repository calls
+its UTC clock exactly once and stores `attemptedAt`. That value is the only time
+input for every decision and every newly persisted timestamp in that transaction.
+Specifically it evaluates authority `effectiveFrom`/`expiresAt`, credential expiry,
+revocation/supersession state, activation interval, PR8 evidence and event freshness,
+replay/conflict classification, and supplies new event/conflict/`postedAt`/operation/
+audit/`createdAt` values.
+The repository first validates exact RFC3339 UTC milliseconds, inclusive range
+`1970-01-01T00:00:00.000Z` through `9999-12-31T23:59:59.999Z`, and compares it to
+the maximum persisted PR9 timestamp in the same company/branch. Clock throw,
+missing/invalid/out-of-range value, timestamp read failure or regression below that
+floor rolls back. No repeated clock read or caller time is allowed. Exact replay
+returns only the original persisted timestamps and never exposes `attemptedAt` as a
+new result timestamp.
+
+### Algorithm A — PR9a eligibility-event production
 
 Inside one repository-owned `BEGIN IMMEDIATE`:
 
-1. reread the eligibility event by exact ID/company/branch;
-2. reread and structurally verify the PR8 run, candidate, operation, audit and seal;
-3. reread the complete current PR6 16-table universe for the exact lineage;
-4. reread latest producer and posting adapter authority chains;
-5. validate credential type, artifact/config/policy identity, effective time,
-   expiry, revocation and supersession;
-6. reread latest write authorization chain;
-7. reread latest activation chain and exact boundary/cohort;
-8. verify amount, due-date, evidence, source-ownership and policy hashes;
-9. detect reopen/cancel/correct/supersession, source drift, overlap and duplicate
-   economic coverage;
-10. look up existing event/source/idempotency/canonical operation and classify exact
-    replay versus conflict;
-11. for a new write, generate repository UUIDs and one transaction timestamp and
-    construct every row/hash internally;
-12. insert one direct-`posted` canonical receivable;
-13. insert one posting operation seal with its pre-generated deferred audit ID;
-14. insert one repository-derived financial audit row;
-15. reread all three relational rows and referenced event/authority records;
-16. reconstruct exact canonical, audit, operation and result hashes/counts/links;
-17. commit only on exact equality.
+1. capture and validate the single `attemptedAt` as above;
+2. reread the write-authorization record and its latest chain, the activation and
+   boundary/cohort, and the exact accepted `[{dryRunId,resultHash}]` pair set;
+3. reread the PR8 run/result, candidate, input set, operations, audit, seals,
+   reconciliation and counts; require the exact accepted pair, candidate result,
+   zero deltas and all PR8 diagnostic/write flags still false as specified;
+4. reread the complete current 16-table PR6 set defined in section 22.4, including competing
+   versions, successors, overlaps, reopen/cancel/correct/supersession state,
+   ownership manifests, upstream IDs and every row class;
+5. reread the latest source-adapter and eligibility-producer authority chains and
+   the posting authority referenced by the write authorization; compare source
+   adapter ID/version/hash, scope, operation, source systems, complete row-class
+   allowlist, owner, upstream IDs, artifact, commit, configuration, policy,
+   effective interval, expiry and lifecycle;
+6. reconstruct `acceptedDryRunsHash`, `sourceLineageHash` and
+   `economicSourceKey`, then query `(companyId,economicSourceKey)` and exact
+   `(dryRunId,candidateId)` before insert;
+7. construct the complete event projection and `eventHash`: use the existing row's
+   persisted `occurredAt`/`createdAt`/`correlationId` when an economic key exists;
+   otherwise use the single `attemptedAt` and pre-generated repository correlation;
+   also query `(companyId,eventHash)`. If one persisted event
+   matches every field/hash, reread its bound PR8/PR6/authority/authorization/
+   activation rows, commit with zero writes and return that event's persisted
+   timestamps with `replayed=true`;
+8. if the economic/candidate identity exists with different content, or any
+   identity points to different scope/content, classify one deterministic conflict,
+   roll back with zero event/canonical/audit/operation writes, and pass only the
+   repository-derived inert denial descriptor to algorithm C;
+9. otherwise construct and insert exactly one `ActualReceivableEligibleV1` using a
+   pre-generated repository UUID and `occurredAt = createdAt = attemptedAt`;
+10. reread the event plus every referenced PR8, PR6, source/producer authority,
+    authorization, activation and boundary row; recompute every exact field, pair,
+    fingerprint and hash from persisted state, and require exactly one event for the
+    economic key and exactly one for the run/candidate pair;
+11. commit only on byte-exact equality and return the persisted row. Any insert,
+    trigger, reread or reconstruction failure rolls back to zero writes.
 
-Exact replay under still-current authority returns the original logical result with
-`replayed = true` and writes nothing. Changed-content replay rolls back all primary
-writes, then may append one deduplicated conflict in the separate transaction from
-section 17. Expired/revoked/drifted authority blocks even identical payload.
+Algorithm A never reads PR7 forecast, never writes canonical, settlement, legacy or
+`app_data` data, and cannot create an event from an unaccepted pair. Its exact replay
+is a no-op; a due-date, amount, policy or authority change retains the same economic
+key and becomes conflict rather than a second event.
 
-`SQLITE_BUSY` and `SQLITE_LOCKED` become
-`CANONICAL_POSTING_CONCURRENT_CONFLICT`; repository retry count is zero. Insert,
-audit, operation, trigger or reread mismatch rolls back the primary transaction.
-Concurrent processes yield one committed winner and exact replay or deterministic
-conflict, never partial rows or raw SQLite lock errors.
+### Algorithm B — PR9b canonical posting
+
+Inside a separate repository-owned `BEGIN IMMEDIATE`:
+
+1. capture and validate the single `attemptedAt` as above;
+2. reread the event by exact ID/company/branch and recompute its `economicSourceKey`,
+   `eventHash` and `sourceLineageHash`;
+3. repeat the full PR8 accepted-pair/run/candidate/seal/reconciliation reread and
+   the full current PR6 16-table lifecycle/ownership/upstream-row reread from
+   algorithm A; no event-time decision is trusted;
+4. reread latest source, producer and posting authority chains, the exact write
+   authorization and its primary-effect/denial permissions, activation and boundary;
+   validate scope, hashes, source row classes, artifacts, policies, effective
+   intervals, accepted pairs and current lifecycle using `attemptedAt`;
+5. reconstruct the mapping, idempotency key, command fingerprint and prospective
+   canonical row; query event, economic source, idempotency, canonical external ID,
+   operation and audit identities before DML;
+6. if a prior operation, canonical row and audit row all exist and every persisted
+   field plus canonical/audit/operation/result fingerprint is exact, commit with zero
+   writes and return the original IDs/timestamps with `replayed=true`;
+7. on missing companion rows, changed content, source/policy/authority drift or any
+   non-exact identity collision, classify a deterministic conflict, roll back all
+   primary effects, then invoke algorithm C with the inert denial descriptor;
+8. otherwise insert one direct-`posted` canonical receivable with a pre-generated
+   repository ID and `postedAt = createdAt = updatedAt = attemptedAt`;
+9. compute the fingerprint of the persisted canonical projection, then insert one
+   operation seal using pre-generated operation/audit IDs, exact source-adapter and
+   accepted-pair bindings, `createdAt = attemptedAt`, and the prospective audit and
+   result fingerprints;
+10. insert one repository-derived audit event with `occurredAt = createdAt =
+    attemptedAt`; the audit-side scope/binding trigger must accept it;
+11. reread the canonical, operation and audit rows and every event, PR8, PR6,
+    authority, authorization, activation and boundary reference; recompute
+    `canonicalReceivableFingerprint`, `auditPayloadFingerprint`,
+    `auditEventFingerprint` and `resultHash` from persisted state;
+12. commit only on byte-exact equality. Audit insert/trigger failure, missing or
+    extra rows, ignored DML, fingerprint mismatch or reread failure rolls back the
+    receivable, operation and audit together.
+
+### Algorithm C — denied-attempt conflict evidence
+
+Algorithm C runs only after A or B has rolled back and cannot share their
+transaction. It receives a frozen repository-derived denial descriptor, never a
+caller-selected table/type/fingerprint. In a new repository-owned `BEGIN IMMEDIATE`
+it captures its own single `attemptedAt`, rereads the exact write-authorization
+record and `denialEvidenceTable`/`denialEvidencePermission`, and rereads the bound
+source/posting authority, activation, scope and immutable denial identities/hashes.
+The permission is evidence-only: it may remain inspectable when the primary status
+caused the denial, but cannot authorize any primary-effect table or success path.
+
+The repository recomputes `conflictHash`, returns an exact existing conflict as a
+no-op, or inserts exactly one conflict with pre-generated ID and `detectedAt =
+createdAt = attemptedAt`; it then rereads and recomputes the persisted row before
+commit. No canonical, event, operation, audit, settlement, PR6/PR8, legacy or
+`app_data` write is permitted. Missing/ambiguous permission, scope/hash mismatch,
+dedupe anomaly, rate/circuit breach or persistence failure rolls back, opens the P0
+telemetry circuit and still never permits the denied primary effect.
+
+For all three algorithms, `SQLITE_BUSY` and `SQLITE_LOCKED` are caught at begin,
+statement, reread and commit boundaries and mapped to the stable repository error
+`CANONICAL_POSTING_CONCURRENT_CONFLICT`; raw SQLite errors never escape and automatic
+retry count is zero. Concurrent processes yield one committed winner plus an exact
+replay or deterministic conflict, never duplicates or partial rows.
 
 ## 24. Migration and runtime compatibility proof obligations
 
@@ -1349,6 +1781,9 @@ CLI, frontend and startup business execution remain unchanged.
 - exact first migration on fresh chain and current seven-row production-shaped
   local fixture;
 - exact six tables, columns, PKs, ordered composite FKs, checks, indexes and triggers;
+- exact composite source-adapter parent/FKs and audit `(id,companyId,branchId)` FK;
+- audit-side trigger rejects wrong scope, correlation, aggregate, actor, authority,
+  event type/identity, payload or fingerprint and accepts only the exact operation;
 - forced failure at every DDL/registration stage leaves zero PR9 objects/row;
 - partial, competing, wrong-version and registered-weakened schemas fail closed;
 - repeated valid startup preserves every migration timestamp and creates no WAL;
@@ -1361,6 +1796,9 @@ CLI, frontend and startup business execution remain unchanged.
 - proxy/accessor/custom prototype/toJSON/function/symbol/cycle/sparse array,
   hidden field, secret-like key, float/unsafe integer and byte/depth/node rejection;
 - no getter or callback executes; canonical JSON/hash fixtures are stable;
+- exact UTF-8 byte fixtures and SHA-256 outputs cover every section 22 envelope,
+  null versus omission, escaping, array order, duplicate pair rejection and safe
+  integer boundaries;
 - gross basis and due-date rules match the approved policy exactly.
 
 ### Authority and activation
@@ -1370,6 +1808,11 @@ CLI, frontend and startup business execution remain unchanged.
 - human/admin/system impersonation denies;
 - artifact, commit, config, policy, environment, scope, operation and cohort drift
   deny after lock;
+- source-adapter ID/version/hash mismatch, non-latest record, wrong source system,
+  incomplete row-class allowlist, ownership/upstream ID drift and cross-scope
+  substitution deny in authorization, event, operation and conflict paths;
+- accepted dry-run pair permutation canonicalizes identically, while duplicate IDs,
+  unpaired IDs/hashes and a changed result hash deny under lock;
 - catalog remains exact v1/11 and PR5–PR8 assertions continue passing.
 
 ### Eligibility event
@@ -1378,18 +1821,33 @@ CLI, frontend and startup business execution remain unchanged.
 - fixture/unaccepted/stale/unsealed/blocked candidate denies;
 - every PR6 row/version/hash and zero-delta reconciliation is current;
 - PR7/app_data fallback is structurally absent;
-- exact replay creates no second event; changed source/policy/due/amount conflicts;
+- economic identity is stable across policy/due/amount changes; exact replay creates
+  no second event and changed source/policy/due/amount creates one conflict;
+- algorithm A rereads all PR8/PR6/source/producer/authorization/activation rows after
+  `BEGIN IMMEDIATE`, uses one clock value and rereads the inserted event before commit;
+- event clock throw/invalid/out-of-range/regression rolls back; replay returns only
+  persisted timestamps;
 - event production performs no canonical/settlement/legacy write.
 
 ### Posting
 
 - event-to-PR1 mapping is exact; workflow is direct `posted` only;
 - repository owns actor, row, timestamps, IDs, hashes and audit;
+- algorithm B repeats every PR8/PR6/authority decision after lock and executes no
+  callback/getter/hook/clock/ID generator after the single `attemptedAt` read;
 - source reopen/cancel/correct/supersession and overlapping coverage deny;
 - exact replay writes nothing; changed replay writes zero canonical rows and records
   only the approved conflict evidence;
 - revocation/expiry between planning and lock denies;
 - forced failure at receivable, audit, operation and reread stages rolls back all;
+- wrong audit company/branch/correlation/aggregate/actor/event/payload and deliberate
+  audit-fingerprint mismatch each roll back canonical and operation rows;
+- primary-effect authorization cannot write the conflict table; denial permission
+  cannot write any primary-effect table; algorithm C performs no business write;
+- conflict evidence permission/scope/hash failure opens the circuit while leaving
+  the denied primary effect at zero rows; repeat conflict deduplicates;
+- posting/conflict clock throw/invalid/out-of-range/regression rolls back and exact
+  posting replay returns original persisted timestamps;
 - persisted-row mutation/ignore/extra-row fault injection is detected;
 - full PR9 canonical immutability and no-delete triggers are enforced.
 
@@ -1397,6 +1855,10 @@ CLI, frontend and startup business execution remain unchanged.
 
 - independent processes produce one winner plus exact replay/conflict;
 - no raw busy/locked errors, duplicates, orphan operations or missing audit;
+- busy/locked injection at begin, each DML, reread and commit maps to
+  `CANONICAL_POSTING_CONCURRENT_CONFLICT` with zero automatic retries;
+- concurrent algorithm-A producers yield one event; concurrent algorithm-B posters
+  yield one canonical/operation/audit set; conflict writers yield one hash row;
 - limit boundary tests cover 30/minute, 100/run, 262144 bytes, depth 24, 10000 nodes,
   15-minute freshness, five-second timeout and storage/circuit thresholds.
 
@@ -1409,6 +1871,28 @@ CLI, frontend and startup business execution remain unchanged.
 - canonical/forecast resolvers remain null and flags default false;
 - startup creates zero PR9 business/canonical/settlement rows;
 - repository and diff secret scans are clean.
+
+### Mandatory P1 remediation regressions
+
+- revoked source adapter and latest-chain source-adapter supersession deny after
+  lock; ownership-manifest/upstream-row-class mismatch denies;
+- concurrent event creation for one `economicSourceKey` commits exactly one event;
+- the same economic key with changed due date and with changed amount policy each
+  produces deterministic conflict and never a second event;
+- dry-run ID/result mix-and-match, duplicate ID/pair and changed accepted pair deny;
+- omission or one-field mutation is exercised for every literal field in each
+  section 22 envelope, with immutable cross-implementation canonical byte/hash
+  fixtures;
+- audit wrong company, branch, aggregate, actor identity, actor authority, payload,
+  correlation or event type; missing audit; duplicate audit; and attempted audit
+  update after operation all fail without a committed canonical effect;
+- clock exactly at authority/activation/evidence expiry boundary denies; clock
+  throw, invalid value, range failure and regression deny without writes;
+- unauthorized conflict append, caller-selected conflict operation/table, conflict
+  persistence failure, deduplication and rate/circuit limits are fault-injected;
+- conflict persistence failure returns
+  `CANONICAL_CONFLICT_EVIDENCE_PERSISTENCE_FAILED`, opens the circuit and cannot
+  convert the original denial into success.
 
 ### Required implementation checks
 

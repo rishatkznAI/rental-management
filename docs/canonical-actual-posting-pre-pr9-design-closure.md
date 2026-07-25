@@ -174,9 +174,10 @@ All proposed contracts use these rules:
 - generated row IDs and repository timestamps are excluded from business identity
   unless the contract explicitly lists them;
 - input maximum is 262,144 canonical UTF-8 bytes, depth 24 and 10,000 nodes;
-- retained JSON evidence may contain stable IDs, hashes, enum decisions and numeric
-  counts only. Names, contacts, addresses, free-form messages, credentials, tokens,
-  cookies, sessions and authorization headers are forbidden.
+- retained JSON evidence may contain stable IDs, hashes, exact enum decisions,
+  validated non-PII configuration identifiers such as an IANA timezone, and safe
+  integer versions/counts only. Names, contacts, addresses, free-form messages,
+  credentials, tokens, cookies, sessions and authorization headers are forbidden.
 
 ### 5.1 Risk-based staged governance
 
@@ -320,11 +321,18 @@ Due-date identity envelope is:
 
 ```text
 { dueDateProvenance, contractualDueDate, dueDateEvidenceRef,
-  dueDatePolicyRef, dueDatePolicyVersion, dueDatePolicyHash }
+  dueDatePolicyId, dueDatePolicyVersion, dueDatePolicyHash }
 ```
 
 For `unknown`, the date and evidence ref are null and the explicit unknown-policy
-reference/hash are required. For proven dates, date and evidence ref are required.
+ID/version/hash are required. For proven dates, date and evidence ref are required.
+`dueDatePolicyId` is the immutable `decisionRef` from the accepted PR8
+`unknown_due_date_treatment` policy-manifest entry, `dueDatePolicyVersion` is its
+positive integer `decisionVersion`, and `dueDatePolicyHash` is its exact lowercase
+SHA-256 `decisionHash`.
+The three values are inseparable: authorization, activation, event production and
+posting reread the same canonical persisted PR8 policy manifest under lock and
+reject missing, ambiguous or mixed ID/version/hash bindings.
 The envelope participates in `eventHash` and posting result hash, but is expressly
 excluded from the policy-independent `economicSourceKey`. A due-date or policy
 change for the same economic source is therefore a conflict, never a second event.
@@ -460,20 +468,14 @@ Allowed document/rental classes are exactly `rental_service_upd` and
 `equipment_rental_line`; all sales, service repair, delivery, leasing, payroll,
 advance, payment, forecast and historical/imported classes are excluded.
 
-`cohortHash` is SHA-256 of:
-
-```text
-{ schemaVersion, companyId, branchId, sourceSystemIds,
-  allowedDocumentClasses, allowedRentalClasses, currency,
-  forwardOnlyStartDate, explicitExclusions, policyManifestHashes }
-```
-
-`boundaryHash` is SHA-256 of:
-
-```text
-{ schemaVersion, companyId, branchId, forwardOnlyStartDate,
-  sourceSystemIds, sourceClass, currency }
-```
+`cohortHash` is exactly `CanonicalPostingCohortHashV1` and `boundaryHash` is exactly
+`CanonicalPostingBoundaryHashV1` from section 22.10. Both hash logical normalized
+arrays, never stored JSON text. The one concrete branch is represented as a
+single-member `branchIds` array; duplicate, empty, wildcard or unsorted members are
+rejected. The boundary persists the PR5-timezone-derived
+`forwardOnlyStartUtc`, an explicit nullable `boundaryEndUtc`, and the civil
+`forwardOnlyStartDate`; lifecycle `effectiveFrom`/`expiresAt` never silently become
+source-boundary identity.
 
 The activation has an explicit UTC effective/expiry window not exceeding 24 hours.
 Change, renewal, expansion, revocation or supersession appends a new version and
@@ -486,28 +488,46 @@ or activation record is created here.
 EVIDENCE ACCEPTANCE REMAINS GATE C`
 
 **Recommended admission contract:** an admissible run must be a real production PR8
-run created under an approved policy/source/adapter/activation scope and satisfy:
+run created under an approved policy/source/adapter/activation scope. The one exact
+`AcceptedPr8EvidencePredicateV1` is the conjunction of all of these terms:
 
-- exact `status = completed`;
-- `candidateCount > 0`, `blockedCandidateCount = 0`;
-- complete sealed operation and audit links;
-- all run/input/candidate/check/reconciliation/diagnostic counts and hashes match
-  persisted relational reconstruction;
-- every relevant reconciliation has zero net, VAT and gross delta;
-- candidate is `eligible_candidate`, has no blocker codes and matches the approved
-  cohort before the run begins;
-- run, candidate, result, input-set, policy-manifest and source-ownership hashes are
-  explicitly listed in an independently signed acceptance record;
-- no post-result manual exclusion or aggregate netting is allowed;
-- event production begins no later than 15 minutes after `finalizedAt` and still
-  rereads all current PR6 state under lock;
-- the evidence pack names environment, deployment/artifact, DB identity, capture
-  time, tool/query class, reviewer and exact SHA-256 pack hash.
+```text
+run.status = completed
+run.candidateCount > 0
+run.blockedCandidateCount = 0
+candidate.status = eligible_candidate
+candidate.blockerCount = 0
+sealComplete = true
+diagnosticOnly = true
+canonicalWriteAuthorized = false
+productionActivationAuthorized = false
+unexplainedNetDeltaMinor = 0
+unexplainedVatDeltaMinor = 0
+unexplainedGrossDeltaMinor = 0
+policyManifestHash = acceptedPolicyManifestHash
+sourceOwnershipManifestHash = acceptedSourceOwnershipManifestHash
+sourceInputManifestHash = acceptedSourceInputManifestHash
+{dryRunId,resultHash} is one exact accepted pair
+attemptedAt >= finalizedAt
+attemptedAt <= finalizedAt + acceptedEvidenceFreshnessInterval
+acceptedEvidenceFreshnessInterval = 15 minutes
+```
+
+`sealComplete` is repository-derived and true only when the complete run operation,
+audit, input, candidate, check, reconciliation and diagnostic row graph exists and
+all counts, relational links and hashes reproduce byte-exactly. The three unexplained
+deltas are derived from every relevant persisted reconciliation, not caller totals.
+The accepted policy, ownership and source-input hashes and the exact
+`{dryRunId,resultHash}` pair come from the independently signed acceptance record.
+No post-result manual exclusion or aggregate netting is allowed. The evidence pack
+also names environment, deployment/artifact, DB identity, capture time, tool/query
+class, reviewer and exact SHA-256 pack hash.
 
 Fixtures, tests, local SQLite, manually built JSON and this document are never
-production evidence. `diagnosticOnly = true` and `canonicalWriteAuthorized = false`
-remain unchanged. Acceptance authorizes only event eligibility under its exact scope;
-it does not authorize canonical posting.
+production evidence. In particular, `diagnosticOnly = true` is required and does not
+become false; both write flags are required to remain false. Acceptance authorizes
+only event eligibility under its exact scope; it does not reinterpret PR8 as a write
+authorization and does not authorize canonical posting.
 
 Accepted evidence is represented only as the ordered set
 `acceptedDryRuns=[{dryRunId,resultHash}]`. It is sorted lexicographically by
@@ -616,7 +636,8 @@ acceptedDryRunsJson TEXT NOT NULL
 acceptedDryRunsHash TEXT NOT NULL
 amountBasisPolicyRef TEXT NOT NULL
 amountBasisPolicyHash TEXT NOT NULL
-dueDatePolicyRef TEXT NOT NULL
+dueDatePolicyId TEXT NOT NULL
+dueDatePolicyVersion INTEGER NOT NULL
 dueDatePolicyHash TEXT NOT NULL
 operationalControlRef TEXT NOT NULL
 retentionControlRef TEXT NOT NULL
@@ -655,6 +676,9 @@ companyId TEXT NOT NULL
 branchId TEXT NOT NULL
 activationBoundaryId TEXT NOT NULL
 forwardOnlyStartDate TEXT NOT NULL
+forwardOnlyStartUtc TEXT NOT NULL
+boundaryEndUtc TEXT NULL
+companyTimezoneSnapshot TEXT NOT NULL
 sourceSystemIdsJson TEXT NOT NULL
 allowedDocumentClassesJson TEXT NOT NULL
 allowedRentalClassesJson TEXT NOT NULL
@@ -664,6 +688,9 @@ cohortHash TEXT NOT NULL
 boundaryHash TEXT NOT NULL
 policyManifestHashesJson TEXT NOT NULL
 acceptedDryRunsHash TEXT NOT NULL
+dueDatePolicyId TEXT NOT NULL
+dueDatePolicyVersion INTEGER NOT NULL
+dueDatePolicyHash TEXT NOT NULL
 writeAuthorizationRecordId TEXT NOT NULL
 effectiveFrom TEXT NOT NULL
 expiresAt TEXT NOT NULL
@@ -717,6 +744,7 @@ rentalLineId TEXT NOT NULL
 sliceStartDate TEXT NOT NULL
 sliceEndDateExclusive TEXT NOT NULL
 currency TEXT NOT NULL
+companyTimezoneSnapshot TEXT NOT NULL
 netAmountMinor INTEGER NOT NULL
 vatAmountMinor INTEGER NOT NULL
 grossAmountMinor INTEGER NOT NULL
@@ -727,7 +755,8 @@ amountBasisPolicyHash TEXT NOT NULL
 contractualDueDate TEXT NULL
 dueDateProvenance TEXT NOT NULL
 dueDateEvidenceRef TEXT NULL
-dueDatePolicyRef TEXT NOT NULL
+dueDatePolicyId TEXT NOT NULL
+dueDatePolicyVersion INTEGER NOT NULL
 dueDatePolicyHash TEXT NOT NULL
 sourceAdapterAuthorityRecordId TEXT NOT NULL
 sourceAdapterAuthorityVersion INTEGER NOT NULL
@@ -769,6 +798,9 @@ postingAuthorityRecordId TEXT NOT NULL
 writeAuthorizationRecordId TEXT NOT NULL
 activationRecordId TEXT NOT NULL
 acceptedDryRunsHash TEXT NOT NULL
+dueDatePolicyId TEXT NOT NULL
+dueDatePolicyVersion INTEGER NOT NULL
+dueDatePolicyHash TEXT NOT NULL
 canonicalReceivableId TEXT NOT NULL
 canonicalReceivableFingerprint TEXT NOT NULL
 sourceLineageHash TEXT NOT NULL
@@ -784,7 +816,7 @@ createdAt TEXT NOT NULL
 
 Operation is exactly `canonical_receivable.initial_post.v1`. Unique keys:
 `(companyId, operationType, idempotencyKey)`, `eventId`, `economicSourceKey`, and
-`canonicalReceivableId`. Composite FKs connect event, source/producer/posting
+`canonicalReceivableId`, plus `financialAuditEventId`. Composite FKs connect event, source/producer/posting
 authority bindings, authorization, activation, canonical receivable and financial
 audit.
 
@@ -803,6 +835,8 @@ eventHash TEXT NULL
 economicSourceKey TEXT NOT NULL
 existingReceivableId TEXT NULL
 existingOperationId TEXT NULL
+conflictObservationJson TEXT NOT NULL
+conflictObservationHash TEXT NOT NULL
 expectedFingerprint TEXT NOT NULL
 observedFingerprint TEXT NOT NULL
 sourceAdapterAuthorityRecordId TEXT NOT NULL
@@ -822,12 +856,13 @@ detectedAt TEXT NOT NULL
 createdAt TEXT NOT NULL
 ```
 
-Conflict type is one of `identity_content_mismatch`, `source_drift`,
-`authority_drift`, `authorization_drift`, `activation_drift`, `amount_mismatch`,
-`due_date_mismatch`, `duplicate_coverage`, `schema_drift` or
-`persisted_result_mismatch` or `post_posting_source_change`; severity is always
-`p0`. Unique key is
-`(companyId, conflictHash)`.
+Conflict type is exactly one of `ECONOMIC_SOURCE_EVENT_MISMATCH`,
+`SOURCE_ADAPTER_REVOKED`, `SOURCE_ADAPTER_SUPERSEDED`,
+`SOURCE_OWNERSHIP_MANIFEST_MISMATCH`, `PR6_LINEAGE_DRIFT`,
+`PR8_EVIDENCE_MISMATCH`, `DUE_DATE_POLICY_DRIFT`, `COMPANY_TIMEZONE_DRIFT`,
+`AUTHORIZATION_DRIFT`, `ACTIVATION_DRIFT`, `IDEMPOTENCY_CONTENT_CONFLICT` or
+`AUDIT_SEAL_MISMATCH`. No generic or implementation-selected conflict label is
+accepted. Severity is always `p0`; unique key is `(companyId, conflictHash)`.
 
 ### Exact domains, checks and foreign-key graph
 
@@ -879,11 +914,20 @@ values require a valid date and non-empty evidence ref. PR8 candidate flags rema
 exactly `diagnosticOnly = 1`, `canonicalWriteAuthorized = 0` and
 `productionActivationAuthorized = 0`; no PR9 constraint reinterprets them.
 
+Authorization, activation, event and operation rows require the same non-empty
+`dueDatePolicyId`, positive integer `dueDatePolicyVersion` and 64-hex
+`dueDatePolicyHash` reconstructed from the accepted PR8 policy manifest. Activation
+requires a valid IANA `companyTimezoneSnapshot`, exact RFC3339-millisecond
+`forwardOnlyStartUtc`, nullable later `boundaryEndUtc`, and exact derivation from its
+civil `forwardOnlyStartDate`; event timezone snapshots must also be valid IANA names.
+
 For operation rows, all fields are non-null, all identities/hashes revalidate, and
 the exact event, source key and canonical receivable each seal at most one operation.
 For conflict rows, nullable references are permitted only when the referenced row
 does not exist; otherwise scope and identity must match. Expected and observed
-fingerprints must differ. All source, policy, lineage, command, result, record,
+fingerprints must differ; `conflictObservationJson` must be exact canonical
+`ConflictObservationV1` and reproduce its observation/expected/observed hashes. All
+source, policy, lineage, command, result, record,
 approval, cohort, boundary and evidence hashes are lowercase 64-hex values.
 
 `acceptedDryRunsJson` is a canonical JSON array of objects with exactly the keys
@@ -935,6 +979,7 @@ Exact additional index definitions:
 | `uq_pr9_posting_operation_event` | yes | `eventId` |
 | `uq_pr9_posting_operation_source` | yes | `companyId, economicSourceKey` |
 | `uq_pr9_posting_operation_receivable` | yes | `canonicalReceivableId` |
+| `uq_pr9_posting_operation_audit` | yes | `financialAuditEventId` |
 | `idx_pr9_posting_operation_scope` | no | `companyId, branchId, createdAt` |
 | `uq_pr9_posting_conflict_hash` | yes | `companyId, conflictHash` |
 | `idx_pr9_posting_conflict_scope` | no | `companyId, branchId, detectedAt` |
@@ -996,7 +1041,7 @@ Exact trigger table/timing is:
 | `trg_pr9_conflict_source_adapter_validate` | `canonical_receivable_posting_conflicts` | `BEFORE INSERT` |
 | `trg_pr9_event_before_operation_seal` | `canonical_receivable_posting_operations` | `BEFORE INSERT` |
 | `trg_pr9_operation_finalize` | `canonical_receivable_posting_operations` | `BEFORE INSERT` |
-| `trg_pr9_financial_audit_scope_validate_after_insert` | `financial_audit_events` | `AFTER INSERT`, only for `canonical_receivable.initial_posted.v1` |
+| `trg_pr9_financial_audit_scope_validate_after_insert` | `financial_audit_events` | `AFTER INSERT`; activates when an operation references `NEW.id`, regardless of `NEW.eventType` |
 | `trg_pr9_canonical_receivable_no_delete` | `canonical_receivables` | `BEFORE DELETE`, only for the PR9 source system |
 | `trg_pr9_canonical_receivable_full_immutability` | `canonical_receivables` | `BEFORE UPDATE`, only for the PR9 source system |
 
@@ -1019,12 +1064,30 @@ The operation-finalize trigger validates the internally constructed canonical,
 audit-payload and prospective audit-event fingerprints and the deferred audit
 reference; final persisted equality is enforced by the later audit trigger, deferred
 FK and repository reread. `trg_pr9_financial_audit_scope_validate_after_insert` is
-an audit-side `AFTER INSERT` guard for PR9 audit events: it rejects unless the exact
-operation already exists and company, branch, correlation, aggregate type/ID,
-actor identity, actor authority, authority bindings, event identity/type and
-canonical audit payload all
-match that operation. Equivalent enforcement must be proven if SQLite limitations
-require more than one named trigger. The audit FK is `DEFERRABLE INITIALLY
+an audit-side `AFTER INSERT` guard whose exact activation predicate is:
+
+```text
+EXISTS (
+  SELECT 1
+  FROM canonical_receivable_posting_operations AS operation
+  WHERE operation.financialAuditEventId = NEW.id
+)
+```
+
+The predicate deliberately does not inspect `NEW.eventType`, company or branch; a
+wrong value must enter the trigger and abort rather than bypass it. The unique
+operation index on `financialAuditEventId` and the trigger both require exactly one
+referencing operation. Inside the trigger, the audit row must have exact
+`eventType = canonical_receivable.initial_posted.v1`, company ID, branch ID,
+correlation ID, `aggregateType = canonical_receivable`, aggregate/canonical ID,
+`actorId = integration:rentcore-canonical-receivable-posting`, integration actor
+type, payload `actorAuthorityRecordId = operation.postingAuthorityRecordId`, exact
+authority/event identities, canonical payload fingerprint and prospective
+audit-event fingerprint equal to the operation seal. Wrong event type, scope,
+correlation, aggregate, actor identity, actor authority, payload, fingerprint or
+multiple incompatible operation references aborts. Equivalent enforcement must be
+proven if SQLite limitations require more than one named trigger. The audit FK is
+`DEFERRABLE INITIALLY
 DEFERRED`, allowing the mandated canonical → operation → audit insertion order
 while still failing before commit if the audit row is absent, cross-scope or
 different. Existing audit append-only guards remain authoritative.
@@ -1059,14 +1122,15 @@ Recommended exact mapping:
 | rental line | event `rentalLineId` in event/operation/audit | PR1 has no column; mismatch blocks |
 | `externalId` | event `economicSourceKey` | unique within company |
 | economic source key | event `economicSourceKey`; mapped to `externalId` | policy-independent identity; changed content is P0 conflict |
-| `idempotencyKey` | `sha256(canonicalJson({companyId, operationType, eventId, eventHash, authorizationId, authorizationVersion}))` | exact replay only |
+| `idempotencyKey` | repository-derived `CanonicalPostingIdempotencyKeyV1` from section 22.10 | caller value forbidden; same source with changed event is conflict |
 | `currency` | `RUB` | other currency blocks |
 | `originalAmountMinor` | event `grossAmountMinor` | must equal approved event basis |
 | `issuedAt` | current conducted UPD version `createdAt` | source drift blocks |
 | `postedAt` | repository transaction timestamp | generated once |
 | `contractualDueDate` | event date or null for approved unknown | difference blocks |
 | `dueDateProvenance` | event provenance | difference blocks |
-| `companyTimezone` | fresh active PR5 company timezone | drift from event blocks |
+| due-date policy binding | event `dueDatePolicyId`/`dueDatePolicyVersion`/`dueDatePolicyHash`; sealed in operation/audit | any mixed or changed member is `DUE_DATE_POLICY_DRIFT` |
+| `companyTimezone` | event `companyTimezoneSnapshot`, originally copied from locked PR5 company authority | fresh PR5 mismatch/unavailability blocks; never copy a newer mutable value |
 | `workflowStatus` | literal `posted` | draft forbidden |
 | `description` | literal `Governed UPD coverage slice` | no customer data |
 | `createdAt`, `updatedAt` | same repository transaction timestamp | immutable |
@@ -1116,14 +1180,19 @@ authorization never permits a primary effect; the denial append is permitted onl
 when the exact authorization version that governed the denied attempt remains
 verifiably bound to this explicit denial-evidence permission.
 
-Conflict evidence contains stable IDs and hashes only, no names, contact data,
-amount payload JSON, credentials or free-form source content. Required numeric
-amounts are represented only through expected/observed fingerprints. It is retained
+Conflict evidence contains only stable IDs, hashes, exact enums/states, safe integer
+versions and the validated IANA timezone projection; it contains no names, contact
+data, amount payload JSON, credentials or free-form source content. Required numeric
+amounts are represented only through expected/observed fingerprints. Every row
+persists the exact canonical, repository-derived `ConflictObservationV1` from
+section 22.8 plus its observation/expected/observed fingerprints; callers supply
+none of those values. It is retained
 indefinitely, is legal-hold eligible, append-only and hash-deduplicated. Exact replay
 creates no conflict; same `conflictHash` returns the prior conflict identity.
 Admission is bounded by the same 30-attempt scope limit, conflict writes are
-deduplicated before insert, and five non-money conflicts in five minutes or any
-money/duplicate/source/schema conflict opens the circuit. Gate C must revalidate the
+deduplicated before insert, and the exact immediate-versus-five-in-five circuit
+classification is the section-22.8 registry; no caller or implementation may
+reclassify it. Gate C must revalidate the
 retention period, legal-hold/privacy treatment, telemetry destination and incident
 ownership; Gate A supplies no production sufficiency for those controls.
 
@@ -1140,10 +1209,13 @@ source row, source hash drift or authority revocation. It blocks new posting, wr
 no canonical effect and records the approved conflict evidence.
 
 If the canonical row already exists, PR9 never updates or deletes it. The condition
-is a P0 `post_posting_source_change` incident for reconciliation and a future
-correction/compensation PR. PR9 may expose only the immutable conflict and existing
-operation identities to that future workflow. Authority revocation stops future
-attempts but does not invalidate or erase prior committed evidence.
+is a P0 post-posting source-change incident for reconciliation and a future
+correction/compensation PR. Its conflict evidence uses the exact root type from
+`ConflictObservationV1`—for example `PR6_LINEAGE_DRIFT`,
+`DUE_DATE_POLICY_DRIFT` or `SOURCE_ADAPTER_REVOKED`—rather than inventing a generic
+label. PR9 may expose only the immutable conflict and existing operation identities
+to that future workflow. Authority revocation stops future attempts but does not
+invalidate or erase prior committed evidence.
 
 ## 19. D-PR9-14 — Operational thresholds
 
@@ -1159,7 +1231,7 @@ Recommended v1 numbers:
 | writes per posting transaction | 1 receivable |
 | active posting concurrency | 1 per company/branch; SQLite still serializes global writers |
 | SQLite `busy_timeout` | 5,000 ms |
-| automatic repository retry | 0; caller may resubmit the same idempotency key explicitly |
+| automatic repository retry | 0; caller may resubmit the same event/selectors, and the repository derives the same idempotency key |
 | inert input bytes | 262,144 |
 | inert depth | 24 |
 | inert nodes | 10,000 |
@@ -1167,7 +1239,7 @@ Recommended v1 numbers:
 | authority/authorization/activation max lifetime | 24 hours |
 | free-space stop | below max of 512 MiB or 20% of mounted volume |
 | DB+WAL daily-growth stop | 64 MiB per UTC day |
-| conflict circuit breaker | any money/duplicate/source/schema mismatch, or 5 other conflicts in 5 minutes per company/branch |
+| conflict circuit breaker | immediate for the ten section-22.8 integrity types; 5 `AUTHORIZATION_DRIFT`/`ACTIVATION_DRIFT` conflicts in 5 minutes per company/branch |
 | audit/conflict persistence failure | immediate circuit open |
 | blocker-rate alert | at least 1 blocked posting in 5 minutes |
 | latency warning | transaction over 2 seconds |
@@ -1412,10 +1484,12 @@ Therefore its exact ordered member set is: `acceptedDryRunsHash`,
 `activationBoundaryId`, `activationCohortRef`, `activationRecordId`, `amountBasis`,
 `amountBasisPolicyHash`, `amountBasisPolicyRef`, `branchId`, `candidateId`,
 `candidateResultHash`, `clientId`, `closedPeriodVersionId`, `cohortHash`,
-`companyId`, `completeInputSetHash`, `conductedUpdVersionId`, `contractId`,
+`companyId`, `companyTimezoneSnapshot`, `completeInputSetHash`,
+`conductedUpdVersionId`, `contractId`,
 `contractualDueDate`, `correlationId`, `coverageSetId`, `coverageSliceId`,
-`createdAt`, `currency`, `domain`, `dryRunId`, `dueDateEvidenceRef`, `dueDatePolicyHash`,
-`dueDatePolicyRef`, `dueDateProvenance`, `economicSourceKey`,
+`createdAt`, `currency`, `domain`, `dryRunId`, `dueDateEvidenceRef`,
+`dueDatePolicyHash`, `dueDatePolicyId`, `dueDatePolicyVersion`,
+`dueDateProvenance`, `economicSourceKey`,
 `eventSchemaVersion`, `eventVersion`, `formedUpdVersionId`, `grossAmountMinor`,
 `netAmountMinor`, `occurredAt`, `originalAmountMinor`, `periodId`, `policyManifestHash`,
 `producerAuthorityRecordId`, `rentalId`, `rentalLineId`, `schemaVersion`,
@@ -1432,7 +1506,8 @@ attempt clock or candidate ID, so generated attempt metadata remains sealed with
 forking identity. Same economic key and event hash is exact replay. Same economic
 key with any changed event content,
 including amount, due-date, policy, evidence or authority, is one deterministic
-conflict and never a second event.
+conflict and never a second event. A changed or unavailable fresh PR5 timezone does
+not alter the existing event; it denies replay/posting as `COMPANY_TIMEZONE_DRIFT`.
 
 ### 22.6 `CanonicalWriteAuthorizationV1` and activation
 
@@ -1446,7 +1521,8 @@ version `1`, and exactly:
   activationCohortRef, amountBasisPolicyHash, amountBasisPolicyRef,
   approvalSetJson, authorizationId, authorizationVersion, backupEvidenceRef,
   boundaryHash, branchId, cohortHash, companyId, denialEvidencePermission,
-  denialEvidenceTable, domain, dueDatePolicyHash, dueDatePolicyRef, effectiveFrom,
+  denialEvidenceTable, domain, dueDatePolicyHash, dueDatePolicyId,
+  dueDatePolicyVersion, effectiveFrom,
   eventSchemaVersion, evidencePackHash, expiresAt, forbiddenOperationsJson,
   operationType, operationalControlRef, policyManifestHashesJson,
   postingAuthorityRecordId, previousRecordId, primaryEffectTablesJson,
@@ -1457,6 +1533,11 @@ version `1`, and exactly:
 ```
 
 The exact exclusions are `recordId`, `recordHash` and `createdAt`.
+`authorizationHash` means this exact persisted `recordHash`; no second or
+caller-computed authorization hash exists.
+The due-date policy triple is the exact accepted PR8 manifest entry and is compared
+as one unit during authorization creation and every Algorithm A/B/C reread; no
+member may be independently supplied or mixed with another version.
 
 The approval set must contain stable refs/hashes for product, accountant/finance,
 legal, tax, security/identity, release/operations, source-adapter owner, producer
@@ -1471,12 +1552,16 @@ Its record hash uses domain `rentcore.canonical_actual_posting.activation`, vers
 ```text
 { acceptedDryRunsHash, activationBoundaryId, activationId, activationVersion,
   allowedDocumentClassesJson, allowedRentalClassesJson, approvalHash, approvalRef,
-  boundaryHash, branchId, cohortHash, companyId, currency, domain, effectiveFrom,
-  explicitExclusionsJson, expiresAt, forwardOnlyStartDate,
-  policyManifestHashesJson, previousRecordId, revocationReasonCode, schemaVersion,
-  sourceSystemIdsJson, status, version, writeAuthorizationRecordId }
+  boundaryEndUtc, boundaryHash, branchId, cohortHash, companyId,
+  companyTimezoneSnapshot, currency, domain, dueDatePolicyHash, dueDatePolicyId,
+  dueDatePolicyVersion, effectiveFrom, explicitExclusionsJson, expiresAt,
+  forwardOnlyStartDate, forwardOnlyStartUtc, policyManifestHashesJson,
+  previousRecordId, revocationReasonCode, schemaVersion, sourceSystemIdsJson,
+  status, version, writeAuthorizationRecordId }
 ```
 
+`boundaryEndUtc` is the only additional nullable field and is JSON null for v1.
+`activationHash` means this exact persisted `recordHash`; no parallel hash exists.
 The exact exclusions are `recordId`, `recordHash` and `createdAt`. It seals
 `acceptedDryRunsHash` and is default denied when missing, ambiguous, ineffective,
 expired, revoked, superseded or mismatched. Deployment creates or selects no
@@ -1488,13 +1573,17 @@ activation.
 `rentcore.canonical_actual_posting.command`, version `1`, and exactly:
 
 ```text
-{ assertedEventHash, assertedWriteAuthorizationRecordId, branchId, companyId,
-  domain, eventId, idempotencyKey, operationType,
+{ assertedDueDatePolicyHash, assertedDueDatePolicyId,
+  assertedDueDatePolicyVersion, assertedEventHash,
+  assertedWriteAuthorizationRecordId, branchId, companyId, domain, eventId,
+  operationType,
   requestedActivationRecordId, requestedPostingAuthorityRecordId,
   requestedSourceAdapterAuthorityRecordId, version }
 ```
 
-These are inert pre-lock selectors/assertions only; none decides authority.
+These are inert pre-lock selectors/assertions only; none decides authority. The
+caller supplies no idempotency key: it is derived only after locked relational
+reread by `CanonicalPostingIdempotencyKeyV1`.
 
 `canonicalReceivableFingerprint` has domain
 `rentcore.canonical_receivable.persisted_row`, version `1`, and every exact
@@ -1514,7 +1603,8 @@ persisted/generated PR1 field after reread:
 
 ```text
 { activationRecordId, acceptedDryRunsHash, canonicalReceivableFingerprint,
-  domain, economicSourceKey, eventHash, eventId, operationId,
+  domain, dueDatePolicyHash, dueDatePolicyId, dueDatePolicyVersion,
+  economicSourceKey, eventHash, eventId, operationId,
   postingAuthorityRecordId, sourceAdapterAuthorityRecordHash,
   sourceAdapterAuthorityRecordId, sourceAdapterAuthorityVersion,
   sourceLineageHash, sourceOwnershipManifestHash, version,
@@ -1549,11 +1639,13 @@ other exclusions.
 and exactly:
 
 ```text
-{ acceptedDryRunsHash, activationRecordHash, activationRecordId,
+{ acceptedDryRunsHash, activationId, activationRecordHash, activationRecordId,
   attemptedAt, auditEventFingerprint, auditPayloadFingerprint, branchId,
   canonicalReceivableFingerprint, canonicalReceivableId, commandFingerprint,
-  companyId, correlationId, domain, economicSourceKey, eventHash, eventId,
-  financialAuditEventId, idempotencyKey, operationId, operationType,
+  canonicalWriteAuthorizationId, companyId, correlationId, domain,
+  dueDatePolicyHash, dueDatePolicyId, dueDatePolicyVersion, economicSourceKey,
+  eventHash, eventId, financialAuditEventId, idempotencyKey, operationId,
+  operationType,
   postingAuthorityRecordHash, postingAuthorityRecordId, schemaVersion,
   sourceAdapterAuthorityRecordHash, sourceAdapterAuthorityRecordId,
   sourceAdapterAuthorityVersion, sourceLineageHash,
@@ -1570,17 +1662,109 @@ binding without introducing a second ambiguous operation hash.
 Within that envelope, `attemptedAt` equals the persisted operation `createdAt`; for
 a new result both equal the one locked clock value, while replay reuses that sealed
 persisted value rather than the new attempt clock. Authority and activation record
-hash members are obtained from the exact relational parents during persisted reread.
+hash members, logical `activationId`/`canonicalWriteAuthorizationId` and due-date
+policy triple are obtained from the exact relational parents/event/operation during
+persisted reread, never from command assertions.
 
 ### 22.8 `CanonicalPostingConflictV1`
+
+`ConflictObservationV1` is a repository-owned plain object with exactly:
+
+```text
+{ domain, version, conflictType, expectedProjection, observedProjection }
+```
+
+`domain = rentcore.canonical_actual_posting.conflict_observation`, `version = 1`,
+and `conflictType` must be one exact section-14 enum value. The repository persists
+this object as exact canonical JSON in `conflictObservationJson` and computes
+`conflictObservationHash = sha256(canonicalJson(ConflictObservationV1))`.
+`expectedFingerprint` and `observedFingerprint` are independently computed as:
+
+```text
+sha256(canonicalJson({
+  conflictType,
+  domain: rentcore.canonical_actual_posting.conflict_expected,
+  projection: expectedProjection,
+  version: 1
+}))
+
+sha256(canonicalJson({
+  conflictType,
+  domain: rentcore.canonical_actual_posting.conflict_observed,
+  projection: observedProjection,
+  version: 1
+}))
+```
+
+The exact projection registry is:
+
+| `conflictType` | Exact keys in both projections | Expected authoritative source | Observed authoritative source / null rule |
+|---|---|---|---|
+| `ECONOMIC_SOURCE_EVENT_MISMATCH` | `{economicSourceKey,eventHash,eventId}` | locked attempted event reconstruction | persisted event at the economic/candidate identity; `eventId` is JSON null only when no row exists |
+| `SOURCE_ADAPTER_REVOKED` | `{authorityId,authorityVersion,recordHash,status}` | exact authorization-bound source-adapter version with expected `authorized` | latest locked authority version with exact `revoked`; its record hash seals the reason without retaining it in observation JSON |
+| `SOURCE_ADAPTER_SUPERSEDED` | `{authorityId,authorityVersion,recordHash,status}` | exact authorization-bound source-adapter version with expected `authorized` | latest locked successor with exact `superseded`; its record hash seals the reason without retaining it in observation JSON |
+| `SOURCE_OWNERSHIP_MANIFEST_MISMATCH` | `{sourceOwnershipManifestHash}` | authorization/event sealed manifest | complete locked PR6 ownership reconstruction |
+| `PR6_LINEAGE_DRIFT` | `{sourceLineageHash}` | event-sealed PR6 lineage | complete locked current 16-table PR6 reconstruction |
+| `PR8_EVIDENCE_MISMATCH` | `{acceptedDryRunsHash,dryRunId,resultHash}` | authorization/activation accepted pair set and selected pair | locked PR8 run/result; `dryRunId` or `resultHash` is JSON null only when the referenced persisted row/member is absent |
+| `DUE_DATE_POLICY_DRIFT` | `{bindingState,dueDatePolicyHash,dueDatePolicyId,dueDatePolicyVersion}` | event/authorization/activation exact policy triple with `bindingState=valid` | locked accepted PR8 `unknown_due_date_treatment` decision; state is `valid`, `missing` or `ambiguous`, and all three members are JSON null for the latter two |
+| `COMPANY_TIMEZONE_DRIFT` | `{companyTimezone,timezoneState}` | event snapshot with `timezoneState=valid` | fresh locked PR5 value; state is `valid`, `missing`, `invalid`, `unavailable` or `ambiguous`, and timezone is JSON null unless state is `valid` |
+| `AUTHORIZATION_DRIFT` | `{authorizationId,authorizationVersion,recordHash,status}` | event-bound authorization version expected `authorized` | latest locked authorization chain record |
+| `ACTIVATION_DRIFT` | `{activationId,activationVersion,recordHash,status}` | event-bound activation version expected `authorized` | latest locked activation chain record |
+| `IDEMPOTENCY_CONTENT_CONFLICT` | `{activationId,canonicalWriteAuthorizationId,economicSourceKey,eventHash,idempotencyKey,operationType}` | locked attempted operation projection | persisted operation at any colliding source/idempotency identity |
+| `AUDIT_SEAL_MISMATCH` | `{actorAuthorityRecordId,actorIdentityId,aggregateId,auditEventFingerprint,auditEventId,auditPayloadFingerprint,branchId,companyId,correlationId,eventTypeFingerprint,eventTypeState}` | repository-constructed prospective audit seal with `eventTypeState=exact` | persisted audit/operation reconstruction; state is `exact`, `mismatch` or `missing`, and every other key is JSON null only when the audit row is wholly absent |
+
+Projection keys are emitted in ASCII order by section 22.1. No other field is
+allowed. Non-null IDs are validated opaque IDs, versions are positive safe integers,
+statuses/types/states are exact enums, a non-null timezone is a validated IANA name
+and fingerprints are lowercase SHA-256. JSON null is permitted only in the table
+cases above; omission is forbidden. Invalid/unavailable raw timezone or policy
+content is never retained. Projections contain no names, contacts, addresses, amounts, dates,
+free-form reasons, credentials, tokens, source payloads or arbitrary caller JSON.
+Ambiguous observations fail closed without inventing a conflict row.
+
+For the audit projection, `eventTypeFingerprint` is SHA-256 of exactly
+`{domain,eventType,version}` with domain
+`rentcore.canonical_actual_posting.audit_event_type`, version `1`, and the validated
+persisted event-type string; expected uses the required literal. A missing audit row
+uses JSON null. The raw mismatching value is never retained in conflict JSON.
+
+The repository derives the observation in Algorithm A or B before rollback, freezes
+it as an unexported branded inert value, and Algorithm C reconstructs both sides from
+persisted state before insert. Callers cannot create or select the type, projection,
+fingerprint or table. When more than one invariant differs, the first matching type
+in this exact precedence order is the sole observation:
+
+```text
+SOURCE_ADAPTER_REVOKED
+SOURCE_ADAPTER_SUPERSEDED
+AUTHORIZATION_DRIFT
+ACTIVATION_DRIFT
+SOURCE_OWNERSHIP_MANIFEST_MISMATCH
+PR6_LINEAGE_DRIFT
+PR8_EVIDENCE_MISMATCH
+DUE_DATE_POLICY_DRIFT
+COMPANY_TIMEZONE_DRIFT
+IDEMPOTENCY_CONTENT_CONFLICT
+AUDIT_SEAL_MISMATCH
+ECONOMIC_SOURCE_EVENT_MISMATCH
+```
+
+No multi-row conflict fan-out or implementation-specific precedence is allowed.
+Immediate circuit-open types are
+`ECONOMIC_SOURCE_EVENT_MISMATCH`, both `SOURCE_ADAPTER_*` types,
+`SOURCE_OWNERSHIP_MANIFEST_MISMATCH`, `PR6_LINEAGE_DRIFT`,
+`PR8_EVIDENCE_MISMATCH`, `DUE_DATE_POLICY_DRIFT`, `COMPANY_TIMEZONE_DRIFT`,
+`IDEMPOTENCY_CONTENT_CONFLICT` and `AUDIT_SEAL_MISMATCH`.
+`AUTHORIZATION_DRIFT` and `ACTIVATION_DRIFT` open the circuit on the fifth conflict
+within five minutes per company/branch. Every type remains severity `p0`.
 
 `conflictHash` uses domain `rentcore.canonical_actual_posting.conflict`, version
 `1`, and exactly:
 
 ```text
 { acceptedDryRunsHash, activationRecordHash, activationRecordId, branchId,
-  companyId, conflictType, detectorVersion, domain, economicSourceKey,
-  eventHash, eventId,
+  companyId, conflictObservationHash, conflictType, detectorVersion, domain,
+  economicSourceKey, eventHash, eventId,
   existingOperationId, existingReceivableId, expectedFingerprint,
   observedFingerprint, postingAuthorityRecordHash, postingAuthorityRecordId,
   schemaVersion,
@@ -1595,7 +1779,11 @@ severity (fixed `p0`) are the exact exclusions, so repeat detection deduplicates
 despite a new attempt timestamp/correlation. Required nullable references are JSON
 null when the row does not exist. The three parent record hashes are repository
 values from the relational activation/posting-authority/write-authorization reread,
-not caller fields. Changed semantic observation produces a new immutable conflict.
+not caller fields. `conflictObservationJson` is represented only by its separately
+verified `conflictObservationHash`; it is not hashed twice as raw JSON. Changed
+semantic observation produces a new immutable conflict. PR9a fixtures publish exact
+canonical bytes and SHA-256 for every projection row, both side envelopes, the full
+observation and the resulting conflict hash.
 
 ### 22.9 Cross-contract field matrix
 
@@ -1605,15 +1793,92 @@ not caller fields. Changed semantic observation produces a new immutable conflic
 | source adapter ID/version/hash | latest governed source-adapter chain | authorization, event, operation, conflict; audit payload | authority record, event, audit payload/event, result, conflict | A/B verify active latest; C verifies exact immutable denial binding | terminal/drift denies primary; changed binding conflicts |
 | `sourceOwnershipManifestHash` + upstream/row classes | complete PR6 ownership universe constrained by source adapter | authorization/event/operation/conflict; lineage rows | authorization record, source lineage, event, audit payload, result, conflict | A/B reconstruct all 16 tables; C verifies denial hashes | drift is deterministic source/authority conflict |
 | accepted `{dryRunId,resultHash}` pairs | accepted PR8 record plus persisted PR8 result | authorization pairs/hash, activation/event/operation/conflict hash | accepted set, authorization/activation records, event, audit payload, result, conflict | A/B verify both members; C verifies denial binding | pair mix-and-match denies; exact set may replay |
+| `AcceptedPr8EvidencePredicateV1` | locked PR8 run/candidate/seal/reconciliation graph plus accepted evidence record | referenced by authorization, activation and event pair/hash bindings | accepted set, authorization/activation/event/result/conflict hashes | A and B require the exact same predicate including `diagnosticOnly=true` and both write flags false | any false term denies; no PR8 flag is reinterpreted |
 | `economicSourceKey` | repository projection of immutable PR6 coverage identity | event, canonical `externalId`, operation, conflict, audit payload | economic key, event, audit payload/event, result, conflict | A builds/queries; B recomputes; C verifies | same key/same hash replay; same key/different content conflicts |
-| amount, due date and policy fields | sealed PR6/PR8 source and approved policy records | event; mapped canonical row; operation/audit fingerprints | event, canonical, audit payload/event, result; conflict observations | A/B reconstruct under lock | excluded from economic key; any change conflicts |
+| amount and due-date values | sealed PR6/PR8 source | event; mapped canonical row; operation/audit fingerprints | event, canonical, audit payload/event, result; conflict observations | A/B reconstruct under lock | excluded from economic key; any change conflicts |
+| due-date policy ID/version/hash | accepted PR8 `unknown_due_date_treatment` manifest entry | authorization, activation, event and operation | authorization/activation/event/command/result plus due-policy conflict observation | A/B reread the exact canonical PR8 manifest; C reconstructs both observation sides | any ID/version/hash drift under the same economic key is deterministic conflict |
+| `companyTimezoneSnapshot` | fresh locked PR5 company timezone at Algorithm A | activation and event; mapped canonical `companyTimezone` | activation/event, canonical/result and timezone conflict observation | A validates and snapshots; B compares fresh PR5 to event before replay or write | null/invalid/unavailable/change denies; canonical always receives event snapshot |
+| cohort, boundary and idempotency identities | locked normalized activation/authorization/event parents | authorization, activation, event/operation | exact section 22.10 envelopes | A/B/C reconstruct logical arrays/IDs, never caller JSON/key | normalization drift denies; same source plus changed event is conflict |
+| `ConflictObservationV1` | branded repository denial plus locked reconstruction | conflict JSON and observation/side fingerprints | observation, expected, observed and conflict hashes | C reconstructs exact registered projections | same observation deduplicates; any semantic change is a new conflict |
 | producer authority | latest eligibility-producer chain | authorization and event | authority/authorization/event, then result through event | A/B reread latest; C verifies denial binding | terminal/drift denies event/posting |
 | posting authority / audit actor authority | latest posting-adapter chain | authorization, operation, conflict, audit payload | authority/authorization, audit payload/event, result, conflict | B rereads active latest; C rereads exact denial binding | mismatch denies; exact prior result may replay only while current |
 | write authorization + primary/denial permissions | latest authorization chain | authorization, activation, event, operation, conflict, audit payload | authorization/activation, event, audit payload/event, result, conflict | A/B require active primary; C rereads evidence-only permission | primary expiry denies; denial permission never creates success |
-| `attemptedAt` | one repository clock read after each begin | new event/operation/canonical/audit or conflict timestamps | new event timestamps enter event hash; new posting time enters result; conflict timestamps remain excluded from dedupe | A, B and C validate range/floor once | replay hashes use original persisted event/operation timestamps, so a later attempt never forks identity |
+| `attemptedAt` | the single repository clock capability call immediately after each begin | new event/operation/canonical/audit or conflict operational timestamps | new event timestamps enter event hash; new posting time enters result; conflict timestamps remain excluded from dedupe | A, B and C validate exact operational floor once with no skew tolerance | equality with floor is allowed; regression denies; replay returns original timestamps and never forks identity |
 
 No row may substitute a caller hash for a relational reread. The matrix is an
 obligation to compare both sides inside the applicable locked transaction.
+
+### 22.10 Cohort, boundary and idempotency envelopes
+
+`CanonicalPostingCohortHashV1` computes `cohortHash` with domain
+`rentcore.canonical_actual_posting.cohort`, envelope version `1`, and exactly:
+
+```text
+{ allowedDocumentClasses, allowedRentalClasses, branchIds, cohortVersion,
+  companyId, currency, domain, explicitExclusions, forwardOnlyStartDate,
+  policyManifestHashes, sourceSystems, version }
+```
+
+`cohortVersion = 1`. `branchIds` is the sorted unique logical array containing
+exactly the activation's one concrete `branchId`. `sourceSystems`,
+`allowedDocumentClasses`, `allowedRentalClasses`, `explicitExclusions` and
+`policyManifestHashes` are logical arrays obtained by parsing their corresponding
+canonical `*Json` columns. Every array is non-empty except
+`explicitExclusions`, contains only validated non-null strings, rejects duplicates,
+and is sorted by ascending ASCII bytes before hashing. The hash never consumes the
+JSON text value itself. Exact exclusions are record/logical activation IDs and
+versions, persisted `schemaVersion`, boundary hash, status, approval/evidence references, accepted dry runs,
+authority IDs, lifecycle effective/expiry/revocation fields and repository
+timestamps.
+
+`CanonicalPostingBoundaryHashV1` computes `boundaryHash` with domain
+`rentcore.canonical_actual_posting.boundary`, envelope version `1`, and exactly:
+
+```text
+{ boundaryEndUtc, boundaryVersion, branchIds, companyId,
+  companyTimezoneSnapshot, currency, domain, exclusionRules,
+  forwardOnlyStartDate, forwardOnlyStartUtc, sourceClass, sourceSystems, version }
+```
+
+`boundaryVersion = 1`, `sourceClass =
+conducted_upd_validated_coverage_slice_v1`, `branchIds` and `sourceSystems` use the
+same normalized logical arrays above, and `exclusionRules` is the normalized logical
+value of `explicitExclusionsJson`. `forwardOnlyStartUtc` is the exact UTC instant of
+`00:00:00.000` on `forwardOnlyStartDate` in `companyTimezoneSnapshot`, formatted as
+RFC3339 UTC milliseconds. An invalid/nonexistent local start instant denies rather
+than normalizes. `boundaryEndUtc` is JSON null for unbounded forward-only v1; a later
+non-null value must be strictly greater than the start and requires a new boundary
+version. No other null is allowed. Exact exclusions are cohort/policy/evidence
+hashes, authorization/activation record or logical IDs and versions, status,
+persisted `schemaVersion`, approval fields, `effectiveFrom`, `expiresAt`, revocation reason and timestamps:
+activation expiry is a lifecycle gate, never source-boundary identity.
+
+`CanonicalPostingIdempotencyKeyV1` computes `idempotencyKey` with domain
+`rentcore.canonical_actual_posting.idempotency_key`, envelope version `1`, and
+exactly:
+
+```text
+{ activationId, canonicalWriteAuthorizationId, domain, economicSourceKey,
+  eventHash, operationType, version }
+```
+
+`activationId` is `canonical_posting_activation_records.activationId` and
+`canonicalWriteAuthorizationId` is
+`canonical_write_authorization_records.authorizationId`, both read from locked
+relational parents; `operationType` is the exact initial-post literal. The
+repository accepts no caller key and derives the value only after event,
+authorization and activation reread. Attempt time, correlation, generated UUIDs,
+record IDs, record/logical versions, persisted `schemaVersion`, authority status and
+other mutable tags are exact exclusions. Same
+inputs produce the same key. A changed `eventHash` under the same
+`economicSourceKey` is classified as `ECONOMIC_SOURCE_EVENT_MISMATCH` before any new
+operation and can never create an independent receivable merely because its derived
+idempotency key differs.
+
+For all three contracts, section 5 and 22.1 byte rules apply. PR9a fixtures publish
+the exact UTF-8 canonical JSON and lowercase SHA-256 for baseline, every single-field
+mutation, array permutation, duplicate/empty-array rejection, null boundary end and
+Unicode/escaping cases. Cross-implementation fixtures must match byte-for-byte.
 
 ## 23. Exact transaction algorithms
 
@@ -1621,24 +1886,90 @@ Before either primary transaction the repository may perform only bounded deeply
 inert validation, copy selector/assertion strings, compute `commandFingerprint`, and
 pre-generate candidate UUIDs for rows that might be inserted. It makes no authority,
 source, acceptance, time-window, replay, conflict or write decision. No caller
-object, proxy, accessor, callback, policy function, hook, clock or ID generator is
-reachable after `BEGIN IMMEDIATE`; statements receive only repository-owned inert
-primitives.
+object, proxy, accessor, callback, policy function, hook, caller clock or ID
+generator is reachable after `BEGIN IMMEDIATE`; statements receive only
+repository-owned inert primitives. The sole permitted post-lock capability call is
+the repository clock call defined next.
 
-For every algorithm below, immediately after `BEGIN IMMEDIATE` the repository calls
-its UTC clock exactly once and stores `attemptedAt`. That value is the only time
+For every algorithm below, immediately after successful `BEGIN IMMEDIATE` the
+repository calls `repositoryClock.readUtcMilliseconds()` exactly once. It must
+return a safe integer Unix epoch millisecond in inclusive range `0` through
+`253402300799999`; the repository deterministically renders that value as exact
+RFC3339 UTC milliseconds and stores it as `attemptedAt`. Throw, missing value,
+non-integer, unsafe integer, out-of-range value or conversion failure rolls back.
+Immediately after the return, the clock capability is discarded and cannot be
+invoked again in the transaction. `attemptedAt` is the only time
 input for every decision and every newly persisted timestamp in that transaction.
 Specifically it evaluates authority `effectiveFrom`/`expiresAt`, credential expiry,
 revocation/supersession state, activation interval, PR8 evidence and event freshness,
 replay/conflict classification, and supplies new event/conflict/`postedAt`/operation/
 audit/`createdAt` values.
-The repository first validates exact RFC3339 UTC milliseconds, inclusive range
-`1970-01-01T00:00:00.000Z` through `9999-12-31T23:59:59.999Z`, and compares it to
-the maximum persisted PR9 timestamp in the same company/branch. Clock throw,
-missing/invalid/out-of-range value, timestamp read failure or regression below that
-floor rolls back. No repeated clock read or caller time is allowed. Exact replay
-returns only the original persisted timestamps and never exposes `attemptedAt` as a
-new result timestamp.
+
+The exact monotonic floor is the maximum valid timestamp from these columns in the
+same company/branch:
+
+```text
+actual_receivable_eligible_events.createdAt
+canonical_receivable_posting_operations.createdAt
+canonical_receivables.postedAt
+canonical_receivables.createdAt
+financial_audit_events.createdAt
+canonical_receivable_posting_conflicts.createdAt
+```
+
+The exact logical query is:
+
+```sql
+SELECT MAX(operationalTimestamp) AS monotonicFloor
+FROM (
+  SELECT createdAt AS operationalTimestamp
+  FROM actual_receivable_eligible_events
+  WHERE companyId = :companyId AND branchId = :branchId
+  UNION ALL
+  SELECT createdAt
+  FROM canonical_receivable_posting_operations
+  WHERE companyId = :companyId AND branchId = :branchId
+  UNION ALL
+  SELECT postedAt
+  FROM canonical_receivables
+  WHERE companyId = :companyId AND branchId = :branchId
+    AND sourceSystem = 'rentcore.billing_source_authority.v1'
+  UNION ALL
+  SELECT createdAt
+  FROM canonical_receivables
+  WHERE companyId = :companyId AND branchId = :branchId
+    AND sourceSystem = 'rentcore.billing_source_authority.v1'
+  UNION ALL
+  SELECT createdAt
+  FROM financial_audit_events
+  WHERE companyId = :companyId AND branchId = :branchId
+    AND eventType = 'canonical_receivable.initial_posted.v1'
+  UNION ALL
+  SELECT createdAt
+  FROM canonical_receivable_posting_conflicts
+  WHERE companyId = :companyId AND branchId = :branchId
+);
+```
+
+Canonical rows are included only when `sourceSystem =
+rentcore.billing_source_authority.v1`; audit rows only when `eventType =
+canonical_receivable.initial_posted.v1`. Operation `createdAt` is its persisted
+`attemptedAt`; conflict `createdAt = detectedAt = attemptedAt`; event
+`createdAt = occurredAt = attemptedAt`; canonical `createdAt = postedAt = updatedAt`;
+and audit `createdAt = occurredAt`, so the equal aliases are not queried twice.
+The floor query is one repository-owned `MAX` over the six exact columns after
+scope filters. Null floor means no prior operational timestamp. Every returned
+timestamp is parsed and range-validated; read/parse ambiguity rolls back.
+
+`attemptedAt >= floor` is allowed, so the same millisecond is valid; any
+`attemptedAt < floor` is clock regression and rolls back. Clock skew tolerance is
+exactly zero. Authority/authorization/activation `effectiveFrom`, `expiresAt`, any
+activation start/end, `boundaryEndUtc`, due date, source business timestamp,
+`conductedAt`, `signedAt`, `importedAt`, future validity endpoint and non-PR9 row are
+explicitly excluded from the floor. Thus an active record with future expiry cannot
+cause false regression. No repeated clock read or caller time is allowed. Exact
+replay returns only original persisted timestamps and never exposes `attemptedAt` as
+a new result timestamp.
 
 ### Algorithm A — PR9a eligibility-event production
 
@@ -1647,44 +1978,60 @@ Inside one repository-owned `BEGIN IMMEDIATE`:
 1. capture and validate the single `attemptedAt` as above;
 2. reread the write-authorization record and its latest chain, the activation and
    boundary/cohort, and the exact accepted `[{dryRunId,resultHash}]` pair set;
-3. reread the PR8 run/result, candidate, input set, operations, audit, seals,
-   reconciliation and counts; require the exact accepted pair, candidate result,
-   zero deltas and all PR8 diagnostic/write flags still false as specified;
-4. reread the complete current 16-table PR6 set defined in section 22.4, including competing
+3. reread the PR5 company record, require one available valid IANA timezone, compare
+   it to the activation timezone/boundary derivation and freeze it as
+   `companyTimezoneSnapshot`; null, invalid, unavailable or ambiguous authority
+   denies before event insertion;
+4. reread the PR8 run/result, candidate, input set, operations, audit, seals,
+   reconciliation and counts and require every term of
+   `AcceptedPr8EvidencePredicateV1`: run `completed`, candidate
+   `eligible_candidate`, complete seal, `diagnosticOnly = true`,
+   `canonicalWriteAuthorized = false`, `productionActivationAuthorized = false`,
+   zero blockers, zero unexplained net/VAT/gross deltas, exact accepted
+   policy/ownership/source hashes, exact accepted pair and freshness under
+   `attemptedAt`;
+5. reread the complete current 16-table PR6 set defined in section 22.4, including competing
    versions, successors, overlaps, reopen/cancel/correct/supersession state,
    ownership manifests, upstream IDs and every row class;
-5. reread the latest source-adapter and eligibility-producer authority chains and
+6. reread the latest source-adapter and eligibility-producer authority chains and
    the posting authority referenced by the write authorization; compare source
    adapter ID/version/hash, scope, operation, source systems, complete row-class
    allowlist, owner, upstream IDs, artifact, commit, configuration, policy,
    effective interval, expiry and lifecycle;
-6. reconstruct `acceptedDryRunsHash`, `sourceLineageHash` and
-   `economicSourceKey`, then query `(companyId,economicSourceKey)` and exact
-   `(dryRunId,candidateId)` before insert;
-7. construct the complete event projection and `eventHash`: use the existing row's
+7. reconstruct the accepted PR8 due-date policy ID/version/hash, `cohortHash`,
+   `boundaryHash`, `acceptedDryRunsHash`, `sourceLineageHash` and
+   `economicSourceKey`; require exact authorization/activation agreement, then query
+   `(companyId,economicSourceKey)` and exact `(dryRunId,candidateId)` before insert;
+8. construct the complete event projection including `companyTimezoneSnapshot` and
+   due-date policy triple and compute `eventHash`: use the existing row's
    persisted `occurredAt`/`createdAt`/`correlationId` when an economic key exists;
    otherwise use the single `attemptedAt` and pre-generated repository correlation;
    also query `(companyId,eventHash)`. If one persisted event
    matches every field/hash, reread its bound PR8/PR6/authority/authorization/
    activation rows, commit with zero writes and return that event's persisted
    timestamps with `replayed=true`;
-8. if the economic/candidate identity exists with different content, or any
-   identity points to different scope/content, classify one deterministic conflict,
-   roll back with zero event/canonical/audit/operation writes, and pass only the
-   repository-derived inert denial descriptor to algorithm C;
-9. otherwise construct and insert exactly one `ActualReceivableEligibleV1` using a
+9. if the economic/candidate identity exists with different content, including
+   timezone or due-policy drift, or any identity points to different scope/content,
+   construct the exact registered `ConflictObservationV1`, roll back with zero
+   event/canonical/audit/operation writes, and pass only its branded inert denial
+   descriptor to algorithm C;
+10. otherwise construct and insert exactly one `ActualReceivableEligibleV1` using a
    pre-generated repository UUID and `occurredAt = createdAt = attemptedAt`;
-10. reread the event plus every referenced PR8, PR6, source/producer authority,
+11. reread the event plus PR5 timezone and every referenced PR8, PR6,
+    source/producer authority,
     authorization, activation and boundary row; recompute every exact field, pair,
     fingerprint and hash from persisted state, and require exactly one event for the
     economic key and exactly one for the run/candidate pair;
-11. commit only on byte-exact equality and return the persisted row. Any insert,
+12. commit only on byte-exact equality and return the persisted row. Any insert,
     trigger, reread or reconstruction failure rolls back to zero writes.
 
 Algorithm A never reads PR7 forecast, never writes canonical, settlement, legacy or
 `app_data` data, and cannot create an event from an unaccepted pair. Its exact replay
-is a no-op; a due-date, amount, policy or authority change retains the same economic
-key and becomes conflict rather than a second event.
+is a no-op only after current predicate/timezone/authority validation; a due-date,
+amount, due-policy ID/version/hash, timezone or authority change retains the same
+economic key and becomes conflict rather than a second event. With no prior event,
+missing/invalid/unavailable PR5 timezone produces no row; with a prior event it is
+`COMPANY_TIMEZONE_DRIFT` and exact replay is forbidden until the authority matches.
 
 ### Algorithm B — PR9b canonical posting
 
@@ -1693,35 +2040,43 @@ Inside a separate repository-owned `BEGIN IMMEDIATE`:
 1. capture and validate the single `attemptedAt` as above;
 2. reread the event by exact ID/company/branch and recompute its `economicSourceKey`,
    `eventHash` and `sourceLineageHash`;
-3. repeat the full PR8 accepted-pair/run/candidate/seal/reconciliation reread and
-   the full current PR6 16-table lifecycle/ownership/upstream-row reread from
-   algorithm A; no event-time decision is trusted;
-4. reread latest source, producer and posting authority chains, the exact write
+3. reread fresh PR5 company authority, require one valid IANA timezone and compare it
+   byte-exactly with `event.companyTimezoneSnapshot`; null, invalid, unavailable or
+   changed timezone is `COMPANY_TIMEZONE_DRIFT` before replay or DML;
+4. repeat the exact `AcceptedPr8EvidencePredicateV1` evaluation—including
+   `diagnosticOnly = true`, both write flags false, zero blockers/deltas, exact
+   accepted hashes/pair and freshness—and the full current PR6 16-table
+   lifecycle/ownership/upstream-row reread from Algorithm A; no event-time decision
+   is trusted;
+5. reread latest source, producer and posting authority chains, the exact write
    authorization and its primary-effect/denial permissions, activation and boundary;
    validate scope, hashes, source row classes, artifacts, policies, effective
-   intervals, accepted pairs and current lifecycle using `attemptedAt`;
-5. reconstruct the mapping, idempotency key, command fingerprint and prospective
+   intervals, accepted pairs, due-date policy ID/version/hash, cohort/boundary
+   envelopes and current lifecycle using `attemptedAt`;
+6. reconstruct the mapping using only `event.companyTimezoneSnapshot`, derive
+   `CanonicalPostingIdempotencyKeyV1`, recompute command fingerprint and prospective
    canonical row; query event, economic source, idempotency, canonical external ID,
    operation and audit identities before DML;
-6. if a prior operation, canonical row and audit row all exist and every persisted
+7. if a prior operation, canonical row and audit row all exist and every persisted
    field plus canonical/audit/operation/result fingerprint is exact, commit with zero
    writes and return the original IDs/timestamps with `replayed=true`;
-7. on missing companion rows, changed content, source/policy/authority drift or any
-   non-exact identity collision, classify a deterministic conflict, roll back all
-   primary effects, then invoke algorithm C with the inert denial descriptor;
-8. otherwise insert one direct-`posted` canonical receivable with a pre-generated
+8. on missing companion rows, changed content, source/policy/timezone/authority drift
+   or any non-exact identity collision, construct the exact registered
+   `ConflictObservationV1`, roll back all primary effects, then invoke Algorithm C
+   with its branded inert denial descriptor;
+9. otherwise insert one direct-`posted` canonical receivable with a pre-generated
    repository ID and `postedAt = createdAt = updatedAt = attemptedAt`;
-9. compute the fingerprint of the persisted canonical projection, then insert one
+10. compute the fingerprint of the persisted canonical projection, then insert one
    operation seal using pre-generated operation/audit IDs, exact source-adapter and
-   accepted-pair bindings, `createdAt = attemptedAt`, and the prospective audit and
-   result fingerprints;
-10. insert one repository-derived audit event with `occurredAt = createdAt =
+    accepted-pair/due-policy bindings, `createdAt = attemptedAt`, and the prospective
+    audit and result fingerprints;
+11. insert one repository-derived audit event with `occurredAt = createdAt =
     attemptedAt`; the audit-side scope/binding trigger must accept it;
-11. reread the canonical, operation and audit rows and every event, PR8, PR6,
+12. reread the canonical, operation and audit rows and every event, PR5, PR8, PR6,
     authority, authorization, activation and boundary reference; recompute
     `canonicalReceivableFingerprint`, `auditPayloadFingerprint`,
     `auditEventFingerprint` and `resultHash` from persisted state;
-12. commit only on byte-exact equality. Audit insert/trigger failure, missing or
+13. commit only on byte-exact equality. Audit insert/trigger failure, missing or
     extra rows, ignored DML, fingerprint mismatch or reread failure rolls back the
     receivable, operation and audit together.
 
@@ -1729,14 +2084,17 @@ Inside a separate repository-owned `BEGIN IMMEDIATE`:
 
 Algorithm C runs only after A or B has rolled back and cannot share their
 transaction. It receives a frozen repository-derived denial descriptor, never a
-caller-selected table/type/fingerprint. In a new repository-owned `BEGIN IMMEDIATE`
+caller-selected table/type/projection/fingerprint. In a new repository-owned `BEGIN IMMEDIATE`
 it captures its own single `attemptedAt`, rereads the exact write-authorization
 record and `denialEvidenceTable`/`denialEvidencePermission`, and rereads the bound
 source/posting authority, activation, scope and immutable denial identities/hashes.
 The permission is evidence-only: it may remain inspectable when the primary status
 caused the denial, but cannot authorize any primary-effect table or success path.
 
-The repository recomputes `conflictHash`, returns an exact existing conflict as a
+The repository validates the unexported descriptor brand, reconstructs the exact
+registered expected and observed projections from persisted state, recomputes
+`expectedFingerprint`, `observedFingerprint`, `conflictObservationJson`,
+`conflictObservationHash` and `conflictHash`, returns an exact existing conflict as a
 no-op, or inserts exactly one conflict with pre-generated ID and `detectedAt =
 createdAt = attemptedAt`; it then rereads and recomputes the persisted row before
 commit. No canonical, event, operation, audit, settlement, PR6/PR8, legacy or
@@ -1784,6 +2142,8 @@ CLI, frontend and startup business execution remain unchanged.
 - exact composite source-adapter parent/FKs and audit `(id,companyId,branchId)` FK;
 - audit-side trigger rejects wrong scope, correlation, aggregate, actor, authority,
   event type/identity, payload or fingerprint and accepts only the exact operation;
+- wrong `eventType` cannot bypass the audit trigger; one audit ID referenced by
+  multiple incompatible operations is rejected by uniqueness and trigger checks;
 - forced failure at every DDL/registration stage leaves zero PR9 objects/row;
 - partial, competing, wrong-version and registered-weakened schemas fail closed;
 - repeated valid startup preserves every migration timestamp and creates no WAL;
@@ -1799,6 +2159,11 @@ CLI, frontend and startup business execution remain unchanged.
 - exact UTF-8 byte fixtures and SHA-256 outputs cover every section 22 envelope,
   null versus omission, escaping, array order, duplicate pair rejection and safe
   integer boundaries;
+- cohort logical-array permutations normalize identically; duplicates reject;
+  boundary start/end/timezone mutations and every idempotency member mutate their
+  exact hashes; stored JSON text is never hashed in place of logical arrays;
+- every `ConflictObservationV1` projection has cross-implementation canonical-byte
+  and SHA-256 fixtures, null-rule tests and one-field mutation tests;
 - gross basis and due-date rules match the approved policy exactly.
 
 ### Authority and activation
@@ -1819,10 +2184,19 @@ CLI, frontend and startup business execution remain unchanged.
 
 - only an accepted, sealed, current, blocker-free PR8 candidate can emit;
 - fixture/unaccepted/stale/unsealed/blocked candidate denies;
+- the exact PR8 predicate accepts `diagnosticOnly=true`; it rejects
+  `diagnosticOnly=false`, `canonicalWriteAuthorized=true`,
+  `productionActivationAuthorized=true`, any blocker, incomplete seal, any non-zero
+  unexplained net/VAT/gross delta, hash/pair mismatch or stale evidence;
 - every PR6 row/version/hash and zero-delta reconciliation is current;
 - PR7/app_data fallback is structurally absent;
 - economic identity is stable across policy/due/amount changes; exact replay creates
   no second event and changed source/policy/due/amount creates one conflict;
+- missing/mixed/mutated due-date policy ID/version/hash rejects; changing version or
+  hash under the same economic key produces `DUE_DATE_POLICY_DRIFT` and never a
+  second event;
+- PR5 timezone null/invalid/unavailable rejects event creation; the valid locked
+  timezone is stored as `companyTimezoneSnapshot` and covered by `eventHash`;
 - algorithm A rereads all PR8/PR6/source/producer/authorization/activation rows after
   `BEGIN IMMEDIATE`, uses one clock value and rereads the inserted event before commit;
 - event clock throw/invalid/out-of-range/regression rolls back; replay returns only
@@ -1836,16 +2210,24 @@ CLI, frontend and startup business execution remain unchanged.
 - algorithm B repeats every PR8/PR6/authority decision after lock and executes no
   callback/getter/hook/clock/ID generator after the single `attemptedAt` read;
 - source reopen/cancel/correct/supersession and overlapping coverage deny;
+- Algorithm B applies the identical exact PR8 predicate used by Algorithm A;
+- timezone change between A and B is `COMPANY_TIMEZONE_DRIFT`; even an otherwise
+  exact replay is denied, and canonical mapping never substitutes the new timezone;
 - exact replay writes nothing; changed replay writes zero canonical rows and records
   only the approved conflict evidence;
 - revocation/expiry between planning and lock denies;
 - forced failure at receivable, audit, operation and reread stages rolls back all;
 - wrong audit company/branch/correlation/aggregate/actor/event/payload and deliberate
   audit-fingerprint mismatch each roll back canonical and operation rows;
+- wrong audit event type is tested specifically against trigger activation by
+  referenced audit ID, not merely caught by repository reread;
 - primary-effect authorization cannot write the conflict table; denial permission
   cannot write any primary-effect table; algorithm C performs no business write;
 - conflict evidence permission/scope/hash failure opens the circuit while leaving
   the denied primary effect at zero rows; repeat conflict deduplicates;
+- every registered conflict type reconstructs its exact expected/observed
+  projections; caller-selected type/projection/hash rejects, same observation
+  deduplicates and any semantic projection mutation produces a new immutable hash;
 - posting/conflict clock throw/invalid/out-of-range/regression rolls back and exact
   posting replay returns original persisted timestamps;
 - persisted-row mutation/ignore/extra-row fault injection is detected;
@@ -1859,6 +2241,12 @@ CLI, frontend and startup business execution remain unchanged.
   `CANONICAL_POSTING_CONCURRENT_CONFLICT` with zero automatic retries;
 - concurrent algorithm-A producers yield one event; concurrent algorithm-B posters
   yield one canonical/operation/audit set; conflict writers yield one hash row;
+- future authorization/activation expiry is excluded from the clock floor; a lower
+  prior operational timestamp permits progress, same-millisecond equality succeeds,
+  and a value below the exact operational floor rejects;
+- clock throw, missing/non-integer/unsafe/out-of-range return and attempted second
+  `repositoryClock.readUtcMilliseconds()` invocation each fail closed; replay returns
+  only persisted timestamps;
 - limit boundary tests cover 30/minute, 100/run, 262144 bytes, depth 24, 10000 nodes,
   15-minute freshness, five-second timeout and storage/circuit thresholds.
 
@@ -1874,6 +2262,18 @@ CLI, frontend and startup business execution remain unchanged.
 
 ### Mandatory P1 remediation regressions
 
+- exact `AcceptedPr8EvidencePredicateV1` truth-table and byte-identical use by
+  D-PR9-08, Algorithms A/B and the field matrix;
+- due-date policy ID/version/hash absence, mix-and-match and mutation regressions;
+- timezone snapshot creation, invalid/unavailable authority, A-to-B drift and replay
+  after drift;
+- audit trigger bypass attempt with wrong event type and incompatible shared audit ID;
+- all twelve `ConflictObservationV1` projection, dedupe, PII/secret rejection and
+  cross-implementation fixture cases;
+- future validity endpoints excluded from the monotonic floor, operational
+  regression/equality policy and exactly-one repository clock call;
+- cohort ordering/duplicate rejection, boundary normalization/null-end rules and
+  idempotency baseline plus every-field mutation fixtures;
 - revoked source adapter and latest-chain source-adapter supersession deny after
   lock; ownership-manifest/upstream-row-class mismatch denies;
 - concurrent event creation for one `economicSourceKey` commits exactly one event;

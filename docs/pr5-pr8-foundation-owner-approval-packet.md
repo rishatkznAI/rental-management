@@ -24,13 +24,18 @@ Missing information remains `UNDECIDED`.
 
 The owner decisions below were explicitly supplied by Rishat. The initial decision
 set was recorded at `2026-07-24T08:30:17Z`; the exact foundation-only deployment
-approval was recorded at `2026-07-24T12:00:08Z`. This record changes approval state
-only; it performs no deployment, artifact publication, Railway change, production
-operation, migration, integration activation or PR9 work.
+approval was recorded at `2026-07-24T12:00:08Z`. That approval was exercised by
+deployment `de3fa106-491a-4ddc-896d-a0f650626dc5` and is no longer reusable. The
+application was rolled back to pinned PR3 deployment
+`0eec88f4-2338-4352-abc5-17b030aa6583`. The current incident and remediation
+evidence is recorded in
+`docs/pr5-pr8-foundation-deployment-incident-2026-07-25.md`.
 
 Current authorization state:
 
-`foundationDeploymentAuthorized = TRUE`
+`foundationDeploymentPerformed = TRUE`
+
+`foundationDeploymentAuthorized = FALSE`
 
 `productionActivationAuthorized = FALSE`
 
@@ -38,10 +43,11 @@ Current authorization state:
 
 ## 2. Backup custody decisions
 
-Technical context: the coherent encrypted off-production-volume artifact and its
-manifest are now in approved private Google Drive custody outside Railway and the
-local workstation. An independent download, checksum, decrypt and SQLite integrity
-verification passed; the temporary plaintext was deleted.
+Technical context: the `20260724T045252Z` pre-deployment artifact remains in
+approved private Google Drive custody and passed independent verification. The
+current post-rollback artifact `20260725T121525Z` is encrypted and locally
+restricted; checksum, decrypt, SQLite integrity, migration registry and zero-row
+verification passed, but durable off-host custody has not yet been recorded.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
@@ -67,6 +73,25 @@ Decision record:
 `backupResponsibleOwnerAccepted = TRUE`
 
 `backupCustodyApproved = TRUE`
+
+`postRollbackBackupCaptured = TRUE`
+
+`postRollbackBackupDurableCustody = FALSE`
+
+Post-rollback reference:
+`local-restricted://rentCore-production-backups/20260725T121525Z/app.sqlite.coherent-20260725T121525Z.sqlite.age`.
+The encrypted SHA-256 is
+`6a12d65030cd183b0ee00beb899d2ea56e9ea0c8b8a86af95ec73bd0c3b5bd61`;
+manifest SHA-256 is
+`43993962d18d95730e306ad76b54f1f4f53e72a5d120d38ac6f617c5c5ac22bf`;
+restore-evidence SHA-256 is
+`1bf186734a9e686b3d1b26e5e1b107f925a78aa13b5542c1766f80c21860fe11`;
+and verified plaintext SHA-256 is
+`104a9436fcc625dd6eedaba4fe1d36b91984308518e276234b51e4ab5839ce0a`.
+The restored image returned integrity/quick `ok`, FK 0, the exact seven-row
+registry and zero PR5–PR8/canonical/settlement business rows. Plaintext was
+deleted after verification. These technical results do not substitute for durable
+custody approval.
 
 ## 3. Restore drill acceptance decisions
 
@@ -151,7 +176,11 @@ Decision record:
 The plan presented for approval is exactly
 `pr5-pr8-foundation-post-deployment-smoke-v1`. Its deployment, runtime health,
 database integrity, migration registry, PR5, PR6, PR7, PR8 and canonical
-read/write safety checks remain defined in the merged readiness evidence.
+read/write safety checks remain defined in the merged readiness evidence. The plan
+was executed after foundation deployment, but its old single-vantage ingress rule
+classified an operator-path TCP timeout as P1 and triggered rollback. Review
+evidence later showed the same timeout after PR3 rollback, no corresponding
+Railway request logs, and six independent external probes returning `/health` 200.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
@@ -169,6 +198,13 @@ Decision record:
 - Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
 `postDeploymentSmokeApproved = FALSE`
+
+The revised smoke policy is not yet approved. It classifies one operator-path
+DNS/TCP/TLS timeout as `INCONCLUSIVE_PROBE_PATH` and requires multi-vantage
+external probes plus Railway edge/request-log correlation before declaring an
+application ingress failure. Fail-closed rollback remains mandatory when
+independent evidence identifies an unhealthy runtime. A future retry requires a
+new named-owner approval of that policy and the complete revised smoke plan.
 
 ## 7. Secret-rotation deferral boundary
 
@@ -201,7 +237,8 @@ These decisions are independent. Approval of one row must not change another row
 | Decision field | Status | Current authorization | Required scope |
 |---|---|---|---|
 | `artifactApprovalDecision` | `APPROVED` | `pinnedArtifactApproved = TRUE` | exact source and digest are approved under the immutable private GHCR reference only |
-| `foundationDeploymentDecision` | `APPROVED` | `foundationDeploymentAuthorized = TRUE` | deploy only the exact approved PR5–PR8 foundation artifact and immediately follow the approved smoke plan; no activation authority is implied |
+| `historicalFoundationDeploymentDecision` | `APPROVED` | `foundationDeploymentPerformed = TRUE` | the `2026-07-24T12:00:08Z` approval was exercised by deployment `de3fa106-491a-4ddc-896d-a0f650626dc5` and cannot be reused |
+| `foundationRetryDecision` | `UNDECIDED` | `foundationDeploymentAuthorized = FALSE` | no retry may occur until the incident/remediation conditions are independently accepted and a new explicit authorization is recorded |
 | `productionActivationDecision` | `REJECTED` | `productionActivationAuthorized = FALSE` | business/read/write/integration activation remains forbidden |
 | `pr9ImplementationDecision` | `REJECTED` | `pr9ImplementationAuthorized = FALSE` | PR9 implementation remains forbidden and is not implied by any foundation decision |
 
@@ -219,11 +256,16 @@ Final release decision record:
 - Approved smoke plan: `pr5-pr8-foundation-post-deployment-smoke-v1`
 - Durable decision reference: `explicit owner instruction recorded in this approval packet update`
 
-The effective state is:
+The historical final release record above remains immutable evidence of the
+consumed approval. The effective current state is:
 
-`FOUNDATION_DEPLOYMENT_READY`
+`FOUNDATION_REMEDIATION_REQUIRED`
 
-`foundationDeploymentAuthorized = TRUE`
+`foundationDeploymentPerformed = TRUE`
+
+`foundationRetryDecision = UNDECIDED`
+
+`foundationDeploymentAuthorized = FALSE`
 
 `productionActivationAuthorized = FALSE`
 
@@ -247,15 +289,16 @@ The foundation approval does not alter any excluded authority:
 
 `gsmIntegrationActivationAuthorized = FALSE`
 
-## 9. Exact next deployment step
+## 9. Exact next permitted step
 
-In a separately executed production change, deploy the already published immutable
-image
-`ghcr.io/rishatkznai/rental-management@sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
-to the existing Railway `rental-management` production service without rebuilding,
-changing variables/flags or activating integrations. Immediately execute
-`pr5-pr8-foundation-post-deployment-smoke-v1` under its documented P0/P1 stop and
-rollback rules. This packet update performs no deployment.
+Do not retry deployment. Keep the Railway service source disconnected while all
+seven conditions in
+`docs/pr5-pr8-foundation-deployment-incident-2026-07-25.md` section 10 are
+completed and independently accepted. They require current durable backup custody
+and verification; incident, rollback and no-source approval; the new shadow
+timestamp baseline; multi-vantage ingress and Railway-log evidence; immediate
+pre-change config/flag/count reconfirmation; and a new explicit authorization bound
+to the exact digest, backup, change window and revised stop/rollback rules.
 
-Production activation and PR9 remain `REJECTED`; they are not prerequisites to, and
-cannot be implied by, the current foundation-only deployment authorization.
+Production activation and PR9 remain `REJECTED`; they cannot be implied by any
+future foundation retry decision.

@@ -2,20 +2,22 @@
 
 ## 1. Status
 
-**Status:** `FOUNDATION_DEPLOYMENT_READY`
+**Status:** `FOUNDATION_REMEDIATION_REQUIRED`
 
 **Evaluated:** `2026-07-22`; cleanup and immutable candidate evidence independently
 verified `2026-07-23`; coherent backup, restore drill, storage calculation and
 security-exposure review updated `2026-07-24`; disabled-integration execution
 audit completed `2026-07-24T05:52:47Z`; immutable GHCR publication independently
 verified `2026-07-24T08:54:25Z`; scoped owner deployment approval recorded
-`2026-07-24T12:00:08Z`
+`2026-07-24T12:00:08Z`; deployment, rollback and remediation recorded
+`2026-07-25`
 
 **Repository baseline:** `1d59992315f1b7f4ff2d370fc17345a459ac52e3`
 
-**Foundation deployment performed:** `NO`
+**Foundation deployment performed:** `YES`
 
-**Foundation deployment authorized:** `YES`
+**Foundation deployment authorized:** `NO`; the prior approval was exercised and
+cannot be reused
 
 **Production activation authorized:** `NO`
 
@@ -24,18 +26,23 @@ verified `2026-07-24T08:54:25Z`; scoped owner deployment approval recorded
 PR #223 reviewed head `1a5dfee9dcd42f28b189017361a3223aeef9d25c`
 was independently reconfirmed and squash-merged as
 `1d59992315f1b7f4ff2d370fc17345a459ac52e3` on
-`2026-07-22T11:26:06Z`. The public-ingress blocker is closed, the migration,
-repeated-startup, failure-matrix and previous-code compatibility evidence remains
-successful, and no runtime source changed after the #221 remediation.
+`2026-07-22T11:26:06Z`. That pre-deployment evidence remains historical. The
+foundation deployment `de3fa106-491a-4ddc-896d-a0f650626dc5` ran and registered
+PR5–PR8 before application rollback to pinned PR3 deployment
+`0eec88f4-2338-4352-abc5-17b030aa6583`. The authoritative incident record is
+`docs/pr5-pr8-foundation-deployment-incident-2026-07-25.md`.
 
 The technical restore drill is complete, reproducible and owner-accepted. The 30%
 minimum reserve, 35% alert threshold and named operations owner are approved. The
 exact immutable foundation candidate is now published unchanged to a private GHCR
 package and its remote manifest digest is independently verified and approved. The
-encrypted current backup now has independently verified private Google Drive
-custody, the smoke-evidence retention policy is approved and Rishat is the security
-owner. Rishat approved the exact foundation-only deployment scope at
-`2026-07-24T12:00:08Z`. Potential prior secret exposure is not
+historical pre-deployment backup has independently verified private Google Drive
+custody; the fresh post-rollback backup is locally restricted and restore-verified
+but still requires durable off-host custody. The smoke-evidence retention policy
+is approved and Rishat is the security owner. Rishat approved the exact
+foundation-only deployment scope at
+`2026-07-24T12:00:08Z`; that authorization was exercised and is no longer reusable.
+Potential prior secret exposure is not
 remediated, but rotation is deferred under a foundation-only
 scoped owner risk acceptance. The owner's clarified boundary permits the existing
 in-process environment lookups while both integrations fail closed. The reviewed
@@ -45,13 +52,15 @@ and does not resolve the exposure.
 
 ## 2. Scope and fail-closed boundary
 
-This gate evaluates only operational evidence needed before a possible future
-PR5–PR8 foundation deployment. It uses repository/GitHub metadata, read-only
+This gate originally evaluated operational evidence needed before the first
+PR5–PR8 foundation deployment. It now also records the remediation boundary after
+the performed deployment and rollback. It uses repository/GitHub metadata, read-only
 Railway metadata, read-only volume listings, read-only SQLite inspection of
 existing historical backup files, and the already reviewed local migration/restore
 evidence.
 
-This work did **not** deploy or restart production; change Railway configuration,
+The pre-deployment work through `2026-07-24` did **not** deploy or restart
+production; change Railway configuration,
 domains, variables or network; write a backup file on the production volume;
 restore production; run a production initializer or migration; bootstrap identity;
 populate PR6; calculate PR7; execute PR8; enable canonical/forecast reads; create
@@ -71,35 +80,38 @@ on one historical backup and the later exact manual cleanup. The incident change
 no live database, backup payload or business row; the two sidecars are now absent
 and the strict post-cleanup production-volume baseline has been restored.
 
-The prompt requesting this evaluation is authority to inspect and document, not an
-owner, release, operations, database, security or product approval record. Missing
-or ambiguous approval remains deny.
+On `2026-07-25`, separately authorized operations deployed the exact foundation
+artifact, rolled back the application artifact, disconnected the GHCR source with
+deploys skipped, and captured a coherent encrypted post-rollback backup. No
+business activation occurred. The current remediation record authorizes no retry;
+missing or ambiguous retry approval remains deny.
 
 ## 3. Current production baseline
 
-Read-only baseline evidence was captured on `2026-07-22`. Cleanup-specific
-verification on `2026-07-23`, backup-specific before/after verification and the
-names-only secret-exposure audit on `2026-07-24` reconfirmed the protected volume,
-database-file, runtime and configuration rows below:
+The pre-deployment baseline was captured on `2026-07-22`–`2026-07-24`. The
+authoritative current baseline is the post-rollback evidence captured on
+`2026-07-25`:
 
 | Item | Value |
 |---|---|
 | Project / environment / service | `cooperative-vitality` / `production` / `rental-management` |
-| Deployment / instance | `b74623ec-d20d-4c50-ab40-0e0a494c5bc5` / `54afd747-1bd1-4069-9320-31e03db1f5ea`; running |
+| Deployment / instance | `0eec88f4-2338-4352-abc5-17b030aa6583` / `76d8ee34-7c31-49b7-ace3-1106f9c938cf`; `SUCCESS/RUNNING` |
 | Deployed source | `6a38582f5f90b85734884b6b12ad8e306b24619e` |
 | Deployed image | `sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650` |
 | Runtime / build | Node `v20.18.1`; npm `10.8.2`; Nixpacks; runtime V2 |
 | Placement | `europe-west4-drams3a`; one replica; `/data` mount |
 | Database | `/data/app.sqlite`; DB `11,927,552`, WAL `7,453,112`, SHM `32,768` bytes |
-| Schema/data boundary | shadow v2 plus PR1/PR2 v1 only; PR5–PR8 not deployed; all eight canonical/settlement tables empty |
-| Public/internal health | prior accepted `2026-07-22` evidence: `200` for `/health` and `/api/version`; public GET/HEAD evidence applies to ingress readiness only |
+| Railway source | `repo=null`, `image=null`; cleanup patch `5b037962-291c-4528-b2e8-1b4dd77d18c5` committed with deploys skipped; no automatic deploy source |
+| Schema/data boundary | exact seven-row shadow/PR1–PR8 registry; PR5 catalog 1/11; every PR5–PR8 and canonical/settlement business count 0 |
+| Public/internal health | internal `/health` and `/api/version` 200 after source cleanup; a single operator public timeout is inconclusive under the revised multi-vantage policy |
 | Cleanup runtime/config (`2026-07-23`) | deployment and replica unchanged; startup `2026-07-15T07:09:34.047Z`; canonical raw 33-variable comparison fingerprint `0f23a29e44e7729e37c2e7420619db16980bb3e640d15352babf7dfc97d44816` unchanged |
-| Backup verification | deployment/source/image/instance and volume listing unchanged; DB/WAL/SHM inode, size, mtime and SHA-256 exact before/after; no Railway mutation command executed |
+| Backup verification | post-rollback backup `20260725T121525Z`; plaintext SHA-256 `104a9436...`; encrypted SHA-256 `6a12d650...`; integrity/quick `ok`, FK 0, source DB/WAL/SHM exact before/after; fresh durable off-host custody pending |
 | Secret audit verification (`2026-07-24T05:23:10Z`) | 33 variable names; sorted name-inventory SHA-256 `8f770e3a88235228693f7dcd106ed01f33d734608ea46c9caac36cd0eea2cc4f`; no variable-set command, restart or deployment |
 | Disabled-integration audit (`2026-07-24T05:52:47Z`) | read only `BOT_DISABLED=true`, `GSM_ENABLED=false`, deployment `b74623ec-d20d-4c50-ab40-0e0a494c5bc5` and source `6a38582f5f90b85734884b6b12ad8e306b24619e`; no token value requested; focused fail-closed/no-leak tests passed |
 
-The active deployment, source and database boundary are evidence inputs. They were
-not changed by this gate.
+The old rows below remain historical pre-deployment evidence where explicitly
+dated. Current runtime/database assertions must use the incident record and this
+post-rollback baseline.
 
 ## 4. Backup closure
 
@@ -166,6 +178,30 @@ approved/durable definition:
 `backupResponsibleOwnerAccepted = TRUE`.
 
 `backupCustodyApproved = TRUE`.
+
+### 4.1A Post-rollback coherent capture
+
+At `2026-07-25T12:15:52.022Z`–`12:15:52.205Z`, after the pinned
+rollback and source disconnect, `better-sqlite3` created a coherent online backup
+from the live database opened read-only/query-only. Source DB/WAL/SHM hashes,
+sizes and mtimes were exact before and after capture.
+
+| Evidence | Exact value |
+|---|---|
+| Source deployment / SHA / image | `0eec88f4-2338-4352-abc5-17b030aa6583` / `6a38582f5f90b85734884b6b12ad8e306b24619e` / `sha256:c27f43d5520f63415203e0cafdb23c07d4d93ec3d93e0236af4917dfbcae9650` |
+| Local restricted reference | `local-restricted://rentCore-production-backups/20260725T121525Z/app.sqlite.coherent-20260725T121525Z.sqlite.age` |
+| Plaintext identity | `11,927,552` bytes; SHA-256 `104a9436fcc625dd6eedaba4fe1d36b91984308518e276234b51e4ab5839ce0a`; deleted after verification |
+| Encrypted identity | `11,930,648` bytes; SHA-256 `6a12d65030cd183b0ee00beb899d2ea56e9ea0c8b8a86af95ec73bd0c3b5bd61` |
+| Manifest | SHA-256 `43993962d18d95730e306ad76b54f1f4f53e72a5d120d38ac6f617c5c5ac22bf` |
+| Restore evidence | SHA-256 `1bf186734a9e686b3d1b26e5e1b107f925a78aa13b5542c1766f80c21860fe11`; plaintext checksum exact; integrity/quick `ok`; FK 0 |
+| Registry/counts | exact seven migrations; shadow timestamp `2026-07-25 11:44:20`; catalog 1/11; all PR5–PR8 and canonical/settlement business totals 0 |
+
+This fresh backup is encrypted and locally restricted but does not yet have
+independently verified durable off-host custody. Stable destination IDs,
+independent download/decrypt verification, retention and owner acceptance are
+required before a retry can be approved. The earlier `20260724T045252Z` Drive
+artifact remains valid historical pre-deployment evidence but is not the current
+post-rollback baseline.
 
 ### 4.2 Mechanism
 
@@ -585,15 +621,15 @@ docs-only gate.
 |---|---|---|---|
 | Deployment identity | Railway deployment metadata plus `/api/version` | exact approved source SHA, deployment ID and immutable image digest; no branch or tag substitution | P0 stop; signed release capture; release owner |
 | Deployment placement | metadata for runtime V2, Node/npm, replica, region and `/data` mount | approved Node `v20.18.1`, npm `10.8.2`, one approved replica in `europe-west4-drams3a` | P0/P1 stop; metadata JSON; operations owner |
-| Runtime health | internal and public GET/HEAD `/health` and `/api/version`; startup/log review | independent HTTP 200, one deployment/version marker, valid TLS, no crash/restart loop or migration error | P1 stop; timestamped probes/log extract; operations owner |
+| Runtime health | internal probes plus multi-vantage external GET/HEAD `/health` and `/api/version`, correlated to Railway edge/request logs and startup logs | internal HTTP 200; independent external regions agree on TLS/HTTP/deployment marker; no crash/restart loop or migration error; one uncorrelated operator timeout is inconclusive | P1 stop only on independently correlated runtime/edge failure; otherwise investigate the probe path without rollback; operations owner |
 | Auth boundary | unauthenticated `/api/auth/me` and protected-route probes | expected 401/403; never 200 or secret-bearing output | P0 stop; redacted transcript; security owner |
 | Bot disabled boundary | read only the non-secret `BOT_DISABLED` flag; inspect startup and bot transport logs without reading or printing `BOT_TOKEN`; probe disabled bot entry points without a token | exact `BOT_DISABLED=true`; in-process lookup permitted; no polling, webhook registration/watchdog, outbound message, bot worker, external token use or token-bearing output; `botIntegrationActivationAuthorized=FALSE` | P0 stop; redacted flag/log/probe transcript; security/operations owners |
 | GSM disabled boundary | read only the non-secret `GSM_ENABLED` flag; inspect gateway/route state without reading or printing `GSM_INGEST_TOKEN` or sending a packet | exact `GSM_ENABLED=false`; in-process lookup permitted; HTTP ingest fails `503 GSM_DISABLED` before token comparison; no TCP gateway, worker, synthetic packet, external token use or token-bearing output; `gsmIntegrationActivationAuthorized=FALSE` | P0 stop; redacted flag/log/probe transcript; security/operations owners |
 | Deferred-secret clarified boundary | static/runtime evidence for disabled integration initialization | no operator/tool value access, mutation, disclosure, external authentication or integration/business action; ordinary in-process lookup is allowed; current candidate passes while both disable flags remain exact | P0 stop; source/runtime trace; security/release owners |
 | DB integrity | read-only/query-only `foreign_key_check`, `integrity_check`, `quick_check` | 0 FK rows; `ok`; `ok`; no checkpoint, vacuum or write | P0 stop; redacted transcript; database owner |
 | DB schema/count conservation | approved normalized `sqlite_master` fingerprint plus before/after count allow-list | exact approved schema hash; all 63 legacy `app_data` collections conserved; no unauthorized business delta | P0 stop; hash/count record; database/release owners |
-| Migration registry | ordered read of `sql_shadow_schema_migrations` | exact seven-row ordered set in section 7.1; original shadow/PR1/PR2 timestamps retained and PR5–PR8 each present once with approved timestamps | P0/P1 stop; registry CSV/hash; release owner |
-| Repeated-start evidence | only under a separately approved controlled restart window | registry/schema/counts unchanged and exact `documents_gantt_shadow_indexes.applied_at` preserved | P1 stop; signed before/after diff; operations owner |
+| Migration registry | ordered read of `sql_shadow_schema_migrations` | exact seven-row post-rollback set; `documents_gantt_shadow_indexes.applied_at` equals `2026-07-25 11:44:20`; PR1/PR2 and PR5–PR8 timestamps match the incident baseline | P0/P1 stop; registry CSV/hash; release owner |
+| Repeated-start evidence | only under a separately approved controlled restart window | registry/schema/counts unchanged relative to the `20260725T121525Z` baseline and exact shadow `applied_at = 2026-07-25 11:44:20` preserved | P1 stop; signed before/after diff; operations owner |
 | PR5 identity | read-only roots, memberships, branch access, roles, grants, audit, bootstrap and resolver checks | catalog 1/11 only; company/branch/authority/bootstrap rows `0`; trusted resolver `null` | P0 stop; count JSON; security/identity owner |
 | PR6 source | read-only counts of all 16 PR6 tables and deployed import/route/worker graph | all rows `0`; no adapter, population, route, worker or consumer | P0 stop; count/import transcript; source owner |
 | PR7 forecast | read-only counts of all 8 PR7 tables, route/resolver and import graph | all rows `0`; no calculation/run/consumer; forecast read unavailable and resolver `null` | P0 stop; count/probe transcript; finance owner |
@@ -605,10 +641,11 @@ docs-only gate.
 Approval requires one immutable plan record binding the exact artifact manifest,
 commands, evidence destination/retention, named release/operations/database/
 security/product owners, change window, P0/P1 stop rules and application-only
-rollback target. The plan, executor and independent reviewer are approved; the
-evidence destination/retention, security owner and exact foundation-only release
-authorization are now recorded. The smoke result remains pending until the
-authorized deployment is separately executed.
+rollback target. The original plan was executed after deployment
+`de3fa106-491a-4ddc-896d-a0f650626dc5`; its single-vantage ingress rule caused the
+application rollback even though independent evidence did not establish a runtime
+failure. The revised multi-vantage and Railway-log correlation policy in the
+incident record is not yet owner-approved for a retry.
 
 `postDeploymentSmokePlanDefined = TRUE`.
 
@@ -617,10 +654,12 @@ authorized deployment is separately executed.
 ## 9. Owner and release approval
 
 The owner packet names Rishat as product, release, operations, database/backup and
-security owner and records the approved durable Google Drive backup custody,
-restore drill, storage policy, smoke plan, indefinite release-record retention for
-signed/redacted smoke evidence and exact private GHCR artifact. Rishat explicitly
-approved the exact foundation-only deployment scope at `2026-07-24T12:00:08Z`.
+security owner and records the historical approval for durable Google Drive
+backup custody, restore drill, storage policy, smoke plan, indefinite
+release-record retention for signed/redacted smoke evidence and the exact private
+GHCR artifact. Rishat explicitly approved the exact foundation-only deployment
+scope at `2026-07-24T12:00:08Z`. That approval was exercised and consumed by
+deployment `de3fa106-491a-4ddc-896d-a0f650626dc5`; it cannot authorize a retry.
 No activation, bootstrap, population, calculation, dry run, canonical read/write,
 integration activation or PR9 authority is implied.
 
@@ -633,7 +672,9 @@ integration activation or PR9 authority is implied.
 | `backupDurableDestinationApproved` | `APPROVED` | Rishat approved private Google Drive custody outside Railway and the local workstation; stable folder/file IDs and exact checksums are recorded |
 | `backupResponsibleOwnerAccepted` | `TRUE` | Rishat is the responsible backup owner |
 | `backupCustodyApproved` | `TRUE` | encrypted artifact and manifest are restricted to Rishat, independently downloaded and checksum/restorability verified; identity and plaintext are not stored there |
-| `backupAvailable` | `TRUE` | current coherent encrypted artifact has approved 30-day retention and independently verified durable external custody |
+| `backupAvailable` | `TRUE` | historical pre-deployment artifact `20260724T045252Z` has approved, independently verified durable external custody |
+| `postRollbackBackupCaptured` | `TRUE` | coherent encrypted artifact `20260725T121525Z` passed exact restore, registry and zero-row verification |
+| `postRollbackBackupDurableCustody` | `FALSE` | current artifact is locally restricted; off-host upload, stable object IDs and independent custody verification remain required |
 | `restoreDrillPassed` | `TRUE` | encrypted restore, raw validation, both exact-SHA startups, candidate migration/repeat and previous-code compatibility passed reproducibly |
 | `restoreDrillOwnerAccepted` | `TRUE` | Rishat accepted the completed technical drill and is the named operations owner |
 | `storageCapacityAccepted` | `TRUE` | Rishat approved the 30% minimum reserve, 35% alert threshold and operations ownership |
@@ -650,11 +691,13 @@ integration activation or PR9 authority is implied.
 | `artifactApprovalDecision` | `APPROVED` | Rishat is the named artifact/release owner; approval is bound to the immutable GHCR reference only |
 | `postDeploymentSmokePlanDefined` | `TRUE` | complete fail-closed deployment/runtime/DB/PR5–PR8/canonical checklist and approval contract is defined |
 | `smokeEvidenceRetentionApproved` | `TRUE` | signed/redacted smoke report and checksums will be retained indefinitely in the repository release record with the deployment audit |
-| `postDeploymentSmokeApproved` | `FALSE` | plan, executor, reviewer and evidence retention are approved, but deployment-dependent checks were not run |
+| `postDeploymentSmokeApproved` | `FALSE` | the deployment checks ran, but the old single-vantage rule produced an inconclusive ingress classification and rollback; revised policy approval is pending |
 | `securityOwner` | `Rishat` | Rishat accepted security ownership for this foundation gate |
-| `ownerReleaseApprovalRecorded` | `TRUE` | Rishat recorded the separate exact foundation-only deployment approval at `2026-07-24T12:00:08Z` |
+| `ownerReleaseApprovalRecorded` | `TRUE` | the historical exact deployment approval was recorded at `2026-07-24T12:00:08Z`, exercised and consumed |
 | `productionVolumeMutationCleanup` | `COMPLETE` | exact two sidecars are absent; root listing and unchanged live/backup hashes, metadata, runtime and config independently verified |
-| `foundationDeploymentAuthorized` | `TRUE` | approved only for source `1d59992315f1b7f4ff2d370fc17345a459ac52e3`, OCI digest `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`, verified Google Drive backup and smoke plan `pr5-pr8-foundation-post-deployment-smoke-v1` |
+| `foundationDeploymentPerformed` | `TRUE` | deployment `de3fa106-491a-4ddc-896d-a0f650626dc5` ran before pinned rollback `0eec88f4-2338-4352-abc5-17b030aa6583` |
+| `foundationDeploymentDecision` | `UNDECIDED` | the prior approval was consumed; no new retry decision is recorded |
+| `foundationDeploymentAuthorized` | `FALSE` | source cleanup and documentation do not authorize another deployment |
 | `productionActivationAuthorized` | `FALSE` | explicitly outside foundation delivery |
 | `pr5BootstrapAuthorized` | `FALSE` | explicitly excluded from the owner approval |
 | `pr6SourcePopulationAuthorized` | `FALSE` | explicitly excluded from the owner approval |
@@ -679,19 +722,22 @@ integration activation or PR9 authority is implied.
 | Disabled integration flags | `PASS`; non-sensitive production reads only: `BOT_DISABLED=true`, `GSM_ENABLED=false`; deployment/source unchanged and neither token variable was requested |
 | Clarified deferred-secret condition | `PASS`; exact startup/route/gateway audit and focused tests prove permitted in-process lookups cause no external authentication, business handler, gateway listener or token-bearing output while disabled |
 | Secret-decision no-mutation check | `PASS`; no Railway variable update, restart or deployment; no integration/route/worker/gateway activation |
-| Fresh public DNS/TLS/HTTP probe | `INCONCLUSIVE`; DNS resolved but the client timed out before TLS/HTTP; no ingress mutation was attempted and no post-rotation evidence applies |
+| Foundation deployment / rollback | `RECORDED`; exact attempt, superseded first rollback, pinned rollback, migrations and current identities are recorded in the incident document |
+| Post-rollback Railway source | `PASS`; `repo=null`, `image=null`; patch `5b037962-291c-4528-b2e8-1b4dd77d18c5` committed with deploys skipped; staged diff empty; current PR3 deployment unchanged |
+| Fresh public DNS/TLS/HTTP probe | `INCONCLUSIVE_PROBE_PATH`; the operator path timed out before TCP/TLS both before and after rollback, while six independent regional probes reportedly returned `/health` 200 and no matching Railway request log was present |
 | Exact candidate context | `PASS`; `/server` exported only from `1d59992315f1b7f4ff2d370fc17345a459ac52e3`; server lockfile SHA-256 matched the manifest |
 | OCI build and repeat export | `PASS`; both `linux/amd64` exports produced manifest `sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5` and archive SHA-256 `3a7fdb95c605f5fa94e0f6c269784e469f3b73bef3143fd7e7d0e5af51a4e2f9` |
 | Final image inspection | `PASS`; source/runtime/migration/config/lock labels exact; Node `v20.18.1`, npm `10.8.2` and native `better-sqlite3` load passed without application startup |
 | Immutable GHCR publication | `PASS`; prebuilt archive pushed without rebuild; private package, exact source tag and immutable digest-qualified reference created `2026-07-24T08:54:25Z` |
 | Independent registry verification | `PASS`; separate authenticated pull returned expected digest exactly; GitHub Packages API returned matching version name/tag and `visibility=private` |
-| Durable backup custody | `PASS`; private Google Drive file IDs recorded; encrypted and manifest downloads matched exact hashes/size; decrypted plaintext matched and immutable read-only SQLite integrity/quick/FK checks passed |
+| Historical durable backup custody | `PASS`; private Google Drive file IDs for `20260724T045252Z` recorded; encrypted and manifest downloads matched exact hashes/size; decrypted plaintext matched and immutable read-only SQLite integrity/quick/FK checks passed |
+| Fresh post-rollback backup | `PASS_LOCAL`; encrypted artifact `20260725T121525Z`, manifest and restore evidence match exact checksums; integrity/quick `ok`, FK 0, seven-row registry and all protected business totals 0; durable off-host custody pending |
 | Downloaded plaintext cleanup | `PASS`; temporary plaintext and isolated copies deleted by exact path; no WAL/SHM created; age identity remained separate and was not uploaded |
 | Rollback identity read | `PASS`; exact production deployment/source/image/instance remained current at `2026-07-23T16:33:50Z` |
-| Changed-file allow-list | `PASS`; this branch changes only this document, `docs/pr5-pr8-foundation-deployment-readiness-gate.md` and `docs/pr5-pr8-foundation-owner-approval-packet.md` |
+| Changed-file allow-list | `PASS`; this branch changes only this document, `docs/pr5-pr8-foundation-deployment-readiness-gate.md`, `docs/pr5-pr8-foundation-owner-approval-packet.md` and `docs/pr5-pr8-foundation-deployment-incident-2026-07-25.md` |
 | Runtime-code diff | `NONE` |
-| Production deployment / restart / configuration change | `NONE` |
-| Production live DB, WAL, SHM, schema, registry or business-data mutation | `NONE`; exact checksums and boundaries remained unchanged |
+| Production deployment / restart / configuration change | `RECORDED`; foundation deployment and pinned application rollback occurred; the only remediation config change was clearing `source.image` with deploys skipped; variables, volume, networking, port and flags were unchanged |
+| Production live DB, WAL, SHM, schema, registry or business-data mutation | `EXPECTED_ADDITIVE_SCHEMA_ONLY`; PR5–PR8 migrations registered at `2026-07-25 11:38:35`; PR3 rollback rewrote the shadow timestamp to `2026-07-25 11:44:20`; all protected business rows remain 0 and integrity/quick/FK pass |
 | Strict post-cleanup production-volume baseline | `PASS`; exact sidecars are absent, expected root entries remain and all protected file hashes/metadata are unchanged |
 
 The temporary sidecar-file incident is closed. Its exact creation and deletion
@@ -700,26 +746,22 @@ unintended root file and the protected database/application state is unchanged.
 
 ## 12. Result and next permitted step
 
-`FOUNDATION_DEPLOYMENT_READY`.
+`FOUNDATION_REMEDIATION_REQUIRED`.
 
-There is no remaining pre-deployment readiness blocker for the exact approved
-foundation-only scope. The authorization is immutable-artifact-specific and does
-not permit a rebuild, floating branch deployment, configuration/flag change,
-bootstrap, source population, calculation, dry run, canonical read/write,
-integration activation, production activation or PR9 implementation.
+`foundationDeploymentPerformed = TRUE`.
 
-`foundationDeploymentDecision = APPROVED`.
+`foundationDeploymentDecision = UNDECIDED`.
 
-`foundationDeploymentAuthorized = TRUE`.
+`foundationDeploymentAuthorized = FALSE`.
 
-`postDeploymentSmokeApproved` remains `FALSE` because the deployment-dependent
-smoke has not run; the plan, executor, reviewer and evidence retention are approved,
-so that post-deployment state is not a missing pre-deployment decision.
-
-**Exact next deployment step:** in a separately executed production change, deploy
-the already published immutable image
-`ghcr.io/rishatkznai/rental-management@sha256:866de3a0554129168d12aeeaffd6c412fdad1ad9552885faa5c01c29bf1b7ba5`
-to the existing Railway `rental-management` production service without rebuilding,
-changing variables/flags or activating integrations; then execute
-`pr5-pr8-foundation-post-deployment-smoke-v1` under its P0/P1 stop and rollback
-rules. This docs-only task performs no deployment.
+No retry is permitted by this record. Before one explicit digest retry can be
+considered, all seven conditions in
+`docs/pr5-pr8-foundation-deployment-incident-2026-07-25.md` section 10 must be
+independently accepted: durable off-host custody and independent verification of
+the fresh post-rollback backup; approval of the incident, rollback-safe no-source
+state and exact previous-image rollback; approval of the `2026-07-25 11:44:20`
+shadow baseline; approved multi-vantage probes and Railway log correlation;
+immediate pre-change config/flag/count reconfirmation; and a new explicit owner
+authorization bound to the exact digest, backup, change window and revised smoke
+rules. The current source remains disconnected and this docs-only remediation
+authorizes no deployment, activation or PR9 work.

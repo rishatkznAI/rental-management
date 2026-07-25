@@ -37,6 +37,10 @@ Current authorization state:
 
 `foundationDeploymentAuthorized = FALSE`
 
+`foundationDeploymentRetryAuthorized = FALSE`
+
+`postRollbackBackupDurableCustody = TRUE`
+
 `productionActivationAuthorized = FALSE`
 
 `pr9ImplementationAuthorized = FALSE`
@@ -45,9 +49,9 @@ Current authorization state:
 
 Technical context: the `20260724T045252Z` pre-deployment artifact remains in
 approved private Google Drive custody and passed independent verification. The
-current post-rollback artifact `20260725T121525Z` is encrypted and locally
-restricted; checksum, decrypt, SQLite integrity, migration registry and zero-row
-verification passed, but durable off-host custody has not yet been recorded.
+current post-rollback artifact `20260725T121525Z` now also has restricted private
+Google Drive custody and passed an independent download, checksum, decrypt,
+SQLite integrity, migration registry and zero-row verification.
 
 | Decision field | Status | Required named-owner record |
 |---|---|---|
@@ -76,10 +80,13 @@ Decision record:
 
 `postRollbackBackupCaptured = TRUE`
 
-`postRollbackBackupDurableCustody = FALSE`
+`postRollbackBackupDurableCustody = TRUE`
 
-Post-rollback reference:
-`local-restricted://rentCore-production-backups/20260725T121525Z/app.sqlite.coherent-20260725T121525Z.sqlite.age`.
+Post-rollback durable reference:
+`rentcore-drive:Rentcore/20260725T121525Z/`; folder ID
+`1j8OLI_p3o7If0Mlu-zTbxFSCKWbwJ1Pk`, encrypted object ID
+`14tMB54nxClsrV3At7oeE0OAk41G3WPoX`, and manifest object ID
+`1orsj7QIiqB2lYIgiEj1zCXhbW-_9uC0r`.
 The encrypted SHA-256 is
 `6a12d65030cd183b0ee00beb899d2ea56e9ea0c8b8a86af95ec73bd0c3b5bd61`;
 manifest SHA-256 is
@@ -90,8 +97,25 @@ and verified plaintext SHA-256 is
 `104a9436fcc625dd6eedaba4fe1d36b91984308518e276234b51e4ab5839ce0a`.
 The restored image returned integrity/quick `ok`, FK 0, the exact seven-row
 registry and zero PR5–PR8/canonical/settlement business rows. Plaintext was
-deleted after verification. These technical results do not substitute for durable
-custody approval.
+deleted after verification. The existing 30-day retention approval applies
+through at least `2026-08-24T13:10:45.015Z`; deletion exceptions remain under the
+responsible backup owner. Drive reports exactly one inherited `user`/`owner`
+grant on the folder and each object, no public grant, and anonymous downloads
+redirect to Google authentication. The identity is held separately, and no
+plaintext, credentials or environment material was uploaded.
+
+Post-rollback custody decision record:
+
+- Approver name: `Rishat`
+- Accountable role: `responsible backup owner`
+- Approval/verification UTC timestamp: `2026-07-25T13:18:40Z`
+- Durable decision reference: `explicit instruction to complete the post-rollback backup custody task plus independently verified Drive object evidence recorded in this packet`
+- Independent download verification: encrypted size `11,930,648`, manifest size
+  `4,371`, plaintext size `11,927,552`; all exact SHA-256 values above matched;
+  integrity/quick `ok`; FK 0; exact seven-row registry; catalog `1/11`; PR5
+  `0/7`, PR6 `0/16`, PR7 `0/8`, PR8 `0/8`, canonical/settlement `0/8`
+- Cleanup: temporary plaintext, WAL/SHM sidecars and downloaded copies deleted;
+  the separately held age identity was neither copied nor uploaded
 
 ## 3. Restore drill acceptance decisions
 
@@ -238,7 +262,7 @@ These decisions are independent. Approval of one row must not change another row
 |---|---|---|---|
 | `artifactApprovalDecision` | `APPROVED` | `pinnedArtifactApproved = TRUE` | exact source and digest are approved under the immutable private GHCR reference only |
 | `historicalFoundationDeploymentDecision` | `APPROVED` | `foundationDeploymentPerformed = TRUE` | the `2026-07-24T12:00:08Z` approval was exercised by deployment `de3fa106-491a-4ddc-896d-a0f650626dc5` and cannot be reused |
-| `foundationRetryDecision` | `UNDECIDED` | `foundationDeploymentAuthorized = FALSE` | no retry may occur until the incident/remediation conditions are independently accepted and a new explicit authorization is recorded |
+| `foundationRetryDecision` | `UNDECIDED` | `foundationDeploymentRetryAuthorized = FALSE`; `foundationDeploymentAuthorized = FALSE` | no retry may occur until the incident/remediation conditions are independently accepted and a new explicit authorization is recorded |
 | `productionActivationDecision` | `REJECTED` | `productionActivationAuthorized = FALSE` | business/read/write/integration activation remains forbidden |
 | `pr9ImplementationDecision` | `REJECTED` | `pr9ImplementationAuthorized = FALSE` | PR9 implementation remains forbidden and is not implied by any foundation decision |
 
@@ -267,6 +291,10 @@ consumed approval. The effective current state is:
 
 `foundationDeploymentAuthorized = FALSE`
 
+`foundationDeploymentRetryAuthorized = FALSE`
+
+`postRollbackBackupDurableCustody = TRUE`
+
 `productionActivationAuthorized = FALSE`
 
 `pr9ImplementationAuthorized = FALSE`
@@ -292,11 +320,11 @@ The foundation approval does not alter any excluded authority:
 ## 9. Exact next permitted step
 
 Do not retry deployment. Keep the Railway service source disconnected while all
-seven conditions in
+five remaining conditions in
 `docs/pr5-pr8-foundation-deployment-incident-2026-07-25.md` section 10 are
-completed and independently accepted. They require current durable backup custody
-and verification; incident, rollback and no-source approval; the new shadow
-timestamp baseline; multi-vantage ingress and Railway-log evidence; immediate
+completed and independently accepted. They require incident, rollback and
+no-source approval; the new shadow timestamp baseline; multi-vantage ingress and
+Railway-log evidence; immediate
 pre-change config/flag/count reconfirmation; and a new explicit authorization bound
 to the exact digest, backup, change window and revised stop/rollback rules.
 

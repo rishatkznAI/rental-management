@@ -10,6 +10,10 @@
 
 `foundationDeploymentAuthorized = FALSE`
 
+`foundationDeploymentRetryAuthorized = FALSE`
+
+`postRollbackBackupDurableCustody = TRUE`
+
 `productionActivationAuthorized = FALSE`
 
 `pr9ImplementationAuthorized = FALSE`
@@ -48,6 +52,8 @@ artifact-safe rollback.
 | `2026-07-25 11:44:20` | The PR3 initializer rewrote the existing `documents_gantt_shadow_indexes.applied_at`; this is the accepted post-rollback baseline, not the pre-attempt timestamp. |
 | `2026-07-25T12:14:19.487Z` | Remediation patch `5b037962-291c-4528-b2e8-1b4dd77d18c5` committed with deploys skipped, setting the remaining GHCR image source to `null`. |
 | `2026-07-25T12:15:52.022Z`–`12:15:52.205Z` | Coherent post-rollback SQLite backup captured and verified without changing source DB/WAL/SHM. |
+| `2026-07-25T13:08:56.305Z`–`13:10:45.015Z` | Restricted Google Drive folder and the two allowed backup objects were created under `Rentcore/20260725T121525Z/`; no plaintext, identity, credentials or environment material was uploaded. |
+| `2026-07-25T13:18:40Z` | Independent fresh-directory download, checksum, decrypt, immutable SQLite and exact boundary verification completed; temporary plaintext, sidecars and downloaded copies were deleted. |
 
 ## 4. Rollback-safe Railway source
 
@@ -123,10 +129,36 @@ online backup. Independent decryption reproduced the plaintext SHA-256 and the
 database evidence in section 5. Both plaintext copies and their temporary
 WAL/SHM sidecars were deleted; the age identity remains separately held.
 
-The encrypted artifact is not yet recorded in independently verified durable
-off-host custody. Upload to the approved restricted destination, stable object
-IDs, independent re-download/checksum/decrypt verification, retention and owner
-acceptance remain mandatory before a retry can be authorized.
+Durable post-rollback custody completed under the existing owner-approved private
+Google Drive and 30-day retention policy:
+
+| Drive object | Path | Stable ID |
+|---|---|---|
+| Folder | `rentcore-drive:Rentcore/20260725T121525Z/` | `1j8OLI_p3o7If0Mlu-zTbxFSCKWbwJ1Pk` |
+| Encrypted backup | `rentcore-drive:Rentcore/20260725T121525Z/app.sqlite.coherent-20260725T121525Z.sqlite.age` | `14tMB54nxClsrV3At7oeE0OAk41G3WPoX` |
+| Manifest | `rentcore-drive:Rentcore/20260725T121525Z/manifest.json` | `1orsj7QIiqB2lYIgiEj1zCXhbW-_9uC0r` |
+
+Each folder/object has exactly one inherited `user`/`owner` permission and no
+public grant; anonymous object downloads redirect to Google authentication. The
+age identity remains separately held. Plaintext SQLite, identity material,
+Railway credentials and environment material are absent from the destination.
+Retention runs through at least `2026-08-24T13:10:45.015Z`; deletion exceptions
+remain controlled by the responsible backup owner.
+
+An independent download into a fresh temporary directory reproduced encrypted
+size `11,930,648` and SHA-256
+`6a12d65030cd183b0ee00beb899d2ea56e9ea0c8b8a86af95ec73bd0c3b5bd61`,
+manifest size `4,371` and SHA-256
+`43993962d18d95730e306ad76b54f1f4f53e72a5d120d38ac6f617c5c5ac22bf`,
+and decrypted plaintext size `11,927,552` and SHA-256
+`104a9436fcc625dd6eedaba4fe1d36b91984308518e276234b51e4ab5839ce0a`.
+Immutable SQLite verification returned `integrity_check=ok`, `quick_check=ok`
+and zero foreign-key violations. The exact seven-row migration registry,
+capability catalog `1/11`, PR5 `0/7` tables, PR6 `0/16`, PR7 `0/8`, PR8 `0/8`
+and canonical/settlement `0/8` boundaries all matched. Temporary plaintext,
+WAL/SHM sidecars and downloaded copies were deleted after verification.
+
+`postRollbackBackupDurableCustody = TRUE`.
 
 ## 7. Incident classification
 
@@ -182,6 +214,10 @@ The `2026-07-24T12:00:08Z` foundation authorization was exercised by deployment
 
 `foundationDeploymentAuthorized = FALSE`
 
+`foundationDeploymentRetryAuthorized = FALSE`
+
+`postRollbackBackupDurableCustody = TRUE`
+
 `postDeploymentSmokeApproved = FALSE`
 
 `productionActivationAuthorized = FALSE`
@@ -206,25 +242,22 @@ The `2026-07-24T12:00:08Z` foundation authorization was exercised by deployment
 
 ## 10. Conditions before one explicit digest retry
 
-No deployment retry is currently authorized. Exactly these conditions remain:
+No deployment retry is currently authorized. The durable-custody and independent
+restore conditions are complete. Exactly these five conditions remain:
 
-1. Place the `20260725T121525Z` encrypted backup and manifest in approved durable
-   restricted off-host custody; record stable object IDs, retention and access.
-2. Independently download that durable copy and reproduce encrypted, manifest and
-   plaintext checksums plus integrity/quick/FK, registry and zero-row evidence.
-3. Approve this incident record, the rollback-safe no-source state, and the updated
+1. Approve this incident record, the rollback-safe no-source state, and the updated
    rollback runbook requiring previous-image reuse with the exact PR3 artifact.
-4. Approve the post-rollback registry baseline, especially
+2. Approve the post-rollback registry baseline, especially
    `documents_gantt_shadow_indexes.applied_at = 2026-07-25 11:44:20`.
-5. Approve and provision the multi-vantage ingress probes and Railway edge/request
+3. Approve and provision the multi-vantage ingress probes and Railway edge/request
    log correlation evidence required by section 8.
-6. Reconfirm unchanged variables, `/data` mount, networking, port 8080, disabled
+4. Reconfirm unchanged variables, `/data` mount, networking, port 8080, disabled
    integrations, absent/default-false canonical/forecast reads and zero business
    rows immediately before any source change.
-7. Record a new explicit owner/release/operations authorization bound to the exact
+5. Record a new explicit owner/release/operations authorization bound to the exact
    digest, current backup, revised smoke plan, change window and stop/rollback
    rules. The prior authorization cannot be reused.
 
-Only after all seven conditions are independently accepted may one separately
+Only after all five conditions are independently accepted may one separately
 requested digest retry be considered. This incident record authorizes no retry,
 activation, PR9 work or business-data operation.

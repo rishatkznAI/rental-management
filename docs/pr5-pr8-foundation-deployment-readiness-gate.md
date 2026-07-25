@@ -9,7 +9,8 @@ coherent backup, restore, storage and security review updated `2026-07-24`;
 disabled-integration execution audit completed `2026-07-24T05:52:47Z`; private
 GHCR publication independently verified `2026-07-24T08:54:25Z`; exact scoped
 owner authorization recorded `2026-07-24T12:00:08Z`; deployment, rollback and
-post-rollback remediation recorded `2026-07-25`
+post-rollback remediation recorded `2026-07-25`; post-rollback durable custody
+independently verified `2026-07-25T13:18:40Z`
 
 **Foundation deployment performed:** `YES`
 
@@ -48,8 +49,9 @@ the exact remote digest is independently verified and owner-approved. Rishat's
 separate `2026-07-24T12:00:08Z` decision authorized only deployment of that exact
 foundation artifact under the approved backup and smoke-plan boundary. That
 authorization was exercised and consumed. The fresh `20260725T121525Z`
-post-rollback artifact is locally encrypted and restore-verified, but durable
-off-host custody and independent verification remain pending.
+post-rollback artifact now has restricted, independently verified durable Google
+Drive custody. This closes only the backup-custody condition and authorizes no
+retry.
 
 ## 2. Scope
 
@@ -102,7 +104,7 @@ verification is recorded in
 | Health | internal `/health` and `/api/version` 200 after source cleanup; current PR3 deployment unchanged |
 | Database | seven registered migrations; shadow `applied_at = 2026-07-25 11:44:20`; integrity/quick `ok`; FK 0 |
 | Protected rows | PR5 catalog 1/11; PR5–PR8 and canonical/settlement business totals all 0 |
-| Fresh backup | `20260725T121525Z`; encrypted/manifest/restore evidence verified locally; durable off-host custody pending |
+| Fresh backup | `20260725T121525Z`; restricted Drive folder `1j8OLI_p3o7If0Mlu-zTbxFSCKWbwJ1Pk`, encrypted object `14tMB54nxClsrV3At7oeE0OAk41G3WPoX`, manifest object `1orsj7QIiqB2lYIgiEj1zCXhbW-_9uC0r`; independent checksum/decrypt/SQLite/boundary verification passed |
 
 The source cleanup changed only `source.image` from the foundation digest to null.
 Variables, volume, networking, port 8080 and feature flags were unchanged. The
@@ -952,7 +954,7 @@ The separate exact foundation-only deployment authorization is recorded.
 | `backupCustodyApproved` | `TRUE` |
 | `backupAvailable` | `TRUE` |
 | `postRollbackBackupCaptured` | `TRUE` |
-| `postRollbackBackupDurableCustody` | `FALSE` |
+| `postRollbackBackupDurableCustody` | `TRUE` |
 | `restoreDrillPassed` | `TRUE` |
 | `restoreDrillOwnerAccepted` | `TRUE` |
 | `potentialSecretExposureResolved` | `FALSE` |
@@ -976,6 +978,7 @@ The separate exact foundation-only deployment authorization is recorded.
 | `foundationDeploymentPerformed` | `TRUE` |
 | `foundationDeploymentDecision` | `UNDECIDED` |
 | `foundationDeploymentAuthorized` | `FALSE` |
+| `foundationDeploymentRetryAuthorized` | `FALSE` |
 | `productionActivationAuthorized` | `FALSE` |
 | `pr5BootstrapAuthorized` | `FALSE` |
 | `pr6SourcePopulationAuthorized` | `FALSE` |
@@ -988,9 +991,8 @@ The separate exact foundation-only deployment authorization is recorded.
 ## 24. Blockers
 
 The prior deployment approval was exercised and consumed. The current blockers to
-one explicit retry are: durable off-host custody and independent verification of
-the fresh `20260725T121525Z` backup; approval of the incident, rollback-safe
-no-source state and exact previous-image rollback procedure; approval of the
+one explicit retry are: approval of the incident, rollback-safe no-source state
+and exact previous-image rollback procedure; approval of the
 post-rollback shadow timestamp baseline; approval/provisioning of multi-vantage
 probes and Railway log correlation; an immediate pre-change config/flag/count
 reconfirmation; and a new digest-, backup-, window- and smoke-rule-bound owner
@@ -1009,7 +1011,7 @@ remain `FALSE`. This documentation update performs no production action.
 ## 26. Next permitted step
 
 No deployment is the next permitted step. Complete and independently approve all
-seven conditions in
+five remaining conditions in
 `docs/pr5-pr8-foundation-deployment-incident-2026-07-25.md` section 10 while the
 Railway source remains disconnected. Only a later explicit owner instruction may
 authorize one digest retry. This docs-only task authorizes no deployment,

@@ -10,7 +10,8 @@ security-exposure review updated `2026-07-24`; disabled-integration execution
 audit completed `2026-07-24T05:52:47Z`; immutable GHCR publication independently
 verified `2026-07-24T08:54:25Z`; scoped owner deployment approval recorded
 `2026-07-24T12:00:08Z`; deployment, rollback and remediation recorded
-`2026-07-25`
+`2026-07-25`; post-rollback durable custody independently verified
+`2026-07-25T13:18:40Z`
 
 **Repository baseline:** `1d59992315f1b7f4ff2d370fc17345a459ac52e3`
 
@@ -37,8 +38,8 @@ minimum reserve, 35% alert threshold and named operations owner are approved. Th
 exact immutable foundation candidate is now published unchanged to a private GHCR
 package and its remote manifest digest is independently verified and approved. The
 historical pre-deployment backup has independently verified private Google Drive
-custody; the fresh post-rollback backup is locally restricted and restore-verified
-but still requires durable off-host custody. The smoke-evidence retention policy
+custody; the fresh post-rollback backup now also has restricted, independently
+verified durable Google Drive custody. The smoke-evidence retention policy
 is approved and Rishat is the security owner. Rishat approved the exact
 foundation-only deployment scope at
 `2026-07-24T12:00:08Z`; that authorization was exercised and is no longer reusable.
@@ -105,7 +106,7 @@ authoritative current baseline is the post-rollback evidence captured on
 | Schema/data boundary | exact seven-row shadow/PR1–PR8 registry; PR5 catalog 1/11; every PR5–PR8 and canonical/settlement business count 0 |
 | Public/internal health | internal `/health` and `/api/version` 200 after source cleanup; a single operator public timeout is inconclusive under the revised multi-vantage policy |
 | Cleanup runtime/config (`2026-07-23`) | deployment and replica unchanged; startup `2026-07-15T07:09:34.047Z`; canonical raw 33-variable comparison fingerprint `0f23a29e44e7729e37c2e7420619db16980bb3e640d15352babf7dfc97d44816` unchanged |
-| Backup verification | post-rollback backup `20260725T121525Z`; plaintext SHA-256 `104a9436...`; encrypted SHA-256 `6a12d650...`; integrity/quick `ok`, FK 0, source DB/WAL/SHM exact before/after; fresh durable off-host custody pending |
+| Backup verification | post-rollback backup `20260725T121525Z`; restricted Drive folder `1j8OLI_p3o7If0Mlu-zTbxFSCKWbwJ1Pk`; plaintext SHA-256 `104a9436...`; encrypted SHA-256 `6a12d650...`; integrity/quick `ok`, FK 0, exact registry/boundaries; independent durable-copy verification passed |
 | Secret audit verification (`2026-07-24T05:23:10Z`) | 33 variable names; sorted name-inventory SHA-256 `8f770e3a88235228693f7dcd106ed01f33d734608ea46c9caac36cd0eea2cc4f`; no variable-set command, restart or deployment |
 | Disabled-integration audit (`2026-07-24T05:52:47Z`) | read only `BOT_DISABLED=true`, `GSM_ENABLED=false`, deployment `b74623ec-d20d-4c50-ab40-0e0a494c5bc5` and source `6a38582f5f90b85734884b6b12ad8e306b24619e`; no token value requested; focused fail-closed/no-leak tests passed |
 
@@ -195,13 +196,21 @@ sizes and mtimes were exact before and after capture.
 | Manifest | SHA-256 `43993962d18d95730e306ad76b54f1f4f53e72a5d120d38ac6f617c5c5ac22bf` |
 | Restore evidence | SHA-256 `1bf186734a9e686b3d1b26e5e1b107f925a78aa13b5542c1766f80c21860fe11`; plaintext checksum exact; integrity/quick `ok`; FK 0 |
 | Registry/counts | exact seven migrations; shadow timestamp `2026-07-25 11:44:20`; catalog 1/11; all PR5–PR8 and canonical/settlement business totals 0 |
+| Durable Drive path / folder | `rentcore-drive:Rentcore/20260725T121525Z/`; `1j8OLI_p3o7If0Mlu-zTbxFSCKWbwJ1Pk` |
+| Durable encrypted object | `app.sqlite.coherent-20260725T121525Z.sqlite.age`; `14tMB54nxClsrV3At7oeE0OAk41G3WPoX` |
+| Durable manifest object | `manifest.json`; `1orsj7QIiqB2lYIgiEj1zCXhbW-_9uC0r` |
+| Access / retention | one inherited `user`/`owner` grant per folder/object, no public grant, anonymous access requires Google authentication; 30-day retention through at least `2026-08-24T13:10:45.015Z` |
 
-This fresh backup is encrypted and locally restricted but does not yet have
-independently verified durable off-host custody. Stable destination IDs,
-independent download/decrypt verification, retention and owner acceptance are
-required before a retry can be approved. The earlier `20260724T045252Z` Drive
-artifact remains valid historical pre-deployment evidence but is not the current
-post-rollback baseline.
+An independent fresh-directory download reproduced the encrypted, manifest and
+plaintext sizes and SHA-256 values exactly. Immutable SQLite integrity and quick
+checks returned `ok`, foreign-key violations were zero, the exact seven-row
+registry and all catalog/zero-business-row boundaries matched. Temporary
+plaintext, WAL/SHM sidecars and downloaded copies were deleted. The age identity
+remains separately held and was not uploaded. The earlier `20260724T045252Z`
+Drive artifact remains valid historical pre-deployment evidence but is not the
+current post-rollback baseline.
+
+`postRollbackBackupDurableCustody = TRUE`.
 
 ### 4.2 Mechanism
 
@@ -674,7 +683,7 @@ integration activation or PR9 authority is implied.
 | `backupCustodyApproved` | `TRUE` | encrypted artifact and manifest are restricted to Rishat, independently downloaded and checksum/restorability verified; identity and plaintext are not stored there |
 | `backupAvailable` | `TRUE` | historical pre-deployment artifact `20260724T045252Z` has approved, independently verified durable external custody |
 | `postRollbackBackupCaptured` | `TRUE` | coherent encrypted artifact `20260725T121525Z` passed exact restore, registry and zero-row verification |
-| `postRollbackBackupDurableCustody` | `FALSE` | current artifact is locally restricted; off-host upload, stable object IDs and independent custody verification remain required |
+| `postRollbackBackupDurableCustody` | `TRUE` | restricted Drive objects have stable IDs, exact remote hashes/sizes and independent download/decrypt/SQLite/boundary verification; plaintext and identity are excluded |
 | `restoreDrillPassed` | `TRUE` | encrypted restore, raw validation, both exact-SHA startups, candidate migration/repeat and previous-code compatibility passed reproducibly |
 | `restoreDrillOwnerAccepted` | `TRUE` | Rishat accepted the completed technical drill and is the named operations owner |
 | `storageCapacityAccepted` | `TRUE` | Rishat approved the 30% minimum reserve, 35% alert threshold and operations ownership |
@@ -698,6 +707,7 @@ integration activation or PR9 authority is implied.
 | `foundationDeploymentPerformed` | `TRUE` | deployment `de3fa106-491a-4ddc-896d-a0f650626dc5` ran before pinned rollback `0eec88f4-2338-4352-abc5-17b030aa6583` |
 | `foundationDeploymentDecision` | `UNDECIDED` | the prior approval was consumed; no new retry decision is recorded |
 | `foundationDeploymentAuthorized` | `FALSE` | source cleanup and documentation do not authorize another deployment |
+| `foundationDeploymentRetryAuthorized` | `FALSE` | durable custody alone does not authorize a retry; the remaining incident conditions and new explicit approval are required |
 | `productionActivationAuthorized` | `FALSE` | explicitly outside foundation delivery |
 | `pr5BootstrapAuthorized` | `FALSE` | explicitly excluded from the owner approval |
 | `pr6SourcePopulationAuthorized` | `FALSE` | explicitly excluded from the owner approval |
@@ -731,8 +741,8 @@ integration activation or PR9 authority is implied.
 | Immutable GHCR publication | `PASS`; prebuilt archive pushed without rebuild; private package, exact source tag and immutable digest-qualified reference created `2026-07-24T08:54:25Z` |
 | Independent registry verification | `PASS`; separate authenticated pull returned expected digest exactly; GitHub Packages API returned matching version name/tag and `visibility=private` |
 | Historical durable backup custody | `PASS`; private Google Drive file IDs for `20260724T045252Z` recorded; encrypted and manifest downloads matched exact hashes/size; decrypted plaintext matched and immutable read-only SQLite integrity/quick/FK checks passed |
-| Fresh post-rollback backup | `PASS_LOCAL`; encrypted artifact `20260725T121525Z`, manifest and restore evidence match exact checksums; integrity/quick `ok`, FK 0, seven-row registry and all protected business totals 0; durable off-host custody pending |
-| Downloaded plaintext cleanup | `PASS`; temporary plaintext and isolated copies deleted by exact path; no WAL/SHM created; age identity remained separate and was not uploaded |
+| Fresh post-rollback backup | `PASS_DURABLE`; restricted Drive folder/object IDs recorded; exact remote and downloaded encrypted/manifest/plaintext checksums and sizes matched; integrity/quick `ok`, FK 0, seven-row registry and all protected business totals 0 |
+| Downloaded plaintext cleanup | `PASS`; fresh remote-download directory, temporary plaintext, WAL/SHM sidecars and downloaded encrypted/manifest copies deleted by exact path; age identity remained separate and was not uploaded |
 | Rollback identity read | `PASS`; exact production deployment/source/image/instance remained current at `2026-07-23T16:33:50Z` |
 | Changed-file allow-list | `PASS`; this branch changes only this document, `docs/pr5-pr8-foundation-deployment-readiness-gate.md`, `docs/pr5-pr8-foundation-owner-approval-packet.md` and `docs/pr5-pr8-foundation-deployment-incident-2026-07-25.md` |
 | Runtime-code diff | `NONE` |
@@ -754,12 +764,15 @@ unintended root file and the protected database/application state is unchanged.
 
 `foundationDeploymentAuthorized = FALSE`.
 
+`foundationDeploymentRetryAuthorized = FALSE`.
+
+`postRollbackBackupDurableCustody = TRUE`.
+
 No retry is permitted by this record. Before one explicit digest retry can be
-considered, all seven conditions in
+considered, all five remaining conditions in
 `docs/pr5-pr8-foundation-deployment-incident-2026-07-25.md` section 10 must be
-independently accepted: durable off-host custody and independent verification of
-the fresh post-rollback backup; approval of the incident, rollback-safe no-source
-state and exact previous-image rollback; approval of the `2026-07-25 11:44:20`
+independently accepted: approval of the incident, rollback-safe no-source state
+and exact previous-image rollback; approval of the `2026-07-25 11:44:20`
 shadow baseline; approved multi-vantage probes and Railway log correlation;
 immediate pre-change config/flag/count reconfirmation; and a new explicit owner
 authorization bound to the exact digest, backup, change window and revised smoke

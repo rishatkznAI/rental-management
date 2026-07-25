@@ -2,7 +2,7 @@
 
 ## 1. Status and safety boundary
 
-**Document status:** `DESIGN CLOSURE BLOCKED — OWNER DECISION PACKET READY`
+**Document status:** `DESIGN CLOSURE READY FOR RISK-BASED GATE A APPROVAL`
 
 **Design-only audit timestamp:** `2026-07-25T16:35:40Z`
 
@@ -10,27 +10,39 @@
 
 **Audited base:** `9870c279166e41dc0a059763240a8ce892abf54d`
 
-This document is an exact, implementation-ready **recommendation** for PR9. It is
-not an approval record and does not implement, authorize, deploy or activate PR9.
-Every D-PR9 decision remains `BLOCKED` because no durable owner approval of this
-exact proposal was supplied. The owner packet in section 22 permits a later explicit
-decision without exposing credentials or accessing production.
+This document is an exact **design recommendation** for PR9. It is not an approval
+record and does not implement, authorize, deploy or activate PR9. D-PR9-01–16 are
+Gate A design assumptions awaiting durable approval by the Product/Business Owner
+after an independent Technical Architecture Reviewer has approved this exact
+document head. Gate A closes only the architecture design. It does not certify
+accounting, tax, legal/privacy or operational correctness for production and does
+not authorize implementation or any production action.
 
 The required authorization state remains:
 
 ```text
 foundationDeploymentRetryAuthorized = FALSE
+architectureDesignApproved = FALSE
+pr9aImplementationAuthorized = FALSE
+pr9bImplementationAuthorized = FALSE
+pr9ImplementationAuthorized = FALSE
+pr9DisabledDeploymentAuthorized = FALSE
 productionActivationAuthorized = FALSE
 canonicalProductionReadsAuthorized = FALSE
 productionCanonicalWritesAuthorized = FALSE
-pr9ImplementationAuthorized = FALSE
+settlementAuthorized = FALSE
+shadowReadAuthorized = FALSE
+cutoverAuthorized = FALSE
 ```
 
 Merging this design document, passing CI, or receiving no objection changes none of
-those values. PR9 implementation requires a later, separately recorded
-`pr9ImplementationAuthorized = TRUE` decision after every prerequisite gate is
-satisfied. Disabled deployment, production activation, canonical reads, canonical
-writes, settlement, shadow reads and cutover remain separate later decisions.
+those values. After Gate A closes, PR9a still requires a later, separately recorded
+`pr9aImplementationAuthorized = TRUE` owner decision tied to its exact scope and
+base SHA. PR9b requires its own later authorization after Gate C. Disabled
+deployment, release, production activation, canonical reads, canonical writes,
+settlement, shadow reads and cutover remain separate later decisions. The legacy
+aggregate `pr9ImplementationAuthorized` field remains `FALSE` and cannot substitute
+for either scoped implementation gate.
 
 ## 2. Live base and chronology audit
 
@@ -166,9 +178,85 @@ All proposed contracts use these rules:
   counts only. Names, contacts, addresses, free-form messages, credentials, tokens,
   cookies, sessions and authorization headers are forbidden.
 
+### 5.1 Risk-based staged governance
+
+The governance boundary has four independent gates. Approval at one gate never
+implies approval at a later gate.
+
+#### Gate A — Architecture design
+
+Gate A approves the contracts, schema design, transaction design, isolation, test
+matrix and PR9a/PR9b split recorded in this document. It requires exactly:
+
+- a Product/Business Owner durable approval; and
+- a durable approval from a Technical Architecture Reviewer who is independent of
+  the document author for this review.
+
+Automated Codex review may be retained as technical evidence, but it cannot provide
+either durable approval. Both approvals must identify PR #231 and the same exact
+document head SHA in an authenticated durable channel. Gate A approval does not
+assert accounting correctness, tax treatment, legal sufficiency, privacy
+compliance, operational readiness or production evidence validity. It authorizes no
+implementation, deployment, migration or production read/write.
+
+#### Gate B — Disabled implementation
+
+Gate B may authorize only PR9a: additive schema, immutable contracts, the
+eligibility-event foundation, disabled repository/domain code, tests and fixtures.
+The schema initializer is in scope only when the Gate B approval says so explicitly.
+No production business execution, canonical DML, route, worker, scheduler, flag,
+resolver or activation path is allowed.
+
+Gate B requires a separate Product/Business Owner authorization naming the exact
+PR9a implementation scope and base SHA. Accounting, Tax/VAT and Legal/Privacy
+approval is not a Gate B prerequisite because PR9a must read no production data,
+perform no production write, recognize no financial fact and remain unactivated.
+Gate A approval alone never opens Gate B.
+
+#### Gate C — Production evidence and policy
+
+Gate C is required before any PR9b production-capable posting implementation or
+production dry run. Approvals are role-scoped rather than an enterprise board:
+
+- Accounting/Finance approves amount basis, due-date and source-document semantics;
+- Tax/VAT approves VAT, gross/net and rounding policy;
+- Legal/Privacy approves evidence sufficiency, retention, privacy and legal hold;
+- Security/Operations approves credential and authority design, monitoring,
+  rollback and incident controls; and
+- an independent production evidence reviewer accepts the exact production
+  evidence pack and must not be its sole author or producer.
+
+One qualified person may hold multiple Gate C roles when that reflects the real
+organization, the combined roles and potential conflict are durably disclosed, and
+each role-scoped approval is explicit. No artificial one-person-per-decision rule
+applies. A technical description is not a substitute for accounting, tax, legal or
+security approval. Gate C approves only the policy/evidence contracts assigned to
+each role; it does not authorize deployment or production canonical writes.
+
+#### Gate D — Production activation and write authorization
+
+Gate D is a separate, single-use authorization immediately before any Railway
+mutation, production deployment, production PR8 execution or canonical write
+activation. It requires an independently issued release authorization bound to the
+exact artifact, environment, database identity, cohort, evidence pack, effective
+window and rollback controls. The release authorizer cannot be the sole implementer
+or sole producer/reviewer of the evidence being released. Gate D expires after its
+named action/window and cannot be inferred from Gates A–C, merge or CI.
+
+Segregation of duties is therefore proportional to risk: role combination is
+permitted for a small owner-operated product with durable disclosure, while
+independence is mandatory for Gate A technical review, production evidence review
+and Gate D release authorization. An author cannot be the only reviewer of their
+own production evidence, and automated review never replaces owner authorization.
+
+In sections 6–25, an "approved" policy, authority, evidence pack, activation or
+production value means approved at its applicable later Gate C or Gate D. Gate A
+approves only the shape and fail-closed behavior of those contracts.
+
 ## 6. D-PR9-01 — Amount basis
 
-**Status:** `BLOCKED — OWNER/ACCOUNTANT/TAX APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING; GATE C PRODUCTION POLICY
+REVALIDATION REQUIRED`
 
 **Recommended decision:** `canonical_receivables.originalAmountMinor` equals the
 exact PR8 candidate `sourceGrossMinor`. Currency is `RUB`; arithmetic is integer
@@ -208,7 +296,8 @@ posting transaction.
 
 ## 7. D-PR9-02 — Due date
 
-**Status:** `BLOCKED — OWNER/ACCOUNTANT/LEGAL APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING; GATE C PRODUCTION POLICY
+REVALIDATION REQUIRED`
 
 **Recommended decision:** `dueDateProvenance=unknown` may be eligible and may be
 posted only when the approved PR8 `unknown_due_date_treatment` gate explicitly says
@@ -245,7 +334,8 @@ approved PR2 due-date-change workflow; PR9 never updates it.
 
 ## 8. D-PR9-03 — Conducted, signature and evidence authority
 
-**Status:** `BLOCKED — ACCOUNTANT/LEGAL/SOURCE-OWNER APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING; GATE C PRODUCTION POLICY
+REVALIDATION REQUIRED`
 
 **Recommended decision:** the source is admissible only when all conditions hold:
 
@@ -275,7 +365,8 @@ blocks before canonical DML.
 
 ## 9. D-PR9-04 — Source system and adapter
 
-**Status:** `BLOCKED — SOURCE/SECURITY/OPERATIONS OWNER APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING; CONCRETE PRODUCTION AUTHORITY
+REMAINS GATE C`
 
 **Recommended v1 logical source system:** exactly
 `rentcore.billing_source_authority.v1`.
@@ -295,7 +386,8 @@ No concrete production adapter instance is approved or created by this document.
 
 ## 10. D-PR9-05 — Integration identity
 
-**Status:** `BLOCKED — SECURITY/OPERATIONS/ADAPTER OWNER APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING; CONCRETE PRODUCTION IDENTITY
+REMAINS GATE C`
 
 **Recommended same-process v1 identities:**
 
@@ -328,7 +420,7 @@ blocks future attempts and preserves history.
 
 ## 11. D-PR9-06 — Capability catalog strategy
 
-**Status:** `BLOCKED — SECURITY/IDENTITY OWNER APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING`
 
 **Recommended strategy:** option A. PR9 adds no capability catalog version and no
 human capability. Integration operations are authorized exclusively by
@@ -347,7 +439,8 @@ UI/API or out-of-process integration resolver requires a separate catalog-design
 
 ## 12. D-PR9-07 — Activation boundary and cohort
 
-**Status:** `BLOCKED — PRODUCT/FINANCE/LEGAL/OPERATIONS APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING; GATE C PRODUCTION POLICY
+REVALIDATION REQUIRED; ACTIVATION REMAINS GATE D`
 
 **Recommended immutable v1 definition:** one activation record covers exactly one
 company, one concrete branch, the source system
@@ -382,7 +475,8 @@ or activation record is created here.
 
 ## 13. D-PR9-08 — Accepted PR8 evidence
 
-**Status:** `BLOCKED — FINANCE/LEGAL/INDEPENDENT REVIEW APPROVAL REQUIRED`
+**Status:** `GATE A EVIDENCE-CONTRACT DESIGN ASSUMPTION PENDING; ACTUAL PRODUCTION
+EVIDENCE ACCEPTANCE REMAINS GATE C`
 
 **Recommended admission contract:** an admissible run must be a real production PR8
 run created under an approved policy/source/adapter/activation scope and satisfy:
@@ -410,7 +504,7 @@ it does not authorize canonical posting.
 
 ## 14. D-PR9-09 — Exact database object set
 
-**Status:** `BLOCKED — ARCHITECTURE/DATABASE/SECURITY APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING`
 
 **Recommended migration:**
 
@@ -851,7 +945,7 @@ timestamp mutation. There is no down migration.
 
 ## 15. D-PR9-10 — Event-to-canonical mapping
 
-**Status:** `BLOCKED — PRODUCT/FINANCE/ARCHITECTURE APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING`
 
 Recommended exact mapping:
 
@@ -890,7 +984,7 @@ conflict under any mapped field creates no second receivable and no update.
 
 ## 16. D-PR9-11 — Canonical immutability
 
-**Status:** `BLOCKED — FINANCE/LEGAL/ARCHITECTURE APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING`
 
 **Recommended decision:** add source-scoped PR9 triggers. Every PR9-created canonical
 row is fully immutable and cannot be deleted. The existing PR1/PR2 behavior for any
@@ -908,7 +1002,7 @@ and remains application-rollback compatible.
 
 ## 17. D-PR9-12 — Conflict and quarantine evidence
 
-**Status:** `BLOCKED — SECURITY/LEGAL/OPERATIONS APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING`
 
 **Recommended decision:** the primary posting transaction rolls back completely on
 conflict: canonical, operation and financial-audit writes are all zero. After that
@@ -927,7 +1021,7 @@ attempts and are not financial effects.
 
 ## 18. D-PR9-13 — Source change after posting
 
-**Status:** `BLOCKED — FINANCE/LEGAL/SOURCE-OWNER APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING`
 
 PR9 performs no background monitoring. On a later attempt/replay, it detects current
 PR6 reopen, cancellation, correction, supersession, amount/due-date change, missing
@@ -942,7 +1036,8 @@ attempts but does not invalidate or erase prior committed evidence.
 
 ## 19. D-PR9-14 — Operational thresholds
 
-**Status:** `BLOCKED — OPERATIONS/SECURITY/PRODUCT APPROVAL REQUIRED`
+**Status:** `GATE A LOCAL/DISABLED SAFE-DEFAULT ASSUMPTION PENDING; GATE C
+PRODUCTION VALUES REVALIDATION REQUIRED`
 
 Recommended v1 numbers:
 
@@ -974,7 +1069,8 @@ exact limits.
 
 ## 20. D-PR9-15 — Retention, legal and incident controls
 
-**Status:** `BLOCKED — LEGAL/SECURITY/OPERATIONS APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING; GATE C PRODUCTION POLICY
+REVALIDATION REQUIRED`
 
 Recommended v1 controls:
 
@@ -1001,11 +1097,14 @@ Recommended v1 controls:
   backup owner; security owner controls adapter identity/revocation; operations owns
   telemetry and incident execution.
 
-No named owner acceptance of these proposed targets is present.
+These values are design assumptions only. Gate A does not make them legally,
+privacy, security or operationally sufficient for production. Gate C must replace
+or revalidate the exact production retention, legal-hold, RPO/RTO, custody and
+incident values through the responsible role-scoped approvals.
 
 ## 21. D-PR9-16 — PR structure
 
-**Status:** `BLOCKED — ARCHITECTURE/SECURITY/RELEASE APPROVAL REQUIRED`
+**Status:** `GATE A DESIGN ASSUMPTION PENDING`
 
 **Recommended decision:** stacked PR9a/PR9b under this single architecture gate.
 
@@ -1070,8 +1169,11 @@ through isolated tests. A single large PR9 is rejected by recommendation because
 would combine a new authority model, six-table migration, event producer and the
 first canonical DML boundary into one security review.
 
-Neither PR is authorized by this document. PR9b additionally requires independently
-released PR9a and its own exact implementation authorization.
+Neither PR is authorized by this document. PR9a requires a separate Gate B owner
+authorization naming exact scope and base SHA. PR9b additionally requires an
+independently released PR9a, Gate C production policy/evidence closure and its own
+exact implementation authorization. Gate D remains mandatory before any deployment,
+production PR8 execution, Railway mutation or canonical write activation.
 
 ## 22. Exact contract envelopes
 
@@ -1115,7 +1217,14 @@ Hash envelope excludes only generated `recordId`, `recordHash` and `createdAt`.
 Approval set must contain stable refs and hashes for product, accountant/finance,
 legal, tax, security/identity, release/operations, source-adapter owner,
 producer owner, posting-adapter owner and independent reconciliation reviewer.
-Expiry or revocation blocks even exact replay.
+These are role-scoped production approvals, not a requirement for a distinct person
+per role. The same authenticated person may occupy multiple roles when their real
+mandate and the combination/conflict disclosure are durably recorded. The
+independent production evidence reviewer cannot be the evidence pack's sole author
+or producer, and the Gate D release authorizer cannot be the sole implementer or
+sole producer/reviewer of that evidence. Expiry or revocation blocks even exact
+replay. Gate A creates none of these records and satisfies none of these production
+approval entries.
 
 ### `CanonicalPostingActivationV1`
 
@@ -1321,7 +1430,10 @@ Passing tests authorizes no merge, deployment, activation, reads or writes.
 
 | Field | Current value | Reason |
 |---|---|---|
-| `architectureDesignApproved` | `FALSE` | blocked: exact proposal recorded; no durable owner approval |
+| `architectureDesignApproved` | `FALSE` | Gate A requires durable Product/Business Owner and independent Technical Architecture Reviewer approvals bound to the same exact PR head |
+| `pr9aImplementationAuthorized` | `FALSE` | Gate B exact-scope/base-SHA owner authorization is absent |
+| `pr9bImplementationAuthorized` | `FALSE` | Gate C is open and no exact PR9b authorization exists |
+| `pr9ImplementationAuthorized` | `FALSE` | legacy aggregate remains fail-closed and cannot substitute for the scoped PR9a/PR9b gates |
 | `productionEvidenceAccepted` | `FALSE` | blocked: no accepted current PR8 production evidence pack |
 | `productionIdentityReady` | `FALSE` | blocked: PR5 business/bootstrap rows remain zero |
 | `productionSourceAuthorityReady` | `FALSE` | blocked: PR6 business rows and approved adapter instance absent |
@@ -1331,90 +1443,98 @@ Passing tests authorizes no merge, deployment, activation, reads or writes.
 | `sourceAdapterAuthorityApproved` | `FALSE` | blocked: design only; no concrete production authority |
 | `eligibilityProducerAuthorityApproved` | `FALSE` | blocked: design identity only |
 | `canonicalPostingAdapterAuthorityApproved` | `FALSE` | blocked: design identity only |
-| `operationalControlsApproved` | `FALSE` | blocked: exact proposed numbers lack owner approval/enforcement |
-| `retentionAndLegalHoldControlsApproved` | `FALSE` | blocked: proposed controls lack legal/operations approval |
-| `canonicalWriteContractApproved` | `FALSE` | blocked: D-PR9-01–16 are not owner-approved |
-| `pr9ImplementationAuthorized` | `FALSE` | explicit current gate |
+| `operationalControlsApproved` | `FALSE` | Gate C production limits, monitoring, rollback and incident controls are not approved or enforced |
+| `retentionAndLegalHoldControlsApproved` | `FALSE` | Gate C legal/privacy and operations approval is absent |
+| `canonicalWriteContractApproved` | `FALSE` | Gate A design approval cannot approve a production write contract |
+| `foundationDeploymentRetryAuthorized` | `FALSE` | separate foundation retry remains unauthorized |
 | `pr9DisabledDeploymentAuthorized` | `FALSE` | separate decision absent |
-| `productionActivationAuthorized` | `FALSE` | separate decision absent |
+| `productionActivationAuthorized` | `FALSE` | single-use Gate D authorization absent |
 | `canonicalProductionReadsAuthorized` | `FALSE` | resolver null; flag default false; no approval |
-| `productionCanonicalWritesAuthorized` | `FALSE` | no authorization/activation/evidence |
+| `productionCanonicalWritesAuthorized` | `FALSE` | no Gate C closure or single-use Gate D authorization |
 | `settlementAuthorized` | `FALSE` | PR10 not authorized |
 | `shadowReadAuthorized` | `FALSE` | PR11 not authorized |
 | `cutoverAuthorized` | `FALSE` | PR12 not authorized |
 
+If both valid Gate A approvals are later recorded, only
+`architectureDesignApproved` may become `TRUE`. Every other field in this table
+remains unchanged. A later Gate B owner prompt may change only
+`pr9aImplementationAuthorized`; it cannot change any deployment or production field.
+
 ## 27. D-PR9 status matrix
 
-| Decision | Status | Recommended selection awaiting approval |
+| Decision | Gate A design disposition | Deferred production decision |
 |---|---|---|
-| D-PR9-01 Amount basis | `BLOCKED` | gross RUB minor units; no recalculation |
-| D-PR9-02 Due date | `BLOCKED` | approved unknown may post outside aging; proven allow-list otherwise |
-| D-PR9-03 Conducted/signature/evidence | `BLOCKED` | latest current conducted plus exact policy/evidence lineage |
-| D-PR9-04 Source systems/adapters | `BLOCKED` | canonical source `rentcore.billing_source_authority.v1`; exact upstream allow-list per authority |
-| D-PR9-05 Integration identity | `BLOCKED` | named same-process repository identities; 24-hour authority, no credential |
-| D-PR9-06 Capability catalog | `BLOCKED` | strategy A; keep exact human catalog v1/11 |
-| D-PR9-07 Boundary/cohort | `BLOCKED` | one company/branch, RUB, forward-only governed rental UPD slice |
-| D-PR9-08 PR8 evidence | `BLOCKED` | sealed accepted production run; zero blockers/deltas; 15-minute freshness |
-| D-PR9-09 DB objects | `BLOCKED` | migration v1, exact six-table set and source-scoped canonical triggers |
-| D-PR9-10 Mapping | `BLOCKED` | UPD + coverage slice, actualSourceKey external ID, gross, direct posted |
-| D-PR9-11 Immutability | `BLOCKED` | full no-update/no-delete for PR9-source canonical rows |
-| D-PR9-12 Conflict evidence | `BLOCKED` | zero primary writes; separate deduplicated append-only conflict transaction |
-| D-PR9-13 Post-posting changes | `BLOCKED` | detect/deny/quarantine; future compensation only |
-| D-PR9-14 Thresholds | `BLOCKED` | exact limits in section 19 |
-| D-PR9-15 Retention/incidents | `BLOCKED` | indefinite, confidential metadata, RPO 15m/RTO 60m |
-| D-PR9-16 PR structure | `BLOCKED` | stacked PR9a schema/event then PR9b posting |
+| D-PR9-01 Amount basis | gross RUB minor-unit representation; no recalculation | Gate C Accounting/Finance and Tax/VAT revalidate production amount and VAT policy |
+| D-PR9-02 Due date | nullable model and explicit provenance contract | Gate C Accounting/Finance and Legal/Privacy revalidate production due-date semantics |
+| D-PR9-03 Conducted/signature/evidence | fail-closed evidence-chain structure | Gate C Accounting/Finance, Legal/Privacy and source authority revalidate admissibility |
+| D-PR9-04 Source systems/adapters | stable logical source and allow-listed adapter contract | Gate C approves the concrete production source/adapter authority |
+| D-PR9-05 Integration identity | named same-process identity contract | Gate C approves concrete production identity and credential/authority controls |
+| D-PR9-06 Capability catalog | strategy A; keep human catalog v1/11 | any future catalog or external identity change requires a new design review |
+| D-PR9-07 Boundary/cohort | single-company/branch forward-only cohort shape | Gate C revalidates production cohort policy; Gate D alone activates it |
+| D-PR9-08 PR8 evidence | sealed-evidence admission contract shape only | Gate C independently reviews and accepts an actual production evidence pack |
+| D-PR9-09 DB objects | additive six-table/index/trigger design | Gate B separately controls PR9a initializer implementation; Gate D controls production migration |
+| D-PR9-10 Mapping | exact event-to-PR1 projection design | production policy inputs remain subject to their Gate C approvals |
+| D-PR9-11 Immutability | source-scoped no-update/no-delete design | future correction/compensation needs a separate design and authorization |
+| D-PR9-12 Conflict evidence | rollback plus deduplicated append-only conflict design | production privacy/security/operations controls remain Gate C |
+| D-PR9-13 Post-posting changes | detect, deny and quarantine design | any production correction/compensation policy is outside PR9 |
+| D-PR9-14 Thresholds | local/disabled validation defaults | Gate C Security/Operations revalidates enforceable production values |
+| D-PR9-15 Retention/incidents | retention/security design assumptions | Gate C Legal/Privacy and Security/Operations revalidate production controls |
+| D-PR9-16 PR structure | stacked PR9a foundation then PR9b posting | Gate B may authorize PR9a only; PR9b waits for Gate C; any release waits for Gate D |
 
-No D-PR9 decision is approved by this document.
+All D-PR9-01–16 may be approved now only as Gate A architecture design assumptions.
+This document itself approves none of them. In particular, Gate A does not accept
+actual PR8 production evidence and does not finalize production policy values for
+D-PR9-01, D-PR9-02, D-PR9-03, D-PR9-07, D-PR9-08, D-PR9-14 or D-PR9-15.
 
-## 28. Owner Decision Packet
+## 28. Gate A Owner Approval Packet
 
-The owner may approve the complete recommendation in one later message only after
-the named finance, legal, tax, security and operations authorities have approved
-the decisions assigned to their roles. No secret or production access is needed.
-Each required authority must submit the applicable exact line below through an
-authenticated, durable review channel. The channel's immutable author identity,
-UTC creation timestamp and permanent message URL are respectively the approver,
-approval timestamp and approval reference; the system must preserve those metadata
-with the literal approval text. A role-to-person registry must independently prove
-that the authenticated author held the named role at that time. One person's
-approval cannot stand in for a second required role.
+Gate A requires two durable approvals bound to the same exact PR #231 head: one
+from the Product/Business Owner and one from an independent Technical Architecture
+Reviewer. It does not require separate Accounting, Tax/VAT, Legal/Privacy, Security
+or Operations approvers. Those specialists are required only at Gate C for the
+production policy/evidence contracts within their competence. Formal legal or tax
+opinions are not prerequisites for the local disabled foundation, because Gate A
+and Gate B assert no production legal/tax correctness and permit no production data
+or financial recognition.
 
-| Decision and question | Recommended option | Alternatives and consequence | Principal risk | Exact approval line |
-|---|---|---|---|---|
-| D-PR9-01: amount basis? | exact gross RUB kopecks; no recalculation | net understates debt; another basis requires a new mapping | wrong customer obligation | `APPROVE D-PR9-01 v1 exactly as recommended in section 6 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-02: may unknown due date post? | yes only as null and outside aging under `post_without_aging_v1` | proven-only delays receivable; broader inference creates false aging | false aging or blocked debt | `APPROVE D-PR9-02 v1 exactly as recommended in section 7 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-03: what proves conducted/signature state? | exact current closed/conducted/coverage/evidence chain | always-signed is stricter; label inference is forbidden | fabricated debt | `APPROVE D-PR9-03 v1 exactly as recommended in section 8 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-04: which source/adapters? | PR6 logical source plus concrete authority allow-list | direct mutable upstream IDs weaken stable lineage | fallback or wrong source | `APPROVE D-PR9-04 v1 exactly as recommended in section 9 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-05: which integration identity? | named same-process identities, no credential, 24-hour authority | external workload credential requires a new security design | impersonation | `APPROVE D-PR9-05 v1 exactly as recommended in section 10 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-06: how to coexist with catalog v1/11? | strategy A; separate integration contracts | catalog migration broadens scope and can break PR5–PR8 checks | authorization regression | `APPROVE D-PR9-06 v1 strategy A exactly as recommended in section 11 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-07: what activation cohort? | one company/branch, RUB, forward-only governed rental-UPD slice | broader or historical cohort increases duplicate/cross-scope exposure | unintended posting scope | `APPROVE D-PR9-07 v1 exactly as recommended in section 12 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d; no production activation is authorized.` |
-| D-PR9-08: which PR8 evidence is admissible? | accepted sealed zero-delta run, 15-minute freshness | longer/stale or fixture evidence weakens proof | stale or fabricated eligibility | `APPROVE D-PR9-08 v1 exactly as recommended in section 13 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-09: what migration object set? | `canonical_actual_posting_pr9` v1, exact six tables/indexes/triggers | another normalized set changes lineage and rollback proof | schema drift | `APPROVE D-PR9-09 v1 exactly as recommended in section 14 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-10: how does event map to PR1? | exact section-15 projection | PR1 extension broadens migration; coarser source identity permits duplicates | unreproducible debt | `APPROVE D-PR9-10 v1 exactly as recommended in section 15 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-11: may PR9 canonical rows mutate? | database-enforced full no-update/no-delete | PR1 lifecycle updates would rewrite the immutable fact | history mutation | `APPROVE D-PR9-11 v1 exactly as recommended in section 16 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-12: may denied conflict evidence persist? | zero primary writes, then one separate deduplicated conflict row | absolute zero writes loses durable denial evidence | side effect or lost evidence | `APPROVE D-PR9-12 v1 exactly as recommended in section 17 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-13: what follows post-posting source change? | detect, deny, quarantine; later compensation design | mutable correction destroys original history | incorrect correction | `APPROVE D-PR9-13 v1 exactly as recommended in section 18 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-14: which operational limits? | every exact number in section 19 | different values require explicit replacement decision | outage or unbounded writes | `APPROVE D-PR9-14 v1 exactly as recommended in section 19 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-15: which retention/incident controls? | indefinite retention, RPO 15m, RTO 60m and section-20 controls | finite disposal or other targets need legal/operations approval | evidence loss or privacy breach | `APPROVE D-PR9-15 v1 exactly as recommended in section 20 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-| D-PR9-16: one PR or stacked? | PR9a schema/event, then PR9b isolated posting | one PR combines security, migration and first-write review | unreviewable boundary | `APPROVE D-PR9-16 v1 exactly as recommended in section 21 of PRE-PR9 Design Closure audited at base 9870c279166e41dc0a059763240a8ce892abf54d.` |
-
-The required approving roles are exactly those named in each decision status and
-section. Approval of D-PR9-01–16 would permit setting
-`architectureDesignApproved = TRUE` and `canonicalWriteContractApproved = TRUE`
-only if every approval text and its identity/timestamp/reference metadata are
-durable and independently verifiable. It would still leave:
+The Technical Architecture Reviewer must submit this exact statement after
+replacing `<EXACT_PR_HEAD_SHA>` with the full current head SHA:
 
 ```text
+TECHNICAL ARCHITECTURE REVIEW APPROVED — I independently reviewed PRE-PR9 Design Closure in PR #231 at exact head <EXACT_PR_HEAD_SHA>. I approve D-PR9-01–D-PR9-16 only as the Gate A architecture design assumptions and fail-closed PR9a/PR9b boundaries recorded in that head. I do not approve implementation, deployment, production migration, Railway access, production reads or writes, accounting/tax/legal/privacy production policy, production evidence, activation, settlement, shadow read or cutover.
+```
+
+Automated review output may be linked as evidence for that reviewer, but cannot be
+the authenticated durable approval itself. The reviewer approval is invalid if the
+document head changes afterward.
+
+After that technical approval exists for the same head, the Product/Business Owner
+may submit the following exact statement, replacing `<EXACT_PR_HEAD_SHA>` with the
+full current head SHA:
+
+```text
+OWNER DESIGN APPROVAL — I confirm that I am the Product/Business Owner authorized for rentCore. I approve Gate A architecture design in PR #231 at exact head <EXACT_PR_HEAD_SHA>, including D-PR9-01–D-PR9-16 only as design assumptions for the contracts, schema design, transaction design, isolation, test matrix and PR9a/PR9b split recorded in that head. I confirm that a durable independent Technical Architecture Reviewer approval exists for the same exact head. I acknowledge that Accounting/Finance, Tax/VAT, Legal/Privacy, production evidence, source/identity authority, Security/Operations readiness and all production policy values remain unapproved until their applicable later gates. This approval authorizes no merge automatically, no PR9a or PR9b implementation, no disabled or production deployment, no production migration, no Railway access, no production PR8 execution, no canonical production read or write, no settlement, no shadow read and no cutover.
+
+architectureDesignApproved = TRUE
+pr9aImplementationAuthorized = FALSE
+pr9bImplementationAuthorized = FALSE
 pr9ImplementationAuthorized = FALSE
 pr9DisabledDeploymentAuthorized = FALSE
+foundationDeploymentRetryAuthorized = FALSE
 productionActivationAuthorized = FALSE
 canonicalProductionReadsAuthorized = FALSE
 productionCanonicalWritesAuthorized = FALSE
+settlementAuthorized = FALSE
+shadowReadAuthorized = FALSE
+cutoverAuthorized = FALSE
 ```
 
-The owner must issue a later, separate exact implementation authorization before
-PR9a, and another before PR9b. Deployment and every production operation remain
-outside this packet.
+The statements are valid only when their authenticated author identity, UTC
+timestamp, permanent reference and literal text are durable and both identify the
+same unchanged PR head. The owner approval may set only
+`architectureDesignApproved = TRUE`. PR9a remains forbidden until a new Gate B
+owner prompt names its exact implementation scope and base SHA. PR9b remains
+forbidden until Gate C closes and a separate exact authorization is recorded.
 
 ## 29. Explicit non-goals and prohibited actions
 

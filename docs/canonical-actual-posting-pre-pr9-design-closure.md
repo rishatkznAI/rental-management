@@ -361,7 +361,7 @@ The event therefore persists `selectedDueDateGateKind`,
 `unknownDueDateTreatmentMappingId`/`Version`/`Hash`. Those fields and the policy-set
 hash participate in the event, command, audit, operation, result and conflict
 envelopes, but are expressly excluded from the policy-independent
-`economicSourceKey`. Authorization, activation, Algorithms A/B/C and persisted
+`economicLineageKey`. Authorization, activation, Algorithms A/B/C and persisted
 reread use the same canonical PR8 manifest and reject missing, ambiguous, unknown,
 cross-gate or mixed ID/version/hash bindings. A due-date, selected-gate, source
 literal or mapping change for the same economic source is a deterministic conflict,
@@ -479,6 +479,13 @@ denies expired, revoked, superseded, ambiguous or artifact/config/policy-drifted
 identity. Revocation after planning but before lock denies. Revocation after commit
 blocks future attempts and preserves history.
 
+Producer and posting authority are never ID-only references. Their exact downstream
+binding is the six-field composite record ID, authority version, record hash,
+company, branch and fixed authority kind. Write authorization seals both composites;
+the event seals the producer composite; activation/operation/audit/result seal the
+posting-adapter composite; conflict evidence seals both. A one-field difference or a
+same-ID later version is deterministic drift/supersession, never silent acceptance.
+
 ## 11. D-PR9-06 — Capability catalog strategy
 
 **Status:** `GATE A DESIGN ASSUMPTION PENDING`
@@ -561,10 +568,22 @@ sourceInputManifestHash = acceptedSourceInputManifestHash
 run.companyTimezone = acceptedCompanyTimezoneSnapshot
 acceptedCompanyTimezoneSnapshot = activation.companyTimezoneSnapshot
 activation.companyTimezoneSnapshot = freshPr5ReceivablesTimezone
-attemptedAt >= finalizedAt
-attemptedAt <= finalizedAt + acceptedEvidenceFreshnessInterval
-acceptedEvidenceFreshnessInterval = 15 minutes
+finalizedAt <= attemptedAt
+attemptedAt < validUntilExclusive
+validUntilExclusive = finalizedAt + acceptedEvidenceFreshnessDurationMs
+acceptedEvidenceFreshnessDurationMs = 900000
+freshnessPolicyId = rentcore.pr8_evidence_freshness.v1
+freshnessPolicyVersion = 1
+freshnessPolicyHash = FreshnessWindowPolicyV1
+freshnessWindowFingerprint = FreshnessWindowFingerprintV1
 ```
+
+The freshness interval is exact half-open `[finalizedAt, validUntilExclusive)` in
+integer UTC milliseconds. `finalizedAt` must parse to a safe integer millisecond,
+the duration is the exact positive integer `900000`, and addition must remain within
+the section-23 UTC range. Invalid input, negative duration, overflow, a mismatched
+persisted `validFrom`/`validUntilExclusive`, or equality with the exclusive upper
+bound fails closed. No wall-clock or floating-point duration arithmetic is allowed.
 
 `sealComplete` is repository-derived and true only when the complete run operation,
 audit, input, candidate, check, reconciliation and diagnostic row graph exists and
@@ -601,12 +620,33 @@ The independently signed acceptance record persists canonical
 exact objects:
 
 ```text
-{ companyTimezoneSnapshot, dryRunId, policyManifestHash,
+{ companyTimezoneSnapshot, dryRunId, finalizedAt,
+  freshnessDurationMs, freshnessPolicyHash, freshnessPolicyId,
+  freshnessPolicyVersion, freshnessWindowFingerprint, policyManifestHash,
   reconciliationSetHash, resultHash, sourceInputManifestHash,
-  sourceOwnershipManifestHash }
+  sourceOwnershipManifestHash, validFrom, validUntilExclusive }
 ```
 
-`reconciliationSetHash` is SHA-256 of the exact ordered reconciliation hashes above.
+`validFrom` equals `finalizedAt`; `validUntilExclusive` is its checked integer-
+millisecond sum with `freshnessDurationMs = 900000`.
+`FreshnessWindowPolicyV1` has domain
+`rentcore.canonical_actual_posting.pr8_freshness_policy`, version `1`, and exactly
+`{domain,durationMs,intervalKind,policyId,policyVersion,version}` with
+`intervalKind = half_open` and the literals above. `FreshnessWindowFingerprintV1`
+has domain `rentcore.canonical_actual_posting.pr8_freshness_window`, version `1`,
+and exactly `{domain,finalizedAt,freshnessDurationMs,freshnessPolicyHash,
+freshnessPolicyId,freshnessPolicyVersion,validFrom,validUntilExclusive,version}`.
+`freshnessPolicyHash = sha256(canonicalJson(FreshnessWindowPolicyV1))` and
+`freshnessWindowFingerprint =
+sha256(canonicalJson(FreshnessWindowFingerprintV1))`; neither name denotes raw JSON.
+The acceptance entry and acceptance hash seal every member. `reconciliationSetHash`
+is SHA-256 of the exact ordered reconciliation hashes above.
+`acceptedFreshnessWindowsHash` uses domain
+`rentcore.canonical_actual_posting.accepted_freshness_windows`, version `1`, and
+exactly `{domain,windows,version}`, where `windows` is the accepted evidence
+projection `[{dryRunId,freshnessWindowFingerprint}]` in the same unique dry-run
+order. Authorization and activation persist this set hash; a selected event/result/
+conflict uses the exact entry fingerprint for its `dryRunId`.
 All accepted runs in one company/branch activation must have one byte-identical,
 canonical IANA `companyTimezoneSnapshot`. The pair projection of this array must
 equal `acceptedDryRunsJson`; no independently supplied pair or timezone is accepted.
@@ -639,8 +679,9 @@ approved artifact. A parser throw,
 different resolved canonical name, missing tzdb/ICU capability or non-scalar string
 rejects; aliases are not replaced with the resolved value. The artifact/configuration
 authority hash binds the Node, ICU and tzdb data identity used by this check. Every
-Algorithms A/B comparison occurs only after all five independently persisted values
-pass this same validation.
+Algorithm A comparison occurs only after its five pre-insert persisted values pass
+this validation. Algorithm B repeats those five and the persisted event snapshot, so
+all six applicable values pass before replay or DML.
 
 Fixtures, tests, local SQLite, manually built JSON and this document are never
 production evidence. In particular, `diagnosticOnly = true` is required and does not
@@ -655,8 +696,8 @@ Accepted evidence is represented only as the ordered set
 exact result hash per ID, and is
 sealed as `acceptedDryRunsHash`; parallel identifier/hash arrays are forbidden. That
 pair set is the exact projection of `acceptedPr8EvidenceJson` and cannot be validated
-separately from `acceptedPr8EvidenceHash` or its accepted timezone and manifest
-bindings.
+separately from `acceptedPr8EvidenceHash` or its accepted timezone,
+freshness-window and manifest bindings.
 
 ## 14. D-PR9-09 — Exact database object set
 
@@ -719,8 +760,10 @@ Enums: authority kind is `source_adapter`, `eligibility_producer` or
 `canonical_posting_adapter`; status is `authorized`, `revoked`, `expired` or
 `superseded`; environment is `production`; allowed operation is exact for the kind.
 Unique keys: `(companyId, branchId, authorityKind, authorityId,
-authorityVersion)` and `recordHash`. The additional relational parent key
-`(recordId, authorityVersion, recordHash, companyId, branchId)` is unique so every
+authorityVersion)` and `recordHash`. The relational source parent key
+`(recordId,authorityVersion,recordHash,companyId,branchId)` and the full authority
+parent key `(companyId,branchId,authorityKind,recordId,authorityVersion,recordHash)`
+are unique so every
 consumer binds one exact scoped authority version without trusting caller JSON.
 Composite FKs: `(companyId, branchId)` to canonical branches; predecessor binding
 `(previousRecordId,companyId,branchId,authorityKind,authorityId)` to the exact prior
@@ -754,7 +797,17 @@ sourceAdapterAuthorityVersion INTEGER NOT NULL
 sourceAdapterAuthorityRecordHash TEXT NOT NULL
 sourceOwnershipManifestHash TEXT NOT NULL
 producerAuthorityRecordId TEXT NOT NULL
-postingAuthorityRecordId TEXT NOT NULL
+producerAuthorityVersion INTEGER NOT NULL
+producerAuthorityRecordHash TEXT NOT NULL
+producerAuthorityCompanyId TEXT NOT NULL
+producerAuthorityBranchId TEXT NOT NULL
+producerAuthorityKind TEXT NOT NULL
+postingAdapterAuthorityRecordId TEXT NOT NULL
+postingAdapterAuthorityVersion INTEGER NOT NULL
+postingAdapterAuthorityRecordHash TEXT NOT NULL
+postingAdapterAuthorityCompanyId TEXT NOT NULL
+postingAdapterAuthorityBranchId TEXT NOT NULL
+postingAdapterAuthorityKind TEXT NOT NULL
 eventSchemaVersion TEXT NOT NULL
 operationType TEXT NOT NULL
 primaryEffectTablesJson TEXT NOT NULL
@@ -768,6 +821,7 @@ acceptedDryRunsHash TEXT NOT NULL
 acceptedPr8EvidenceJson TEXT NOT NULL
 acceptedPr8EvidenceHash TEXT NOT NULL
 acceptedCompanyTimezoneSnapshot TEXT NOT NULL
+acceptedFreshnessWindowsHash TEXT NOT NULL
 amountBasisPolicyRef TEXT NOT NULL
 amountBasisPolicyHash TEXT NOT NULL
 dueDatePolicySetJson TEXT NOT NULL
@@ -793,7 +847,10 @@ Status is `authorized`, `revoked`, `expired` or `superseded`; operation is exact
 primary-effect table. Unique keys: `(authorizationId, authorizationVersion)`,
 `recordHash`. Composite scope FKs plus exact scoped/versioned/hash-bound FKs to the
 source, producer and posting authority records and PR6 activation boundary are
-mandatory.
+mandatory. For producer and posting bindings, the child company/branch columns must
+equal the authorization scope, the kind columns must be exact literals
+`eligibility_producer` and `canonical_posting_adapter`, and ID match without the
+same version and record hash is insufficient.
 
 ### `canonical_posting_activation_records`
 
@@ -822,8 +879,15 @@ boundaryHash TEXT NOT NULL
 policyManifestHashesJson TEXT NOT NULL
 acceptedDryRunsHash TEXT NOT NULL
 acceptedPr8EvidenceHash TEXT NOT NULL
+acceptedFreshnessWindowsHash TEXT NOT NULL
 dueDatePolicySetJson TEXT NOT NULL
 dueDatePolicySetHash TEXT NOT NULL
+postingAdapterAuthorityRecordId TEXT NOT NULL
+postingAdapterAuthorityVersion INTEGER NOT NULL
+postingAdapterAuthorityRecordHash TEXT NOT NULL
+postingAdapterAuthorityCompanyId TEXT NOT NULL
+postingAdapterAuthorityBranchId TEXT NOT NULL
+postingAdapterAuthorityKind TEXT NOT NULL
 writeAuthorizationRecordId TEXT NOT NULL
 effectiveFrom TEXT NOT NULL
 expiresAt TEXT NOT NULL
@@ -846,7 +910,11 @@ Columns:
 id TEXT PRIMARY KEY
 companyId TEXT NOT NULL
 branchId TEXT NOT NULL
-economicSourceKey TEXT NOT NULL
+economicLineageKey TEXT NOT NULL
+economicSourceRevisionKey TEXT NOT NULL
+rootSourceDocumentLineageId TEXT NOT NULL
+rootCoverageLineageId TEXT NOT NULL
+currentPr6RevisionHash TEXT NOT NULL
 eventSchemaVersion TEXT NOT NULL
 eventVersion INTEGER NOT NULL
 dryRunId TEXT NOT NULL
@@ -902,6 +970,11 @@ sourceAdapterAuthorityRecordId TEXT NOT NULL
 sourceAdapterAuthorityVersion INTEGER NOT NULL
 sourceAdapterAuthorityRecordHash TEXT NOT NULL
 producerAuthorityRecordId TEXT NOT NULL
+producerAuthorityVersion INTEGER NOT NULL
+producerAuthorityRecordHash TEXT NOT NULL
+producerAuthorityCompanyId TEXT NOT NULL
+producerAuthorityBranchId TEXT NOT NULL
+producerAuthorityKind TEXT NOT NULL
 writeAuthorizationRecordId TEXT NOT NULL
 sourceLineageHash TEXT NOT NULL
 correlationId TEXT NOT NULL
@@ -911,11 +984,13 @@ occurredAt TEXT NOT NULL
 createdAt TEXT NOT NULL
 ```
 
-Unique keys: `(companyId, economicSourceKey)`, `(companyId, eventHash)`, and exact
-`(dryRunId, candidateId)`. Composite FKs connect candidate/run/scope, activation,
-producer authority, write authorization, PR6 activation boundary and exact PR6
-lineage. Checks enforce `ActualReceivableEligibleV1`, version 1, RUB,
-net+VAT=gross, original=gross, half-open interval and due-date rules.
+Unique keys: `(companyId, branchId, economicLineageKey)`,
+`(companyId, branchId, economicSourceRevisionKey)`, `(companyId, eventHash)`, and
+exact `(dryRunId, candidateId)`. Composite FKs connect candidate/run/scope,
+activation, the exact producer authority ID/version/hash/scope/kind binding, write
+authorization, PR6 activation boundary and exact PR6 lineage. Checks enforce
+`ActualReceivableEligibleV1`, version 1, RUB, net+VAT=gross, original=gross,
+half-open interval and due-date rules.
 
 ### `canonical_receivable_posting_operations`
 
@@ -929,12 +1004,19 @@ operationType TEXT NOT NULL
 idempotencyKey TEXT NOT NULL
 eventId TEXT NOT NULL
 eventHash TEXT NOT NULL
-economicSourceKey TEXT NOT NULL
+economicLineageKey TEXT NOT NULL
+economicSourceRevisionKey TEXT NOT NULL
+currentPr6RevisionHash TEXT NOT NULL
 sourceAdapterAuthorityRecordId TEXT NOT NULL
 sourceAdapterAuthorityVersion INTEGER NOT NULL
 sourceAdapterAuthorityRecordHash TEXT NOT NULL
 sourceOwnershipManifestHash TEXT NOT NULL
-postingAuthorityRecordId TEXT NOT NULL
+postingAdapterAuthorityRecordId TEXT NOT NULL
+postingAdapterAuthorityVersion INTEGER NOT NULL
+postingAdapterAuthorityRecordHash TEXT NOT NULL
+postingAdapterAuthorityCompanyId TEXT NOT NULL
+postingAdapterAuthorityBranchId TEXT NOT NULL
+postingAdapterAuthorityKind TEXT NOT NULL
 writeAuthorizationRecordId TEXT NOT NULL
 activationRecordId TEXT NOT NULL
 acceptedDryRunsHash TEXT NOT NULL
@@ -962,10 +1044,11 @@ createdAt TEXT NOT NULL
 ```
 
 Operation is exactly `canonical_receivable.initial_post.v1`. Unique keys:
-`(companyId, operationType, idempotencyKey)`, `eventId`, `economicSourceKey`, and
+`(companyId, operationType, idempotencyKey)`, `eventId`,
+`(companyId,branchId,economicLineageKey)`, and
 `canonicalReceivableId`, plus `financialAuditEventId`. Composite FKs connect event, source/producer/posting
-authority bindings, authorization, activation, canonical receivable and financial
-audit.
+authority bindings (source/posting directly and producer through the exact event),
+authorization, activation, canonical receivable and financial audit.
 
 ### `canonical_receivable_posting_conflicts`
 
@@ -979,7 +1062,9 @@ conflictType TEXT NOT NULL
 severity TEXT NOT NULL
 eventId TEXT NULL
 eventHash TEXT NULL
-economicSourceKey TEXT NOT NULL
+economicLineageKey TEXT NULL
+economicSourceRevisionKey TEXT NULL
+economicLineageCandidateFingerprint TEXT NOT NULL
 existingReceivableId TEXT NULL
 existingOperationId TEXT NULL
 conflictObservationJson TEXT NOT NULL
@@ -990,7 +1075,18 @@ sourceAdapterAuthorityRecordId TEXT NOT NULL
 sourceAdapterAuthorityVersion INTEGER NOT NULL
 sourceAdapterAuthorityRecordHash TEXT NOT NULL
 sourceOwnershipManifestHash TEXT NOT NULL
-postingAuthorityRecordId TEXT NOT NULL
+producerAuthorityRecordId TEXT NOT NULL
+producerAuthorityVersion INTEGER NOT NULL
+producerAuthorityRecordHash TEXT NOT NULL
+producerAuthorityCompanyId TEXT NOT NULL
+producerAuthorityBranchId TEXT NOT NULL
+producerAuthorityKind TEXT NOT NULL
+postingAdapterAuthorityRecordId TEXT NOT NULL
+postingAdapterAuthorityVersion INTEGER NOT NULL
+postingAdapterAuthorityRecordHash TEXT NOT NULL
+postingAdapterAuthorityCompanyId TEXT NOT NULL
+postingAdapterAuthorityBranchId TEXT NOT NULL
+postingAdapterAuthorityKind TEXT NOT NULL
 writeAuthorizationRecordId TEXT NOT NULL
 activationRecordId TEXT NOT NULL
 acceptedDryRunsHash TEXT NOT NULL
@@ -1008,8 +1104,8 @@ detectedAt TEXT NOT NULL
 createdAt TEXT NOT NULL
 ```
 
-Conflict type is exactly one of the 42 literals in the complete section-22.8
-registry: nine non-authority integrity types plus the Cartesian product of three
+Conflict type is exactly one of the 47 literals in the complete section-22.8
+registry: fourteen non-authority integrity types plus the Cartesian product of three
 authority-kind prefixes and eleven authority-denial suffixes. No generic,
 unregistered or implementation-selected conflict label is accepted. Severity is
 always `p0`; unique key is `(companyId, conflictHash)`.
@@ -1044,10 +1140,13 @@ Exact additional domains are:
 | activation source systems | exactly `rentcore.billing_source_authority.v1` |
 | activation document/rental/currency | `rental_service_upd`, `equipment_rental_line`, `RUB` |
 | event `eventSchemaVersion` | `ActualReceivableEligibleV1` |
+| event economic row class | `conducted_upd_validated_coverage_slice_v1` |
 | event `amountBasis` | `gross` |
 | event `dueDateProvenance` | `invoice_due_date`, `contractual_payment_due_date`, `installment_due_date`, `unknown` |
 | conflict `severity` | `p0` |
 | conflict `detectorVersion` | `canonical-posting-conflict-detector-v1` |
+| producer consumer `producerAuthorityKind` | `eligibility_producer` |
+| posting consumer `postingAdapterAuthorityKind` | `canonical_posting_adapter` |
 
 For authority, authorization and activation chains, version is a positive integer,
 version 1 has no predecessor, and version N+1 names the exact latest N record of the
@@ -1089,10 +1188,13 @@ derivation from its civil `forwardOnlyStartDate`, and
 canonical IANA names; aliases rejected by the registered canonicalizer are never
 normalized silently.
 
-For operation rows, every field is non-null except the three
+Every event has non-null `economicLineageKey`, `economicSourceRevisionKey`,
+`rootSourceDocumentLineageId`, `rootCoverageLineageId` and
+`currentPr6RevisionHash`; the two key hashes must reproduce section 22.5 from the
+locked PR6 graph. For operation rows, every field is non-null except the three
 `unknownDueDateTreatmentMapping*` fields, which are all null for the proven gate and
 all non-null for the unknown gate. All identities/hashes revalidate, and the exact
-event, source key and canonical receivable each seal at most one operation. For
+event, economic lineage key and canonical receivable each seal at most one operation. For
 conflict rows, nullable event/operation/receivable references are permitted only when
 the referenced row does not exist; otherwise scope and identity must match. The four
 denied-authority columns follow the exact all-null/all-non-null registry rule below.
@@ -1112,7 +1214,9 @@ records. An ID and result hash can never be validated independently.
 pair, timezone or reconciliation-set member. Its pair projection and hash must match
 `acceptedDryRunsJson`/`acceptedDryRunsHash`; its common timezone must match
 `acceptedCompanyTimezoneSnapshot`; and `acceptedPr8EvidenceHash` must reproduce the
-section-22 envelope everywhere it is persisted. Missing, extra or independently
+section-22 envelope everywhere it is persisted. Its ordered dry-run/window
+projection must reproduce `acceptedFreshnessWindowsHash` in authorization and
+activation. Missing, extra or independently
 mixed members fail closed.
 
 The exact foreign keys all use `ON UPDATE RESTRICT ON DELETE RESTRICT`:
@@ -1121,13 +1225,13 @@ The exact foreign keys all use `ON UPDATE RESTRICT ON DELETE RESTRICT`:
 |---|---|
 | every PR9 table | `companyId` → `canonical_companies(id)`; `(companyId, branchId)` → `canonical_branches(companyId, id)` |
 | governed authority | `(previousRecordId,companyId,branchId,authorityKind,authorityId)` → the same table's exact prior scoped chain row; version trigger requires contiguous N+1 |
-| write authorization | `previousRecordId` → same table `recordId`; `(activationBoundaryId, companyId, branchId)` → `billing_source_activation_boundaries(id, companyId, branchId)`; source binding `(sourceAdapterAuthorityRecordId, sourceAdapterAuthorityVersion, sourceAdapterAuthorityRecordHash, companyId, branchId)` → the exact governed authority composite key; producer/posting IDs → governed authority `recordId` plus the scope/kind/current-version trigger checks below |
-| posting activation | `previousRecordId` → same table `recordId`; `(activationBoundaryId, companyId, branchId)` → `billing_source_activation_boundaries(id, companyId, branchId)`; `writeAuthorizationRecordId` → write authorization `recordId` |
+| write authorization | `previousRecordId` → same table `recordId`; `(activationBoundaryId, companyId, branchId)` → `billing_source_activation_boundaries(id, companyId, branchId)`; source binding `(sourceAdapterAuthorityRecordId, sourceAdapterAuthorityVersion, sourceAdapterAuthorityRecordHash, companyId, branchId)` → exact governed authority composite; producer binding `(producerAuthorityCompanyId,producerAuthorityBranchId,producerAuthorityKind,producerAuthorityRecordId,producerAuthorityVersion,producerAuthorityRecordHash)` and posting binding `(postingAdapterAuthorityCompanyId,postingAdapterAuthorityBranchId,postingAdapterAuthorityKind,postingAdapterAuthorityRecordId,postingAdapterAuthorityVersion,postingAdapterAuthorityRecordHash)` → exact governed authority parent `(companyId,branchId,authorityKind,recordId,authorityVersion,recordHash)`; child authority scope must equal row scope and kinds are fixed |
+| posting activation | `previousRecordId` → same table `recordId`; `(activationBoundaryId, companyId, branchId)` → `billing_source_activation_boundaries(id, companyId, branchId)`; `writeAuthorizationRecordId` → write authorization `recordId`; full posting-adapter authority composite → the exact write-authorization-bound governed record |
 | eligible event PR8 | `(dryRunId, companyId, branchId)` → `actual_source_dry_runs(id, companyId, branchId)`; `(candidateId, dryRunId, companyId, branchId)` → `actual_source_dry_run_candidates(id, runId, companyId, branchId)` |
 | eligible event PR6 | each of `activationBoundaryId`, `rentalLineId`, `periodId`, `closedPeriodVersionId`, `snapshotId`, `updId`, `formedUpdVersionId`, `conductedUpdVersionId`, `updLineId`, `updLineVersionId`, `coverageSetId`, `coverageSliceId` with `(companyId, branchId)` → the same-ID scoped key of the corresponding `billing_source_*` table |
-| eligible event PR9 | `activationRecordId` → posting activation `recordId`; source binding composite → the exact governed authority composite key; `producerAuthorityRecordId` → governed authority `recordId` plus trigger checks; `writeAuthorizationRecordId` → write authorization `recordId` |
-| posting operation | `eventId` → eligible event `id`; source binding composite → exact governed authority composite key; `postingAuthorityRecordId` → governed authority `recordId` plus trigger checks; `writeAuthorizationRecordId` → write authorization `recordId`; `activationRecordId` → posting activation `recordId`; `(companyId, canonicalReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; `(financialAuditEventId, companyId, branchId)` → `financial_audit_events(id, companyId, branchId)` deferred until commit |
-| posting conflict | nullable `eventId` → eligible event `id`; nullable `existingOperationId` → posting operation `id`; nullable `(companyId, existingReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; source binding composite plus posting authority, authorization and activation IDs → their exact scoped PR9 records; nullable denied-authority composite `(deniedAuthorityRecordId,deniedAuthorityVersion,deniedAuthorityRecordHash,companyId,branchId)` → its exact governed record when Algorithm C persistence is permitted |
+| eligible event PR9 | `activationRecordId` → posting activation `recordId`; source binding composite and full producer authority composite → exact governed records; `writeAuthorizationRecordId` → write authorization `recordId` |
+| posting operation | `eventId` → eligible event `id`; source binding composite and full posting-adapter authority composite → exact governed records; `writeAuthorizationRecordId` → write authorization `recordId`; `activationRecordId` → posting activation `recordId`; `(companyId, canonicalReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; `(financialAuditEventId, companyId, branchId)` → `financial_audit_events(id, companyId, branchId)` deferred until commit |
+| posting conflict | nullable `eventId` → eligible event `id`; nullable `existingOperationId` → posting operation `id`; nullable `(companyId, existingReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; source, producer and posting-adapter full composites plus authorization and activation IDs → their exact scoped PR9 records; nullable denied-authority composite `(deniedAuthorityRecordId,deniedAuthorityVersion,deniedAuthorityRecordHash,companyId,branchId)` → its exact governed record when Algorithm C persistence is permitted |
 
 Single-column PR9 record references are additionally guarded by before-insert
 triggers that require exact company, branch, logical kind/status and current version;
@@ -1142,7 +1246,8 @@ Exact additional index definitions:
 |---|---|---|
 | `uq_pr9_adapter_authority_version` | yes | `companyId, branchId, authorityKind, authorityId, authorityVersion` |
 | `uq_pr9_adapter_authority_hash` | yes | `recordHash` |
-| `uq_pr9_adapter_authority_binding` | yes | `recordId, authorityVersion, recordHash, companyId, branchId` |
+| `uq_pr9_adapter_authority_source_binding` | yes | `recordId, authorityVersion, recordHash, companyId, branchId` |
+| `uq_pr9_adapter_authority_binding` | yes | `companyId, branchId, authorityKind, recordId, authorityVersion, recordHash` |
 | `uq_pr9_adapter_authority_chain_parent` | yes | `recordId, companyId, branchId, authorityKind, authorityId` |
 | `idx_pr9_adapter_authority_scope` | no | `companyId, branchId, authorityKind, authorityId, status, expiresAt` |
 | `uq_pr9_write_authorization_version` | yes | `authorizationId, authorizationVersion` |
@@ -1151,13 +1256,14 @@ Exact additional index definitions:
 | `uq_pr9_activation_version` | yes | `activationId, activationVersion` |
 | `uq_pr9_activation_hash` | yes | `recordHash` |
 | `idx_pr9_activation_scope` | no | `companyId, branchId, status, expiresAt` |
-| `uq_pr9_eligible_economic_source` | yes | `companyId, economicSourceKey` |
+| `uq_pr9_eligible_economic_lineage` | yes | `companyId, branchId, economicLineageKey` |
+| `uq_pr9_eligible_source_revision` | yes | `companyId, branchId, economicSourceRevisionKey` |
 | `uq_pr9_eligible_event_hash` | yes | `companyId, eventHash` |
 | `uq_pr9_eligible_candidate` | yes | `dryRunId, candidateId` |
 | `idx_pr9_eligible_scope` | no | `companyId, branchId, createdAt` |
 | `uq_pr9_posting_operation_idempotency` | yes | `companyId, operationType, idempotencyKey` |
 | `uq_pr9_posting_operation_event` | yes | `eventId` |
-| `uq_pr9_posting_operation_source` | yes | `companyId, economicSourceKey` |
+| `uq_pr9_posting_operation_lineage` | yes | `companyId, branchId, economicLineageKey` |
 | `uq_pr9_posting_operation_receivable` | yes | `canonicalReceivableId` |
 | `uq_pr9_posting_operation_audit` | yes | `financialAuditEventId` |
 | `idx_pr9_posting_operation_scope` | no | `companyId, branchId, createdAt` |
@@ -1199,11 +1305,14 @@ trg_pr9_activation_version_chain
 trg_pr9_write_authorization_source_adapter_validate
 trg_pr9_write_authorization_producer_validate
 trg_pr9_write_authorization_posting_adapter_validate
+trg_pr9_activation_posting_adapter_validate
 trg_pr9_event_source_adapter_validate
 trg_pr9_event_producer_validate
 trg_pr9_operation_source_adapter_validate
 trg_pr9_operation_posting_adapter_validate
 trg_pr9_conflict_source_adapter_validate
+trg_pr9_conflict_producer_validate
+trg_pr9_conflict_posting_adapter_validate
 trg_pr9_conflict_denied_authority_validate
 trg_pr9_event_before_operation_seal
 trg_pr9_operation_finalize
@@ -1223,11 +1332,14 @@ Exact trigger table/timing is:
 | `trg_pr9_write_authorization_source_adapter_validate` | `canonical_write_authorization_records` | `BEFORE INSERT` |
 | `trg_pr9_write_authorization_producer_validate` | `canonical_write_authorization_records` | `BEFORE INSERT` |
 | `trg_pr9_write_authorization_posting_adapter_validate` | `canonical_write_authorization_records` | `BEFORE INSERT` |
+| `trg_pr9_activation_posting_adapter_validate` | `canonical_posting_activation_records` | `BEFORE INSERT` |
 | `trg_pr9_event_source_adapter_validate` | `actual_receivable_eligible_events` | `BEFORE INSERT` |
 | `trg_pr9_event_producer_validate` | `actual_receivable_eligible_events` | `BEFORE INSERT` |
 | `trg_pr9_operation_source_adapter_validate` | `canonical_receivable_posting_operations` | `BEFORE INSERT` |
 | `trg_pr9_operation_posting_adapter_validate` | `canonical_receivable_posting_operations` | `BEFORE INSERT` |
 | `trg_pr9_conflict_source_adapter_validate` | `canonical_receivable_posting_conflicts` | `BEFORE INSERT` |
+| `trg_pr9_conflict_producer_validate` | `canonical_receivable_posting_conflicts` | `BEFORE INSERT` |
+| `trg_pr9_conflict_posting_adapter_validate` | `canonical_receivable_posting_conflicts` | `BEFORE INSERT` |
 | `trg_pr9_conflict_denied_authority_validate` | `canonical_receivable_posting_conflicts` | `BEFORE INSERT` |
 | `trg_pr9_event_before_operation_seal` | `canonical_receivable_posting_operations` | `BEFORE INSERT` |
 | `trg_pr9_operation_finalize` | `canonical_receivable_posting_operations` | `BEFORE INSERT` |
@@ -1251,10 +1363,14 @@ also require the latest record to be currently `authorized`; the conflict trigge
 verifies the immutable denied-attempt binding even when a terminal lifecycle was
 the reason for denial and grants no primary effect.
 
-The producer and posting-adapter triggers resolve their record IDs to the exact
+The producer and posting-adapter triggers require the literal child
+ID/version/recordHash/company/branch/kind composite to reference the exact
 scope-specific `eligibility_producer` or `canonical_posting_adapter` chain, require
 their registered operation, actor, artifact/configuration/policy/ownership bindings
-and latest authorized version, and reject cross-company/branch references. The
+and latest authorized version, and reject ID-only, stale-version/hash and
+cross-company/branch references. Activation binds the same posting composite as its
+write authorization; events bind the producer composite; operations bind the posting
+composite; conflicts bind both. The
 denied-authority trigger applies the registered prefix to the exact authority kind,
 requires all four denied-authority columns to bind the same-scope denied record for
 an authority conflict, and requires all four null for a non-authority conflict. It
@@ -1285,7 +1401,7 @@ correlation ID, `aggregateType = canonical_receivable`, aggregate/canonical ID,
 `actorId = integration:rentcore-canonical-receivable-posting`, integration actor
 type, `occurredAt = createdAt = operation.createdAt`, exact reason literal,
 `previousValueJson IS NULL`, exact source-system literal, payload
-`actorAuthorityRecordId = operation.postingAuthorityRecordId`, exact authority/event
+`actorAuthorityRecordId = operation.postingAdapterAuthorityRecordId`, exact authority/event
 identities, exact new-value key set, canonical payload fingerprint and prospective
 audit-event fingerprint equal to the operation seal. Wrong event type, scope,
 correlation, aggregate, actor identity, actor authority, timestamp, reason,
@@ -1322,11 +1438,11 @@ Recommended exact mapping:
 | `sourceSystem` | literal `rentcore.billing_source_authority.v1` | any other value blocks replay |
 | `sourceDocumentType` | literal `upd_coverage_slice_v1` | immutable |
 | `sourceDocumentId` | event `updId` | source version retained outside PR1 row |
-| `sourceLineId` | event `coverageSliceId` | exact smallest economic slice |
+| `sourceLineId` | event `rootCoverageLineageId` | stable correction-lineage identity; current `coverageSliceId` remains in event/operation/audit only |
 | source document version | event `conductedUpdVersionId` in event/operation/audit | PR1 has no column; mismatch blocks |
 | rental line | event `rentalLineId` in event/operation/audit | PR1 has no column; mismatch blocks |
-| `externalId` | event `economicSourceKey` | unique within company |
-| economic source key | event `economicSourceKey`; mapped to `externalId` | policy-independent identity; changed content is P0 conflict |
+| `externalId` | event `economicLineageKey` | unique stable economic lineage within company |
+| economic lineage/revision | event `economicLineageKey` mapped to `externalId`; event/operation retain `economicSourceRevisionKey` | same lineage with changed current revision is a registered correction/revision conflict, never a second receivable |
 | `idempotencyKey` | repository-derived `CanonicalPostingIdempotencyKeyV1` from section 22.10 | caller value forbidden; same source with changed event is conflict |
 | `currency` | `RUB` | other currency blocks |
 | `originalAmountMinor` | event `grossAmountMinor` | must equal approved event basis |
@@ -1344,6 +1460,11 @@ Recommended exact mapping:
 
 `cancellationReason`, `cancelledAt`, `closedAt` and `writtenOffAt` are null. A
 conflict under any mapped field creates no second receivable and no update.
+The existing PR1 unique external identity receives `economicLineageKey`, and its
+source identity receives stable `rootCoverageLineageId`; together with the PR9
+operation lineage unique index and Algorithm-B full-chain lookup, they enforce at
+most one canonical coverage fact per company/branch lineage even when current PR6
+version/set/slice IDs change.
 
 ## 16. D-PR9-11 — Canonical immutability
 
@@ -1418,12 +1539,23 @@ no canonical effect and records the approved conflict evidence when registry
 persistence is `required`; unsafe cross-scope/ambiguous bindings are intentionally
 not persisted and open the circuit.
 
+Before every event or posting decision, the repository traverses the complete locked
+PR6 predecessor/replacement graph to the unique root source document and unique root
+coverage slice. A replacement before the first event may become the current revision
+of that stable lineage. Once an event exists, a different revision is
+`SOURCE_CORRECTION_AFTER_ELIGIBILITY`; once the canonical row exists it is
+`SOURCE_CORRECTION_AFTER_POSTING`. A same-revision content/hash change is
+`SOURCE_REVISION_CHANGED_BEFORE_POSTING`; ambiguous roots or multiple active current
+revisions use their registered root/current conflict types. None may create another
+event or receivable.
+
 If the canonical row already exists, PR9 never updates or deletes it. The condition
 is a P0 post-posting source-change incident for reconciliation and a future
 correction/compensation PR. Its conflict evidence uses the exact root type from
 `ConflictObservationV1`—for example `PR6_LINEAGE_DRIFT`,
 `DUE_DATE_POLICY_DRIFT`, `SOURCE_ADAPTER_REVOKED` or
-`ELIGIBILITY_PRODUCER_EXPIRED`—rather than inventing a generic
+`ELIGIBILITY_PRODUCER_EXPIRED`, and the five exact source revision/root types above—
+rather than inventing a generic
 label. PR9 may expose only the immutable conflict and existing operation identities
 to that future workflow. Authority revocation stops future attempts but does not
 invalidate or erase prior committed evidence.
@@ -1450,7 +1582,7 @@ Recommended v1 numbers:
 | authority/authorization/activation max lifetime | 24 hours |
 | free-space stop | below max of 512 MiB or 20% of mounted volume |
 | DB+WAL daily-growth stop | 64 MiB per UTC day |
-| conflict circuit breaker | immediate for all 33 authority-denial types and the seven non-authority integrity types listed as immediate in section 22.8; 5 `AUTHORIZATION_DRIFT`/`ACTIVATION_DRIFT` conflicts in 5 minutes per company/branch |
+| conflict circuit breaker | immediate for all 33 authority-denial types and the twelve non-authority integrity types listed as immediate in section 22.8; 5 `AUTHORIZATION_DRIFT`/`ACTIVATION_DRIFT` conflicts in 5 minutes per company/branch |
 | audit/conflict persistence failure | immediate circuit open |
 | blocker-rate alert | at least 1 blocked posting in 5 minutes |
 | latency warning | transaction over 2 seconds |
@@ -1648,19 +1780,24 @@ the persisted PR8 run result and match both members of every accepted pair.
 `rentcore.canonical_actual_posting.accepted_pr8_evidence`, version `1`, and exactly:
 
 ```text
-{ acceptedDryRunsHash, acceptedRuns, domain, evidencePackHash, version }
+{ acceptedDryRunsHash, acceptedFreshnessWindowsHash, acceptedRuns, domain,
+  evidencePackHash, version }
 ```
 
 `acceptedRuns` is the exact `acceptedPr8EvidenceJson` array from section 13. It is
 sorted with the same comparator by `dryRunId`; every entry has exactly
-`companyTimezoneSnapshot`, `dryRunId`, `policyManifestHash`,
-`reconciliationSetHash`, `resultHash`, `sourceInputManifestHash` and
-`sourceOwnershipManifestHash`. Its pair projection must reproduce
+`companyTimezoneSnapshot`, `dryRunId`, `finalizedAt`, `freshnessDurationMs`,
+`freshnessPolicyHash`, `freshnessPolicyId`, `freshnessPolicyVersion`,
+`freshnessWindowFingerprint`, `policyManifestHash`, `reconciliationSetHash`,
+`resultHash`, `sourceInputManifestHash`, `sourceOwnershipManifestHash`, `validFrom`
+and `validUntilExclusive`. Its pair projection must reproduce
 `acceptedDryRunsHash`. `reconciliationSetHash` uses domain
 `rentcore.canonical_actual_posting.pr8_reconciliation_set`, version `1`, and exactly
 `{domain,dryRunId,reconciliationHashes,version}`, where hashes are the complete exact
 row set ordered by hash and every hash appears once in the sealed PR8 result.
-Every entry must carry the same canonical `companyTimezoneSnapshot`; the derived
+The freshness members must reproduce the exact section-13 half-open integer-
+millisecond window and its fingerprints. Every entry must carry the same canonical
+`companyTimezoneSnapshot`; the derived
 common value is persisted as `acceptedCompanyTimezoneSnapshot`. Neither the pair
 hash nor PR8 `resultHash` can substitute for this acceptance hash.
 
@@ -1714,26 +1851,92 @@ to JSON null, INTEGER to a safe JSON integer and TEXT to its exact string; any R
 BLOB, unknown column, missing column or schema drift denies before hashing. The
 array-order fixture for each of all 16 row classes is mandatory.
 
-### 22.5 `ActualReceivableEligibleV1`
-
-The policy-independent identity is:
+`currentPr6RevisionHash` is the PR6-only revision seal. It uses domain
+`rentcore.canonical_actual_posting.pr6_current_revision`, version `1`, and exactly:
 
 ```text
-economicSourceKey = sha256(canonicalJson({
-  branchId, companyId, contractId, coverageEndExclusive, coverageStart,
-  currency, domain, rentalId, rentalLineId, schemaVersion, sourceDocumentId,
-  sourceDocumentType, sourceDocumentVersion, sourceLineId, sourceSystem, version
+{ branchId, companyId, conductedUpdContentHash, conductedUpdVersionId,
+  coverageSetId, coverageSetMappingHash, coverageSliceHash, coverageSliceId,
+  domain, formedUpdVersionId,
+  pr6LineageRows:[{rowFingerprint,rowId,rowVersion,tableName}],
+  updLineVersionContentHash, updLineVersionId, version }
+```
+
+The `pr6LineageRows` array is the exact section-22.4 locked closure. The four named
+content/mapping hashes come from their exact current persisted PR6 rows. PR8,
+authority, authorization, activation and timestamps introduced outside PR6 are
+excluded. This seal therefore changes for a current source revision or PR6 graph
+change without confusing it with a policy or actor change.
+
+### 22.5 `ActualReceivableEligibleV1`
+
+The repository uses two exact identities. First, it resolves the correction lineage
+under lock. `rootSourceDocumentLineageId` is the one stable PR6
+`billing_source_upds.id` (`updId`) shared by every set/slice in the accepted chain.
+Starting at the current coverage set/slice, it repeatedly finds the unique
+`billing_source_coverage_supersessions` row whose
+`replacementCoverageSetId = currentCoverageSetId`, requires action `corrected` or
+`superseded`, and moves to that row's `originalCoverageSetId`. At each predecessor
+set it selects exactly one slice with byte-identical company, branch, source-system
+literal, `updId`, `contractId`, `rentalId`, `rentalLineId`, `periodId`, half-open
+coverage interval, currency and economic row class. Traversal stops at the unique
+set/slice with no predecessor. A linked replacement that changes any of these
+lineage-defining members is a cross-lineage collision, not a new economic identity.
+
+The derived stable root ID is:
+
+```text
+rootCoverageLineageId = "coverage-lineage:" + sha256(canonicalJson({
+  branchId, companyId, domain, rootCoverageSetId, rootCoverageSliceId,
+  rootSourceDocumentLineageId, version
 }))
 ```
 
-Here `domain = rentcore.canonical_actual_posting.economic_source_key`, envelope
-`version = 1`, `sourceDocumentType = upd_coverage_slice_v1`,
-`sourceDocumentId = updId`, `sourceDocumentVersion = conductedUpdVersionId`,
-`sourceLineId = coverageSliceId`, `coverageStart = sliceStartDate`, and
-`coverageEndExclusive = sliceEndDateExclusive`. The key explicitly excludes amount,
-due date/provenance/evidence, every policy hash, PR8 acceptance, adapter/producer/
-posting authority, write authorization, activation, lifecycle status, timestamps,
-generated IDs and correlation. `(companyId, economicSourceKey)` is unique.
+Here domain is `rentcore.canonical_actual_posting.coverage_lineage_root`, version is
+`1`, and the root set/slice IDs are immutable PR6 IDs. A missing edge, cycle,
+cross-scope/cross-UPD edge, zero or multiple matching predecessors, two disconnected
+roots with the same apparent economic dimensions, or more than one active current
+revision fails before identity construction using the registered section-22.8
+conflict. The repository scans the complete same-scope PR6 graph, not only the
+caller/current path.
+
+The policy-independent economic identity is:
+
+```text
+economicLineageKey = sha256(canonicalJson({
+  branchId, companyId, contractId, coverageEndExclusive, coverageStart,
+  currency, domain, economicRowClass, rentalId, rentalLineId,
+  rootCoverageLineageId, rootSourceDocumentLineageId, schemaVersion,
+  sourceSystem, version
+}))
+```
+
+Here `domain = rentcore.canonical_actual_posting.economic_lineage_key`, envelope
+`version = 1`, `economicRowClass = conducted_upd_validated_coverage_slice_v1`,
+`coverageStart = sliceStartDate`, and `coverageEndExclusive =
+sliceEndDateExclusive`. The key explicitly excludes current UPD version, coverage
+set/slice IDs, amount, due date/provenance/evidence, every policy hash, PR8
+acceptance, adapter/producer/posting authority, write authorization, activation,
+lifecycle status, timestamps, generated IDs and correlation.
+`(companyId,branchId,economicLineageKey)` is unique.
+
+The exact current-revision identity is:
+
+```text
+economicSourceRevisionKey = sha256(canonicalJson({
+  branchId, companyId, conductedUpdVersionId, coverageSetId, coverageSliceId,
+  currentPr6RevisionHash, domain, economicLineageKey, formedUpdVersionId,
+  updLineVersionId, version
+}))
+```
+
+Its domain is `rentcore.canonical_actual_posting.economic_source_revision`, version
+`1`. It binds the exact current PR6 revision while the lineage key remains stable.
+`(companyId,branchId,economicSourceRevisionKey)` is unique. Before the first event,
+the unique latest valid replacement may supersede its predecessor and supply the
+current revision. After an event exists, a different revision conflicts and cannot
+append a second event. After posting, any different correction/replacement revision
+is a post-posting conflict and cannot append a second canonical row.
 
 `eventHash` uses domain `rentcore.canonical_actual_posting.eligible_event`, version
 `1`, and every persisted event field in section 14 except exactly generated `id`
@@ -1747,11 +1950,15 @@ Therefore its exact ordered member set is: `acceptedDryRunsHash`,
 `conductedUpdVersionId`, `contractId`,
 `contractualDueDate`, `correlationId`, `coverageSetId`, `coverageSliceId`,
 `createdAt`, `currency`, `domain`, `dryRunId`, `dueDateEvidenceRef`,
-`dueDatePolicySetHash`, `dueDateProvenance`, `dueDateTreatment`,
-`economicSourceKey`,
+`currentPr6RevisionHash`, `dueDatePolicySetHash`, `dueDateProvenance`,
+`dueDateTreatment`, `economicLineageKey`, `economicSourceRevisionKey`,
 `eventSchemaVersion`, `eventVersion`, `formedUpdVersionId`, `grossAmountMinor`,
 `netAmountMinor`, `occurredAt`, `originalAmountMinor`, `periodId`, `policyManifestHash`,
-`producerAuthorityRecordId`, `rentalId`, `rentalLineId`, `schemaVersion`,
+`producerAuthorityBranchId`, `producerAuthorityCompanyId`,
+`producerAuthorityKind`, `producerAuthorityRecordHash`,
+`producerAuthorityRecordId`, `producerAuthorityVersion`, `rentalId`,
+`rentalLineId`, `rootCoverageLineageId`, `rootSourceDocumentLineageId`,
+`schemaVersion`,
 `sliceEndDateExclusive`, `sliceStartDate`, `snapshotId`,
 `sourceAdapterAuthorityRecordHash`, `sourceAdapterAuthorityRecordId`,
 `sourceAdapterAuthorityVersion`, `sourceLineageHash`,
@@ -1766,8 +1973,9 @@ For a new event, `occurredAt = createdAt = attemptedAt` and `correlationId` is t
 pre-generated repository value. For replay comparison the repository uses the
 existing event's persisted `occurredAt`, `createdAt` and `correlationId`, not the new
 attempt clock or candidate ID, so generated attempt metadata remains sealed without
-forking identity. Same economic key and event hash is exact replay. Same economic
-key with any changed event content,
+forking identity. Same lineage key, revision key and event hash is exact replay.
+Same lineage key with changed revision uses the specific correction/revision conflict
+from section 22.8. Same lineage and revision with any changed event content,
 including amount, due-date, policy, evidence or authority, is one deterministic
 conflict and never a second event. A changed or unavailable fresh PR5 timezone does
 not alter the existing event; it denies replay/posting as `COMPANY_TIMEZONE_DRIFT`.
@@ -1829,9 +2037,14 @@ version `1`, and exactly:
   denialEvidenceTable, domain, dueDatePolicySetHash, dueDatePolicySetJson,
   effectiveFrom,
   eventSchemaVersion, evidencePackHash, expiresAt, forbiddenOperationsJson,
-  operationType, operationalControlRef, policyManifestHashesJson,
-  postingAuthorityRecordId, previousRecordId, primaryEffectTablesJson,
-  producerAuthorityRecordId, retentionControlRef, revocationReasonCode,
+  acceptedFreshnessWindowsHash, operationType, operationalControlRef,
+  policyManifestHashesJson, postingAdapterAuthorityBranchId,
+  postingAdapterAuthorityCompanyId, postingAdapterAuthorityKind,
+  postingAdapterAuthorityRecordHash, postingAdapterAuthorityRecordId,
+  postingAdapterAuthorityVersion, previousRecordId, primaryEffectTablesJson,
+  producerAuthorityBranchId, producerAuthorityCompanyId, producerAuthorityKind,
+  producerAuthorityRecordHash, producerAuthorityRecordId,
+  producerAuthorityVersion, retentionControlRef, revocationReasonCode,
   schemaVersion, sourceAdapterAuthorityRecordHash,
   sourceAdapterAuthorityRecordId, sourceAdapterAuthorityVersion,
   sourceOwnershipManifestHash, sourceSystemIdsJson, status, version }
@@ -1840,8 +2053,13 @@ version `1`, and exactly:
 The exact exclusions are `recordId`, `recordHash` and `createdAt`.
 `authorizationHash` means this exact persisted `recordHash`; no second or
 caller-computed authorization hash exists.
+This authorization `recordHash` is the single authorization seal over every exact
+member listed in the preceding envelope, including both full producer and posting
+composites. `acceptedPr8EvidenceHash`
+remains an evidence-only hash and does not silently acquire runtime actor semantics.
 The due-date policy set, acceptance record/hash, pair projection and accepted
-timezone are compared as one unit during authorization creation and every Algorithm
+timezone/freshness window and both producer/posting full authority composites are
+compared as one unit during authorization creation and every Algorithm
 A/B/C reread; no member may be independently supplied or mixed with another version.
 
 The approval set must contain stable refs/hashes for product, accountant/finance,
@@ -1861,9 +2079,13 @@ Its record hash uses domain `rentcore.canonical_actual_posting.activation`, vers
   boundaryEndUtc, boundaryHash, branchId, cohortHash, companyId,
   companyTimezoneSnapshot, currency, domain, dueDatePolicySetHash,
   dueDatePolicySetJson, effectiveFrom, explicitExclusionsJson, expiresAt,
-  forwardOnlyStartDate, forwardOnlyStartUtc, policyManifestHashesJson,
-  previousRecordId, revocationReasonCode, schemaVersion, sourceSystemIdsJson,
-  status, version, writeAuthorizationRecordId }
+  acceptedFreshnessWindowsHash, forwardOnlyStartDate, forwardOnlyStartUtc,
+  policyManifestHashesJson, postingAdapterAuthorityBranchId,
+  postingAdapterAuthorityCompanyId, postingAdapterAuthorityKind,
+  postingAdapterAuthorityRecordHash, postingAdapterAuthorityRecordId,
+  postingAdapterAuthorityVersion, previousRecordId, revocationReasonCode,
+  schemaVersion, sourceSystemIdsJson, status, version,
+  writeAuthorizationRecordId }
 ```
 
 Apart from chain-conditional `previousRecordId` and `revocationReasonCode`,
@@ -1871,8 +2093,9 @@ Apart from chain-conditional `previousRecordId` and `revocationReasonCode`,
 SQL/JSON null for every v1 row; `CHECK (boundaryEndUtc IS NULL)` is mandatory.
 `activationHash` means this exact persisted `recordHash`; no parallel hash exists.
 The exact exclusions are `recordId`, `recordHash` and `createdAt`. It seals
-`acceptedDryRunsHash`, `acceptedPr8EvidenceHash`, the accepted timezone and policy
-set. It is default denied when missing, ambiguous, ineffective, expired, revoked,
+`acceptedDryRunsHash`, `acceptedPr8EvidenceHash`, the accepted timezone/freshness
+window, policy set and exact posting-adapter authority ID/version/hash/scope/kind.
+It is default denied when missing, ambiguous, ineffective, expired, revoked,
 superseded, bounded in v1 or mismatched. Deployment creates or selects no activation.
 
 ### 22.7 Posting fingerprints
@@ -1891,7 +2114,9 @@ Algorithm B. It requires an already persisted `eventId`, has domain
   assertedUnknownDueDateTreatmentMappingVersion,
   assertedWriteAuthorizationRecordId, branchId, companyId, domain, eventId,
   operationType,
-  requestedActivationRecordId, requestedPostingAuthorityRecordId,
+  requestedActivationRecordId, requestedPostingAdapterAuthorityRecordHash,
+  requestedPostingAdapterAuthorityRecordId,
+  requestedPostingAdapterAuthorityVersion,
   requestedSourceAdapterAuthorityRecordId, version }
 ```
 
@@ -1915,6 +2140,11 @@ persisted/generated PR1 field after reread:
   version, workflowStatus, writtenOffAt }
 ```
 
+PR1 has no authority columns, so producer/posting authority is intentionally not
+invented inside `canonicalReceivableFingerprint`. The event hash seals the complete
+producer composite, while the audit payload and `resultHash` below seal the complete
+posting-adapter composite. This is the exact selected downstream design.
+
 `auditPayloadFingerprint` uses domain
 `rentcore.canonical_actual_posting.audit_payload`, version `1`, and exactly:
 
@@ -1922,8 +2152,11 @@ persisted/generated PR1 field after reread:
 { acceptedDryRunsHash, acceptedPr8EvidenceHash, activationRecordId,
   actorAuthorityRecordId, actorIdentityId, canonicalReceivableFingerprint, domain,
   dueDatePolicySetHash,
-  dueDateTreatment, economicSourceKey, eventHash, eventId, operationId,
-  postingAuthorityRecordId, sourceAdapterAuthorityRecordHash,
+  dueDateTreatment, economicLineageKey, economicSourceRevisionKey, eventHash,
+  eventId, operationId, postingAdapterAuthorityBranchId,
+  postingAdapterAuthorityCompanyId, postingAdapterAuthorityKind,
+  postingAdapterAuthorityRecordHash, postingAdapterAuthorityRecordId,
+  postingAdapterAuthorityVersion, sourceAdapterAuthorityRecordHash,
   sourceAdapterAuthorityRecordId, sourceAdapterAuthorityVersion,
   selectedDueDateGateKind, selectedDueDatePolicyHash,
   selectedDueDatePolicyId, selectedDueDatePolicyVersion, sourceLineageHash,
@@ -1955,9 +2188,11 @@ JSON or additional key is accepted. The exact repository-derived
 | `createdAt` | exact locked `attemptedAt`, equal to `occurredAt` |
 
 Inside `newValueJson`, `actorIdentityId` equals the exact audit `actorId`, and
-`actorAuthorityRecordId` equals the locked posting `authorityRecordId`; both are
+`actorAuthorityRecordId` equals the locked posting-adapter `authorityRecordId`; both are
 repository-derived and bound by the operation. They are distinct exact payload keys
-in addition to `postingAuthorityRecordId`, and the two authority IDs must be equal.
+in addition to `postingAdapterAuthorityRecordId`, and the two authority IDs must be
+equal. Version/hash/company/branch/kind are the exact locked composite and are
+verified through the payload fingerprint.
 The deferred FK seals audit ID/company/branch; the audit-side `AFTER
 INSERT` trigger compares every table row value, payload key and fingerprint after
 both rows exist. Null/empty substitution, an unknown/additional payload key or any
@@ -1987,10 +2222,16 @@ and exactly:
   attemptedAt, auditEventFingerprint, auditPayloadFingerprint, branchId,
   canonicalReceivableFingerprint, canonicalReceivableId, commandFingerprint,
   canonicalWriteAuthorizationId, companyId, correlationId, domain,
-  dueDatePolicySetHash, dueDateTreatment, economicSourceKey,
-  eventHash, eventId, financialAuditEventId, idempotencyKey, operationId,
-  operationType,
-  postingAuthorityRecordHash, postingAuthorityRecordId, schemaVersion,
+  currentPr6RevisionHash, dueDatePolicySetHash, dueDateTreatment,
+  economicLineageKey, economicSourceRevisionKey,
+  eventHash, eventId, financialAuditEventId, freshnessWindowFingerprint,
+  idempotencyKey, operationId, operationType,
+  postingAdapterAuthorityBranchId, postingAdapterAuthorityCompanyId,
+  postingAdapterAuthorityKind, postingAdapterAuthorityRecordHash,
+  postingAdapterAuthorityRecordId, postingAdapterAuthorityVersion, schemaVersion,
+  producerAuthorityBranchId, producerAuthorityCompanyId, producerAuthorityKind,
+  producerAuthorityRecordHash, producerAuthorityRecordId,
+  producerAuthorityVersion,
   selectedDueDateGateKind, selectedDueDatePolicyHash, selectedDueDatePolicyId,
   selectedDueDatePolicyVersion,
   sourceAdapterAuthorityRecordHash, sourceAdapterAuthorityRecordId,
@@ -2004,9 +2245,10 @@ and exactly:
 key. Every operation column is present; the unknown-mapping triple follows the exact
 conditional null rule for the selected due-date gate. `resultHash` excludes exactly itself; all
 other projections above are reread and recomputed before commit. `resultHash` is the
-operation's immutable seal hash; this is the operation hash for the posting chain,
-and its literal source-adapter ID/version/hash fields satisfy the required authority
-binding without introducing a second ambiguous operation hash.
+operation's immutable seal hash; this is the operation hash for the posting chain.
+Its literal source-adapter and posting-adapter composites plus the event-sealed
+producer composite satisfy the required authority binding without introducing a
+second ambiguous operation hash.
 Within that envelope, `attemptedAt` equals the persisted operation `createdAt`; for
 a new result both equal the one locked clock value, while replay reuses that sealed
 persisted value rather than the new attempt clock. Authority and activation record
@@ -2024,7 +2266,7 @@ assertions.
 ```
 
 `domain = rentcore.canonical_actual_posting.conflict_observation`, `version = 1`,
-and `conflictType` must be one exact section-14 enum value. The repository persists
+and `conflictType` must be one exact section-22.8 registry literal. The repository persists
 this object as exact canonical JSON in `conflictObservationJson` and computes
 `conflictObservationHash = sha256(canonicalJson(ConflictObservationV1))`.
 `expectedFingerprint` and `observedFingerprint` are independently computed as:
@@ -2045,19 +2287,89 @@ sha256(canonicalJson({
 }))
 ```
 
-The nine exact non-authority projection types are:
+`economicLineageCandidateFingerprint` is available before a unique coverage root is
+accepted. It uses domain
+`rentcore.canonical_actual_posting.economic_lineage_candidate`, version `1`, and
+exactly `{branchId,companyId,contractId,coverageEndExclusive,coverageStart,currency,
+domain,economicRowClass,rentalId,rentalLineId,sourceSystem,version}`. It intentionally
+contains neither root source-document nor root coverage ID: disconnected roots with
+the same apparent economic dimensions must collide before either root can become an
+accepted lineage. It contains no amount, due date, name or authority data.
+`rootCoverageLineageIdsHash` uses domain
+`rentcore.canonical_actual_posting.root_lineage_ids`, version `1`, and exactly
+`{domain,rootCoverageLineageIds,version}`; `rootCoverageLineageIds` is the complete
+unique array of candidate root IDs sorted by the section-22.1 comparator, including
+the empty array when no root exists. `rootSourceDocumentLineageIdsHash` uses domain
+`rentcore.canonical_actual_posting.root_source_document_lineage_ids`, version `1`,
+and exactly `{domain,rootSourceDocumentLineageIds,version}` with the complete unique
+root UPD-ID array under the same sorting/empty-array rule. `currentRevisionKeysHash` uses domain
+`rentcore.canonical_actual_posting.current_revision_keys`, version `1`, and exactly
+`{currentSourceRevisionKeys,domain,version}`; `currentSourceRevisionKeys` is the
+complete non-empty unique array of locked current revision keys sorted by the same
+comparator.
+`replacementRelationHash` uses domain
+`rentcore.canonical_actual_posting.replacement_relation`, version `1`, and exactly
+`{domain,economicLineageCandidateFingerprint,relations,version}` where `relations`
+is the complete locked correction/supersession path ordered by predecessor set ID,
+replacement set ID, then lifecycle action, with exact objects
+`{action,predecessorCoverageSetId,replacementCoverageSetId,supersessionRowHash}`.
+`predecessorCoverageSetId` is the exact projection alias of persisted
+`originalCoverageSetId`; `supersessionRowHash` is that row's section-22.4
+`rowFingerprint`. All three ordering members use the section-22.1 comparator.
+Missing, extra, duplicate, cyclic or cross-scope relations reject before hashing.
 
-| `conflictType` | Exact keys in both projections | Expected authoritative source | Observed authoritative source / null rule |
+Every non-authority expected and observed projection below additionally has the
+same exact common authority-binding keys
+`{postingAdapterAuthorityBranchId,postingAdapterAuthorityCompanyId,
+postingAdapterAuthorityKind,postingAdapterAuthorityRecordHash,
+postingAdapterAuthorityRecordId,postingAdapterAuthorityVersion,
+producerAuthorityBranchId,producerAuthorityCompanyId,producerAuthorityKind,
+producerAuthorityRecordHash,producerAuthorityRecordId,producerAuthorityVersion}`.
+Expected values come from the exact authorization/activation/event bindings;
+observed values come from the locked latest-chain reread. Every member is non-null
+and byte-exact for a persistable non-authority conflict; otherwise the applicable
+higher-precedence authority denial is selected. Thus the table lists the complete
+type-specific keys, not an alternative to this mandatory common projection.
+
+The fourteen exact non-authority projection types are:
+
+| `conflictType` | Exact type-specific keys in both projections | Expected authoritative source | Observed authoritative source / null rule |
 |---|---|---|---|
-| `ECONOMIC_SOURCE_EVENT_MISMATCH` | `{economicSourceKey,eventHash,eventId}` | locked attempted event reconstruction | persisted event at the economic/candidate identity; `eventId` is null only when no row exists |
+| `SOURCE_LINEAGE_ROOT_CONFLICT` | `{economicLineageCandidateFingerprint,rootCount,rootCoverageLineageIdsHash,rootSourceDocumentLineageIdsHash}` | one unique locked root, `rootCount=1`, and each root hash seals its one-member array | complete locked predecessor traversal; count is `0` or greater than `1`, and both sorted-root hashes are non-null even for the empty arrays |
+| `SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS` | `{currentRevisionCount,currentRevisionKeysHash,economicLineageKey,rootCoverageLineageId}` | exactly one active current revision | complete locked successor/active-coverage scan for the accepted root; count is greater than `1` |
+| `SOURCE_CORRECTION_AFTER_POSTING` | `{canonicalReceivableId,currentSourceRevisionKey,economicLineageKey,eventId,eventSourceRevisionKey,replacementRelationHash}` | operation/event-sealed revision | locked current successor revision after an existing canonical row; no member is nullable |
+| `SOURCE_CORRECTION_AFTER_ELIGIBILITY` | `{currentSourceRevisionKey,economicLineageKey,eventId,eventSourceRevisionKey,replacementRelationHash}` | event-sealed revision | locked unique current successor after an event and before canonical posting; no member is nullable |
+| `SOURCE_REVISION_CHANGED_BEFORE_POSTING` | `{currentPr6RevisionHash,currentSourceRevisionKey,economicLineageKey,eventId,sealedPr6RevisionHash,sealedSourceRevisionKey}` | event-sealed current revision | same revision IDs without a valid correction edge but changed locked PR6 revision hash |
+| `ECONOMIC_SOURCE_EVENT_MISMATCH` | `{economicLineageKey,economicSourceRevisionKey,eventHash,eventId}` | locked attempted event reconstruction | persisted event at the lineage/revision/candidate identity; `eventId` is null only when no row exists |
 | `PR6_LINEAGE_DRIFT` | `{sourceLineageHash}` | event-sealed PR6 lineage | complete locked current 16-table PR6 reconstruction |
-| `PR8_EVIDENCE_MISMATCH` | `{acceptedDryRunsHash,acceptedPr8EvidenceHash,dryRunId,reconciliationSetHash,resultHash}` | authorization/activation acceptance and selected run | complete locked PR8 run/result/reconciliation graph; member is null only when its exact persisted source is absent |
+| `PR8_EVIDENCE_MISMATCH` | `{acceptedDryRunsHash,acceptedPr8EvidenceHash,dryRunId,freshnessState,freshnessWindowFingerprint,reconciliationSetHash,resultHash}` | authorization/activation acceptance and selected run with `freshnessState=fresh` | complete locked PR8 graph and half-open clock evaluation; state is `fresh`, `stale`, `not_yet_valid` or `invalid_window`; other members are null only when their exact persisted source is absent |
 | `DUE_DATE_POLICY_DRIFT` | `{bindingState,dueDatePolicySetHash,dueDateTreatment,selectedDueDateGateKind,selectedDueDatePolicyHash,selectedDueDatePolicyId,selectedDueDatePolicyVersion,unknownDueDateTreatmentMappingHash,unknownDueDateTreatmentMappingId,unknownDueDateTreatmentMappingVersion}` | event/authorization/activation selected member with `bindingState=valid` | locked selected named PR8 gate and mapping; state is `valid`, `missing` or `ambiguous`; all policy/mapping members are null for missing/ambiguous, and mapping members are null for a valid proven gate |
 | `COMPANY_TIMEZONE_DRIFT` | `{acceptedCompanyTimezoneSnapshot,activationCompanyTimezoneSnapshot,eventCompanyTimezoneSnapshot,pr5ReceivablesTimezone,pr8RunCompanyTimezone,timezoneState}` | five-way accepted/event/activation/run/PR5 equality with `timezoneState=valid` | locked values; state is `valid`, `missing`, `invalid`, `unavailable`, `ambiguous` or `mismatch`; each unavailable source is null and no alias is normalized |
-| `AUTHORIZATION_DRIFT` | `{authorizationId,authorizationVersion,recordHash,status}` | event-bound authorization expected `authorized` | latest locked authorization chain record |
-| `ACTIVATION_DRIFT` | `{activationId,activationVersion,recordHash,status}` | event-bound activation expected `authorized` | latest locked activation chain record |
-| `IDEMPOTENCY_CONTENT_CONFLICT` | `{activationId,canonicalWriteAuthorizationId,economicSourceKey,eventHash,idempotencyKey,operationType}` | locked attempted operation projection | persisted operation at any colliding source/idempotency identity |
+| `AUTHORIZATION_DRIFT` | `{authorizationId,authorizationTemporalState,authorizationVersion,recordHash,status,temporalWindowFingerprint,validFrom,validUntil}` | event-bound authorization expected `authorized` and `authorizationTemporalState=active` | latest locked authorization record plus attemptedAt evaluation; temporal state is `active`, `not_yet_effective` or `expired` |
+| `ACTIVATION_DRIFT` | `{activationId,activationTemporalState,activationVersion,recordHash,status,temporalWindowFingerprint,validFrom,validUntil}` | event-bound activation expected `authorized` and `activationTemporalState=active` | latest locked activation record plus attemptedAt evaluation; temporal state is `active`, `not_yet_effective` or `expired` |
+| `IDEMPOTENCY_CONTENT_CONFLICT` | `{activationId,canonicalWriteAuthorizationId,economicLineageKey,economicSourceRevisionKey,eventHash,idempotencyKey,operationType}` | locked attempted operation projection | persisted operation at any colliding lineage/revision/idempotency identity |
 | `AUDIT_SEAL_MISMATCH` | `{actorAuthorityRecordId,actorIdentityId,aggregateId,auditEventFingerprint,auditEventId,auditPayloadFingerprint,branchId,companyId,correlationId,eventTypeFingerprint,eventTypeState}` | repository prospective audit seal with `eventTypeState=exact` | persisted audit/operation reconstruction; state is `exact`, `mismatch` or `missing`, and every other key is null only when the audit row is wholly absent |
+
+For source-revision projections, `currentSourceRevisionKey` is the exact
+`economicSourceRevisionKey` reconstructed from the locked current PR6 revision;
+`eventSourceRevisionKey` and `sealedSourceRevisionKey` are aliases of the persisted
+event's `economicSourceRevisionKey`; `currentPr6RevisionHash` is the locked current
+seal and `sealedPr6RevisionHash` is the persisted event seal. These aliases add no
+caller-controlled or implicit field.
+
+The five source-lineage/revision transitions are exact:
+
+| Type | Algorithm A/B transition | Algorithm C persistence | Circuit |
+|---|---|---|---|
+| `SOURCE_LINEAGE_ROOT_CONFLICT` | A and B stop on zero/multiple roots, cycle, broken predecessor or same-scope disconnected roots with the same candidate fingerprint | required when the same-scope graph and candidate/root-set fingerprints are reconstructable; unsafe cross-scope/unreadable corruption is `not allowed` | immediate |
+| `SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS` | A and B stop when one root has more than one active current revision | required | immediate |
+| `SOURCE_CORRECTION_AFTER_POSTING` | A or B finds a canonical/operation anywhere in the root graph and a different current revision | required | immediate |
+| `SOURCE_CORRECTION_AFTER_ELIGIBILITY` | A or B finds an event in the root graph and a different successor revision, with no canonical row | required | immediate |
+| `SOURCE_REVISION_CHANGED_BEFORE_POSTING` | A or B finds the same revision IDs but a different `currentPr6RevisionHash` without a valid replacement edge | required | immediate |
+
+For every required transition A/B rolls back with zero additional event/canonical/
+operation/audit rows and passes only the branded descriptor to C. `conflictHash`
+deduplicates the exact projections; no raw attempt timestamp participates.
 
 The authority-denial registry is the exact Cartesian product of these prefixes and
 suffixes; the literal conflict type is `<PREFIX>_<SUFFIX>`:
@@ -2074,10 +2386,11 @@ These 33 literals are all registered; there is no untyped authority denial. Ever
 one uses `AuthorityDenialObservationV1` with exact projection keys:
 
 ```text
-{ actorId, artifactIdentityHash, authorityId, authorityKind, authorityVersion,
+{ actorId, artifactIdentityHash, authorityId, authorityKind, authorityRecordId,
+  authorityVersion,
   bindingState, configurationHash, latestRecordHash, ownershipManifestHash,
-  policyHash, recordHash, scopeFingerprint, stateCode, status,
-  validityWindowHash }
+  effectiveFrom, effectiveUntil, policyHash, recordHash, scopeFingerprint, stateCode,
+  status, temporalEvaluationState, temporalWindowFingerprint }
 ```
 
 For each literal, `expectedFingerprint` and `observedFingerprint` use the two exact
@@ -2090,7 +2403,16 @@ an authority denial.
 `stateCode` is the suffix, `authorityKind` is the kind selected by the prefix, and
 `bindingState` is `valid`, `missing` or `ambiguous`. `artifactIdentityHash` seals
 exact artifact digest plus commit SHA; `scopeFingerprint` seals company/branch;
-`validityWindowHash` seals effective/expiry instants; and no raw artifact,
+`temporalWindowFingerprint` uses domain
+`rentcore.canonical_actual_posting.temporal_window`, version `1`, and exactly
+`{domain,effectiveFrom,effectiveUntil,recordHash,recordId,recordKind,version}`.
+`recordKind` is exactly `governed_authority`, `write_authorization` or `activation`;
+`recordId`/`recordHash` are the locked persisted record's physical ID and record hash.
+`effectiveUntil` is the exact projection alias of persisted `expiresAt`.
+`temporalEvaluationState` is exactly `active`, `not_yet_effective` or `expired`:
+expected is always `active`; observed is derived only from the locked `attemptedAt`
+and half-open interval. Raw attemptedAt is excluded, so retries in the same temporal
+state deduplicate. The exact window timestamps remain sealed and stable. No raw artifact,
 cross-tenant scope or reason text is retained. Expected projection comes from the
 authorization-bound exact record and expects `authorized`, current, same scope and
 matching artifact/config/policy/ownership. Observed projection comes from the locked
@@ -2130,7 +2452,27 @@ forbidden. Invalid/unavailable raw timezone or policy content is never retained.
 Projections contain no names, contacts, addresses, amounts, business dates,
 free-form reasons, credentials, tokens, source payloads or arbitrary caller JSON.
 
-For the audit projection, `eventTypeFingerprint` is SHA-256 of exactly
+For write authorization and activation, projection aliases `validFrom` and
+`validUntil` are the persisted `effectiveFrom` and exclusive `expiresAt`; their
+`temporalWindowFingerprint` uses record kinds `write_authorization` and `activation`.
+The expected state is active and the observed state follows the same half-open
+comparison. Thus unchanged ID/hash/status plus a time-only denial still yields
+different side fingerprints. For PR8, `freshnessState` is derived as
+`not_yet_valid` when `attemptedAt < validFrom`, `fresh` when
+`validFrom <= attemptedAt < validUntilExclusive`, `stale` at or after the exclusive
+end, and `invalid_window` on invalid/overflow/mismatched window data. The raw clock
+value is absent from all conflict and dedupe hashes. When the accepted entry remains
+structurally valid, both sides project its exact persisted
+`freshnessWindowFingerprint`; the side fingerprints still differ because the
+expected state is `fresh` and the observed state is the locked evaluation result.
+`invalid_window` represents a current PR8 finalized-time/window reconstruction that
+cannot reproduce that accepted window. If the acceptance entry/fingerprint itself
+is missing or cannot pass its exact hash/type checks, safe conflict reconstruction
+is impossible: Algorithm C rolls back evidence persistence and opens the circuit.
+
+Projection timestamps are limited to these immutable authority/freshness window
+members. No source business date is retained. For the audit projection,
+`eventTypeFingerprint` is SHA-256 of exactly
 `{domain,eventType,version}` with domain
 `rentcore.canonical_actual_posting.audit_event_type`, version `1`, and the validated
 persisted event-type string; expected uses the required literal. A missing audit row
@@ -2158,6 +2500,11 @@ for PREFIX in [SOURCE_ADAPTER, ELIGIBILITY_PRODUCER,
   PREFIX_OWNERSHIP_MANIFEST_MISMATCH
 AUTHORIZATION_DRIFT
 ACTIVATION_DRIFT
+SOURCE_LINEAGE_ROOT_CONFLICT
+SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS
+SOURCE_CORRECTION_AFTER_POSTING
+SOURCE_CORRECTION_AFTER_ELIGIBILITY
+SOURCE_REVISION_CHANGED_BEFORE_POSTING
 PR6_LINEAGE_DRIFT
 PR8_EVIDENCE_MISMATCH
 DUE_DATE_POLICY_DRIFT
@@ -2169,7 +2516,8 @@ ECONOMIC_SOURCE_EVENT_MISMATCH
 
 No multi-row conflict fan-out or implementation-specific precedence is allowed.
 Immediate circuit-open types are all 33 authority types plus
-`ECONOMIC_SOURCE_EVENT_MISMATCH`, `PR6_LINEAGE_DRIFT`, `PR8_EVIDENCE_MISMATCH`,
+the five source-lineage/revision types, `ECONOMIC_SOURCE_EVENT_MISMATCH`,
+`PR6_LINEAGE_DRIFT`, `PR8_EVIDENCE_MISMATCH`,
 `DUE_DATE_POLICY_DRIFT`, `COMPANY_TIMEZONE_DRIFT`,
 `IDEMPOTENCY_CONTENT_CONFLICT` and `AUDIT_SEAL_MISMATCH`.
 `AUTHORIZATION_DRIFT` and `ACTIVATION_DRIFT` open the circuit on the fifth conflict
@@ -2183,11 +2531,16 @@ within five minutes per company/branch. Every type remains severity `p0`.
   activationRecordId, branchId,
   companyId, conflictObservationHash, conflictType, detectorVersion, domain,
   deniedAuthorityKind, deniedAuthorityRecordHash, deniedAuthorityRecordId,
-  deniedAuthorityVersion,
-  economicSourceKey, eventHash, eventId,
+  deniedAuthorityVersion, economicLineageCandidateFingerprint,
+  economicLineageKey, economicSourceRevisionKey, eventHash, eventId,
   existingOperationId, existingReceivableId, expectedFingerprint,
-  observedFingerprint, postingAuthorityRecordHash, postingAuthorityRecordId,
-  schemaVersion,
+  observedFingerprint,
+  postingAdapterAuthorityBranchId, postingAdapterAuthorityCompanyId,
+  postingAdapterAuthorityKind, postingAdapterAuthorityRecordHash,
+  postingAdapterAuthorityRecordId, postingAdapterAuthorityVersion,
+  producerAuthorityBranchId, producerAuthorityCompanyId, producerAuthorityKind,
+  producerAuthorityRecordHash, producerAuthorityRecordId,
+  producerAuthorityVersion, schemaVersion,
   sourceAdapterAuthorityRecordHash, sourceAdapterAuthorityRecordId,
   sourceAdapterAuthorityVersion, sourceLineageHash,
   sourceOwnershipManifestHash, version,
@@ -2197,9 +2550,12 @@ within five minutes per company/branch. Every type remains severity `p0`.
 Generated `id`, `correlationId`, `detectedAt`, `createdAt`, `conflictHash`, and
 severity (fixed `p0`) are the exact exclusions, so repeat detection deduplicates
 despite a new attempt timestamp/correlation. Required nullable references are JSON
-null when the row does not exist. Denied-authority fields follow the exact
+null when the row does not exist. `economicLineageKey` and
+`economicSourceRevisionKey` may be null only for
+`SOURCE_LINEAGE_ROOT_CONFLICT`; `economicLineageCandidateFingerprint` is always
+non-null. Denied-authority fields follow the exact
 all-null/all-non-null authority registry rule. The parent record hashes are repository
-values from the relational activation/posting-authority/write-authorization reread,
+values from the relational activation/producer/posting-authority/write-authorization reread,
 not caller fields. `conflictObservationJson` is represented only by its separately
 verified `conflictObservationHash`; it is not hashed twice as raw JSON. Changed
 semantic observation produces a new immutable conflict. PR9a fixtures publish exact
@@ -2211,18 +2567,18 @@ observation and the resulting conflict hash.
 | Field/binding | Authoritative source | Persisted contracts | Hash envelopes | Locked reread | Replay/conflict role |
 |---|---|---|---|---|---|
 | `companyId`,`branchId` | PR5 relational scope | all six PR9 contracts + audit | every row/content hash | A, B and C reread composite parents | mismatch is conflict/denial, never cross-scope replay |
-| scoped authority kind/ID/version/hash | repository-derived per-company/branch authority chains for source, producer and posting actors | authority; source binding in authorization/event/operation/conflict; denied-authority binding in conflict | authority record, event, audit payload/event, result, conflict | A/B verify exact scope/kind/latest chain; C follows the 33-type denial registry | cross-scope reference denies; every lifecycle/content drift has exact type or explicit no-persist rule |
+| scoped authority kind/ID/version/hash | repository-derived per-company/branch authority chains for source, producer and posting actors | authority; full source/producer/posting composites in authorization and their event/activation/operation/conflict consumers; denied-authority binding in conflict | authority/authorization/activation records, event, audit payload/event, result, conflict | A/B verify exact scope/kind/ID/version/hash/latest chain; C follows the 33-type denial registry | ID-only match is insufficient; cross-scope or one-field drift denies |
 | `sourceOwnershipManifestHash` + upstream/row classes | complete PR6 ownership universe constrained by source adapter | authorization/event/operation/conflict; lineage rows | authorization record, source lineage, event, audit payload, result, conflict | A/B reconstruct all 16 tables; C verifies denial hashes | mismatch is the authority-kind `OWNERSHIP_MANIFEST_MISMATCH` type |
-| accepted `{dryRunId,resultHash}` pairs + `acceptedPr8EvidenceHash` | signed acceptance record plus persisted PR8 result/reconciliation rows | authorization JSON/hashes/timezone, activation/event/operation/conflict hashes | pair set, accepted-evidence/reconciliation-set hashes, authorization/activation/event/audit/result/conflict | A/B verify pair, exact row set and accepted timezone; C verifies denial binding | pair/timezone/reconciliation mix-and-match denies; exact set may replay |
+| accepted `{dryRunId,resultHash}` pairs + `acceptedPr8EvidenceHash` | signed acceptance record plus persisted PR8 result/reconciliation rows | authorization JSON/hashes/timezone/freshness window, activation/event/operation/conflict hashes | pair set, accepted-evidence/reconciliation/freshness hashes, authorization/activation/event/audit/result/conflict | A/B verify pair, exact row set, timezone and half-open freshness; C verifies denial binding | pair/timezone/reconciliation/freshness mix-and-match denies; exact set may replay |
 | `AcceptedPr8EvidencePredicateV1` | locked PR8 run/candidate/seal plus all exact six-per-candidate reconciliation rows and accepted evidence | authorization, activation, event and operation acceptance bindings | accepted set/evidence/reconciliation hashes and downstream envelopes | A and B require the byte-identical predicate including each row's three zero deltas, diagnostic flag and both write flags | any false term denies; row netting and PR8 flag reinterpretation are forbidden |
-| `economicSourceKey` | repository projection of immutable PR6 coverage identity | event, canonical `externalId`, operation, conflict, audit payload | economic key, event, audit payload/event, result, conflict | A builds/queries; B recomputes; C verifies | same key/same hash replay; same key/different content conflicts |
-| amount and due-date values | sealed PR6/PR8 source | event; mapped canonical row; operation/audit fingerprints | event, canonical, audit payload/event, result; conflict observations | A/B reconstruct under lock | excluded from economic key; any change conflicts |
+| `economicLineageKey` + `economicSourceRevisionKey` | unique root UPD/coverage lineage plus current PR6 revision | event; lineage key in canonical `externalId`/`sourceLineId`; both in operation/conflict/audit | lineage root/candidate, current PR6 revision, event, audit payload/event, result, conflict | A traverses roots/current revisions and queries all lineage/revision/canonical identities; B repeats the full collision scan; C reconstructs | latest replacement before first event is allowed; any different revision after event/posting conflicts and never duplicates |
+| amount and due-date values | sealed PR6/PR8 source | event; mapped canonical row; operation/audit fingerprints | event, canonical, audit payload/event, result; conflict observations | A/B reconstruct under lock | excluded from economic lineage key; any change conflicts |
 | due-date policy set/selected gate/mapping | accepted PR8 `contractual_due_date` and `unknown_due_date_treatment` named members plus repository mapping | authorization/activation set; selected member in event/operation/audit | policy set, event, command, audit, result and conflict observation | A/B reread both set members and only the provenance-selected gate; C reconstructs both sides | proven never depends on unknown; unknown never uses contractual; any source literal, gate or mapping drift conflicts |
 | accepted/run/activation/event/PR5 timezone | persisted PR8 `run.companyTimezone`, signed acceptance snapshot, activation snapshot, event snapshot and fresh PR5 `receivablesTimezone` | authorization acceptance, activation, event, operation/audit via acceptance/event | accepted-evidence, authorization/activation/event, canonical/result and timezone conflict observation | A requires five-way equality and copies the accepted PR8 value; B repeats fresh equality before replay/write | null/invalid/alias/unavailable/change denies; no fresh-value substitution is allowed |
-| cohort, boundary and idempotency identities | locked normalized activation/authorization/event parents | authorization, activation, event/operation | exact section 22.10 envelopes | A/B/C reconstruct logical arrays/IDs, never caller JSON/key | normalization drift denies; same source plus changed event is conflict |
+| cohort, boundary and idempotency identities | locked normalized activation/authorization/event parents | authorization, activation, event/operation | exact section 22.10 envelopes | A/B/C reconstruct logical arrays/IDs, never caller JSON/key | normalization drift denies; same lineage plus changed event/revision is conflict |
 | `ConflictObservationV1` | branded repository denial plus locked reconstruction | conflict JSON and observation/side fingerprints | observation, expected, observed and conflict hashes | C reconstructs exact registered projections | same observation deduplicates; any semantic change is a new conflict |
-| producer authority | latest eligibility-producer chain | authorization and event | authority/authorization/event, then result through event | A/B reread latest; C verifies denial binding | terminal/drift denies event/posting |
-| posting authority / audit actor authority | latest posting-adapter chain | authorization, operation, conflict, audit payload | authority/authorization, audit payload/event, result, conflict | B rereads active latest; C rereads exact denial binding | mismatch denies; exact prior result may replay only while current |
+| producer authority | latest eligibility-producer chain | full ID/version/hash/company/branch/kind composite in authorization, event and conflict | authority/authorization/event/result/conflict | A and B reread exact record plus latest chain; C verifies denial binding | any one-field or latest-chain drift denies event/posting |
+| posting authority / audit actor authority | latest posting-adapter chain | full composite in authorization, activation, operation, conflict and audit payload | authority/authorization/activation, audit payload/event, result, conflict | B rereads exact record plus latest chain; C rereads exact denial binding | any one-field mismatch denies; exact prior result may replay only while current |
 | write authorization + primary/denial permissions | latest authorization chain | authorization, activation, event, operation, conflict, audit payload | authorization/activation, event, audit payload/event, result, conflict | A/B require active primary; C rereads evidence-only permission | primary expiry denies; denial permission never creates success |
 | `attemptedAt` | the single repository clock capability call immediately after each begin | new event/operation/canonical/audit or conflict operational timestamps | new event timestamps enter event hash; new posting time enters result; conflict timestamps remain excluded from dedupe | A, B and C validate exact operational floor once with no skew tolerance | equality with floor is allowed; regression denies; replay returns original timestamps and never forks identity |
 
@@ -2281,8 +2637,8 @@ activation expiry is a lifecycle gate, never source-boundary identity.
 exactly:
 
 ```text
-{ activationId, canonicalWriteAuthorizationId, domain, economicSourceKey,
-  eventHash, operationType, version }
+{ activationId, canonicalWriteAuthorizationId, domain, economicLineageKey,
+  economicSourceRevisionKey, eventHash, operationType, version }
 ```
 
 `activationId` is `canonical_posting_activation_records.activationId` and
@@ -2293,10 +2649,11 @@ repository accepts no caller key and derives the value only after event,
 authorization and activation reread. Attempt time, correlation, generated UUIDs,
 record IDs, record/logical versions, persisted `schemaVersion`, authority status and
 other mutable tags are exact exclusions. Same
-inputs produce the same key. A changed `eventHash` under the same
-`economicSourceKey` is classified as `ECONOMIC_SOURCE_EVENT_MISMATCH` before any new
-operation and can never create an independent receivable merely because its derived
-idempotency key differs.
+inputs produce the same key. A changed revision under the same lineage is classified
+by the correction/revision registry before idempotency. A changed `eventHash` under
+the same lineage and same revision is `ECONOMIC_SOURCE_EVENT_MISMATCH` before any
+new operation and can never create an independent receivable merely because its
+derived idempotency key differs.
 
 For all three contracts, section 5 and 22.1 byte rules apply. PR9a fixtures publish
 the exact UTF-8 canonical JSON and lowercase SHA-256 for baseline, every single-field
@@ -2403,8 +2760,9 @@ Inside one repository-owned `BEGIN IMMEDIATE`:
 1. capture and validate the single `attemptedAt` as above;
 2. reread the write-authorization record and its latest chain, canonical
    `acceptedPr8EvidenceJson`/hash, its exact projected
-   `[{dryRunId,resultHash}]` pair set, accepted timezone, activation, policy set and
-   boundary/cohort; require `boundaryEndUtc IS NULL`;
+   `[{dryRunId,resultHash}]` pair set, accepted timezone, exact half-open freshness
+   window/fingerprint, activation, policy set and boundary/cohort; require
+   `boundaryEndUtc IS NULL`;
 3. reread the selected PR8 `run.companyTimezone` and fresh PR5
    `receivablesTimezone`; validate each without alias replacement and require the
    exact equality `run = acceptance entry = authorization accepted snapshot =
@@ -2420,35 +2778,54 @@ Inside one repository-owned `BEGIN IMMEDIATE`:
    zero blockers, the complete exact `run.candidateCount * 6` reconciliation row set,
    each row's three deltas and blocker state individually zero, exact row ordering/
    hashes/counts, exact accepted policy/ownership/source/timezone/reconciliation
-   hashes, exact accepted pair and freshness under `attemptedAt`; missing, duplicate,
+   hashes, exact accepted pair and
+   `finalizedAt <= attemptedAt < validUntilExclusive`; invalid integer-millisecond
+   parsing, duration, window fingerprint or overflow denies; missing, duplicate,
    unrelated or cross-candidate/run rows deny and no delta netting is performed;
 5. reread the complete current 16-table PR6 set defined in section 22.4, including competing
    versions, successors, overlaps, reopen/cancel/correct/supersession state,
-   ownership manifests, upstream IDs and every row class;
+   ownership manifests, upstream IDs and every row class; traverse all predecessor/
+   successor relations to the unique root UPD/coverage slice, prove exactly one
+   current revision, derive `rootSourceDocumentLineageId`,
+   `rootCoverageLineageId`, `economicLineageCandidateFingerprint` and
+   `currentPr6RevisionHash`, and classify root/cycle/broken-edge/multiple-current
+   failures before event lookup; a prospective lineage denial is frozen but not
+   selected until step 6 has evaluated every higher-precedence authority denial;
 6. reread the latest same-scope source-adapter and eligibility-producer authority
    chains and
-   the posting authority referenced by the write authorization; compare source
-   adapter ID/version/hash, scope, operation, source systems, complete row-class
+   the posting authority referenced by the write authorization; compare the exact
+   producer and posting ID/version/recordHash/company/branch/kind composites as well
+   as the source-adapter ID/version/hash, scope, operation, source systems, complete row-class
    allowlist, owner, upstream IDs, artifact, commit, configuration, policy,
    effective interval, expiry and lifecycle; classify the first denial by the exact
-   section-22.8 kind/suffix registry;
+   section-22.8 precedence, so an authority denial wins over the prospective lineage
+   denial and every persistable non-authority projection has both full authority
+   composites;
 7. reconstruct both named `DueDatePolicySetV1` members and select exactly
    `contractual_due_date` for proven provenance or `unknown_due_date_treatment` plus
    `UnknownDueDatePostingTreatmentMappingV1` for unknown provenance; reconstruct
    `cohortHash`, `boundaryHash`, `acceptedDryRunsHash`,
-   `acceptedPr8EvidenceHash`, `sourceLineageHash` and
-   `economicSourceKey`; require exact authorization/activation agreement, then query
-   `(companyId,economicSourceKey)` and exact `(dryRunId,candidateId)` before insert;
+   `acceptedPr8EvidenceHash`, `sourceLineageHash`, `economicLineageKey` and
+   `economicSourceRevisionKey`; require exact authorization/activation agreement,
+   then query `(companyId,branchId,economicLineageKey)`,
+   `(companyId,branchId,economicSourceRevisionKey)`, exact
+   `(dryRunId,candidateId)`, and predecessor/successor event, operation and canonical
+   identities throughout the locked correction graph before insert;
 8. construct the complete event projection including the accepted PR8
    `companyTimezoneSnapshot`, policy-set hash, selected gate/treatment and nullable
    mapping triple and compute `eventHash`: use the existing row's
-   persisted `occurredAt`/`createdAt`/`correlationId` when an economic key exists;
+   persisted `occurredAt`/`createdAt`/`correlationId` when a lineage event exists;
    otherwise use the single `attemptedAt` and pre-generated repository correlation;
    also query `(companyId,eventHash)`. If one persisted event
    matches every field/hash, reread its bound PR8/PR6/authority/authorization/
    activation rows, commit with zero writes and return that event's persisted
    timestamps with `replayed=true`;
-9. if the economic/candidate identity exists with different content, including
+9. if a canonical row exists anywhere in the same correction graph with another
+   revision, select `SOURCE_CORRECTION_AFTER_POSTING`; otherwise, if an event exists
+   for the same lineage with another revision, select
+   `SOURCE_CORRECTION_AFTER_ELIGIBILITY`; if current revision IDs match but its PR6 seal
+   differs, select `SOURCE_REVISION_CHANGED_BEFORE_POSTING`. Otherwise, if the
+   lineage/revision/candidate identity exists with different content, including
    timezone or due-policy drift, or any identity points to different scope/content,
    construct the exact registered `ConflictObservationV1`, roll back with zero
    event/canonical/audit/operation writes, and pass only its branded inert denial
@@ -2460,15 +2837,19 @@ Inside one repository-owned `BEGIN IMMEDIATE`:
     source/producer authority,
     authorization, activation and boundary row; recompute every exact field, pair,
     fingerprint and hash from persisted state, and require exactly one event for the
-    economic key and exactly one for the run/candidate pair;
+    company/branch lineage, exactly one for the current revision and exactly one for
+    the run/candidate pair, with zero additional event/canonical rows on every
+    competing root or successor identity;
 12. commit only on byte-exact equality and return the persisted row. Any insert,
     trigger, reread or reconstruction failure rolls back to zero writes.
 
 Algorithm A never reads PR7 forecast, never writes canonical, settlement, legacy or
 `app_data` data, and cannot create an event from an unaccepted pair. Its exact replay
 is a no-op only after current predicate/timezone/authority validation; a due-date,
-amount, policy-set/selected-gate/mapping, timezone or authority change retains the same
-economic key and becomes conflict rather than a second event. With no prior event,
+amount, policy-set/selected-gate/mapping, timezone or authority change retains the
+same lineage key and becomes conflict rather than a second event. A unique latest
+replacement before the first event is allowed; after an event or posting, any new
+revision of that lineage is a registered conflict. With no prior event,
 missing/invalid/unavailable PR5 timezone produces no row; with a prior event it is
 `COMPANY_TIMEZONE_DRIFT` and exact replay is forbidden until the authority matches.
 
@@ -2477,8 +2858,12 @@ missing/invalid/unavailable PR5 timezone produces no row; with a prior event it 
 Inside a separate repository-owned `BEGIN IMMEDIATE`:
 
 1. capture and validate the single `attemptedAt` as above;
-2. reread the event by exact ID/company/branch and recompute its `economicSourceKey`,
-   `eventHash` and `sourceLineageHash`;
+2. reread the event by exact ID/company/branch and recompute its
+   `economicLineageKey`, `economicSourceRevisionKey`, `currentPr6RevisionHash`,
+   `eventHash` and `sourceLineageHash`; traverse the complete predecessor/successor
+   graph and query all event/operation/canonical identities for that root before any
+   replay or DML; freeze but do not select any prospective lineage denial until the
+   higher-precedence authority rereads in step 5 complete;
 3. reread the accepted evidence record and authorization accepted snapshot, selected
    PR8 `run.companyTimezone`, the activation timezone field and fresh PR5
    `receivablesTimezone`; require every value to be a canonical valid IANA name and
@@ -2487,21 +2872,28 @@ Inside a separate repository-owned `BEGIN IMMEDIATE`:
 4. repeat the exact `AcceptedPr8EvidencePredicateV1` evaluation—including
    `diagnosticOnly = true`, both write flags false, zero blockers, the complete exact
    six-per-candidate reconciliation row set with every individual delta zero, exact
-   accepted evidence/timezone/hashes/pair and freshness—and the full current PR6 16-table
+   accepted evidence/timezone/hashes/pair and the exact half-open freshness window—
+   and the full current PR6 16-table
    lifecycle/ownership/upstream-row reread from Algorithm A; no event-time decision
    is trusted;
 5. reread latest source, producer and posting authority chains, the exact write
    authorization and its primary-effect/denial permissions, activation and boundary;
-   validate scope, hashes, source row classes, artifacts, policies, effective
+   validate every source/producer/posting authority ID/version/hash/company/branch/
+   kind field, latest chain, source row classes, artifacts, policies, effective
    intervals, accepted evidence/pairs/timezone, both due-date policy-set members, the
    provenance-selected gate and optional mapping, cohort/boundary envelopes including
    null v1 end, and current lifecycle using `attemptedAt`; classify any authority
-   denial by the exact kind/suffix registry;
+   denial by the exact kind/suffix registry and apply the complete section-22.8
+   precedence before selecting any prospective lineage denial;
 6. reconstruct the mapping using only the already accepted
    `event.companyTimezoneSnapshot`, derive `CanonicalPostingIdempotencyKeyV1`,
    recompute `CanonicalPostingCommandFingerprintV1` and prospective
-   canonical row; query event, economic source, idempotency, canonical external ID,
-   operation and audit identities before DML;
+   canonical row; query event, lineage, revision, every predecessor/successor event/
+   canonical identity, idempotency, canonical external ID, operation and audit
+   identities before DML. A successor after an existing canonical row is
+   `SOURCE_CORRECTION_AFTER_POSTING`; otherwise a successor after eligibility is
+   `SOURCE_CORRECTION_AFTER_ELIGIBILITY`; same revision IDs with a changed PR6 seal are
+   `SOURCE_REVISION_CHANGED_BEFORE_POSTING`;
 7. if a prior operation, canonical row and audit row all exist and every persisted
    field plus canonical/audit/operation/result fingerprint is exact, commit with zero
    writes and return the original IDs/timestamps with `replayed=true`;
@@ -2513,8 +2905,9 @@ Inside a separate repository-owned `BEGIN IMMEDIATE`:
 9. otherwise insert one direct-`posted` canonical receivable with a pre-generated
    repository ID and `postedAt = createdAt = updatedAt = attemptedAt`;
 10. compute the fingerprint of the persisted canonical projection, then insert one
-   operation seal using pre-generated operation/audit IDs, exact source-adapter,
-    accepted-evidence/pair/timezone, policy-set, selected-gate and mapping bindings,
+   operation seal using pre-generated operation/audit IDs, exact source-adapter and
+    posting-adapter full composites, producer composite through the event,
+    accepted-evidence/pair/timezone/freshness, policy-set, selected-gate and mapping bindings,
     `createdAt = attemptedAt`, and the prospective audit and result fingerprints;
 11. insert one repository-derived audit event with `occurredAt = createdAt =
     attemptedAt`; the audit-side scope/binding trigger must accept it;
@@ -2539,6 +2932,14 @@ source/producer/posting authority as applicable, activation, scope, accepted
 evidence and immutable denial identities/hashes.
 The permission is evidence-only: it may remain inspectable when the primary status
 caused the denial, but cannot authorize any primary-effect table or success path.
+
+For a temporal or freshness denial, the branded descriptor also retains the original
+A/B `attemptedAt` only as transient repository evidence. It is never persisted or
+hashed. Algorithm C uses its own clock only for its permission/lifecycle decision and
+new conflict timestamps, and re-proves the original derived temporal/freshness state
+against the immutable window plus original attempt. If the record/window changed
+between rollback and C, C fails evidence persistence and opens the circuit; it does
+not reclassify the denied primary attempt as success.
 
 The repository validates the unexported descriptor brand, reconstructs the exact
 registered expected and observed projections from persisted state, recomputes
@@ -2590,7 +2991,9 @@ CLI, frontend and startup business execution remain unchanged.
 - exact first migration on fresh chain and current seven-row production-shaped
   local fixture;
 - exact six tables, columns, PKs, ordered composite FKs, checks, indexes and triggers;
-- exact composite source-adapter parent/FKs and audit `(id,companyId,branchId)` FK;
+- exact composite source-adapter and producer/posting
+  ID/version/hash/company/branch/kind parent/FKs plus audit
+  `(id,companyId,branchId)` FK;
 - authority unique/latest-chain keys are scope-specific for all three kinds; one
   `actorId` succeeds in two company/branch scopes only through two independent
   chains, while cross-scope predecessor and consumer references abort;
@@ -2636,6 +3039,10 @@ CLI, frontend and startup business execution remain unchanged.
 - source-adapter ID/version/hash mismatch, non-latest record, wrong source system,
   incomplete row-class allowlist, ownership/upstream ID drift and cross-scope
   substitution deny in authorization, event, operation and conflict paths;
+- one-field mutation of producer version/hash/company/branch/kind and posting-adapter
+  version/hash/company/branch/kind rejects; ID-only equality, cross-scope FK and
+  latest-chain substitution reject in authorization, activation, event, operation,
+  audit, result and conflict seals;
 - every source, producer and posting authority prefix is exercised against all 11
   exact denial suffixes; each of the 33 literals verifies projection bytes,
   precedence, deduplication, immediate circuit class, PII/secret minimization and
@@ -2648,6 +3055,10 @@ CLI, frontend and startup business execution remain unchanged.
 
 - only an accepted, sealed, current, blocker-free PR8 candidate can emit;
 - fixture/unaccepted/stale/unsealed/blocked candidate denies;
+- the exact freshness interval is
+  `finalizedAt <= attemptedAt < finalizedAt + 900000`; equality at the exclusive
+  end is stale. Invalid `finalizedAt`, negative/wrong duration, unsafe addition,
+  overflow, mismatched window fingerprint and `attemptedAt` before `validFrom` fail;
 - the exact PR8 predicate accepts `diagnosticOnly=true`; it rejects
   `diagnosticOnly=false`, `canonicalWriteAuthorized=true`,
   `productionActivationAuthorized=true`, any blocker, incomplete seal, any non-zero
@@ -2660,8 +3071,13 @@ CLI, frontend and startup business execution remain unchanged.
 - every PR6 row/version/hash and every exact PR8 reconciliation row/hash/count is
   current;
 - PR7/app_data fallback is structurally absent;
-- economic identity is stable across policy/due/amount changes; exact replay creates
-  no second event and changed source/policy/due/amount creates one conflict;
+- economic lineage identity is stable across current UPD/coverage replacement IDs
+  and policy/due/amount changes; exact replay creates no second event and changed
+  source revision/policy/due/amount creates exactly its registered conflict;
+- a unique replacement before the first event is accepted as the current revision;
+  correction after event and correction after posting create their distinct conflict
+  types and zero additional event/receivable rows; two apparent roots, cycle, broken
+  predecessor and multiple current revisions fail closed;
 - proven provenance selects only the exact `contractual_due_date` member; unknown
   provenance selects only `unknown_due_date_treatment` with source literal
   `allow_unknown_without_aging` and the repository mapping to
@@ -2687,6 +3103,9 @@ CLI, frontend and startup business execution remain unchanged.
 - algorithm B repeats every PR8/PR6/authority decision after lock and executes no
   callback/getter/hook/clock/ID generator after the single `attemptedAt` read;
 - source reopen/cancel/correct/supersession and overlapping coverage deny;
+- Algorithm B repeats the full root/current-revision traversal and refuses a
+  successor that appeared after Algorithm A, including concurrent old/new revision
+  posting attempts;
 - Algorithm B applies the identical exact PR8 predicate used by Algorithm A;
 - timezone change between A and B is `COMPANY_TIMEZONE_DRIFT`; even an otherwise
   exact replay is denied, and canonical mapping never substitutes the new timezone;
@@ -2709,6 +3128,12 @@ CLI, frontend and startup business execution remain unchanged.
 - every registered conflict type reconstructs its exact expected/observed
   projections; caller-selected type/projection/hash rejects, same observation
   deduplicates and any semantic projection mutation produces a new immutable hash;
+- unchanged authority/authorization/activation record content with only
+  `not_yet_effective` or `expired` temporal evaluation persists a conflict whose
+  expected/observed fingerprints differ and repeated same-state retries deduplicate;
+- identical PR8 evidence hashes with `fresh`, `stale`, `not_yet_valid` and
+  `invalid_window` states produce exact distinct observation fixtures; equality at
+  expiry is stale and repeated stale retries deduplicate without raw attemptedAt;
 - posting/conflict clock throw/invalid/out-of-range/regression rolls back and exact
   posting replay returns original persisted timestamps;
 - persisted-row mutation/ignore/extra-row fault injection is detected;
@@ -2726,6 +3151,9 @@ CLI, frontend and startup business execution remain unchanged.
   `CANONICAL_POSTING_CONCURRENT_CONFLICT` with zero automatic retries;
 - concurrent algorithm-A producers yield one event; concurrent algorithm-B posters
   yield one canonical/operation/audit set; conflict writers yield one hash row;
+- concurrent old/new correction revisions for one lineage yield at most one event
+  before eligibility and, after eligibility/posting, zero additional events or
+  receivables plus the exact deduplicated correction conflict;
 - future authorization/activation expiry is excluded from the clock floor; a lower
   prior operational timestamp permits progress, same-millisecond equality succeeds,
   and a value below the exact operational floor rejects;
@@ -2761,7 +3189,7 @@ CLI, frontend and startup business execution remain unchanged.
   chains; cross-scope chain, parent or consumer substitution rejects for all three
   authority kinds;
 - audit trigger bypass attempt with wrong event type and incompatible shared audit ID;
-- all 42 `ConflictObservationV1` types, including the 33 authority Cartesian-product
+- all 47 `ConflictObservationV1` types, including the 33 authority Cartesian-product
   literals, have projection, precedence, dedupe, circuit/persistence transition,
   PII/secret rejection and cross-implementation fixture cases;
 - future validity endpoints excluded from the monotonic floor, operational
@@ -2771,8 +3199,13 @@ CLI, frontend and startup business execution remain unchanged.
   v1 boundary end and every non-null/end-update path rejects;
 - revoked source adapter and latest-chain source-adapter supersession deny after
   lock; ownership-manifest/upstream-row-class mismatch denies;
-- concurrent event creation for one `economicSourceKey` commits exactly one event;
-- the same economic key with changed due date and with changed amount policy each
+- concurrent event creation for one `economicLineageKey` commits exactly one event;
+- unique replacement before event, correction after event, correction after posting,
+  concurrent old/new revision event/posting attempts, two roots with the same
+  apparent dimensions, cycle/broken predecessor and multiple-current-revision
+  fixtures exercise all five new source conflict types; second event/receivable
+  count is always zero;
+- the same lineage/revision key with changed due date and with changed amount policy each
   produces deterministic conflict and never a second event;
 - dry-run ID/result mix-and-match, duplicate ID/pair and changed accepted pair deny;
 - omission or one-field mutation is exercised for every literal field in each
@@ -2785,6 +3218,8 @@ CLI, frontend and startup business execution remain unchanged.
   effect;
 - clock exactly at authority/activation/evidence expiry boundary denies; clock
   throw, invalid value, range failure and regression deny without writes;
+- producer and posting-adapter version, hash, company, branch and kind one-field
+  mutation fixtures plus cross-scope FK/latest-chain mismatch all deny;
 - unauthorized conflict append, caller-selected conflict operation/table, conflict
   persistence failure, deduplication and rate/circuit limits are fault-injected;
 - conflict persistence failure returns

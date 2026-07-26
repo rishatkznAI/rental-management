@@ -717,7 +717,7 @@ requires zero rows in all canonical/settlement business tables and all PR5–PR8
 business tables; registered rerun does not require zero rows and validates structure
 read-only.
 
-The exact PR9 table set is six tables:
+The exact PR9 table set is seven tables:
 
 ### `governed_adapter_authority_records`
 
@@ -813,6 +813,8 @@ operationType TEXT NOT NULL
 primaryEffectTablesJson TEXT NOT NULL
 denialEvidenceTable TEXT NOT NULL
 denialEvidencePermission TEXT NOT NULL
+denialTransitionTable TEXT NOT NULL
+denialTransitionPermission TEXT NOT NULL
 forbiddenOperationsJson TEXT NOT NULL
 policyManifestHashesJson TEXT NOT NULL
 evidencePackHash TEXT NOT NULL
@@ -843,8 +845,14 @@ Status is `authorized`, `revoked`, `expired` or `superseded`; operation is exact
 `canonical_receivable_posting_operations`, `canonical_receivables`,
 `financial_audit_events`. The denial-evidence table is exactly
 `canonical_receivable_posting_conflicts` and its only permission is
-`canonical_receivable_posting_conflicts.append_after_denial.v1`; it is never a
-primary-effect table. Unique keys: `(authorizationId, authorizationVersion)`,
+`canonical_receivable_posting_conflicts.append_after_denial.v1`. Its mandatory
+durable transition companion is exactly
+`canonical_receivable_posting_conflict_transitions` with permission
+`canonical_receivable_posting_conflict_transitions.create_and_advance.v1`. These two
+permissions authorize only the atomic evidence/intent pair and monotonic recovery
+stages defined below; neither table is a primary-effect table and neither permission
+can create an event, receivable, posting operation, financial-audit event or another
+business attempt. Unique keys: `(authorizationId, authorizationVersion)`,
 `recordHash`. Composite scope FKs plus exact scoped/versioned/hash-bound FKs to the
 source, producer and posting authority records and PR6 activation boundary are
 mandatory. For producer and posting bindings, the child company/branch columns must
@@ -1108,6 +1116,7 @@ postingAuthorityChainSnapshotHash TEXT NOT NULL
 correlationId TEXT NOT NULL
 detectorVersion TEXT NOT NULL
 conflictHash TEXT NOT NULL
+transitionId TEXT NOT NULL
 schemaVersion INTEGER NOT NULL
 detectedAt TEXT NOT NULL
 createdAt TEXT NOT NULL
@@ -1136,6 +1145,76 @@ The six snapshot columns persist exactly three complete canonical
 hashes. The JSON is retained once in this conflict row; there is no PR9 v1 snapshot
 child table or alternate persistence form.
 
+`transitionId` is repository-derived from this row's already proven
+`denialAttemptId` and `conflictHash`; it is intentionally excluded from
+`conflictHash` to avoid recursion. The conflict row and its exact transition record
+form one mandatory deferred-FK pair and must commit or roll back together.
+
+### `canonical_receivable_posting_conflict_transitions`
+
+This table is the durable idempotent accounting/circuit outbox. It is operational
+evidence metadata, not a canonical, settlement, event, operation or financial-audit
+effect. Columns:
+
+```text
+transitionId TEXT PRIMARY KEY
+conflictId TEXT NOT NULL
+companyId TEXT NOT NULL
+branchId TEXT NOT NULL
+operationDomain TEXT NOT NULL
+scopeSequence INTEGER NOT NULL
+transitionKind TEXT NOT NULL
+denialAttemptId TEXT NOT NULL
+conflictHash TEXT NOT NULL
+conflictType TEXT NOT NULL
+circuitRule TEXT NOT NULL
+attemptAccountingKey TEXT NOT NULL
+rateAccountingKey TEXT NOT NULL
+circuitTransitionKey TEXT NOT NULL
+state TEXT NOT NULL
+attemptApplied INTEGER NOT NULL
+attemptResultJson TEXT NULL
+attemptResultHash TEXT NULL
+rateApplied INTEGER NOT NULL
+rateResultJson TEXT NULL
+rateResultHash TEXT NULL
+circuitApplied INTEGER NOT NULL
+circuitResultJson TEXT NULL
+circuitResultHash TEXT NULL
+intentHash TEXT NOT NULL
+schemaVersion INTEGER NOT NULL
+createdAt TEXT NOT NULL
+```
+
+`operationDomain` is exactly `canonical_receivable.initial_post.v1`;
+`scopeSequence` is a positive safe integer allocated under the Algorithm-C write lock
+as one plus the maximum existing value in the exact company/branch/operation-domain
+scope (or `1` when none exists); caller input, reuse, gap and overflow reject;
+`transitionKind` is exactly `required_conflict_accounting_circuit_v1`; and
+`circuitRule` is exactly `immediate` or `fifth_in_five` as selected by the fixed
+section-22.8 registry. State is exactly `PENDING`, `ACCOUNTED`,
+`CIRCUIT_APPLIED` or `COMPLETE`. Boolean markers are integer `0`/`1`. The only valid
+state/marker/null combinations are:
+
+| State | `attemptApplied` | `rateApplied` | `circuitApplied` | Result columns |
+|---|---:|---:|---:|---|
+| `PENDING` before attempt stage | 0 | 0 | 0 | all six result JSON/hash columns null |
+| `PENDING` after attempt stage | 1 | 0 | 0 | only attempt result JSON/hash non-null |
+| `ACCOUNTED` | 1 | 1 | 0 | attempt and rate results non-null; circuit result null |
+| `CIRCUIT_APPLIED` | 1 | 1 | 1 | all results non-null |
+| `COMPLETE` | 1 | 1 | 1 | all results non-null and immutable |
+
+Every non-null result JSON is canonical and reproduces its paired hash. `createdAt`
+equals the conflict row's `evidenceAttemptedAt`/`createdAt` and never changes; stage
+advancement reads no clock. Unique keys are `conflictId`, `denialAttemptId`,
+`(companyId,conflictHash)`, `(companyId,branchId,operationDomain,scopeSequence)` and
+each of the three accounting keys. A transition row
+has one exact composite deferred FK
+`(conflictId,companyId,branchId,denialAttemptId,conflictHash)` to its conflict row,
+and the conflict row's `transitionId` has the reciprocal deferred FK. Consequently
+neither side can commit alone. Section 22.8 defines identity/result hashes and
+section 23 defines monotonic recovery.
+
 ### Exact domains, checks and foreign-key graph
 
 Every PR9 row has `schemaVersion = 1`; accepting a later integer without a new
@@ -1162,6 +1241,8 @@ Exact additional domains are:
 | authorization `primaryEffectTablesJson` | exactly sorted `canonical_receivable_posting_operations`, `canonical_receivables`, `financial_audit_events` |
 | authorization `denialEvidenceTable` | `canonical_receivable_posting_conflicts` |
 | authorization `denialEvidencePermission` | `canonical_receivable_posting_conflicts.append_after_denial.v1` |
+| authorization `denialTransitionTable` | `canonical_receivable_posting_conflict_transitions` |
+| authorization `denialTransitionPermission` | `canonical_receivable_posting_conflict_transitions.create_and_advance.v1` |
 | authorization `forbiddenOperationsJson` | exactly sorted `adjust`, `allocate`, `backfill`, `cancel`, `correct`, `delete`, `dual_write`, `refund`, `settle`, `update`, `write_off` |
 | activation source systems | exactly `rentcore.billing_source_authority.v1` |
 | activation document/rental/currency | `rental_service_upd`, `equipment_rental_line`, `RUB` |
@@ -1171,6 +1252,10 @@ Exact additional domains are:
 | event `dueDateProvenance` | `invoice_due_date`, `contractual_payment_due_date`, `installment_due_date`, `unknown` |
 | conflict `severity` | `p0` |
 | conflict `detectorVersion` | `canonical-posting-conflict-detector-v1` |
+| transition `operationDomain` | `canonical_receivable.initial_post.v1` |
+| transition `transitionKind` | `required_conflict_accounting_circuit_v1` |
+| transition `circuitRule` | `immediate`, `fifth_in_five` |
+| transition `state` | `PENDING`, `ACCOUNTED`, `CIRCUIT_APPLIED`, `COMPLETE` |
 | producer consumer `producerAuthorityKind` | `eligibility_producer` |
 | posting consumer `postingAdapterAuthorityKind` | `canonical_posting_adapter` |
 
@@ -1264,6 +1349,7 @@ The exact foreign keys all use `ON UPDATE RESTRICT ON DELETE RESTRICT`:
 | eligible event PR9 | `activationRecordId` → posting activation `recordId`; source binding composite and full producer authority composite → exact governed records; `writeAuthorizationRecordId` → write authorization `recordId` |
 | posting operation | `eventId` → eligible event `id`; source binding composite and full posting-adapter authority composite → exact governed records; `writeAuthorizationRecordId` → write authorization `recordId`; `activationRecordId` → posting activation `recordId`; `(companyId, canonicalReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; `(financialAuditEventId, companyId, branchId)` → `financial_audit_events(id, companyId, branchId)` deferred until commit |
 | posting conflict | nullable `eventId` → eligible event `id`; nullable `existingOperationId` → posting operation `id`; nullable `(companyId, existingReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; source and producer full composites equal the immutable attempt-bound write-authorization bindings, posting-adapter full composite equals that authorization's and activation's common attempt binding, and any referenced event/operation must reproduce the applicable same composites; all reference exact scoped PR9 parents without asserting current lifecycle; nullable denied-authority composite `(deniedAuthorityRecordId,deniedAuthorityVersion,deniedAuthorityRecordHash,companyId,branchId)` → the exact observed governed record when Algorithm C persistence is permitted |
+| conflict/transition pair | conflict `transitionId` → transition `transitionId`; transition `(conflictId,companyId,branchId,denialAttemptId,conflictHash)` → conflict `(id,companyId,branchId,denialAttemptId,conflictHash)`; both are `DEFERRABLE INITIALLY DEFERRED`, the parent composite is unique, scope/identity/hash must agree and commit requires exactly one row on each side |
 
 Single-column PR9 primary-effect record references are additionally guarded by
 before-insert triggers that require exact company, branch, logical kind/status and
@@ -1304,6 +1390,15 @@ Exact additional index definitions:
 | `uq_pr9_posting_conflict_hash` | yes | `companyId, conflictHash` |
 | `uq_pr9_posting_conflict_denial_attempt` | yes | `denialAttemptId` |
 | `idx_pr9_posting_conflict_scope` | no | `companyId, branchId, detectedAt` |
+| `uq_pr9_posting_conflict_transition_parent` | yes | `id, companyId, branchId, denialAttemptId, conflictHash` |
+| `uq_pr9_conflict_transition_conflict` | yes | `conflictId` |
+| `uq_pr9_conflict_transition_attempt` | yes | `denialAttemptId` |
+| `uq_pr9_conflict_transition_hash` | yes | `companyId, conflictHash` |
+| `uq_pr9_conflict_transition_scope_sequence` | yes | `companyId, branchId, operationDomain, scopeSequence` |
+| `uq_pr9_conflict_transition_attempt_key` | yes | `attemptAccountingKey` |
+| `uq_pr9_conflict_transition_rate_key` | yes | `rateAccountingKey` |
+| `uq_pr9_conflict_transition_circuit_key` | yes | `circuitTransitionKey` |
+| `idx_pr9_conflict_transition_recovery_scope` | no | `companyId, branchId, operationDomain, state, scopeSequence` |
 | `uq_pr9_financial_audit_scope_parent` | yes | `financial_audit_events.id, companyId, branchId` |
 
 ### Triggers
@@ -1329,6 +1424,9 @@ trg_canonical_receivable_posting_operations_no_replace
 trg_canonical_receivable_posting_conflicts_no_update
 trg_canonical_receivable_posting_conflicts_no_delete
 trg_canonical_receivable_posting_conflicts_no_replace
+trg_canonical_receivable_posting_conflict_transitions_no_delete
+trg_canonical_receivable_posting_conflict_transitions_no_replace
+trg_pr9_conflict_transition_monotonic_update
 ```
 
 The exact cross-object trigger names are:
@@ -1376,6 +1474,9 @@ Exact trigger table/timing is:
 | `trg_pr9_conflict_producer_validate` | `canonical_receivable_posting_conflicts` | `BEFORE INSERT` |
 | `trg_pr9_conflict_posting_adapter_validate` | `canonical_receivable_posting_conflicts` | `BEFORE INSERT` |
 | `trg_pr9_conflict_denied_authority_validate` | `canonical_receivable_posting_conflicts` | `BEFORE INSERT` |
+| `trg_canonical_receivable_posting_conflict_transitions_no_delete` | `canonical_receivable_posting_conflict_transitions` | `BEFORE DELETE` |
+| `trg_canonical_receivable_posting_conflict_transitions_no_replace` | `canonical_receivable_posting_conflict_transitions` | `BEFORE INSERT` when a primary/business key exists |
+| `trg_pr9_conflict_transition_monotonic_update` | `canonical_receivable_posting_conflict_transitions` | `BEFORE UPDATE` |
 | `trg_pr9_event_before_operation_seal` | `canonical_receivable_posting_operations` | `BEFORE INSERT` |
 | `trg_pr9_operation_finalize` | `canonical_receivable_posting_operations` | `BEFORE INSERT` |
 | `trg_pr9_financial_audit_scope_validate_after_insert` | `financial_audit_events` | `AFTER INSERT`; activates when an operation references `NEW.id`, regardless of `NEW.eventType` |
@@ -1491,6 +1592,13 @@ authority rows and conflict row and invokes the same repository recomputation be
 commit. Thus no layer may authorize use of a persisted authority hash without an
 independent reconstruction in the locked repository proof, and a one-field mutation
 with the old hash retained cannot reach replay or DML.
+
+The transition monotonic-update trigger freezes identity, scope, conflict binding,
+rule, keys, intent hash, schema version and creation time. It permits only the exact
+state/marker/result progression in the transition table, rejects skipped or reversed
+stages and requires each newly non-null result JSON/hash pair to pass the normative
+section-22.8 reconstruction. Reapplying an already durable stage with byte-identical
+result is a repository no-op and issues no update; any changed result fails closed.
 
 After step 5, a current descendant beyond a snapshot's frozen head is allowed only
 when it is a contiguous immutable append whose version is greater than the snapshot's
@@ -1668,13 +1776,16 @@ open a new transaction and first classify replay by the two exact unique keys. B
 modes verify every frozen source/producer/posting snapshot member plus the referenced
 authorization, activation and scope bindings and derive the conflict internally
 without substituting current descendants into the historical snapshots. Only
-`NEW_EVIDENCE_INSERT` rereads and admits the exact current permission;
+`NEW_EVIDENCE_INSERT` rereads and admits the exact current conflict/transition
+companion permissions;
 `EXACT_REPLAY` proves the permission binding already sealed in the persisted row but
 does not require current append authority for its no-DML return. A caller cannot select the table,
 permission, operation, type, fingerprints or timestamps. A terminal primary-write
 authorization never permits a primary effect; the denial append is permitted only
 when the exact authorization version that governed the denied attempt remains
-verifiably bound to this explicit denial-evidence permission.
+verifiably bound to both explicit denial-evidence/transition permissions. Recovery
+may only advance the already durable sealed transition and cannot create a new row or
+primary effect when current authority later changes.
 
 Conflict evidence contains only stable IDs, hashes, exact enums/states, safe integer
 versions and the validated IANA timezone projection; it contains no names, contact
@@ -1690,9 +1801,12 @@ conflict identity. A separate A/B execution always has a new repository-owned
 `denialAttemptId` and therefore a distinct evidence identity and conflict row even if
 its `deniedAttemptedAt`, denial type, projections and every source/evidence/authority
 hash are identical. Each new A/B attempt counts independently toward admission,
-rate-limit and circuit accounting exactly once when its new evidence row commits;
-Algorithm-C persistence retry counts zero and changes no counters.
-Admission is bounded by the same 30-attempt scope limit. Algorithm C determines
+rate-limit and circuit accounting exactly once through the durable transition created
+in the same commit as its evidence row; the committed pair is the ledger and no
+in-memory increment is authoritative. Algorithm-C persistence replay counts zero and
+changes no transition stage. Admission is bounded by the same 30-attempt scope limit
+as a projection of valid applied rate results; any incomplete transition in the exact
+scope blocks new admission until recovery. Algorithm C determines
 `EXACT_REPLAY` versus `NEW_EVIDENCE_INSERT` from both repository-owned unique keys
 before any append-specific circuit/rate/storage admission. Only the latter mode is
 admitted and accounted as a new evidence insert. Conflict writes are deduplicated
@@ -1759,7 +1873,7 @@ Recommended v1 numbers:
 | authority/authorization/activation max lifetime | 24 hours |
 | free-space stop | below max of 512 MiB or 20% of mounted volume |
 | DB+WAL daily-growth stop | 64 MiB per UTC day |
-| conflict circuit breaker | after durable required evidence commit: immediate for the persistable authority-denial and fourteen non-authority types listed as immediate in section 22.8; after the fifth durable `AUTHORIZATION_DRIFT`/`ACTIVATION_DRIFT` row in 5 minutes per company/branch; `not allowed`/integrity failures, including `AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1`, use the separate immediate integrity/emergency circuit with no evidence-row claim |
+| conflict circuit breaker | evidence-bound state is derived only from durable applied transition results: immediate for the persistable authority-denial and fourteen non-authority types listed as immediate in section 22.8; open when the exact `fifth_in_five` result contains at least five durable `AUTHORIZATION_DRIFT`/`ACTIVATION_DRIFT` attempts in its half-open five-minute company/branch/domain window; an incomplete transition blocks new admission but not exact replay; `not allowed`/integrity failures, including `AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1`, use the separate immediate integrity/emergency circuit with no evidence-row claim |
 | audit/conflict persistence or integrity failure | immediate integrity/emergency circuit; this is distinct from an evidence-bound conflict-classification transition and cannot assert a missing row |
 | blocker-rate alert | at least 1 blocked posting in 5 minutes |
 | latency warning | transaction over 2 seconds |
@@ -1778,16 +1892,20 @@ REVALIDATION REQUIRED`
 Recommended v1 controls:
 
 - authority, authorization, activation, eligible event, posting operation,
-  conflict, canonical and financial-audit records are retained indefinitely;
-- update, delete, purge, TTL, cleanup and rollback deletion are forbidden;
+  conflict, conflict-transition, canonical and financial-audit records are retained
+  indefinitely;
+- update is forbidden except for the exact monotonic conflict-transition stage
+  progression; delete, purge, TTL, cleanup, rollback deletion and every identity/
+  evidence mutation remain forbidden for all records;
 - legal hold is an append-only hold reference included in exports and blocks any
   future disposal policy;
 - privacy class is `confidential_financial_metadata`; stable IDs, amounts and hashes
   are allowed, while names, addresses, contacts, messages and credentials are not;
 - export format is canonical UTF-8 JSON Lines plus sorted manifest and SHA-256 for
   every file and the complete export;
-- tamper evidence consists of immutable SQLite triggers, complete relational FKs,
-  record hashes, operation sealing, backup checksums and independent export verify;
+- tamper evidence consists of immutable-row and monotonic-transition SQLite triggers,
+  complete relational FKs, record hashes, operation sealing, backup checksums and
+  independent export verify;
 - backup scope is the coherent entire SQLite database, manifest and application
   artifact identity before first activation and after every schema change;
 - target RPO is 15 minutes; target RTO is 60 minutes;
@@ -1869,7 +1987,7 @@ docs/canonical-receivables-decisions.md
 
 PR9b adds no migration and remains unreachable from production. It may write only
 through isolated tests. A single large PR9 is rejected by recommendation because it
-would combine a new authority model, six-table migration, event producer and the
+would combine a new authority model, seven-table migration, event producer and the
 first canonical DML boundary into one security review.
 
 Neither PR is authorized by this document. PR9a requires a separate Gate B owner
@@ -2240,7 +2358,8 @@ version `1`, and exactly:
   activationCohortRef, amountBasisPolicyHash, amountBasisPolicyRef,
   approvalSetJson, authorizationId, authorizationVersion, backupEvidenceRef,
   boundaryHash, branchId, cohortHash, companyId, denialEvidencePermission,
-  denialEvidenceTable, domain, dueDatePolicySetHash, dueDatePolicySetJson,
+  denialEvidenceTable, denialTransitionPermission, denialTransitionTable, domain,
+  dueDatePolicySetHash, dueDatePolicySetJson,
   effectiveFrom,
   eventSchemaVersion, evidencePackHash, expiresAt, forbiddenOperationsJson,
   acceptedFreshnessWindowsHash, operationType, operationalControlRef,
@@ -2538,13 +2657,15 @@ compareSafeIntegerAscending(a, b):
   require Number.isSafeInteger(a) and Number.isSafeInteger(b)
   if a < b return -1
   if a > b return 1
-  return 0
+  if a === b return 0
+  fail CANONICAL_AUTHORITY_CANDIDATE_COMPARATOR_FAILED
 
 compareSafeIntegerDescending(a, b):
   require Number.isSafeInteger(a) and Number.isSafeInteger(b)
   if a > b return -1
   if a < b return 1
-  return 0
+  if a === b return 0
+  fail CANONICAL_AUTHORITY_CANDIDATE_COMPARATOR_FAILED
 
 compareAuthorityDenialCandidate(a, b):
   result = compareSafeIntegerAscending(a.precedenceRank, b.precedenceRank)
@@ -2556,7 +2677,11 @@ compareAuthorityDenialCandidate(a, b):
 
 `compareUtf16Ascending` is exactly the section-22.1 unescaped UTF-16 comparator. No
 other comparator or direction is permitted in A, B, C, triggers, fixtures or hash
-construction.
+construction. Failure of either safe-integer precondition and the theoretically
+unreachable state after explicit `<`, `>` and `===` branches return the stable
+`CANONICAL_AUTHORITY_CANDIDATE_COMPARATOR_FAILED`, write zero rows and open the
+integrity/emergency circuit. Subtraction, coercion, locale and lexical numeric
+comparison remain forbidden.
 
 `precedenceState` is exactly `selected`, `suppressed_by_higher_kind` or
 `unaffected_active_latest`. `selectedDenialCandidate` is the exact first candidate
@@ -3130,7 +3255,8 @@ severity `p0`.
 ```
 
 Generated `id`, `correlationId`, `evidenceAttemptedAt`, `createdAt`, `conflictHash`,
-severity (fixed `p0`) and the three raw snapshot JSON columns are the exact exclusions.
+derived `transitionId`, severity (fixed `p0`) and the three raw snapshot JSON columns
+are the exact exclusions.
 Each snapshot JSON is represented exactly once by its included verified hash, as
 `conflictObservationJson` is represented by `conflictObservationHash`; arbitrary or
 non-canonical JSON is forbidden. `detectedAt` is the required physical
@@ -3161,11 +3287,122 @@ produces a new immutable conflict;
 canonical bytes and SHA-256 for every projection row, both side envelopes, the full
 observation and the resulting conflict hash.
 
+#### Durable conflict-transition identity and accounting results
+
+For every registry entry whose Algorithm-C persistence is `required`, the repository
+derives exactly:
+
+```text
+transitionId = sha256(canonicalJson({
+  conflictHash,
+  denialAttemptId,
+  domain: "rentcore.canonical_actual_posting.conflict_transition_identity",
+  transitionKind: "required_conflict_accounting_circuit_v1",
+  version: 1
+}))
+```
+
+It then derives three distinct keys by applying the same envelope independently for
+`accountingKind = attempt`, `rate` and `circuit`:
+
+```text
+accountingKey(accountingKind) = sha256(canonicalJson({
+  accountingKind,
+  conflictHash,
+  denialAttemptId,
+  domain: "rentcore.canonical_actual_posting.conflict_accounting_key",
+  version: 1
+}))
+```
+
+These values are persisted respectively as `attemptAccountingKey`,
+`rateAccountingKey` and `circuitTransitionKey`. `intentHash` uses domain
+`rentcore.canonical_actual_posting.conflict_transition_intent`, version `1`, and
+exactly:
+
+```text
+{ branchId, circuitRule, companyId, conflictHash, conflictId, conflictType,
+  denialAttemptId, domain, operationDomain, scopeSequence, transitionId,
+  transitionKind, version }
+```
+
+The repository computes `transitionId`, all three accounting keys and `intentHash`
+only from its proven conflict candidate and pre-generated conflict row ID; callers
+supply none of them. `transitionId` is excluded from `conflictHash`, while the
+reciprocal deferred FKs and `intentHash` bind the pair without a recursive hash.
+
+Each accounting result is canonical JSON hashed with its own fixed domain and
+version `1`. `AttemptAccountingResultV1` has exactly
+`{accountingKey,accountingKind,counted,denialAttemptId,domain,transitionId,version}`;
+its domain is `rentcore.canonical_actual_posting.attempt_accounting_result`, kind is
+`attempt` and `counted` is `true`. `RateAccountingResultV1` has the same exact field
+set with domain `rentcore.canonical_actual_posting.rate_accounting_result` and kind
+`rate`. The durable transition rows themselves are the accounting ledger: counting
+is the existence of one valid applied result under the unique key, never an
+independent in-memory increment.
+
+The 30-per-rolling-minute admission projection counts valid applied rate results in
+the same exact company/branch/operation-domain whose linked conflict satisfies
+`windowStartExclusive < deniedAttemptedAt <= windowEndInclusive`, where
+`windowEndInclusive` is the candidate A/B `attemptedAt` and
+`windowStartExclusive` is that safe-integer epoch millisecond minus `60000`, clamped
+to zero and rendered canonically. IDs are ordered by `deniedAttemptedAt` ascending
+then denial ID UTF-16 ascending. Equality at the lower bound is excluded and equality
+at the upper bound is included. An incomplete transition blocks instead of being
+silently omitted from this count.
+
+`CircuitTransitionResultV1` has exactly:
+
+```text
+{ accountingKey, accountingKind, branchId, circuitRule, circuitState, companyId,
+  denialAttemptId, domain, operationDomain, qualifyingDenialAttemptIds,
+  scopeSequence, transitionId, version, windowEndInclusive, windowStartExclusive }
+```
+
+Its domain is `rentcore.canonical_actual_posting.circuit_transition_result`, kind is
+`circuit`, and `circuitState` is `open` or `closed`. For `immediate`, the qualifying
+array contains exactly this `denialAttemptId`, both window fields are JSON null and
+state is `open`. For `fifth_in_five`, `windowEndInclusive` is the conflict's exact
+`deniedAttemptedAt`, `windowStartExclusive` is its safe-integer epoch millisecond
+minus `300000` clamped to zero and rendered as RFC3339 UTC milliseconds, and the
+qualifying array contains every unique committed paired `AUTHORIZATION_DRIFT` or
+`ACTIVATION_DRIFT` denial ID in the same exact company/branch/operation-domain with
+`windowStartExclusive < deniedAttemptedAt <= windowEndInclusive` and
+`candidate.scopeSequence <= this.scopeSequence`. It is sorted by `scopeSequence`
+ascending. The immutable upper sequence boundary excludes every later committed
+transition even when its timestamps or UUID lexical order would otherwise sort
+earlier, so replay/recovery always reconstructs the same array. State is `open` iff
+the array length is at least five, otherwise
+`closed`. The global evidence-bound circuit is the deterministic projection `open`
+iff any valid applied result in that scope is open; no mutable in-memory circuit bit
+is authoritative.
+
+Every stage result hash is SHA-256 over its exact canonical result object. Repeating
+one `accountingKey` requires byte-identical JSON/hash and returns that persisted
+result without DML. A missing pair, invalid state combination, changed identity,
+changed result or hash mismatch returns
+`CANONICAL_CONFLICT_TRANSITION_INTEGRITY_FAILED`, performs no primary/conflict/new-
+transition DML and opens only the separately classified integrity/emergency circuit.
+An incomplete valid transition blocks new admission with
+`CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED`; that literal never converts the
+original denial into success and never blocks byte-exact conflict replay.
+
+Normative terminology for this boundary is fixed: a **located row** is any distinct
+persisted conflict row returned by either repository replay lookup; a
+**self-consistent row** has passed the complete conflict, authority, canonical,
+key/index and transition-pair proof from its own persisted values; **replay
+corruption** is any located row that fails that proof; a **genuine UUID collision**
+is only a self-consistent row or pair of rows whose valid identity conflicts with the
+incoming package; a **durable transition intent** is the exact paired `PENDING`
+record committed with required conflict evidence; and an **incomplete transition**
+is any valid transition whose state is not `COMPLETE`. These terms are not aliases
+for one another and may not be reclassified by implementation choice.
+
 ### 22.9 Cross-contract field matrix
 
 | Field/binding | Authoritative source | Persisted contracts | Hash envelopes | Locked reread | Replay/conflict role |
 |---|---|---|---|---|---|
-| `companyId`,`branchId` | PR5 relational scope | all six PR9 contracts + audit | every row/content hash | A, B and C reread composite parents | mismatch is conflict/denial, never cross-scope replay |
+| `companyId`,`branchId` | PR5 relational scope | all seven PR9 contracts + audit | every row/content hash | A, B, C and transition recovery reread composite parents | mismatch is conflict/denial, never cross-scope replay |
 | scoped authority kind/logical-ID/record-ID/version/hash | repository-derived per-company/branch authority chains for source, producer and posting actors | authority; full source/producer/posting composites in authorization and their event/activation/operation consumers; immutable attempt-bound composites plus separate same-logical-chain observed denied-authority binding in conflict | authority/authorization/activation records, event, audit payload/event, result, conflict | A/B reconstruct all three chains/snapshots and exact precedence; C recomputes every frozen member's complete section-22.2 envelope and preserves attempt-bound parents, proves the frozen suffix-specific contiguous relation, requires genuinely unaffected frozen heads active/latest at denied time and ignores valid post-boundary appends | ID-only or stored-hash-only match is insufficient; cross-scope/kind/logical-chain, skipped-version or frozen one-field drift denies; a conflict reference grants no current authority |
 | `sourceOwnershipManifestHash` + upstream/row classes | complete PR6 ownership universe constrained by source adapter | authorization/event/operation/conflict; lineage rows | authorization record, source lineage, event, audit payload, result, conflict | A/B reconstruct all 16 tables; C verifies denial hashes | mismatch is the authority-kind `OWNERSHIP_MANIFEST_MISMATCH` type |
 | accepted `{dryRunId,resultHash}` pairs + `acceptedPr8EvidenceHash` | signed acceptance record plus persisted PR8 result/reconciliation rows | authorization JSON/hashes/timezone/freshness window, activation/event/operation/conflict hashes | pair set, accepted-evidence/reconciliation/freshness hashes, authorization/activation/event/audit/result/conflict | A/B verify pair, exact row set, timezone and half-open freshness; C verifies denial binding | pair/timezone/reconciliation/freshness mix-and-match denies; exact set may replay |
@@ -3180,7 +3417,8 @@ observation and the resulting conflict hash.
 | three `FrozenAuthorityChainSnapshotV1` envelopes/hashes | complete locked source/producer/posting chains visible to A/B | three canonical JSON/hash pairs in conflict row | both projections, observation and conflict hash bind the three snapshot hashes | C/trigger rereads every frozen member and boundary; later contiguous descendants above the frozen maximum are ignored historically | frozen change/omission fails integrity; append after head affects only a new A/B attempt |
 | producer authority | latest eligibility-producer chain | full ID/version/hash/company/branch/kind composite in authorization and event; conflict stores the attempt-bound composite plus separate same-logical-chain observed denied composite | authority/authorization/event/result/conflict | A/B reconstruct exact producer candidate after source precedence; C proves the frozen same-authority-ID/contiguous suffix and frozen source/posting state; later appends are not historical candidates | any frozen one-field/latest-chain drift denies evidence; selected terminal/latest-chain evidence remains persistable without masking a source denial |
 | posting authority / audit actor authority | latest posting-adapter chain | full composite in authorization, activation, operation and audit payload; conflict stores the attempt-bound composite plus separate same-logical-chain observed denied composite | authority/authorization/activation, audit payload/event, result, conflict | B reconstructs posting only after source/producer precedence; C proves the frozen same-authority-ID/contiguous suffix and unaffected snapshot heads | any frozen one-field mismatch denies evidence; exact prior result may replay only while current; conflict evidence grants no replay authority |
-| write authorization + primary/denial permissions | latest authorization chain | authorization, activation, event, operation, conflict, audit payload | authorization/activation, event, audit payload/event, result, conflict | A/B require active primary; C proves the frozen/persisted binding in both modes and rereads current evidence-only append permission only for `NEW_EVIDENCE_INSERT` | primary expiry denies; a current append denial cannot block byte-exact replay and denial permission never creates success |
+| write authorization + primary/denial permissions | latest authorization chain | authorization, activation, event, operation, conflict, transition, audit payload | authorization/activation, event, audit payload/event, result, conflict, transition intent/stage results | A/B require active primary; C proves the frozen/persisted binding in both modes and rereads current evidence/transition permissions only for `NEW_EVIDENCE_INSERT`; recovery may only advance the already sealed transition | primary expiry denies; current permission drift cannot block byte-exact replay or recovery of an existing valid intent, and denial permissions never create success |
+| conflict transition identity/stages | repository-derived conflict row and fixed registry | conflict `transitionId` plus one transition row | transition identity, intent and three accounting-result hashes | C atomically creates the pair; recovery rereads and proves both rows before each monotonic stage | missing/corrupt pair fails integrity; repeated stage is byte-exact no-op; incomplete scope blocks new admission but never exact replay |
 | A/B `attemptedAt` / conflict `deniedAttemptedAt` | the single repository clock capability call immediately after A/B begin | new event/operation/canonical/audit timestamps; on denial the exact value is frozen and persisted in the conflict row | event/posting hashes as before; every conflict projection, temporal/freshness denial fingerprint, observation and conflict hash includes `deniedAttemptedAt` | A/B classify once; C proves the frozen value/window/rows | the time fixes temporal semantics but does not provide uniqueness; `denialAttemptId` distinguishes executions |
 | `evidenceAttemptedAt` | the single repository clock capability call only in C `NEW_EVIDENCE_INSERT`, after replay-mode lookup and complete frozen proof | new conflict `evidenceAttemptedAt = createdAt`; current evidence permission/circuit/rate/storage/timeout guard | excluded from side, observation and conflict/dedupe hashes | new-insert C validates the operational floor and current evidence-write authority once; `EXACT_REPLAY` makes zero clock calls | cannot change suffix, precedence, projection or denial identity; replay returns the persisted value |
 
@@ -3314,22 +3552,34 @@ BEGIN IMMEDIATE
 
 Zero calls, two calls, a call before the locked clock, a call after deterministic
 derivation starts, a caller-provided/callback/getter/hook/lazy/remote/plugin/mockable
-production generator, another generator or another clock read all fail closed with
-zero DML. Malformed output, throw or collision performs no regeneration and has no
-entropy or ID fallback.
+production generator, another generator, fallback/regeneration/entropy fallback or
+another clock read all return
+`CANONICAL_DENIAL_ATTEMPT_ID_GENERATION_FAILED`, fail closed and perform zero DML.
+Malformed output or throw returns that same generation literal. No such structural,
+sequence, source or format violation may return the collision literal, and every
+case performs no regeneration and has no entropy or ID fallback.
 
 Still under the A/B lock, the repository queries the global `denialAttemptId` unique
 key. An existing row is an impossible generator collision: A/B rolls back with
 `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`, creates no package and opens the
 integrity/emergency circuit.
-Algorithm C repeats that uniqueness check: the same UUID may match only a byte-exact
-existing conflict for the same frozen package; a different row or package with that
-UUID returns the same collision error, writes zero rows and opens the
-integrity/emergency circuit. The
+Algorithm C repeats that uniqueness lookup but never classifies from lookup
+asymmetry alone: the same UUID may match only a byte-exact existing conflict for the
+same frozen package. Only after every located row passes the Algorithm-C self-
+integrity proof does a self-consistent different row or foreign package using that
+UUID return the collision error, write zero rows and open the integrity/emergency
+circuit. The
 unique constraint is the final concurrent guard. A caller-provided field named
 `denialAttemptId` is rejected at the pre-lock exact command boundary. The generated
 UUID is discarded on A/B success and becomes durable only if a denied package is
 validly persisted by C.
+
+`CANONICAL_DENIAL_ATTEMPT_ID_COLLISION` is reserved exclusively for a genuine
+uniqueness collision after every located persisted row has passed its own complete
+self-integrity and key-binding proof. It is forbidden for malformed UUIDs, wrong
+generator source/order/count, missing or repeated invocation, fallback/regeneration,
+or a corrupted persisted replay row. Section 23's Algorithm-C matrix is the sole
+authority for distinguishing replay corruption from a genuine collision.
 
 Algorithms A/B name their clock value `attemptedAt`; `denialAttemptId` is independent
 identity and never a time input. `attemptedAt` is their only time input for
@@ -3427,7 +3677,10 @@ Inside one repository-owned `BEGIN IMMEDIATE`:
 
 1. capture and validate the single `attemptedAt`, generate the one
    `denialAttemptId` UUIDv4, and prove that ID absent from the conflict unique index as
-   above;
+   above; then recheck that the exact company/branch/operation-domain transition
+   scope has no row outside `COMPLETE`. If one exists, roll back, discard the UUID,
+   create no denial package, synchronously run the section-23 reconciler and require
+   a fresh locked zero-incomplete recheck before any new primary admission;
 2. reread the write-authorization record and its latest chain, canonical
    `acceptedPr8EvidenceJson`/hash, its exact projected
    `[{dryRunId,resultHash}]` pair set, accepted timezone, exact half-open freshness
@@ -3549,7 +3802,9 @@ Inside a separate repository-owned `BEGIN IMMEDIATE`:
 
 1. capture and validate the single `attemptedAt`, generate the one
    `denialAttemptId` UUIDv4, and prove that ID absent from the conflict unique index as
-   above;
+   above; then apply the identical zero-incomplete transition-scope recheck and
+   recovery-required rollback rule from Algorithm A before reading the event or
+   making a primary/replay decision;
 2. reread the event by exact ID/company/branch and recompute its
    `economicLineageKey`, `economicSourceRevisionKey`, `currentPr6RevisionHash`,
    `eventHash` and `sourceLineageHash`; traverse the complete predecessor/successor
@@ -3638,21 +3893,47 @@ mode before every append-specific admission guard. The transaction prefix is exa
 1. enter a new repository-owned `BEGIN IMMEDIATE`;
 2. read and validate the unexported brand and fixed-shape frozen package as inert data;
 3. validate its `denialAttemptId` as canonical UUIDv4 without generating an ID;
-4. provisionally look up both repository-owned replay keys: global
+4. execute both repository-owned replay lookups: global
    `denialAttemptId` and the persisted `(companyId,conflictHash)` key using the
    package's exact `companyId` projection and `conflictHashCandidate`;
-5. read the complete existing conflict row when a key finds one;
-6. if both keys name that same row, select `EXACT_REPLAY`; if both are absent and the
-   package is the exact output of one new A/B execution, select
-   `NEW_EVIDENCE_INSERT`; if exactly one key finds a row or they find different rows,
-   return `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`, perform zero DML and enter the
-   integrity/emergency circuit path.
+5. collect the distinct persisted rows found by either path and read each complete
+   conflict row plus its mandatory transition row; no asymmetric result is classified
+   yet;
+6. for every distinct found row, independently prove its exact shape/types/nulls,
+   canonical JSON, stored projections/fingerprints/snapshots, complete authority
+   envelopes/chains, recomputed observation/conflict hash, transition identity/intent
+   and all persisted key/index bindings. A row returned by one lookup must contain
+   the exact key used by that lookup; if its stored fields reproduce the other
+   package key while that other lookup missed it, the index/key projection is corrupt;
+7. apply the sole normative classification matrix below. Only after every found row
+   is proved self-consistent may C distinguish a genuine collision from corruption.
 
 No clock, UUID/ID generator, current append-permission check, circuit/rate admission,
 storage-capacity admission, timeout accounting, counter mutation or DML occurs in
 that prefix.
 
-Both modes then execute the same complete frozen proof. C reads each of the three
+The classification matrix has this exact precedence:
+
+| Located state after both lookups | Required classification | Stable result |
+|---|---|---|
+| one or more located rows and any located conflict/transition row fails structural, canonical, projection, fingerprint/hash, authority-snapshot, persisted-key or reciprocal-pair proof | corrupted persisted replay evidence; corruption precedence wins before collision analysis | `CANONICAL_CONFLICT_REPLAY_INTEGRITY_FAILED` |
+| two different located rows and both are self-consistent | two valid rows claim intersecting replay identity | `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION` |
+| exactly one self-consistent row but its valid denial/package identity differs from the incoming package, including reuse of an existing `denialAttemptId` for another conflict identity | genuine foreign-package UUID collision | `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION` |
+| exactly one self-consistent row, both lookup paths name it, and every package/row field is byte-exact | replay candidate; full incoming frozen-package proof still mandatory | `EXACT_REPLAY` |
+| no row found by either lookup and the package is the exact output of one new A/B execution | new evidence candidate; full incoming frozen-package proof still mandatory | `NEW_EVIDENCE_INSERT` |
+
+Mutation of persisted `denialAttemptId`, `companyId`, `conflictHash`, canonical JSON,
+fingerprint, projection, snapshot binding, `transitionId` or either stored replay-key
+projection is always the first row of this matrix, including lookup-A-hit/lookup-B-
+miss, lookup-B-hit/lookup-A-miss and both-lookups-same-corrupt-row cases. It cannot be
+reported as UUID collision. Conversely, two different self-consistent rows or one
+self-consistent foreign-package row cannot be downgraded to replay corruption.
+Every integrity/collision result performs zero conflict/transition DML, returns no
+replay, creates no replacement or business attempt, reads no new clock, generates no
+UUID, changes no attempt/rate/circuit accounting and opens the integrity/emergency
+circuit.
+
+Both candidate modes then execute the same complete incoming frozen-package proof. C reads each of the three
 snapshot envelopes, checks its fixed kind and canonical bytes/hash, and rereads every
 frozen member's complete persisted `governed_adapter_authority_records` envelope—not
 only the fields projected into `FrozenAuthorityChainMemberV1`. For every member it
@@ -3706,56 +3987,120 @@ observed record into an attempt binding, treat either evidence composite as a cu
 grant, select a lower-precedence candidate or let a later clock/append create another
 winner.
 
-The normative end-to-end `EXACT_REPLAY` order is exactly: (1) transaction entry under
-the contract above; (2) frozen package read/brand/shape proof; (3) canonical
-`denialAttemptId` validation; (4) lookup by both exact repository-owned replay keys;
-(5) complete existing-row read; (6) full frozen authority-member/chain proof,
-including section-22.2 recomputation; (7) full expected/observed projection and
-precedence proof; (8) full canonical JSON/fingerprint/observation/conflict-hash proof;
-(9) byte-exact persisted-row proof; (10) return that existing row. None of steps
-1–10 may be reordered around an append-specific admission.
+The normative end-to-end `EXACT_REPLAY` order is exactly: (1) transaction entry;
+(2) frozen package brand/shape proof; (3) canonical `denialAttemptId` validation;
+(4) both exact repository-owned replay lookups; (5) distinct found-row collection and
+complete conflict/transition reads; (6) complete self-integrity, stored-key/index and
+reciprocal-pair proof for every found row; (7) the matrix classification plus full
+incoming frozen authority-member/chain proof, including section-22.2 recomputation;
+(8) full expected/observed projection, precedence, canonical JSON, fingerprint,
+observation and conflict-hash proof; (9) byte-exact persisted conflict-row and
+transition-intent proof; (10) return that existing conflict row. None of steps 1–10
+may be reordered around an append-specific admission, and no collision result may
+precede step 6.
 
 In `EXACT_REPLAY`, after the common proof C reconstructs the complete persisted
-conflict row, revalidates every exact field/type/null rule, canonical JSON byte string
-and hash, and requires byte-exact equality with the proven package-derived row except
-that it reuses the row's original repository ID, `evidenceAttemptedAt` and `createdAt`.
+conflict row and its transition intent, revalidates every exact field/type/null rule,
+canonical JSON byte string, hash and reciprocal link, and requires byte-exact equality
+with the proven package-derived row except that it reuses the row's original
+repository ID, `evidenceAttemptedAt`, `createdAt` and current valid monotonic
+transition stage/results.
 It then returns that existing row with `replayed=true`. This mode performs zero DML,
 zero clock/UUID/ID-generator calls, zero append-permission/circuit/rate/storage
 admission, zero attempt/rate/circuit counter changes and no circuit reopening—even
-when the conflict circuit is already open, the rate limit is exhausted or append
-storage is unavailable. A read failure fails closed. A persisted replay row whose own
-canonical bytes/hash/fields do not pass returns the stable
-`CANONICAL_CONFLICT_REPLAY_INTEGRITY_FAILED`, performs zero conflict DML, inserts no
-replacement/new attempt and enters the integrity/emergency circuit path.
+when the conflict circuit is already open, the rate limit is exhausted, append
+storage is unavailable or the valid transition is not yet `COMPLETE`. Replay never
+advances that transition. A read failure fails closed. A persisted replay
+conflict/transition pair that does not pass returns the stable
+`CANONICAL_CONFLICT_REPLAY_INTEGRITY_FAILED`, performs zero conflict/transition DML,
+inserts no replacement/new attempt and enters the integrity/emergency circuit path.
 
 Only `NEW_EVIDENCE_INSERT` continues after the common proof. C then calls
 `repositoryClock.readUtcMilliseconds()` exactly once, validates/renders
 `evidenceAttemptedAt`, discards the clock, validates the exact monotonic floor, rereads
-the current authorization's evidence-only table/permission, and applies the
+the current authorization's exact evidence and transition tables/permissions, and applies the
 new-attempt circuit, rate, timeout and append/storage admissions. The permission may
-authorize only
-`canonical_receivable_posting_conflicts.append_after_denial.v1`; it can never
-authorize a primary effect. C generates no ID after lock and uses only the
-repository-owned pre-generated conflict row ID plus the package's existing
-`denialAttemptId`. It inserts exactly one conflict with all three canonical snapshot
+authorize only the conflict append and its mandatory transition create/advance
+operations named in section 14; neither can authorize a primary effect. C generates
+no ID after lock and uses only the repository-owned pre-generated conflict row ID,
+the package's existing `denialAttemptId` and the deterministic `transitionId`. Under
+the same lock it allocates the exact next positive safe-integer `scopeSequence`; a
+gap, duplicate, unsafe overflow or caller value returns the evidence-persistence
+failure before DML. It
+inserts exactly one conflict with all three canonical snapshot
 JSON/hash pairs, `deniedAttemptedAt = detectedAt` from the package and
-`evidenceAttemptedAt = createdAt` from this one clock. Authority conflicts require the
+`evidenceAttemptedAt = createdAt` from this one clock, then exactly one `PENDING`
+transition intent with all markers zero in the same transaction. The two reciprocal
+FKs are deferred, but C rereads and proves both complete rows before commit; failure,
+absence, duplication or mismatch of either row rolls back both. Authority conflicts require the
 exact all-non-null same-scope denied-authority kind/record-ID/version/hash composite;
 non-authority conflicts require all four null. C rereads the conflict and all complete
-authority envelopes, repeats every canonical/hash/relational proof from persisted
-state and commits only on byte-exact equality.
+authority envelopes plus the transition identity/intent, repeats every canonical/
+hash/relational proof from persisted state and commits only on byte-exact equality.
 
-Conflict-classification circuit/rate accounting is derived before insert but is not
-mutated before evidence durability. The exact transition order is: conflict row and
-post-insert proof succeed; transaction commit is confirmed; the new A/B attempt is
-accounted exactly once; then the registry's immediate circuit transition is applied,
-or the fifth-in-five transition is applied when that committed row reaches the exact
-threshold. A crash or failure after commit but before transition leaves the evidence
-row durable and forces fail-closed recovery to reconcile that row before any later
-primary admission. A conflict-classification circuit must never be opened for a row
-whose commit was not confirmed. Frozen/read integrity failures and persistence/admission
-failures instead use the separately named integrity/emergency circuit path and never
-pretend that conflict evidence exists.
+Conflict-classification accounting never uses an in-memory counter as authority. The
+exact order is: the conflict row and `PENDING` transition intent both pass post-insert
+proof; their one transaction commits; only then may repository recovery advance
+attempt, rate, circuit and completion stages under their three unique keys. Therefore
+no committed required conflict lacks durable transition intent and no evidence-bound
+circuit can open for an uncommitted row. A crash at any later point leaves an exact
+durable marker from which recovery resumes without repeating or skipping a stage.
+Frozen/read integrity and pair-persistence/admission failures instead use the
+separately named integrity/emergency circuit and never pretend that conflict evidence
+or an evidence-bound transition exists.
+
+The recovery/admission scope is exactly
+`(companyId,branchId,operationDomain=canonical_receivable.initial_post.v1)`. Before
+new primary admission in A or B, and before C may continue a
+`NEW_EVIDENCE_INSERT`, the repository must prove that no transition in that exact
+scope is outside `COMPLETE`. An incomplete transition returns
+`CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED` if it remains unresolved, but the
+repository first synchronously invokes the repository-owned reconciler and then
+rechecks the scope in a fresh locked transaction. New primary/new-evidence admission
+remains fail-closed until that recheck finds zero incomplete transitions. C always
+performs replay lookup and the complete
+replay integrity proof before this guard, so a valid exact replay remains available
+and read-only while an associated or unrelated transition is incomplete. The guard
+does not block another company, branch or operation domain.
+
+The reconciler is an internal disabled-repository operation, not a route, worker,
+queue, scheduler, timer, CLI, startup mutation or production capability. It creates
+no conflict/business row and accepts no caller-selected transition, scope, key,
+result or state. For the exact blocked scope it selects incomplete transitions in
+`scopeSequence` ascending order. Each stage
+uses its own repository-owned `BEGIN IMMEDIATE` and this exact sequence:
+
+1. reread the transition and its reciprocal conflict row and re-prove complete row,
+   authority, projection, conflict hash, transition identity/intent and scope
+   integrity;
+2. prove the sealed authorization version granted the exact conflict/transition
+   companion permissions. Current authorization expiry cannot strand an already
+   committed valid intent, but cannot grant a new row or primary effect;
+3. if `attemptApplied = 0`, construct `AttemptAccountingResultV1`, update only its
+   result pair and marker, reread and commit; if already applied, require byte-exact
+   result and return the existing durable stage without DML;
+4. in a new transaction apply the identical rule to `RateAccountingResultV1` and
+   advance to `ACCOUNTED`;
+5. in a new transaction reconstruct the complete circuit window from durable paired
+   rows, apply `CircuitTransitionResultV1` under `circuitTransitionKey` exactly once
+   and advance to `CIRCUIT_APPLIED`;
+6. in a final transaction re-prove all three results and advance only the state to
+   `COMPLETE`; repeated completion is a byte-exact no-op.
+
+No recovery stage reads a clock, generates an ID, changes `deniedAttemptedAt` or
+`evidenceAttemptedAt`, creates a new attempt, mutates a conflict row or performs any
+primary/settlement/PR6/PR8/legacy/`app_data` DML. Attempt and rate accounting are the
+unique durable applied result rows, not increments in a second store. Circuit state
+is the deterministic projection of durable circuit results. Thus replaying recovery
+one or many times yields one attempt result, one rate result and one circuit result,
+with no double-count or undercount.
+
+Concurrent reconciler invocations serialize on `BEGIN IMMEDIATE`. An invocation that observes an
+already advanced byte-exact stage returns its existing result; a changed stage fails
+with `CANONICAL_CONFLICT_TRANSITION_INTEGRITY_FAILED`. `SQLITE_BUSY`/`SQLITE_LOCKED`
+uses the common stable concurrent-conflict mapping and zero automatic retries. Until
+every transition in scope is `COMPLETE`, new A/B and C-new admission remains blocked;
+exact replay still follows the ten-step read-only path above.
 
 No canonical, event, operation, audit, settlement, PR6/PR8, legacy or `app_data` write
 is permitted. New-insert permission expiry, missing/ambiguous permission, scope/hash
@@ -3800,7 +4145,14 @@ CLI, frontend and startup business execution remain unchanged.
 
 - exact first migration on fresh chain and current seven-row production-shaped
   local fixture;
-- exact six tables, columns, PKs, ordered composite FKs, checks, indexes and triggers;
+- exact seven tables, columns, PKs, ordered composite FKs, checks, indexes and triggers;
+- the conflict/transition reciprocal deferred-FK pair cannot commit either row alone;
+  every required conflict has exactly one transition, all three accounting keys and
+  the exact initial `PENDING`/zero-marker/null-result state;
+- transition fixtures enforce every allowed marker/state/result combination, reject
+  skipped/reversed/mixed stages and prove identity/scope/rule/intent fields immutable;
+  first/next/concurrent sequence allocation yields contiguous `scopeSequence` values,
+  while duplicate, gap, caller-supplied and safe-integer overflow cases reject;
 - exact composite source-adapter and producer/posting
   ID/version/hash/company/branch/kind parent/FKs plus audit
   `(id,companyId,branchId)` FK;
@@ -3833,7 +4185,10 @@ CLI, frontend and startup business execution remain unchanged.
 - A/B permits exactly one fixed internal UUID call after the valid locked clock and
   before deterministic derivation; caller-supplied `denialAttemptId`, zero/two calls,
   early/late/alternate/callback generators, wrong UUID version/variant/case, braces,
-  malformed output, throw and collision all reject without retry/fallback or DML;
+  malformed output, throw, fallback and regeneration all return
+  `CANONICAL_DENIAL_ATTEMPT_ID_GENERATION_FAILED` without retry/fallback or DML;
+  only a fully proved genuine uniqueness collision returns
+  `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`, and corrupted replay evidence never does;
 - exact UTF-8 byte fixtures and SHA-256 outputs cover every section 22 envelope,
   null versus omission, array order, duplicate pair rejection, safe integer
   boundaries, Cyrillic, Tatar characters, emoji/non-BMP, slash, quotation mark,
@@ -3908,10 +4263,11 @@ CLI, frontend and startup business execution remain unchanged.
   binding fields described after the normative section-22.2 list;
 - `AuthorityDenialCandidateV1` cross-language fixtures prove rank ascending numeric,
   version descending numeric and record-ID ascending UTF-16 ordering. They cover
-  versions 2 and 10; same rank with different versions; same rank/version with
+  explicit equality branches; equal values; versions 2 and 10; same rank with different versions; same rank/version with
   different IDs; non-safe integer, numeric string `"10"`, decimal `10.5`, negative
   rank, non-positive version, duplicate ordering key, transitivity, antisymmetry and
-  every input permutation. Each valid candidate set yields identical ordered bytes,
+  every input permutation. The unreachable-state guard returns
+  `CANONICAL_AUTHORITY_CANDIDATE_COMPARATOR_FAILED`. Each valid candidate set yields identical ordered bytes,
   `candidateSetHash`, selected candidate and `conflictHash`; every invalid value
   rejects with zero conflict DML;
 - append a new authorized descendant between A/B rollback and C, and separately append
@@ -4013,8 +4369,9 @@ CLI, frontend and startup business execution remain unchanged.
   and createdAt; every mutation aborts before commit;
 - wrong audit event type is tested specifically against trigger activation by
   referenced audit ID, not merely caught by repository reread;
-- primary-effect authorization cannot write the conflict table; denial permission
-  cannot write any primary-effect table; algorithm C performs no business write;
+- primary-effect authorization cannot write the conflict or transition table;
+  denial evidence/transition permissions cannot write any primary-effect table;
+  algorithm C and recovery perform no business write;
 - conflict evidence new-insert permission/scope/hash failure enters the
   integrity/emergency circuit path while leaving the denied primary effect at zero
   rows; an Algorithm-C retry of the same frozen
@@ -4028,6 +4385,16 @@ CLI, frontend and startup business execution remain unchanged.
   A corrupted replay row instead returns
   `CANONICAL_CONFLICT_REPLAY_INTEGRITY_FAILED`, writes zero rows, creates no
   replacement/new attempt and enters the integrity/emergency circuit path;
+- Algorithm-C replay-key fixtures separately mutate persisted `denialAttemptId`,
+  `companyId`, `conflictHash`, canonical JSON, fingerprint, projection, authority
+  snapshot binding, `transitionId` and each stored replay lookup projection. They
+  cover lookup-A-hit/B-miss, lookup-B-hit/A-miss, both lookups naming one corrupted
+  row, two lookups naming two different self-consistent rows, one self-consistent
+  foreign-package row and one byte-exact matching row. Every corrupted-row case is
+  `CANONICAL_CONFLICT_REPLAY_INTEGRITY_FAILED`; the two genuine collision cases are
+  `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`; only the byte-exact case returns replay.
+  Every denial path has zero conflict/transition DML, replacement, clock, UUID and
+  accounting changes;
 - every registered conflict type reconstructs its exact expected/observed
   projections; caller-selected attempt ID/time/type/projection/hash rejects, the same
   frozen package deduplicates and any `denialAttemptId`, semantic projection,
@@ -4069,9 +4436,11 @@ CLI, frontend and startup business execution remain unchanged.
   calls; an alternate, caller, callback, getter, hook, lazy, remote, plugin or
   mockable-production generator; generator before the locked clock; generator after
   deterministic derivation begins; malformed/throw output; and collision. Every
-  invalid case returns its stable generation/collision error with zero DML, no second
-  clock, no regeneration and no fallback. C replay/new-insert fixtures assert zero
-  UUID-generator calls;
+  non-collision invalid case returns
+  `CANONICAL_DENIAL_ATTEMPT_ID_GENERATION_FAILED`; only a genuine proved uniqueness
+  collision returns `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`. Every case has zero DML,
+  no second clock, no regeneration and no fallback. C replay/new-insert fixtures
+  assert zero UUID-generator calls;
 - posting/conflict clock throw/invalid/out-of-range/regression rolls back and exact
   posting replay returns original persisted timestamps;
 - persisted-row mutation/ignore/extra-row fault injection is detected;
@@ -4088,7 +4457,18 @@ CLI, frontend and startup business execution remain unchanged.
 - busy/locked injection at begin, each DML, reread and commit maps to
   `CANONICAL_POSTING_CONCURRENT_CONFLICT` with zero automatic retries;
 - concurrent algorithm-A producers yield one event; concurrent algorithm-B posters
-  yield one canonical/operation/audit set; conflict writers yield one hash row;
+  yield one canonical/operation/audit set; conflict writers yield one conflict row
+  plus one paired transition intent;
+- crash/recovery fixtures inject failure before conflict insert, after conflict and
+  transition inserts but before their common commit, after pair commit, before and
+  after attempt accounting, after rate accounting, after circuit application and
+  before `COMPLETE`. Repeated recovery and concurrent reconcilers always finish with
+  one conflict, one transition, one attempt result, one rate result and one circuit
+  result, with no double-count/undercount and identical final state;
+- incomplete-transition fixtures prove the exact company/branch/operation-domain
+  scope blocks new A/B and C-new admission, does not block another scope, and never
+  blocks a fully proved exact replay. Recovery creates no conflict/business attempt,
+  reads no clock, generates no UUID and never mutates persisted attempt timestamps;
 - concurrent old/new correction revisions for one lineage yield at most one event
   before eligibility and, after eligibility/posting, zero additional events or
   receivables plus the exact deduplicated correction conflict;
@@ -4142,8 +4522,11 @@ CLI, frontend and startup business execution remain unchanged.
 - UUIDv4 generation format/variant, same-millisecond sequential/concurrent uniqueness,
   exact post-clock/pre-derivation single-call ordering, zero/two/alternate/callback/
   early/late/malformed/throw/collision failure, same-package replay and caller-field
-  rejection; every invalid path has zero DML and no retry/fallback, every new A/B
-  execution counts once while Algorithm-C replay counts zero;
+  rejection; every non-collision violation has exact
+  `CANONICAL_DENIAL_ATTEMPT_ID_GENERATION_FAILED`, only a proved uniqueness collision
+  has `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`, and every invalid path has zero DML and
+  no retry/fallback. Every new A/B execution has one durable attempt/rate/circuit
+  transition while Algorithm-C replay counts zero;
 - exact three-kind snapshot member/candidate/boundary/snapshot hash fixtures plus
   append-between-transactions, higher-precedence append, historical-hash stability,
   future-attempt reclassification and every frozen integrity failure listed above;
@@ -4152,17 +4535,30 @@ CLI, frontend and startup business execution remain unchanged.
   frozen hash retained, plus fixed domain/version projection mutation; every mismatch
   is the stable frozen-chain integrity failure with zero DML;
 - exact authority-candidate safe-integer comparator fixtures prove rank ascending,
-  version descending, record-ID UTF-16 ascending, duplicate rejection and invariant
-  ordering/selection/hashes across input permutations, including versions 2 and 10;
+  version descending, record-ID UTF-16 ascending, explicit `<`/`>`/`===` equality,
+  duplicate rejection and invariant ordering/selection/hashes across input
+  permutations, including equal values and versions 2 and 10; invalid/unreachable
+  states have exact `CANONICAL_AUTHORITY_CANDIDATE_COMPARATOR_FAILED`;
 - Algorithm-C mode-order fixtures prove exact replay bypasses open-circuit, exhausted-
   rate and unavailable-append-storage admission with zero clock/generator/DML/counter
   mutation, while only a fully proved absent-row package enters
-  `NEW_EVIDENCE_INSERT`. Persisted replay corruption returns the stable replay-
-  integrity failure and never inserts a replacement;
-- new evidence fixtures prove commit confirmation precedes attempt accounting and the
-  registry circuit transition; injected pre-commit/commit failure cannot record an
-  evidence-bound conflict-circuit transition, and post-commit transition recovery
-  sees the durable row before any later primary admission;
+  `NEW_EVIDENCE_INSERT`. Every asymmetric lookup/key-field/canonical/hash/snapshot/
+  transition-pair corruption returns
+  `CANONICAL_CONFLICT_REPLAY_INTEGRITY_FAILED` before collision classification and
+  never inserts a replacement; two proved distinct rows and a proved foreign package
+  return only `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`;
+- new evidence fixtures prove the conflict and `PENDING` transition intent commit
+  atomically before attempt/rate/circuit stages. The exact matrix is: (1) crash before
+  conflict-evidence commit; (2) crash after conflict-row insert but before transaction
+  commit; (3) crash after evidence-plus-intent commit; (4) crash before attempt
+  accounting; (5) crash after attempt accounting; (6) crash after rate accounting;
+  (7) crash after circuit transition; (8) crash before marking `COMPLETE`; (9)
+  repeated restart/recovery; (10) concurrent test-only recovery workers invoking the
+  same repository reconciler (no runtime worker); (11) exact replay
+  during an incomplete transition; and (12) new primary admission during an
+  incomplete transition. Every case proves one pair, one result per key, no double-
+  count/undercount, identical final state, scope-local admission blocking and read-
+  only replay availability;
 - later contiguous authority descendants separately cover `revoked` persistence,
   `superseded` persistence, authorized `LATEST_CHAIN_MISMATCH` persistence and expired
   `AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1` zero-DML/immediate-circuit
@@ -4203,15 +4599,38 @@ CLI, frontend and startup business execution remain unchanged.
   producer/source denial proves source precedence; an unaffected non-latest authority
   rejects. Every accepted denial-evidence fixture proves all canonical/event/
   operation/audit primary-effect row counts remain zero;
-- unauthorized conflict append, caller-selected conflict operation/table, conflict
-  persistence failure, deduplication and rate/circuit limits are fault-injected;
+- unauthorized conflict/transition write, caller-selected conflict/transition
+  operation/table/key/state, pair-persistence failure, deduplication and rate/circuit
+  limits are fault-injected;
 - conflict persistence failure returns
   `CANONICAL_CONFLICT_EVIDENCE_PERSISTENCE_FAILED`, enters the separately classified
   integrity/emergency circuit path and cannot convert the original denial into
   success; it does not claim an evidence-bound conflict-circuit transition without a
-  durable row.
+  durable conflict/transition pair.
 - static regression proves the posting command fingerprint is Algorithm-B-only,
   event-bound and absent from Algorithm A.
+
+### Future remediation implementation checklist
+
+- preserve the exact seven-table inventory and reciprocal deferred conflict/
+  transition FKs; no conflict-only commit path is permitted;
+- implement the located-row collection, complete self-integrity proof and
+  classification matrix before any collision result or append admission;
+- keep `CANONICAL_CONFLICT_REPLAY_INTEGRITY_FAILED`,
+  `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`,
+  `CANONICAL_DENIAL_ATTEMPT_ID_GENERATION_FAILED`,
+  `CANONICAL_CONFLICT_TRANSITION_INTEGRITY_FAILED` and
+  `CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED` disjoint;
+- derive transition identity, intent, stage keys and results only from locked
+  repository values and exact section-22 envelopes;
+- make every recovery stage idempotent under its unique key, monotonically persisted
+  and independently reread before commit;
+- enforce the exact company/branch/operation-domain incomplete-transition guard while
+  allowing the complete read-only replay path;
+- implement the explicit safe-integer equality/unreachable comparator branches and
+  their cross-language fixtures;
+- keep every authorization field in section 26 unchanged; implementation, deployment
+  and production remain separately gated.
 
 ### Required implementation checks
 
@@ -4275,7 +4694,7 @@ remains unchanged. A later Gate B owner prompt may change only
 | D-PR9-06 Capability catalog | strategy A; keep human catalog v1/11 | any future catalog or external identity change requires a new design review |
 | D-PR9-07 Boundary/cohort | single-company/branch forward-only cohort shape | Gate C revalidates production cohort policy; Gate D alone activates it |
 | D-PR9-08 PR8 evidence | sealed-evidence admission contract shape only | Gate C independently reviews and accepts an actual production evidence pack |
-| D-PR9-09 DB objects | additive six-table/index/trigger design | Gate B separately controls PR9a initializer implementation; Gate D controls production migration |
+| D-PR9-09 DB objects | additive seven-table/index/trigger design | Gate B separately controls PR9a initializer implementation; Gate D controls production migration |
 | D-PR9-10 Mapping | exact event-to-PR1 projection design | production policy inputs remain subject to their Gate C approvals |
 | D-PR9-11 Immutability | source-scoped no-update/no-delete design | future correction/compensation needs a separate design and authorization |
 | D-PR9-12 Conflict evidence | rollback plus deduplicated append-only conflict design | production privacy/security/operations controls remain Gate C |

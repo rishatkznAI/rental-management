@@ -3501,14 +3501,38 @@ minus `300000` clamped to zero and rendered as RFC3339 UTC milliseconds, and the
 qualifying array contains every unique committed paired `AUTHORIZATION_DRIFT` or
 `ACTIVATION_DRIFT` denial ID in the same exact company/branch/operation-domain with
 `windowStartExclusive < linkedConflict.evidenceAttemptedAt <= windowEndInclusive` and
-operational order `(linkedConflict.evidenceAttemptedAt,candidate.scopeSequence) <=
-(thisConflict.evidenceAttemptedAt,this.scopeSequence)`. It is sorted by
-`evidenceAttemptedAt` ascending and then `scopeSequence` ascending. Historical denial
-time, UUID lexical order, arrival order and raw repository order cannot affect the
-array. The first four operationally committed qualifying results are `closed`; the
-fifth is `open`, including when all five evidence timestamps are equal or their
-historical `deniedAttemptedAt` values commit in reverse order. State is `open` iff the
-array length is at least five, otherwise `closed`. The global evidence-bound circuit is the deterministic projection `open`
+this exact operational-order predicate:
+
+```text
+(
+  linkedConflict.evidenceAttemptedAt,
+  linkedTransition.scopeSequence
+)
+<=
+(
+  thisConflict.evidenceAttemptedAt,
+  thisTransition.scopeSequence
+)
+```
+
+The left tuple always uses the operational clock and sequence of the linked conflict/
+transition pair. The right tuple always uses the operational clock and sequence of the
+transition whose result is being computed or reconstructed. `candidateScopeSequence`
+is permitted only for a transient new-admission candidate before commit;
+`candidate.scopeSequence` is forbidden during immutable result reconstruction. A
+generic `this.scopeSequence` is likewise forbidden unless it is defined as an exact
+alias of `thisTransition.scopeSequence`. Linked-side filtering by the exact predicate
+occurs before sorting; sorting cannot repair an over-inclusive qualifying set. A
+later committed transition therefore cannot expand an earlier sealed result's
+qualifying array.
+
+The qualifying array is sorted by `evidenceAttemptedAt` ascending and then
+`scopeSequence` ascending. Historical denial time, UUID lexical order, arrival order
+and raw repository order cannot affect the array. The first four operationally
+committed qualifying results are `closed`; the fifth is `open`, including when all
+five evidence timestamps are equal or their historical `deniedAttemptedAt` values
+commit in reverse order. State is `open` iff the array length is at least five,
+otherwise `closed`. The global evidence-bound circuit is the deterministic projection `open`
 iff any valid applied result in that scope is open; no mutable in-memory circuit bit
 is authoritative.
 
@@ -4806,9 +4830,20 @@ CLI, frontend and startup business execution remain unchanged.
   `evidenceAttemptedAt` cases, are committed through C in direct/reverse/random order;
   every permutation orders by `(evidenceAttemptedAt,scopeSequence)`, admits at most 30
   pairs and rejects the 31st before pair DML. Five qualifying drift packages in direct,
-  reverse and arbitrary historical order, including one equal evidence timestamp,
-  produce `closed` for operational results one through four and `open` for the fifth;
-  denial UUID and historical order never change the result;
+  reverse and random input enumeration order produce `closed` for operational results
+  one through four and `open` for the fifth using only
+  `(evidenceAttemptedAt,scopeSequence)`; denial UUID, historical `deniedAttemptedAt`
+  order and row-read order never change the result. The mandatory equal-time immutable-
+  reconstruction fixture commits five such pairs with one identical
+  `evidenceAttemptedAt` and `scopeSequence = 1,2,3,4,5`, then after the fifth commit
+  reconstructs results one through four from both reverse and random row enumeration.
+  Each earlier qualifying array remains its original operational prefix, contains no
+  transition with a greater `scopeSequence`, remains `closed`, and reproduces byte-
+  exact canonical JSON, result hash and persisted `circuitResultHash`; the integrity
+  proof passes without `CANONICAL_CONFLICT_TRANSITION_INTEGRITY_FAILED`. The fifth
+  qualifying array contains exactly all five operational predecessors including
+  itself, remains `open`, and its reconstruction is byte-exact with the persisted
+  result;
 - limit boundary tests additionally cover 100/run, 262144 bytes, depth 24, 10000
   nodes, 15-minute freshness, five-second timeout and storage/circuit thresholds.
 

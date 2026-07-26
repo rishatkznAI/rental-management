@@ -1096,6 +1096,8 @@ deniedAuthorityKind TEXT NULL
 deniedAuthorityRecordId TEXT NULL
 deniedAuthorityVersion INTEGER NULL
 deniedAuthorityRecordHash TEXT NULL
+deniedAttemptedAt TEXT NOT NULL
+evidenceAttemptedAt TEXT NOT NULL
 correlationId TEXT NOT NULL
 detectorVersion TEXT NOT NULL
 conflictHash TEXT NOT NULL
@@ -1109,6 +1111,11 @@ registry: sixteen non-authority integrity types plus the Cartesian product of th
 authority-kind prefixes and eleven authority-denial suffixes. No generic,
 unregistered or implementation-selected conflict label is accepted. Severity is
 always `p0`; unique key is `(companyId, conflictHash)`.
+`deniedAttemptedAt` and `evidenceAttemptedAt` are distinct repository-owned exact
+RFC3339 UTC-millisecond timestamps. `detectedAt = deniedAttemptedAt` and
+`createdAt = evidenceAttemptedAt` are mandatory equality checks; the aliases cannot
+be supplied or varied independently. Section 23 defines their disjoint authority and
+hash roles.
 
 ### Exact domains, checks and foreign-key graph
 
@@ -1198,6 +1205,9 @@ event, economic lineage key and canonical receivable each seal at most one opera
 conflict rows, nullable event/operation/receivable references are permitted only when
 the referenced row does not exist; otherwise scope and identity must match. The four
 denied-authority columns follow the exact all-null/all-non-null registry rule below.
+Both conflict timestamps are non-null canonical RFC3339 milliseconds;
+`detectedAt = deniedAttemptedAt` and `createdAt = evidenceAttemptedAt`, while
+`deniedAttemptedAt` must reproduce the observation and both projections.
 Expected and observed fingerprints must differ; `conflictObservationJson` must be
 the exact canonical `ConflictObservationV1` and reproduce its
 observation/expected/observed hashes. All
@@ -1393,6 +1403,10 @@ the attempt binding: substituting it into the top-level attempt columns, using a
 authority chain, skipping a version, or changing any scope/kind/ID/version/persisted
 hash aborts. `deniedAuthorityRecordHash` always equals the observed parent's persisted
 hash; a reconstructed hash difference remains inside the exact observed projection.
+The row's `deniedAttemptedAt` must equal `detectedAt`, the frozen observation and both
+side projections; `evidenceAttemptedAt` must equal `createdAt`. Neither trigger nor
+SQL expression reads a current clock. Advancing time never rewrites the frozen
+suffix, projection or precedence.
 
 Collectively the four conflict authority triggers execute this exact proof before
 insert:
@@ -1400,20 +1414,28 @@ insert:
 1. derive the selected prefix/suffix from the registered `conflictType`;
 2. bind all three immutable attempt composites to the denied write authorization,
    activation and any event/operation as above;
-3. reconstruct all three complete same-scope logical authority chains and every
-   applicable denial candidate under the locked Algorithm-C `attemptedAt`;
+3. verify the frozen A/B chain references and reconstruct all three complete
+   same-scope logical authority chains and every denial candidate exactly as observed
+   at `deniedAttemptedAt`; append-only rows not referenced by the frozen package do not
+   replace that historical candidate set;
 4. select exactly one candidate using the section-22.8 kind-major and suffix
-   precedence;
+   precedence frozen at `deniedAttemptedAt`, after first rejecting the exact
+   later-expired-descendant unrepresentable state;
 5. require the selected observed parent to satisfy its same-chain suffix relation;
 6. require every authority kind with no denial candidate to be the unique latest
-   `authorized` record active at `attemptedAt` with exact scope/kind/ID/version/hash;
+   `authorized` record active at `deniedAttemptedAt` with exact
+   scope/kind/ID/version/hash;
    a concurrent lower-precedence denial may be safely reconstructed and suppressed,
    but it is not falsely classified as unaffected;
 7. reject the insert if any higher-precedence denial exists, if a concurrent denial
    is ambiguous/unsafe, or if the selected type/projection differs from the unique
    precedence result;
 8. recompute and compare the expected/observed side fingerprints,
-   `conflictObservationHash` and `conflictHash` before accepting the row.
+   `conflictObservationHash` and `conflictHash`, each including the exact
+   `deniedAttemptedAt`, before accepting the row; independently require
+   `evidenceAttemptedAt` to satisfy the current evidence-write permission, circuit,
+   rate/storage/timeout and creation-timestamp checks without including it in any
+   denial hash.
 
 Thus producer revocation with a simultaneous source denial can persist only the
 source observation; producer revocation with active/latest source and posting can
@@ -1422,6 +1444,10 @@ cross-kind, non-contiguous or lower-precedence evidence aborts. For a non-author
 conflict all `deniedAuthority*` columns are null and all three authority chains must be
 active/latest. A registry state marked `not allowed` cannot satisfy these triggers
 because the repository must perform no conflict insert.
+The same is true for
+`AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1`: its state has no conflict
+insert path, and every conflict trigger rejects an attempt to encode it as `EXPIRED`,
+`LATEST_CHAIN_MISMATCH` or another suffix.
 
 The operation-finalize trigger validates the internally constructed canonical,
 audit-payload and prospective audit-event fingerprints and the deferred audit
@@ -1541,6 +1567,16 @@ denial `required`. A `not allowed` denial performs no conflict DML and immediate
 opens the P0 telemetry circuit. Failure to persist required conflict evidence never
 permits posting; it raises a P0 telemetry failure and opens the circuit.
 
+The denied attempt and evidence append use two different repository-owned clocks.
+Algorithms A/B freeze their exact locked `attemptedAt` as `deniedAttemptedAt` inside
+the immutable denial package. Algorithm C reads a new `evidenceAttemptedAt` only after
+its own `BEGIN IMMEDIATE`. `deniedAttemptedAt` is persisted and seals the denial
+suffix, precedence, projections, fingerprints and dedupe identity;
+`evidenceAttemptedAt` proves only current evidence-write permission/operational guards
+and supplies conflict creation timestamps. Advancing from not-yet-effective to active,
+or remaining past a stale/expired boundary, between the two transactions does not
+rewrite or cancel the frozen denial.
+
 Primary-effect authority and denial-evidence authority are separate. The write
 authorization enumerates the three primary-effect tables independently from the
 single denial table and grants only the exact repository-owned append permission
@@ -1562,7 +1598,10 @@ persists the exact canonical, repository-derived `ConflictObservationV1` from
 section 22.8 plus its observation/expected/observed fingerprints; callers supply
 none of those values. It is retained
 indefinitely, is legal-hold eligible, append-only and hash-deduplicated. Exact replay
-creates no conflict; same `conflictHash` returns the prior conflict identity.
+creates no conflict; an Algorithm-C retry of the same immutable denial package has the
+same `conflictHash` and returns the prior conflict identity. A separate A/B denied
+attempt has a new repository-owned `deniedAttemptedAt` and is a distinct evidence
+identity even if its semantic state is otherwise equal.
 Admission is bounded by the same 30-attempt scope limit, conflict writes are
 deduplicated before insert, and the exact immediate-versus-five-in-five circuit
 classification is the section-22.8 registry; no caller or implementation may
@@ -1599,7 +1638,7 @@ is a P0 post-posting source-change incident for reconciliation and a future
 correction/compensation PR. Its conflict evidence uses the exact root type from
 `ConflictObservationV1`—for example `PR6_LINEAGE_DRIFT`,
 `DUE_DATE_POLICY_DRIFT`, `SOURCE_ADAPTER_REVOKED` or
-`ELIGIBILITY_PRODUCER_EXPIRED`, and the five exact source revision/root types above—
+`ELIGIBILITY_PRODUCER_EXPIRED`, and the seven exact source revision/root types above—
 rather than inventing a generic
 label. PR9 may expose only the immutable conflict and existing operation identities
 to that future workflow. Authority revocation stops future attempts but does not
@@ -1627,7 +1666,7 @@ Recommended v1 numbers:
 | authority/authorization/activation max lifetime | 24 hours |
 | free-space stop | below max of 512 MiB or 20% of mounted volume |
 | DB+WAL daily-growth stop | 64 MiB per UTC day |
-| conflict circuit breaker | immediate for all 33 authority-denial types and the fourteen non-authority integrity types listed as immediate in section 22.8; 5 `AUTHORIZATION_DRIFT`/`ACTIVATION_DRIFT` conflicts in 5 minutes per company/branch |
+| conflict circuit breaker | immediate for all 33 authority-denial types, the fourteen non-authority integrity types listed as immediate in section 22.8, and the no-DML `AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1` operational guard; 5 `AUTHORIZATION_DRIFT`/`ACTIVATION_DRIFT` conflicts in 5 minutes per company/branch |
 | audit/conflict persistence failure | immediate circuit open |
 | blocker-rate alert | at least 1 blocked posting in 5 minutes |
 | latency warning | transaction over 2 seconds |
@@ -2307,13 +2346,18 @@ assertions.
 `ConflictObservationV1` is a repository-owned plain object with exactly:
 
 ```text
-{ domain, version, conflictType, expectedProjection, observedProjection }
+{ deniedAttemptedAt, domain, version, conflictType, expectedProjection,
+  observedProjection }
 ```
 
 `domain = rentcore.canonical_actual_posting.conflict_observation`, `version = 1`,
 and `conflictType` must be one exact section-22.8 registry literal. The repository persists
 this object as exact canonical JSON in `conflictObservationJson` and computes
 `conflictObservationHash = sha256(canonicalJson(ConflictObservationV1))`.
+`deniedAttemptedAt` is the exact immutable A/B clock value, is identical to the
+mandatory `deniedAttemptedAt` member inside both projections, and is never replaced by
+Algorithm C's clock. This deliberate top-level plus side-projection binding prevents a
+projection or observation from being replayed under another denied attempt.
 `expectedFingerprint` and `observedFingerprint` are independently computed as:
 
 ```text
@@ -2331,6 +2375,16 @@ sha256(canonicalJson({
   version: 1
 }))
 ```
+
+Before A/B rolls back it constructs an unexported branded
+`FrozenDenialPackageV1` with exactly
+`{conflictCandidateProjection,conflictHashCandidate,conflictObservationHash,
+conflictType,deniedAttemptedAt,expectedFingerprint,expectedProjection,
+observedFingerprint,observedProjection}`. `conflictCandidateProjection` is the exact
+section-22.8 `conflictHash` envelope below before hashing and therefore contains every
+source/evidence/authority reference and hash; no open-ended reference bag is allowed.
+The package is immutable, contains no `evidenceAttemptedAt`, and is the only input by
+which Algorithm C may request a denial-evidence append.
 
 `economicLineageCandidateFingerprint` is available before a unique coverage root is
 accepted. It uses domain
@@ -2403,8 +2457,8 @@ one. Projection `companyId`, `branchId` and `rootCoverageLineageId` are always t
 validated attempt scope and accepted root, never values copied from an invalid target.
 
 Every non-authority expected and observed projection below additionally has the
-same exact common authority-binding keys
-`{postingAdapterAuthorityBranchId,postingAdapterAuthorityCompanyId,
+same exact common denied-attempt and authority-binding keys
+`{deniedAttemptedAt,postingAdapterAuthorityBranchId,postingAdapterAuthorityCompanyId,
 postingAdapterAuthorityKind,postingAdapterAuthorityRecordHash,
 postingAdapterAuthorityRecordId,postingAdapterAuthorityVersion,
 producerAuthorityBranchId,producerAuthorityCompanyId,producerAuthorityKind,
@@ -2428,11 +2482,11 @@ The sixteen exact non-authority projection types are:
 | `SOURCE_REVISION_CHANGED_BEFORE_POSTING` | `{currentPr6RevisionHash,currentSourceRevisionKey,economicLineageKey,eventId,sealedPr6RevisionHash,sealedSourceRevisionKey}` | event-sealed current revision | same revision IDs without a valid correction edge but changed locked PR6 revision hash |
 | `ECONOMIC_SOURCE_EVENT_MISMATCH` | `{economicLineageKey,economicSourceRevisionKey,eventHash,eventId}` | locked attempted event reconstruction | persisted event at the lineage/revision/candidate identity; `eventId` is null only when no row exists |
 | `PR6_LINEAGE_DRIFT` | `{sourceLineageHash}` | event-sealed PR6 lineage | complete locked current 16-table PR6 reconstruction |
-| `PR8_EVIDENCE_MISMATCH` | `{acceptedDryRunsHash,acceptedPr8EvidenceHash,dryRunId,freshnessState,freshnessWindowFingerprint,reconciliationSetHash,resultHash}` | authorization/activation acceptance and selected run with `freshnessState=fresh` | complete locked PR8 graph and half-open clock evaluation; state is `fresh`, `stale`, `not_yet_valid` or `invalid_window`; other members are null only when their exact persisted source is absent |
+| `PR8_EVIDENCE_MISMATCH` | `{acceptedDryRunsHash,acceptedPr8EvidenceHash,deniedFreshnessWindowFingerprint,dryRunId,freshnessState,freshnessWindowFingerprint,reconciliationSetHash,resultHash}` | authorization/activation acceptance and selected run with `freshnessState=fresh` | complete locked PR8 graph and half-open `deniedAttemptedAt` evaluation; state is `fresh`, `stale`, `not_yet_valid` or `invalid_window`; `deniedFreshnessWindowFingerprint` seals the base accepted window, denied time and side state; other members are null only when their exact persisted source is absent |
 | `DUE_DATE_POLICY_DRIFT` | `{bindingState,dueDatePolicySetHash,dueDateTreatment,selectedDueDateGateKind,selectedDueDatePolicyHash,selectedDueDatePolicyId,selectedDueDatePolicyVersion,unknownDueDateTreatmentMappingHash,unknownDueDateTreatmentMappingId,unknownDueDateTreatmentMappingVersion}` | event/authorization/activation selected member with `bindingState=valid` | locked selected named PR8 gate and mapping; state is `valid`, `missing` or `ambiguous`; all policy/mapping members are null for missing/ambiguous, and mapping members are null for a valid proven gate |
 | `COMPANY_TIMEZONE_DRIFT` | `{acceptedCompanyTimezoneSnapshot,activationCompanyTimezoneSnapshot,eventCompanyTimezoneSnapshot,pr5ReceivablesTimezone,pr8RunCompanyTimezone,timezoneState}` | five-way accepted/event/activation/run/PR5 equality with `timezoneState=valid` | locked values; state is `valid`, `missing`, `invalid`, `unavailable`, `ambiguous` or `mismatch`; each unavailable source is null and no alias is normalized |
-| `AUTHORIZATION_DRIFT` | `{authorizationId,authorizationTemporalState,authorizationVersion,recordHash,status,temporalWindowFingerprint,validFrom,validUntil}` | event-bound authorization expected `authorized` and `authorizationTemporalState=active` | latest locked authorization record plus attemptedAt evaluation; temporal state is `active`, `not_yet_effective` or `expired` |
-| `ACTIVATION_DRIFT` | `{activationId,activationTemporalState,activationVersion,recordHash,status,temporalWindowFingerprint,validFrom,validUntil}` | event-bound activation expected `authorized` and `activationTemporalState=active` | latest locked activation record plus attemptedAt evaluation; temporal state is `active`, `not_yet_effective` or `expired` |
+| `AUTHORIZATION_DRIFT` | `{authorizationId,authorizationTemporalState,authorizationVersion,recordHash,status,temporalWindowFingerprint,validFrom,validUntil}` | event-bound authorization expected `authorized` and `authorizationTemporalState=active` | latest locked authorization record plus `deniedAttemptedAt` evaluation; temporal state is `active`, `not_yet_effective` or `expired` |
+| `ACTIVATION_DRIFT` | `{activationId,activationTemporalState,activationVersion,recordHash,status,temporalWindowFingerprint,validFrom,validUntil}` | event-bound activation expected `authorized` and `activationTemporalState=active` | latest locked activation record plus `deniedAttemptedAt` evaluation; temporal state is `active`, `not_yet_effective` or `expired` |
 | `IDEMPOTENCY_CONTENT_CONFLICT` | `{activationId,canonicalWriteAuthorizationId,economicLineageKey,economicSourceRevisionKey,eventHash,idempotencyKey,operationType}` | locked attempted operation projection | persisted operation at any colliding lineage/revision/idempotency identity |
 | `AUDIT_SEAL_MISMATCH` | `{actorAuthorityRecordId,actorIdentityId,aggregateId,auditEventFingerprint,auditEventId,auditPayloadFingerprint,branchId,companyId,correlationId,eventTypeFingerprint,eventTypeState}` | repository prospective audit seal with `eventTypeState=exact` | persisted audit/operation reconstruction; state is `exact`, `mismatch` or `missing`, and every other key is null only when the audit row is wholly absent |
 
@@ -2474,13 +2528,14 @@ The exact current-revision state matrix is:
 
 | State | Count / sorted keys / hash | Expected and observed projection | Precedence and transition | Retry |
 |---|---|---|---|---|
-| `missing` | `0`; `[]`; the registered non-null empty-envelope hash above | expected is exactly `unique`, count `1`, singular key and set hash JSON null; observed is exactly `missing`, count `0`, singular key JSON null and the empty-envelope hash, with the same accepted root and economic lineage key on both sides | after root and broken-successor checks and before `multiple`; `SOURCE_LINEAGE_NO_CURRENT_REVISION`; A/B deny, C is required when safely reconstructable and otherwise takes the exact not-allowed path below | the same locked graph reproduces identical side fingerprints, observation hash and conflict hash, so the unique conflict row deduplicates |
+| `missing` | `0`; `[]`; the registered non-null empty-envelope hash above | expected is exactly `unique`, count `1`, singular key and set hash JSON null; observed is exactly `missing`, count `0`, singular key JSON null and the empty-envelope hash, with the same accepted root and economic lineage key on both sides | after root and broken-successor checks and before `multiple`; `SOURCE_LINEAGE_NO_CURRENT_REVISION`; A/B deny, C is required when safely reconstructable and otherwise takes the exact not-allowed path below | the same frozen package, including `deniedAttemptedAt`, reproduces identical side fingerprints, observation hash and conflict hash, so its Algorithm-C retry deduplicates |
 | `unique` | `1`; `[currentRevisionKey]`; non-null hash of the registered envelope | the normal runtime invariant and observation are both `unique`, count `1`, the sole non-null key and its non-null set hash; no conflict projection is constructed | after all prior lineage checks, A/B may derive the current PR6 revision seal and proceed; no conflict type and C is not invoked | ordinary event/posting replay rules apply; the state itself creates no evidence row |
-| `multiple` | greater than `1`; complete unique comparator-sorted key array; its non-null registered envelope hash | expected is exactly `unique`, count `1`, singular key and set hash JSON null; observed is exactly `multiple`, actual count, singular key JSON null and complete set hash, with the same accepted root and economic lineage key on both sides | after `missing`; `SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS`; A/B deny and C is required | the same locked set reproduces identical side fingerprints, observation hash and conflict hash; input row order cannot change dedupe |
+| `multiple` | greater than `1`; complete unique comparator-sorted key array; its non-null registered envelope hash | expected is exactly `unique`, count `1`, singular key and set hash JSON null; observed is exactly `multiple`, actual count, singular key JSON null and complete set hash, with the same accepted root and economic lineage key on both sides | after `missing`; `SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS`; A/B deny and C is required | the same frozen package reproduces identical hashes; input row order and Algorithm-C evidence time cannot change dedupe |
 
 For both conflict states, each side fingerprint, `conflictObservationHash` and
 `conflictHash` is computed by the exact section-22.8 envelopes; no raw repository
-ordering, selected candidate or timestamp enters them.
+ordering or selected candidate enters them. The exact `deniedAttemptedAt` enters all
+three identities, while `evidenceAttemptedAt` enters none.
 
 `SOURCE_LINEAGE_BROKEN_SUCCESSOR` is persistable only when the attempt scope, unique
 root, exact relation row, validated from/to IDs and complete broken-edge set are all
@@ -2509,14 +2564,16 @@ The seven source-lineage/revision transitions are exact:
 | `SOURCE_REVISION_CHANGED_BEFORE_POSTING` | A or B finds the same revision IDs but a different `currentPr6RevisionHash` without a valid replacement edge | required | immediate |
 
 For every required transition A/B rolls back with zero additional event/canonical/
-operation/audit rows and passes only the branded descriptor to C. `conflictHash`
-deduplicates the exact projections; no raw attempt timestamp participates.
+operation/audit rows and passes only the branded frozen package to C. `conflictHash`
+deduplicates retries of that exact package, including its `deniedAttemptedAt`;
+Algorithm C's evidence clock never participates.
 The exact source-lineage precedence is root conflict first (using its internal
 `cycle` through `multiple_roots` order), then broken successor, no current revision,
 multiple current revisions, correction after posting, correction after eligibility
 and revision changed before posting. Therefore cycle or competing roots beat a broken
 successor; a safely reconstructed broken successor beats either current-cardinality
-conflict. Same locked state yields the same fingerprints/hash on retry. Missing versus
+conflict. Retrying C with the same frozen denied-attempt package yields the same
+fingerprints/hash. Missing versus
 multiple current states and every broken-edge/root state differ in their exact state,
 count and/or sorted set hash and cannot deduplicate into one another.
 
@@ -2537,7 +2594,8 @@ one uses `AuthorityDenialObservationV1` with exact projection keys:
 ```text
 { actorId, artifactIdentityHash, authorityId, authorityKind, authorityRecordId,
   authorityVersion,
-  bindingState, configurationHash, latestRecordHash, ownershipManifestHash,
+  bindingState, configurationHash, deniedAttemptedAt, latestRecordHash,
+  ownershipManifestHash,
   effectiveFrom, effectiveUntil, policyHash, recordHash, scopeFingerprint, stateCode,
   status, temporalEvaluationState, temporalWindowFingerprint }
 ```
@@ -2554,14 +2612,18 @@ an authority denial.
 exact artifact digest plus commit SHA; `scopeFingerprint` seals company/branch;
 `temporalWindowFingerprint` uses domain
 `rentcore.canonical_actual_posting.temporal_window`, version `1`, and exactly
-`{domain,effectiveFrom,effectiveUntil,recordHash,recordId,recordKind,version}`.
+`{deniedAttemptedAt,domain,effectiveFrom,effectiveUntil,recordHash,recordId,
+recordKind,version}`.
 `recordKind` is exactly `governed_authority`, `write_authorization` or `activation`;
 `recordId`/`recordHash` are the locked persisted record's physical ID and record hash.
 `effectiveUntil` is the exact projection alias of persisted `expiresAt`.
 `temporalEvaluationState` is exactly `active`, `not_yet_effective` or `expired`:
-expected is always `active`; observed is derived only from the locked `attemptedAt`
-and half-open interval. Raw attemptedAt is excluded, so retries in the same temporal
-state deduplicate. The exact window timestamps remain sealed and stable. No raw artifact,
+expected is always `active`; observed is derived only from the frozen
+`deniedAttemptedAt` and half-open interval. `deniedAttemptedAt` is included in both
+side projections, their temporal-window fingerprints, `conflictObservationHash` and
+`conflictHash`; `evidenceAttemptedAt` is excluded. Therefore only retries of the same
+frozen denied attempt deduplicate. The exact window timestamps remain sealed and
+stable. No raw artifact,
 cross-tenant scope or reason text is retained. Expected projection comes from the
 authorization-bound exact record and expects `authorized`, current, same scope and
 matching artifact/config/policy/ownership. Observed projection comes from the locked
@@ -2572,8 +2634,8 @@ Exact authority suffix behavior is:
 
 | Suffix | Deterministic observed condition | Algorithm C persistence | Circuit |
 |---|---|---|---|
-| `NOT_YET_EFFECTIVE` | observed parent is the exact attempt-bound record and `attemptedAt < effectiveFrom` | required when exact same-scope record/FKs remain valid | immediate |
-| `EXPIRED` | observed parent is the exact attempt-bound record and `attemptedAt >= expiresAt`; a later record whose persisted status is `expired` is not substituted for this same-record temporal denial | required when exact same-scope record/FKs remain valid | immediate |
+| `NOT_YET_EFFECTIVE` | observed parent is the exact attempt-bound record, its lifecycle status remains `authorized`, and `deniedAttemptedAt < effectiveFrom` | required when exact same-scope record/FKs remain valid | immediate |
+| `EXPIRED` | observed parent is the exact attempt-bound record, its lifecycle status remains `authorized`, and `deniedAttemptedAt >= effectiveUntil`; expected and observed ID/version/persisted hash are that same record, expected temporal state is `active` and observed temporal state is `expired` | required when exact same-scope record/FKs remain valid | immediate |
 | `REVOKED` | observed parent is the exact attempt-bound record already marked `revoked`, or the unique contiguous latest terminal descendant of the same logical chain with status `revoked` | required | immediate |
 | `SUPERSEDED` | observed parent is the unique contiguous latest descendant of the same logical chain with status `superseded` | required | immediate |
 | `RECORD_HASH_MISMATCH` | same scope/kind/logical authority ID, physical record ID and version; persisted parent remains FK-bindable but locked envelope reconstruction differs from the attempt-bound/persisted hash | required when the persisted exact parent key remains relationally bindable; otherwise not allowed | immediate |
@@ -2582,7 +2644,7 @@ Exact authority suffix behavior is:
 | `POLICY_HASH_DRIFT` | exact attempt-bound record/version and logical chain; locked registered policy projection differs | required | immediate |
 | `SCOPE_MISMATCH` | company/branch scope differs | not allowed because a cross-scope parent FK must never be created | immediate telemetry |
 | `OWNERSHIP_MANIFEST_MISMATCH` | exact attempt-bound record/version and logical chain; authorization-bound ownership hash differs from complete PR6 reconstruction | required | immediate |
-| `LATEST_CHAIN_MISMATCH` | observed parent is the exact repository-latest contiguous descendant with the same company/branch/kind/logical authority ID; it is currently `authorized`, otherwise the applicable lifecycle suffix wins | required when both bound and unique latest records are safely reconstructable; otherwise not allowed | immediate telemetry |
+| `LATEST_CHAIN_MISMATCH` | observed parent is a different exact repository-latest contiguous descendant with the same company/branch/kind/logical authority ID and persisted lifecycle status `authorized`; revoked/superseded use their exact suffixes, while an `expired` descendant takes the explicit unrepresentable transition below | required when both bound and unique latest authorized records are safely reconstructable; otherwise not allowed | immediate telemetry |
 
 “Required” means A/B roll back primary effects and then invoke Algorithm C. “Not
 allowed” means no conflict row is attempted: the denial remains final, the P0
@@ -2592,6 +2654,20 @@ For authority conflicts that are persisted, the conflict row's nullable
 authority parent; all four are null for non-authority conflicts and all four are
 non-null for authority conflicts. Deduplication uses the normal `conflictHash`; every
 authority type is immediate-circuit severity `p0`.
+
+A different latest contiguous descendant whose persisted lifecycle status is
+`expired` is not one of the 33 persistable authority observations in v1. Before any
+registered suffix or cross-kind precedence result is emitted, A/B detects this exact
+state and returns
+`AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1`: the primary effect is
+denied, Algorithm C is `not allowed`, conflict DML is exactly zero, and the circuit
+opens immediately for operator intervention. Logs/telemetry may contain only safe
+company/branch/kind plus attempt/latest record IDs, versions and hashes; no payload,
+reason text, credential or cross-tenant data. The descendant cannot be substituted
+into a same-record `*_EXPIRED` projection and cannot fall back to
+`*_LATEST_CHAIN_MISMATCH`. V1 intentionally cannot represent it without mixing
+lifecycle and temporal semantics; durable evidence would require a new versioned
+observation and registry contract.
 
 Same record means byte-identical physical ID, logical authority ID, version and
 persisted hash. Contiguous descendant means following only exact N-to-N+1
@@ -2632,33 +2708,46 @@ For write authorization and activation, projection aliases `validFrom` and
 `validUntil` are the persisted `effectiveFrom` and exclusive `expiresAt`; their
 `temporalWindowFingerprint` uses record kinds `write_authorization` and `activation`.
 The expected state is active and the observed state follows the same half-open
-comparison. Thus unchanged ID/hash/status plus a time-only denial still yields
+comparison at `deniedAttemptedAt`. Thus unchanged ID/hash/status plus a time-only denial still yields
 different side fingerprints. For PR8, `freshnessState` is derived as
-`not_yet_valid` when `attemptedAt < validFrom`, `fresh` when
-`validFrom <= attemptedAt < validUntilExclusive`, `stale` at or after the exclusive
+`not_yet_valid` when `deniedAttemptedAt < validFrom`, `fresh` when
+`validFrom <= deniedAttemptedAt < validUntilExclusive`, `stale` at or after the exclusive
 end, and `invalid_window` on invalid/overflow/mismatched window data. The raw clock
-value is absent from all conflict and dedupe hashes. When the accepted entry remains
-structurally valid, both sides project its exact persisted
-`freshnessWindowFingerprint`; the side fingerprints still differ because the
-expected state is `fresh` and the observed state is the locked evaluation result.
+used by C is absent from all conflict and dedupe hashes. The accepted entry's existing
+`FreshnessWindowFingerprintV1` remains the immutable base-window seal and is not
+redefined. Each conflict side additionally computes
+`DeniedFreshnessWindowFingerprintV1` with domain
+`rentcore.canonical_actual_posting.denied_pr8_freshness_window`, version `1`, and
+exactly `{deniedAttemptedAt,domain,freshnessState,freshnessWindowFingerprint,version}`;
+its hash is the projection's `deniedFreshnessWindowFingerprint`. When the accepted
+entry remains structurally valid, both sides project its exact persisted base
+`freshnessWindowFingerprint`, the same `deniedAttemptedAt`, and their distinct
+expected `fresh` versus observed locked evaluation state. Thus time is bound without
+mutating the accepted PR8 evidence contract.
 `invalid_window` represents a current PR8 finalized-time/window reconstruction that
 cannot reproduce that accepted window. If the acceptance entry/fingerprint itself
 is missing or cannot pass its exact hash/type checks, safe conflict reconstruction
 is impossible: Algorithm C rolls back evidence persistence and opens the circuit.
 
-Projection timestamps are limited to these immutable authority/freshness window
-members. No source business date is retained. For the audit projection,
+Projection timestamps are limited to the exact `deniedAttemptedAt` plus these
+immutable authority/freshness window members. `evidenceAttemptedAt` and source
+business dates are never projected. For the audit projection,
 `eventTypeFingerprint` is SHA-256 of exactly
 `{domain,eventType,version}` with domain
 `rentcore.canonical_actual_posting.audit_event_type`, version `1`, and the validated
 persisted event-type string; expected uses the required literal. A missing audit row
 uses JSON null. The raw mismatching value is never retained in conflict JSON.
 
-The repository derives the observation in Algorithm A or B before rollback, freezes
-it as an unexported branded inert value, and Algorithm C reconstructs both sides from
-persisted state before insert. Callers cannot create or select the type, projection,
-fingerprint or table. When more than one invariant differs, the first matching type
-in this exact precedence order is the sole observation:
+The repository derives the observation in Algorithm A or B at
+`deniedAttemptedAt`, freezes the exact package before rollback, and Algorithm C
+proves that frozen observation from immutable persisted state without reclassifying it
+at `evidenceAttemptedAt`. Callers cannot create or select either timestamp, the type,
+projection, fingerprint or table. Before the registry below, any authority kind whose
+different latest contiguous descendant has persisted status `expired` takes the
+global `AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1` not-allowed transition;
+no conflict candidate is constructed. Otherwise, when more than one invariant
+differs, the first matching type in this exact precedence order is the sole
+observation:
 
 ```text
 for PREFIX in [SOURCE_ADAPTER, ELIGIBILITY_PRODUCER,
@@ -2696,12 +2785,14 @@ No multi-row conflict fan-out or implementation-specific precedence is allowed.
 Authority precedence is kind-major: every source-adapter denial precedes every
 eligibility-producer denial, which precedes every canonical-posting-adapter denial.
 Within one kind, unbindable scope wins first, then record-hash integrity, terminal
-revoked/superseded/expired lifecycle, temporal expiry/not-yet state, artifact,
+revoked/superseded lifecycle, same-record temporal expiry/not-yet state, artifact,
 configuration, policy and ownership drift, and finally generic latest-chain mismatch.
-A terminal latest descendant therefore selects its exact lifecycle literal rather
-than being swallowed by `LATEST_CHAIN_MISMATCH`; that last suffix applies only when
-the safely reconstructed latest descendant is otherwise authorized/active and no
-more specific condition matched.
+A terminal latest descendant with `revoked` or `superseded` therefore selects its
+exact lifecycle literal rather than being swallowed by `LATEST_CHAIN_MISMATCH`; a
+later `expired` descendant never enters this list, and that last suffix applies only
+when the safely reconstructed latest descendant is otherwise authorized/active and no
+more specific condition matched. All candidate predicates and precedence are frozen
+at `deniedAttemptedAt`; `evidenceAttemptedAt` cannot change the selected literal.
 Immediate circuit-open types are all 33 authority types plus
 the seven source-lineage/revision types, `ECONOMIC_SOURCE_EVENT_MISMATCH`,
 `PR6_LINEAGE_DRIFT`, `PR8_EVIDENCE_MISMATCH`,
@@ -2718,7 +2809,7 @@ within five minutes per company/branch. Every type remains severity `p0`.
   activationRecordId, branchId,
   companyId, conflictObservationHash, conflictType, detectorVersion, domain,
   deniedAuthorityKind, deniedAuthorityRecordHash, deniedAuthorityRecordId,
-  deniedAuthorityVersion, economicLineageCandidateFingerprint,
+  deniedAuthorityVersion, deniedAttemptedAt, economicLineageCandidateFingerprint,
   economicLineageKey, economicSourceRevisionKey, eventHash, eventId,
   existingOperationId, existingReceivableId, expectedFingerprint,
   observedFingerprint,
@@ -2734,9 +2825,12 @@ within five minutes per company/branch. Every type remains severity `p0`.
   writeAuthorizationRecordHash, writeAuthorizationRecordId }
 ```
 
-Generated `id`, `correlationId`, `detectedAt`, `createdAt`, `conflictHash`, and
-severity (fixed `p0`) are the exact exclusions, so repeat detection deduplicates
-despite a new attempt timestamp/correlation. Required nullable references are JSON
+Generated `id`, `correlationId`, `evidenceAttemptedAt`, `createdAt`, `conflictHash`, and
+severity (fixed `p0`) are the exact exclusions. `detectedAt` is the required physical
+alias of the included `deniedAttemptedAt` and is not hashed as a second independent
+member. Algorithm-C retries of one frozen package therefore deduplicate despite a new
+evidence clock/correlation; a distinct A/B denied attempt has a distinct hash.
+Required nullable references are JSON
 null when the row does not exist. `economicLineageKey` may be null only for
 `SOURCE_LINEAGE_ROOT_CONFLICT`. `economicSourceRevisionKey` is JSON null for
 `SOURCE_LINEAGE_ROOT_CONFLICT`, `SOURCE_LINEAGE_BROKEN_SUCCESSOR`,
@@ -2751,7 +2845,8 @@ observed parent selected by the projection, while its stored hash remains the pa
 bindable persisted hash even for `RECORD_HASH_MISMATCH`. Neither is a caller field and the observed composite cannot
 replace the attempt-bound composite. `conflictObservationJson` is represented only by its separately
 verified `conflictObservationHash`; it is not hashed twice as raw JSON. Changed
-semantic observation produces a new immutable conflict. PR9a fixtures publish exact
+semantic observation or `deniedAttemptedAt` produces a new immutable conflict;
+`evidenceAttemptedAt` cannot. PR9a fixtures publish exact
 canonical bytes and SHA-256 for every projection row, both side envelopes, the full
 observation and the resulting conflict hash.
 
@@ -2769,11 +2864,12 @@ observation and the resulting conflict hash.
 | due-date policy set/selected gate/mapping | accepted PR8 `contractual_due_date` and `unknown_due_date_treatment` named members plus repository mapping | authorization/activation set; selected member in event/operation/audit | policy set, event, command, audit, result and conflict observation | A/B reread both set members and only the provenance-selected gate; C reconstructs both sides | proven never depends on unknown; unknown never uses contractual; any source literal, gate or mapping drift conflicts |
 | accepted/run/activation/event/PR5 timezone | persisted PR8 `run.companyTimezone`, signed acceptance snapshot, activation snapshot, event snapshot and fresh PR5 `receivablesTimezone` | authorization acceptance, activation, event, operation/audit via acceptance/event | accepted-evidence, authorization/activation/event, canonical/result and timezone conflict observation | A requires five-way equality and copies the accepted PR8 value; B repeats fresh equality before replay/write | null/invalid/alias/unavailable/change denies; no fresh-value substitution is allowed |
 | cohort, boundary and idempotency identities | locked normalized activation/authorization/event parents | authorization, activation, event/operation | exact section 22.10 envelopes | A/B/C reconstruct logical arrays/IDs, never caller JSON/key | normalization drift denies; same lineage plus changed event/revision is conflict |
-| `ConflictObservationV1` | branded repository denial plus locked reconstruction | conflict JSON and observation/side fingerprints | observation, expected, observed and conflict hashes | C reconstructs exact registered projections | same observation deduplicates; any semantic change is a new conflict |
+| `ConflictObservationV1` | branded repository denial frozen by A/B | conflict JSON and observation/side fingerprints | observation, expected, observed and conflict hashes include `deniedAttemptedAt` | C proves the frozen registered projections from immutable rows and never reclassifies them at its own clock | one frozen package deduplicates; any semantic or denied-time change is a new conflict |
 | producer authority | latest eligibility-producer chain | full ID/version/hash/company/branch/kind composite in authorization and event; conflict stores the attempt-bound composite plus separate same-logical-chain observed denied composite | authority/authorization/event/result/conflict | A/B reconstruct exact producer candidate after source precedence; C proves same authority ID/contiguous suffix relation and source/posting active/latest unless they have a safely reconstructed precedence candidate | any one-field/latest-chain drift denies event/posting; selected terminal/latest-chain evidence remains persistable without masking a source denial |
 | posting authority / audit actor authority | latest posting-adapter chain | full composite in authorization, activation, operation and audit payload; conflict stores the attempt-bound composite plus separate same-logical-chain observed denied composite | authority/authorization/activation, audit payload/event, result, conflict | B reconstructs posting only after source/producer precedence; C proves same authority ID/contiguous suffix relation and active/latest unaffected chains | any one-field mismatch denies; exact prior result may replay only while current; conflict evidence grants no replay authority |
 | write authorization + primary/denial permissions | latest authorization chain | authorization, activation, event, operation, conflict, audit payload | authorization/activation, event, audit payload/event, result, conflict | A/B require active primary; C rereads evidence-only permission | primary expiry denies; denial permission never creates success |
-| `attemptedAt` | the single repository clock capability call immediately after each begin | new event/operation/canonical/audit or conflict operational timestamps | new event timestamps enter event hash; new posting time enters result; conflict timestamps remain excluded from dedupe | A, B and C validate exact operational floor once with no skew tolerance | equality with floor is allowed; regression denies; replay returns original timestamps and never forks identity |
+| A/B `attemptedAt` / conflict `deniedAttemptedAt` | the single repository clock capability call immediately after A/B begin | new event/operation/canonical/audit timestamps; on denial the exact value is frozen and persisted in the conflict row | event/posting hashes as before; every conflict projection, temporal/freshness denial fingerprint, observation and conflict hash includes `deniedAttemptedAt` | A/B classify once; C proves the frozen value/window/rows | an Algorithm-C retry of the same denied attempt deduplicates; a separate A/B attempt is distinct |
+| `evidenceAttemptedAt` | the single repository clock capability call immediately after Algorithm-C begin | conflict `evidenceAttemptedAt = createdAt`; current evidence permission/circuit/rate/storage/timeout guard | excluded from side, observation and conflict/dedupe hashes | C validates the operational floor and current evidence-write authority once | cannot change suffix, precedence, projection or denial identity |
 
 No row may substitute a caller hash for a relational reread. The matrix is an
 obligation to compare both sides inside the applicable locked transaction.
@@ -2866,19 +2962,28 @@ generator is reachable after `BEGIN IMMEDIATE`; statements receive only
 repository-owned inert primitives. The sole permitted post-lock capability call is
 the repository clock call defined next.
 
-For every algorithm below, immediately after successful `BEGIN IMMEDIATE` the
-repository calls `repositoryClock.readUtcMilliseconds()` exactly once. It must
-return a safe integer Unix epoch millisecond in inclusive range `0` through
-`253402300799999`; the repository deterministically renders that value as exact
-RFC3339 UTC milliseconds and stores it as `attemptedAt`. Throw, missing value,
-non-integer, unsafe integer, out-of-range value or conversion failure rolls back.
-Immediately after the return, the clock capability is discarded and cannot be
-invoked again in the transaction. `attemptedAt` is the only time
-input for every decision and every newly persisted timestamp in that transaction.
-Specifically it evaluates authority `effectiveFrom`/`expiresAt`, credential expiry,
-revocation/supersession state, activation interval, PR8 evidence and event freshness,
-replay/conflict classification, and supplies new event/conflict/`postedAt`/operation/
-audit/`createdAt` values.
+Immediately after each successful `BEGIN IMMEDIATE` the repository calls
+`repositoryClock.readUtcMilliseconds()` exactly once. It must return a safe integer
+Unix epoch millisecond in inclusive range `0` through `253402300799999`; the
+repository deterministically renders that value as exact RFC3339 UTC milliseconds.
+Throw, missing value, non-integer, unsafe integer, out-of-range value or conversion
+failure rolls back. Immediately after the return, the clock capability is discarded
+and cannot be invoked again in that transaction.
+
+Algorithms A/B name their value `attemptedAt`. It is their only time input for
+authority/authorization/activation temporal evaluation, credential expiry,
+revocation/supersession state, PR8 freshness, replay/conflict classification and all
+new primary-effect timestamps. If A/B denies, that exact value is renamed without
+conversion to `deniedAttemptedAt` in `FrozenDenialPackageV1`; it fixes suffix,
+precedence, both projections, temporal/freshness fingerprints,
+`conflictObservationHash`, `conflictHash` and dedupe identity permanently.
+
+Algorithm C names its independent value `evidenceAttemptedAt`. It is used only for
+the current conflict-evidence append permission/authority and circuit guard, the
+monotonic floor, operational timeout/storage/rate-limit checks, and
+`evidenceAttemptedAt = createdAt`. It cannot alter an A/B temporal/freshness state,
+suffix, projection, precedence, fingerprint or hash. There is no generic clock value
+shared by the transactions and no current SQL clock is permitted.
 
 The exact monotonic floor is the maximum valid timestamp from these columns in the
 same company/branch:
@@ -2929,22 +3034,25 @@ FROM (
 Canonical rows are included only when `sourceSystem =
 rentcore.billing_source_authority.v1`; audit rows only when `eventType =
 canonical_receivable.initial_posted.v1`. Operation `createdAt` is its persisted
-`attemptedAt`; conflict `createdAt = detectedAt = attemptedAt`; event
+`attemptedAt`; conflict `detectedAt = deniedAttemptedAt` and
+`createdAt = evidenceAttemptedAt`; event
 `createdAt = occurredAt = attemptedAt`; canonical `createdAt = postedAt = updatedAt`;
 and audit `createdAt = occurredAt`, so the equal aliases are not queried twice.
 The floor query is one repository-owned `MAX` over the six exact columns after
 scope filters. Null floor means no prior operational timestamp. Every returned
 timestamp is parsed and range-validated; read/parse ambiguity rolls back.
 
-`attemptedAt >= floor` is allowed, so the same millisecond is valid; any
-`attemptedAt < floor` is clock regression and rolls back. Clock skew tolerance is
+For A/B, `attemptedAt >= floor` is allowed; for C,
+`evidenceAttemptedAt >= floor` is allowed. The same millisecond is valid and a lower
+applicable transaction-clock value is regression and rolls back. Clock skew tolerance is
 exactly zero. Authority/authorization/activation `effectiveFrom`, `expiresAt`, any
 activation start/end, `boundaryEndUtc`, due date, source business timestamp,
 `conductedAt`, `signedAt`, `importedAt`, future validity endpoint and non-PR9 row are
 explicitly excluded from the floor. Thus an active record with future expiry cannot
-cause false regression. No repeated clock read or caller time is allowed. Exact
-replay returns only original persisted timestamps and never exposes `attemptedAt` as
-a new result timestamp.
+cause false regression. `deniedAttemptedAt` is historical denial identity, not C's
+operational floor input. No repeated clock read or caller time is allowed. Exact
+replay returns only original persisted timestamps and never exposes a new transaction
+clock as a result timestamp.
 
 ### Algorithm A — PR9a eligibility-event production
 
@@ -2999,7 +3107,10 @@ Inside one repository-owned `BEGIN IMMEDIATE`:
    allowlist, owner, upstream IDs, artifact, commit, configuration, policy,
    effective interval, expiry and lifecycle; classify the first denial by the exact
    section-22.8 kind-major/suffix precedence after reconstructing every candidate in
-   all three chains. Require each genuinely unaffected kind active/latest; retain any
+   all three chains at this transaction's `attemptedAt`. First apply the global
+   later-expired-descendant unrepresentable guard; it returns the exact operational
+   error, opens the circuit and creates no denial package. Otherwise require each
+   genuinely unaffected kind active/latest; retain any
    safely reconstructed lower-precedence concurrent denial only to prove why it was
    suppressed. Thus an authority denial wins over the prospective lineage denial and
    every persistable non-authority projection has both full authority composites;
@@ -3029,9 +3140,10 @@ Inside one repository-owned `BEGIN IMMEDIATE`:
    differs, select `SOURCE_REVISION_CHANGED_BEFORE_POSTING`. Otherwise, if the
    lineage/revision/candidate identity exists with different content, including
    timezone or due-policy drift, or any identity points to different scope/content,
-   construct the exact registered `ConflictObservationV1`, roll back with zero
-   event/canonical/audit/operation writes, and pass only its branded inert denial
-   descriptor to Algorithm C only when the registry says persistence `required`;
+   construct the exact registered `ConflictObservationV1`, freeze
+   `deniedAttemptedAt = attemptedAt` plus the complete
+   `FrozenDenialPackageV1`, roll back with zero event/canonical/audit/operation writes,
+   and pass only that branded inert package to Algorithm C when the registry says persistence `required`;
    a `not allowed` authority observation opens the circuit without conflict DML;
 10. otherwise construct and insert exactly one `ActualReceivableEligibleV1` using a
    pre-generated repository UUID and `occurredAt = createdAt = attemptedAt`;
@@ -3091,7 +3203,8 @@ Inside a separate repository-owned `BEGIN IMMEDIATE`:
    provenance-selected gate and optional mapping, cohort/boundary envelopes including
    null v1 end, and current lifecycle using `attemptedAt`; classify any authority
    denial by reconstructing all three chains/candidates, requiring genuinely
-   unaffected kinds active/latest, and applying the complete section-22.8
+   unaffected kinds active/latest, first applying the exact
+   later-expired-descendant unrepresentable guard, and then applying the complete section-22.8
    kind-major/suffix precedence before selecting any prospective lineage denial;
 6. reconstruct the mapping using only the already accepted
    `event.companyTimezoneSnapshot`, derive `CanonicalPostingIdempotencyKeyV1`,
@@ -3107,8 +3220,9 @@ Inside a separate repository-owned `BEGIN IMMEDIATE`:
    writes and return the original IDs/timestamps with `replayed=true`;
 8. on missing companion rows, changed content, source/policy/timezone/authority drift
    or any non-exact identity collision, construct the exact registered
-   `ConflictObservationV1`, roll back all primary effects, then invoke Algorithm C
-   with its branded inert denial descriptor only when its registry persistence is
+   `ConflictObservationV1`, freeze `deniedAttemptedAt = attemptedAt` and the complete
+   `FrozenDenialPackageV1`, roll back all primary effects, then invoke Algorithm C
+   with that branded inert denial package only when its registry persistence is
    `required`; `not allowed` opens the circuit with no conflict DML;
 9. otherwise insert one direct-`posted` canonical receivable with a pre-generated
    repository ID and `postedAt = createdAt = updatedAt = attemptedAt`;
@@ -3132,14 +3246,31 @@ Inside a separate repository-owned `BEGIN IMMEDIATE`:
 Algorithm C runs only after A or B has rolled back, only for a registry entry whose
 persistence is `required`, and cannot share their transaction. A `not allowed`
 authority denial never enters C and opens the P0 telemetry circuit directly. C
-receives a frozen repository-derived denial descriptor, never a
-caller-selected table/type/projection/fingerprint. In a new repository-owned `BEGIN IMMEDIATE`
-it captures its own single `attemptedAt`, rereads the exact write-authorization
-record and `denialEvidenceTable`/`denialEvidencePermission`, and rereads the bound
-source/producer/posting authority as applicable, activation, scope, accepted
-evidence and immutable denial identities/hashes.
+receives the exact branded `FrozenDenialPackageV1`, never a caller-selected
+timestamp/table/type/projection/fingerprint/reference. In a new repository-owned
+`BEGIN IMMEDIATE` it captures one `evidenceAttemptedAt`, then permanently discards the
+clock capability. It rereads the exact write-authorization record and
+`denialEvidenceTable`/`denialEvidencePermission` and checks at
+`evidenceAttemptedAt` that the evidence-only append permission, current evidence-write
+authority, circuit, rate, timeout and storage guards permit one attempt.
 The permission is evidence-only: it may remain inspectable when the primary status
 caused the denial, but cannot authorize any primary-effect table or success path.
+
+After the current append guard succeeds, C rereads only the package's referenced
+source/producer/posting authority, authorization, activation, scope, accepted-evidence
+and lineage rows to prove existence, exact scope/kind/logical-ID/physical-ID/version/
+persisted-hash linkage, chain continuity and tamper absence. It does not expand the
+frozen candidate set or evaluate any original temporal/freshness predicate at
+`evidenceAttemptedAt`. It recomputes the suffix, global precedence, expected/observed
+projections, temporal/freshness fingerprints and candidate hashes exactly at the
+persisted `deniedAttemptedAt`, requiring byte equality with the package. Merely
+reaching `effectiveFrom`/`validFrom`, or remaining beyond an expiry/staleness boundary,
+between A/B and C is not a row change and cannot invalidate or reclassify the denial.
+If a referenced immutable row/window no longer reproduces, was changed non-append-
+only, is missing, or the frozen observation cannot be proved, C performs zero conflict
+DML, returns `CANONICAL_CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED`, and opens the
+circuit. It never converts the denial to success.
+
 The conflict row's source and producer top-level composites must reproduce the frozen
 attempt-bound write-authorization bindings byte-for-byte; its posting composite must
 reproduce that authorization's and activation's common attempt binding, and any
@@ -3147,35 +3278,30 @@ referenced event/operation must agree, even when one authority is now terminal o
 non-latest. For an authority conflict, the separate
 `deniedAuthority*` composite must reproduce the exact observed record selected by the
 prefix/suffix registry and the trigger must prove same logical authority ID plus the
-exact suffix-specific record/descendant relationship. C rereads all three chains,
-recomputes the unique global precedence result, requires every kind without a denial
-candidate active/latest, and rejects a frozen lower-precedence type if a higher one is
-now provable. A safely reconstructed lower-precedence concurrent denial is suppressed
-under the single-observation rule; an ambiguous/unsafe concurrent denial fails
-evidence persistence and opens the circuit. C cannot substitute the observed record
-into the attempt binding and neither composite is evaluated as a grant of primary
-authority.
+exact suffix-specific record/descendant relationship at `deniedAttemptedAt`. The
+frozen proof includes all three A/B chains, their unique global precedence result and
+the active/latest state of every genuinely unaffected kind. A safely reconstructed
+lower-precedence candidate remains suppressed exactly as A/B recorded it; C's later
+clock cannot create a new winner. C cannot substitute the observed record into the
+attempt binding and neither composite is evaluated as a grant of primary authority.
+The global later-expired-descendant state has no package or Algorithm-C path.
 
-For a temporal or freshness denial, the branded descriptor also retains the original
-A/B `attemptedAt` only as transient repository evidence. It is never persisted or
-hashed. Algorithm C uses its own clock only for its permission/lifecycle decision and
-new conflict timestamps, and re-proves the original derived temporal/freshness state
-against the immutable window plus original attempt. If the record/window changed
-between rollback and C, C fails evidence persistence and opens the circuit; it does
-not reclassify the denied primary attempt as success.
-
-The repository validates the unexported descriptor brand, reconstructs the exact
+The repository validates the unexported package brand, reconstructs the exact
 registered expected and observed projections from persisted state, recomputes
 `expectedFingerprint`, `observedFingerprint`, `conflictObservationJson`,
 `conflictObservationHash` and `conflictHash`, returns an exact existing conflict as a
-no-op, or inserts exactly one conflict with pre-generated ID and `detectedAt =
-createdAt = attemptedAt`; it then rereads and recomputes the persisted row before
+no-op, or inserts exactly one conflict with pre-generated ID,
+`deniedAttemptedAt = detectedAt` from the package and
+`evidenceAttemptedAt = createdAt` from C; it then rereads and recomputes the persisted row before
 commit. An authority conflict additionally requires the exact all-non-null
 same-scope denied-authority kind/record ID/version/hash composite; a non-authority
 conflict requires all four columns null. No canonical, event, operation, audit, settlement, PR6/PR8, legacy or
-`app_data` write is permitted. Missing/ambiguous permission, scope/hash mismatch,
+`app_data` write is permitted. Evidence permission expiry before C, missing/ambiguous
+permission, scope/hash mismatch,
 dedupe anomaly, rate/circuit breach or persistence failure rolls back, opens the P0
-telemetry circuit and still never permits the denied primary effect.
+telemetry circuit, returns `CANONICAL_CONFLICT_EVIDENCE_PERSISTENCE_FAILED` unless the
+more specific frozen-integrity error above applies, and still never permits the denied
+primary effect.
 
 For all three algorithms, `SQLITE_BUSY` and `SQLITE_LOCKED` are caught at begin,
 statement, reread and commit boundaries and mapped to the stable repository error
@@ -3270,9 +3396,11 @@ CLI, frontend and startup business execution remain unchanged.
   audit, result and conflict seals;
 - conflict-trigger fixtures preserve exact stale/terminal attempt-bound producer and
   posting composites while separately binding the registry-selected observed denied
-  record. Revoked, expired, superseded and latest-chain-mismatch evidence inserts
-  succeed only under the registered Algorithm-C permission; substituting the latest
-  observed record into an attempt-bound column rejects. The same stale/terminal
+  record. Later-revoked, later-superseded, later-authorized-chain-mismatch and
+  same-record temporal-expiry evidence inserts succeed only under the registered
+  Algorithm-C permission; a later-expired descendant instead takes the exact no-DML
+  transition below. Substituting the latest observed record into an attempt-bound
+  column rejects. The same stale/terminal
   composite still rejects in every primary-effect consumer trigger;
 - trigger-level authority fixtures cover producer revoked with source/posting
   active/latest; producer revoked concurrently with a source denial selecting only
@@ -3282,9 +3410,11 @@ CLI, frontend and startup business execution remain unchanged.
   unaffected non-latest chain each reject;
 - same-record temporal fixtures cover `NOT_YET_EFFECTIVE` and time-window `EXPIRED`;
   contiguous same-chain fixtures cover terminal `REVOKED`, `SUPERSEDED` and
-  `LATEST_CHAIN_MISMATCH`; an `expired` descendant cannot satisfy the same-record
-  `EXPIRED` suffix and follows the registry's safely reconstructable applicable type
-  or exact not-allowed path. Every one-field mutation of both the attempt-bound
+  authorized `LATEST_CHAIN_MISMATCH`. An exact later contiguous `expired` descendant
+  produces zero conflict DML, the literal
+  `AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1` and immediate circuit open;
+  separate negative fixtures prove no fallback to `EXPIRED` or
+  `LATEST_CHAIN_MISMATCH`. Every one-field mutation of both the attempt-bound
   company/branch/kind/record ID/logical authority ID/version/hash projection and the
   observed parent/projection/linkage rejects. Lower-precedence evidence rejects when
   a higher candidate exists; safely reconstructed lower concurrent candidates do not
@@ -3330,7 +3460,8 @@ CLI, frontend and startup business execution remain unchanged.
   accepted;
 - zero-current fixtures assert `missing`, count zero, null singular key, the exact
   registered empty-array bytes/hash and `SOURCE_LINEAGE_NO_CURRENT_REVISION`; repeated
-  retry deduplicates byte-for-byte. Broken-successor fixtures cover missing target,
+  Algorithm-C retry of one frozen package deduplicates byte-for-byte. A separate A/B
+  attempt has a distinct denied-time identity. Broken-successor fixtures cover missing target,
   cross-scope target, wrong root, multiple edges sorted deterministically, safe
   required persistence, unsafe exact operational error and cycle/root-conflict
   precedence over broken edge;
@@ -3380,10 +3511,12 @@ CLI, frontend and startup business execution remain unchanged.
 - primary-effect authorization cannot write the conflict table; denial permission
   cannot write any primary-effect table; algorithm C performs no business write;
 - conflict evidence permission/scope/hash failure opens the circuit while leaving
-  the denied primary effect at zero rows; repeat conflict deduplicates;
+  the denied primary effect at zero rows; an Algorithm-C retry of the same frozen
+  denied-attempt package deduplicates, while a separate A/B attempt does not;
 - every registered conflict type reconstructs its exact expected/observed
-  projections; caller-selected type/projection/hash rejects, same observation
-  deduplicates and any semantic projection mutation produces a new immutable hash;
+  projections; caller-selected time/type/projection/hash rejects, the same frozen
+  package deduplicates and any semantic projection or `deniedAttemptedAt` mutation
+  produces a new immutable hash;
 - root and multiple-current conflict fixtures prove the only registered expected
   set-hash null rules, every root observation-state literal and its exact precedence;
   independent implementations produce identical side/observation/conflict hashes for
@@ -3391,10 +3524,25 @@ CLI, frontend and startup business execution remain unchanged.
   current revisions;
 - unchanged authority/authorization/activation record content with only
   `not_yet_effective` or `expired` temporal evaluation persists a conflict whose
-  expected/observed fingerprints differ and repeated same-state retries deduplicate;
+  expected/observed fingerprints differ and Algorithm-C retries of the same denied
+  package deduplicate;
 - identical PR8 evidence hashes with `fresh`, `stale`, `not_yet_valid` and
   `invalid_window` states produce exact distinct observation fixtures; equality at
-  expiry is stale and repeated stale retries deduplicate without raw attemptedAt;
+  expiry is stale and only retries with the same `deniedAttemptedAt` deduplicate;
+- clock-separation fixtures cover authority `NOT_YET_EFFECTIVE` in A becoming active
+  before C, authorization not-yet-effective in B becoming valid before C, activation
+  expired in B with a later C clock, and stale PR8 evidence with a later clock still
+  beyond the same window. Every case persists the original suffix/projections/hash;
+  `evidenceAttemptedAt` changes only creation fields;
+- mutation or non-append-only drift of immutable `effectiveFrom`, `effectiveUntil` or
+  freshness-window data between A/B and C returns
+  `CANONICAL_CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED`, writes zero conflict rows and
+  opens the circuit. Evidence permission expiry before C returns
+  `CANONICAL_CONFLICT_EVIDENCE_PERSISTENCE_FAILED` with the same zero-effect rule;
+- cross-language fixtures prove `deniedAttemptedAt` is present in both projections,
+  temporal/denied-freshness fingerprints, observation and conflict hashes; one-field
+  mutation changes all applicable hashes. `evidenceAttemptedAt` mutation leaves every
+  denial/dedupe hash unchanged, and one package retry returns the same conflict row;
 - posting/conflict clock throw/invalid/out-of-range/regression rolls back and exact
   posting replay returns original persisted timestamps;
 - persisted-row mutation/ignore/extra-row fault injection is detected;
@@ -3453,6 +3601,16 @@ CLI, frontend and startup business execution remain unchanged.
 - all 49 `ConflictObservationV1` types, including the 33 authority Cartesian-product
   literals, have projection, precedence, dedupe, circuit/persistence transition,
   PII/secret rejection and cross-implementation fixture cases;
+- the conflict schema, both side projections, temporal and denied-freshness
+  fingerprints, observation and conflict envelope bind exact `deniedAttemptedAt`;
+  `evidenceAttemptedAt` is independently repository-owned, equals conflict
+  `createdAt`, and is excluded from denial identity. Boundary-crossing and immutable-
+  drift fixtures prove the exact Algorithm-C frozen-denial rules and both stable
+  failure literals;
+- later contiguous authority descendants separately cover `revoked` persistence,
+  `superseded` persistence, authorized `LATEST_CHAIN_MISMATCH` persistence and expired
+  `AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1` zero-DML/immediate-circuit
+  behavior, including explicit no-`EXPIRED` and no-`LATEST_CHAIN_MISMATCH` fallback;
 - future validity endpoints excluded from the monotonic floor, operational
   regression/equality policy and exactly-one repository clock call;
 - cohort ordering/duplicate rejection, boundary normalization/null-end rules and

@@ -1231,12 +1231,14 @@ The exact foreign keys all use `ON UPDATE RESTRICT ON DELETE RESTRICT`:
 | eligible event PR6 | each of `activationBoundaryId`, `rentalLineId`, `periodId`, `closedPeriodVersionId`, `snapshotId`, `updId`, `formedUpdVersionId`, `conductedUpdVersionId`, `updLineId`, `updLineVersionId`, `coverageSetId`, `coverageSliceId` with `(companyId, branchId)` → the same-ID scoped key of the corresponding `billing_source_*` table |
 | eligible event PR9 | `activationRecordId` → posting activation `recordId`; source binding composite and full producer authority composite → exact governed records; `writeAuthorizationRecordId` → write authorization `recordId` |
 | posting operation | `eventId` → eligible event `id`; source binding composite and full posting-adapter authority composite → exact governed records; `writeAuthorizationRecordId` → write authorization `recordId`; `activationRecordId` → posting activation `recordId`; `(companyId, canonicalReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; `(financialAuditEventId, companyId, branchId)` → `financial_audit_events(id, companyId, branchId)` deferred until commit |
-| posting conflict | nullable `eventId` → eligible event `id`; nullable `existingOperationId` → posting operation `id`; nullable `(companyId, existingReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; source, producer and posting-adapter full composites plus authorization and activation IDs → their exact scoped PR9 records; nullable denied-authority composite `(deniedAuthorityRecordId,deniedAuthorityVersion,deniedAuthorityRecordHash,companyId,branchId)` → its exact governed record when Algorithm C persistence is permitted |
+| posting conflict | nullable `eventId` → eligible event `id`; nullable `existingOperationId` → posting operation `id`; nullable `(companyId, existingReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; source and producer full composites equal the immutable attempt-bound write-authorization bindings, posting-adapter full composite equals that authorization's and activation's common attempt binding, and any referenced event/operation must reproduce the applicable same composites; all reference exact scoped PR9 parents without asserting current lifecycle; nullable denied-authority composite `(deniedAuthorityRecordId,deniedAuthorityVersion,deniedAuthorityRecordHash,companyId,branchId)` → the exact observed governed record when Algorithm C persistence is permitted |
 
-Single-column PR9 record references are additionally guarded by before-insert
-triggers that require exact company, branch, logical kind/status and current version;
-an ID existing in another scope is never sufficient. The PR8 and PR6 composite FKs
-are ordered exactly as shown. No JSON reference substitutes for a relational FK.
+Single-column PR9 primary-effect record references are additionally guarded by
+before-insert triggers that require exact company, branch, logical kind/status and
+current version; an ID existing in another scope is never sufficient. Conflict-table
+references are evidence-only and follow the exact attempt-bound/observed-denied rules
+below instead of asserting current authority. The PR8 and PR6 composite FKs are
+ordered exactly as shown. No JSON reference substitutes for a relational FK.
 
 ### Indexes
 
@@ -1365,17 +1367,33 @@ the reason for denial and grants no primary effect.
 
 The producer and posting-adapter triggers require the literal child
 ID/version/recordHash/company/branch/kind composite to reference the exact
-scope-specific `eligibility_producer` or `canonical_posting_adapter` chain, require
-their registered operation, actor, artifact/configuration/policy/ownership bindings
-and latest authorized version, and reject ID-only, stale-version/hash and
-cross-company/branch references. Activation binds the same posting composite as its
-write authorization; events bind the producer composite; operations bind the posting
-composite; conflicts bind both. The
+scope-specific `eligibility_producer` or `canonical_posting_adapter` chain and reject
+ID-only, wrong-version/hash and cross-company/branch references. Authorization,
+activation, event and operation consumer triggers additionally require the registered
+operation, actor, artifact/configuration/policy/ownership bindings and the unique
+latest currently `authorized` version. Activation binds the same posting composite as
+its write authorization; events bind the producer composite; operations bind the
+posting composite.
+
+The conflict source/producer/posting triggers instead validate all three exact
+immutable attempt-bound composites from the denied write authorization: source and
+producer equal its bindings, posting equals its and the activation's common binding,
+and any referenced event/operation reproduces the applicable same composites.
+They do not require those evidence bindings to remain latest or `authorized`: a
+terminal or later version may be the fact being recorded. This evidence-only exception
+cannot authorize or be reused by a primary-effect consumer. Substituting the observed
+latest record into an attempt-bound column, changing any scope/kind/version/hash, or
+using a record not bound to the denied attempt aborts. The
 denied-authority trigger applies the registered prefix to the exact authority kind,
 requires all four denied-authority columns to bind the same-scope denied record for
 an authority conflict, and requires all four null for a non-authority conflict. It
-also verifies the exact registered suffix and its `required` persistence state. A
-registry state marked `not allowed` cannot satisfy this trigger because the
+also requires that composite to name the persisted parent selected by the observed
+projection, with `deniedAuthorityRecordHash` equal to that parent's persisted
+`recordHash`, and verifies the exact registered suffix and its `required` persistence
+state. Thus the top-level authority
+composites preserve what the denied attempt was authorized to use, while
+`deniedAuthority*` preserves the exact locked record that caused the selected denial.
+A registry state marked `not allowed` cannot satisfy this trigger because the
 repository must perform no conflict insert.
 
 The operation-finalize trigger validates the internally constructed canonical,
@@ -2295,6 +2313,7 @@ domain,economicRowClass,rentalId,rentalLineId,sourceSystem,version}`. It intenti
 contains neither root source-document nor root coverage ID: disconnected roots with
 the same apparent economic dimensions must collide before either root can become an
 accepted lineage. It contains no amount, due date, name or authority data.
+On the observed side of `SOURCE_LINEAGE_ROOT_CONFLICT`,
 `rootCoverageLineageIdsHash` uses domain
 `rentcore.canonical_actual_posting.root_lineage_ids`, version `1`, and exactly
 `{domain,rootCoverageLineageIds,version}`; `rootCoverageLineageIds` is the complete
@@ -2306,7 +2325,13 @@ root UPD-ID array under the same sorting/empty-array rule. `currentRevisionKeysH
 `rentcore.canonical_actual_posting.current_revision_keys`, version `1`, and exactly
 `{currentSourceRevisionKeys,domain,version}`; `currentSourceRevisionKeys` is the
 complete non-empty unique array of locked current revision keys sorted by the same
-comparator.
+comparator on the observed side of
+`SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS`. The corresponding expected-side hash
+members are exact JSON null: they express the invariant “cardinality must be one”
+without inventing or selecting a nonexistent unique root/revision. Null is a
+registered value here, not missing evidence. A caller-selected candidate, first
+sorted member, generated sentinel ID or pre-lock selector must never populate either
+expected hash.
 `replacementRelationHash` uses domain
 `rentcore.canonical_actual_posting.replacement_relation`, version `1`, and exactly
 `{domain,economicLineageCandidateFingerprint,relations,version}` where `relations`
@@ -2335,8 +2360,8 @@ The fourteen exact non-authority projection types are:
 
 | `conflictType` | Exact type-specific keys in both projections | Expected authoritative source | Observed authoritative source / null rule |
 |---|---|---|---|
-| `SOURCE_LINEAGE_ROOT_CONFLICT` | `{economicLineageCandidateFingerprint,rootCount,rootCoverageLineageIdsHash,rootSourceDocumentLineageIdsHash}` | one unique locked root, `rootCount=1`, and each root hash seals its one-member array | complete locked predecessor traversal; count is `0` or greater than `1`, and both sorted-root hashes are non-null even for the empty arrays |
-| `SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS` | `{currentRevisionCount,currentRevisionKeysHash,economicLineageKey,rootCoverageLineageId}` | exactly one active current revision | complete locked successor/active-coverage scan for the accepted root; count is greater than `1` |
+| `SOURCE_LINEAGE_ROOT_CONFLICT` | `{economicLineageCandidateFingerprint,rootCount,rootCoverageLineageIdsHash,rootObservationState,rootSourceDocumentLineageIdsHash}` | invariant projection: `rootObservationState=unique`, `rootCount=1`, both root hashes are JSON null | complete locked predecessor traversal; `rootObservationState` follows the exact precedence below, count is the complete candidate-root count, and both sorted-root hashes are non-null even for the empty arrays |
+| `SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS` | `{currentRevisionCount,currentRevisionKeysHash,currentRevisionState,economicLineageKey,rootCoverageLineageId}` | invariant projection: `currentRevisionState=unique`, `currentRevisionCount=1`, `currentRevisionKeysHash` is JSON null | complete locked successor/active-coverage scan for the accepted root; `currentRevisionState=multiple`, count is greater than `1`, and the hash seals the complete sorted non-empty key array |
 | `SOURCE_CORRECTION_AFTER_POSTING` | `{canonicalReceivableId,currentSourceRevisionKey,economicLineageKey,eventId,eventSourceRevisionKey,replacementRelationHash}` | operation/event-sealed revision | locked current successor revision after an existing canonical row; no member is nullable |
 | `SOURCE_CORRECTION_AFTER_ELIGIBILITY` | `{currentSourceRevisionKey,economicLineageKey,eventId,eventSourceRevisionKey,replacementRelationHash}` | event-sealed revision | locked unique current successor after an event and before canonical posting; no member is nullable |
 | `SOURCE_REVISION_CHANGED_BEFORE_POSTING` | `{currentPr6RevisionHash,currentSourceRevisionKey,economicLineageKey,eventId,sealedPr6RevisionHash,sealedSourceRevisionKey}` | event-sealed current revision | same revision IDs without a valid correction edge but changed locked PR6 revision hash |
@@ -2357,12 +2382,33 @@ event's `economicSourceRevisionKey`; `currentPr6RevisionHash` is the locked curr
 seal and `sealedPr6RevisionHash` is the persisted event seal. These aliases add no
 caller-controlled or implicit field.
 
+The root observation enum is exactly `unique`, `cycle`, `broken_predecessor`,
+`ambiguous_predecessor`, `cross_lineage_collision`, `missing_root` or
+`multiple_roots`. Expected is always `unique`. When several safely reconstructable
+defects coexist, observed selection is the first applicable literal in this exact
+order: `cycle`, `broken_predecessor`, `ambiguous_predecessor`,
+`cross_lineage_collision`, `missing_root`, `multiple_roots`. Cross-scope or
+unreadable corruption remains `not allowed` and never reaches Algorithm C.
+`cycle` means a coverage-set ID repeats during the complete predecessor/successor
+walk; `broken_predecessor` means a named same-scope predecessor relation cannot be
+joined to its required set/slice projection; `ambiguous_predecessor` means more than
+one relation names the same replacement; `cross_lineage_collision` means a linked
+replacement changes any section-22.5 lineage-defining member; `missing_root` means
+the safely readable candidate graph has zero root after the preceding conditions are
+false; and `multiple_roots` means it has more than one. A normal no-predecessor row is
+the unique root and is never `broken_predecessor`.
+`currentRevisionState` is exactly `unique` or `multiple`. These two projection types
+are the only section-22.8 types whose expected set-hash member is JSON null. Their
+observed set hashes are always non-null, including the registered empty-root hashes.
+Consequently two implementations cannot choose different roots, revisions or
+sentinels merely to construct the expected side.
+
 The five source-lineage/revision transitions are exact:
 
 | Type | Algorithm A/B transition | Algorithm C persistence | Circuit |
 |---|---|---|---|
-| `SOURCE_LINEAGE_ROOT_CONFLICT` | A and B stop on zero/multiple roots, cycle, broken predecessor or same-scope disconnected roots with the same candidate fingerprint | required when the same-scope graph and candidate/root-set fingerprints are reconstructable; unsafe cross-scope/unreadable corruption is `not allowed` | immediate |
-| `SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS` | A and B stop when one root has more than one active current revision | required | immediate |
+| `SOURCE_LINEAGE_ROOT_CONFLICT` | A and B stop on zero/multiple roots, cycle, broken/ambiguous predecessor, same-scope cross-lineage replacement or disconnected roots with the same candidate fingerprint; they use the registered invariant expected projection and exact observed-state precedence, never a selected root/sentinel | required when the same-scope graph and candidate/root-set fingerprints are reconstructable; unsafe cross-scope/unreadable corruption is `not allowed` | immediate |
+| `SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS` | A and B stop when one root has more than one active current revision; expected hash is registered JSON null and observed hash seals the complete sorted set | required | immediate |
 | `SOURCE_CORRECTION_AFTER_POSTING` | A or B finds a canonical/operation anywhere in the root graph and a different current revision | required | immediate |
 | `SOURCE_CORRECTION_AFTER_ELIGIBILITY` | A or B finds an event in the root graph and a different successor revision, with no canonical row | required | immediate |
 | `SOURCE_REVISION_CHANGED_BEFORE_POSTING` | A or B finds the same revision IDs but a different `currentPr6RevisionHash` without a valid replacement edge | required | immediate |
@@ -2443,6 +2489,21 @@ For authority conflicts that are persisted, the conflict row's nullable
 authority parent; all four are null for non-authority conflicts and all four are
 non-null for authority conflicts. Deduplication uses the normal `conflictHash`; every
 authority type is immediate-circuit severity `p0`.
+
+For every persisted authority conflict, the source/producer/posting composites in the
+top-level conflict row remain the exact immutable attempt-bound records selected by
+the denied write authorization: source and producer equal its bindings, posting
+equals its and the activation's common binding, and any referenced event/operation
+must agree. They are evidence references, not a new current-authority decision. The
+`deniedAuthority*` composite names the exact observed persisted parent selected by
+`AuthorityDenialObservationV1`: the locked record whose lifecycle,
+temporal, content or chain relation establishes the selected prefix/suffix. For
+`LATEST_CHAIN_MISMATCH` and later-version `SUPERSEDED`, this is the safely
+reconstructable unique latest record; for a denial established by the bound record
+itself, it may equal that attempt-bound parent. If no unique same-scope observed record
+can supply all four fields, the registry's conditional/`not allowed` rule applies and
+no conflict row is inserted. Algorithm C and its triggers must never replace an
+attempt-bound top-level composite with this observed composite.
 
 Projection keys use section-22.1 ordering. No other field is allowed. Non-null IDs
 are validated opaque IDs, versions are positive safe integers, statuses/types/states
@@ -2555,8 +2616,10 @@ null when the row does not exist. `economicLineageKey` and
 `SOURCE_LINEAGE_ROOT_CONFLICT`; `economicLineageCandidateFingerprint` is always
 non-null. Denied-authority fields follow the exact
 all-null/all-non-null authority registry rule. The parent record hashes are repository
-values from the relational activation/producer/posting-authority/write-authorization reread,
-not caller fields. `conflictObservationJson` is represented only by its separately
+values from the relational attempt-bound activation/producer/posting-authority/write-
+authorization reread; the separate denied-authority values come from the exact
+observed projection. Neither is a caller field and the observed composite cannot
+replace the attempt-bound composite. `conflictObservationJson` is represented only by its separately
 verified `conflictObservationHash`; it is not hashed twice as raw JSON. Changed
 semantic observation produces a new immutable conflict. PR9a fixtures publish exact
 canonical bytes and SHA-256 for every projection row, both side envelopes, the full
@@ -2567,7 +2630,7 @@ observation and the resulting conflict hash.
 | Field/binding | Authoritative source | Persisted contracts | Hash envelopes | Locked reread | Replay/conflict role |
 |---|---|---|---|---|---|
 | `companyId`,`branchId` | PR5 relational scope | all six PR9 contracts + audit | every row/content hash | A, B and C reread composite parents | mismatch is conflict/denial, never cross-scope replay |
-| scoped authority kind/ID/version/hash | repository-derived per-company/branch authority chains for source, producer and posting actors | authority; full source/producer/posting composites in authorization and their event/activation/operation/conflict consumers; denied-authority binding in conflict | authority/authorization/activation records, event, audit payload/event, result, conflict | A/B verify exact scope/kind/ID/version/hash/latest chain; C follows the 33-type denial registry | ID-only match is insufficient; cross-scope or one-field drift denies |
+| scoped authority kind/ID/version/hash | repository-derived per-company/branch authority chains for source, producer and posting actors | authority; full source/producer/posting composites in authorization and their event/activation/operation consumers; immutable attempt-bound composites plus separate observed denied-authority binding in conflict | authority/authorization/activation records, event, audit payload/event, result, conflict | A/B verify exact scope/kind/ID/version/hash/latest chain; C preserves attempt-bound parents and separately binds the registry-selected observed denied record | ID-only match is insufficient; cross-scope or one-field drift denies; a conflict reference grants no current authority |
 | `sourceOwnershipManifestHash` + upstream/row classes | complete PR6 ownership universe constrained by source adapter | authorization/event/operation/conflict; lineage rows | authorization record, source lineage, event, audit payload, result, conflict | A/B reconstruct all 16 tables; C verifies denial hashes | mismatch is the authority-kind `OWNERSHIP_MANIFEST_MISMATCH` type |
 | accepted `{dryRunId,resultHash}` pairs + `acceptedPr8EvidenceHash` | signed acceptance record plus persisted PR8 result/reconciliation rows | authorization JSON/hashes/timezone/freshness window, activation/event/operation/conflict hashes | pair set, accepted-evidence/reconciliation/freshness hashes, authorization/activation/event/audit/result/conflict | A/B verify pair, exact row set, timezone and half-open freshness; C verifies denial binding | pair/timezone/reconciliation/freshness mix-and-match denies; exact set may replay |
 | `AcceptedPr8EvidencePredicateV1` | locked PR8 run/candidate/seal plus all exact six-per-candidate reconciliation rows and accepted evidence | authorization, activation, event and operation acceptance bindings | accepted set/evidence/reconciliation hashes and downstream envelopes | A and B require the byte-identical predicate including each row's three zero deltas, diagnostic flag and both write flags | any false term denies; row netting and PR8 flag reinterpretation are forbidden |
@@ -2577,8 +2640,8 @@ observation and the resulting conflict hash.
 | accepted/run/activation/event/PR5 timezone | persisted PR8 `run.companyTimezone`, signed acceptance snapshot, activation snapshot, event snapshot and fresh PR5 `receivablesTimezone` | authorization acceptance, activation, event, operation/audit via acceptance/event | accepted-evidence, authorization/activation/event, canonical/result and timezone conflict observation | A requires five-way equality and copies the accepted PR8 value; B repeats fresh equality before replay/write | null/invalid/alias/unavailable/change denies; no fresh-value substitution is allowed |
 | cohort, boundary and idempotency identities | locked normalized activation/authorization/event parents | authorization, activation, event/operation | exact section 22.10 envelopes | A/B/C reconstruct logical arrays/IDs, never caller JSON/key | normalization drift denies; same lineage plus changed event/revision is conflict |
 | `ConflictObservationV1` | branded repository denial plus locked reconstruction | conflict JSON and observation/side fingerprints | observation, expected, observed and conflict hashes | C reconstructs exact registered projections | same observation deduplicates; any semantic change is a new conflict |
-| producer authority | latest eligibility-producer chain | full ID/version/hash/company/branch/kind composite in authorization, event and conflict | authority/authorization/event/result/conflict | A and B reread exact record plus latest chain; C verifies denial binding | any one-field or latest-chain drift denies event/posting |
-| posting authority / audit actor authority | latest posting-adapter chain | full composite in authorization, activation, operation, conflict and audit payload | authority/authorization/activation, audit payload/event, result, conflict | B rereads exact record plus latest chain; C rereads exact denial binding | any one-field mismatch denies; exact prior result may replay only while current |
+| producer authority | latest eligibility-producer chain | full ID/version/hash/company/branch/kind composite in authorization and event; conflict stores the attempt-bound composite plus separate observed denied composite | authority/authorization/event/result/conflict | A and B reread exact record plus latest chain; C validates both immutable attempt binding and registry-selected observed denial without treating either as primary authority | any one-field or latest-chain drift denies event/posting; terminal/latest-chain conflict evidence remains persistable when the registry permits it |
+| posting authority / audit actor authority | latest posting-adapter chain | full composite in authorization, activation, operation and audit payload; conflict stores the attempt-bound composite plus separate observed denied composite | authority/authorization/activation, audit payload/event, result, conflict | B rereads exact record plus latest chain; C validates both immutable attempt binding and exact observed denial | any one-field mismatch denies; exact prior result may replay only while current; conflict evidence grants no replay authority |
 | write authorization + primary/denial permissions | latest authorization chain | authorization, activation, event, operation, conflict, audit payload | authorization/activation, event, audit payload/event, result, conflict | A/B require active primary; C rereads evidence-only permission | primary expiry denies; denial permission never creates success |
 | `attemptedAt` | the single repository clock capability call immediately after each begin | new event/operation/canonical/audit or conflict operational timestamps | new event timestamps enter event hash; new posting time enters result; conflict timestamps remain excluded from dedupe | A, B and C validate exact operational floor once with no skew tolerance | equality with floor is allowed; regression denies; replay returns original timestamps and never forks identity |
 
@@ -2789,8 +2852,12 @@ Inside one repository-owned `BEGIN IMMEDIATE`:
    current revision, derive `rootSourceDocumentLineageId`,
    `rootCoverageLineageId`, `economicLineageCandidateFingerprint` and
    `currentPr6RevisionHash`, and classify root/cycle/broken-edge/multiple-current
-   failures before event lookup; a prospective lineage denial is frozen but not
-   selected until step 6 has evaluated every higher-precedence authority denial;
+   failures before event lookup. For invalid cardinality, construct only the exact
+   registered invariant expected side (`unique`, count one, JSON-null set hash) and
+   the complete observed set/state; never select a caller candidate, first sorted
+   root/revision or synthetic ID to fill the expected side. A prospective lineage
+   denial is frozen but not selected until step 6 has evaluated every
+   higher-precedence authority denial;
 6. reread the latest same-scope source-adapter and eligibility-producer authority
    chains and
    the posting authority referenced by the write authorization; compare the exact
@@ -2862,8 +2929,11 @@ Inside a separate repository-owned `BEGIN IMMEDIATE`:
    `economicLineageKey`, `economicSourceRevisionKey`, `currentPr6RevisionHash`,
    `eventHash` and `sourceLineageHash`; traverse the complete predecessor/successor
    graph and query all event/operation/canonical identities for that root before any
-   replay or DML; freeze but do not select any prospective lineage denial until the
-   higher-precedence authority rereads in step 5 complete;
+   replay or DML; for an invalid root/current-revision cardinality, reconstruct the
+   same invariant expected side and complete observed set/state as Algorithm A,
+   without deriving an expected root/revision from the persisted event. Freeze but do
+   not select any prospective lineage denial until the higher-precedence authority
+   rereads in step 5 complete;
 3. reread the accepted evidence record and authorization accepted snapshot, selected
    PR8 `run.companyTimezone`, the activation timezone field and fresh PR5
    `receivablesTimezone`; require every value to be a canonical valid IANA name and
@@ -2932,6 +3002,14 @@ source/producer/posting authority as applicable, activation, scope, accepted
 evidence and immutable denial identities/hashes.
 The permission is evidence-only: it may remain inspectable when the primary status
 caused the denial, but cannot authorize any primary-effect table or success path.
+The conflict row's source and producer top-level composites must reproduce the frozen
+attempt-bound write-authorization bindings byte-for-byte; its posting composite must
+reproduce that authorization's and activation's common attempt binding, and any
+referenced event/operation must agree, even when one authority is now terminal or
+non-latest. For an authority conflict, the separate
+`deniedAuthority*` composite must reproduce the exact observed record selected by the
+prefix/suffix registry. C cannot substitute that observed record into the attempt
+binding and neither composite is evaluated as a grant of primary authority.
 
 For a temporal or freshness denial, the branded descriptor also retains the original
 A/B `attemptedAt` only as transient repository evidence. It is never persisted or
@@ -3038,11 +3116,19 @@ CLI, frontend and startup business execution remain unchanged.
   deny after lock;
 - source-adapter ID/version/hash mismatch, non-latest record, wrong source system,
   incomplete row-class allowlist, ownership/upstream ID drift and cross-scope
-  substitution deny in authorization, event, operation and conflict paths;
+  substitution deny in authorization, event and operation paths; a permitted
+  conflict path preserves the exact attempt-bound source record and separately binds
+  the observed denial under the same evidence-only trigger semantics;
 - one-field mutation of producer version/hash/company/branch/kind and posting-adapter
   version/hash/company/branch/kind rejects; ID-only equality, cross-scope FK and
   latest-chain substitution reject in authorization, activation, event, operation,
   audit, result and conflict seals;
+- conflict-trigger fixtures preserve exact stale/terminal attempt-bound producer and
+  posting composites while separately binding the registry-selected observed denied
+  record. Revoked, expired, superseded and latest-chain-mismatch evidence inserts
+  succeed only under the registered Algorithm-C permission; substituting the latest
+  observed record into an attempt-bound column rejects. The same stale/terminal
+  composite still rejects in every primary-effect consumer trigger;
 - every source, producer and posting authority prefix is exercised against all 11
   exact denial suffixes; each of the 33 literals verifies projection bytes,
   precedence, deduplication, immediate circuit class, PII/secret minimization and
@@ -3077,7 +3163,11 @@ CLI, frontend and startup business execution remain unchanged.
 - a unique replacement before the first event is accepted as the current revision;
   correction after event and correction after posting create their distinct conflict
   types and zero additional event/receivable rows; two apparent roots, cycle, broken
-  predecessor and multiple current revisions fail closed;
+  or ambiguous predecessor and multiple current revisions fail closed. Invalid
+  cardinality fixtures assert the exact `unique`/count-one/JSON-null invariant
+  expected side, complete sorted observed hashes and deterministic observed-state
+  precedence; no candidate-selected, first-sorted or synthetic expected ID is
+  accepted;
 - proven provenance selects only the exact `contractual_due_date` member; unknown
   provenance selects only `unknown_due_date_treatment` with source literal
   `allow_unknown_without_aging` and the repository mapping to
@@ -3128,6 +3218,11 @@ CLI, frontend and startup business execution remain unchanged.
 - every registered conflict type reconstructs its exact expected/observed
   projections; caller-selected type/projection/hash rejects, same observation
   deduplicates and any semantic projection mutation produces a new immutable hash;
+- root and multiple-current conflict fixtures prove the only registered expected
+  set-hash null rules, every root observation-state literal and its exact precedence;
+  independent implementations produce identical side/observation/conflict hashes for
+  zero roots, multiple roots, cycles, broken/ambiguous predecessors and multiple
+  current revisions;
 - unchanged authority/authorization/activation record content with only
   `not_yet_effective` or `expired` temporal evaluation persists a conflict whose
   expected/observed fingerprints differ and repeated same-state retries deduplicate;
@@ -3219,7 +3314,11 @@ CLI, frontend and startup business execution remain unchanged.
 - clock exactly at authority/activation/evidence expiry boundary denies; clock
   throw, invalid value, range failure and regression deny without writes;
 - producer and posting-adapter version, hash, company, branch and kind one-field
-  mutation fixtures plus cross-scope FK/latest-chain mismatch all deny;
+  mutation fixtures plus cross-scope FK/latest-chain mismatch all deny; conflict-only
+  trigger fixtures accept the exact immutable attempt-bound composite alongside the
+  exact observed denied composite for permitted terminal/latest-chain denials, reject
+  attempt/observed substitution, and prove that no such row authorizes a primary
+  effect;
 - unauthorized conflict append, caller-selected conflict operation/table, conflict
   persistence failure, deduplication and rate/circuit limits are fault-injected;
 - conflict persistence failure returns

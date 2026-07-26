@@ -1127,10 +1127,12 @@ registry: sixteen non-authority integrity types plus the Cartesian product of th
 authority-kind prefixes and eleven authority-denial suffixes. No generic,
 unregistered or implementation-selected conflict label is accepted. Severity is
 always `p0`; unique keys are `(companyId, conflictHash)` and the globally unique
-`denialAttemptId`.
+`denialAttemptId`, plus the globally unique `transitionId` used by the reciprocal
+composite pair.
 `denialAttemptId` is the immutable repository-owned lowercase RFC 9562 UUIDv4 of the
-individual A/B execution. It is generated exactly once after that execution acquires
-`BEGIN IMMEDIATE`, cannot be supplied by a caller, and is included in the observation,
+individual admitted A/B execution. It is generated exactly once after that execution
+acquires `BEGIN IMMEDIATE` and passes the zero-incomplete-scope guard, cannot be
+supplied by a caller, and is included in the observation,
 both projections and conflict/dedupe hash. Reusing it is legal only for Algorithm-C
 persistence replay of the same byte-exact frozen package; every new A/B execution,
 including one in the same UTC millisecond with identical denial content, has another
@@ -1148,7 +1150,12 @@ child table or alternate persistence form.
 `transitionId` is repository-derived from this row's already proven
 `denialAttemptId` and `conflictHash`; it is intentionally excluded from
 `conflictHash` to avoid recursion. The conflict row and its exact transition record
-form one mandatory deferred-FK pair and must commit or roll back together.
+form one mandatory reciprocal composite deferred-FK pair and must commit or roll back
+together. `transitionId` is unique on the conflict table. A single-column
+`transitionId` reference is insufficient and forbidden: the forward child tuple is
+exactly `(transitionId,id,companyId,branchId,denialAttemptId,conflictHash)` and must
+match the transition parent tuple exactly
+`(transitionId,conflictId,companyId,branchId,denialAttemptId,conflictHash)`.
 
 ### `canonical_receivable_posting_conflict_transitions`
 
@@ -1189,7 +1196,10 @@ createdAt TEXT NOT NULL
 `operationDomain` is exactly `canonical_receivable.initial_post.v1`;
 `scopeSequence` is a positive safe integer allocated under the Algorithm-C write lock
 as one plus the maximum existing value in the exact company/branch/operation-domain
-scope (or `1` when none exists); caller input, reuse, gap and overflow reject;
+scope (or `1` when none exists); caller input, committed-value reuse, committed gap
+and overflow reject. Allocation is provisional until the pair commits: rollback or
+pre-commit crash leaves no durable sequence reservation, and a later external A/B
+execution may receive a different next value without being persistence replay;
 `transitionKind` is exactly `required_conflict_accounting_circuit_v1`; and
 `circuitRule` is exactly `immediate` or `fifth_in_five` as selected by the fixed
 section-22.8 registry. State is exactly `PENDING`, `ACCOUNTED`,
@@ -1207,13 +1217,21 @@ state/marker/null combinations are:
 Every non-null result JSON is canonical and reproduces its paired hash. `createdAt`
 equals the conflict row's `evidenceAttemptedAt`/`createdAt` and never changes; stage
 advancement reads no clock. Unique keys are `conflictId`, `denialAttemptId`,
-`(companyId,conflictHash)`, `(companyId,branchId,operationDomain,scopeSequence)` and
-each of the three accounting keys. A transition row
-has one exact composite deferred FK
-`(conflictId,companyId,branchId,denialAttemptId,conflictHash)` to its conflict row,
-and the conflict row's `transitionId` has the reciprocal deferred FK. Consequently
-neither side can commit alone. Section 22.8 defines identity/result hashes and
-section 23 defines monotonic recovery.
+`(companyId,conflictHash)`, `(companyId,branchId,operationDomain,scopeSequence)`, the
+exact ordered reciprocal parent tuple
+`(transitionId,conflictId,companyId,branchId,denialAttemptId,conflictHash)`, and each
+of the three accounting keys. A transition row has one exact composite deferred FK
+`(conflictId,companyId,branchId,denialAttemptId,conflictHash)` to the conflict parent
+tuple `(id,companyId,branchId,denialAttemptId,conflictHash)`. The conflict row has the
+reciprocal composite deferred FK
+`(transitionId,id,companyId,branchId,denialAttemptId,conflictHash)` to the transition
+parent tuple
+`(transitionId,conflictId,companyId,branchId,denialAttemptId,conflictHash)`.
+Both FKs are `DEFERRABLE INITIALLY DEFERRED` and both parent tuples have the exact
+ordered unique indexes listed below. Consequently neither side can commit alone, one
+conflict cannot share or swap a transition, and one transition cannot name a foreign
+conflict identity. Section 22.8 defines identity/result hashes and section 23 defines
+monotonic recovery.
 
 ### Exact domains, checks and foreign-key graph
 
@@ -1349,7 +1367,7 @@ The exact foreign keys all use `ON UPDATE RESTRICT ON DELETE RESTRICT`:
 | eligible event PR9 | `activationRecordId` → posting activation `recordId`; source binding composite and full producer authority composite → exact governed records; `writeAuthorizationRecordId` → write authorization `recordId` |
 | posting operation | `eventId` → eligible event `id`; source binding composite and full posting-adapter authority composite → exact governed records; `writeAuthorizationRecordId` → write authorization `recordId`; `activationRecordId` → posting activation `recordId`; `(companyId, canonicalReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; `(financialAuditEventId, companyId, branchId)` → `financial_audit_events(id, companyId, branchId)` deferred until commit |
 | posting conflict | nullable `eventId` → eligible event `id`; nullable `existingOperationId` → posting operation `id`; nullable `(companyId, existingReceivableId, branchId)` → `canonical_receivables(companyId, id, branchId)`; source and producer full composites equal the immutable attempt-bound write-authorization bindings, posting-adapter full composite equals that authorization's and activation's common attempt binding, and any referenced event/operation must reproduce the applicable same composites; all reference exact scoped PR9 parents without asserting current lifecycle; nullable denied-authority composite `(deniedAuthorityRecordId,deniedAuthorityVersion,deniedAuthorityRecordHash,companyId,branchId)` → the exact observed governed record when Algorithm C persistence is permitted |
-| conflict/transition pair | conflict `transitionId` → transition `transitionId`; transition `(conflictId,companyId,branchId,denialAttemptId,conflictHash)` → conflict `(id,companyId,branchId,denialAttemptId,conflictHash)`; both are `DEFERRABLE INITIALLY DEFERRED`, the parent composite is unique, scope/identity/hash must agree and commit requires exactly one row on each side |
+| conflict/transition pair | conflict forward tuple `(transitionId,id,companyId,branchId,denialAttemptId,conflictHash)` → transition reciprocal parent `(transitionId,conflictId,companyId,branchId,denialAttemptId,conflictHash)`; transition reverse tuple `(conflictId,companyId,branchId,denialAttemptId,conflictHash)` → conflict parent `(id,companyId,branchId,denialAttemptId,conflictHash)`; both are `DEFERRABLE INITIALLY DEFERRED`, both parent tuples have exact ordered unique indexes, and commit requires one mutually identical row on each side; single-column-only, cross-linked, swapped, shared and orphan pairings reject |
 
 Single-column PR9 primary-effect record references are additionally guarded by
 before-insert triggers that require exact company, branch, logical kind/status and
@@ -1389,8 +1407,10 @@ Exact additional index definitions:
 | `idx_pr9_posting_operation_scope` | no | `companyId, branchId, createdAt` |
 | `uq_pr9_posting_conflict_hash` | yes | `companyId, conflictHash` |
 | `uq_pr9_posting_conflict_denial_attempt` | yes | `denialAttemptId` |
+| `uq_pr9_posting_conflict_transition_id` | yes | `transitionId` |
 | `idx_pr9_posting_conflict_scope` | no | `companyId, branchId, detectedAt` |
 | `uq_pr9_posting_conflict_transition_parent` | yes | `id, companyId, branchId, denialAttemptId, conflictHash` |
+| `uq_pr9_conflict_transition_reciprocal_parent` | yes | `transitionId, conflictId, companyId, branchId, denialAttemptId, conflictHash` |
 | `uq_pr9_conflict_transition_conflict` | yes | `conflictId` |
 | `uq_pr9_conflict_transition_attempt` | yes | `denialAttemptId` |
 | `uq_pr9_conflict_transition_hash` | yes | `companyId, conflictHash` |
@@ -1600,6 +1620,16 @@ stages and requires each newly non-null result JSON/hash pair to pass the normat
 section-22.8 reconstruction. Reapplying an already durable stage with byte-identical
 result is a repository no-op and issues no update; any changed result fails closed.
 
+Pair insertion additionally relies on the two exact reciprocal composite deferred
+FKs, not on `transitionId` alone. At deferred-constraint evaluation, the conflict's
+six-field forward tuple and transition's six-field parent tuple must be byte-identical,
+and the transition's five-field reverse tuple must match that same conflict row.
+Duplicate, shared, crossed or swapped links; a one-field company, branch, attempt-ID
+or conflict-hash mismatch; and either orphan fail before commit with
+`CANONICAL_CONFLICT_TRANSITION_INTEGRITY_FAILED`. The transaction rolls back both
+inserts and commits zero pair rows. Repository post-insert reconstruction proves the
+same tuples before requesting commit; it does not weaken the relational constraint.
+
 After step 5, a current descendant beyond a snapshot's frozen head is allowed only
 when it is a contiguous immutable append whose version is greater than the snapshot's
 `maximumObservedAuthorityVersion`. It is outside the frozen boundary, is never added
@@ -1744,12 +1774,13 @@ integrity/emergency path exists for unreadable/corrupt evidence and append failu
 does not claim that a missing conflict row was persisted.
 
 The denied attempt and a new evidence append use two different repository-owned clocks.
-At the start of every A/B transaction the repository also generates one unique
-`denialAttemptId`; it is identity, not a clock. Algorithms A/B freeze that UUID and
+Only after an A/B transaction's locked incomplete-transition guard succeeds does the
+repository read its clock and generate one unique `denialAttemptId`; it is identity,
+not a clock. A blocked transaction calls neither capability. Algorithms A/B freeze that UUID and
 their exact locked `attemptedAt` as `deniedAttemptedAt` inside the immutable denial
 package. Algorithm C reads a new `evidenceAttemptedAt` only in
-`NEW_EVIDENCE_INSERT`, after its own `BEGIN IMMEDIATE`, replay-key lookup and complete
-frozen proof. `EXACT_REPLAY` reads no clock. `denialAttemptId` distinguishes every
+`NEW_EVIDENCE_INSERT`, after its own `BEGIN IMMEDIATE`, replay-key lookup, complete
+frozen proof and zero-incomplete guard. `EXACT_REPLAY` and blocked C-new read no clock. `denialAttemptId` distinguishes every
 new A/B execution, while
 `deniedAttemptedAt` is persisted and seals the denial suffix, precedence,
 projections, fingerprints and temporal evaluation;
@@ -1800,13 +1831,18 @@ same `denialAttemptId`, `conflictHash` and snapshot hashes and returns the prior
 conflict identity. A separate A/B execution always has a new repository-owned
 `denialAttemptId` and therefore a distinct evidence identity and conflict row even if
 its `deniedAttemptedAt`, denial type, projections and every source/evidence/authority
-hash are identical. Each new A/B attempt counts independently toward admission,
-rate-limit and circuit accounting exactly once through the durable transition created
-in the same commit as its evidence row; the committed pair is the ledger and no
-in-memory increment is authoritative. Algorithm-C persistence replay counts zero and
-changes no transition stage. Admission is bounded by the same 30-attempt scope limit
-as a projection of valid applied rate results; any incomplete transition in the exact
-scope blocks new admission until recovery. Algorithm C determines
+hash are identical. The denial-accounting universe contains only successfully
+committed Algorithm-C `NEW_EVIDENCE_INSERT` attempts whose mandatory conflict and
+transition-intent pair passed the complete post-insert proof and atomic commit. Each
+such durable denial counts toward attempt, rate-limit and circuit accounting exactly
+once through that transition; the committed pair is the ledger and no in-memory
+increment is authoritative. A successful A/B business result, a `not allowed` denial
+without mandatory evidence, malformed input, UUID failure/collision, pre-pair-commit
+failure or rollback, evidence-persistence failure, exact replay and recovery invocation
+are outside this accounting universe and count zero. Algorithm-C persistence replay
+changes no transition stage. New evidence admission is bounded by the same 30-durable-
+denial scope limit as a projection of valid applied rate results; any incomplete
+transition in the exact scope blocks new admission until recovery. Algorithm C determines
 `EXACT_REPLAY` versus `NEW_EVIDENCE_INSERT` from both repository-owned unique keys
 before any append-specific circuit/rate/storage admission. Only the latter mode is
 admitted and accounted as a new evidence insert. Conflict writes are deduplicated
@@ -1860,7 +1896,7 @@ Recommended v1 numbers:
 
 | Control | Exact limit |
 |---|---:|
-| admission | 30 new A/B `denialAttemptId` executions per company/branch per rolling minute; Algorithm-C persistence replay counts zero |
+| committed-denial evidence admission | no more than 30 successfully committed Algorithm-C `NEW_EVIDENCE_INSERT` denial attempts per exact company/branch/`canonical_receivable.initial_post.v1` scope in the existing rolling one-minute half-open window; a 31st candidate is denied before pair commit, while successful A/B results, `not allowed` denials without mandatory evidence, malformed/UUID/integrity failures, rollback or pre-commit persistence failure, exact replay and recovery count zero |
 | accepted events per PR8 run | 100 |
 | writes per posting transaction | 1 receivable |
 | active posting concurrency | 1 per company/branch; SQLite still serializes global writers |
@@ -2294,7 +2330,7 @@ Therefore its exact ordered member set is: `acceptedDryRunsHash`,
 `writeAuthorizationRecordId`.
 
 For a new event, `occurredAt = createdAt = attemptedAt` and `correlationId` is the
-pre-generated repository value. For replay comparison the repository uses the
+repository value generated only on the post-guard proven-new path. For replay comparison the repository uses the
 existing event's persisted `occurredAt`, `createdAt` and `correlationId`, not the new
 attempt clock or candidate ID, so generated attempt metadata remains sealed without
 forking identity. Same lineage key, revision key and event hash is exact replay.
@@ -2497,7 +2533,7 @@ JSON or additional key is accepted. The exact repository-derived
 
 | Persisted column | Exact value |
 |---|---|
-| `id` | pre-generated repository `audit-` UUID; equals operation `financialAuditEventId` |
+| `id` | post-guard proven-new-path repository `audit-` UUID; equals operation `financialAuditEventId` |
 | `companyId`, `branchId` | exact event/operation scope |
 | `aggregateType` | literal `canonical_receivable` |
 | `aggregateId` | exact `canonicalReceivableId` |
@@ -3289,6 +3325,23 @@ observation and the resulting conflict hash.
 
 #### Durable conflict-transition identity and accounting results
 
+The durability boundary is the successful atomic commit of one conflict row and its
+exact reciprocal transition-intent row. Before that commit an A/B execution and its
+`denialAttemptId`, `deniedAttemptedAt`, provisional conflict identity and any
+provisional `scopeSequence` are transient. They are not durable business attempts,
+are not in the denial-accounting or rate/circuit universe, and cannot be reconstructed
+after rollback or process loss. A later external call is a new A/B execution with a
+new clock read and UUID and may receive another sequence; it is not an Algorithm-C
+persistence retry of the lost attempt. No eighth table or durable pre-attempt intent
+exists in v1.
+
+After that atomic pair commit, the row is a **durably committed denial attempt** and
+exactly-once guarantees begin: one attempt result, one rate result and one circuit
+result must eventually be applied through monotonic idempotent recovery. A retry of
+that committed identity is `EXACT_REPLAY`, returns the existing pair, allocates no
+sequence and counts zero additional attempts. These pre-commit and post-commit
+categories are disjoint.
+
 For every registry entry whose Algorithm-C persistence is `required`, the repository
 derives exactly:
 
@@ -3327,9 +3380,15 @@ exactly:
 ```
 
 The repository computes `transitionId`, all three accounting keys and `intentHash`
-only from its proven conflict candidate and pre-generated conflict row ID; callers
+only from its proven conflict candidate and post-guard/new-path conflict row ID; callers
 supply none of them. `transitionId` is excluded from `conflictHash`, while the
 reciprocal deferred FKs and `intentHash` bind the pair without a recursive hash.
+The computation order is exact: prove and hash the conflict projection; pass the
+locked zero-incomplete guard and evidence clock; generate inert `conflictId`; derive
+`transitionId` and the three accounting keys from the already final `conflictHash`;
+allocate the provisional locked `scopeSequence`; then derive `intentHash`. The conflict's composite forward FK stores `transitionId` but
+`conflictHash` does not consume it, and neither relational FK is a hash input. Thus
+the stronger reciprocal binding introduces no identity or hash cycle.
 
 Each accounting result is canonical JSON hashed with its own fixed domain and
 version `1`. `AttemptAccountingResultV1` has exactly
@@ -3341,15 +3400,18 @@ set with domain `rentcore.canonical_actual_posting.rate_accounting_result` and k
 is the existence of one valid applied result under the unique key, never an
 independent in-memory increment.
 
-The 30-per-rolling-minute admission projection counts valid applied rate results in
-the same exact company/branch/operation-domain whose linked conflict satisfies
+The 30-per-rolling-minute committed-denial admission projection counts only valid
+applied rate results of durably committed `NEW_EVIDENCE_INSERT` pairs in the same
+exact company/branch/operation-domain whose linked conflict satisfies
 `windowStartExclusive < deniedAttemptedAt <= windowEndInclusive`, where
 `windowEndInclusive` is the candidate A/B `attemptedAt` and
 `windowStartExclusive` is that safe-integer epoch millisecond minus `60000`, clamped
 to zero and rendered canonically. IDs are ordered by `deniedAttemptedAt` ascending
 then denial ID UTF-16 ascending. Equality at the lower bound is excluded and equality
-at the upper bound is included. An incomplete transition blocks instead of being
-silently omitted from this count.
+at the upper bound is included. Exactly 30 existing applied results are allowed as
+the maximum durable population; a 31st `NEW_EVIDENCE_INSERT` candidate fails admission
+before conflict/transition DML and therefore never becomes a committed denial. An
+incomplete transition blocks instead of being silently omitted from this count.
 
 `CircuitTransitionResultV1` has exactly:
 
@@ -3397,6 +3459,9 @@ incoming package; a **durable transition intent** is the exact paired `PENDING`
 record committed with required conflict evidence; and an **incomplete transition**
 is any valid transition whose state is not `COMPLETE`. These terms are not aliases
 for one another and may not be reclassified by implementation choice.
+A **transient A/B execution** has not crossed the atomic pair-commit boundary and is
+not recoverable or countable; a **durably committed denial attempt** has crossed that
+boundary and is the sole member of the attempt/rate/circuit accounting universe.
 
 ### 22.9 Cross-contract field matrix
 
@@ -3413,14 +3478,14 @@ for one another and may not be reclassified by implementation choice.
 | accepted/run/activation/event/PR5 timezone | persisted PR8 `run.companyTimezone`, signed acceptance snapshot, activation snapshot, event snapshot and fresh PR5 `receivablesTimezone` | authorization acceptance, activation, event, operation/audit via acceptance/event | accepted-evidence, authorization/activation/event, canonical/result and timezone conflict observation | A requires five-way equality and copies the accepted PR8 value; B repeats fresh equality before replay/write | null/invalid/alias/unavailable/change denies; no fresh-value substitution is allowed |
 | cohort, boundary and idempotency identities | locked normalized activation/authorization/event parents | authorization, activation, event/operation | exact section 22.10 envelopes | A/B/C reconstruct logical arrays/IDs, never caller JSON/key | normalization drift denies; same lineage plus changed event/revision is conflict |
 | `ConflictObservationV1` | branded repository denial frozen by A/B | conflict JSON and observation/side fingerprints | observation, expected, observed and conflict hashes include `denialAttemptId`, `deniedAttemptedAt` and all three chain snapshot hashes | C proves the frozen registered projections from immutable rows and never reclassifies them at its own clock | one frozen package deduplicates; any new attempt ID, semantic, denied-time or snapshot change is a new conflict |
-| `denialAttemptId` | exactly one repository-owned `node:crypto.randomUUID({ disableEntropyCache: true })` call immediately after the one valid locked A/B clock read | frozen package and conflict row; global unique constraint | observation, both projections and conflict hash | C accepts only the package value and exact existing-row replay; it generates no ID; caller value, zero/two A/B calls, malformed output or collision fails closed without retry/fallback | same package retry retains the ID; every new A/B execution is distinct even in the same millisecond |
+| `denialAttemptId` | exactly one repository-owned `node:crypto.randomUUID({ disableEntropyCache: true })` call after the locked zero-incomplete guard and the one valid A/B clock read | transient frozen package and, only after pair commit, conflict row; global unique constraint | observation, both projections and conflict hash | A/B uniqueness hit and C replay both require complete persisted-pair self-integrity before collision; C generates no ID; caller value, zero/two calls or malformed output fails without retry/fallback | committed-package replay retains the ID; a pre-commit loss is not replay, and every later external A/B execution is distinct even in the same millisecond |
 | three `FrozenAuthorityChainSnapshotV1` envelopes/hashes | complete locked source/producer/posting chains visible to A/B | three canonical JSON/hash pairs in conflict row | both projections, observation and conflict hash bind the three snapshot hashes | C/trigger rereads every frozen member and boundary; later contiguous descendants above the frozen maximum are ignored historically | frozen change/omission fails integrity; append after head affects only a new A/B attempt |
 | producer authority | latest eligibility-producer chain | full ID/version/hash/company/branch/kind composite in authorization and event; conflict stores the attempt-bound composite plus separate same-logical-chain observed denied composite | authority/authorization/event/result/conflict | A/B reconstruct exact producer candidate after source precedence; C proves the frozen same-authority-ID/contiguous suffix and frozen source/posting state; later appends are not historical candidates | any frozen one-field/latest-chain drift denies evidence; selected terminal/latest-chain evidence remains persistable without masking a source denial |
 | posting authority / audit actor authority | latest posting-adapter chain | full composite in authorization, activation, operation and audit payload; conflict stores the attempt-bound composite plus separate same-logical-chain observed denied composite | authority/authorization/activation, audit payload/event, result, conflict | B reconstructs posting only after source/producer precedence; C proves the frozen same-authority-ID/contiguous suffix and unaffected snapshot heads | any frozen one-field mismatch denies evidence; exact prior result may replay only while current; conflict evidence grants no replay authority |
 | write authorization + primary/denial permissions | latest authorization chain | authorization, activation, event, operation, conflict, transition, audit payload | authorization/activation, event, audit payload/event, result, conflict, transition intent/stage results | A/B require active primary; C proves the frozen/persisted binding in both modes and rereads current evidence/transition permissions only for `NEW_EVIDENCE_INSERT`; recovery may only advance the already sealed transition | primary expiry denies; current permission drift cannot block byte-exact replay or recovery of an existing valid intent, and denial permissions never create success |
-| conflict transition identity/stages | repository-derived conflict row and fixed registry | conflict `transitionId` plus one transition row | transition identity, intent and three accounting-result hashes | C atomically creates the pair; recovery rereads and proves both rows before each monotonic stage | missing/corrupt pair fails integrity; repeated stage is byte-exact no-op; incomplete scope blocks new admission but never exact replay |
-| A/B `attemptedAt` / conflict `deniedAttemptedAt` | the single repository clock capability call immediately after A/B begin | new event/operation/canonical/audit timestamps; on denial the exact value is frozen and persisted in the conflict row | event/posting hashes as before; every conflict projection, temporal/freshness denial fingerprint, observation and conflict hash includes `deniedAttemptedAt` | A/B classify once; C proves the frozen value/window/rows | the time fixes temporal semantics but does not provide uniqueness; `denialAttemptId` distinguishes executions |
-| `evidenceAttemptedAt` | the single repository clock capability call only in C `NEW_EVIDENCE_INSERT`, after replay-mode lookup and complete frozen proof | new conflict `evidenceAttemptedAt = createdAt`; current evidence permission/circuit/rate/storage/timeout guard | excluded from side, observation and conflict/dedupe hashes | new-insert C validates the operational floor and current evidence-write authority once; `EXACT_REPLAY` makes zero clock calls | cannot change suffix, precedence, projection or denial identity; replay returns the persisted value |
+| conflict transition identity/stages | repository-derived conflict row and fixed registry | conflict exact six-field forward composite plus one transition exact reciprocal composite | transition identity, intent and three accounting-result hashes | C atomically creates the mutually bound pair; recovery rereads and proves both composite directions before each monotonic stage | missing/shared/crossed/swapped/corrupt pair fails integrity; repeated stage is byte-exact no-op; incomplete scope blocks new admission but never exact replay |
+| A/B `attemptedAt` / conflict `deniedAttemptedAt` | the single repository clock capability call only after A/B's locked zero-incomplete-scope guard | new event/operation/canonical/audit timestamps; on denial the exact value is frozen and persisted in the conflict row | event/posting hashes as before; every conflict projection, temporal/freshness denial fingerprint, observation and conflict hash includes `deniedAttemptedAt` | A/B classify once; C proves the frozen value/window/rows | a blocked scope reads no clock/UUID and returns recovery-required; otherwise time fixes temporal semantics but not uniqueness |
+| `evidenceAttemptedAt` | the single repository clock capability call only in C `NEW_EVIDENCE_INSERT`, after replay-mode lookup, complete frozen proof and locked zero-incomplete-scope guard | new conflict `evidenceAttemptedAt = createdAt`; current evidence permission/circuit/rate/storage/timeout guard | excluded from side, observation and conflict/dedupe hashes | new-insert C validates the operational floor and current evidence-write authority once; `EXACT_REPLAY` and blocked C-new make zero clock calls | cannot change suffix, precedence, projection or denial identity; replay returns the persisted value |
 
 No row may substitute a caller hash for a relational reread. The matrix is an
 obligation to compare both sides inside the applicable locked transaction.
@@ -3503,21 +3568,33 @@ Unicode/escaping cases. Cross-implementation fixtures must match byte-for-byte.
 ## 23. Exact transaction algorithms
 
 Before either primary transaction the repository may perform only bounded deeply
-inert validation, copy selector/assertion strings and pre-generate candidate UUIDs
-for rows that might be inserted. Algorithm B may additionally compute
+inert validation and copy selector/assertion strings. It generates no UUID, row ID or
+correlation ID before the locked incomplete-transition guard. Algorithm B may additionally compute
 `CanonicalPostingCommandFingerprintV1` because its event already exists; Algorithm A
 does not compute that fingerprint or any substitute. Pre-lock work makes no authority,
 source, acceptance, time-window, replay, conflict or write decision. No caller
 object, proxy, accessor, callback, policy function, hook, caller clock or ID
 generator is reachable after `BEGIN IMMEDIATE`; statements receive only
 repository-owned inert primitives. The only permitted post-lock primitive calls are
-the repository clock call in each A/B transaction and in Algorithm C's
-`NEW_EVIDENCE_INSERT` mode, plus the fixed internal UUIDv4 call in A/B defined next.
-Algorithm C `EXACT_REPLAY` makes neither call. None is caller-injected,
-callback-based, networked, lazy, plugin-provided or an external service; all other row
-IDs remain pre-generated inert values.
+the repository clock call in an admitted A/B transaction and admitted Algorithm-C
+`NEW_EVIDENCE_INSERT`, the fixed internal denial UUIDv4 call in A/B defined next, and
+the fixed closed-over repository row-ID factory only after the algorithm has passed
+its incomplete guard and selected an actual new-row path. Blocked A/B, blocked C-new
+and C `EXACT_REPLAY` call none of them. No primitive is caller-injected,
+callback-based, networked, lazy, plugin-provided or an external service.
 
-Immediately after each successful A/B `BEGIN IMMEDIATE` the repository calls
+Immediately after each successful A/B `BEGIN IMMEDIATE`, the repository first
+validates the already inert immutable company/branch/operation-domain scope and checks
+for any transition outside `COMPLETE` in exactly that scope. This guard performs no
+clock read, UUID/ID generation, `scopeSequence` allocation, business derivation or
+accounting. If a row exists, A/B rolls back, invokes the separate synchronous
+repository reconciler, returns
+`CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED` for this blocked invocation and
+never resumes it. Reconciler success permits only a later, separate external A/B
+invocation to start again. The guard remains under the same `BEGIN IMMEDIATE` that is
+held through the later admission decision, so a zero result cannot become stale.
+
+Only after that zero-incomplete guard succeeds does the repository call
 `repositoryClock.readUtcMilliseconds()` exactly once. It must return a safe integer
 Unix epoch millisecond in inclusive range `0` through `253402300799999`; the
 repository deterministically renders that value as exact RFC3339 UTC milliseconds.
@@ -3543,6 +3620,10 @@ deterministic. The complete normative sequence is therefore:
 
 ```text
 BEGIN IMMEDIATE
+-> validate inert companyId + branchId + operationDomain scope
+-> require zero transition rows outside COMPLETE in that exact scope
+-> on block: ROLLBACK, run separate reconciler, return
+   CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED; never resume this invocation
 -> repositoryClock.readUtcMilliseconds() exactly once
 -> validate and render locked attemptedAt
 -> node:crypto.randomUUID({ disableEntropyCache: true }) exactly once
@@ -3550,19 +3631,44 @@ BEGIN IMMEDIATE
 -> continue deterministic locked derivation
 ```
 
-Zero calls, two calls, a call before the locked clock, a call after deterministic
-derivation starts, a caller-provided/callback/getter/hook/lazy/remote/plugin/mockable
-production generator, another generator, fallback/regeneration/entropy fallback or
-another clock read all return
+After the zero-incomplete guard has succeeded and A/B has entered the clock/generator
+stage, zero UUID calls, two calls, a call before the locked clock, a call after
+deterministic derivation starts, a caller-provided/callback/getter/hook/lazy/remote/
+plugin/mockable production generator, another generator, fallback/regeneration/
+entropy fallback or another clock read all return
 `CANONICAL_DENIAL_ATTEMPT_ID_GENERATION_FAILED`, fail closed and perform zero DML.
 Malformed output or throw returns that same generation literal. No such structural,
 sequence, source or format violation may return the collision literal, and every
 case performs no regeneration and has no entropy or ID fallback.
+The intentional zero-call path caused by a failed incomplete-transition guard never
+enters this stage and returns only
+`CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED`.
+
+Other generated row and correlation IDs use a separate fixed synchronous internal
+repository factory whose function reference is closed over before commands are
+accepted. It may be invoked only after the zero-incomplete guard, never before. A
+successful new Algorithm-A event path generates exactly its event and correlation IDs
+after every replay/conflict identity lookup has proved the new path. A successful new
+Algorithm-B posting path then generates exactly its canonical, operation and audit IDs.
+Algorithm-C `NEW_EVIDENCE_INSERT` generates exactly its conflict and correlation IDs
+only after common replay/package proof, the zero-incomplete guard and the valid evidence
+clock. Replay, collision, corruption, blocked admission and recovery generate none.
+These IDs are inert before first use, cannot influence the prior guard or denial UUID
+sequence, are never caller-controlled and remain excluded from business/dedupe hashes
+unless an exact envelope explicitly lists them.
 
 Still under the A/B lock, the repository queries the global `denialAttemptId` unique
-key. An existing row is an impossible generator collision: A/B rolls back with
-`CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`, creates no package and opens the
-integrity/emergency circuit.
+key. A hit is not yet a collision. A/B must read the complete located conflict row and
+its mandatory transition, prove structural shape, canonical JSON, projections,
+fingerprints and hashes, every complete authority snapshot/envelope, persisted key/
+index binding, the two exact reciprocal composite FKs, transition identity/intent and
+all durable stage/results from that pair's own values. A failed proof returns
+`CANONICAL_CONFLICT_REPLAY_INTEGRITY_FAILED`; a completely self-consistent existing
+pair is the impossible genuine generator uniqueness collision and returns
+`CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`. Both paths roll back, create no package,
+perform zero conflict/transition DML or accounting, generate no replacement UUID,
+provide no fallback/replacement pair and open the applicable integrity/collision
+emergency circuit.
 Algorithm C repeats that uniqueness lookup but never classifies from lookup
 asymmetry alone: the same UUID may match only a byte-exact existing conflict for the
 same frozen package. Only after every located row passes the Algorithm-C self-
@@ -3578,8 +3684,9 @@ validly persisted by C.
 uniqueness collision after every located persisted row has passed its own complete
 self-integrity and key-binding proof. It is forbidden for malformed UUIDs, wrong
 generator source/order/count, missing or repeated invocation, fallback/regeneration,
-or a corrupted persisted replay row. Section 23's Algorithm-C matrix is the sole
-authority for distinguishing replay corruption from a genuine collision.
+or a corrupted persisted replay row. This common A/B/C self-integrity-first contract
+is the sole authority for distinguishing persisted corruption from a genuine
+collision; Algorithm C additionally applies its two-lookup package matrix below.
 
 Algorithms A/B name their clock value `attemptedAt`; `denialAttemptId` is independent
 identity and never a time input. `attemptedAt` is their only time input for
@@ -3593,8 +3700,9 @@ three snapshots, observation and projections fix `conflictObservationHash`,
 `conflictHash` and dedupe identity permanently.
 
 Algorithm C `NEW_EVIDENCE_INSERT` names its independent value
-`evidenceAttemptedAt`. It is read exactly once only after mode classification and the
-complete frozen/package proof, and is used only for
+`evidenceAttemptedAt`. It is read exactly once only after mode classification, the
+complete frozen/package proof and the zero-incomplete transition-scope guard, and is
+used only for
 the current conflict-evidence append permission/authority and circuit guard, the
 monotonic floor, operational timeout/storage/rate-limit checks, and
 `evidenceAttemptedAt = createdAt`. It cannot alter an A/B temporal/freshness state,
@@ -3675,12 +3783,16 @@ clock as a result timestamp.
 
 Inside one repository-owned `BEGIN IMMEDIATE`:
 
-1. capture and validate the single `attemptedAt`, generate the one
-   `denialAttemptId` UUIDv4, and prove that ID absent from the conflict unique index as
-   above; then recheck that the exact company/branch/operation-domain transition
-   scope has no row outside `COMPLETE`. If one exists, roll back, discard the UUID,
-   create no denial package, synchronously run the section-23 reconciler and require
-   a fresh locked zero-incomplete recheck before any new primary admission;
+1. validate the inert exact company/branch/operation-domain scope and require zero
+   transition rows outside `COMPLETE` before any clock/UUID call or business
+   derivation. If one exists, roll back with zero clock reads, UUID calls, sequence
+   allocation or attempt creation; synchronously run the separate section-23
+   reconciler; return `CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED`; and never
+   resume this invocation. A new external invocation must acquire a new lock and pass
+   this guard. Otherwise capture and validate the single `attemptedAt`, generate the
+   one `denialAttemptId` UUIDv4, and query its conflict unique index. On a hit perform
+   the complete common persisted conflict/transition self-integrity proof above before
+   returning replay-integrity failure or genuine collision;
 2. reread the write-authorization record and its latest chain, canonical
    `acceptedPr8EvidenceJson`/hash, its exact projected
    `[{dryRunId,resultHash}]` pair set, accepted timezone, exact half-open freshness
@@ -3754,9 +3866,10 @@ Inside one repository-owned `BEGIN IMMEDIATE`:
 8. construct the complete event projection including the accepted PR8
    `companyTimezoneSnapshot`, policy-set hash, selected gate/treatment and nullable
    mapping triple and compute `eventHash`: use the existing row's
-   persisted `occurredAt`/`createdAt`/`correlationId` when a lineage event exists;
-   otherwise use the single `attemptedAt` and pre-generated repository correlation;
-   also query `(companyId,eventHash)`. If one persisted event
+   persisted `occurredAt`/`createdAt`/`correlationId` when a lineage event exists.
+   Only when every lineage/revision/candidate lookup is empty, generate the repository
+   event/correlation IDs for the provisional new-event path and use the single
+   `attemptedAt`; then also query `(companyId,eventHash)`. If one persisted event
    matches every field/hash, reread its bound PR8/PR6/authority/authorization/
    activation rows, commit with zero writes and return that event's persisted
    timestamps with `replayed=true`;
@@ -3774,8 +3887,8 @@ Inside one repository-owned `BEGIN IMMEDIATE`:
    and pass only that branded inert package to Algorithm C when the registry says persistence `required`;
    a `not allowed` authority observation opens the integrity/emergency circuit without
    conflict DML;
-10. otherwise construct and insert exactly one `ActualReceivableEligibleV1` using a
-   pre-generated repository UUID and `occurredAt = createdAt = attemptedAt`;
+10. otherwise construct and insert exactly one `ActualReceivableEligibleV1` using the
+   post-guard proven-new-path repository UUID and `occurredAt = createdAt = attemptedAt`;
 11. reread the event plus accepted evidence, PR8 run timezone, fresh PR5 timezone and every referenced PR8, PR6,
     source/producer authority,
     authorization, activation and boundary row; recompute every exact field, pair,
@@ -3800,11 +3913,13 @@ missing/invalid/unavailable PR5 timezone produces no row; with a prior event it 
 
 Inside a separate repository-owned `BEGIN IMMEDIATE`:
 
-1. capture and validate the single `attemptedAt`, generate the one
-   `denialAttemptId` UUIDv4, and prove that ID absent from the conflict unique index as
-   above; then apply the identical zero-incomplete transition-scope recheck and
-   recovery-required rollback rule from Algorithm A before reading the event or
-   making a primary/replay decision;
+1. apply the identical inert-scope, zero-incomplete, rollback, separate-reconciler,
+   stable-result and no-hidden-continuation guard from Algorithm A before a clock read,
+   UUID call, sequence allocation, event read or primary/replay decision. Only after
+   the guard succeeds, capture and validate the single `attemptedAt`, generate the one
+   `denialAttemptId` UUIDv4 and query its conflict unique index. On a hit perform the
+   complete common persisted conflict/transition self-integrity proof before returning
+   replay-integrity failure or genuine collision;
 2. reread the event by exact ID/company/branch and recompute its
    `economicLineageKey`, `economicSourceRevisionKey`, `currentPr6RevisionHash`,
    `eventHash` and `sourceLineageHash`; traverse the complete predecessor/successor
@@ -3860,10 +3975,11 @@ Inside a separate repository-owned `BEGIN IMMEDIATE`:
    `FrozenDenialPackageV1`, roll back all primary effects, then invoke Algorithm C
    with that branded inert denial package only when its registry persistence is
    `required`; `not allowed` opens the integrity/emergency circuit with no conflict DML;
-9. otherwise insert one direct-`posted` canonical receivable with a pre-generated
-   repository ID and `postedAt = createdAt = updatedAt = attemptedAt`;
+9. otherwise generate the fixed repository canonical/operation/audit IDs for this
+   proven-new path and insert one direct-`posted` canonical receivable with that
+   canonical ID and `postedAt = createdAt = updatedAt = attemptedAt`;
 10. compute the fingerprint of the persisted canonical projection, then insert one
-   operation seal using pre-generated operation/audit IDs, exact source-adapter and
+   operation seal using those post-guard operation/audit IDs, exact source-adapter and
     posting-adapter full composites, producer composite through the event,
     accepted-evidence/pair/timezone/freshness, policy-set, selected-gate and mapping bindings,
     `createdAt = attemptedAt`, and the prospective audit and result fingerprints;
@@ -3902,7 +4018,9 @@ mode before every append-specific admission guard. The transaction prefix is exa
 6. for every distinct found row, independently prove its exact shape/types/nulls,
    canonical JSON, stored projections/fingerprints/snapshots, complete authority
    envelopes/chains, recomputed observation/conflict hash, transition identity/intent
-   and all persisted key/index bindings. A row returned by one lookup must contain
+   and all persisted key/index bindings, including the forward six-field conflict-to-
+   transition tuple and reciprocal five-field transition-to-conflict tuple. A row
+   returned by one lookup must contain
    the exact key used by that lookup; if its stored fields reproduce the other
    package key while that other lookup missed it, the index/key projection is corrupt;
 7. apply the sole normative classification matrix below. Only after every found row
@@ -4010,20 +4128,30 @@ zero clock/UUID/ID-generator calls, zero append-permission/circuit/rate/storage
 admission, zero attempt/rate/circuit counter changes and no circuit reopening—even
 when the conflict circuit is already open, the rate limit is exhausted, append
 storage is unavailable or the valid transition is not yet `COMPLETE`. Replay never
-advances that transition. A read failure fails closed. A persisted replay
+advances that transition, invokes the reconciler or applies an accounting/circuit
+stage. Its observable postcondition is the exact same transition state and result
+columns that existed before replay. A read failure fails closed. A persisted replay
 conflict/transition pair that does not pass returns the stable
 `CANONICAL_CONFLICT_REPLAY_INTEGRITY_FAILED`, performs zero conflict/transition DML,
 inserts no replacement/new attempt and enters the integrity/emergency circuit path.
 
-Only `NEW_EVIDENCE_INSERT` continues after the common proof. C then calls
-`repositoryClock.readUtcMilliseconds()` exactly once, validates/renders
-`evidenceAttemptedAt`, discards the clock, validates the exact monotonic floor, rereads
+Only `NEW_EVIDENCE_INSERT` continues after the common proof. Still under that same
+`BEGIN IMMEDIATE`, C first checks the exact company/branch/operation-domain scope for
+any transition outside `COMPLETE`. If one exists, C rolls back with zero evidence-
+clock reads, `scopeSequence` allocation, insert preparation, append admission,
+accounting or DML; synchronously invokes the separate reconciler; returns
+`CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED`; and never resumes this invocation.
+A later external call repeats replay classification before it can be admitted as new.
+Only after this zero-incomplete guard succeeds does C call
+`repositoryClock.readUtcMilliseconds()` exactly once, validate/render
+`evidenceAttemptedAt`, discard the clock, validate the exact monotonic floor, reread
 the current authorization's exact evidence and transition tables/permissions, and applies the
 new-attempt circuit, rate, timeout and append/storage admissions. The permission may
 authorize only the conflict append and its mandatory transition create/advance
-operations named in section 14; neither can authorize a primary effect. C generates
-no ID after lock and uses only the repository-owned pre-generated conflict row ID,
-the package's existing `denialAttemptId` and the deterministic `transitionId`. Under
+operations named in section 14; neither can authorize a primary effect. C accepts no
+caller or pre-guard ID and, after the valid evidence clock, generates only the
+repository-owned conflict/correlation IDs for this proven-new path; it also uses the
+package's existing `denialAttemptId` and the deterministic `transitionId`. Under
 the same lock it allocates the exact next positive safe-integer `scopeSequence`; a
 gap, duplicate, unsafe overflow or caller value returns the evidence-persistence
 failure before DML. It
@@ -4049,15 +4177,28 @@ Frozen/read integrity and pair-persistence/admission failures instead use the
 separately named integrity/emergency circuit and never pretend that conflict evidence
 or an evidence-bound transition exists.
 
+A crash before either insert, after either insert but before the common commit, or
+during failed deferred-constraint/commit evaluation leaves exactly zero durable
+conflict rows, zero transition rows, zero accounting results and zero evidence-bound
+circuit applications for that transient attempt. SQLite rolls the transaction back;
+the in-memory package, UUID, attempted time, provisional conflict identity and
+provisional sequence are not recoverable. The reconciler has no row to select. A later
+external call is a new A/B execution, reads a new clock, generates a new UUID and may
+receive a new sequence; it is not persistence replay. Exactly-once recovery begins
+only after the atomic pair commit described above.
+
 The recovery/admission scope is exactly
 `(companyId,branchId,operationDomain=canonical_receivable.initial_post.v1)`. Before
 new primary admission in A or B, and before C may continue a
 `NEW_EVIDENCE_INSERT`, the repository must prove that no transition in that exact
-scope is outside `COMPLETE`. An incomplete transition returns
-`CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED` if it remains unresolved, but the
-repository first synchronously invokes the repository-owned reconciler and then
-rechecks the scope in a fresh locked transaction. New primary/new-evidence admission
-remains fail-closed until that recheck finds zero incomplete transitions. C always
+scope is outside `COMPLETE`. An incomplete transition always ends the currently
+blocked A/B or C-new invocation with the stable literal
+`CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED`; it is never mapped to UUID
+generation, collision or replay-integrity failure. After rolling back that invocation,
+the repository synchronously invokes the repository-owned reconciler as a separate
+operation. It does not recheck-and-resume the original request. New primary/new-
+evidence admission requires a later external invocation whose own locked guard finds
+zero incomplete transitions. C always
 performs replay lookup and the complete
 replay integrity proof before this guard, so a valid exact replay remains available
 and read-only while an associated or unrelated transition is incomplete. The guard
@@ -4067,7 +4208,9 @@ The reconciler is an internal disabled-repository operation, not a route, worker
 queue, scheduler, timer, CLI, startup mutation or production capability. It creates
 no conflict/business row and accepts no caller-selected transition, scope, key,
 result or state. For the exact blocked scope it selects incomplete transitions in
-`scopeSequence` ascending order. Each stage
+`scopeSequence` ascending order. Exact replay never calls it and never performs a
+recovery side effect; a blocked new-admission path may invoke it only after that path
+has rolled back and committed to returning the stable recovery-required result. Each stage
 uses its own repository-owned `BEGIN IMMEDIATE` and this exact sequence:
 
 1. reread the transition and its reciprocal conflict row and re-prove complete row,
@@ -4093,7 +4236,9 @@ primary/settlement/PR6/PR8/legacy/`app_data` DML. Attempt and rate accounting ar
 unique durable applied result rows, not increments in a second store. Circuit state
 is the deterministic projection of durable circuit results. Thus replaying recovery
 one or many times yields one attempt result, one rate result and one circuit result,
-with no double-count or undercount.
+with no double-count or undercount for every durably committed denial pair. This claim
+does not include a transient pre-commit A/B/C execution for which no durable pair
+exists.
 
 Concurrent reconciler invocations serialize on `BEGIN IMMEDIATE`. An invocation that observes an
 already advanced byte-exact stage returns its existing result; a changed stage fails
@@ -4146,9 +4291,17 @@ CLI, frontend and startup business execution remain unchanged.
 - exact first migration on fresh chain and current seven-row production-shaped
   local fixture;
 - exact seven tables, columns, PKs, ordered composite FKs, checks, indexes and triggers;
-- the conflict/transition reciprocal deferred-FK pair cannot commit either row alone;
-  every required conflict has exactly one transition, all three accounting keys and
-  the exact initial `PENDING`/zero-marker/null-result state;
+- the conflict/transition reciprocal composite deferred-FK pair cannot commit either
+  row alone. Fixtures cover: (1) valid exact pair; (2) two conflicts referencing one
+  transition; (3) transition referencing another conflict; (4) swapped transition
+  IDs; (5) matching transition ID with mismatched company; (6) mismatched branch;
+  (7) mismatched denial attempt; (8) mismatched conflict hash; (9) duplicate
+  transition for one conflict; (10) orphan conflict; (11) orphan transition; and
+  (12) deferred commit of a valid pair. Every invalid case returns
+  `CANONICAL_CONFLICT_TRANSITION_INTEGRITY_FAILED`, rolls back the transaction and
+  commits zero pair rows; every required valid conflict has exactly one transition,
+  all three accounting keys and the exact initial `PENDING`/zero-marker/null-result
+  state;
 - transition fixtures enforce every allowed marker/state/result combination, reject
   skipped/reversed/mixed stages and prove identity/scope/rule/intent fields immutable;
   first/next/concurrent sequence allocation yields contiguous `scopeSequence` values,
@@ -4182,13 +4335,20 @@ CLI, frontend and startup business execution remain unchanged.
 - no getter or callback executes; restricted RFC 8785/JCS canonical JSON/hash
   fixtures are stable across the approved JavaScript and independent reference
   implementations;
-- A/B permits exactly one fixed internal UUID call after the valid locked clock and
-  before deterministic derivation; caller-supplied `denialAttemptId`, zero/two calls,
+- after the zero-incomplete guard succeeds, A/B permits exactly one fixed internal
+  UUID call after the valid locked clock and before deterministic derivation; caller-
+  supplied `denialAttemptId`, zero/two calls after that guard,
   early/late/alternate/callback generators, wrong UUID version/variant/case, braces,
   malformed output, throw, fallback and regeneration all return
   `CANONICAL_DENIAL_ATTEMPT_ID_GENERATION_FAILED` without retry/fallback or DML;
   only a fully proved genuine uniqueness collision returns
   `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`, and corrupted replay evidence never does;
+- A/B uniqueness-hit fixtures independently corrupt the conflict row, transition row,
+  reciprocal composite, conflict hash, company and denial attempt. Every case first
+  performs the complete pair self-integrity proof and returns
+  `CANONICAL_CONFLICT_REPLAY_INTEGRITY_FAILED`; only a fully self-consistent existing
+  pair returns `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`, with zero DML, regeneration,
+  fallback, replacement or accounting in both cases;
 - exact UTF-8 byte fixtures and SHA-256 outputs cover every section 22 envelope,
   null versus omission, array order, duplicate pair rejection, safe integer
   boundaries, Cyrillic, Tatar characters, emoji/non-BMP, slash, quotation mark,
@@ -4432,15 +4592,17 @@ CLI, frontend and startup business execution remain unchanged.
   conflict hashes and evidence rows. Duplicate generated ID fails closed without a
   second UUID call; persisted retry of either package creates no duplicate and does
   not increment new-attempt rate/circuit accounting;
-- exact A/B generator-sequence fixtures cover one allowed UUID call; zero calls; two
-  calls; an alternate, caller, callback, getter, hook, lazy, remote, plugin or
+- exact A/B denial-generator-sequence fixtures cover one allowed denial UUID call;
+  post-guard zero denial calls; two denial calls; an alternate, caller, callback,
+  getter, hook, lazy, remote, plugin or
   mockable-production generator; generator before the locked clock; generator after
   deterministic derivation begins; malformed/throw output; and collision. Every
   non-collision invalid case returns
   `CANONICAL_DENIAL_ATTEMPT_ID_GENERATION_FAILED`; only a genuine proved uniqueness
   collision returns `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`. Every case has zero DML,
   no second clock, no regeneration and no fallback. C replay/new-insert fixtures
-  assert zero UUID-generator calls;
+  assert zero denial-UUID-generator calls; C-new row-ID factory calls are permitted
+  only after its zero-incomplete guard and valid evidence clock;
 - posting/conflict clock throw/invalid/out-of-range/regression rolls back and exact
   posting replay returns original persisted timestamps;
 - persisted-row mutation/ignore/extra-row fault injection is detected;
@@ -4459,16 +4621,29 @@ CLI, frontend and startup business execution remain unchanged.
 - concurrent algorithm-A producers yield one event; concurrent algorithm-B posters
   yield one canonical/operation/audit set; conflict writers yield one conflict row
   plus one paired transition intent;
-- crash/recovery fixtures inject failure before conflict insert, after conflict and
-  transition inserts but before their common commit, after pair commit, before and
-  after attempt accounting, after rate accounting, after circuit application and
-  before `COMPLETE`. Repeated recovery and concurrent reconcilers always finish with
-  one conflict, one transition, one attempt result, one rate result and one circuit
-  result, with no double-count/undercount and identical final state;
+- pre-commit crash fixtures inject failure before conflict insert and after one or both
+  pair inserts but before their common commit. Each proves SQLite rollback leaves zero
+  durable conflicts, transitions, accounting results and evidence-bound circuit
+  applications; the transient UUID/time/sequence is not recovered, and a later
+  external call is a new A/B execution;
+- post-commit crash/recovery fixtures inject failure after the atomic pair commit,
+  before and after attempt accounting, after rate accounting, after circuit
+  application and before `COMPLETE`. Repeated recovery and concurrent reconcilers
+  always finish each committed pair with one conflict, one transition, one attempt
+  result, one rate result and one circuit result, with no double-count/undercount and
+  identical final state;
 - incomplete-transition fixtures prove the exact company/branch/operation-domain
   scope blocks new A/B and C-new admission, does not block another scope, and never
-  blocks a fully proved exact replay. Recovery creates no conflict/business attempt,
-  reads no clock, generates no UUID and never mutates persisted attempt timestamps;
+  blocks a fully proved exact replay. Blocked A/B performs zero clock/UUID/row-ID/
+  correlation-ID calls and allocates no sequence; blocked C-new reads no evidence
+  clock, generates no row/correlation ID and performs zero DML.
+  The blocked call returns `CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED`, invokes
+  recovery only as a separate operation and never resumes. A later external invocation
+  after recovery passes a fresh guard and may proceed normally;
+- replay/recovery separation fixture starts with an incomplete transition, performs a
+  full exact replay, proves the transition state/results are byte-unchanged and zero
+  accounting/recovery side effects occurred, then separately invokes the reconciler
+  and proves eventual `COMPLETE` with exactly one result per key;
 - concurrent old/new correction revisions for one lineage yield at most one event
   before eligibility and, after eligibility/posting, zero additional events or
   receivables plus the exact deduplicated correction conflict;
@@ -4477,10 +4652,16 @@ CLI, frontend and startup business execution remain unchanged.
   and a value below the exact operational floor rejects;
 - clock throw, missing/non-integer/unsafe/out-of-range return and attempted second
   `repositoryClock.readUtcMilliseconds()` invocation each fail closed; replay returns
-  only persisted timestamps. A/B and C `NEW_EVIDENCE_INSERT` each call their clock
-  exactly once at their specified point; C `EXACT_REPLAY` calls it zero times;
-- limit boundary tests cover 30/minute, 100/run, 262144 bytes, depth 24, 10000 nodes,
-  15-minute freshness, five-second timeout and storage/circuit thresholds.
+  only persisted timestamps. An admitted A/B and zero-incomplete C
+  `NEW_EVIDENCE_INSERT` each call their clock exactly once at the specified point;
+  blocked A/B, blocked C-new and C `EXACT_REPLAY` call it zero times;
+- committed-denial universe fixtures prove successful A/B results, `not allowed`
+  denials without mandatory evidence, malformed/UUID/integrity failures, pre-commit
+  rollback/persistence failure, exact replay and recovery count zero; one committed
+  `NEW_EVIDENCE_INSERT` pair counts exactly once; 30 committed pairs in the exact
+  rolling window are admitted and the 31st candidate is denied before pair DML;
+- limit boundary tests additionally cover 100/run, 262144 bytes, depth 24, 10000
+  nodes, 15-minute freshness, five-second timeout and storage/circuit thresholds.
 
 ### Static isolation and conservation
 
@@ -4520,13 +4701,16 @@ CLI, frontend and startup business execution remain unchanged.
   drift fixtures prove the exact Algorithm-C frozen-denial rules and both stable
   failure literals;
 - UUIDv4 generation format/variant, same-millisecond sequential/concurrent uniqueness,
-  exact post-clock/pre-derivation single-call ordering, zero/two/alternate/callback/
+  exact post-guard/post-clock/pre-derivation single-call ordering, post-guard zero/two/alternate/callback/
   early/late/malformed/throw/collision failure, same-package replay and caller-field
   rejection; every non-collision violation has exact
   `CANONICAL_DENIAL_ATTEMPT_ID_GENERATION_FAILED`, only a proved uniqueness collision
   has `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`, and every invalid path has zero DML and
-  no retry/fallback. Every new A/B execution has one durable attempt/rate/circuit
-  transition while Algorithm-C replay counts zero;
+  no retry/fallback. A/B uniqueness-hit cases perform the same complete persisted-pair
+  self-integrity proof as C before corruption versus collision classification. Only a
+  successfully committed Algorithm-C `NEW_EVIDENCE_INSERT` pair enters the durable
+  attempt/rate/circuit universe; successful A/B, `not allowed`, pre-commit failure,
+  exact replay and recovery count zero;
 - exact three-kind snapshot member/candidate/boundary/snapshot hash fixtures plus
   append-between-transactions, higher-precedence append, historical-hash stability,
   future-attempt reclassification and every frozen integrity failure listed above;
@@ -4549,23 +4733,26 @@ CLI, frontend and startup business execution remain unchanged.
   return only `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`;
 - new evidence fixtures prove the conflict and `PENDING` transition intent commit
   atomically before attempt/rate/circuit stages. The exact matrix is: (1) crash before
-  conflict-evidence commit; (2) crash after conflict-row insert but before transaction
-  commit; (3) crash after evidence-plus-intent commit; (4) crash before attempt
-  accounting; (5) crash after attempt accounting; (6) crash after rate accounting;
-  (7) crash after circuit transition; (8) crash before marking `COMPLETE`; (9)
-  repeated restart/recovery; (10) concurrent test-only recovery workers invoking the
-  same repository reconciler (no runtime worker); (11) exact replay
-  during an incomplete transition; and (12) new primary admission during an
-  incomplete transition. Every case proves one pair, one result per key, no double-
-  count/undercount, identical final state, scope-local admission blocking and read-
-  only replay availability;
+  conflict insert gives zero durable pair/accounting; (2) crash after either/both
+  inserts but before commit gives zero durable pair/accounting; (3) crash after atomic
+  pair commit recovers that one pair; (4) crash before attempt accounting; (5) crash
+  after attempt accounting; (6) crash after rate accounting; (7) crash after circuit
+  transition; (8) crash before marking `COMPLETE`; (9) repeated restart/recovery;
+  (10) concurrent test-only recovery invocations of the same repository reconciler
+  (no runtime worker); (11) exact replay during an incomplete transition leaves state
+  unchanged, followed by a separately invoked reconciler that reaches `COMPLETE`;
+  and (12) new primary admission during an incomplete transition returns recovery-
+  required before clock/UUID and never resumes, while a later external call may
+  proceed after recovery. Exactly-once/no-undercount applies only to cases at or after
+  the successful pair commit;
 - later contiguous authority descendants separately cover `revoked` persistence,
   `superseded` persistence, authorized `LATEST_CHAIN_MISMATCH` persistence and expired
   `AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1` zero-DML/immediate-circuit
   behavior, including explicit no-`EXPIRED` and no-`LATEST_CHAIN_MISMATCH` fallback;
 - future validity endpoints excluded from the monotonic floor, operational
-  regression/equality policy, exactly one repository clock call in A/B and C new
-  insert, and zero repository clock calls in C exact replay;
+  regression/equality policy, exactly one repository clock call only after the
+  successful A/B or C-new incomplete-scope guard, and zero calls in blocked A/B,
+  blocked C-new and C exact replay;
 - cohort ordering/duplicate rejection, boundary normalization/null-end rules and
   idempotency baseline plus every-field mutation fixtures; SQL/JSON null is the only
   v1 boundary end and every non-null/end-update path rejects;
@@ -4612,10 +4799,13 @@ CLI, frontend and startup business execution remain unchanged.
 
 ### Future remediation implementation checklist
 
-- preserve the exact seven-table inventory and reciprocal deferred conflict/
-  transition FKs; no conflict-only commit path is permitted;
-- implement the located-row collection, complete self-integrity proof and
-  classification matrix before any collision result or append admission;
+- preserve the exact seven-table inventory and both ordered reciprocal composite
+  deferred conflict/transition FKs plus their exact unique parent indexes; no single-
+  column-only, shared, crossed, swapped or orphan pair and no conflict-only commit path
+  is permitted;
+- implement the located-row collection and complete persisted-pair self-integrity
+  proof before any A/B uniqueness-hit or Algorithm-C collision result, and implement
+  C's two-lookup classification matrix before append admission;
 - keep `CANONICAL_CONFLICT_REPLAY_INTEGRITY_FAILED`,
   `CANONICAL_DENIAL_ATTEMPT_ID_COLLISION`,
   `CANONICAL_DENIAL_ATTEMPT_ID_GENERATION_FAILED`,
@@ -4623,10 +4813,19 @@ CLI, frontend and startup business execution remain unchanged.
   `CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED` disjoint;
 - derive transition identity, intent, stage keys and results only from locked
   repository values and exact section-22 envelopes;
+- treat all pre-pair-commit identities and sequence allocation as transient and begin
+  exactly-once attempt/rate/circuit guarantees only after atomic pair commit; do not
+  add an eighth table or claim reconciler recovery for rolled-back attempts;
+- define the 30/minute ledger exclusively from valid applied rate results of committed
+  `NEW_EVIDENCE_INSERT` pairs; every excluded success/failure/replay/recovery category
+  counts zero;
 - make every recovery stage idempotent under its unique key, monotonically persisted
   and independently reread before commit;
-- enforce the exact company/branch/operation-domain incomplete-transition guard while
-  allowing the complete read-only replay path;
+- enforce the A/B incomplete-transition guard before clock/UUID and the C-new guard
+  after replay proof but before evidence clock/sequence/DML; return the stable recovery-
+  required result, reconcile separately and never resume the blocked invocation;
+- keep exact replay read-only and state-preserving; only an explicitly separate
+  reconciler invocation may advance an incomplete transition;
 - implement the explicit safe-integer equality/unreachable comparator branches and
   their cross-language fixtures;
 - keep every authorization field in section 26 unchanged; implementation, deployment

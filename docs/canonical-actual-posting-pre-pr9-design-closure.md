@@ -13,10 +13,12 @@
 This document is an exact **design recommendation** for PR9. It is not an approval
 record and does not implement, authorize, deploy or activate PR9. D-PR9-01–16 are
 Gate A design assumptions awaiting durable approval by the Product/Business Owner
-after an independent Technical Architecture Reviewer has approved this exact
-document head. Gate A closes only the architecture design. It does not certify
-accounting, tax, legal/privacy or operational correctness for production and does
-not authorize implementation or any production action.
+under the section-28 approval contract for this exact document head. In the
+documented single-owner governance mode, a separate independent human Technical
+Architecture Reviewer is recommended but is not a blocking Gate A condition. Gate A
+closes only the architecture design. It does not certify accounting, tax,
+legal/privacy or operational correctness for production and does not authorize
+implementation or any production action.
 
 The required authorization state remains:
 
@@ -189,15 +191,25 @@ implies approval at a later gate.
 #### Gate A — Architecture design
 
 Gate A approves the contracts, schema design, transaction design, isolation, test
-matrix and PR9a/PR9b split recorded in this document. It requires exactly:
+matrix and PR9a/PR9b split recorded in this document. For this pre-PR9 design, it
+requires exactly:
 
-- a Product/Business Owner durable approval; and
-- a durable approval from a Technical Architecture Reviewer who is independent of
-  the document author for this review.
+- a technically completed design review with no unresolved P0/P1 architecture
+  findings;
+- a durable Product/Business Owner approval in an authenticated permanent GitHub
+  channel that identifies the repository, PR #231, document path, Owner identity,
+  Owner role, UTC timestamp, permanent approval reference and exact approved commit
+  SHA; and
+- when the project operates in single-owner governance mode, the Owner's explicit
+  acceptance of the additional architecture, implementation and operational risk.
 
-Automated Codex review may be retained as technical evidence, but it cannot provide
-either durable approval. Both approvals must identify PR #231 and the same exact
-document head SHA in an authenticated durable channel. Gate A approval does not
+An independent human Technical Architecture Reviewer approval is recommended,
+increases assurance and may be added when a suitable specialist is available, but
+is not a blocking condition for this Gate A single-owner exception. Automated review
+may be retained as supporting technical evidence and may establish that it found no
+unresolved P0/P1 findings, but it is not human approval and must never be represented
+as independent human approval. It does not replace the durable Product/Business
+Owner approval. Gate A approval does not
 assert accounting correctness, tax treatment, legal sufficiency, privacy
 compliance, operational readiness or production evidence validity. It authorizes no
 implementation, deployment, migration or production read/write.
@@ -246,11 +258,16 @@ window and rollback controls. The release authorizer cannot be the sole implemen
 or sole producer/reviewer of the evidence being released. Gate D expires after its
 named action/window and cannot be inferred from Gates A–C, merge or CI.
 
-Segregation of duties is therefore proportional to risk: role combination is
-permitted for a small owner-operated product with durable disclosure, while
-independence is mandatory for Gate A technical review, production evidence review
-and Gate D release authorization. An author cannot be the only reviewer of their
-own production evidence, and automated review never replaces owner authorization.
+Segregation of duties is therefore proportional to risk: the narrowly scoped Gate A
+single-owner exception permits the Product/Business Owner to approve only
+`architectureDesignApproved` for this pre-PR9 design after the section-28 review,
+evidence and risk-acceptance conditions are satisfied. It does not extend to Gate B,
+Gate C, Gate D or any implementation, deployment, Railway, production evidence,
+authority, operational, legal/retention, activation, read, write, settlement,
+shadow-read or cutover decision. Independence remains mandatory for production
+evidence review and Gate D release authorization. An author cannot be the only
+reviewer of their own production evidence, and automated review never replaces
+owner authorization or becomes human approval.
 
 In sections 6–25, an "approved" policy, authority, evidence pack, activation or
 production value means approved at its applicable later Gate C or Gate D. Gate A
@@ -5048,7 +5065,7 @@ Passing tests authorizes no merge, deployment, activation, reads or writes.
 
 | Field | Current value | Reason |
 |---|---|---|
-| `architectureDesignApproved` | `FALSE` | Gate A requires durable Product/Business Owner and independent Technical Architecture Reviewer approvals bound to the same exact PR head |
+| `architectureDesignApproved` | `FALSE` | governance-contract remediation only; a new section-28 Owner approval bound to the exact post-remediation document head is absent |
 | `pr9aImplementationAuthorized` | `FALSE` | Gate B exact-scope/base-SHA owner authorization is absent |
 | `pr9bImplementationAuthorized` | `FALSE` | Gate C is open and no exact PR9b authorization exists |
 | `pr9ImplementationAuthorized` | `FALSE` | legacy aggregate remains fail-closed and cannot substitute for the scoped PR9a/PR9b gates |
@@ -5073,7 +5090,8 @@ Passing tests authorizes no merge, deployment, activation, reads or writes.
 | `shadowReadAuthorized` | `FALSE` | PR11 not authorized |
 | `cutoverAuthorized` | `FALSE` | PR12 not authorized |
 
-If both valid Gate A approvals are later recorded, only
+If all section-28 Gate A review, evidence and Owner risk-acceptance conditions are
+later satisfied for the exact unchanged document head, only
 `architectureDesignApproved` may become `TRUE`. Every other field in this table
 remains unchanged. A later Gate B owner prompt may change only
 `pr9aImplementationAuthorized`; it cannot change any deployment or production field.
@@ -5106,32 +5124,49 @@ D-PR9-01, D-PR9-02, D-PR9-03, D-PR9-07, D-PR9-08, D-PR9-14 or D-PR9-15.
 
 ## 28. Gate A Owner Approval Packet
 
-Gate A requires two durable approvals bound to the same exact PR #231 head: one
-from the Product/Business Owner and one from an independent Technical Architecture
-Reviewer. It does not require separate Accounting, Tax/VAT, Legal/Privacy, Security
-or Operations approvers. Those specialists are required only at Gate C for the
-production policy/evidence contracts within their competence. Formal legal or tax
-opinions are not prerequisites for the local disabled foundation, because Gate A
-and Gate B assert no production legal/tax correctness and permit no production data
-or financial recognition.
+Gate A requires a technically completed design review with no unresolved P0/P1
+architecture findings and one durable Product/Business Owner approval bound to the
+same exact PR #231 document head. For this owner-operated project, the Owner may use
+the Gate A single-owner exception without a separate independent human Technical
+Architecture Reviewer. An independent human review remains recommended and may be
+retained as additional assurance, but it is not a required signature or blocking
+condition. Automated review is supporting technical evidence only: it may report
+that it found no unresolved P0/P1 findings, but it is not human approval and must
+not be described as independent human approval.
 
-The Technical Architecture Reviewer must submit this exact statement after
-replacing `<EXACT_PR_HEAD_SHA>` with the full current head SHA:
+The single-owner exception applies only to `architectureDesignApproved` for this
+pre-PR9 Gate A design. It does not apply to PR9a or PR9b implementation, the legacy
+aggregate PR9 implementation gate, foundation retry, disabled or production
+deployment, Railway actions, production evidence acceptance, source/producer/
+posting-adapter authority, operational controls, legal or retention controls,
+production activation, canonical reads or writes, settlement, shadow read or
+cutover. Every such decision remains `FALSE` and requires its own later explicit
+gate. Gate A does not require separate Accounting, Tax/VAT, Legal/Privacy, Security
+or Operations approval because those specialists remain required only at their
+applicable later production policy/evidence gates. Gate A and Gate B assert no
+production legal/tax correctness and permit no production data or financial
+recognition.
+
+The Product/Business Owner must publish the following statement in an authenticated
+permanent GitHub channel after replacing every angle-bracketed template field with
+the literal durable value. The exact approved head must be the commit containing the
+unchanged design and governance contract being approved:
 
 ```text
-TECHNICAL ARCHITECTURE REVIEW APPROVED — I independently reviewed PRE-PR9 Design Closure in PR #231 at exact head <EXACT_PR_HEAD_SHA>. I approve D-PR9-01–D-PR9-16 only as the Gate A architecture design assumptions and fail-closed PR9a/PR9b boundaries recorded in that head. I do not approve implementation, deployment, production migration, Railway access, production reads or writes, accounting/tax/legal/privacy production policy, production evidence, activation, settlement, shadow read or cutover.
-```
+PRODUCT / BUSINESS OWNER ARCHITECTURE APPROVAL
 
-Automated review output may be linked as evidence for that reviewer, but cannot be
-the authenticated durable approval itself. The reviewer approval is invalid if the
-document head changes afterward.
+Repository: rishatkznAI/rental-management
+PR: #231
+Approved head: <EXACT_PR_HEAD_SHA>
+Document: docs/canonical-actual-posting-pre-pr9-design-closure.md
+Owner identity: <OWNER_IDENTITY>
+Owner role: Product / Business Owner
+Approval timestamp UTC: <APPROVAL_TIMESTAMP_UTC>
+Permanent GitHub reference: <PERMANENT_GITHUB_APPROVAL_URL>
 
-After that technical approval exists for the same head, the Product/Business Owner
-may submit the following exact statement, replacing `<EXACT_PR_HEAD_SHA>` with the
-full current head SHA:
+OWNER DESIGN APPROVAL — I confirm that I am the Product/Business Owner authorized for rentCore. I approve Gate A architecture design in PR #231 at exact head <EXACT_PR_HEAD_SHA>, including D-PR9-01–D-PR9-16 only as design assumptions for the contracts, schema design, transaction design, isolation, test matrix and PR9a/PR9b split recorded in that head. I acknowledge that Accounting/Finance, Tax/VAT, Legal/Privacy, production evidence, source/identity authority, Security/Operations readiness and all production policy values remain unapproved until their applicable later gates. This approval authorizes no merge automatically, no PR9a or PR9b implementation, no disabled or production deployment, no production migration, no Railway access, no production PR8 execution, no canonical production read or write, no settlement, no shadow read and no cutover.
 
-```text
-OWNER DESIGN APPROVAL — I confirm that I am the Product/Business Owner authorized for rentCore. I approve Gate A architecture design in PR #231 at exact head <EXACT_PR_HEAD_SHA>, including D-PR9-01–D-PR9-16 only as design assumptions for the contracts, schema design, transaction design, isolation, test matrix and PR9a/PR9b split recorded in that head. I confirm that a durable independent Technical Architecture Reviewer approval exists for the same exact head. I acknowledge that Accounting/Finance, Tax/VAT, Legal/Privacy, production evidence, source/identity authority, Security/Operations readiness and all production policy values remain unapproved until their applicable later gates. This approval authorizes no merge automatically, no PR9a or PR9b implementation, no disabled or production deployment, no production migration, no Railway access, no production PR8 execution, no canonical production read or write, no settlement, no shadow read and no cutover.
+SINGLE-OWNER RISK ACCEPTANCE — The Product/Business Owner acknowledges that Gate A is being approved without a separate independent human Technical Architecture Reviewer. The Owner accepts the additional architecture, implementation and operational risk created by single-owner governance. Automated reviews are supporting technical evidence only and are not represented as independent human approval.
 
 architectureDesignApproved = TRUE
 pr9aImplementationAuthorized = FALSE
@@ -5139,6 +5174,18 @@ pr9bImplementationAuthorized = FALSE
 pr9ImplementationAuthorized = FALSE
 pr9DisabledDeploymentAuthorized = FALSE
 foundationDeploymentRetryAuthorized = FALSE
+productionEvidenceAccepted = FALSE
+productionIdentityReady = FALSE
+productionSourceAuthorityReady = FALSE
+productionDryRunExecutionAuthorized = FALSE
+productionDryRunExecutionCompleted = FALSE
+productionDryRunEvidenceAccepted = FALSE
+sourceAdapterAuthorityApproved = FALSE
+eligibilityProducerAuthorityApproved = FALSE
+canonicalPostingAdapterAuthorityApproved = FALSE
+operationalControlsApproved = FALSE
+retentionAndLegalHoldControlsApproved = FALSE
+canonicalWriteContractApproved = FALSE
 productionActivationAuthorized = FALSE
 canonicalProductionReadsAuthorized = FALSE
 productionCanonicalWritesAuthorized = FALSE
@@ -5147,9 +5194,12 @@ shadowReadAuthorized = FALSE
 cutoverAuthorized = FALSE
 ```
 
-The statements are valid only when their authenticated author identity, UTC
-timestamp, permanent reference and literal text are durable and both identify the
-same unchanged PR head. The owner approval may set only
+The statement is valid only when its authenticated Owner identity, Owner role, UTC
+timestamp, permanent GitHub reference, repository, PR number, document path, literal
+risk acceptance and approval text are durable and identify the same exact unchanged
+document head. Any later change to this design document invalidates the prior Owner
+approval and requires a new Owner approval for the new exact head. The Owner
+approval may set only
 `architectureDesignApproved = TRUE`. PR9a remains forbidden until a new Gate B
 owner prompt names its exact implementation scope and base SHA. PR9b remains
 forbidden until Gate C closes and a separate exact authorization is recorded.

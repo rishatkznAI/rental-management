@@ -2,7 +2,7 @@
 
 ## 1. Status and safety boundary
 
-**Document status:** `DESIGN CLOSURE READY FOR RISK-BASED GATE A APPROVAL`
+**Document status:** `GATE A ARCHITECTURE DESIGN APPROVED — IMPLEMENTATION NOT AUTHORIZED`
 
 **Design-only audit timestamp:** `2026-07-25T16:35:40Z`
 
@@ -10,21 +10,22 @@
 
 **Audited base:** `9870c279166e41dc0a059763240a8ce892abf54d`
 
-This document is an exact **design recommendation** for PR9. It is not an approval
-record and does not implement, authorize, deploy or activate PR9. D-PR9-01–16 are
-Gate A design assumptions awaiting durable approval by the Product/Business Owner
-under the section-28 approval contract for this exact document head. In the
-documented single-owner governance mode, a separate independent human Technical
-Architecture Reviewer is recommended but is not a blocking Gate A condition. Gate A
-closes only the architecture design. It does not certify accounting, tax,
-legal/privacy or operational correctness for production and does not authorize
-implementation or any production action.
+This document records the exact **Gate A architecture design baseline** for PR9 and
+does not implement, authorize, deploy or activate PR9. D-PR9-01–16 are approved only
+as Gate A design assumptions by the durable Product/Business Owner approval recorded
+in section 28 for exact approved design head
+`b8a420f896e4363d014e5f6e2a0f1e6eae0cbe66`. The documented single-owner
+governance exception applies only to this architecture approval; a separate
+independent human Technical Architecture Reviewer remains recommended but is not a
+blocking Gate A condition. Gate A closes only the architecture design. It does not
+certify accounting, tax, legal/privacy or operational correctness for production
+and does not authorize implementation or any production action.
 
 The required authorization state remains:
 
 ```text
 foundationDeploymentRetryAuthorized = FALSE
-architectureDesignApproved = FALSE
+architectureDesignApproved = TRUE
 pr9aImplementationAuthorized = FALSE
 pr9bImplementationAuthorized = FALSE
 pr9ImplementationAuthorized = FALSE
@@ -38,7 +39,9 @@ cutoverAuthorized = FALSE
 ```
 
 Merging this design document, passing CI, or receiving no objection changes none of
-those values. After Gate A closes, PR9a still requires a later, separately recorded
+those values. The section-28 durable Owner approval changes only
+`architectureDesignApproved`. Gate A is closed only for architecture design; PR9a
+still requires a later, separately recorded
 `pr9aImplementationAuthorized = TRUE` owner decision tied to its exact scope and
 base SHA. PR9b requires its own later authorization after Gate C. Disabled
 deployment, release, production activation, canonical reads, canonical writes,
@@ -275,7 +278,7 @@ approves only the shape and fail-closed behavior of those contracts.
 
 ## 6. D-PR9-01 — Amount basis
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING; GATE C PRODUCTION POLICY
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED; GATE C PRODUCTION POLICY
 REVALIDATION REQUIRED`
 
 **Recommended decision:** `canonical_receivables.originalAmountMinor` equals the
@@ -316,7 +319,7 @@ posting transaction.
 
 ## 7. D-PR9-02 — Due date
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING; GATE C PRODUCTION POLICY
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED; GATE C PRODUCTION POLICY
 REVALIDATION REQUIRED`
 
 **Recommended decision:** `dueDateProvenance=unknown` may be eligible only when the
@@ -390,7 +393,7 @@ approved PR2 due-date-change workflow; PR9 never updates it.
 
 ## 8. D-PR9-03 — Conducted, signature and evidence authority
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING; GATE C PRODUCTION POLICY
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED; GATE C PRODUCTION POLICY
 REVALIDATION REQUIRED`
 
 **Recommended decision:** the source is admissible only when all conditions hold:
@@ -421,7 +424,7 @@ blocks before canonical DML.
 
 ## 9. D-PR9-04 — Source system and adapter
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING; CONCRETE PRODUCTION AUTHORITY
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED; CONCRETE PRODUCTION AUTHORITY
 REMAINS GATE C`
 
 **Recommended v1 logical source system:** exactly
@@ -448,7 +451,7 @@ No concrete production adapter instance is approved or created by this document.
 
 ## 10. D-PR9-05 — Integration identity
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING; CONCRETE PRODUCTION IDENTITY
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED; CONCRETE PRODUCTION IDENTITY
 REMAINS GATE C`
 
 **Recommended same-process v1 actor identities:**
@@ -505,7 +508,7 @@ same-ID later version is deterministic drift/supersession, never silent acceptan
 
 ## 11. D-PR9-06 — Capability catalog strategy
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING`
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED`
 
 **Recommended strategy:** option A. PR9 adds no capability catalog version and no
 human capability. Integration operations are authorized exclusively by
@@ -524,7 +527,7 @@ UI/API or out-of-process integration resolver requires a separate catalog-design
 
 ## 12. D-PR9-07 — Activation boundary and cohort
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING; GATE C PRODUCTION POLICY
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED; GATE C PRODUCTION POLICY
 REVALIDATION REQUIRED; ACTIVATION REMAINS GATE D`
 
 **Recommended immutable v1 definition:** one activation record covers exactly one
@@ -557,7 +560,7 @@ or activation record is created here.
 
 ## 13. D-PR9-08 — Accepted PR8 evidence
 
-**Status:** `GATE A EVIDENCE-CONTRACT DESIGN ASSUMPTION PENDING; ACTUAL PRODUCTION
+**Status:** `GATE A EVIDENCE-CONTRACT DESIGN ASSUMPTION APPROVED; ACTUAL PRODUCTION
 EVIDENCE ACCEPTANCE REMAINS GATE C`
 
 **Recommended admission contract:** an admissible run must be a real production PR8
@@ -718,7 +721,7 @@ freshness-window and manifest bindings.
 
 ## 14. D-PR9-09 — Exact database object set
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING`
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED`
 
 **Recommended migration:**
 
@@ -1738,7 +1741,7 @@ timestamp mutation. There is no down migration.
 
 ## 15. D-PR9-10 — Event-to-canonical mapping
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING`
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED`
 
 Recommended exact mapping:
 
@@ -1783,7 +1786,7 @@ version/set/slice IDs change.
 
 ## 16. D-PR9-11 — Canonical immutability
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING`
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED`
 
 **Recommended decision:** add source-scoped PR9 triggers. Every PR9-created canonical
 row is fully immutable and cannot be deleted. The existing PR1/PR2 behavior for any
@@ -1801,7 +1804,7 @@ and remains application-rollback compatible.
 
 ## 17. D-PR9-12 — Conflict and quarantine evidence
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING`
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED`
 
 **Recommended decision:** the primary posting transaction rolls back completely on
 conflict: canonical, operation and financial-audit writes are all zero. After that
@@ -1903,7 +1906,7 @@ attempts and are not financial effects.
 
 ## 18. D-PR9-13 — Source change after posting
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING`
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED`
 
 PR9 performs no background monitoring. On a later attempt/replay, it detects current
 PR6 reopen, cancellation, correction, supersession, amount/due-date change, missing
@@ -1935,7 +1938,7 @@ invalidate or erase prior committed evidence.
 
 ## 19. D-PR9-14 — Operational thresholds
 
-**Status:** `GATE A LOCAL/DISABLED SAFE-DEFAULT ASSUMPTION PENDING; GATE C
+**Status:** `GATE A LOCAL/DISABLED SAFE-DEFAULT ASSUMPTION APPROVED; GATE C
 PRODUCTION VALUES REVALIDATION REQUIRED`
 
 Recommended v1 numbers:
@@ -1968,7 +1971,7 @@ exact limits.
 
 ## 20. D-PR9-15 — Retention, legal and incident controls
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING; GATE C PRODUCTION POLICY
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED; GATE C PRODUCTION POLICY
 REVALIDATION REQUIRED`
 
 Recommended v1 controls:
@@ -2007,7 +2010,7 @@ incident values through the responsible role-scoped approvals.
 
 ## 21. D-PR9-16 — PR structure
 
-**Status:** `GATE A DESIGN ASSUMPTION PENDING`
+**Status:** `GATE A DESIGN ASSUMPTION APPROVED`
 
 **Recommended decision:** stacked PR9a/PR9b under this single architecture gate.
 
@@ -5065,7 +5068,7 @@ Passing tests authorizes no merge, deployment, activation, reads or writes.
 
 | Field | Current value | Reason |
 |---|---|---|
-| `architectureDesignApproved` | `FALSE` | governance-contract remediation only; a new section-28 Owner approval bound to the exact post-remediation document head is absent |
+| `architectureDesignApproved` | `TRUE` | Gate A single-owner approval by Ришат Хабибрахманов is durably bound to approved design head `b8a420f896e4363d014e5f6e2a0f1e6eae0cbe66` at the section-28 permanent GitHub reference |
 | `pr9aImplementationAuthorized` | `FALSE` | Gate B exact-scope/base-SHA owner authorization is absent |
 | `pr9bImplementationAuthorized` | `FALSE` | Gate C is open and no exact PR9b authorization exists |
 | `pr9ImplementationAuthorized` | `FALSE` | legacy aggregate remains fail-closed and cannot substitute for the scoped PR9a/PR9b gates |
@@ -5090,10 +5093,11 @@ Passing tests authorizes no merge, deployment, activation, reads or writes.
 | `shadowReadAuthorized` | `FALSE` | PR11 not authorized |
 | `cutoverAuthorized` | `FALSE` | PR12 not authorized |
 
-If all section-28 Gate A review, evidence and Owner risk-acceptance conditions are
-later satisfied for the exact unchanged document head, only
-`architectureDesignApproved` may become `TRUE`. Every other field in this table
-remains unchanged. A later Gate B owner prompt may change only
+The section-28 Gate A review, evidence and Owner risk-acceptance conditions are
+satisfied for exact approved design head
+`b8a420f896e4363d014e5f6e2a0f1e6eae0cbe66`; only
+`architectureDesignApproved` is `TRUE`. Every other field in this table remains
+unchanged. A later Gate B owner prompt may change only
 `pr9aImplementationAuthorized`; it cannot change any deployment or production field.
 
 ## 27. D-PR9 status matrix
@@ -5117,12 +5121,12 @@ remains unchanged. A later Gate B owner prompt may change only
 | D-PR9-15 Retention/incidents | retention/security design assumptions | Gate C Legal/Privacy and Security/Operations revalidate production controls |
 | D-PR9-16 PR structure | stacked PR9a foundation then PR9b posting | Gate B may authorize PR9a only; PR9b waits for Gate C; any release waits for Gate D |
 
-All D-PR9-01–16 may be approved now only as Gate A architecture design assumptions.
-This document itself approves none of them. In particular, Gate A does not accept
+All D-PR9-01–16 are approved only as Gate A architecture design assumptions. This
+approval changes no later-gate value. In particular, Gate A does not accept
 actual PR8 production evidence and does not finalize production policy values for
 D-PR9-01, D-PR9-02, D-PR9-03, D-PR9-07, D-PR9-08, D-PR9-14 or D-PR9-15.
 
-## 28. Gate A Owner Approval Packet
+## 28. Gate A Owner Approval Record
 
 Gate A requires a technically completed design review with no unresolved P0/P1
 architecture findings and one durable Product/Business Owner approval bound to the
@@ -5147,24 +5151,28 @@ applicable later production policy/evidence gates. Gate A and Gate B assert no
 production legal/tax correctness and permit no production data or financial
 recognition.
 
-The Product/Business Owner must publish the following statement in an authenticated
-permanent GitHub channel after replacing every angle-bracketed template field with
-the literal durable value. The exact approved head must be the commit containing the
-unchanged design and governance contract being approved:
+The Product/Business Owner published the following approval in an authenticated
+permanent GitHub channel. The record below binds that durable evidence to the
+existing normative authorization format. The approved design head contains the
+unchanged technical design and the single-owner governance contract being approved:
 
 ```text
 PRODUCT / BUSINESS OWNER ARCHITECTURE APPROVAL
 
 Repository: rishatkznAI/rental-management
 PR: #231
-Approved head: <EXACT_PR_HEAD_SHA>
+Approved head: b8a420f896e4363d014e5f6e2a0f1e6eae0cbe66
 Document: docs/canonical-actual-posting-pre-pr9-design-closure.md
-Owner identity: <OWNER_IDENTITY>
+Owner identity: Ришат Хабибрахманов
 Owner role: Product / Business Owner
-Approval timestamp UTC: <APPROVAL_TIMESTAMP_UTC>
-Permanent GitHub reference: <PERMANENT_GITHUB_APPROVAL_URL>
+Approval timestamp UTC: 2026-07-27T05:56:59Z
+Permanent GitHub reference: https://github.com/rishatkznAI/rental-management/pull/231#issuecomment-5087757763
+Approval mode: single-owner Gate A exception
+Supporting technical review evidence: FINAL VERDICT: DESIGN REVIEW PASSED
+Reviewed technical design head: aa25aeb62b81e8d27cfd21b09a2eec09d6351aa4
+Technical sections 6–25 at approved design head: byte-exact after governance remediation
 
-OWNER DESIGN APPROVAL — I confirm that I am the Product/Business Owner authorized for rentCore. I approve Gate A architecture design in PR #231 at exact head <EXACT_PR_HEAD_SHA>, including D-PR9-01–D-PR9-16 only as design assumptions for the contracts, schema design, transaction design, isolation, test matrix and PR9a/PR9b split recorded in that head. I acknowledge that Accounting/Finance, Tax/VAT, Legal/Privacy, production evidence, source/identity authority, Security/Operations readiness and all production policy values remain unapproved until their applicable later gates. This approval authorizes no merge automatically, no PR9a or PR9b implementation, no disabled or production deployment, no production migration, no Railway access, no production PR8 execution, no canonical production read or write, no settlement, no shadow read and no cutover.
+OWNER DESIGN APPROVAL — I confirm that I am the Product/Business Owner authorized for rentCore. I approve Gate A architecture design in PR #231 at exact approved design head b8a420f896e4363d014e5f6e2a0f1e6eae0cbe66, including D-PR9-01–D-PR9-16 only as design assumptions for the contracts, schema design, transaction design, isolation, test matrix and PR9a/PR9b split recorded in that head. I acknowledge that Accounting/Finance, Tax/VAT, Legal/Privacy, production evidence, source/identity authority, Security/Operations readiness and all production policy values remain unapproved until their applicable later gates. This approval authorizes no merge automatically, no PR9a or PR9b implementation, no disabled or production deployment, no production migration, no Railway access, no production PR8 execution, no canonical production read or write, no settlement, no shadow read and no cutover.
 
 SINGLE-OWNER RISK ACCEPTANCE — The Product/Business Owner acknowledges that Gate A is being approved without a separate independent human Technical Architecture Reviewer. The Owner accepts the additional architecture, implementation and operational risk created by single-owner governance. Automated reviews are supporting technical evidence only and are not represented as independent human approval.
 
@@ -5194,12 +5202,14 @@ shadowReadAuthorized = FALSE
 cutoverAuthorized = FALSE
 ```
 
-The statement is valid only when its authenticated Owner identity, Owner role, UTC
+The statement is valid because its authenticated Owner identity, Owner role, UTC
 timestamp, permanent GitHub reference, repository, PR number, document path, literal
-risk acceptance and approval text are durable and identify the same exact unchanged
-document head. Any later change to this design document invalidates the prior Owner
-approval and requires a new Owner approval for the new exact head. The Owner
-approval may set only
+risk acceptance and approval text are durable and identify the exact approved design
+head. The single approval-recording commit may change only
+`architectureDesignApproved` and embed this already-durable evidence; it changes no
+approved design semantics and does not invalidate the approval. Any later change to
+this design document invalidates the prior Owner approval and requires a new Owner
+approval for the new exact head. The Owner approval sets only
 `architectureDesignApproved = TRUE`. PR9a remains forbidden until a new Gate B
 owner prompt names its exact implementation scope and base SHA. PR9b remains
 forbidden until Gate C closes and a separate exact authorization is recorded.

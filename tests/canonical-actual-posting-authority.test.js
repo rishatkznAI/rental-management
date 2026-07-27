@@ -39,6 +39,20 @@ function nextAuthority(previous, version, overrides = {}) {
   });
 }
 
+function mutateAppendOnlyTable(db, table, mutation) {
+  const triggers = db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND tbl_name = ? AND sql IS NOT NULL
+    ORDER BY name
+  `).all(table);
+  for (const trigger of triggers) db.exec(`DROP TRIGGER "${trigger.name}"`);
+  try {
+    mutation();
+  } finally {
+    for (const trigger of triggers) db.exec(trigger.sql);
+  }
+}
+
 test('authority repository appends and replays an exact root-to-head chain', () => {
   const context = createPr9aContext();
   try {
@@ -156,6 +170,128 @@ test('post-boundary descendants are excluded from historical frozen classificati
   } finally {
     context.db.close();
   }
+});
+
+test('frozen authority verification rejects malformed suffixes, gaps, and pre-boundary mutation', async t => {
+  await t.test('malformed contiguous suffix row', () => {
+    const context = createPr9aContext();
+    try {
+      const repository = context.authority.repository;
+      const root = context.authority.source;
+      const frozen = repository.freezeAuthorityState({
+        scope: root,
+        binding: {
+          recordId: root.recordId,
+          recordHash: root.recordHash,
+          companyId: root.companyId,
+          branchId: root.branchId,
+        },
+        attemptedAt: DENIED_AT,
+        denialAttemptId: DENIAL_ID,
+        precedenceState: 'unaffected_active_latest',
+      });
+      const descendant = nextAuthority(root, 2);
+      repository.appendAuthorityRecord(descendant);
+      mutateAppendOnlyTable(context.db, 'governed_adapter_authority_records', () => {
+        context.db.prepare(`
+          UPDATE governed_adapter_authority_records SET ownerRef = 'mutated-suffix-owner'
+          WHERE recordId = ?
+        `).run(descendant.recordId);
+      });
+      assert.throws(
+        () => repository.verifyFrozenAuthorityState({
+          snapshot: frozen.snapshot,
+          snapshotHash: frozen.hash,
+          expectedAuthorityKind: 'source_adapter',
+        }),
+        error => error.code === ERROR_CODES.AUTHORITY_FROZEN_CHAIN_SNAPSHOT_INTEGRITY_FAILED,
+      );
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('gap above frozen maximum', () => {
+    const context = createPr9aContext();
+    try {
+      const repository = context.authority.repository;
+      const root = context.authority.source;
+      const frozen = repository.freezeAuthorityState({
+        scope: root,
+        binding: {
+          recordId: root.recordId,
+          recordHash: root.recordHash,
+          companyId: root.companyId,
+          branchId: root.branchId,
+        },
+        attemptedAt: DENIED_AT,
+        denialAttemptId: DENIAL_ID,
+        precedenceState: 'unaffected_active_latest',
+      });
+      const second = nextAuthority(root, 2);
+      const third = nextAuthority(second, 3);
+      repository.appendAuthorityRecord(second);
+      repository.appendAuthorityRecord(third);
+      context.db.pragma('foreign_keys = OFF');
+      try {
+        mutateAppendOnlyTable(context.db, 'governed_adapter_authority_records', () => {
+          context.db.prepare(`
+            DELETE FROM governed_adapter_authority_records WHERE recordId = ?
+          `).run(second.recordId);
+        });
+      } finally {
+        context.db.pragma('foreign_keys = ON');
+      }
+      assert.throws(
+        () => repository.verifyFrozenAuthorityState({
+          snapshot: frozen.snapshot,
+          snapshotHash: frozen.hash,
+          expectedAuthorityKind: 'source_adapter',
+        }),
+        error => error.code === ERROR_CODES.AUTHORITY_FROZEN_CHAIN_SNAPSHOT_INTEGRITY_FAILED,
+      );
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('mutation at or below frozen maximum', () => {
+    const context = createPr9aContext();
+    try {
+      const repository = context.authority.repository;
+      const root = context.authority.source;
+      const second = nextAuthority(root, 2);
+      repository.appendAuthorityRecord(second);
+      const frozen = repository.freezeAuthorityState({
+        scope: root,
+        binding: {
+          recordId: second.recordId,
+          recordHash: second.recordHash,
+          companyId: second.companyId,
+          branchId: second.branchId,
+        },
+        attemptedAt: DENIED_AT,
+        denialAttemptId: DENIAL_ID,
+        precedenceState: 'unaffected_active_latest',
+      });
+      mutateAppendOnlyTable(context.db, 'governed_adapter_authority_records', () => {
+        context.db.prepare(`
+          UPDATE governed_adapter_authority_records SET ownerRef = 'mutated-frozen-owner'
+          WHERE recordId = ?
+        `).run(root.recordId);
+      });
+      assert.throws(
+        () => repository.verifyFrozenAuthorityState({
+          snapshot: frozen.snapshot,
+          snapshotHash: frozen.hash,
+          expectedAuthorityKind: 'source_adapter',
+        }),
+        error => error.code === ERROR_CODES.AUTHORITY_FROZEN_CHAIN_SNAPSHOT_INTEGRITY_FAILED,
+      );
+    } finally {
+      context.db.close();
+    }
+  });
 });
 
 test('candidate ordering and global kind-major precedence are input-order independent for versions 2 and 10', () => {

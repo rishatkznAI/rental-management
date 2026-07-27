@@ -9,6 +9,7 @@ const {
   BILLING_SOURCE_COVERAGE_SETS_TABLE,
   BILLING_SOURCE_COVERAGE_SLICES_TABLE,
   BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
+  BILLING_SOURCE_SNAPSHOTS_TABLE,
   BILLING_SOURCE_UPD_LINE_VERSIONS_TABLE,
   BILLING_SOURCE_UPD_VERSIONS_TABLE,
 } = require('./billing-source-authority-schema');
@@ -359,6 +360,49 @@ function persistedRowFingerprint(db, tableName, row) {
   };
 }
 
+function sameScopeLogicalCoverageRows(db, candidate) {
+  return db.prepare(`
+    SELECT slice.*, coverage.updId AS graphUpdId, coverage.formedUpdVersionId AS graphFormedUpdVersionId,
+           coverage.status AS graphCoverageStatus
+    FROM ${BILLING_SOURCE_COVERAGE_SLICES_TABLE} AS slice
+    JOIN ${BILLING_SOURCE_COVERAGE_SETS_TABLE} AS coverage
+      ON coverage.id = slice.coverageSetId
+     AND coverage.companyId = slice.companyId
+     AND coverage.branchId = slice.branchId
+    WHERE slice.companyId = ? AND slice.branchId = ?
+      AND slice.rentalId = ? AND slice.rentalLineId = ? AND slice.periodId = ?
+      AND slice.currency = ? AND slice.contractId IS ?
+      AND slice.sliceStartDate < ? AND ? < slice.sliceEndDateExclusive
+      AND coverage.status = 'validated'
+    ORDER BY slice.coverageSetId ASC, slice.id ASC
+  `).all(
+    candidate.companyId,
+    candidate.branchId,
+    candidate.rentalId,
+    candidate.rentalLineId,
+    candidate.periodId,
+    candidate.currency,
+    candidate.contractId,
+    candidate.sliceEndDateExclusive,
+    candidate.sliceStartDate,
+  );
+}
+
+const NON_LINEAGE_ID_COLUMNS = new Set([
+  'actorMembershipId',
+  'actorPrincipalId',
+  'branchId',
+  'clientId',
+  'companyId',
+  'contractId',
+  'principalId',
+  'rentalId',
+]);
+
+function isPr6LineageReferenceColumn(column) {
+  return (column === 'id' || column.endsWith('Id')) && !NON_LINEAGE_ID_COLUMNS.has(column);
+}
+
 function reconstructPr6LineageRows(db, candidate) {
   const all = [];
   for (const tableName of BILLING_SOURCE_AUTHORITY_TABLES) {
@@ -381,6 +425,22 @@ function reconstructPr6LineageRows(db, candidate) {
     candidate.coverageSetId,
     candidate.coverageSliceId,
   ].filter(Boolean));
+  for (const row of sameScopeLogicalCoverageRows(db, candidate)) {
+    for (const value of [
+      row.id,
+      row.coverageSetId,
+      row.updId,
+      row.graphUpdId,
+      row.formedUpdVersionId,
+      row.graphFormedUpdVersionId,
+      row.updLineId,
+      row.updLineVersionId,
+      row.periodId,
+      row.closedPeriodVersionId,
+      row.snapshotId,
+      row.rentalLineId,
+    ]) if (typeof value === 'string' && value.length > 0) known.add(value);
+  }
   const selected = new Set();
   let changed = true;
   while (changed) {
@@ -389,7 +449,7 @@ function reconstructPr6LineageRows(db, candidate) {
       if (selected.has(index)) continue;
       const entry = all[index];
       const related = entry.columns.some(column => (
-        (column === 'id' || column.endsWith('Id'))
+        isPr6LineageReferenceColumn(column)
         && typeof entry.row[column] === 'string'
         && known.has(entry.row[column])
       ));
@@ -398,7 +458,7 @@ function reconstructPr6LineageRows(db, candidate) {
       changed = true;
       for (const column of entry.columns) {
         if (
-          (column === 'id' || column.endsWith('Id'))
+          isPr6LineageReferenceColumn(column)
           && typeof entry.row[column] === 'string'
           && entry.row[column]
         ) known.add(entry.row[column]);
@@ -554,30 +614,33 @@ function rootLineageIdsHash(domain, key, values) {
   });
 }
 
-function brokenSuccessorDenial(db, candidate, relation, rootCoverageLineageId, edgeFailureState) {
+function brokenSuccessorDenial(db, candidate, relationInput, rootCoverageLineageId, edgeFailureState) {
   const economicLineageCandidateFingerprint = sourceCandidateFingerprint(candidate);
-  const relationRowFingerprint = persistedRowFingerprint(
-    db,
-    BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
-    relation,
-  ).rowFingerprint;
-  const brokenEdgeFingerprint = sha256Canonical({
-    branchId: candidate.branchId,
-    companyId: candidate.companyId,
-    domain: 'rentcore.canonical_actual_posting.broken_successor_edge',
-    edgeFailureState,
-    fromCoverageSetId: relation.originalCoverageSetId,
-    relationRowFingerprint,
-    rootCoverageLineageId,
-    toCoverageSetId: relation.replacementCoverageSetId,
-    version: 1,
-  });
-  const brokenEdges = [{
-    brokenEdgeFingerprint,
-    edgeFailureState,
-    fromCoverageSetId: relation.originalCoverageSetId,
-    toCoverageSetId: relation.replacementCoverageSetId,
-  }];
+  const relations = Array.isArray(relationInput) ? relationInput : [relationInput];
+  const brokenEdges = relations.map(relation => {
+    const relationRowFingerprint = persistedRowFingerprint(
+      db,
+      BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
+      relation,
+    ).rowFingerprint;
+    const brokenEdgeFingerprint = sha256Canonical({
+      branchId: candidate.branchId,
+      companyId: candidate.companyId,
+      domain: 'rentcore.canonical_actual_posting.broken_successor_edge',
+      edgeFailureState,
+      fromCoverageSetId: relation.originalCoverageSetId,
+      relationRowFingerprint,
+      rootCoverageLineageId,
+      toCoverageSetId: relation.replacementCoverageSetId,
+      version: 1,
+    });
+    return {
+      brokenEdgeFingerprint,
+      edgeFailureState,
+      fromCoverageSetId: relation.originalCoverageSetId,
+      toCoverageSetId: relation.replacementCoverageSetId,
+    };
+  }).sort((left, right) => compareUtf16Ascending(canonicalJson(left), canonicalJson(right)));
   const edgesHash = edges => sha256Canonical({
     brokenEdges: edges,
     domain: 'rentcore.canonical_actual_posting.broken_successor_edges',
@@ -599,11 +662,11 @@ function brokenSuccessorDenial(db, candidate, relation, rootCoverageLineageId, e
     },
     observedSpecific: {
       branchId: candidate.branchId,
-      brokenEdgeCount: 1,
-      brokenEdgeFingerprint,
+      brokenEdgeCount: brokenEdges.length,
+      brokenEdgeFingerprint: brokenEdges.length === 1 ? brokenEdges[0].brokenEdgeFingerprint : null,
       brokenEdgesHash: edgesHash(brokenEdges),
-      brokenEdgeFromId: relation.originalCoverageSetId,
-      brokenEdgeToId: relation.replacementCoverageSetId,
+      brokenEdgeFromId: brokenEdges.length === 1 ? brokenEdges[0].fromCoverageSetId : null,
+      brokenEdgeToId: brokenEdges.length === 1 ? brokenEdges[0].toCoverageSetId : null,
       companyId: candidate.companyId,
       economicLineageCandidateFingerprint,
       rootCoverageLineageId,
@@ -614,6 +677,91 @@ function brokenSuccessorDenial(db, candidate, relation, rootCoverageLineageId, e
 
 function analyzeLockedSourceGraph(db, acceptedCandidate) {
   const economicLineageCandidateFingerprint = sourceCandidateFingerprint(acceptedCandidate);
+  const logicalCoverageRows = sameScopeLogicalCoverageRows(db, acceptedCandidate);
+  const logicalSetIds = [...new Set(logicalCoverageRows.map(row => row.coverageSetId))]
+    .sort(compareUtf16Ascending);
+  const logicalSetIdSet = new Set(logicalSetIds);
+  const logicalEdges = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE}
+    WHERE companyId = ? AND branchId = ?
+    ORDER BY originalCoverageSetId ASC, replacementCoverageSetId ASC, action ASC, id ASC
+  `).all(acceptedCandidate.companyId, acceptedCandidate.branchId).filter(row => (
+    logicalSetIdSet.has(row.originalCoverageSetId)
+    || (row.replacementCoverageSetId !== null && logicalSetIdSet.has(row.replacementCoverageSetId))
+  ));
+  const hasExternallyBrokenSuccessor = logicalEdges.some(edge => (
+    logicalSetIdSet.has(edge.originalCoverageSetId)
+    && edge.replacementCoverageSetId !== null
+    && !logicalSetIdSet.has(edge.replacementCoverageSetId)
+  ));
+  const incoming = new Map(logicalSetIds.map(id => [id, 0]));
+  const adjacency = new Map(logicalSetIds.map(id => [id, new Set()]));
+  for (const edge of logicalEdges) {
+    if (!logicalSetIdSet.has(edge.originalCoverageSetId) || edge.replacementCoverageSetId === null) continue;
+    if (!logicalSetIdSet.has(edge.replacementCoverageSetId)) continue;
+    incoming.set(edge.replacementCoverageSetId, (incoming.get(edge.replacementCoverageSetId) || 0) + 1);
+    adjacency.get(edge.originalCoverageSetId).add(edge.replacementCoverageSetId);
+    adjacency.get(edge.replacementCoverageSetId).add(edge.originalCoverageSetId);
+  }
+  const roots = logicalSetIds.filter(id => (incoming.get(id) || 0) === 0);
+  const visitedLogicalSets = new Set();
+  let componentCount = 0;
+  for (const setId of logicalSetIds) {
+    if (visitedLogicalSets.has(setId)) continue;
+    componentCount += 1;
+    const pending = [setId];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (visitedLogicalSets.has(current)) continue;
+      visitedLogicalSets.add(current);
+      for (const neighbor of adjacency.get(current) || []) pending.push(neighbor);
+    }
+  }
+  const externalBreakExplainsSingleDetachedTarget = (
+    hasExternallyBrokenSuccessor
+    && roots.length === 2
+    && componentCount === 2
+  );
+  if (
+    !externalBreakExplainsSingleDetachedTarget
+    && (logicalSetIds.length === 0 || roots.length !== 1 || componentCount !== 1)
+  ) {
+    const rootSourceDocumentLineageIds = [...new Set(roots.map(rootId => (
+      logicalCoverageRows.find(row => row.coverageSetId === rootId)?.graphUpdId
+      ?? logicalCoverageRows.find(row => row.coverageSetId === rootId)?.updId
+      ?? null
+    )).filter(Boolean))].sort(compareUtf16Ascending);
+    return Object.freeze({
+      currentCandidate: acceptedCandidate,
+      denial: Object.freeze({
+        conflictType: 'SOURCE_LINEAGE_ROOT_CONFLICT',
+        expectedSpecific: {
+          economicLineageCandidateFingerprint,
+          rootCount: 1,
+          rootCoverageLineageIdsHash: null,
+          rootObservationState: 'unique',
+          rootSourceDocumentLineageIdsHash: null,
+        },
+        observedSpecific: {
+          economicLineageCandidateFingerprint,
+          rootCount: roots.length,
+          rootCoverageLineageIdsHash: rootLineageIdsHash(
+            'rentcore.canonical_actual_posting.root_lineage_ids',
+            'rootCoverageLineageIds',
+            roots,
+          ),
+          rootObservationState: logicalSetIds.length === 0
+            ? 'missing'
+            : roots.length === 0 ? 'cycle' : 'disconnected_roots',
+          rootSourceDocumentLineageIdsHash: rootLineageIdsHash(
+            'rentcore.canonical_actual_posting.root_source_document_lineage_ids',
+            'rootSourceDocumentLineageIds',
+            rootSourceDocumentLineageIds,
+          ),
+        },
+      }),
+    });
+  }
   const visitedPredecessors = new Set();
   let rootSetId = acceptedCandidate.coverageSetId;
   let rootSliceId = acceptedCandidate.coverageSliceId;
@@ -774,7 +922,16 @@ function analyzeLockedSourceGraph(db, acceptedCandidate) {
     `).all(acceptedCandidate.companyId, acceptedCandidate.branchId, currentSetId);
     if (successors.length === 0) break;
     if (successors.length !== 1) {
-      throw repositoryError('CANONICAL_POSTING_UNSAFE_BROKEN_SUCCESSOR_EVIDENCE');
+      return Object.freeze({
+        currentCandidate: acceptedCandidate,
+        denial: brokenSuccessorDenial(
+          db,
+          acceptedCandidate,
+          successors,
+          rootCoverageLineageId,
+          'forked_successor',
+        ),
+      });
     }
     const successor = successors[0];
     if (successor.action === 'cancelled') {
@@ -1067,6 +1224,55 @@ function deniedFreshnessWindowFingerprint({ deniedAttemptedAt, freshnessState, f
   });
 }
 
+function observedAcceptedDryRunsHash(acceptedDryRuns) {
+  const normalized = Array.isArray(acceptedDryRuns) ? acceptedDryRuns.map(entry => ({
+    dryRunId: entry?.dryRunId ?? null,
+    resultHash: entry?.resultHash ?? null,
+  })).sort((left, right) => compareUtf16Ascending(
+    String(left.dryRunId),
+    String(right.dryRunId),
+  )) : [];
+  return sha256Canonical({
+    acceptedDryRuns: normalized,
+    domain: 'rentcore.canonical_actual_posting.accepted_dry_runs',
+    version: 1,
+  });
+}
+
+function observedAcceptedPr8EvidenceHash({
+  acceptedDryRunsHash,
+  acceptedFreshnessWindowsHash,
+  acceptedRuns,
+  evidencePackHash,
+}) {
+  const normalized = Array.isArray(acceptedRuns) ? [...acceptedRuns].sort((left, right) => (
+    compareUtf16Ascending(String(left?.dryRunId), String(right?.dryRunId))
+  )) : [];
+  return sha256Canonical({
+    acceptedDryRunsHash,
+    acceptedFreshnessWindowsHash,
+    acceptedRuns: normalized,
+    domain: 'rentcore.canonical_actual_posting.accepted_pr8_evidence',
+    evidencePackHash,
+    version: 1,
+  });
+}
+
+function observedAcceptedFreshnessWindowsHash(acceptedRuns) {
+  const windows = Array.isArray(acceptedRuns) ? acceptedRuns.map(entry => ({
+    dryRunId: entry?.dryRunId ?? null,
+    freshnessWindowFingerprint: entry?.freshnessWindowFingerprint ?? null,
+  })).sort((left, right) => compareUtf16Ascending(
+    String(left.dryRunId),
+    String(right.dryRunId),
+  )) : [];
+  return sha256Canonical({
+    domain: 'rentcore.canonical_actual_posting.accepted_freshness_windows',
+    version: 1,
+    windows,
+  });
+}
+
 function temporalState(record, attemptedAt) {
   if (!record) return 'missing';
   if (attemptedAt < parseUtcMilliseconds(record.effectiveFrom)) return 'not_yet_effective';
@@ -1074,7 +1280,14 @@ function temporalState(record, attemptedAt) {
   return 'active';
 }
 
-function verifyPr8EvidenceGraph(db, command, authorization, activation, deniedAttemptedAt) {
+function verifyPr8EvidenceGraph(
+  db,
+  command,
+  authorization,
+  activation,
+  deniedAttemptedAt,
+  { validateCompleteAcceptanceSet = true } = {},
+) {
   const attemptedAt = parseUtcMilliseconds(deniedAttemptedAt);
   const run = db.prepare(`SELECT * FROM ${ACTUAL_SOURCE_DRY_RUNS_TABLE} WHERE id = ?`).get(command.dryRunId);
   const candidate = db.prepare(`
@@ -1099,6 +1312,10 @@ function verifyPr8EvidenceGraph(db, command, authorization, activation, deniedAt
     requireProof(run.companyId === command.companyId && run.branchId === command.branchId, 'run_scope');
     requireProof(candidate.companyId === command.companyId && candidate.branchId === command.branchId, 'candidate_scope');
     requireProof(candidate.runId === run.id && candidate.id === command.candidateId, 'candidate_identity');
+    requireProof(
+      candidate.sliceStartDate >= activation.forwardOnlyStartDate,
+      'activation_boundary_membership',
+    );
 
     const inputRows = db.prepare(`
       SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE}
@@ -1616,9 +1833,74 @@ function verifyPr8EvidenceGraph(db, command, authorization, activation, deniedAt
         acceptedRun.resultHash === run?.resultHash
         && acceptedRun.policyManifestHash === run?.policyManifestHash
         && acceptedRun.sourceInputManifestHash === run?.sourceInputManifestHash
-        && acceptedRun.reconciliationSetHash === reconstructedReconciliationSetHash,
+        && acceptedRun.reconciliationSetHash === reconstructedReconciliationSetHash
+        && acceptedRun.companyTimezoneSnapshot === run?.companyTimezone
+        && acceptedRun.companyTimezoneSnapshot === authorization.acceptedCompanyTimezoneSnapshot
+        && acceptedRun.companyTimezoneSnapshot === activation.companyTimezoneSnapshot
+        && acceptedRun.sourceOwnershipManifestHash === authorization.sourceOwnershipManifestHash,
         'accepted_run_binding',
       );
+    }
+    if (validateCompleteAcceptanceSet) {
+      const orderedAcceptedRuns = [...acceptedRuns].sort((left, right) => (
+        compareUtf16Ascending(left.dryRunId, right.dryRunId)
+      ));
+      const pairProjection = orderedAcceptedRuns.map(entry => ({
+        dryRunId: entry.dryRunId,
+        resultHash: entry.resultHash,
+      }));
+      requireProof(
+        authorization.acceptedPr8EvidenceJson === canonicalJson(orderedAcceptedRuns),
+        'accepted_runs_order',
+      );
+      requireProof(
+        authorization.acceptedDryRunsJson === canonicalJson(pairProjection),
+        'accepted_pair_projection',
+      );
+      requireProof(
+        canonicalJson(acceptedDryRuns) === canonicalJson(pairProjection),
+        'accepted_pair_membership',
+      );
+      const acceptedTimezones = new Set(orderedAcceptedRuns.map(entry => entry.companyTimezoneSnapshot));
+      const acceptedOwnershipHashes = new Set(
+        orderedAcceptedRuns.map(entry => entry.sourceOwnershipManifestHash),
+      );
+      requireProof(
+        acceptedTimezones.size === 1
+        && acceptedTimezones.has(authorization.acceptedCompanyTimezoneSnapshot),
+        'accepted_timezone_set',
+      );
+      requireProof(
+        acceptedOwnershipHashes.size === 1
+        && acceptedOwnershipHashes.has(authorization.sourceOwnershipManifestHash),
+        'accepted_ownership_set',
+      );
+      for (const entry of orderedAcceptedRuns) {
+        const persistedRun = db.prepare(`
+          SELECT * FROM ${ACTUAL_SOURCE_DRY_RUNS_TABLE} WHERE id = ?
+        `).get(entry.dryRunId);
+        const persistedCandidate = persistedRun ? db.prepare(`
+          SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}
+          WHERE runId = ? ORDER BY candidateKey ASC, id ASC LIMIT 1
+        `).get(entry.dryRunId) : null;
+        if (!persistedRun || !persistedCandidate) {
+          requireProof(false, `accepted_run_persisted_graph:${entry.dryRunId}`);
+          continue;
+        }
+        const entryProof = verifyPr8EvidenceGraph(
+          db,
+          {
+            ...command,
+            candidateId: persistedCandidate.id,
+            dryRunId: persistedRun.id,
+          },
+          authorization,
+          activation,
+          deniedAttemptedAt,
+          { validateCompleteAcceptanceSet: false },
+        );
+        requireProof(entryProof.valid, `accepted_run_complete_graph:${entry.dryRunId}`);
+      }
     }
     const acceptedFreshnessWindowsHash = sha256Canonical({
       domain: 'rentcore.canonical_actual_posting.accepted_freshness_windows',
@@ -1665,11 +1947,13 @@ function verifyPr8EvidenceGraph(db, command, authorization, activation, deniedAt
     reconciliationSetHash: acceptedRun?.reconciliationSetHash ?? null,
     resultHash: acceptedRun?.resultHash ?? acceptedPair?.resultHash ?? null,
   };
+  const observedDryRunsHash = observedAcceptedDryRunsHash(acceptedDryRuns);
+  const observedFreshnessWindowsHash = observedAcceptedFreshnessWindowsHash(acceptedRuns);
   const observedProjection = {
-    acceptedDryRunsHash: computeAcceptedDryRunsHash(acceptedDryRuns),
-    acceptedPr8EvidenceHash: computeAcceptedPr8EvidenceHash({
-      acceptedDryRunsHash: authorization.acceptedDryRunsHash,
-      acceptedFreshnessWindowsHash: authorization.acceptedFreshnessWindowsHash,
+    acceptedDryRunsHash: observedDryRunsHash,
+    acceptedPr8EvidenceHash: observedAcceptedPr8EvidenceHash({
+      acceptedDryRunsHash: observedDryRunsHash,
+      acceptedFreshnessWindowsHash: observedFreshnessWindowsHash,
       acceptedRuns,
       evidencePackHash: authorization.evidencePackHash,
     }),
@@ -1684,7 +1968,9 @@ function verifyPr8EvidenceGraph(db, command, authorization, activation, deniedAt
     reconciliationSetHash: reconstructedReconciliationSetHash,
     resultHash: reconstructedResultHash,
   };
-  requireProof(canonicalJson(expectedProjection) === canonicalJson(observedProjection), 'projection_mismatch');
+  if (validateCompleteAcceptanceSet) {
+    requireProof(canonicalJson(expectedProjection) === canonicalJson(observedProjection), 'projection_mismatch');
+  }
   return Object.freeze({
     acceptedRun,
     candidate,
@@ -1726,12 +2012,173 @@ function temporalDenialProjection(record, recordKind, deniedAttemptedAt, expecte
   };
 }
 
+function reconstructMissingPr8Candidate(db, command, run, acceptedRun, activation) {
+  const reconciliationRows = db.prepare(`
+    SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE}
+    WHERE runId = ? AND candidateId = ? AND companyId = ? AND branchId = ?
+      AND dimensionKind = 'coverage_slice_equation'
+    ORDER BY id ASC
+  `).all(command.dryRunId, command.candidateId, command.companyId, command.branchId);
+  const coverageSliceIds = [...new Set(reconciliationRows.map(row => {
+    try {
+      return parsePr8CanonicalJson(row.dimensionIdsJson, 'dimensionIdsJson', 'object').coverageSliceId;
+    } catch {
+      return null;
+    }
+  }).filter(Boolean))].sort(compareUtf16Ascending);
+  if (coverageSliceIds.length !== 1) return null;
+  const slice = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_COVERAGE_SLICES_TABLE}
+    WHERE id = ? AND companyId = ? AND branchId = ?
+  `).get(coverageSliceIds[0], command.companyId, command.branchId);
+  if (!slice) return null;
+  const conductedVersions = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE}
+    WHERE companyId = ? AND branchId = ? AND updId = ?
+      AND formedVersionId = ? AND state = 'conducted'
+    ORDER BY version DESC, id ASC
+  `).all(command.companyId, command.branchId, slice.updId, slice.formedUpdVersionId);
+  if (conductedVersions.length !== 1) return null;
+  const inputRows = db.prepare(`
+    SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_INPUTS_TABLE}
+    WHERE runId = ? AND companyId = ? AND branchId = ?
+    ORDER BY deterministicOrderKey ASC, id ASC
+  `).all(command.dryRunId, command.companyId, command.branchId);
+  const persistedInputs = inputRows.map(row => ({
+    row,
+    relationships: parsePr8CanonicalJson(row.relationshipJson, 'relationshipJson', 'object'),
+  }));
+  const inputByIdentity = new Map(persistedInputs.map(input => [
+    `${input.row.sourceKind}:${input.row.sourceId}`,
+    input,
+  ]));
+  const sliceInput = inputByIdentity.get(`billing_source_coverage_slices:${slice.id}`);
+  const canonicalSlice = Object.fromEntries(Object.entries(slice).sort(([left], [right]) => (
+    compareUtf16Ascending(left, right)
+  )));
+  if (
+    !sliceInput
+    || sliceInput.row.coverageSliceId !== slice.id
+    || sliceInput.row.normalizedInputHash !== pr8Fingerprint({
+      sourceKind: 'billing_source_coverage_slices',
+      row: canonicalSlice,
+    })
+  ) return null;
+  const inputVersion = (kind, id) => inputByIdentity.get(`${kind}:${id}`)?.row.sourceVersion ?? null;
+  const currentConducted = conductedVersions[0];
+  const candidateIdentity = {
+    candidateContractVersion: 'actual-source-slice-v1',
+    companyId: command.companyId,
+    branchId: command.branchId,
+    activationBoundaryId: activation.activationBoundaryId,
+    rentalLineId: slice.rentalLineId,
+    rentalId: slice.rentalId,
+    clientId: slice.clientId,
+    contractId: slice.contractId ?? null,
+    periodId: slice.periodId,
+    closedPeriodVersionId: slice.closedPeriodVersionId,
+    snapshotId: slice.snapshotId,
+    updId: slice.updId,
+    formedUpdVersionId: slice.formedUpdVersionId,
+    currentConductedUpdVersionId: currentConducted.id,
+    updLineId: slice.updLineId,
+    updLineVersionId: slice.updLineVersionId,
+    coverageSetId: slice.coverageSetId,
+    coverageSliceId: slice.id,
+    sliceStartDate: slice.sliceStartDate,
+    sliceEndDateExclusive: slice.sliceEndDateExclusive,
+    sourceNetMinor: Number(slice.allocatedNetMinor),
+    sourceVatMinor: Number(slice.allocatedVatMinor),
+    sourceGrossMinor: Number(slice.allocatedGrossMinor),
+    currency: slice.currency,
+    contractualDueDate: slice.contractualDueDate ?? null,
+    dueDateProvenance: slice.dueDateProvenance,
+    dueDateEvidenceRef: slice.dueDateEvidenceRef ?? null,
+    closedPeriodVersion: inputVersion('billing_source_period_versions', slice.closedPeriodVersionId),
+    formedUpdVersion: inputVersion('billing_source_upd_versions', slice.formedUpdVersionId),
+    currentConductedUpdVersion: inputVersion('billing_source_upd_versions', currentConducted.id),
+    updLineVersion: inputVersion('billing_source_upd_line_versions', slice.updLineVersionId),
+    coverageSetVersion: inputVersion('billing_source_coverage_sets', slice.coverageSetId),
+  };
+  const selectedInputs = new Set([
+    ['billing_source_activation_boundaries', activation.activationBoundaryId],
+    ['billing_source_rental_lines', slice.rentalLineId],
+    ['billing_source_periods', slice.periodId],
+    ['billing_source_period_versions', slice.closedPeriodVersionId],
+    ['billing_source_snapshots', slice.snapshotId],
+    ['billing_source_upds', slice.updId],
+    ['billing_source_upd_versions', slice.formedUpdVersionId],
+    ['billing_source_upd_versions', currentConducted.id],
+    ['billing_source_upd_lines', slice.updLineId],
+    ['billing_source_upd_line_versions', slice.updLineVersionId],
+    ['billing_source_coverage_sets', slice.coverageSetId],
+    ['billing_source_coverage_slices', slice.id],
+  ].map(([kind, id]) => inputByIdentity.get(`${kind}:${id}`)).filter(Boolean));
+  const snapshot = db.prepare(`
+    SELECT effectiveTermsVersionId FROM ${BILLING_SOURCE_SNAPSHOTS_TABLE} WHERE id = ?
+  `).get(slice.snapshotId);
+  if (snapshot?.effectiveTermsVersionId) {
+    const terms = inputByIdentity.get(`billing_source_effective_terms:${snapshot.effectiveTermsVersionId}`);
+    if (terms) selectedInputs.add(terms);
+  }
+  for (const input of persistedInputs) {
+    if (
+      input.row.sourceKind === 'billing_source_snapshot_evidence'
+      && input.relationships.snapshotId === slice.snapshotId
+    ) selectedInputs.add(input);
+    if (
+      input.row.sourceKind === 'billing_source_coverage_supersessions'
+      && (
+        input.relationships.originalCoverageSetId === slice.coverageSetId
+        || input.relationships.replacementCoverageSetId === slice.coverageSetId
+      )
+    ) selectedInputs.add(input);
+  }
+  const operationIds = new Set([...selectedInputs]
+    .map(input => input.relationships.operationId)
+    .filter(Boolean));
+  for (const operationId of operationIds) {
+    const operation = inputByIdentity.get(`billing_source_operations:${operationId}`);
+    if (operation) selectedInputs.add(operation);
+  }
+  for (const input of persistedInputs) {
+    if (
+      input.row.sourceKind === 'billing_source_audit_events'
+      && operationIds.has(input.relationships.operationId)
+    ) selectedInputs.add(input);
+  }
+  const inputLineageHash = pr8Fingerprint([...selectedInputs].map(input => ({
+    sourceKind: input.row.sourceKind,
+    sourceId: input.row.sourceId,
+    normalizedInputHash: input.row.normalizedInputHash,
+  })).sort((left, right) => compareUtf16Ascending(pr8StableJson(left), pr8StableJson(right))));
+  const policyManifestHash = run?.policyManifestHash ?? acceptedRun?.policyManifestHash ?? null;
+  if (!policyManifestHash) return null;
+  const candidate = {
+    ...candidateIdentity,
+    id: command.candidateId,
+    runId: command.dryRunId,
+    candidateKey: pr8Fingerprint(candidateIdentity),
+    blockerCodesJson: '[]',
+    proposedOriginalAmountMinor: Number(slice.allocatedGrossMinor),
+    status: 'eligible_candidate',
+    policyManifestHash,
+    inputLineageHash,
+    diagnosticOnly: 1,
+    canonicalWriteAuthorized: 0,
+    productionActivationAuthorized: 0,
+  };
+  candidate.resultHash = pr8Fingerprint(pr8CandidateResultCanonical(candidate, []));
+  return Object.freeze(candidate);
+}
+
 function loadAcceptedContext(
   db,
   authorityRepository,
   command,
   attemptedAt,
   runtimeContract,
+  { historicalAuthorityChains = null } = {},
 ) {
   const deniedAttemptedAt = renderUtcMilliseconds(attemptedAt);
   const requestedAuthorization = authorityRepository.readWriteAuthorizationRecord(
@@ -1752,11 +2199,27 @@ function loadAcceptedContext(
     activation,
     deniedAttemptedAt,
   );
-  const { run, candidate: acceptedCandidate, acceptedRun } = pr8Proof;
-  if (!run || !acceptedCandidate) {
+  const { run: persistedRun, candidate: acceptedCandidate, acceptedRun } = pr8Proof;
+  const run = persistedRun || (acceptedRun ? Object.freeze({
+    id: command.dryRunId,
+    companyId: command.companyId,
+    branchId: command.branchId,
+    companyTimezone: acceptedRun.companyTimezoneSnapshot,
+    policyManifestHash: acceptedRun.policyManifestHash,
+    resultHash: acceptedRun.resultHash,
+    sourceInputManifestHash: acceptedRun.sourceInputManifestHash,
+  }) : null);
+  const sourceCandidate = acceptedCandidate || reconstructMissingPr8Candidate(
+    db,
+    command,
+    run,
+    acceptedRun,
+    activation,
+  );
+  if (!run || !sourceCandidate) {
     throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
   }
-  const sourceGraph = analyzeLockedSourceGraph(db, acceptedCandidate);
+  const sourceGraph = analyzeLockedSourceGraph(db, sourceCandidate);
   const candidate = sourceGraph.currentCandidate;
 
   const sourceAuthority = authorityRepository.readAuthorityRecord(authorization.sourceAdapterAuthorityRecordId);
@@ -1783,7 +2246,14 @@ function loadAcceptedContext(
     { authority: postingAuthority, authorityKind: 'canonical_posting_adapter' },
   ];
   const authorityStates = authorityBindings.map(({ authority, authorityKind }) => {
-    const chain = authorityRepository.readAuthorityChain(authority);
+    const chain = historicalAuthorityChains?.get(authorityKind)
+      || authorityRepository.readAuthorityChain(authority);
+    const boundInChain = chain.find(row => row.recordId === authority.recordId);
+    if (
+      !boundInChain
+      || boundInChain.recordHash !== authority.recordHash
+      || boundInChain.authorityVersion !== authority.authorityVersion
+    ) throw repositoryError(ERROR_CODES.AUTHORITY_FROZEN_CHAIN_SNAPSHOT_INTEGRITY_FAILED);
     const latest = chain[chain.length - 1];
     if (!latest) throw repositoryError(ERROR_CODES.AUTHORITY_FROZEN_CHAIN_SNAPSHOT_INTEGRITY_FAILED);
     if (latest.recordId !== authority.recordId && latest.status === 'expired') {
@@ -1836,6 +2306,20 @@ function loadAcceptedContext(
     || authorization.activationBoundaryId !== activation.activationBoundaryId
     || authorization.cohortHash !== activation.cohortHash
     || authorization.boundaryHash !== activation.boundaryHash
+    || authorization.acceptedDryRunsHash !== activation.acceptedDryRunsHash
+    || authorization.acceptedPr8EvidenceHash !== activation.acceptedPr8EvidenceHash
+    || authorization.acceptedFreshnessWindowsHash !== activation.acceptedFreshnessWindowsHash
+    || authorization.acceptedCompanyTimezoneSnapshot !== activation.companyTimezoneSnapshot
+    || authorization.policyManifestHashesJson !== activation.policyManifestHashesJson
+    || authorization.sourceSystemIdsJson !== activation.sourceSystemIdsJson
+    || authorization.dueDatePolicySetHash !== activation.dueDatePolicySetHash
+    || authorization.dueDatePolicySetJson !== activation.dueDatePolicySetJson
+    || authorization.postingAdapterAuthorityRecordId !== activation.postingAdapterAuthorityRecordId
+    || authorization.postingAdapterAuthorityVersion !== activation.postingAdapterAuthorityVersion
+    || authorization.postingAdapterAuthorityRecordHash !== activation.postingAdapterAuthorityRecordHash
+    || authorization.postingAdapterAuthorityCompanyId !== activation.postingAdapterAuthorityCompanyId
+    || authorization.postingAdapterAuthorityBranchId !== activation.postingAdapterAuthorityBranchId
+    || authorization.postingAdapterAuthorityKind !== activation.postingAdapterAuthorityKind
     || activation.boundaryEndUtc !== null
   );
 
@@ -2445,6 +2929,25 @@ function createCanonicalActualEligibilityEventRepository(
     }
   }
 
+  function authorityRowsFromFrozenSnapshot(snapshot) {
+    if (!snapshot || !Array.isArray(snapshot.members) || snapshot.members.length === 0) {
+      throw repositoryError(ERROR_CODES.AUTHORITY_FROZEN_DENIAL_INTEGRITY_FAILED);
+    }
+    return snapshot.members.map(member => {
+      const row = authorityRepository.readAuthorityRecord(member.authorityRecordId);
+      if (
+        !row
+        || row.recordHash !== member.authorityRecordHash
+        || row.authorityVersion !== member.authorityVersion
+        || row.authorityId !== snapshot.boundary.authorityId
+        || row.authorityKind !== snapshot.boundary.authorityKind
+        || row.companyId !== snapshot.boundary.companyId
+        || row.branchId !== snapshot.boundary.branchId
+      ) throw repositoryError(ERROR_CODES.AUTHORITY_FROZEN_DENIAL_INTEGRITY_FAILED);
+      return row;
+    });
+  }
+
   function reconstructNonAuthorityDenial(packageValue) {
     const mode = NON_AUTHORITY_RECONSTRUCTION_REGISTRY[packageValue.conflictType];
     if (!mode) throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
@@ -2463,12 +2966,18 @@ function createCanonicalActualEligibilityEventRepository(
       writeAuthorizationRecordId: selectors.writeAuthorizationRecordId,
     };
     const deniedAt = parseUtcMilliseconds(packageValue.deniedAttemptedAt);
+    const historicalAuthorityChains = new Map([
+      ['source_adapter', authorityRowsFromFrozenSnapshot(packageValue.sourceAuthorityChainSnapshot)],
+      ['eligibility_producer', authorityRowsFromFrozenSnapshot(packageValue.producerAuthorityChainSnapshot)],
+      ['canonical_posting_adapter', authorityRowsFromFrozenSnapshot(packageValue.postingAuthorityChainSnapshot)],
+    ]);
     const context = loadAcceptedContext(
       db,
       authorityRepository,
       command,
       deniedAt,
       runtimeContract,
+      { historicalAuthorityChains },
     );
     if (context.authorityDenial) {
       throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
@@ -2582,7 +3091,7 @@ function createCanonicalActualEligibilityEventRepository(
             recordId: boundRecord.recordId,
             sourceOwnershipManifestHash: candidate.sourceOwnershipManifestHash,
           },
-          chain: authorityRepository.readAuthorityChain(boundRecord),
+          chain: authorityRowsFromFrozenSnapshot(entry.snapshot),
         });
         if (canonicalJson(candidates) !== canonicalJson(entry.snapshot.candidates)) {
           throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
@@ -2926,9 +3435,12 @@ function createCanonicalActualEligibilityEventRepository(
       ['eligibility_producer', 'producer'],
       ['canonical_posting_adapter', 'posting'],
     ]) {
-      const authority = context[`${key}Authority`];
+      const authorityState = context.authorityStates.find(state => state.authorityKind === kind);
+      if (!authorityState) {
+        throw repositoryError(ERROR_CODES.AUTHORITY_FROZEN_DENIAL_INTEGRITY_FAILED);
+      }
       result[key] = createFrozenAuthorityChainSnapshot({
-        authorityRows: authorityRepository.readAuthorityChain(authority),
+        authorityRows: authorityState.chain,
         candidates: [],
         denialAttemptId,
         deniedAttemptedAt,

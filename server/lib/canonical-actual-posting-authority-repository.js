@@ -19,6 +19,8 @@ const {
   compareSafeIntegerAscending,
   compareUtf16Ascending,
   computeActivationRecordHash,
+  computeCanonicalPostingBoundaryHash,
+  computeCanonicalPostingCohortHash,
   computeWriteAuthorizationRecordHash,
   createFrozenAuthorityChainSnapshot,
   mapSqliteError,
@@ -113,13 +115,111 @@ function normalizeActivationRow(row) {
   ]);
 }
 
+function parseNormalizedStringArray(value, field, { allowEmpty = false } = {}) {
+  const parsed = parseCanonicalJson(value, field);
+  if (!Array.isArray(parsed) || (!allowEmpty && parsed.length === 0)) {
+    throw repositoryError('CANONICAL_AUTHORITY_LOGICAL_PROJECTION_INVALID');
+  }
+  if (parsed.some(entry => typeof entry !== 'string' || entry.length === 0)) {
+    throw repositoryError('CANONICAL_AUTHORITY_LOGICAL_PROJECTION_INVALID');
+  }
+  const normalized = [...parsed].sort(compareUtf16Ascending);
+  if (
+    new Set(normalized).size !== normalized.length
+    || canonicalJson(parsed) !== canonicalJson(normalized)
+  ) throw repositoryError('CANONICAL_AUTHORITY_LOGICAL_PROJECTION_INVALID');
+  return normalized;
+}
+
+function localMidnightUtc(dateOnly, timezone) {
+  if (typeof dateOnly !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+    throw repositoryError('CANONICAL_POSTING_ACTIVATION_INTEGRITY_FAILED');
+  }
+  const [year, month, day] = dateOnly.split('-').map(Number);
+  const calendarProbe = new Date(Date.UTC(year, month - 1, day));
+  if (
+    calendarProbe.getUTCFullYear() !== year
+    || calendarProbe.getUTCMonth() !== month - 1
+    || calendarProbe.getUTCDate() !== day
+  ) throw repositoryError('CANONICAL_POSTING_ACTIVATION_INTEGRITY_FAILED');
+  let formatter;
+  try {
+    formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+    if (formatter.resolvedOptions().timeZone !== timezone) {
+      throw repositoryError('CANONICAL_POSTING_ACTIVATION_INTEGRITY_FAILED');
+    }
+  } catch (error) {
+    if (error instanceof CanonicalActualPostingError) throw error;
+    throw repositoryError('CANONICAL_POSTING_ACTIVATION_INTEGRITY_FAILED');
+  }
+  const desiredUtc = Date.UTC(year, month - 1, day);
+  let candidate = desiredUtc;
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    const parts = Object.fromEntries(
+      formatter.formatToParts(new Date(candidate)).map(part => [part.type, part.value]),
+    );
+    const renderedAsUtc = Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour),
+      Number(parts.minute),
+      Number(parts.second),
+    );
+    const adjustment = desiredUtc - renderedAsUtc;
+    candidate += adjustment;
+    if (adjustment === 0) break;
+  }
+  const verification = Object.fromEntries(
+    formatter.formatToParts(new Date(candidate)).map(part => [part.type, part.value]),
+  );
+  if (
+    verification.year !== String(year).padStart(4, '0')
+    || verification.month !== String(month).padStart(2, '0')
+    || verification.day !== String(day).padStart(2, '0')
+    || verification.hour !== '00'
+    || verification.minute !== '00'
+    || verification.second !== '00'
+  ) throw repositoryError('CANONICAL_POSTING_ACTIVATION_INTEGRITY_FAILED');
+  return new Date(candidate).toISOString();
+}
+
 function assertWriteAuthorizationRecord(record) {
   const row = materializeInert(record, 'writeAuthorization');
   writeAuthorizationEnvelope(row);
   for (const field of [
-    'acceptedDryRunsJson', 'acceptedPr8EvidenceJson', 'sourceSystemIdsJson',
-    'primaryEffectTablesJson', 'forbiddenOperationsJson', 'policyManifestHashesJson',
+    'acceptedDryRunsJson', 'acceptedPr8EvidenceJson',
+    'primaryEffectTablesJson', 'forbiddenOperationsJson',
   ]) parseCanonicalJson(row[field], field);
+  const sourceSystems = parseNormalizedStringArray(row.sourceSystemIdsJson, 'sourceSystemIdsJson');
+  if (canonicalJson(sourceSystems) !== canonicalJson(['rentcore.billing_source_authority.v1'])) {
+    throw repositoryError('CANONICAL_WRITE_AUTHORIZATION_INTEGRITY_FAILED');
+  }
+  const policyManifestHashes = parseNormalizedStringArray(
+    row.policyManifestHashesJson,
+    'policyManifestHashesJson',
+  );
+  const acceptedRuns = parseCanonicalJson(row.acceptedPr8EvidenceJson, 'acceptedPr8EvidenceJson');
+  const acceptedPolicyManifestHashes = [...new Set(
+    Array.isArray(acceptedRuns)
+      ? acceptedRuns.map(entry => entry?.policyManifestHash).filter(value => typeof value === 'string')
+      : [],
+  )].sort(compareUtf16Ascending);
+  if (
+    policyManifestHashes.some(hash => !/^[0-9a-f]{64}$/.test(hash))
+    || canonicalJson(policyManifestHashes) !== canonicalJson(acceptedPolicyManifestHashes)
+  ) {
+    throw repositoryError('CANONICAL_WRITE_AUTHORIZATION_INTEGRITY_FAILED');
+  }
   parseCanonicalJson(row.dueDatePolicySetJson, 'dueDatePolicySetJson');
   parseCanonicalJson(row.approvalSetJson, 'approvalSetJson');
   if (row.recordHash !== computeWriteAuthorizationRecordHash(row)) {
@@ -131,11 +231,63 @@ function assertWriteAuthorizationRecord(record) {
 function assertActivationRecord(record) {
   const row = materializeInert(record, 'activation');
   activationEnvelope(row);
-  for (const field of [
-    'sourceSystemIdsJson', 'allowedDocumentClassesJson', 'allowedRentalClassesJson',
-    'explicitExclusionsJson', 'policyManifestHashesJson',
-  ]) parseCanonicalJson(row[field], field);
+  const sourceSystems = parseNormalizedStringArray(row.sourceSystemIdsJson, 'sourceSystemIdsJson');
+  const allowedDocumentClasses = parseNormalizedStringArray(
+    row.allowedDocumentClassesJson,
+    'allowedDocumentClassesJson',
+  );
+  const allowedRentalClasses = parseNormalizedStringArray(
+    row.allowedRentalClassesJson,
+    'allowedRentalClassesJson',
+  );
+  const explicitExclusions = parseNormalizedStringArray(
+    row.explicitExclusionsJson,
+    'explicitExclusionsJson',
+    { allowEmpty: true },
+  );
+  const policyManifestHashes = parseNormalizedStringArray(
+    row.policyManifestHashesJson,
+    'policyManifestHashesJson',
+  );
+  if (policyManifestHashes.some(hash => !/^[0-9a-f]{64}$/.test(hash))) {
+    throw repositoryError('CANONICAL_POSTING_ACTIVATION_INTEGRITY_FAILED');
+  }
+  if (
+    canonicalJson(sourceSystems) !== canonicalJson(['rentcore.billing_source_authority.v1'])
+    || canonicalJson(allowedDocumentClasses) !== canonicalJson(['rental_service_upd'])
+    || canonicalJson(allowedRentalClasses) !== canonicalJson(['equipment_rental_line'])
+    || row.currency !== 'RUB'
+    || row.forwardOnlyStartUtc !== localMidnightUtc(
+      row.forwardOnlyStartDate,
+      row.companyTimezoneSnapshot,
+    )
+  ) throw repositoryError('CANONICAL_POSTING_ACTIVATION_INTEGRITY_FAILED');
   parseCanonicalJson(row.dueDatePolicySetJson, 'dueDatePolicySetJson');
+  const cohortHash = computeCanonicalPostingCohortHash({
+    allowedDocumentClasses,
+    allowedRentalClasses,
+    branchIds: [row.branchId],
+    companyId: row.companyId,
+    currency: row.currency,
+    explicitExclusions,
+    forwardOnlyStartDate: row.forwardOnlyStartDate,
+    policyManifestHashes,
+    sourceSystems,
+  });
+  const boundaryHash = computeCanonicalPostingBoundaryHash({
+    boundaryEndUtc: row.boundaryEndUtc,
+    branchIds: [row.branchId],
+    companyId: row.companyId,
+    companyTimezoneSnapshot: row.companyTimezoneSnapshot,
+    currency: row.currency,
+    exclusionRules: explicitExclusions,
+    forwardOnlyStartDate: row.forwardOnlyStartDate,
+    forwardOnlyStartUtc: row.forwardOnlyStartUtc,
+    sourceSystems,
+  });
+  if (row.cohortHash !== cohortHash || row.boundaryHash !== boundaryHash) {
+    throw repositoryError('CANONICAL_POSTING_ACTIVATION_INTEGRITY_FAILED');
+  }
   if (row.recordHash !== computeActivationRecordHash(row)) {
     throw repositoryError('CANONICAL_POSTING_ACTIVATION_INTEGRITY_FAILED');
   }

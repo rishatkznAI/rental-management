@@ -13,6 +13,10 @@ import {
   eligibilityCommand,
   runtimeContractForAuthority,
 } from './canonical-actual-posting-fixtures.js';
+import {
+  approvedTestPolicyManifest,
+  dryRunCommand,
+} from './actual-source-eligibility-dry-run-fixtures.js';
 
 const require = createRequire(import.meta.url);
 const repositoryPath = require.resolve('../server/lib/canonical-actual-eligibility-event-repository.js');
@@ -93,6 +97,363 @@ function insertCopiedRow(db, table, row) {
     VALUES (${columns.map(() => '?').join(', ')})
   `).run(...columns.map(column => row[column]));
 }
+
+// Independent hostile-test oracle: this intentionally does not call the PR9a
+// production canonical/hash/projection constructors. It implements only the
+// exact JSON subset and envelopes needed to reseal adversarial persisted rows.
+function oracleCanonicalJson(value) {
+  if (value === null) return 'null';
+  if (value === true) return 'true';
+  if (value === false) return 'false';
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(oracleCanonicalJson).join(',')}]`;
+  const keys = Object.keys(value).sort();
+  return `{${keys.map(key => `${JSON.stringify(key)}:${oracleCanonicalJson(value[key])}`).join(',')}}`;
+}
+
+function oracleHash(value) {
+  return crypto.createHash('sha256').update(Buffer.from(oracleCanonicalJson(value), 'utf8')).digest('hex');
+}
+
+const ORACLE_WRITE_AUTHORIZATION_FIELDS = [
+  'acceptedCompanyTimezoneSnapshot', 'acceptedDryRunsHash', 'acceptedDryRunsJson',
+  'acceptedPr8EvidenceHash', 'acceptedPr8EvidenceJson', 'activationBoundaryId',
+  'activationCohortRef', 'amountBasisPolicyHash', 'amountBasisPolicyRef',
+  'approvalSetJson', 'authorizationId', 'authorizationVersion', 'backupEvidenceRef',
+  'boundaryHash', 'branchId', 'cohortHash', 'companyId', 'denialEvidencePermission',
+  'denialEvidenceTable', 'denialTransitionPermission', 'denialTransitionTable',
+  'dueDatePolicySetHash', 'dueDatePolicySetJson', 'effectiveFrom', 'eventSchemaVersion',
+  'evidencePackHash', 'expiresAt', 'forbiddenOperationsJson',
+  'acceptedFreshnessWindowsHash', 'operationType', 'operationalControlRef',
+  'policyManifestHashesJson', 'postingAdapterAuthorityBranchId',
+  'postingAdapterAuthorityCompanyId', 'postingAdapterAuthorityKind',
+  'postingAdapterAuthorityRecordHash', 'postingAdapterAuthorityRecordId',
+  'postingAdapterAuthorityVersion', 'previousRecordId', 'primaryEffectTablesJson',
+  'producerAuthorityBranchId', 'producerAuthorityCompanyId', 'producerAuthorityKind',
+  'producerAuthorityRecordHash', 'producerAuthorityRecordId', 'producerAuthorityVersion',
+  'retentionControlRef', 'revocationReasonCode', 'schemaVersion',
+  'sourceAdapterAuthorityRecordHash', 'sourceAdapterAuthorityRecordId',
+  'sourceAdapterAuthorityVersion', 'sourceOwnershipManifestHash', 'sourceSystemIdsJson',
+  'status',
+];
+
+const ORACLE_ACTIVATION_FIELDS = [
+  'acceptedDryRunsHash', 'acceptedPr8EvidenceHash', 'activationBoundaryId', 'activationId',
+  'activationVersion', 'allowedDocumentClassesJson', 'allowedRentalClassesJson',
+  'approvalHash', 'approvalRef', 'boundaryEndUtc', 'boundaryHash', 'branchId',
+  'cohortHash', 'companyId', 'companyTimezoneSnapshot', 'currency',
+  'dueDatePolicySetHash', 'dueDatePolicySetJson', 'effectiveFrom',
+  'explicitExclusionsJson', 'expiresAt', 'acceptedFreshnessWindowsHash',
+  'forwardOnlyStartDate', 'forwardOnlyStartUtc', 'policyManifestHashesJson',
+  'postingAdapterAuthorityBranchId', 'postingAdapterAuthorityCompanyId',
+  'postingAdapterAuthorityKind', 'postingAdapterAuthorityRecordHash',
+  'postingAdapterAuthorityRecordId', 'postingAdapterAuthorityVersion',
+  'previousRecordId', 'revocationReasonCode', 'schemaVersion', 'sourceSystemIdsJson',
+  'status', 'writeAuthorizationRecordId',
+];
+
+function oracleRecordHash(row, fields, domain) {
+  const envelope = { domain };
+  for (const field of fields) envelope[field] = row[field];
+  envelope.version = 1;
+  return oracleHash(envelope);
+}
+
+function rewriteWholeRow(db, table, row) {
+  const columns = Object.keys(row);
+  mutateAppendOnlyTable(db, table, () => {
+    db.prepare(`
+      UPDATE ${table}
+      SET ${columns.map(column => `"${column}" = ?`).join(', ')}
+      WHERE recordId = ?
+    `).run(...columns.map(column => row[column]), row.recordId);
+  });
+}
+
+function oracleAcceptedDryRunsHash(acceptedDryRuns) {
+  const normalized = acceptedDryRuns
+    .map(entry => ({ dryRunId: entry.dryRunId, resultHash: entry.resultHash }))
+    .sort((left, right) => left.dryRunId < right.dryRunId ? -1 : left.dryRunId > right.dryRunId ? 1 : 0);
+  return oracleHash({
+    acceptedDryRuns: normalized,
+    domain: 'rentcore.canonical_actual_posting.accepted_dry_runs',
+    version: 1,
+  });
+}
+
+function oracleFreshnessWindowsHash(acceptedRuns) {
+  const windows = acceptedRuns
+    .map(entry => ({
+      dryRunId: entry.dryRunId,
+      freshnessWindowFingerprint: entry.freshnessWindowFingerprint,
+    }))
+    .sort((left, right) => left.dryRunId < right.dryRunId ? -1 : left.dryRunId > right.dryRunId ? 1 : 0);
+  return oracleHash({
+    domain: 'rentcore.canonical_actual_posting.accepted_freshness_windows',
+    version: 1,
+    windows,
+  });
+}
+
+function oracleAcceptedPr8EvidenceHash({
+  acceptedDryRunsHash,
+  acceptedFreshnessWindowsHash,
+  acceptedRuns,
+  evidencePackHash,
+}) {
+  return oracleHash({
+    acceptedDryRunsHash,
+    acceptedFreshnessWindowsHash,
+    acceptedRuns: [...acceptedRuns].sort((left, right) => (
+      left.dryRunId < right.dryRunId ? -1 : left.dryRunId > right.dryRunId ? 1 : 0
+    )),
+    domain: 'rentcore.canonical_actual_posting.accepted_pr8_evidence',
+    evidencePackHash,
+    version: 1,
+  });
+}
+
+function oracleAcceptedRun(context, dryRunId) {
+  const run = context.db.prepare('SELECT * FROM actual_source_dry_runs WHERE id = ?').get(dryRunId);
+  const reconciliationHashes = context.db.prepare(`
+    SELECT reconciliationHash FROM actual_source_dry_run_reconciliations
+    WHERE runId = ? ORDER BY reconciliationHash ASC
+  `).all(dryRunId).map(row => row.reconciliationHash);
+  const reconciliationSetHash = oracleHash({
+    domain: 'rentcore.canonical_actual_posting.pr8_reconciliation_set',
+    dryRunId,
+    reconciliationHashes,
+    version: 1,
+  });
+  const freshnessDurationMs = 900000;
+  const freshnessPolicyHash = oracleHash({
+    domain: 'rentcore.canonical_actual_posting.pr8_freshness_policy',
+    durationMs: freshnessDurationMs,
+    intervalKind: 'half_open',
+    policyId: 'rentcore.pr8_evidence_freshness.v1',
+    policyVersion: 1,
+    version: 1,
+  });
+  const validUntilExclusive = new Date(Date.parse(run.finalizedAt) + freshnessDurationMs).toISOString();
+  const freshnessWindowFingerprint = oracleHash({
+    domain: 'rentcore.canonical_actual_posting.pr8_freshness_window',
+    finalizedAt: run.finalizedAt,
+    freshnessDurationMs,
+    freshnessPolicyHash,
+    freshnessPolicyId: 'rentcore.pr8_evidence_freshness.v1',
+    freshnessPolicyVersion: 1,
+    validFrom: run.finalizedAt,
+    validUntilExclusive,
+    version: 1,
+  });
+  return {
+    companyTimezoneSnapshot: run.companyTimezone,
+    dryRunId,
+    finalizedAt: run.finalizedAt,
+    freshnessDurationMs,
+    freshnessPolicyHash,
+    freshnessPolicyId: 'rentcore.pr8_evidence_freshness.v1',
+    freshnessPolicyVersion: 1,
+    freshnessWindowFingerprint,
+    policyManifestHash: run.policyManifestHash,
+    reconciliationSetHash,
+    resultHash: run.resultHash,
+    sourceInputManifestHash: run.sourceInputManifestHash,
+    sourceOwnershipManifestHash: context.authority.authorization.sourceOwnershipManifestHash,
+    validFrom: run.finalizedAt,
+    validUntilExclusive,
+  };
+}
+
+function oracleCohortHash(activation, overrides = {}) {
+  const value = { ...activation, ...overrides };
+  return oracleHash({
+    allowedDocumentClasses: JSON.parse(value.allowedDocumentClassesJson),
+    allowedRentalClasses: JSON.parse(value.allowedRentalClassesJson),
+    branchIds: [value.branchId],
+    cohortVersion: 1,
+    companyId: value.companyId,
+    currency: value.currency,
+    domain: 'rentcore.canonical_actual_posting.cohort',
+    explicitExclusions: JSON.parse(value.explicitExclusionsJson),
+    forwardOnlyStartDate: value.forwardOnlyStartDate,
+    policyManifestHashes: JSON.parse(value.policyManifestHashesJson),
+    sourceSystems: JSON.parse(value.sourceSystemIdsJson),
+    version: 1,
+  });
+}
+
+function oracleBoundaryHash(activation, overrides = {}) {
+  const value = { ...activation, ...overrides };
+  return oracleHash({
+    boundaryEndUtc: null,
+    boundaryVersion: 1,
+    branchIds: [value.branchId],
+    companyId: value.companyId,
+    companyTimezoneSnapshot: value.companyTimezoneSnapshot,
+    currency: value.currency,
+    domain: 'rentcore.canonical_actual_posting.boundary',
+    exclusionRules: JSON.parse(value.explicitExclusionsJson),
+    forwardOnlyStartDate: value.forwardOnlyStartDate,
+    forwardOnlyStartUtc: value.forwardOnlyStartUtc,
+    sourceClass: 'conducted_upd_validated_coverage_slice_v1',
+    sourceSystems: JSON.parse(value.sourceSystemIdsJson),
+    version: 1,
+  });
+}
+
+function oraclePersistedRowFingerprint(db, tableName, row) {
+  const columns = db.prepare(`PRAGMA table_xinfo(${tableName})`).all()
+    .filter(column => Number(column.hidden) === 0)
+    .sort((left, right) => Number(left.cid) - Number(right.cid))
+    .map(column => ({ columnName: column.name, value: row[column.name] }));
+  let rowVersion = null;
+  for (const field of ['version', 'sourceVersion', 'sourceEventVersion', 'resultVersion', 'aggregateVersion']) {
+    if (row[field] != null) {
+      rowVersion = Number(row[field]);
+      break;
+    }
+  }
+  return oracleHash({
+    columns,
+    domain: 'rentcore.billing_source_authority.persisted_row',
+    rowId: row.id,
+    rowVersion,
+    tableName,
+    version: 1,
+  });
+}
+
+function oracleBrokenEdge(context, relation, rootCoverageLineageId, edgeFailureState) {
+  const relationRowFingerprint = oraclePersistedRowFingerprint(
+    context.db,
+    'billing_source_coverage_supersessions',
+    relation,
+  );
+  const brokenEdgeFingerprint = oracleHash({
+    branchId: relation.branchId,
+    companyId: relation.companyId,
+    domain: 'rentcore.canonical_actual_posting.broken_successor_edge',
+    edgeFailureState,
+    fromCoverageSetId: relation.originalCoverageSetId,
+    relationRowFingerprint,
+    rootCoverageLineageId,
+    toCoverageSetId: relation.replacementCoverageSetId,
+    version: 1,
+  });
+  return {
+    brokenEdgeFingerprint,
+    edgeFailureState,
+    fromCoverageSetId: relation.originalCoverageSetId,
+    toCoverageSetId: relation.replacementCoverageSetId,
+  };
+}
+
+function resealAcceptance(context, { acceptedDryRuns, acceptedRuns, authorization = {} }) {
+  const persistedAuthorization = context.db.prepare(`
+    SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+  `).get(context.authority.authorization.recordId);
+  const acceptedDryRunsHash = oracleAcceptedDryRunsHash(acceptedDryRuns);
+  const acceptedFreshnessWindowsHash = oracleFreshnessWindowsHash(acceptedRuns);
+  const acceptedPr8EvidenceHash = oracleAcceptedPr8EvidenceHash({
+    acceptedDryRunsHash,
+    acceptedFreshnessWindowsHash,
+    acceptedRuns,
+    evidencePackHash: persistedAuthorization.evidencePackHash,
+  });
+  const changedAuthorization = {
+    ...persistedAuthorization,
+    ...authorization,
+    acceptedDryRunsJson: oracleCanonicalJson(acceptedDryRuns),
+    acceptedDryRunsHash,
+    acceptedPr8EvidenceJson: oracleCanonicalJson(acceptedRuns),
+    acceptedPr8EvidenceHash,
+    acceptedFreshnessWindowsHash,
+  };
+  changedAuthorization.recordHash = oracleRecordHash(
+    changedAuthorization,
+    ORACLE_WRITE_AUTHORIZATION_FIELDS,
+    'rentcore.canonical_actual_posting.write_authorization',
+  );
+  rewriteWholeRow(context.db, 'canonical_write_authorization_records', changedAuthorization);
+
+  const persistedActivation = context.db.prepare(`
+    SELECT * FROM canonical_posting_activation_records WHERE recordId = ?
+  `).get(context.authority.activation.recordId);
+  const changedActivation = {
+    ...persistedActivation,
+    acceptedDryRunsHash,
+    acceptedPr8EvidenceHash,
+    acceptedFreshnessWindowsHash,
+  };
+  changedActivation.recordHash = oracleRecordHash(
+    changedActivation,
+    ORACLE_ACTIVATION_FIELDS,
+    'rentcore.canonical_actual_posting.activation',
+  );
+  rewriteWholeRow(context.db, 'canonical_posting_activation_records', changedActivation);
+  return { authorization: changedAuthorization, activation: changedActivation };
+}
+
+function insertDisconnectedCoverageRoot(context, suffix = 'hostile-disconnected') {
+  const coverageSet = context.db.prepare('SELECT * FROM billing_source_coverage_sets ORDER BY id LIMIT 1').get();
+  const coverageSlice = context.db.prepare(`
+    SELECT * FROM billing_source_coverage_slices WHERE coverageSetId = ? ORDER BY id LIMIT 1
+  `).get(coverageSet.id);
+  const competingSet = {
+    ...coverageSet,
+    id: `coverage-set-${suffix}`,
+    version: Number(context.db.prepare(`
+      SELECT MAX(version) AS version FROM billing_source_coverage_sets WHERE updId = ?
+    `).get(coverageSet.updId).version) + 1,
+    createdAt: '2026-07-27T12:00:01.000Z',
+  };
+  const competingSlice = {
+    ...coverageSlice,
+    id: `coverage-slice-${suffix}`,
+    coverageSetId: competingSet.id,
+    createdAt: '2026-07-27T12:00:01.000Z',
+  };
+  insertCopiedRow(context.db, 'billing_source_coverage_sets', competingSet);
+  const overlapTrigger = context.db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND name = 'trg_billing_source_coverage_slices_no_overlap'
+  `).get();
+  context.db.exec(`DROP TRIGGER "${overlapTrigger.name}"`);
+  try {
+    insertCopiedRow(context.db, 'billing_source_coverage_slices', competingSlice);
+  } finally {
+    context.db.exec(overlapTrigger.sql);
+  }
+  return { competingSet, competingSlice };
+}
+
+function deletePr8RowIgnoringForeignKeys(context, table, id) {
+  context.db.pragma('foreign_keys = OFF');
+  try {
+    mutateAppendOnlyTable(context.db, table, () => {
+      context.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
+    });
+  } finally {
+    context.db.pragma('foreign_keys = ON');
+  }
+}
+
+test('independent PR9a hostile oracle matches a fixed external SHA-256 golden', () => {
+  const value = {
+    version: 1,
+    domain: 'rentcore.pr9a.independent_oracle_golden',
+  };
+  assert.equal(
+    oracleCanonicalJson(value),
+    '{"domain":"rentcore.pr9a.independent_oracle_golden","version":1}',
+  );
+  assert.equal(
+    oracleHash(value),
+    '8ae402684170acf5b0ebae32faf3d5581a1dae7efa3d80d1394d9d5d6860a87b',
+  );
+});
 
 function insertPostingTriplet(context, event) {
   const canonicalReceivableId = `canonical-receivable-${event.id}`;
@@ -523,6 +884,647 @@ test('every hostile PR8 graph mutation is a required PR8_EVIDENCE_MISMATCH denia
   }
 });
 
+test('independent remediation hostile proofs reject fully resealed trust-boundary bypasses', async t => {
+  await t.test('A-01 rejects an accepted evidence run absent from the complete pair projection', () => {
+    const context = createPr9aContext();
+    try {
+      const acceptedDryRuns = JSON.parse(context.authority.authorization.acceptedDryRunsJson);
+      const acceptedRuns = JSON.parse(context.authority.authorization.acceptedPr8EvidenceJson);
+      const foreignRun = {
+        ...acceptedRuns[0],
+        dryRunId: 'foreign-resealed-pr8-run',
+        resultHash: oracleHash({ fixture: 'foreign-resealed-pr8-run' }),
+      };
+      resealAcceptance(context, {
+        acceptedDryRuns,
+        acceptedRuns: [...acceptedRuns, foreignRun],
+      });
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('A-01 rejects a fully resealed accepted-run ownership mutation', () => {
+    const context = createPr9aContext();
+    try {
+      const acceptedDryRuns = JSON.parse(context.authority.authorization.acceptedDryRunsJson);
+      const acceptedRuns = JSON.parse(context.authority.authorization.acceptedPr8EvidenceJson);
+      acceptedRuns[0] = {
+        ...acceptedRuns[0],
+        sourceOwnershipManifestHash: oracleHash({ fixture: 'foreign-ownership' }),
+      };
+      resealAcceptance(context, { acceptedDryRuns, acceptedRuns });
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('A-02 rejects self-consistent forged policy, cohort, and boundary labels', () => {
+    const context = createPr9aContext();
+    try {
+      const authorization = context.db.prepare(`
+        SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+      `).get(context.authority.authorization.recordId);
+      authorization.policyManifestHashesJson = oracleCanonicalJson([
+        oracleHash({ fixture: 'forged-policy-manifest' }),
+      ]);
+      authorization.cohortHash = oracleHash({ fixture: 'forged-cohort-label' });
+      authorization.boundaryHash = oracleHash({ fixture: 'forged-boundary-label' });
+      authorization.recordHash = oracleRecordHash(
+        authorization,
+        ORACLE_WRITE_AUTHORIZATION_FIELDS,
+        'rentcore.canonical_actual_posting.write_authorization',
+      );
+      rewriteWholeRow(context.db, 'canonical_write_authorization_records', authorization);
+
+      const activation = context.db.prepare(`
+        SELECT * FROM canonical_posting_activation_records WHERE recordId = ?
+      `).get(context.authority.activation.recordId);
+      activation.policyManifestHashesJson = authorization.policyManifestHashesJson;
+      activation.cohortHash = authorization.cohortHash;
+      activation.boundaryHash = authorization.boundaryHash;
+      activation.recordHash = oracleRecordHash(
+        activation,
+        ORACLE_ACTIVATION_FIELDS,
+        'rentcore.canonical_actual_posting.activation',
+      );
+      rewriteWholeRow(context.db, 'canonical_posting_activation_records', activation);
+
+      assert.throws(
+        () => context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)),
+        error => error.code === 'CANONICAL_WRITE_AUTHORIZATION_INTEGRITY_FAILED',
+      );
+      assert.deepEqual(counts(context.db), {
+        events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+      });
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('A-03 rejects a disconnected same-dimension PR6 coverage root', () => {
+    const context = createPr9aContext();
+    try {
+      insertDisconnectedCoverageRoot(context);
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_ROOT_CONFLICT');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('A-04 excludes a valid post-boundary authority append from historical C classification', () => {
+    const context = createPr9aContext();
+    let restore = () => {};
+    try {
+      mutateCandidateForConflict(context);
+      restore = mutateAfterNextRollback(context.db, () => {
+        context.authority.repository.appendAuthorityRecord(nextAuthority(context.authority.source, 2));
+      });
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    } finally {
+      restore();
+      context.db.close();
+    }
+  });
+
+  await t.test('A-05 persists nullable PR8 mismatch evidence for a missing selected candidate', () => {
+    const context = createPr9aContext();
+    try {
+      deletePr8RowIgnoringForeignKeys(
+        context,
+        'actual_source_dry_run_candidates',
+        context.authority.candidate.id,
+      );
+      const { observation } = assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+      assert.equal(observation.observedProjection.resultHash, context.authority.run.resultHash);
+      assert.equal(observation.observedProjection.reconciliationSetHash, null);
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('A-01 complete accepted PR8 set rejects independently resealed set, pair, time, and source drift', async t => {
+  const cases = [
+    ['pair entry absent from evidence', context => {
+      const acceptedRuns = JSON.parse(context.authority.authorization.acceptedPr8EvidenceJson);
+      const acceptedDryRuns = JSON.parse(context.authority.authorization.acceptedDryRunsJson);
+      acceptedDryRuns.push({
+        dryRunId: 'foreign-pair-only-run',
+        resultHash: oracleHash({ fixture: 'foreign-pair-only-run' }),
+      });
+      resealAcceptance(context, { acceptedDryRuns, acceptedRuns });
+    }],
+    ['duplicate selected pair entry', context => {
+      const acceptedRuns = JSON.parse(context.authority.authorization.acceptedPr8EvidenceJson);
+      const acceptedDryRuns = JSON.parse(context.authority.authorization.acceptedDryRunsJson);
+      acceptedDryRuns.push({ ...acceptedDryRuns[0] });
+      resealAcceptance(context, { acceptedDryRuns, acceptedRuns });
+    }],
+    ['selected pair differs from full evidence projection', context => {
+      const acceptedRuns = JSON.parse(context.authority.authorization.acceptedPr8EvidenceJson);
+      const acceptedDryRuns = JSON.parse(context.authority.authorization.acceptedDryRunsJson);
+      acceptedDryRuns[0] = {
+        ...acceptedDryRuns[0],
+        resultHash: oracleHash({ fixture: 'selected-pair-mismatch' }),
+      };
+      resealAcceptance(context, { acceptedDryRuns, acceptedRuns });
+    }],
+    ['company timezone snapshot drift', context => {
+      const acceptedRuns = JSON.parse(context.authority.authorization.acceptedPr8EvidenceJson);
+      const acceptedDryRuns = JSON.parse(context.authority.authorization.acceptedDryRunsJson);
+      acceptedRuns[0] = { ...acceptedRuns[0], companyTimezoneSnapshot: 'UTC' };
+      resealAcceptance(context, { acceptedDryRuns, acceptedRuns });
+    }],
+    ['persisted accepted run is absent', context => {
+      deletePr8RowIgnoringForeignKeys(context, 'actual_source_dry_runs', context.authority.run.id);
+    }],
+    ['stale fully resealed acceptance window', context => {
+      const acceptedRuns = JSON.parse(context.authority.authorization.acceptedPr8EvidenceJson);
+      const acceptedDryRuns = JSON.parse(context.authority.authorization.acceptedDryRunsJson);
+      const finalizedAt = '2026-07-27T09:00:00.000Z';
+      const validUntilExclusive = '2026-07-27T09:15:00.000Z';
+      acceptedRuns[0] = {
+        ...acceptedRuns[0],
+        finalizedAt,
+        validFrom: finalizedAt,
+        validUntilExclusive,
+      };
+      acceptedRuns[0].freshnessWindowFingerprint = oracleHash({
+        domain: 'rentcore.canonical_actual_posting.pr8_freshness_window',
+        finalizedAt,
+        freshnessDurationMs: acceptedRuns[0].freshnessDurationMs,
+        freshnessPolicyHash: acceptedRuns[0].freshnessPolicyHash,
+        freshnessPolicyId: acceptedRuns[0].freshnessPolicyId,
+        freshnessPolicyVersion: acceptedRuns[0].freshnessPolicyVersion,
+        validFrom: finalizedAt,
+        validUntilExclusive,
+        version: 1,
+      });
+      resealAcceptance(context, { acceptedDryRuns, acceptedRuns });
+    }],
+  ];
+  for (const [name, mutate] of cases) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        mutate(context);
+        assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+
+  await t.test('multi-run acceptance rejects one run with different timezone and ownership', () => {
+    const context = createPr9aContext();
+    try {
+      const second = context.dryRunService.evaluateActualSourceDryRun(
+        context.dryRunContext,
+        dryRunCommand({
+          asOfDate: '2026-09-15',
+          idempotencyKey: 'pr9-hostile-second-accepted-run',
+          policyManifest: approvedTestPolicyManifest(),
+        }),
+      );
+      const acceptedRuns = [
+        oracleAcceptedRun(context, context.authority.run.id),
+        oracleAcceptedRun(context, second.dryRunId),
+      ].sort((left, right) => left.dryRunId < right.dryRunId ? -1 : left.dryRunId > right.dryRunId ? 1 : 0);
+      acceptedRuns[1] = {
+        ...acceptedRuns[1],
+        companyTimezoneSnapshot: 'UTC',
+        sourceOwnershipManifestHash: oracleHash({ fixture: 'multi-run-foreign-owner' }),
+      };
+      const acceptedDryRuns = acceptedRuns.map(entry => ({
+        dryRunId: entry.dryRunId,
+        resultHash: entry.resultHash,
+      }));
+      resealAcceptance(context, { acceptedDryRuns, acceptedRuns });
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('valid multi-run acceptance proves every persisted run graph', () => {
+    const context = createPr9aContext();
+    try {
+      const second = context.dryRunService.evaluateActualSourceDryRun(
+        context.dryRunContext,
+        dryRunCommand({
+          asOfDate: '2026-09-15',
+          idempotencyKey: 'pr9-valid-second-accepted-run',
+          policyManifest: approvedTestPolicyManifest(),
+        }),
+      );
+      const acceptedRuns = [
+        oracleAcceptedRun(context, context.authority.run.id),
+        oracleAcceptedRun(context, second.dryRunId),
+      ].sort((left, right) => left.dryRunId < right.dryRunId ? -1 : left.dryRunId > right.dryRunId ? 1 : 0);
+      const acceptedDryRuns = acceptedRuns.map(entry => ({
+        dryRunId: entry.dryRunId,
+        resultHash: entry.resultHash,
+      }));
+      resealAcceptance(context, { acceptedDryRuns, acceptedRuns });
+      const result = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      assert.equal(result.replayed, false);
+      assert.deepEqual(counts(context.db), {
+        events: 1, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+      });
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('A-02 authority projections reject independently resealed logical and normalized drift', async t => {
+  const mutateActivation = (context, mutate) => {
+    const activation = context.db.prepare(`
+      SELECT * FROM canonical_posting_activation_records WHERE recordId = ?
+    `).get(context.authority.activation.recordId);
+    mutate(activation);
+    activation.recordHash = oracleRecordHash(
+      activation,
+      ORACLE_ACTIVATION_FIELDS,
+      'rentcore.canonical_actual_posting.activation',
+    );
+    rewriteWholeRow(context.db, 'canonical_posting_activation_records', activation);
+  };
+  const cases = [
+    ['arbitrary equal cohort labels', context => {
+      const forged = oracleHash({ fixture: 'arbitrary-equal-cohort' });
+      const authorization = context.db.prepare(`
+        SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+      `).get(context.authority.authorization.recordId);
+      authorization.cohortHash = forged;
+      authorization.recordHash = oracleRecordHash(
+        authorization,
+        ORACLE_WRITE_AUTHORIZATION_FIELDS,
+        'rentcore.canonical_actual_posting.write_authorization',
+      );
+      rewriteWholeRow(context.db, 'canonical_write_authorization_records', authorization);
+      mutateActivation(context, activation => { activation.cohortHash = forged; });
+    }],
+    ['arbitrary equal boundary labels', context => {
+      const forged = oracleHash({ fixture: 'arbitrary-equal-boundary' });
+      const authorization = context.db.prepare(`
+        SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+      `).get(context.authority.authorization.recordId);
+      authorization.boundaryHash = forged;
+      authorization.recordHash = oracleRecordHash(
+        authorization,
+        ORACLE_WRITE_AUTHORIZATION_FIELDS,
+        'rentcore.canonical_actual_posting.write_authorization',
+      );
+      rewriteWholeRow(context.db, 'canonical_write_authorization_records', authorization);
+      mutateActivation(context, activation => { activation.boundaryHash = forged; });
+    }],
+    ['policy manifest differs from accepted evidence', context => {
+      const authorization = context.db.prepare(`
+        SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+      `).get(context.authority.authorization.recordId);
+      authorization.policyManifestHashesJson = oracleCanonicalJson([
+        oracleHash({ fixture: 'policy-not-in-accepted-evidence' }),
+      ]);
+      authorization.recordHash = oracleRecordHash(
+        authorization,
+        ORACLE_WRITE_AUTHORIZATION_FIELDS,
+        'rentcore.canonical_actual_posting.write_authorization',
+      );
+      rewriteWholeRow(context.db, 'canonical_write_authorization_records', authorization);
+    }],
+    ['duplicate normalized source-system array', context => {
+      mutateActivation(context, activation => {
+        activation.sourceSystemIdsJson = oracleCanonicalJson([
+          'rentcore.billing_source_authority.v1',
+          'rentcore.billing_source_authority.v1',
+        ]);
+      });
+    }],
+    ['reordered normalized policy array', context => {
+      mutateActivation(context, activation => {
+        const existing = JSON.parse(activation.policyManifestHashesJson)[0];
+        activation.policyManifestHashesJson = oracleCanonicalJson([
+          oracleHash({ fixture: 'second-policy' }),
+          existing,
+        ].sort().reverse());
+      });
+    }],
+    ['logical boundary fields retain stale stored labels', context => {
+      mutateActivation(context, activation => {
+        activation.forwardOnlyStartDate = '2026-08-02';
+        activation.forwardOnlyStartUtc = '2026-08-01T21:00:00.000Z';
+      });
+    }],
+  ];
+  for (const [name, mutate] of cases) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        const activation = context.db.prepare(`
+          SELECT * FROM canonical_posting_activation_records WHERE recordId = ?
+        `).get(context.authority.activation.recordId);
+        assert.equal(activation.cohortHash, oracleCohortHash(activation));
+        assert.equal(activation.boundaryHash, oracleBoundaryHash(activation));
+        let storageRejection = null;
+        try {
+          mutate(context);
+        } catch (error) {
+          storageRejection = error;
+        }
+        if (storageRejection) {
+          assert.match(String(storageRejection.code), /^SQLITE_CONSTRAINT/);
+          assert.deepEqual(counts(context.db), {
+            events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+          });
+          return;
+        }
+        assert.throws(
+          () => context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)),
+          error => [
+            'CANONICAL_WRITE_AUTHORIZATION_INTEGRITY_FAILED',
+            'CANONICAL_POSTING_ACTIVATION_INTEGRITY_FAILED',
+            'CANONICAL_AUTHORITY_LOGICAL_PROJECTION_INVALID',
+          ].includes(error.code),
+        );
+        assert.deepEqual(counts(context.db), {
+          events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+        });
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+
+  await t.test('source slice before the forward-only date is denied', () => {
+    const context = createPr9aContext();
+    try {
+      mutateAppendOnlyTable(context.db, 'actual_source_dry_run_candidates', () => {
+        context.db.prepare(`
+          UPDATE actual_source_dry_run_candidates SET sliceStartDate = '2026-07-31'
+          WHERE id = ?
+        `).run(context.authority.candidate.id);
+      });
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('self-consistent policy projection still must match persisted PR8 policy', () => {
+    const context = createPr9aContext();
+    try {
+      const forgedPolicy = oracleHash({ fixture: 'self-consistent-foreign-policy' });
+      const acceptedDryRuns = JSON.parse(context.authority.authorization.acceptedDryRunsJson);
+      const acceptedRuns = JSON.parse(context.authority.authorization.acceptedPr8EvidenceJson);
+      acceptedRuns[0] = { ...acceptedRuns[0], policyManifestHash: forgedPolicy };
+      resealAcceptance(context, {
+        acceptedDryRuns,
+        acceptedRuns,
+        authorization: { policyManifestHashesJson: oracleCanonicalJson([forgedPolicy]) },
+      });
+      const activation = context.db.prepare(`
+        SELECT * FROM canonical_posting_activation_records WHERE recordId = ?
+      `).get(context.authority.activation.recordId);
+      activation.policyManifestHashesJson = oracleCanonicalJson([forgedPolicy]);
+      activation.cohortHash = oracleCohortHash(activation);
+      activation.recordHash = oracleRecordHash(
+        activation,
+        ORACLE_ACTIVATION_FIELDS,
+        'rentcore.canonical_actual_posting.activation',
+      );
+      rewriteWholeRow(context.db, 'canonical_posting_activation_records', activation);
+      const authorization = context.db.prepare(`
+        SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+      `).get(context.authority.authorization.recordId);
+      authorization.cohortHash = activation.cohortHash;
+      authorization.recordHash = oracleRecordHash(
+        authorization,
+        ORACLE_WRITE_AUTHORIZATION_FIELDS,
+        'rentcore.canonical_actual_posting.write_authorization',
+      );
+      rewriteWholeRow(context.db, 'canonical_write_authorization_records', authorization);
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('A-03 full same-scope PR6 graph seals complete sorted roots, edges, and revisions', async t => {
+  await t.test('three disconnected competing overlapping roots seal the full sorted root set', () => {
+    const context = createPr9aContext();
+    try {
+      const first = insertDisconnectedCoverageRoot(context, 'root-z');
+      const second = insertDisconnectedCoverageRoot(context, 'root-a');
+      const { observation } = assertRequiredDenial(context, 'SOURCE_LINEAGE_ROOT_CONFLICT');
+      const roots = [
+        context.authority.candidate.coverageSetId,
+        first.competingSet.id,
+        second.competingSet.id,
+      ].sort();
+      assert.equal(observation.observedProjection.rootCount, 3);
+      assert.equal(observation.observedProjection.rootObservationState, 'disconnected_roots');
+      assert.equal(observation.observedProjection.rootCoverageLineageIdsHash, oracleHash({
+        domain: 'rentcore.canonical_actual_posting.root_lineage_ids',
+        rootCoverageLineageIds: roots,
+        version: 1,
+      }));
+      assert.equal(observation.observedProjection.rootSourceDocumentLineageIdsHash, oracleHash({
+        domain: 'rentcore.canonical_actual_posting.root_source_document_lineage_ids',
+        rootSourceDocumentLineageIds: [context.authority.candidate.updId],
+        version: 1,
+      }));
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('forked successor seals every sorted edge and never selects by order', () => {
+    const context = createPr9aContext();
+    try {
+      context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      appendConductedSourceCorrection(context, 'full-fork');
+      const relation = context.db.prepare('SELECT * FROM billing_source_coverage_supersessions').get();
+      context.db.exec('DROP INDEX uq_billing_source_coverage_supersession_original');
+      mutateAppendOnlyTable(context.db, 'billing_source_coverage_supersessions', () => {
+        insertCopiedRow(context.db, 'billing_source_coverage_supersessions', {
+          ...relation,
+          id: 'billing-source-supersession-hostile-full-fork',
+          sourceEventId: 'hostile-full-fork-event',
+        });
+      });
+      const { observation } = assertRequiredDenial(context, 'SOURCE_LINEAGE_BROKEN_SUCCESSOR');
+      assert.equal(observation.observedProjection.brokenEdgeCount, 2);
+      assert.equal(observation.observedProjection.brokenEdgeFingerprint, null);
+      assert.equal(observation.observedProjection.brokenEdgeFromId, null);
+      assert.equal(observation.observedProjection.brokenEdgeToId, null);
+      const persistedRelations = context.db.prepare(`
+        SELECT * FROM billing_source_coverage_supersessions
+        ORDER BY originalCoverageSetId, replacementCoverageSetId, action, id
+      `).all();
+      const brokenEdges = persistedRelations.map(row => oracleBrokenEdge(
+        context,
+        row,
+        observation.observedProjection.rootCoverageLineageId,
+        'forked_successor',
+      )).sort((left, right) => {
+        const a = oracleCanonicalJson(left);
+        const b = oracleCanonicalJson(right);
+        return a < b ? -1 : a > b ? 1 : 0;
+      });
+      assert.equal(observation.observedProjection.brokenEdgesHash, oracleHash({
+        brokenEdges,
+        domain: 'rentcore.canonical_actual_posting.broken_successor_edges',
+        version: 1,
+      }));
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('formedVersionId drift cannot manufacture a current revision', () => {
+    const context = createPr9aContext();
+    try {
+      context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      appendConductedSourceCorrection(context, 'formed-version-drift');
+      const latestSlice = context.db.prepare(`
+        SELECT * FROM billing_source_coverage_slices ORDER BY createdAt DESC, id DESC LIMIT 1
+      `).get();
+      context.db.pragma('foreign_keys = OFF');
+      try {
+        mutateAppendOnlyTable(context.db, 'billing_source_coverage_slices', () => {
+          context.db.prepare(`
+            UPDATE billing_source_coverage_slices
+            SET formedUpdVersionId = 'missing-formed-version'
+            WHERE id = ?
+          `).run(latestSlice.id);
+        });
+      } finally {
+        context.db.pragma('foreign_keys = ON');
+      }
+      const { observation } = assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION');
+      assert.equal(observation.observedProjection.currentRevisionCount, 0);
+      assert.equal(observation.observedProjection.currentRevisionKeysHash, oracleHash({
+        currentSourceRevisionKeys: [],
+        domain: 'rentcore.canonical_actual_posting.current_revision_keys',
+        version: 1,
+      }));
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('A-04 Algorithm C validates live authority suffix only as immutable contiguous evidence', async t => {
+  const cases = [
+    ['malformed suffix row', context => {
+      const descendant = nextAuthority(context.authority.source, 2);
+      context.authority.repository.appendAuthorityRecord(descendant);
+      mutateAppendOnlyTable(context.db, 'governed_adapter_authority_records', () => {
+        context.db.prepare(`
+          UPDATE governed_adapter_authority_records SET ownerRef = 'malformed-suffix-owner'
+          WHERE recordId = ?
+        `).run(descendant.recordId);
+      });
+    }],
+    ['gap in suffix', context => {
+      const second = nextAuthority(context.authority.source, 2);
+      const third = nextAuthority(second, 3);
+      context.authority.repository.appendAuthorityRecord(second);
+      context.authority.repository.appendAuthorityRecord(third);
+      context.db.pragma('foreign_keys = OFF');
+      try {
+        mutateAppendOnlyTable(context.db, 'governed_adapter_authority_records', () => {
+          context.db.prepare(`
+            DELETE FROM governed_adapter_authority_records WHERE recordId = ?
+          `).run(second.recordId);
+        });
+      } finally {
+        context.db.pragma('foreign_keys = ON');
+      }
+    }],
+    ['mutation at frozen maximum', context => {
+      mutateAppendOnlyTable(context.db, 'governed_adapter_authority_records', () => {
+        context.db.prepare(`
+          UPDATE governed_adapter_authority_records SET ownerRef = 'mutated-frozen-owner'
+          WHERE recordId = ?
+        `).run(context.authority.source.recordId);
+      });
+    }],
+  ];
+  for (const [name, corrupt] of cases) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      let restore = () => {};
+      try {
+        mutateCandidateForConflict(context);
+        restore = mutateAfterNextRollback(context.db, () => corrupt(context));
+        assert.throws(
+          () => context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)),
+          error => [
+            ERROR_CODES.AUTHORITY_FROZEN_CHAIN_SNAPSHOT_INTEGRITY_FAILED,
+            ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED,
+          ].includes(error.code),
+        );
+        assert.deepEqual(counts(context.db), {
+          events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+        });
+      } finally {
+        restore();
+        context.db.close();
+      }
+    });
+  }
+});
+
+test('A-05 missing PR8 parents retain exact nullable projection and complete Algorithm C accounting', async t => {
+  for (const [name, remove] of [
+    ['selected run missing', context => {
+      deletePr8RowIgnoringForeignKeys(context, 'actual_source_dry_runs', context.authority.run.id);
+    }],
+    ['selected candidate missing', context => {
+      deletePr8RowIgnoringForeignKeys(context, 'actual_source_dry_run_candidates', context.authority.candidate.id);
+    }],
+    ['selected run and candidate missing', context => {
+      deletePr8RowIgnoringForeignKeys(context, 'actual_source_dry_run_candidates', context.authority.candidate.id);
+      deletePr8RowIgnoringForeignKeys(context, 'actual_source_dry_runs', context.authority.run.id);
+    }],
+  ]) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        remove(context);
+        const before = counts(context.db);
+        const { observation, transition } = assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+        const specificKeys = [
+          'acceptedDryRunsHash', 'acceptedPr8EvidenceHash', 'deniedFreshnessWindowFingerprint',
+          'dryRunId', 'freshnessState', 'freshnessWindowFingerprint',
+          'reconciliationSetHash', 'resultHash',
+        ];
+        for (const projection of [observation.expectedProjection, observation.observedProjection]) {
+          for (const key of specificKeys) assert.ok(Object.hasOwn(projection, key));
+        }
+        assert.equal(observation.observedProjection.reconciliationSetHash, null);
+        assert.deepEqual(
+          [transition.state, transition.attemptApplied, transition.rateApplied, transition.circuitApplied],
+          ['COMPLETE', 1, 1, 1],
+        );
+        assert.deepEqual(counts(context.db), {
+          ...before,
+          conflicts: before.conflicts + 1,
+          transitions: before.transitions + 1,
+        });
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+});
+
 test('required authorization, activation, due-date, and timezone denials all flow through Algorithm C', async t => {
   const cases = [
     ['authorization missing', 'AUTHORIZATION_DRIFT', context => ({
@@ -781,11 +1783,9 @@ test('locked source revision state machine classifies revision change, correctio
       mutateAppendOnlyTable(context.db, 'billing_source_coverage_supersessions', () => {
         context.db.prepare('DELETE FROM billing_source_coverage_supersessions').run();
       });
-      const { observation } = assertRequiredDenial(
-        context,
-        'SOURCE_REVISION_CHANGED_BEFORE_POSTING',
-      );
-      assert.equal(observation.conflictType, 'SOURCE_REVISION_CHANGED_BEFORE_POSTING');
+      const { observation } = assertRequiredDenial(context, 'SOURCE_LINEAGE_ROOT_CONFLICT');
+      assert.equal(observation.observedProjection.rootObservationState, 'disconnected_roots');
+      assert.equal(observation.observedProjection.rootCount, 2);
     } finally {
       context.db.close();
     }
@@ -1173,6 +2173,7 @@ test('repository-owned runtime identities make artifact, configuration, and poli
   ];
   const fields = [
     ['artifactDigest', 'ARTIFACT_IDENTITY_DRIFT', 'runtime-artifact-v2'],
+    ['sourceCommitSha', 'ARTIFACT_IDENTITY_DRIFT', 'fedcba9876543210fedcba9876543210fedcba98'],
     ['configurationHash', 'CONFIGURATION_HASH_DRIFT', sha256Canonical({ fixture: 'runtime-config-v2' })],
     ['policyHash', 'POLICY_HASH_DRIFT', sha256Canonical({ fixture: 'runtime-policy-v2' })],
   ];

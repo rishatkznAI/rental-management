@@ -335,117 +335,180 @@ Resolution requires a separate architecture remediation or Gate B scope amendmen
 review and new Owner authorization bound to its exact head. The implementer may not
 choose a permissive interpretation.
 
-## 10. Durable Gate B Owner approval contract
+## 10. Durable Gate B single-owner authorization contract
 
 The normative Gate B contract requires a new, separate Product/Business Owner
-authorization naming the exact PR9a scope and base SHA. The Gate A single-owner
-exception authorizes only `architectureDesignApproved`; it is not inherited by Gate
-B and is not Gate B evidence. The normative document does not name a separate human
-Technical Architecture Reviewer as a Gate B prerequisite, but the fresh durable
-Owner decision below is mandatory and automated review cannot replace it.
-
-Valid Gate B evidence must be an authenticated permanent GitHub comment on the Gate
-B PR and must contain all of the following:
-
-- repository `rishatkznAI/rental-management` and the actual Gate B PR number;
-- the exact final Gate B document head, unchanged after the comment;
-- architecture baseline
-  `fefb5c482bcb63dedbb81ec9eb12da49d57a358a` and this document path;
-- Owner identity, Product / Business Owner role, actual UTC timestamp and the
-  permanent permalink to that same comment;
-- explicit review and acceptance of the exact PR9a scope, allow-list, acceptance
-  criteria, stopping conditions and disabled-implementation risks;
-- explicit authorization of only `pr9aImplementationAuthorized = TRUE`;
-- explicit denials for PR9b, aggregate PR9, deployment, Railway, production
-  migrations/reads/writes/activation, settlement, shadow-read and cutover.
-
-Procedure:
-
-1. Complete review of this docs-only Gate B PR while
-   `pr9aImplementationAuthorized` remains `FALSE`.
-2. Freeze its final head and replace every template placeholder with actual values
-   in the Owner's GitHub comment; do not edit this document merely to fill the
-   template.
-3. The authenticated Owner posts the comment, obtains its permanent permalink and
-   immediately edits that same comment to replace the permalink placeholder. The
-   comment is not valid evidence until the actual permalink and every other field
-   are present. This comment-only edit does not change the approved Git head. If the
-   platform cannot retain that self-reference, an authenticated immediately linked
-   follow-up comment must record the permalink and exact same head; both comments
-   form one evidence record.
-4. Independently verify Owner identity/association, role statement, UTC timestamp,
-   exact head, base binding, full scope/risk acceptance and every explicit denial.
-5. Any content commit after approval invalidates it and requires a new comment on the
-   new exact head. Approval does not merge the PR automatically.
-6. Only after the evidence procedure is complete may a separately authorized action
-   merge this docs-only Gate B PR. PR9a implementation must occur later in a separate
-   implementation branch/PR created from a verified compatible `main`; this package
-   itself creates no implementation branch.
-
-Until all evidence is complete, `pr9aImplementationAuthorized = FALSE`.
-
-## 11. Owner approval template
-
-The following block is an **UNEXECUTED TEMPLATE — NOT APPROVAL EVIDENCE**. Every
-angle-bracket field is an intentional template placeholder. The block has no effect
-until the authenticated Owner posts it with actual values on the exact Gate B PR
-head and the complete evidence contract in section 10 is verified.
+authorization naming the exact PR9a scope and base SHA. For this single-owner
+project, the Owner is established by this repository mapping:
 
 ```text
-PRODUCT / BUSINESS OWNER PR9A IMPLEMENTATION AUTHORIZATION
+Repository owner account: rishatkznAI
+Product / Business Owner: Ришат Хабибрахманов
+```
+
+The Gate A single-owner exception remains limited to
+`architectureDesignApproved`; it is not itself Gate B authorization. Gate B instead
+uses the explicit Owner instruction and authorization-commit evidence model below.
+An automated system may execute and record that instruction, but it must never claim
+that it independently made the business decision.
+
+### 10.1 Authorization prerequisites
+
+PR9a implementation may be authorized only when all of the following are true:
+
+- `architectureDesignApproved = TRUE`;
+- PR #232 contains the completed Gate B package and has no unresolved P0 or P1 Gate
+  B findings;
+- the Product / Business Owner gives a direct, explicit instruction in the Codex
+  session to authorize PR9a and names the exact current Gate B package head;
+- that instruction accepts the exact PR9a scope and disabled-implementation risks,
+  authorizes only `pr9aImplementationAuthorized = TRUE`, and preserves every denial
+  in sections 8 and 10.4;
+- the local branch head, remote branch head and PR #232 head all equal the head named
+  by the Owner immediately before the authorization commit;
+- one authorization commit has that exact Gate B package head as its parent and its
+  entire repository diff is only the single literal change
+  `pr9aImplementationAuthorized = FALSE` to
+  `pr9aImplementationAuthorized = TRUE` in this document;
+- every other authorization field and every technical byte remain unchanged;
+- the authorization commit is pushed to the existing repository-owner branch for
+  PR #232 and all required checks complete successfully.
+
+The exact Gate B package head named by the Owner is therefore the parent of the
+authorization commit. The authorization commit's author, authored/committed
+timestamps, SHA, parent SHA and exact one-line diff are supplied by Git metadata;
+they are not copied manually into a separate approval record.
+
+### 10.2 Durable evidence model
+
+Together, the following form the durable Gate B authorization evidence:
+
+1. the direct explicit Product / Business Owner instruction in the Codex task
+   history, naming the exact pre-authorization Gate B package head;
+2. the immutable parent binding from that head to the one-purpose authorization
+   commit;
+3. the authorization commit metadata: author, authored/committed timestamps, commit
+   SHA, parent SHA and exact diff;
+4. the GitHub branch and PR #232 history showing that commit and its successful
+   checks;
+5. verification that the repository is owner-operated by `rishatkznAI`, mapped
+   above to Product / Business Owner Ришат Хабибрахманов.
+
+A GitHub Owner approval comment may be added as optional supporting evidence, but it
+is not a blocking condition and cannot substitute for the exact-head instruction or
+one-purpose authorization commit. No approval-comment permalink, manually entered
+UTC timestamp, self-referencing comment URL, or repeated Owner identity/role block
+is required.
+
+### 10.3 Final authorization procedure
+
+1. Complete the docs-only Gate B package and technical/governance review while
+   `pr9aImplementationAuthorized = FALSE`; resolve every P0/P1 finding.
+2. Freeze and report the exact PR #232 Gate B package head, its architecture baseline
+   and current authorization matrix to the Owner.
+3. The Owner gives a direct explicit Codex-session instruction naming that exact
+   head and authorizing only PR9a within this package. A template is not required.
+4. The executing system states that it is carrying out the Owner's decision rather
+   than making one, refetches local/remote/PR state, and stops on any head mismatch.
+5. Create exactly one authorization commit whose parent is the named head and whose
+   entire diff is the one literal `FALSE` to `TRUE` change for
+   `pr9aImplementationAuthorized`. Do not amend scope, evidence text or any other
+   authorization value in that commit.
+6. Push only that commit to the existing PR #232 branch and require successful
+   checks. Verify its author, timestamps, SHA, parent, exact diff and unchanged denial
+   fields from Git and GitHub.
+7. Only after steps 1–6 pass is Gate B evidence complete. A separately requested
+   action may then merge the docs-only Gate B PR. PR9a implementation must occur
+   later in a separate implementation branch/PR created from a verified compatible
+   `main`.
+
+Any content change before the authorization commit creates a new candidate Gate B
+package head and requires a new exact-head Owner instruction. Any extra diff in the
+authorization commit, failed check, unresolved P0/P1, identity ambiguity or head
+mismatch invalidates the procedure and requires a stop; it must not be repaired by
+silently broadening the authorization commit.
+
+Until the whole procedure is complete,
+`pr9aImplementationAuthorized = FALSE`.
+
+### 10.4 Scope of this governance simplification
+
+This evidence simplification applies only to
+`pr9aImplementationAuthorized`. It neither authorizes nor simplifies the separate
+gates for:
+
+```text
+pr9bImplementationAuthorized
+pr9ImplementationAuthorized
+foundationDeploymentRetryAuthorized
+pr9DisabledDeploymentAuthorized
+productionActivationAuthorized
+canonicalProductionReadsAuthorized
+productionCanonicalWritesAuthorized
+settlementAuthorized
+shadowReadAuthorized
+cutoverAuthorized
+```
+
+Deployment, Railway access/change and every production action still require their
+own later explicit instructions and applicable gates.
+
+## 11. Optional non-blocking Owner instruction template
+
+The following block is an **OPTIONAL UNEXECUTED TEMPLATE — NOT AUTHORIZATION
+EVIDENCE**. It is only drafting assistance. Stored in this document, it has no
+effect. The Owner may instead use any direct Codex-session instruction that contains
+the exact head and all section-10 requirements.
+
+```text
+PRODUCT / BUSINESS OWNER PR9A IMPLEMENTATION AUTHORIZATION INSTRUCTION
 
 Repository: rishatkznAI/rental-management
-PR: <GATE B PR NUMBER>
-Authorized head: <EXACT GATE B HEAD>
-Architecture baseline: <APPROVED MAIN SHA>
-Document: <GATE B DOCUMENT PATH>
+PR: #232
+Gate B package head: <EXACT PRE-AUTHORIZATION PR HEAD>
+Architecture baseline: fefb5c482bcb63dedbb81ec9eb12da49d57a358a
+Document: docs/pr9a-implementation-authorization-gate.md
 
-Approver identity: Ришат Хабибрахманов
-Approver role: Product / Business Owner
-Approval timestamp UTC: <ACTUAL UTC TIMESTAMP>
-Permanent GitHub reference: <PERMALINK TO THIS COMMENT>
-
-I authorize implementation of PR9a only, within the exact scope and constraints defined by this Gate B document and the approved pre-PR9 architecture baseline.
+I directly instruct Codex to create and push the Gate B authorization commit for PR9a at the exact Gate B package head stated above.
 
 I have reviewed and accept the exact PR9a scope, changed-file allow-list, acceptance criteria, stopping conditions and disabled-implementation risks defined by this Gate B document.
 
-This approval authorizes only:
+The authorization commit must change only:
 
-pr9aImplementationAuthorized = TRUE
+pr9aImplementationAuthorized = FALSE → TRUE
 
-This approval does not authorize:
+All other authorization fields and all technical content must remain unchanged.
 
-pr9bImplementationAuthorized = TRUE
-pr9ImplementationAuthorized = TRUE
-foundationDeploymentRetryAuthorized = TRUE
-pr9DisabledDeploymentAuthorized = TRUE
-productionActivationAuthorized = TRUE
-canonicalProductionReadsAuthorized = TRUE
-productionCanonicalWritesAuthorized = TRUE
-settlementAuthorized = TRUE
-shadowReadAuthorized = TRUE
-cutoverAuthorized = TRUE
-
-This approval does not authorize deployment, Railway access or changes, production migrations, production reads, production writes, activation, settlement, shadow-read or cutover.
-
-Approved by: Ришат Хабибрахманов
+This instruction does not authorize PR9b, aggregate PR9, deployment, Railway access or changes, production migrations, production reads, production writes, activation, settlement, shadow-read or cutover.
 ```
 
-## 12. Gate B package completion checklist
+This optional template does not require a GitHub comment or any manually copied
+timestamp, permalink, Owner identity or role block.
 
-Before this package can be presented for the Owner decision, its PR must prove:
+## 12. Gate B package completion and verification checklist
+
+Before this package head can be named in an Owner authorization instruction, PR #232
+must prove:
 
 - the base is the expected architecture baseline or a reviewed safe descendant;
 - the only changed file is this subordinate Markdown document;
 - executable, SQL, schema, migration and runtime diffs are empty;
 - the baseline commit, normative document blob and Gate A evidence binding resolve;
+- technical sections 2–9 are byte-identical to pre-remediation PR head
+  `81e8fcaf6580f7e6aac29f515a5f762aeac82255`, with SHA-256
+  `a170f6f84c4b38bd53957aa7094272e004beab11d40be62d3649b33bf71fdbaa`;
 - PR9a and PR9b scope remain separated and all production/deployment prohibitions
   are internally consistent;
-- every authorization value remains unchanged;
-- placeholders exist only inside the explicitly marked unexecuted template;
+- `architectureDesignApproved` remains `TRUE`,
+  `pr9aImplementationAuthorized` remains `FALSE`, and every other authorization
+  value remains unchanged during package preparation;
+- no language makes a GitHub comment, comment permalink, manually entered UTC
+  timestamp, self-referencing URL or repeated Owner identity/role block mandatory;
+- placeholders exist only inside the explicitly marked optional unexecuted template;
 - repository and added-line secret scans are clean;
 - `git diff --check`, two independent `npm test` runs and `npm run build` pass;
 - the committed/pushed worktree and index are clean.
 
-Passing this checklist prepares evidence for an Owner decision. It does not make the
-decision and does not authorize PR9a implementation.
+Passing this checklist prepares the simplified evidence model for a later Owner
+decision. It does not make that decision, create the authorization commit or
+authorize PR9a implementation.

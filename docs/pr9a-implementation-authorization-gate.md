@@ -35,7 +35,7 @@ the existence of this file grants no implementation authority. The current state
 ```text
 foundationDeploymentRetryAuthorized = FALSE
 architectureDesignApproved = TRUE
-pr9aImplementationAuthorized = FALSE
+pr9aImplementationAuthorized = TRUE
 pr9bImplementationAuthorized = FALSE
 pr9ImplementationAuthorized = FALSE
 pr9DisabledDeploymentAuthorized = FALSE

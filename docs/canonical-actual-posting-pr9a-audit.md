@@ -167,10 +167,10 @@ evidence, adapter approval, activation, migration, read, write, or deployment st
 
 The pre-commit verification result for this implementation is:
 
-- targeted PR9a suites: 38 tests passed, 0 failed;
-- first `npm test`: 2,381 tests passed, 0 failed;
-- second `npm test`: 2,381 tests passed, 0 failed;
-- explicit `node --test tests/*.test.js`: 2,381 tests passed, 0 failed;
+- targeted PR9a suites: 39 tests passed, 0 failed;
+- first and second mandated `npm test` passes: 2,381 tests passed, 0 failed in each before the final denial-brand export guard was added;
+- final-tree `npm test`: 2,382 tests passed, 0 failed;
+- final-tree explicit `node --test tests/*.test.js`: 2,382 tests passed, 0 failed;
 - `npm run build`: passed, 3,385 modules transformed;
 - schema inventory: 7 tables, 38 named indexes, 41 named triggers, clean foreign-key check;
 - changed-file allow-list, PR9a/PR9b separation, Algorithm B absence, canonical business DML absence, route/worker/scheduler/external-access absence, authorization guard, placeholder, repository-secret, and added-line-secret scans: passed.

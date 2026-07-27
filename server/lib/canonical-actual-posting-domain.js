@@ -14,6 +14,19 @@ const MAX_NODES = 10_000;
 const OPERATION_DOMAIN = 'canonical_receivable.initial_post.v1';
 const TRANSITION_KIND = 'required_conflict_accounting_circuit_v1';
 
+const RUNTIME_AUTHORITY_KINDS = Object.freeze([
+  'source_adapter',
+  'eligibility_producer',
+  'canonical_posting_adapter',
+]);
+const RUNTIME_AUTHORITY_CONTRACT_KEYS = Object.freeze([
+  'artifactDigest',
+  'configurationHash',
+  'policyHash',
+  'sourceCommitSha',
+]);
+const RUNTIME_CONTRACTS = new WeakSet();
+
 const ERROR_CODES = Object.freeze({
   INPUT_NOT_INERT: 'CANONICAL_INPUT_NOT_INERT',
   INPUT_LIMIT_EXCEEDED: 'CANONICAL_INPUT_LIMIT_EXCEEDED',
@@ -166,6 +179,56 @@ function assertUuidV4(value, field = 'uuid') {
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value)
   ) fail(ERROR_CODES.INVALID_UUID, `Invalid lowercase RFC 9562 UUIDv4: ${field}`, field);
   return value;
+}
+
+function createCanonicalActualPostingRuntimeContract(input = { authorities: null, enabled: false, version: 1 }) {
+  const inert = materializeInert(input, 'runtimeContract');
+  assertExactObjectKeys(inert, ['authorities', 'enabled', 'version'], 'runtimeContract');
+  if (inert.version !== 1 || typeof inert.enabled !== 'boolean') {
+    fail(ERROR_CODES.ENVELOPE_INVALID, 'Invalid runtime contract version or state.', 'runtimeContract');
+  }
+  if (!inert.enabled) {
+    if (inert.authorities !== null) {
+      fail(ERROR_CODES.ENVELOPE_INVALID, 'Disabled runtime contract must not carry authority identities.');
+    }
+  } else {
+    assertExactObjectKeys(inert.authorities, RUNTIME_AUTHORITY_KINDS, 'runtimeContract.authorities');
+    for (const kind of RUNTIME_AUTHORITY_KINDS) {
+      const authority = inert.authorities[kind];
+      assertExactObjectKeys(
+        authority,
+        RUNTIME_AUTHORITY_CONTRACT_KEYS,
+        `runtimeContract.authorities.${kind}`,
+      );
+      assertIdentifier(authority.artifactDigest, `${kind}.artifactDigest`);
+      assertIdentifier(authority.sourceCommitSha, `${kind}.sourceCommitSha`);
+      assertHash(authority.configurationHash, `${kind}.configurationHash`);
+      assertHash(authority.policyHash, `${kind}.policyHash`);
+    }
+  }
+  const contract = Object.freeze(inert);
+  RUNTIME_CONTRACTS.add(contract);
+  return contract;
+}
+
+const DISABLED_CANONICAL_ACTUAL_POSTING_RUNTIME_CONTRACT =
+  createCanonicalActualPostingRuntimeContract({ authorities: null, enabled: false, version: 1 });
+
+function assertCanonicalActualPostingRuntimeContract(contract) {
+  if (!contract || !RUNTIME_CONTRACTS.has(contract)) {
+    fail(ERROR_CODES.ENVELOPE_INVALID, 'A repository-owned runtime contract is required.', 'runtimeContract');
+  }
+  return contract;
+}
+
+function deriveRepositoryIdentity(domain, input) {
+  assertIdentifier(domain, 'identityDomain');
+  const inert = materializeInert(input, 'identityInput');
+  return sha256Canonical({
+    ...inert,
+    domain,
+    version: 1,
+  });
 }
 
 function materializeInertValue(value, field, depth, ancestors, state) {
@@ -1682,9 +1745,11 @@ module.exports = {
   TRANSITION_KIND,
   WRITE_AUTHORIZATION_HASH_FIELDS,
   CanonicalActualPostingError,
+  DISABLED_CANONICAL_ACTUAL_POSTING_RUNTIME_CONTRACT,
   acceptedPr8EvidenceEnvelope,
   acceptedDryRunsEnvelope,
   activationEnvelope,
+  assertCanonicalActualPostingRuntimeContract,
   assertExactObjectKeys,
   assertGovernedAuthorityRecord,
   assertHash,
@@ -1730,7 +1795,9 @@ module.exports = {
   conflictSideFingerprint,
   conflictTransitionIntentEnvelope,
   createFrozenAuthorityChainSnapshot,
+  createCanonicalActualPostingRuntimeContract,
   createPendingConflictTransition,
+  deriveRepositoryIdentity,
   dueDatePolicySetEnvelope,
   eligibleEventEnvelope,
   fail,

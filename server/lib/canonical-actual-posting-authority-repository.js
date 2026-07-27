@@ -325,6 +325,26 @@ function createCanonicalActualPostingAuthorityRepository(db) {
     return row ? assertActivationRecord(normalizeActivationRow(row)) : null;
   }
 
+  function readLatestWriteAuthorization(scope) {
+    const inert = materializeInert(scope, 'authorizationScope');
+    const row = db.prepare(`
+      SELECT * FROM ${CANONICAL_WRITE_AUTHORIZATION_RECORDS_TABLE}
+      WHERE companyId = ? AND branchId = ?
+      ORDER BY authorizationVersion DESC, recordId ASC LIMIT 1
+    `).get(inert.companyId, inert.branchId);
+    return row ? assertWriteAuthorizationRecord(normalizeWriteAuthorizationRow(row)) : null;
+  }
+
+  function readLatestActivation(scope) {
+    const inert = materializeInert(scope, 'activationScope');
+    const row = db.prepare(`
+      SELECT * FROM ${CANONICAL_POSTING_ACTIVATION_RECORDS_TABLE}
+      WHERE companyId = ? AND branchId = ?
+      ORDER BY activationVersion DESC, recordId ASC LIMIT 1
+    `).get(inert.companyId, inert.branchId);
+    return row ? assertActivationRecord(normalizeActivationRow(row)) : null;
+  }
+
   function buildAuthorityCandidates({ chain, binding, attemptedAt }) {
     assertRfc3339Milliseconds(attemptedAt, 'attemptedAt');
     if (!Array.isArray(chain) || chain.length === 0) {
@@ -418,6 +438,8 @@ function createCanonicalActualPostingAuthorityRepository(db) {
     buildAuthorityCandidates,
     freezeAuthorityState,
     readActivationRecord,
+    readLatestActivation,
+    readLatestWriteAuthorization,
     readAuthorityChain,
     readAuthorityRecord,
     readLatestAuthority,

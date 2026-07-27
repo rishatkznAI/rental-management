@@ -3,6 +3,8 @@ const {
   createCanonicalActualEligibilityEventRepository,
 } = require('./canonical-actual-eligibility-event-repository');
 const {
+  DISABLED_CANONICAL_ACTUAL_POSTING_RUNTIME_CONTRACT,
+  assertCanonicalActualPostingRuntimeContract,
   assertExactObjectKeys,
   assertIdentifier,
   materializeInert,
@@ -15,8 +17,14 @@ function validateEligibilityEventCommand(command) {
   return inert;
 }
 
-function createCanonicalActualEligibilityEventService({ db }) {
-  const repository = createCanonicalActualEligibilityEventRepository(db);
+function createCanonicalActualEligibilityEventService({
+  db,
+  runtimeContract = DISABLED_CANONICAL_ACTUAL_POSTING_RUNTIME_CONTRACT,
+}) {
+  const repository = createCanonicalActualEligibilityEventRepository(
+    db,
+    assertCanonicalActualPostingRuntimeContract(runtimeContract),
+  );
   return Object.freeze({
     produceEligibleEvent(command) {
       return repository.produceEligibleEvent(validateEligibilityEventCommand(command));

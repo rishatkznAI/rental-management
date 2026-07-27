@@ -8,8 +8,10 @@ import test from 'node:test';
 import { Worker } from 'node:worker_threads';
 import {
   authorityRecord,
+  appendConductedSourceCorrection,
   createPr9aContext,
   eligibilityCommand,
+  runtimeContractForAuthority,
 } from './canonical-actual-posting-fixtures.js';
 
 const require = createRequire(import.meta.url);
@@ -17,8 +19,19 @@ const repositoryPath = require.resolve('../server/lib/canonical-actual-eligibili
 const {
   ERROR_CODES,
   canonicalJson,
+  createCanonicalActualPostingRuntimeContract,
+  computeEconomicLineageCandidateFingerprint,
+  computeActivationRecordHash,
+  computeDueDatePolicySetHash,
+  computeEligibleEventHash,
+  computeWriteAuthorizationRecordHash,
+  deriveRepositoryIdentity,
+  sha256Canonical,
   validateEligibleEventRecord,
 } = require('../server/lib/canonical-actual-posting-domain.js');
+const {
+  createCanonicalActualEligibilityEventService,
+} = require('../server/lib/canonical-actual-eligibility-event-service.js');
 
 function counts(db) {
   return {
@@ -41,7 +54,7 @@ function freshRepositoryWith(context, install) {
   delete require.cache[repositoryPath];
   try {
     const { createCanonicalActualEligibilityEventRepository } = require(repositoryPath);
-    return createCanonicalActualEligibilityEventRepository(context.db);
+    return createCanonicalActualEligibilityEventRepository(context.db, context.runtimeContract);
   } finally {
     restore();
     delete require.cache[repositoryPath];
@@ -57,6 +70,231 @@ function mutateCandidateForConflict(context) {
   context.db.prepare('UPDATE actual_source_dry_run_candidates SET dueDateEvidenceRef = ? WHERE id = ?')
     .run('contract-due-date-conflict-v2', context.authority.candidate.id);
   context.db.exec(trigger.sql);
+}
+
+function mutateAppendOnlyTable(db, table, mutation) {
+  const triggers = db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND tbl_name = ? AND sql IS NOT NULL
+    ORDER BY name
+  `).all(table);
+  for (const trigger of triggers) db.exec(`DROP TRIGGER "${trigger.name}"`);
+  try {
+    mutation();
+  } finally {
+    for (const trigger of triggers) db.exec(trigger.sql);
+  }
+}
+
+function insertCopiedRow(db, table, row) {
+  const columns = Object.keys(row);
+  db.prepare(`
+    INSERT INTO ${table} (${columns.map(column => `"${column}"`).join(', ')})
+    VALUES (${columns.map(() => '?').join(', ')})
+  `).run(...columns.map(column => row[column]));
+}
+
+function insertPostingTriplet(context, event) {
+  const canonicalReceivableId = `canonical-receivable-${event.id}`;
+  const operationId = `canonical-operation-${event.id}`;
+  const auditEventId = `canonical-audit-${event.id}`;
+  const idempotencyKey = `canonical-posting-${event.id}`;
+  const canonicalReceivableFingerprint = sha256Canonical({ eventId: event.id, fixture: 'canonical' });
+  const auditPayloadFingerprint = sha256Canonical({ eventId: event.id, fixture: 'payload' });
+  const receivable = {
+    id: canonicalReceivableId,
+    companyId: event.companyId,
+    branchId: event.branchId,
+    clientId: event.clientId,
+    contractId: event.contractId,
+    rentalId: event.rentalId,
+    sourceDocumentType: 'rental_service_upd',
+    sourceDocumentId: event.rootSourceDocumentLineageId,
+    sourceLineId: event.economicLineageKey,
+    sourceSystem: 'rentcore.billing_source_authority.v1',
+    externalId: event.economicLineageKey,
+    idempotencyKey,
+    currency: event.currency,
+    originalAmountMinor: event.grossAmountMinor,
+    issuedAt: null,
+    postedAt: event.createdAt,
+    contractualDueDate: event.contractualDueDate,
+    dueDateProvenance: event.dueDateProvenance,
+    companyTimezone: event.companyTimezoneSnapshot,
+    workflowStatus: 'posted',
+    cancellationReason: null,
+    description: null,
+    createdAt: event.createdAt,
+    updatedAt: event.createdAt,
+    cancelledAt: null,
+    closedAt: null,
+    writtenOffAt: null,
+    version: 1,
+  };
+  const operation = {
+    id: operationId,
+    companyId: event.companyId,
+    branchId: event.branchId,
+    operationType: 'canonical_receivable.initial_post.v1',
+    idempotencyKey,
+    eventId: event.id,
+    eventHash: event.eventHash,
+    economicLineageKey: event.economicLineageKey,
+    economicSourceRevisionKey: event.economicSourceRevisionKey,
+    currentPr6RevisionHash: event.currentPr6RevisionHash,
+    sourceAdapterAuthorityRecordId: event.sourceAdapterAuthorityRecordId,
+    sourceAdapterAuthorityVersion: event.sourceAdapterAuthorityVersion,
+    sourceAdapterAuthorityRecordHash: event.sourceAdapterAuthorityRecordHash,
+    sourceOwnershipManifestHash: event.sourceOwnershipManifestHash,
+    postingAdapterAuthorityRecordId: context.authority.posting.recordId,
+    postingAdapterAuthorityVersion: context.authority.posting.authorityVersion,
+    postingAdapterAuthorityRecordHash: context.authority.posting.recordHash,
+    postingAdapterAuthorityCompanyId: event.companyId,
+    postingAdapterAuthorityBranchId: event.branchId,
+    postingAdapterAuthorityKind: 'canonical_posting_adapter',
+    writeAuthorizationRecordId: event.writeAuthorizationRecordId,
+    activationRecordId: event.activationRecordId,
+    acceptedDryRunsHash: event.acceptedDryRunsHash,
+    acceptedPr8EvidenceHash: event.acceptedPr8EvidenceHash,
+    dueDatePolicySetHash: event.dueDatePolicySetHash,
+    selectedDueDateGateKind: event.selectedDueDateGateKind,
+    selectedDueDatePolicyId: event.selectedDueDatePolicyId,
+    selectedDueDatePolicyVersion: event.selectedDueDatePolicyVersion,
+    selectedDueDatePolicyHash: event.selectedDueDatePolicyHash,
+    dueDateTreatment: event.dueDateTreatment,
+    unknownDueDateTreatmentMappingId: event.unknownDueDateTreatmentMappingId,
+    unknownDueDateTreatmentMappingVersion: event.unknownDueDateTreatmentMappingVersion,
+    unknownDueDateTreatmentMappingHash: event.unknownDueDateTreatmentMappingHash,
+    canonicalReceivableId,
+    canonicalReceivableFingerprint,
+    sourceLineageHash: event.sourceLineageHash,
+    commandFingerprint: sha256Canonical({ eventId: event.id, fixture: 'command' }),
+    auditPayloadFingerprint,
+    auditEventFingerprint: sha256Canonical({ eventId: event.id, fixture: 'audit-event' }),
+    resultHash: sha256Canonical({ eventId: event.id, fixture: 'result' }),
+    financialAuditEventId: auditEventId,
+    correlationId: event.correlationId,
+    schemaVersion: 1,
+    createdAt: event.createdAt,
+  };
+  const payload = {
+    acceptedDryRunsHash: operation.acceptedDryRunsHash,
+    acceptedPr8EvidenceHash: operation.acceptedPr8EvidenceHash,
+    activationRecordId: operation.activationRecordId,
+    actorAuthorityRecordId: operation.postingAdapterAuthorityRecordId,
+    actorIdentityId: 'integration:rentcore-canonical-receivable-posting',
+    auditPayloadFingerprint,
+    canonicalReceivableFingerprint,
+    dueDatePolicySetHash: operation.dueDatePolicySetHash,
+    dueDateTreatment: operation.dueDateTreatment,
+    economicLineageKey: operation.economicLineageKey,
+    economicSourceRevisionKey: operation.economicSourceRevisionKey,
+    eventHash: operation.eventHash,
+    eventId: operation.eventId,
+    operationId,
+    postingAdapterAuthorityBranchId: operation.postingAdapterAuthorityBranchId,
+    postingAdapterAuthorityCompanyId: operation.postingAdapterAuthorityCompanyId,
+    postingAdapterAuthorityKind: operation.postingAdapterAuthorityKind,
+    postingAdapterAuthorityRecordHash: operation.postingAdapterAuthorityRecordHash,
+    postingAdapterAuthorityRecordId: operation.postingAdapterAuthorityRecordId,
+    postingAdapterAuthorityVersion: operation.postingAdapterAuthorityVersion,
+    selectedDueDateGateKind: operation.selectedDueDateGateKind,
+    selectedDueDatePolicyHash: operation.selectedDueDatePolicyHash,
+    selectedDueDatePolicyId: operation.selectedDueDatePolicyId,
+    selectedDueDatePolicyVersion: operation.selectedDueDatePolicyVersion,
+    sourceAdapterAuthorityRecordHash: operation.sourceAdapterAuthorityRecordHash,
+    sourceAdapterAuthorityRecordId: operation.sourceAdapterAuthorityRecordId,
+    sourceAdapterAuthorityVersion: operation.sourceAdapterAuthorityVersion,
+    sourceLineageHash: operation.sourceLineageHash,
+    sourceOwnershipManifestHash: operation.sourceOwnershipManifestHash,
+    unknownDueDateTreatmentMappingHash: operation.unknownDueDateTreatmentMappingHash,
+    unknownDueDateTreatmentMappingId: operation.unknownDueDateTreatmentMappingId,
+    unknownDueDateTreatmentMappingVersion: operation.unknownDueDateTreatmentMappingVersion,
+    writeAuthorizationRecordId: operation.writeAuthorizationRecordId,
+  };
+  const audit = {
+    id: auditEventId,
+    companyId: event.companyId,
+    branchId: event.branchId,
+    aggregateType: 'canonical_receivable',
+    aggregateId: canonicalReceivableId,
+    eventType: 'canonical_receivable.initial_posted.v1',
+    actorId: 'integration:rentcore-canonical-receivable-posting',
+    actorType: 'integration',
+    occurredAt: event.createdAt,
+    reason: 'canonical_actual_posting_initial_post_v1',
+    previousValueJson: null,
+    newValueJson: canonicalJson(payload),
+    correlationId: event.correlationId,
+    sourceSystem: 'rentcore.billing_source_authority.v1',
+    createdAt: event.createdAt,
+  };
+  context.db.exec('BEGIN');
+  try {
+    insertCopiedRow(context.db, 'canonical_receivables', receivable);
+    insertCopiedRow(context.db, 'canonical_receivable_posting_operations', operation);
+    insertCopiedRow(context.db, 'financial_audit_events', audit);
+    context.db.exec('COMMIT');
+  } catch (error) {
+    if (context.db.inTransaction) context.db.exec('ROLLBACK');
+    throw error;
+  }
+  return { audit, operation, receivable };
+}
+
+function assertRequiredDenial(context, expectedType, command = eligibilityCommand(context)) {
+  const before = counts(context.db);
+  let denial;
+  try {
+    context.eligibilityService.produceEligibleEvent(command);
+  } catch (error) {
+    denial = error;
+  }
+  assert.ok(denial);
+  assert.equal(denial.code, expectedType);
+  assert.equal(denial.replayed, false);
+  assert.deepEqual(counts(context.db), {
+    events: before.events,
+    conflicts: before.conflicts + 1,
+    transitions: before.transitions + 1,
+    receivables: before.receivables,
+    operations: before.operations,
+  });
+  const conflict = context.db.prepare('SELECT * FROM canonical_receivable_posting_conflicts').get();
+  const transition = context.db.prepare('SELECT * FROM canonical_receivable_posting_conflict_transitions').get();
+  assert.equal(conflict.conflictType, expectedType);
+  assert.deepEqual(
+    [transition.state, transition.attemptApplied, transition.rateApplied, transition.circuitApplied],
+    ['COMPLETE', 1, 1, 1],
+  );
+  const observation = JSON.parse(conflict.conflictObservationJson);
+  assert.equal(observation.conflictType, expectedType);
+  assert.notEqual(canonicalJson(observation.expectedProjection), canonicalJson(observation.observedProjection));
+  const beforeReplay = canonicalJson({ conflict, transition });
+  const pair = context.eligibilityRepository.readConflictPair(transition.transitionId);
+  assert.equal(canonicalJson({ conflict: pair.conflict, transition: pair.transition }), beforeReplay);
+  assert.equal(canonicalJson({
+    conflict: context.db.prepare('SELECT * FROM canonical_receivable_posting_conflicts').get(),
+    transition: context.db.prepare('SELECT * FROM canonical_receivable_posting_conflict_transitions').get(),
+  }), beforeReplay);
+  return { conflict, denial, observation, transition };
+}
+
+function mutateAfterNextRollback(db, mutation) {
+  const originalExec = db.exec;
+  let armed = true;
+  Object.defineProperty(db, 'exec', {
+    configurable: true,
+    value(sql) {
+      const result = originalExec.call(db, sql);
+      if (armed && String(sql).trim().toUpperCase() === 'ROLLBACK') {
+        armed = false;
+        mutation();
+      }
+      return result;
+    },
+  });
+  return () => { delete db.exec; };
 }
 
 function nextAuthority(previous, version, overrides = {}) {
@@ -75,6 +313,41 @@ function nextAuthority(previous, version, overrides = {}) {
   });
 }
 
+function appendAuthorizationVersion(context, overrides = {}) {
+  const previous = context.authority.repository.readLatestWriteAuthorization({
+    branchId: 'branch-a-1', companyId: 'company-a',
+  });
+  const record = {
+    ...previous,
+    ...overrides,
+    authorizationVersion: previous.authorizationVersion + 1,
+    createdAt: new Date(Date.now() + previous.authorizationVersion).toISOString(),
+    previousRecordId: previous.recordId,
+    recordId: `write-authorization-record-v${previous.authorizationVersion + 1}`,
+  };
+  delete record.recordHash;
+  record.recordHash = computeWriteAuthorizationRecordHash(record);
+  return context.authority.repository.appendWriteAuthorizationRecord(record).record;
+}
+
+function appendActivationVersion(context, writeAuthorization, overrides = {}) {
+  const previous = context.authority.repository.readLatestActivation({
+    branchId: 'branch-a-1', companyId: 'company-a',
+  });
+  const record = {
+    ...previous,
+    ...overrides,
+    activationVersion: previous.activationVersion + 1,
+    createdAt: new Date(Date.now() + previous.activationVersion).toISOString(),
+    previousRecordId: previous.recordId,
+    recordId: `posting-activation-record-v${previous.activationVersion + 1}`,
+    writeAuthorizationRecordId: writeAuthorization.recordId,
+  };
+  delete record.recordHash;
+  record.recordHash = computeActivationRecordHash(record);
+  return context.authority.repository.appendActivationRecord(record).record;
+}
+
 function produceConflict(context) {
   context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
   mutateCandidateForConflict(context);
@@ -88,11 +361,11 @@ function produceConflict(context) {
   return error;
 }
 
-function runWorker(dbPath, command) {
+function runWorker(dbPath, command, runtimeContractInput) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(
       new URL('./helpers/canonical-actual-eligibility-concurrency-worker.mjs', import.meta.url),
-      { workerData: { dbPath, command } },
+      { workerData: { dbPath, command, runtimeContractInput } },
     );
     worker.once('message', resolve);
     worker.once('error', reject);
@@ -120,6 +393,706 @@ test('Algorithm A creates one deterministic eligibility event and never performs
     assert.deepEqual(context.db.pragma('foreign_key_check'), []);
   } finally {
     context.db.close();
+  }
+});
+
+test('Algorithm A independently accepts the complete locked PR8 evidence graph', () => {
+  const context = createPr9aContext();
+  try {
+    const result = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+    assert.equal(result.replayed, false);
+    assert.equal(result.event.candidateResultHash, context.authority.candidate.resultHash);
+    assert.deepEqual(counts(context.db), {
+      events: 1, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+    });
+  } finally {
+    context.db.close();
+  }
+});
+
+test('every hostile PR8 graph mutation is a required PR8_EVIDENCE_MISMATCH denial with zero event DML', async t => {
+  const mutations = [
+    ['due-date evidence binding with stale result hash', context => {
+      mutateAppendOnlyTable(context.db, 'actual_source_dry_run_candidates', () => {
+        context.db.prepare(`
+          UPDATE actual_source_dry_run_candidates SET dueDateEvidenceRef = ? WHERE id = ?
+        `).run('contract-due-date-hostile-v2', context.authority.candidate.id);
+      });
+    }],
+    ['candidate economic field', context => {
+      mutateAppendOnlyTable(context.db, 'actual_source_dry_run_candidates', () => {
+        context.db.prepare(`
+          UPDATE actual_source_dry_run_candidates
+          SET proposedOriginalAmountMinor = proposedOriginalAmountMinor + 1 WHERE id = ?
+        `).run(context.authority.candidate.id);
+      });
+    }],
+    ['result aggregate field', context => {
+      mutateAppendOnlyTable(context.db, 'actual_source_dry_runs', () => {
+        context.db.prepare(`
+          UPDATE actual_source_dry_runs
+          SET runNetMinor = runNetMinor + 1, runGrossMinor = runGrossMinor + 1
+          WHERE id = ?
+        `).run(context.dryRun.dryRunId);
+      });
+    }],
+    ['child deterministic ordering', context => {
+      mutateAppendOnlyTable(context.db, 'actual_source_dry_run_inputs', () => {
+        const input = context.db.prepare(`
+          SELECT id FROM actual_source_dry_run_inputs ORDER BY deterministicOrderKey, id LIMIT 1
+        `).get();
+        context.db.prepare(`
+          UPDATE actual_source_dry_run_inputs SET deterministicOrderKey = ? WHERE id = ?
+        `).run('f'.repeat(64), input.id);
+      });
+    }],
+    ['missing child row', context => {
+      mutateAppendOnlyTable(context.db, 'actual_source_dry_run_checks', () => {
+        const check = context.db.prepare(`
+          SELECT id FROM actual_source_dry_run_checks ORDER BY id LIMIT 1
+        `).get();
+        context.db.prepare('DELETE FROM actual_source_dry_run_checks WHERE id = ?').run(check.id);
+      });
+    }],
+    ['duplicate child row', context => {
+      context.db.exec('DROP INDEX uq_actual_source_check_identity');
+      mutateAppendOnlyTable(context.db, 'actual_source_dry_run_checks', () => {
+        const check = context.db.prepare(`
+          SELECT * FROM actual_source_dry_run_checks WHERE candidateId IS NOT NULL ORDER BY id LIMIT 1
+        `).get();
+        insertCopiedRow(context.db, 'actual_source_dry_run_checks', {
+          ...check,
+          id: 'actual-source-check-hostile-duplicate',
+        });
+      });
+    }],
+    ['reconciliation delta', context => {
+      mutateAppendOnlyTable(context.db, 'actual_source_dry_run_reconciliations', () => {
+        const row = context.db.prepare(`
+          SELECT id FROM actual_source_dry_run_reconciliations ORDER BY id LIMIT 1
+        `).get();
+        context.db.prepare(`
+          UPDATE actual_source_dry_run_reconciliations
+          SET deltaNetMinor = 1, blockerState = 1 WHERE id = ?
+        `).run(row.id);
+      });
+    }],
+    ['audit and operation seal', context => {
+      mutateAppendOnlyTable(context.db, 'actual_source_dry_run_audit_events', () => {
+        context.db.prepare(`
+          UPDATE actual_source_dry_run_audit_events SET resultHash = ? WHERE aggregateId = ?
+        `).run('0'.repeat(64), context.dryRun.dryRunId);
+      });
+    }],
+    ['stale run result hash', context => {
+      mutateAppendOnlyTable(context.db, 'actual_source_dry_runs', () => {
+        context.db.prepare(`
+          UPDATE actual_source_dry_runs SET resultHash = ? WHERE id = ?
+        `).run('0'.repeat(64), context.dryRun.dryRunId);
+      });
+    }],
+  ];
+  const commonKeys = [
+    'denialAttemptId', 'deniedAttemptedAt', 'postingAdapterAuthorityBranchId',
+    'postingAdapterAuthorityCompanyId', 'postingAdapterAuthorityKind',
+    'postingAdapterAuthorityRecordHash', 'postingAdapterAuthorityRecordId',
+    'postingAdapterAuthorityVersion', 'postingAuthorityChainSnapshotHash',
+    'producerAuthorityBranchId', 'producerAuthorityCompanyId', 'producerAuthorityKind',
+    'producerAuthorityRecordHash', 'producerAuthorityRecordId', 'producerAuthorityVersion',
+    'producerAuthorityChainSnapshotHash', 'sourceAuthorityChainSnapshotHash',
+  ];
+  const specificKeys = [
+    'acceptedDryRunsHash', 'acceptedPr8EvidenceHash', 'deniedFreshnessWindowFingerprint',
+    'dryRunId', 'freshnessState', 'freshnessWindowFingerprint',
+    'reconciliationSetHash', 'resultHash',
+  ];
+  for (const [name, mutate] of mutations) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        mutate(context);
+        const { observation } = assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+        const expectedKeys = [...commonKeys, ...specificKeys].sort();
+        assert.deepEqual(Object.keys(observation.expectedProjection).sort(), expectedKeys);
+        assert.deepEqual(Object.keys(observation.observedProjection).sort(), expectedKeys);
+        assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+});
+
+test('required authorization, activation, due-date, and timezone denials all flow through Algorithm C', async t => {
+  const cases = [
+    ['authorization missing', 'AUTHORIZATION_DRIFT', context => ({
+      command: eligibilityCommand(context, { writeAuthorizationRecordId: 'missing-write-authorization' }),
+    })],
+    ['authorization latest-version drift', 'AUTHORIZATION_DRIFT', context => {
+      appendAuthorizationVersion(context);
+      return { command: eligibilityCommand(context) };
+    }],
+    ['activation missing', 'ACTIVATION_DRIFT', context => ({
+      command: eligibilityCommand(context, { activationRecordId: 'missing-posting-activation' }),
+    })],
+    ['activation latest-version drift', 'ACTIVATION_DRIFT', context => {
+      appendActivationVersion(context, context.authority.authorization);
+      return { command: eligibilityCommand(context) };
+    }],
+    ['due-date policy drift', 'DUE_DATE_POLICY_DRIFT', context => {
+      const dueDatePolicySet = JSON.parse(context.authority.authorization.dueDatePolicySetJson);
+      dueDatePolicySet.contractualDueDate.expectedSourceRef = 'invoice_due_date';
+      const dueDatePolicySetJson = canonicalJson(dueDatePolicySet);
+      const dueDatePolicySetHash = computeDueDatePolicySetHash(dueDatePolicySet);
+      const authorization = appendAuthorizationVersion(context, {
+        dueDatePolicySetHash,
+        dueDatePolicySetJson,
+      });
+      const activation = appendActivationVersion(context, authorization, {
+        dueDatePolicySetHash,
+        dueDatePolicySetJson,
+      });
+      return {
+        command: eligibilityCommand(context, {
+          activationRecordId: activation.recordId,
+          writeAuthorizationRecordId: authorization.recordId,
+        }),
+      };
+    }],
+    ['company timezone drift', 'COMPANY_TIMEZONE_DRIFT', context => {
+      mutateAppendOnlyTable(context.db, 'canonical_companies', () => {
+        context.db.prepare(`
+          UPDATE canonical_companies SET receivablesTimezone = 'UTC' WHERE id = 'company-a'
+        `).run();
+      });
+      return { command: eligibilityCommand(context) };
+    }],
+  ];
+  const specificKeys = {
+    AUTHORIZATION_DRIFT: [
+      'authorizationId', 'authorizationTemporalState', 'authorizationVersion', 'recordHash',
+      'status', 'temporalWindowFingerprint', 'validFrom', 'validUntil',
+    ],
+    ACTIVATION_DRIFT: [
+      'activationId', 'activationTemporalState', 'activationVersion', 'recordHash',
+      'status', 'temporalWindowFingerprint', 'validFrom', 'validUntil',
+    ],
+    DUE_DATE_POLICY_DRIFT: [
+      'bindingState', 'dueDatePolicySetHash', 'dueDateTreatment', 'selectedDueDateGateKind',
+      'selectedDueDatePolicyHash', 'selectedDueDatePolicyId', 'selectedDueDatePolicyVersion',
+      'unknownDueDateTreatmentMappingHash', 'unknownDueDateTreatmentMappingId',
+      'unknownDueDateTreatmentMappingVersion',
+    ],
+    COMPANY_TIMEZONE_DRIFT: [
+      'acceptedCompanyTimezoneSnapshot', 'activationCompanyTimezoneSnapshot',
+      'eventCompanyTimezoneSnapshot', 'pr5ReceivablesTimezone', 'pr8RunCompanyTimezone',
+      'timezoneState',
+    ],
+  };
+  const commonKeys = [
+    'denialAttemptId', 'deniedAttemptedAt', 'postingAdapterAuthorityBranchId',
+    'postingAdapterAuthorityCompanyId', 'postingAdapterAuthorityKind',
+    'postingAdapterAuthorityRecordHash', 'postingAdapterAuthorityRecordId',
+    'postingAdapterAuthorityVersion', 'postingAuthorityChainSnapshotHash',
+    'producerAuthorityBranchId', 'producerAuthorityCompanyId', 'producerAuthorityKind',
+    'producerAuthorityRecordHash', 'producerAuthorityRecordId', 'producerAuthorityVersion',
+    'producerAuthorityChainSnapshotHash', 'sourceAuthorityChainSnapshotHash',
+  ];
+  for (const [name, expectedType, arrange] of cases) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        const { command } = arrange(context);
+        const { observation } = assertRequiredDenial(context, expectedType, command);
+        const expectedKeys = [...commonKeys, ...specificKeys[expectedType]].sort();
+        assert.deepEqual(Object.keys(observation.expectedProjection).sort(), expectedKeys);
+        assert.deepEqual(Object.keys(observation.observedProjection).sort(), expectedKeys);
+        assert.equal(Object.keys(observation.expectedProjection).some(key => key.startsWith('CANONICAL_')), false);
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+});
+
+test('locked source revision state machine classifies revision change, correction, posting, and lineage failures with exact precedence', async t => {
+  const commonKeys = [
+    'denialAttemptId', 'deniedAttemptedAt', 'postingAdapterAuthorityBranchId',
+    'postingAdapterAuthorityCompanyId', 'postingAdapterAuthorityKind',
+    'postingAdapterAuthorityRecordHash', 'postingAdapterAuthorityRecordId',
+    'postingAdapterAuthorityVersion', 'postingAuthorityChainSnapshotHash',
+    'producerAuthorityBranchId', 'producerAuthorityCompanyId', 'producerAuthorityKind',
+    'producerAuthorityRecordHash', 'producerAuthorityRecordId', 'producerAuthorityVersion',
+    'producerAuthorityChainSnapshotHash', 'sourceAuthorityChainSnapshotHash',
+  ];
+  const assertProjectionKeys = (observation, keys) => {
+    const expected = [...commonKeys, ...keys].sort();
+    assert.deepEqual(Object.keys(observation.expectedProjection).sort(), expected);
+    assert.deepEqual(Object.keys(observation.observedProjection).sort(), expected);
+  };
+
+  await t.test('same revision IDs with changed content before posting', () => {
+    const context = createPr9aContext();
+    try {
+      const event = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)).event;
+      mutateAppendOnlyTable(context.db, 'billing_source_upd_versions', () => {
+        context.db.prepare(`
+          UPDATE billing_source_upd_versions SET contentHash = ? WHERE id = ?
+        `).run('0'.repeat(64), event.conductedUpdVersionId);
+      });
+      const { observation } = assertRequiredDenial(
+        context,
+        'SOURCE_REVISION_CHANGED_BEFORE_POSTING',
+      );
+      assertProjectionKeys(observation, [
+        'currentPr6RevisionHash', 'currentSourceRevisionKey', 'economicLineageKey',
+        'eventId', 'sealedPr6RevisionHash', 'sealedSourceRevisionKey',
+      ]);
+      assert.equal(observation.expectedProjection.eventId, event.id);
+      assert.equal(observation.expectedProjection.sealedPr6RevisionHash, event.currentPr6RevisionHash);
+      assert.notEqual(
+        observation.observedProjection.currentPr6RevisionHash,
+        observation.expectedProjection.currentPr6RevisionHash,
+      );
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('event-sealed PR6 lineage drift uses its dedicated registry type', () => {
+    const context = createPr9aContext();
+    try {
+      const event = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)).event;
+      const changed = { ...event, sourceLineageHash: '0'.repeat(64) };
+      delete changed.id;
+      delete changed.eventHash;
+      const eventHash = computeEligibleEventHash(changed);
+      mutateAppendOnlyTable(context.db, 'actual_receivable_eligible_events', () => {
+        context.db.prepare(`
+          UPDATE actual_receivable_eligible_events
+          SET sourceLineageHash = ?, eventHash = ? WHERE id = ?
+        `).run(changed.sourceLineageHash, eventHash, event.id);
+      });
+      const { observation } = assertRequiredDenial(context, 'PR6_LINEAGE_DRIFT');
+      assertProjectionKeys(observation, ['sourceLineageHash']);
+      assert.equal(observation.expectedProjection.sourceLineageHash, changed.sourceLineageHash);
+      assert.equal(observation.observedProjection.sourceLineageHash, event.sourceLineageHash);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('self-consistent event content collision remains ECONOMIC_SOURCE_EVENT_MISMATCH', () => {
+    const context = createPr9aContext();
+    try {
+      const event = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)).event;
+      const changed = {
+        ...event,
+        grossAmountMinor: event.grossAmountMinor + 1,
+        netAmountMinor: event.netAmountMinor + 1,
+        originalAmountMinor: event.originalAmountMinor + 1,
+      };
+      delete changed.id;
+      delete changed.eventHash;
+      const eventHash = computeEligibleEventHash(changed);
+      mutateAppendOnlyTable(context.db, 'actual_receivable_eligible_events', () => {
+        context.db.prepare(`
+          UPDATE actual_receivable_eligible_events
+          SET grossAmountMinor = ?, netAmountMinor = ?, originalAmountMinor = ?, eventHash = ?
+          WHERE id = ?
+        `).run(
+          changed.grossAmountMinor,
+          changed.netAmountMinor,
+          changed.originalAmountMinor,
+          eventHash,
+          event.id,
+        );
+      });
+      const { observation } = assertRequiredDenial(context, 'ECONOMIC_SOURCE_EVENT_MISMATCH');
+      assertProjectionKeys(observation, [
+        'economicLineageKey', 'economicSourceRevisionKey', 'eventHash', 'eventId',
+      ]);
+      assert.notEqual(observation.expectedProjection.eventHash, observation.observedProjection.eventHash);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('valid replacement edge after eligibility', () => {
+    const context = createPr9aContext();
+    try {
+      const event = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)).event;
+      appendConductedSourceCorrection(context, 'after-eligibility');
+      const { observation } = assertRequiredDenial(
+        context,
+        'SOURCE_CORRECTION_AFTER_ELIGIBILITY',
+      );
+      assertProjectionKeys(observation, [
+        'currentSourceRevisionKey', 'economicLineageKey', 'eventId',
+        'eventSourceRevisionKey', 'replacementRelationHash',
+      ]);
+      assert.equal(observation.expectedProjection.eventId, event.id);
+      assert.equal(observation.expectedProjection.eventSourceRevisionKey, event.economicSourceRevisionKey);
+      assert.notEqual(
+        observation.expectedProjection.replacementRelationHash,
+        observation.observedProjection.replacementRelationHash,
+      );
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('correction after a posting operation exists wins over all lower revision states', () => {
+    const context = createPr9aContext();
+    try {
+      const event = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)).event;
+      const posting = insertPostingTriplet(context, event);
+      appendConductedSourceCorrection(context, 'after-posting');
+      const currentConducted = context.db.prepare(`
+        SELECT id FROM billing_source_upd_versions WHERE state = 'conducted'
+        ORDER BY version DESC LIMIT 1
+      `).get();
+      mutateAppendOnlyTable(context.db, 'billing_source_upd_versions', () => {
+        context.db.prepare(`
+          UPDATE billing_source_upd_versions SET contentHash = ? WHERE id = ?
+        `).run('1'.repeat(64), currentConducted.id);
+      });
+      const { conflict, observation } = assertRequiredDenial(
+        context,
+        'SOURCE_CORRECTION_AFTER_POSTING',
+      );
+      assertProjectionKeys(observation, [
+        'canonicalReceivableId', 'currentSourceRevisionKey', 'economicLineageKey',
+        'eventId', 'eventSourceRevisionKey', 'replacementRelationHash',
+      ]);
+      assert.equal(conflict.existingOperationId, posting.operation.id);
+      assert.equal(conflict.existingReceivableId, posting.receivable.id);
+      assert.equal(observation.expectedProjection.canonicalReceivableId, posting.receivable.id);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('missing replacement edge cannot be misclassified as a valid correction', () => {
+    const context = createPr9aContext();
+    try {
+      context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      appendConductedSourceCorrection(context, 'missing-edge');
+      mutateAppendOnlyTable(context.db, 'billing_source_coverage_supersessions', () => {
+        context.db.prepare('DELETE FROM billing_source_coverage_supersessions').run();
+      });
+      const { observation } = assertRequiredDenial(
+        context,
+        'SOURCE_REVISION_CHANGED_BEFORE_POSTING',
+      );
+      assert.equal(observation.conflictType, 'SOURCE_REVISION_CHANGED_BEFORE_POSTING');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('invalid replacement target is a reconstructed broken-successor denial', () => {
+    const context = createPr9aContext();
+    try {
+      context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      appendConductedSourceCorrection(context, 'broken-edge');
+      context.db.pragma('foreign_keys = OFF');
+      mutateAppendOnlyTable(context.db, 'billing_source_coverage_supersessions', () => {
+        context.db.prepare(`
+          UPDATE billing_source_coverage_supersessions
+          SET replacementCoverageSetId = 'missing-replacement-coverage-set'
+        `).run();
+      });
+      context.db.pragma('foreign_keys = ON');
+      const { observation } = assertRequiredDenial(context, 'SOURCE_LINEAGE_BROKEN_SUCCESSOR');
+      assertProjectionKeys(observation, [
+        'branchId', 'brokenEdgeCount', 'brokenEdgeFingerprint', 'brokenEdgesHash',
+        'brokenEdgeFromId', 'brokenEdgeToId', 'companyId',
+        'economicLineageCandidateFingerprint', 'rootCoverageLineageId',
+        'successorObservationState',
+      ]);
+      assert.equal(observation.observedProjection.successorObservationState, 'broken');
+      assert.equal(observation.observedProjection.brokenEdgeCount, 1);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('replacement without a conducted current revision is a no-current denial', () => {
+    const context = createPr9aContext();
+    try {
+      context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      appendConductedSourceCorrection(context, 'no-current', { conduct: false });
+      const { observation } = assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION');
+      assertProjectionKeys(observation, [
+        'currentRevisionCount', 'currentRevisionKey', 'currentRevisionKeysHash',
+        'currentRevisionState', 'economicLineageKey', 'rootCoverageLineageId',
+      ]);
+      assert.equal(observation.observedProjection.currentRevisionState, 'missing');
+      assert.equal(observation.observedProjection.currentRevisionCount, 0);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('multiple conducted current revisions are never selected by sort order', () => {
+    const context = createPr9aContext();
+    try {
+      context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      appendConductedSourceCorrection(context, 'multiple-current');
+      const conducted = context.db.prepare(`
+        SELECT * FROM billing_source_upd_versions WHERE state = 'conducted'
+        ORDER BY version DESC LIMIT 1
+      `).get();
+      mutateAppendOnlyTable(context.db, 'billing_source_upd_versions', () => {
+        insertCopiedRow(context.db, 'billing_source_upd_versions', {
+          ...conducted,
+          id: 'billing-source-upd-version-hostile-second-current',
+          previousVersionId: conducted.id,
+          sourceEventId: 'hostile-second-current-event',
+          version: Number(conducted.version) + 1,
+        });
+      });
+      const { observation } = assertRequiredDenial(
+        context,
+        'SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS',
+      );
+      assert.equal(observation.observedProjection.currentRevisionState, 'multiple');
+      assert.equal(observation.observedProjection.currentRevisionCount, 2);
+      assert.equal(observation.observedProjection.currentRevisionKey, null);
+      assert.ok(observation.observedProjection.currentRevisionKeysHash);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('cycle/root conflict has precedence over successor and revision classifications', () => {
+    const context = createPr9aContext();
+    try {
+      context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      appendConductedSourceCorrection(context, 'cycle-root');
+      const relation = context.db.prepare('SELECT * FROM billing_source_coverage_supersessions').get();
+      mutateAppendOnlyTable(context.db, 'billing_source_coverage_supersessions', () => {
+        insertCopiedRow(context.db, 'billing_source_coverage_supersessions', {
+          ...relation,
+          id: 'billing-source-supersession-hostile-cycle',
+          originalCoverageSetId: relation.replacementCoverageSetId,
+          replacementCoverageSetId: relation.originalCoverageSetId,
+          sourceEventId: 'hostile-cycle-event',
+        });
+      });
+      const { observation } = assertRequiredDenial(context, 'SOURCE_LINEAGE_ROOT_CONFLICT');
+      assertProjectionKeys(observation, [
+        'economicLineageCandidateFingerprint', 'rootCount', 'rootCoverageLineageIdsHash',
+        'rootObservationState', 'rootSourceDocumentLineageIdsHash',
+      ]);
+      assert.equal(observation.observedProjection.rootObservationState, 'cycle');
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('Algorithm C rejects frozen non-authority claims when its independent locked reread changes type, value, policy, timezone, PR8 graph, or precedence', async t => {
+  const expectIntegrityFailure = (context, arrange, mutateAfterRollback) => {
+    const command = arrange();
+    const restore = mutateAfterNextRollback(context.db, mutateAfterRollback);
+    try {
+      assert.throws(
+        () => context.eligibilityService.produceEligibleEvent(command || eligibilityCommand(context)),
+        error => error.code === ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED,
+      );
+      assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM canonical_receivable_posting_conflicts').get().count, 0);
+      assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM canonical_receivable_posting_conflict_transitions').get().count, 0);
+    } finally {
+      restore();
+    }
+  };
+
+  await t.test('wrong PR8 graph claim', () => {
+    const context = createPr9aContext();
+    try {
+      const original = context.authority.candidate.dueDateEvidenceRef;
+      expectIntegrityFailure(
+        context,
+        () => {
+          mutateCandidateForConflict(context);
+          return eligibilityCommand(context);
+        },
+        () => mutateAppendOnlyTable(context.db, 'actual_source_dry_run_candidates', () => {
+          context.db.prepare(`
+            UPDATE actual_source_dry_run_candidates SET dueDateEvidenceRef = ? WHERE id = ?
+          `).run(original, context.authority.candidate.id);
+        }),
+      );
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('wrong timezone claim', () => {
+    const context = createPr9aContext();
+    try {
+      expectIntegrityFailure(
+        context,
+        () => {
+          mutateAppendOnlyTable(context.db, 'canonical_companies', () => {
+            context.db.prepare(`
+              UPDATE canonical_companies SET receivablesTimezone = 'UTC' WHERE id = 'company-a'
+            `).run();
+          });
+          return eligibilityCommand(context);
+        },
+        () => mutateAppendOnlyTable(context.db, 'canonical_companies', () => {
+          context.db.prepare(`
+            UPDATE canonical_companies SET receivablesTimezone = 'Europe/Moscow' WHERE id = 'company-a'
+          `).run();
+        }),
+      );
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('wrong source revision classification', () => {
+    const context = createPr9aContext();
+    try {
+      context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      expectIntegrityFailure(
+        context,
+        () => {
+          appendConductedSourceCorrection(context, 'reconstructor-source');
+          return eligibilityCommand(context);
+        },
+        () => mutateAppendOnlyTable(context.db, 'billing_source_coverage_supersessions', () => {
+          context.db.prepare('DELETE FROM billing_source_coverage_supersessions').run();
+        }),
+      );
+      assert.equal(context.db.prepare('SELECT COUNT(*) AS count FROM actual_receivable_eligible_events').get().count, 1);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('wrong authority precedence claim', () => {
+    const context = createPr9aContext();
+    try {
+      const original = context.authority.candidate.dueDateEvidenceRef;
+      expectIntegrityFailure(
+        context,
+        () => {
+          mutateCandidateForConflict(context);
+          return eligibilityCommand(context);
+        },
+        () => {
+          mutateAppendOnlyTable(context.db, 'actual_source_dry_run_candidates', () => {
+            context.db.prepare(`
+              UPDATE actual_source_dry_run_candidates SET dueDateEvidenceRef = ? WHERE id = ?
+            `).run(original, context.authority.candidate.id);
+          });
+          context.authority.repository.appendAuthorityRecord(nextAuthority(context.authority.source, 2));
+        },
+      );
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('wrong due-date policy claim', () => {
+    const context = createPr9aContext();
+    try {
+      let command;
+      let originalDueDatePolicySet;
+      expectIntegrityFailure(
+        context,
+        () => {
+          originalDueDatePolicySet = JSON.parse(context.authority.authorization.dueDatePolicySetJson);
+          const drifted = JSON.parse(context.authority.authorization.dueDatePolicySetJson);
+          drifted.contractualDueDate.expectedSourceRef = 'invoice_due_date';
+          const dueDatePolicySetJson = canonicalJson(drifted);
+          const dueDatePolicySetHash = computeDueDatePolicySetHash(drifted);
+          const authorization = appendAuthorizationVersion(context, {
+            dueDatePolicySetHash,
+            dueDatePolicySetJson,
+          });
+          const activation = appendActivationVersion(context, authorization, {
+            dueDatePolicySetHash,
+            dueDatePolicySetJson,
+          });
+          command = eligibilityCommand(context, {
+            activationRecordId: activation.recordId,
+            writeAuthorizationRecordId: authorization.recordId,
+          });
+          return command;
+        },
+        () => {
+          const dueDatePolicySetJson = canonicalJson(originalDueDatePolicySet);
+          const dueDatePolicySetHash = computeDueDatePolicySetHash(originalDueDatePolicySet);
+          const authorization = appendAuthorizationVersion(context, {
+            dueDatePolicySetHash,
+            dueDatePolicySetJson,
+          });
+          appendActivationVersion(context, authorization, {
+            dueDatePolicySetHash,
+            dueDatePolicySetJson,
+          });
+        },
+      );
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('Algorithm C rejects self-consistent malformed projection claims with valid incoming hashes', async t => {
+  const domain = require('../server/lib/canonical-actual-posting-domain.js');
+  const cases = [
+    ['extra key', projection => ({ ...projection, unregisteredKey: 'hostile' })],
+    ['missing key', projection => {
+      const changed = { ...projection };
+      delete changed.resultHash;
+      return changed;
+    }],
+    ['wrong key set', projection => {
+      const { dryRunId, ...changed } = projection;
+      return { ...changed, dryRunIdentity: dryRunId };
+    }],
+    ['wrong type', projection => ({ ...projection, dryRunId: 42 })],
+    ['malformed value', projection => ({ ...projection, resultHash: 'self-consistent-not-a-hash' })],
+  ];
+  for (const [name, mutateProjection] of cases) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        mutateCandidateForConflict(context);
+        const originalBuild = domain.buildConflictContracts;
+        let constructionCalls = 0;
+        const repository = freshRepositoryWith(context, () => replaceFunction(
+          domain,
+          'buildConflictContracts',
+          input => {
+            constructionCalls += 1;
+            if (constructionCalls <= 2 && input.conflictType === 'PR8_EVIDENCE_MISMATCH') {
+              return originalBuild({
+                ...input,
+                observedProjection: mutateProjection(input.observedProjection),
+              });
+            }
+            return originalBuild(input);
+          },
+        ));
+        assert.throws(
+          () => repository.produceEligibleEvent(eligibilityCommand(context)),
+          error => error.code === ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED,
+        );
+        assert.ok(constructionCalls >= 3, 'Algorithm C performed an independent reconstruction');
+        assert.deepEqual(counts(context.db), {
+          events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+        });
+      } finally {
+        context.db.close();
+      }
+    });
   }
 });
 
@@ -192,6 +1165,102 @@ test('Algorithm A applies source-before-producer global authority precedence and
   }
 });
 
+test('repository-owned runtime identities make artifact, configuration, and policy drift reachable for all authority kinds', async t => {
+  const cases = [
+    ['source_adapter', 'SOURCE_ADAPTER'],
+    ['eligibility_producer', 'ELIGIBILITY_PRODUCER'],
+    ['canonical_posting_adapter', 'CANONICAL_POSTING_ADAPTER'],
+  ];
+  const fields = [
+    ['artifactDigest', 'ARTIFACT_IDENTITY_DRIFT', 'runtime-artifact-v2'],
+    ['configurationHash', 'CONFIGURATION_HASH_DRIFT', sha256Canonical({ fixture: 'runtime-config-v2' })],
+    ['policyHash', 'POLICY_HASH_DRIFT', sha256Canonical({ fixture: 'runtime-policy-v2' })],
+  ];
+  for (const [kind, prefix] of cases) {
+    for (const [field, suffix, value] of fields) {
+      await t.test(`${kind} ${suffix}`, () => {
+        const context = createPr9aContext();
+        try {
+          const runtimeContract = createCanonicalActualPostingRuntimeContract(
+            runtimeContractForAuthority(context.authority, { [kind]: { [field]: value } }),
+          );
+          const service = createCanonicalActualEligibilityEventService({ db: context.db, runtimeContract });
+          assert.throws(
+            () => service.produceEligibleEvent(eligibilityCommand(context)),
+            error => {
+              assert.equal(error.code, `${prefix}_${suffix}`);
+              assert.equal(error.conflict.deniedAuthorityKind, kind);
+              return true;
+            },
+          );
+          assert.deepEqual(counts(context.db), {
+            events: 0, conflicts: 1, transitions: 1, receivables: 0, operations: 0,
+          });
+          const conflict = context.db.prepare('SELECT * FROM canonical_receivable_posting_conflicts').get();
+          const observation = JSON.parse(conflict.conflictObservationJson);
+          const authority = {
+            source_adapter: context.authority.source,
+            eligibility_producer: context.authority.producer,
+            canonical_posting_adapter: context.authority.posting,
+          }[kind];
+          if (field === 'configurationHash' || field === 'policyHash') {
+            assert.equal(observation.expectedProjection[field], value);
+            assert.equal(observation.observedProjection[field], authority[field]);
+          } else {
+            assert.notEqual(
+              observation.expectedProjection.artifactIdentityHash,
+              observation.observedProjection.artifactIdentityHash,
+            );
+          }
+          for (const [snapshotKind, jsonField] of [
+            ['source_adapter', 'sourceAuthorityChainSnapshotJson'],
+            ['eligibility_producer', 'producerAuthorityChainSnapshotJson'],
+            ['canonical_posting_adapter', 'postingAuthorityChainSnapshotJson'],
+          ]) {
+            assert.equal(
+              JSON.parse(conflict[jsonField]).precedenceState,
+              snapshotKind === kind ? 'selected' : 'unaffected_active_latest',
+            );
+          }
+          const transition = context.db.prepare('SELECT * FROM canonical_receivable_posting_conflict_transitions').get();
+          assert.equal(transition.state, 'COMPLETE');
+          assert.deepEqual(
+            [transition.attemptApplied, transition.rateApplied, transition.circuitApplied],
+            [1, 1, 1],
+          );
+        } finally {
+          context.db.close();
+        }
+      });
+    }
+  }
+});
+
+test('runtime identity denial precedence remains source then producer then posting', () => {
+  const context = createPr9aContext();
+  try {
+    const runtimeContract = createCanonicalActualPostingRuntimeContract(runtimeContractForAuthority(
+      context.authority,
+      {
+        source_adapter: { policyHash: sha256Canonical({ drift: 'source' }) },
+        eligibility_producer: { artifactDigest: 'producer-runtime-drift-v2' },
+        canonical_posting_adapter: { configurationHash: sha256Canonical({ drift: 'posting' }) },
+      },
+    ));
+    const service = createCanonicalActualEligibilityEventService({ db: context.db, runtimeContract });
+    assert.throws(
+      () => service.produceEligibleEvent(eligibilityCommand(context)),
+      error => error.code === 'SOURCE_ADAPTER_POLICY_HASH_DRIFT',
+    );
+    const conflict = context.db.prepare('SELECT * FROM canonical_receivable_posting_conflicts').get();
+    assert.equal(JSON.parse(conflict.sourceAuthorityChainSnapshotJson).precedenceState, 'selected');
+    assert.equal(JSON.parse(conflict.producerAuthorityChainSnapshotJson).precedenceState, 'suppressed_by_higher_kind');
+    assert.equal(JSON.parse(conflict.postingAuthorityChainSnapshotJson).precedenceState, 'suppressed_by_higher_kind');
+  } finally {
+    context.db.close();
+  }
+});
+
 test('later expired authority descendant is unrepresentable and performs zero conflict or event DML', () => {
   const context = createPr9aContext();
   try {
@@ -236,6 +1305,20 @@ test('command validation and repository UUID/clock failures perform zero DML wit
     badUuid.db.close();
   }
 
+  const thrownUuid = createPr9aContext();
+  try {
+    const repository = freshRepositoryWith(thrownUuid, () => replaceFunction(crypto, 'randomUUID', () => {
+      throw new Error('entropy unavailable');
+    }));
+    assert.throws(
+      () => repository.produceEligibleEvent(eligibilityCommand(thrownUuid)),
+      error => error.code === ERROR_CODES.DENIAL_ATTEMPT_ID_GENERATION_FAILED,
+    );
+    assert.deepEqual(counts(thrownUuid.db), { events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0 });
+  } finally {
+    thrownUuid.db.close();
+  }
+
   const badClock = createPr9aContext();
   try {
     const repository = freshRepositoryWith(badClock, () => replaceFunction(Date, 'now', () => { throw new Error('clock failed'); }));
@@ -246,6 +1329,125 @@ test('command validation and repository UUID/clock failures perform zero DML wit
     assert.deepEqual(counts(badClock.db), { events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0 });
   } finally {
     badClock.db.close();
+  }
+});
+
+test('one entropy call is reserved for denialAttemptId and every other repository identity is deterministic and domain-separated', () => {
+  const fixedUuid = '11111111-1111-4111-8111-111111111111';
+  const success = createPr9aContext();
+  try {
+    const calls = [];
+    const repository = freshRepositoryWith(success, () => replaceFunction(crypto, 'randomUUID', options => {
+      calls.push(options);
+      return fixedUuid;
+    }));
+    const result = repository.produceEligibleEvent(eligibilityCommand(success));
+    assert.deepEqual(calls, [{ disableEntropyCache: true }]);
+    const candidate = success.authority.candidate;
+    const identityInput = {
+      branchId: candidate.branchId,
+      companyId: candidate.companyId,
+      denialAttemptId: fixedUuid,
+      economicLineageCandidateFingerprint: computeEconomicLineageCandidateFingerprint({
+        branchId: candidate.branchId,
+        companyId: candidate.companyId,
+        contractId: candidate.contractId ?? null,
+        coverageEndExclusive: candidate.sliceEndDateExclusive,
+        coverageStart: candidate.sliceStartDate,
+        currency: candidate.currency,
+        rentalId: candidate.rentalId,
+        rentalLineId: candidate.rentalLineId,
+      }),
+      economicSourceRevisionKey: result.event.economicSourceRevisionKey,
+      sourceLineageHash: result.event.sourceLineageHash,
+    };
+    const expectedEventId = deriveRepositoryIdentity(
+      'rentcore.canonical_actual_posting.eligibility_event_identity',
+      identityInput,
+    );
+    const expectedCorrelationId = deriveRepositoryIdentity(
+      'rentcore.canonical_actual_posting.eligibility_correlation_identity',
+      identityInput,
+    );
+    assert.equal(result.event.id, expectedEventId);
+    assert.equal(result.event.correlationId, expectedCorrelationId);
+    assert.notEqual(expectedEventId, expectedCorrelationId);
+    assert.equal(
+      deriveRepositoryIdentity('rentcore.canonical_actual_posting.eligibility_event_identity', identityInput),
+      expectedEventId,
+    );
+    const replay = repository.produceEligibleEvent(eligibilityCommand(success));
+    assert.equal(replay.replayed, true);
+    assert.equal(calls.length, 1, 'exact event replay performs zero additional UUID calls');
+  } finally {
+    success.db.close();
+  }
+
+  const denial = createPr9aContext();
+  try {
+    mutateCandidateForConflict(denial);
+    let callCount = 0;
+    const repository = freshRepositoryWith(denial, () => replaceFunction(crypto, 'randomUUID', options => {
+      assert.deepEqual(options, { disableEntropyCache: true });
+      callCount += 1;
+      return fixedUuid;
+    }));
+    assert.throws(
+      () => repository.produceEligibleEvent(eligibilityCommand(denial)),
+      error => error.code === 'PR8_EVIDENCE_MISMATCH',
+    );
+    assert.equal(callCount, 1);
+    const conflict = denial.db.prepare('SELECT * FROM canonical_receivable_posting_conflicts').get();
+    const expectedConflictId = deriveRepositoryIdentity(
+      'rentcore.canonical_actual_posting.conflict_row_identity',
+      {
+        branchId: conflict.branchId,
+        companyId: conflict.companyId,
+        conflictHash: conflict.conflictHash,
+        denialAttemptId: fixedUuid,
+      },
+    );
+    assert.equal(conflict.id, expectedConflictId);
+    assert.equal(conflict.correlationId, deriveRepositoryIdentity(
+      'rentcore.canonical_actual_posting.conflict_correlation_identity',
+      {
+        branchId: conflict.branchId,
+        companyId: conflict.companyId,
+        conflictHash: conflict.conflictHash,
+        denialAttemptId: fixedUuid,
+      },
+    ));
+    assert.notEqual(conflict.id, conflict.correlationId);
+  } finally {
+    denial.db.close();
+  }
+});
+
+test('transition recovery performs zero UUID calls', () => {
+  const context = createPr9aContext();
+  try {
+    context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+    mutateCandidateForConflict(context);
+    context.db.exec(`
+      CREATE TRIGGER pr9_test_uuid_recovery_abort
+      BEFORE UPDATE ON canonical_receivable_posting_conflict_transitions
+      BEGIN SELECT RAISE(ABORT, 'test uuid recovery'); END;
+    `);
+    assert.throws(
+      () => context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)),
+      error => error.code === ERROR_CODES.CONFLICT_TRANSITION_RECOVERY_REQUIRED,
+    );
+    context.db.exec('DROP TRIGGER pr9_test_uuid_recovery_abort');
+    const transition = context.db.prepare('SELECT * FROM canonical_receivable_posting_conflict_transitions').get();
+    let callCount = 0;
+    const repository = freshRepositoryWith(context, () => replaceFunction(crypto, 'randomUUID', () => {
+      callCount += 1;
+      return '22222222-2222-4222-8222-222222222222';
+    }));
+    assert.equal(repository.reconcileTransition(transition.transitionId).transition.state, 'COMPLETE');
+    assert.equal(callCount, 0);
+  } finally {
+    context.db.close();
   }
 });
 
@@ -271,7 +1473,7 @@ test('required denial commits a reciprocal pair, synchronously reaches COMPLETE,
   const context = createPr9aContext();
   try {
     const error = produceConflict(context);
-    assert.equal(error.code, 'ECONOMIC_SOURCE_EVENT_MISMATCH');
+    assert.equal(error.code, 'PR8_EVIDENCE_MISMATCH');
     assert.equal(error.replayed, false);
     assert.ok(error.conflict);
     const observation = JSON.parse(error.conflict.conflictObservationJson);
@@ -388,7 +1590,7 @@ test('31 direct denial candidates commit at most 30 pairs and the 31st is blocke
     for (let attempt = 1; attempt <= 30; attempt += 1) {
       assert.throws(
         () => context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)),
-        error => error.code === 'ECONOMIC_SOURCE_EVENT_MISMATCH',
+        error => error.code === 'PR8_EVIDENCE_MISMATCH',
       );
     }
     assert.equal(counts(context.db).conflicts, 30);
@@ -410,7 +1612,10 @@ test('concurrent Algorithm A execution serializes to one event and one exact rep
   const command = eligibilityCommand(context);
   context.db.close();
   try {
-    const results = await Promise.all([runWorker(dbPath, command), runWorker(dbPath, command)]);
+    const results = await Promise.all([
+      runWorker(dbPath, command, context.runtimeContractInput),
+      runWorker(dbPath, command, context.runtimeContractInput),
+    ]);
     assert.ok(results.every(result => result.ok), JSON.stringify(results));
     assert.deepEqual(results.map(result => result.id), [results[0].id, results[0].id]);
     assert.deepEqual(results.map(result => result.replayed).sort(), [false, true]);

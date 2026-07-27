@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import {
   SOURCE_CAPABILITIES,
+  conductPlan,
+  formPlan,
   hash,
 } from './billing-source-authority-fixtures.js';
 import {
@@ -68,6 +70,7 @@ const {
   computeAuthorityId,
   computeCanonicalPostingBoundaryHash,
   computeCanonicalPostingCohortHash,
+  createCanonicalActualPostingRuntimeContract,
   computeDueDatePolicySetHash,
   computeGovernedAuthorityRecordHash,
   computeUnknownDueDateMappingHash,
@@ -198,9 +201,113 @@ export function createPr9aContext({ dbPath = ':memory:' } = {}) {
     }),
   );
   const authority = seedAuthorityFoundation(context, dryRun.dryRunId);
-  const eligibilityRepository = createCanonicalActualEligibilityEventRepository(db);
-  const eligibilityService = createCanonicalActualEligibilityEventService({ db });
-  return { ...context, dryRun, authority, eligibilityRepository, eligibilityService };
+  const runtimeContractInput = runtimeContractForAuthority(authority);
+  const runtimeContract = createCanonicalActualPostingRuntimeContract(runtimeContractInput);
+  const eligibilityRepository = createCanonicalActualEligibilityEventRepository(db, runtimeContract);
+  const eligibilityService = createCanonicalActualEligibilityEventService({ db, runtimeContract });
+  return {
+    ...context,
+    dryRun,
+    authority,
+    eligibilityRepository,
+    eligibilityService,
+    runtimeContract,
+    runtimeContractInput,
+  };
+}
+
+export function runtimeContractForAuthority(authority, overrides = {}) {
+  const authorities = {};
+  for (const [kind, record] of [
+    ['source_adapter', authority.source],
+    ['eligibility_producer', authority.producer],
+    ['canonical_posting_adapter', authority.posting],
+  ]) {
+    authorities[kind] = {
+      artifactDigest: record.artifactDigest,
+      configurationHash: record.configurationHash,
+      policyHash: record.policyHash,
+      sourceCommitSha: record.sourceCommitSha,
+      ...(overrides[kind] || {}),
+    };
+  }
+  return { authorities, enabled: true, version: 1 };
+}
+
+export function appendConductedSourceCorrection(
+  context,
+  suffix = 'pr9a-correction',
+  { conduct = true } = {},
+) {
+  const upd = context.db.prepare(`
+    SELECT * FROM billing_source_upds ORDER BY createdAt, id LIMIT 1
+  `).get();
+  const latestUpdVersion = context.db.prepare(`
+    SELECT * FROM billing_source_upd_versions
+    WHERE updId = ? ORDER BY version DESC, id DESC LIMIT 1
+  `).get(upd.id);
+  const line = context.db.prepare(`
+    SELECT * FROM billing_source_upd_lines WHERE updId = ? ORDER BY id LIMIT 1
+  `).get(upd.id);
+  const latestLineVersion = context.db.prepare(`
+    SELECT * FROM billing_source_upd_line_versions
+    WHERE updLineId = ? ORDER BY version DESC, id DESC LIMIT 1
+  `).get(line.id);
+  const predecessor = context.db.prepare(`
+    SELECT coverage.id
+    FROM billing_source_coverage_sets AS coverage
+    LEFT JOIN billing_source_coverage_supersessions AS successor
+      ON successor.originalCoverageSetId = coverage.id
+    WHERE coverage.updId = ? AND successor.id IS NULL
+    ORDER BY coverage.createdAt, coverage.id LIMIT 1
+  `).get(upd.id);
+  const replacement = context.service.correctUpd(context.commandContext, {
+    operationType: 'correct_upd',
+    idempotencyKey: `replace-upd-${suffix}`,
+    updId: upd.id,
+    expectedUpdVersion: Number(latestUpdVersion.version),
+    action: 'replace',
+    reasonCode: 'ACCOUNTING_REPLACE',
+    reasonText: 'Explicit PR9a correction evidence',
+    sourceEventId: `replace-event-${suffix}`,
+    sourceEventVersion: 1,
+    sourceHash: hash(`replace-event-${suffix}`),
+    lines: [{
+      id: line.id,
+      sourceLineRef: line.sourceLineRef,
+      sourceLineIdentityKind: line.sourceLineIdentityKind,
+      displayPosition: Number(latestLineVersion.version) + 1,
+      description: 'Corrected PR9a source revision',
+      quantityValueInteger: 1,
+      quantityScale: 0,
+      unitCode: 'service',
+      currency: 'RUB',
+      netMinor: 100_000,
+      vatMinor: 20_000,
+      grossMinor: 120_000,
+      vatPolicyRef: 'vat-policy-test-v1',
+      roundingPolicyRef: 'rounding-policy-test-v1',
+      policyDecisionRef: 'policy-decision-test-v1',
+      sourceIntegrityStatus: 'matched',
+      blockerReasonCodes: [],
+      sourceSystem: 'isolated_test_adapter',
+      sourceRef: line.sourceLineRef,
+      sourceVersion: Number(latestLineVersion.version) + 1,
+      sourceHash: hash(`replacement-line-${suffix}`),
+    }],
+    coverage: {
+      ...formPlan(context).coverage,
+      supersedesCoverageSetIds: [predecessor.id],
+    },
+  });
+  const conducted = conduct ? context.service.conductUpd(context.commandContext, conductPlan(context, {
+    conductedEvidenceHash: hash(`conducted-replacement-${suffix}`),
+    conductedEvidenceRef: `conducted-replacement-${suffix}`,
+    idempotencyKey: `conduct-replacement-${suffix}`,
+    sourceEventId: `conduct-replacement-event-${suffix}`,
+    sourceHash: hash(`conduct-replacement-event-${suffix}`),
+  })) : null;
+  return { conducted, replacement };
 }
 
 export function authorityRecord({ kind, ownershipHash, nowMs = Date.now(), overrides = {} }) {
@@ -270,19 +377,38 @@ function acceptedEvidence(db, run) {
     version: 1,
   });
   const validFrom = run.finalizedAt;
-  const validUntilExclusive = new Date(Date.parse(validFrom) + 24 * 60 * 60 * 1000).toISOString();
-  const acceptedFreshnessWindowsHash = hash('accepted-freshness-windows-fixture');
+  const freshnessDurationMs = 900000;
+  const validUntilExclusive = new Date(Date.parse(validFrom) + freshnessDurationMs).toISOString();
+  const freshnessPolicyHash = sha256Canonical({
+    domain: 'rentcore.canonical_actual_posting.pr8_freshness_policy',
+    durationMs: freshnessDurationMs,
+    intervalKind: 'half_open',
+    policyId: 'rentcore.pr8_evidence_freshness.v1',
+    policyVersion: 1,
+    version: 1,
+  });
+  const freshnessWindowFingerprint = sha256Canonical({
+    domain: 'rentcore.canonical_actual_posting.pr8_freshness_window',
+    finalizedAt: run.finalizedAt,
+    freshnessDurationMs,
+    freshnessPolicyHash,
+    freshnessPolicyId: 'rentcore.pr8_evidence_freshness.v1',
+    freshnessPolicyVersion: 1,
+    validFrom,
+    validUntilExclusive,
+    version: 1,
+  });
   const evidencePackHash = hash('accepted-pr8-evidence-pack-fixture');
   const sourceOwnershipManifestHash = hash('pr9-source-ownership-manifest-fixture');
   const acceptedRuns = [{
     companyTimezoneSnapshot: run.companyTimezone,
     dryRunId: run.id,
     finalizedAt: run.finalizedAt,
-    freshnessDurationMs: 24 * 60 * 60 * 1000,
-    freshnessPolicyHash: hash('freshness-policy-fixture'),
-    freshnessPolicyId: 'freshness-policy-fixture-v1',
+    freshnessDurationMs,
+    freshnessPolicyHash,
+    freshnessPolicyId: 'rentcore.pr8_evidence_freshness.v1',
     freshnessPolicyVersion: 1,
-    freshnessWindowFingerprint: hash('freshness-window-fixture'),
+    freshnessWindowFingerprint,
     policyManifestHash: run.policyManifestHash,
     reconciliationSetHash,
     resultHash: run.resultHash,
@@ -291,6 +417,14 @@ function acceptedEvidence(db, run) {
     validFrom,
     validUntilExclusive,
   }];
+  const acceptedFreshnessWindowsHash = sha256Canonical({
+    domain: 'rentcore.canonical_actual_posting.accepted_freshness_windows',
+    windows: acceptedRuns.map(entry => ({
+      dryRunId: entry.dryRunId,
+      freshnessWindowFingerprint: entry.freshnessWindowFingerprint,
+    })),
+    version: 1,
+  });
   return {
     acceptedDryRuns,
     acceptedDryRunsHash,
@@ -312,7 +446,7 @@ export function seedAuthorityFoundation(context, dryRunId) {
   const repository = createCanonicalActualPostingAuthorityRepository(db);
   const run = db.prepare('SELECT * FROM actual_source_dry_runs WHERE id = ?').get(dryRunId);
   const evidence = acceptedEvidence(db, run);
-  const nowMs = Date.now();
+  const nowMs = Date.parse('2026-07-27T12:00:00.000Z');
   const source = authorityRecord({ kind: 'source_adapter', ownershipHash: evidence.sourceOwnershipManifestHash, nowMs });
   const producer = authorityRecord({ kind: 'eligibility_producer', ownershipHash: evidence.sourceOwnershipManifestHash, nowMs });
   const posting = authorityRecord({ kind: 'canonical_posting_adapter', ownershipHash: evidence.sourceOwnershipManifestHash, nowMs });

@@ -854,6 +854,15 @@ No recommendation in this memo is a legal or accounting conclusion.
 - **What becomes impossible if postponed:** No transition beyond the readiness design record is permitted.
 - **Status:** **DESIGN RECORDED — AUTHORIZATION BLOCKED**; not approved
 
+### D-36 — What does the approved PR9a Gate B authorize?
+
+- **Question:** Which portion of the approved canonical-actual-posting architecture may be implemented without authorizing PR9b or production behavior?
+- **Approved decision:** Gate B authorizes only the disabled PR9a repository foundation at authorization baseline `da3bd21935abfbd42c95ef8be9eac1eecb56e95c`: additive migration `canonical_actual_posting_pr9` v1 and its exact seven tables; bounded immutable serialization/hash/envelope contracts; source-adapter, eligibility-producer and canonical-posting-adapter authority records plus write-authorization and activation repository foundations; Algorithm A `ActualReceivableEligibleV1` production and deterministic replay; and only the denial-evidence, durable transition and synchronous recovery behavior Algorithm A requires. The schema initializer may be registered immediately after PR8 in `server/db.js`.
+- **Explicit exclusions:** Algorithm B, canonical business DML, live adapters, routes, workers, schedulers, flags, resolver wiring, production sources, production reads/writes, deployment, Railway, production migration execution, activation, settlement, shadow reads, cutover, backfill, dual write, PR9b and complete PR9.
+- **Authorization values:** `architectureDesignApproved = TRUE` and `pr9aImplementationAuthorized = TRUE`. `pr9bImplementationAuthorized`, `pr9ImplementationAuthorized`, all deployment fields, `productionActivationAuthorized`, `canonicalProductionReadsAuthorized`, `productionCanonicalWritesAuthorized`, `settlementAuthorized`, `shadowReadAuthorized`, and `cutoverAuthorized` remain `FALSE`.
+- **Evidence boundary:** Isolated fixtures and tests prove repository behavior only. They are not production source evidence, adapter approval, zero-delta production evidence, deployment readiness, activation evidence, or canonical-write approval.
+- **Status:** **APPROVED — PR9A IMPLEMENTATION ONLY; DISABLED BY DEFAULT**
+
 ## Implementation gates
 
 The outcomes below distinguish a product-decision baseline from later operational evidence. A `PASS` authorizes only the named PR scope; it does not authorize production enablement, migration, or cutover.

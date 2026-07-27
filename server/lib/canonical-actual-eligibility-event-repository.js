@@ -48,6 +48,7 @@ const {
   compareUtf16Ascending,
   computeAcceptedDryRunsHash,
   computeAcceptedPr8EvidenceHash,
+  computeArtifactIdentityHash,
   computeConflictHash,
   computeCoverageLineageRootId,
   computeDueDatePolicySetHash,
@@ -595,16 +596,6 @@ function loadAcceptedContext(db, authorityRepository, command, attemptedAt) {
   if (!sourceAuthority || !producerAuthority || !postingAuthority) {
     throw repositoryError(ERROR_CODES.AUTHORITY_FROZEN_CHAIN_SNAPSHOT_INTEGRITY_FAILED);
   }
-  for (const authority of [sourceAuthority, producerAuthority, postingAuthority]) {
-    const latest = authorityRepository.readLatestAuthority(authority);
-    if (!latest || latest.recordId !== authority.recordId) throw repositoryError('CANONICAL_AUTHORITY_LATEST_CHAIN_MISMATCH');
-    assertActiveWindow(authority, attemptedAt, 'CANONICAL_AUTHORITY_TEMPORAL_DENIAL');
-    if (
-      authority.companyId !== command.companyId
-      || authority.branchId !== command.branchId
-      || authority.sourceOwnershipManifestHash !== authorization.sourceOwnershipManifestHash
-    ) throw repositoryError('CANONICAL_AUTHORITY_SCOPE_OR_OWNERSHIP_MISMATCH');
-  }
   if (
     sourceAuthority.authorityVersion !== authorization.sourceAdapterAuthorityVersion
     || sourceAuthority.recordHash !== authorization.sourceAdapterAuthorityRecordHash
@@ -617,6 +608,41 @@ function loadAcceptedContext(db, authorityRepository, command, attemptedAt) {
     || sourceAuthority.authorityKind !== 'source_adapter'
   ) throw repositoryError('CANONICAL_AUTHORITY_BINDING_INVALID');
 
+  const authorityBindings = [
+    { authority: sourceAuthority, authorityKind: 'source_adapter' },
+    { authority: producerAuthority, authorityKind: 'eligibility_producer' },
+    { authority: postingAuthority, authorityKind: 'canonical_posting_adapter' },
+  ];
+  const authorityStates = authorityBindings.map(({ authority, authorityKind }) => {
+    const chain = authorityRepository.readAuthorityChain(authority);
+    const latest = chain[chain.length - 1];
+    if (!latest) throw repositoryError(ERROR_CODES.AUTHORITY_FROZEN_CHAIN_SNAPSHOT_INTEGRITY_FAILED);
+    if (latest.recordId !== authority.recordId && latest.status === 'expired') {
+      throw repositoryError('AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1');
+    }
+    const binding = {
+      artifactDigest: authority.artifactDigest,
+      branchId: command.branchId,
+      companyId: command.companyId,
+      configurationHash: authority.configurationHash,
+      policyHash: authority.policyHash,
+      recordHash: authority.recordHash,
+      recordId: authority.recordId,
+      sourceCommitSha: authority.sourceCommitSha,
+      sourceOwnershipManifestHash: authorization.sourceOwnershipManifestHash,
+    };
+    const candidates = authorityRepository.buildAuthorityCandidates({
+      chain,
+      binding,
+      attemptedAt: renderUtcMilliseconds(attemptedAt),
+    });
+    return Object.freeze({ authority, authorityKind, binding, candidates, chain, latest });
+  });
+  const authorityDenial = selectGlobalAuthorityDenial(authorityStates.map(state => ({
+    authorityKind: state.authorityKind,
+    candidates: state.candidates,
+  })));
+
   return Object.freeze({
     acceptedRun,
     activation,
@@ -628,22 +654,15 @@ function loadAcceptedContext(db, authorityRepository, command, attemptedAt) {
     run,
     selectedDueDate,
     sourceAuthority,
+    authorityDenial,
+    authorityStates: Object.freeze(authorityStates),
   });
 }
 
-function deriveEventCore(db, context, { correlationId, occurredAt }) {
-  const { authorization, activation, candidate, run, selectedDueDate, sourceAuthority, producerAuthority } = context;
-  const scopedCandidate = { ...candidate, companyId: candidate.companyId, branchId: candidate.branchId };
-  const root = resolveCoverageRoot(db, scopedCandidate);
-  const rootSourceDocumentLineageId = candidate.updId;
-  const rootCoverageLineageId = computeCoverageLineageRootId({
-    branchId: candidate.branchId,
-    companyId: candidate.companyId,
-    rootCoverageSetId: root.rootCoverageSetId,
-    rootCoverageSliceId: root.rootCoverageSliceId,
-    rootSourceDocumentLineageId,
-  });
-  const economicDimensions = {
+function deriveSourceBasis(db, context) {
+  const { authorization, candidate, run, sourceAuthority } = context;
+  const pr6LineageRows = reconstructPr6LineageRows(db, candidate);
+  const economicLineageCandidateFingerprint = computeEconomicLineageCandidateFingerprint({
     branchId: candidate.branchId,
     companyId: candidate.companyId,
     contractId: candidate.contractId ?? null,
@@ -652,23 +671,6 @@ function deriveEventCore(db, context, { correlationId, occurredAt }) {
     currency: candidate.currency,
     rentalId: candidate.rentalId,
     rentalLineId: candidate.rentalLineId,
-    rootCoverageLineageId,
-    rootSourceDocumentLineageId,
-  };
-  const economicLineageKey = computeEconomicLineageKey(economicDimensions);
-  const economicLineageCandidateFingerprint = computeEconomicLineageCandidateFingerprint(economicDimensions);
-  const pr6LineageRows = reconstructPr6LineageRows(db, candidate);
-  const revisionHash = currentPr6RevisionHash(db, candidate, pr6LineageRows);
-  const economicSourceRevisionKey = computeEconomicSourceRevisionKey({
-    branchId: candidate.branchId,
-    companyId: candidate.companyId,
-    conductedUpdVersionId: candidate.currentConductedUpdVersionId,
-    coverageSetId: candidate.coverageSetId,
-    coverageSliceId: candidate.coverageSliceId,
-    currentPr6RevisionHash: revisionHash,
-    economicLineageKey,
-    formedUpdVersionId: candidate.formedUpdVersionId,
-    updLineVersionId: candidate.updLineVersionId,
   });
   const sourceLineageHash = computeSourceLineageHash({
     acceptedDryRunsHash: authorization.acceptedDryRunsHash,
@@ -696,6 +698,65 @@ function deriveEventCore(db, context, { correlationId, occurredAt }) {
     sourceSystem: 'rentcore.billing_source_authority.v1',
     updId: candidate.updId,
     updLineId: candidate.updLineId,
+    updLineVersionId: candidate.updLineVersionId,
+  });
+  return Object.freeze({
+    economicLineageCandidateFingerprint,
+    pr6LineageRows,
+    sourceLineageHash,
+  });
+}
+
+function deriveAuthorityDenialBasis(db, context) {
+  const basis = deriveSourceBasis(db, context);
+  return Object.freeze({
+    economicLineageCandidateFingerprint: basis.economicLineageCandidateFingerprint,
+    event: Object.freeze({
+      branchId: context.candidate.branchId,
+      companyId: context.candidate.companyId,
+      economicLineageKey: null,
+      economicSourceRevisionKey: null,
+      sourceLineageHash: basis.sourceLineageHash,
+    }),
+  });
+}
+
+function deriveEventCore(db, context, { correlationId, occurredAt }) {
+  const { authorization, activation, candidate, run, selectedDueDate, sourceAuthority, producerAuthority } = context;
+  const basis = deriveSourceBasis(db, context);
+  const scopedCandidate = { ...candidate, companyId: candidate.companyId, branchId: candidate.branchId };
+  const root = resolveCoverageRoot(db, scopedCandidate);
+  const rootSourceDocumentLineageId = candidate.updId;
+  const rootCoverageLineageId = computeCoverageLineageRootId({
+    branchId: candidate.branchId,
+    companyId: candidate.companyId,
+    rootCoverageSetId: root.rootCoverageSetId,
+    rootCoverageSliceId: root.rootCoverageSliceId,
+    rootSourceDocumentLineageId,
+  });
+  const economicDimensions = {
+    branchId: candidate.branchId,
+    companyId: candidate.companyId,
+    contractId: candidate.contractId ?? null,
+    coverageEndExclusive: candidate.sliceEndDateExclusive,
+    coverageStart: candidate.sliceStartDate,
+    currency: candidate.currency,
+    rentalId: candidate.rentalId,
+    rentalLineId: candidate.rentalLineId,
+    rootCoverageLineageId,
+    rootSourceDocumentLineageId,
+  };
+  const economicLineageKey = computeEconomicLineageKey(economicDimensions);
+  const revisionHash = currentPr6RevisionHash(db, candidate, basis.pr6LineageRows);
+  const economicSourceRevisionKey = computeEconomicSourceRevisionKey({
+    branchId: candidate.branchId,
+    companyId: candidate.companyId,
+    conductedUpdVersionId: candidate.currentConductedUpdVersionId,
+    coverageSetId: candidate.coverageSetId,
+    coverageSliceId: candidate.coverageSliceId,
+    currentPr6RevisionHash: revisionHash,
+    economicLineageKey,
+    formedUpdVersionId: candidate.formedUpdVersionId,
     updLineVersionId: candidate.updLineVersionId,
   });
   const unknown = candidate.dueDateProvenance === 'unknown';
@@ -768,14 +829,17 @@ function deriveEventCore(db, context, { correlationId, occurredAt }) {
     producerAuthorityBranchId: producerAuthority.branchId,
     producerAuthorityKind: producerAuthority.authorityKind,
     writeAuthorizationRecordId: authorization.recordId,
-    sourceLineageHash,
+    sourceLineageHash: basis.sourceLineageHash,
     correlationId,
     schemaVersion: 1,
     occurredAt,
     createdAt: occurredAt,
   };
   event.eventHash = computeEligibleEventHash(event);
-  return Object.freeze({ event: materializeInert(event), economicLineageCandidateFingerprint });
+  return Object.freeze({
+    event: materializeInert(event),
+    economicLineageCandidateFingerprint: basis.economicLineageCandidateFingerprint,
+  });
 }
 
 function monotonicFloor(db, companyId, branchId) {
@@ -1067,6 +1131,148 @@ function createCanonicalActualEligibilityEventRepository(db) {
     }
   }
 
+  function verifyFrozenPackageAgainstSnapshots(packageValue) {
+    const snapshotsByKind = new Map([
+      ['source_adapter', {
+        hash: packageValue.sourceAuthorityChainSnapshotHash,
+        snapshot: packageValue.sourceAuthorityChainSnapshot,
+      }],
+      ['eligibility_producer', {
+        hash: packageValue.producerAuthorityChainSnapshotHash,
+        snapshot: packageValue.producerAuthorityChainSnapshot,
+      }],
+      ['canonical_posting_adapter', {
+        hash: packageValue.postingAuthorityChainSnapshotHash,
+        snapshot: packageValue.postingAuthorityChainSnapshot,
+      }],
+    ]);
+    for (const [kind, entry] of snapshotsByKind) {
+      authorityRepository.verifyFrozenAuthorityState({
+        snapshot: entry.snapshot,
+        snapshotHash: entry.hash,
+        expectedAuthorityKind: kind,
+      });
+    }
+
+    const candidate = packageValue.conflictCandidateProjection;
+    const authorityMatch = /^(SOURCE_ADAPTER|ELIGIBILITY_PRODUCER|CANONICAL_POSTING_ADAPTER)_(.+)$/.exec(
+      packageValue.conflictType,
+    );
+    if (authorityMatch) {
+      const selected = selectGlobalAuthorityDenial([...snapshotsByKind].map(([authorityKind, entry]) => ({
+        authorityKind,
+        candidates: entry.snapshot.candidates,
+      })));
+      const kindByPrefix = {
+        SOURCE_ADAPTER: 'source_adapter',
+        ELIGIBILITY_PRODUCER: 'eligibility_producer',
+        CANONICAL_POSTING_ADAPTER: 'canonical_posting_adapter',
+      };
+      const selectedKind = kindByPrefix[authorityMatch[1]];
+      if (
+        !selected
+        || selected.authorityKind !== selectedKind
+        || selected.candidate.stateCode !== authorityMatch[2]
+      ) throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
+
+      for (const [authorityKind, entry] of snapshotsByKind) {
+        const hasCandidates = entry.snapshot.candidates.length > 0;
+        const expectedState = authorityKind === selectedKind
+          ? 'selected'
+          : hasCandidates ? 'suppressed_by_higher_kind' : 'unaffected_active_latest';
+        if (entry.snapshot.precedenceState !== expectedState) {
+          throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
+        }
+      }
+
+      const boundId = {
+        source_adapter: candidate.sourceAdapterAuthorityRecordId,
+        eligibility_producer: candidate.producerAuthorityRecordId,
+        canonical_posting_adapter: candidate.postingAdapterAuthorityRecordId,
+      }[selectedKind];
+      const boundRecord = authorityRepository.readAuthorityRecord(boundId);
+      const observedRecord = authorityRepository.readAuthorityRecord(selected.candidate.authorityRecordId);
+      const selectedSnapshot = snapshotsByKind.get(selectedKind).snapshot;
+      if (!boundRecord || !observedRecord) {
+        throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
+      }
+      const common = {
+        denialAttemptId: packageValue.denialAttemptId,
+        deniedAttemptedAt: packageValue.deniedAttemptedAt,
+        postingAuthorityChainSnapshotHash: packageValue.postingAuthorityChainSnapshotHash,
+        producerAuthorityChainSnapshotHash: packageValue.producerAuthorityChainSnapshotHash,
+        sourceAuthorityChainSnapshotHash: packageValue.sourceAuthorityChainSnapshotHash,
+      };
+      const expectedProjection = authorityDenialSide({
+        common,
+        record: boundRecord,
+        latestRecordHash: boundRecord.recordHash,
+        stateCode: selected.candidate.stateCode,
+        expected: true,
+        ownershipManifestHash: candidate.sourceOwnershipManifestHash,
+      });
+      const observedProjection = authorityDenialSide({
+        common,
+        record: observedRecord,
+        latestRecordHash: selectedSnapshot.members[selectedSnapshot.members.length - 1].authorityRecordHash,
+        stateCode: selected.candidate.stateCode,
+        expected: false,
+        ownershipManifestHash: observedRecord.sourceOwnershipManifestHash,
+      });
+      if (
+        canonicalJson(expectedProjection) !== canonicalJson(packageValue.expectedProjection)
+        || canonicalJson(observedProjection) !== canonicalJson(packageValue.observedProjection)
+        || candidate.deniedAuthorityKind !== selectedKind
+        || candidate.deniedAuthorityRecordId !== observedRecord.recordId
+        || candidate.deniedAuthorityVersion !== observedRecord.authorityVersion
+        || candidate.deniedAuthorityRecordHash !== observedRecord.recordHash
+      ) throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
+    } else {
+      for (const entry of snapshotsByKind.values()) {
+        if (
+          entry.snapshot.precedenceState !== 'unaffected_active_latest'
+          || entry.snapshot.candidates.length !== 0
+        ) throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
+      }
+      const common = {
+        denialAttemptId: packageValue.denialAttemptId,
+        deniedAttemptedAt: packageValue.deniedAttemptedAt,
+        postingAdapterAuthorityBranchId: candidate.postingAdapterAuthorityBranchId,
+        postingAdapterAuthorityCompanyId: candidate.postingAdapterAuthorityCompanyId,
+        postingAdapterAuthorityKind: candidate.postingAdapterAuthorityKind,
+        postingAdapterAuthorityRecordHash: candidate.postingAdapterAuthorityRecordHash,
+        postingAdapterAuthorityRecordId: candidate.postingAdapterAuthorityRecordId,
+        postingAdapterAuthorityVersion: candidate.postingAdapterAuthorityVersion,
+        postingAuthorityChainSnapshotHash: packageValue.postingAuthorityChainSnapshotHash,
+        producerAuthorityBranchId: candidate.producerAuthorityBranchId,
+        producerAuthorityCompanyId: candidate.producerAuthorityCompanyId,
+        producerAuthorityKind: candidate.producerAuthorityKind,
+        producerAuthorityRecordHash: candidate.producerAuthorityRecordHash,
+        producerAuthorityRecordId: candidate.producerAuthorityRecordId,
+        producerAuthorityVersion: candidate.producerAuthorityVersion,
+        producerAuthorityChainSnapshotHash: packageValue.producerAuthorityChainSnapshotHash,
+        sourceAuthorityChainSnapshotHash: packageValue.sourceAuthorityChainSnapshotHash,
+      };
+      for (const projection of [packageValue.expectedProjection, packageValue.observedProjection]) {
+        for (const [key, value] of Object.entries(common)) {
+          if (projection[key] !== value) {
+            throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
+          }
+        }
+      }
+      if (
+        candidate.deniedAuthorityKind !== null
+        || candidate.deniedAuthorityRecordId !== null
+        || candidate.deniedAuthorityVersion !== null
+        || candidate.deniedAuthorityRecordHash !== null
+      ) throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
+    }
+
+    if (computeConflictHash(candidate) !== packageValue.conflictHashCandidate) {
+      throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
+    }
+  }
+
   function persistDenialEvidence(packageInput) {
     let packageValue;
     let blockedScope = null;
@@ -1074,17 +1280,10 @@ function createCanonicalActualEligibilityEventRepository(db) {
     try {
       packageValue = assertFrozenDenialPackage(packageInput);
       const classification = classifyConflictReplay(db, authorityRepository, packageValue);
+      verifyFrozenPackageAgainstSnapshots(packageValue);
       if (classification.mode === 'EXACT_REPLAY') {
         db.exec('COMMIT');
         return Object.freeze({ conflict: classification.conflict, replayed: true });
-      }
-      for (const [snapshot, hash, kind] of [
-        [packageValue.sourceAuthorityChainSnapshot, packageValue.sourceAuthorityChainSnapshotHash, 'source_adapter'],
-        [packageValue.producerAuthorityChainSnapshot, packageValue.producerAuthorityChainSnapshotHash, 'eligibility_producer'],
-        [packageValue.postingAuthorityChainSnapshot, packageValue.postingAuthorityChainSnapshotHash, 'canonical_posting_adapter'],
-      ]) authorityRepository.verifyFrozenAuthorityState({ snapshot, snapshotHash: hash, expectedAuthorityKind: kind });
-      if (computeConflictHash(packageValue.conflictCandidateProjection) !== packageValue.conflictHashCandidate) {
-        throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
       }
       const candidateScope = packageValue.conflictCandidateProjection;
       const incomplete = incompleteTransitions(db, candidateScope.companyId, candidateScope.branchId);
@@ -1220,6 +1419,201 @@ function createCanonicalActualEligibilityEventRepository(db) {
     throw repositoryError(ERROR_CODES.CONFLICT_EVIDENCE_PERSISTENCE_FAILED);
   }
 
+  function authorityTemporalState(record, deniedAttemptedAt) {
+    const attempted = parseUtcMilliseconds(deniedAttemptedAt);
+    if (attempted < parseUtcMilliseconds(record.effectiveFrom)) return 'not_yet_effective';
+    if (attempted >= parseUtcMilliseconds(record.expiresAt)) return 'expired';
+    return 'active';
+  }
+
+  function authorityTemporalWindowFingerprint(record, deniedAttemptedAt) {
+    return sha256Canonical({
+      deniedAttemptedAt,
+      domain: 'rentcore.canonical_actual_posting.temporal_window',
+      effectiveFrom: record.effectiveFrom,
+      effectiveUntil: record.expiresAt,
+      recordHash: record.recordHash,
+      recordId: record.recordId,
+      recordKind: 'governed_authority',
+      version: 1,
+    });
+  }
+
+  function authorityScopeFingerprint(record) {
+    return sha256Canonical({
+      branchId: record.branchId,
+      companyId: record.companyId,
+      domain: 'rentcore.canonical_actual_posting.authority_scope',
+      version: 1,
+    });
+  }
+
+  function authorityDenialSide({
+    common,
+    record,
+    latestRecordHash,
+    stateCode,
+    expected,
+    ownershipManifestHash,
+  }) {
+    return {
+      actorId: record.actorId,
+      artifactIdentityHash: computeArtifactIdentityHash(record),
+      authorityId: record.authorityId,
+      authorityKind: record.authorityKind,
+      authorityRecordId: record.recordId,
+      authorityVersion: record.authorityVersion,
+      bindingState: 'valid',
+      configurationHash: record.configurationHash,
+      denialAttemptId: common.denialAttemptId,
+      deniedAttemptedAt: common.deniedAttemptedAt,
+      effectiveFrom: record.effectiveFrom,
+      effectiveUntil: record.expiresAt,
+      latestRecordHash,
+      ownershipManifestHash,
+      policyHash: record.policyHash,
+      postingAuthorityChainSnapshotHash: common.postingAuthorityChainSnapshotHash,
+      producerAuthorityChainSnapshotHash: common.producerAuthorityChainSnapshotHash,
+      recordHash: record.recordHash,
+      scopeFingerprint: authorityScopeFingerprint(record),
+      sourceAuthorityChainSnapshotHash: common.sourceAuthorityChainSnapshotHash,
+      stateCode,
+      status: expected ? 'authorized' : record.status,
+      temporalEvaluationState: expected ? 'active' : authorityTemporalState(record, common.deniedAttemptedAt),
+      temporalWindowFingerprint: authorityTemporalWindowFingerprint(record, common.deniedAttemptedAt),
+    };
+  }
+
+  function buildAuthorityConflictPackage({ context, derived, denialAttemptId, deniedAttemptedAt }) {
+    const winner = context.authorityDenial;
+    if (!winner) throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
+    const stateByKind = new Map(context.authorityStates.map(state => [state.authorityKind, state]));
+    const snapshots = new Map();
+    for (const state of context.authorityStates) {
+      let precedenceState = 'unaffected_active_latest';
+      if (state.candidates.length > 0) {
+        precedenceState = state.authorityKind === winner.authorityKind
+          ? 'selected'
+          : 'suppressed_by_higher_kind';
+      }
+      snapshots.set(state.authorityKind, createFrozenAuthorityChainSnapshot({
+        authorityRows: state.chain,
+        candidates: state.candidates,
+        denialAttemptId,
+        deniedAttemptedAt,
+        precedenceState,
+      }));
+    }
+    const sourceSnapshot = snapshots.get('source_adapter');
+    const producerSnapshot = snapshots.get('eligibility_producer');
+    const postingSnapshot = snapshots.get('canonical_posting_adapter');
+    const selectedState = stateByKind.get(winner.authorityKind);
+    const observedRecord = selectedState.chain.find(
+      row => row.recordId === winner.candidate.authorityRecordId,
+    );
+    if (!observedRecord) throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
+    const prefix = {
+      source_adapter: 'SOURCE_ADAPTER',
+      eligibility_producer: 'ELIGIBILITY_PRODUCER',
+      canonical_posting_adapter: 'CANONICAL_POSTING_ADAPTER',
+    }[winner.authorityKind];
+    const conflictType = `${prefix}_${winner.candidate.stateCode}`;
+    const commonProjection = {
+      denialAttemptId,
+      deniedAttemptedAt,
+      postingAuthorityChainSnapshotHash: postingSnapshot.hash,
+      producerAuthorityChainSnapshotHash: producerSnapshot.hash,
+      sourceAuthorityChainSnapshotHash: sourceSnapshot.hash,
+    };
+    const expectedProjection = authorityDenialSide({
+      common: commonProjection,
+      record: selectedState.authority,
+      latestRecordHash: selectedState.authority.recordHash,
+      stateCode: winner.candidate.stateCode,
+      expected: true,
+      ownershipManifestHash: context.authorization.sourceOwnershipManifestHash,
+    });
+    const observedProjection = authorityDenialSide({
+      common: commonProjection,
+      record: observedRecord,
+      latestRecordHash: selectedState.latest.recordHash,
+      stateCode: winner.candidate.stateCode,
+      expected: false,
+      ownershipManifestHash: observedRecord.sourceOwnershipManifestHash,
+    });
+    const contracts = buildConflictContracts({
+      conflictType,
+      denialAttemptId,
+      deniedAttemptedAt,
+      expectedProjection,
+      observedProjection,
+    });
+    const attemptedEvent = derived.event;
+    const conflictCandidateProjection = {
+      acceptedDryRunsHash: context.authorization.acceptedDryRunsHash,
+      acceptedPr8EvidenceHash: context.authorization.acceptedPr8EvidenceHash,
+      activationRecordHash: context.activation.recordHash,
+      activationRecordId: context.activation.recordId,
+      branchId: attemptedEvent.branchId,
+      companyId: attemptedEvent.companyId,
+      conflictObservationHash: contracts.conflictObservationHash,
+      conflictType,
+      detectorVersion: 'canonical-posting-conflict-detector-v1',
+      deniedAuthorityKind: observedRecord.authorityKind,
+      deniedAuthorityRecordHash: observedRecord.recordHash,
+      deniedAuthorityRecordId: observedRecord.recordId,
+      deniedAuthorityVersion: observedRecord.authorityVersion,
+      denialAttemptId,
+      deniedAttemptedAt,
+      economicLineageCandidateFingerprint: derived.economicLineageCandidateFingerprint,
+      economicLineageKey: attemptedEvent.economicLineageKey,
+      economicSourceRevisionKey: attemptedEvent.economicSourceRevisionKey,
+      eventHash: null,
+      eventId: null,
+      existingOperationId: null,
+      existingReceivableId: null,
+      expectedFingerprint: contracts.expectedFingerprint,
+      observedFingerprint: contracts.observedFingerprint,
+      postingAdapterAuthorityBranchId: context.postingAuthority.branchId,
+      postingAdapterAuthorityCompanyId: context.postingAuthority.companyId,
+      postingAdapterAuthorityKind: context.postingAuthority.authorityKind,
+      postingAdapterAuthorityRecordHash: context.postingAuthority.recordHash,
+      postingAdapterAuthorityRecordId: context.postingAuthority.recordId,
+      postingAdapterAuthorityVersion: context.postingAuthority.authorityVersion,
+      postingAuthorityChainSnapshotHash: postingSnapshot.hash,
+      producerAuthorityBranchId: context.producerAuthority.branchId,
+      producerAuthorityCompanyId: context.producerAuthority.companyId,
+      producerAuthorityKind: context.producerAuthority.authorityKind,
+      producerAuthorityRecordHash: context.producerAuthority.recordHash,
+      producerAuthorityRecordId: context.producerAuthority.recordId,
+      producerAuthorityVersion: context.producerAuthority.authorityVersion,
+      producerAuthorityChainSnapshotHash: producerSnapshot.hash,
+      schemaVersion: 1,
+      sourceAdapterAuthorityRecordHash: context.sourceAuthority.recordHash,
+      sourceAdapterAuthorityRecordId: context.sourceAuthority.recordId,
+      sourceAdapterAuthorityVersion: context.sourceAuthority.authorityVersion,
+      sourceLineageHash: attemptedEvent.sourceLineageHash,
+      sourceAuthorityChainSnapshotHash: sourceSnapshot.hash,
+      sourceOwnershipManifestHash: context.authorization.sourceOwnershipManifestHash,
+      writeAuthorizationRecordHash: context.authorization.recordHash,
+      writeAuthorizationRecordId: context.authorization.recordId,
+    };
+    return Object.freeze({
+      conflictType,
+      packageValue: freezeDenialPackageForRepository({
+        conflictCandidateProjection,
+        conflictType,
+        denialAttemptId,
+        deniedAttemptedAt,
+        expectedProjection,
+        observedProjection,
+        sourceAuthorityChainSnapshot: sourceSnapshot,
+        producerAuthorityChainSnapshot: producerSnapshot,
+        postingAuthorityChainSnapshot: postingSnapshot,
+      }),
+    });
+  }
+
   function buildEventConflictPackage({
     attemptedEvent,
     existingEvent,
@@ -1252,7 +1646,19 @@ function createCanonicalActualEligibilityEventRepository(db) {
     const commonProjection = {
       denialAttemptId,
       deniedAttemptedAt,
+      postingAdapterAuthorityBranchId: context.postingAuthority.branchId,
+      postingAdapterAuthorityCompanyId: context.postingAuthority.companyId,
+      postingAdapterAuthorityKind: context.postingAuthority.authorityKind,
+      postingAdapterAuthorityRecordHash: context.postingAuthority.recordHash,
+      postingAdapterAuthorityRecordId: context.postingAuthority.recordId,
+      postingAdapterAuthorityVersion: context.postingAuthority.authorityVersion,
       postingAuthorityChainSnapshotHash: postingSnapshot.hash,
+      producerAuthorityBranchId: context.producerAuthority.branchId,
+      producerAuthorityCompanyId: context.producerAuthority.companyId,
+      producerAuthorityKind: context.producerAuthority.authorityKind,
+      producerAuthorityRecordHash: context.producerAuthority.recordHash,
+      producerAuthorityRecordId: context.producerAuthority.recordId,
+      producerAuthorityVersion: context.producerAuthority.authorityVersion,
       producerAuthorityChainSnapshotHash: producerSnapshot.hash,
       sourceAuthorityChainSnapshotHash: sourceSnapshot.hash,
     };
@@ -1399,104 +1805,114 @@ function createCanonicalActualEligibilityEventRepository(db) {
           throw repositoryError('CANONICAL_OPERATIONAL_CLOCK_REGRESSION');
         }
         const context = loadAcceptedContext(db, authorityRepository, command, clock.milliseconds);
-        const provisional = deriveEventCore(db, context, {
-          correlationId: 'repository-provisional-correlation',
-          occurredAt: clock.timestamp,
-        });
-        const locatedRows = [];
-        const queries = [
-          db.prepare(`
-            SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
-            WHERE companyId = ? AND branchId = ? AND economicLineageKey = ?
-          `).get(command.companyId, command.branchId, provisional.event.economicLineageKey),
-          db.prepare(`
-            SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
-            WHERE companyId = ? AND branchId = ? AND economicSourceRevisionKey = ?
-          `).get(command.companyId, command.branchId, provisional.event.economicSourceRevisionKey),
-          db.prepare(`
-            SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
-            WHERE dryRunId = ? AND candidateId = ?
-          `).get(command.dryRunId, command.candidateId),
-        ];
-        for (const row of queries) {
-          if (row && !locatedRows.some(existing => existing.id === row.id)) {
-            locatedRows.push(normalizeEventRow(row));
-          }
-        }
-        if (locatedRows.length > 1) throw repositoryError('CANONICAL_ELIGIBILITY_REPLAY_INTEGRITY_FAILED');
-        if (locatedRows.length === 1) {
-          const persisted = validateEligibleEventRecord(locatedRows[0]);
-          const replay = deriveEventCore(db, context, {
-            correlationId: persisted.correlationId,
-            occurredAt: persisted.createdAt,
-          });
-          const expected = { id: persisted.id, ...replay.event };
-          if (exactRowsEqual(persisted, expected)) {
-            db.exec('COMMIT');
-            return Object.freeze({ event: persisted, replayed: true });
-          }
-          denial = buildEventConflictPackage({
-            attemptedEvent: provisional.event,
-            existingEvent: persisted,
-            economicLineageCandidateFingerprint: provisional.economicLineageCandidateFingerprint,
+        if (context.authorityDenial) {
+          denial = buildAuthorityConflictPackage({
             context,
+            derived: deriveAuthorityDenialBasis(db, context),
             denialAttemptId,
             deniedAttemptedAt: clock.timestamp,
           });
           rollbackQuietly(db);
         } else {
-          const eventId = generateRepositoryId('actual-receivable-eligible');
-          const correlationId = generateRepositoryId('actual-receivable-correlation');
-          const derived = deriveEventCore(db, context, { correlationId, occurredAt: clock.timestamp });
-          const byHash = db.prepare(`
-            SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
-            WHERE companyId = ? AND eventHash = ?
-          `).get(command.companyId, derived.event.eventHash);
-          if (byHash) {
-            const persisted = validateEligibleEventRecord(normalizeEventRow(byHash));
+          const provisional = deriveEventCore(db, context, {
+            correlationId: 'repository-provisional-correlation',
+            occurredAt: clock.timestamp,
+          });
+          const locatedRows = [];
+          const queries = [
+            db.prepare(`
+              SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
+              WHERE companyId = ? AND branchId = ? AND economicLineageKey = ?
+            `).get(command.companyId, command.branchId, provisional.event.economicLineageKey),
+            db.prepare(`
+              SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
+              WHERE companyId = ? AND branchId = ? AND economicSourceRevisionKey = ?
+            `).get(command.companyId, command.branchId, provisional.event.economicSourceRevisionKey),
+            db.prepare(`
+              SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
+              WHERE dryRunId = ? AND candidateId = ?
+            `).get(command.dryRunId, command.candidateId),
+          ];
+          for (const row of queries) {
+            if (row && !locatedRows.some(existing => existing.id === row.id)) {
+              locatedRows.push(normalizeEventRow(row));
+            }
+          }
+          if (locatedRows.length > 1) throw repositoryError('CANONICAL_ELIGIBILITY_REPLAY_INTEGRITY_FAILED');
+          if (locatedRows.length === 1) {
+            const persisted = validateEligibleEventRecord(locatedRows[0]);
+            const replay = deriveEventCore(db, context, {
+              correlationId: persisted.correlationId,
+              occurredAt: persisted.createdAt,
+            });
+            const expected = { id: persisted.id, ...replay.event };
+            if (exactRowsEqual(persisted, expected)) {
+              db.exec('COMMIT');
+              return Object.freeze({ event: persisted, replayed: true });
+            }
             denial = buildEventConflictPackage({
-              attemptedEvent: derived.event,
+              attemptedEvent: provisional.event,
               existingEvent: persisted,
-              economicLineageCandidateFingerprint: derived.economicLineageCandidateFingerprint,
+              economicLineageCandidateFingerprint: provisional.economicLineageCandidateFingerprint,
               context,
               denialAttemptId,
               deniedAttemptedAt: clock.timestamp,
             });
             rollbackQuietly(db);
           } else {
-            const row = { id: eventId, ...derived.event };
-            insertExact(
-              db,
-              ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE,
-              row,
-              REQUIRED_COLUMNS[ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE],
-            );
-            const persisted = readEventById(eventId);
-            const refreshedContext = loadAcceptedContext(db, authorityRepository, command, clock.milliseconds);
-            const reconstructed = deriveEventCore(db, refreshedContext, {
-              correlationId,
-              occurredAt: clock.timestamp,
-            });
-            if (!persisted || !exactRowsEqual(persisted, { id: eventId, ...reconstructed.event })) {
-              throw repositoryError('CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED');
+            const eventId = generateRepositoryId('actual-receivable-eligible');
+            const correlationId = generateRepositoryId('actual-receivable-correlation');
+            const derived = deriveEventCore(db, context, { correlationId, occurredAt: clock.timestamp });
+            const byHash = db.prepare(`
+              SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
+              WHERE companyId = ? AND eventHash = ?
+            `).get(command.companyId, derived.event.eventHash);
+            if (byHash) {
+              const persisted = validateEligibleEventRecord(normalizeEventRow(byHash));
+              denial = buildEventConflictPackage({
+                attemptedEvent: derived.event,
+                existingEvent: persisted,
+                economicLineageCandidateFingerprint: derived.economicLineageCandidateFingerprint,
+                context,
+                denialAttemptId,
+                deniedAttemptedAt: clock.timestamp,
+              });
+              rollbackQuietly(db);
+            } else {
+              const row = { id: eventId, ...derived.event };
+              insertExact(
+                db,
+                ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE,
+                row,
+                REQUIRED_COLUMNS[ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE],
+              );
+              const persisted = readEventById(eventId);
+              const refreshedContext = loadAcceptedContext(db, authorityRepository, command, clock.milliseconds);
+              const reconstructed = deriveEventCore(db, refreshedContext, {
+                correlationId,
+                occurredAt: clock.timestamp,
+              });
+              if (!persisted || !exactRowsEqual(persisted, { id: eventId, ...reconstructed.event })) {
+                throw repositoryError('CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED');
+              }
+              const lineageCount = Number(db.prepare(`
+                SELECT COUNT(*) AS count FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
+                WHERE companyId = ? AND branchId = ? AND economicLineageKey = ?
+              `).get(command.companyId, command.branchId, persisted.economicLineageKey).count);
+              const revisionCount = Number(db.prepare(`
+                SELECT COUNT(*) AS count FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
+                WHERE companyId = ? AND branchId = ? AND economicSourceRevisionKey = ?
+              `).get(command.companyId, command.branchId, persisted.economicSourceRevisionKey).count);
+              const candidateCount = Number(db.prepare(`
+                SELECT COUNT(*) AS count FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
+                WHERE dryRunId = ? AND candidateId = ?
+              `).get(command.dryRunId, command.candidateId).count);
+              if (lineageCount !== 1 || revisionCount !== 1 || candidateCount !== 1) {
+                throw repositoryError('CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED');
+              }
+              db.exec('COMMIT');
+              return Object.freeze({ event: persisted, replayed: false });
             }
-            const lineageCount = Number(db.prepare(`
-              SELECT COUNT(*) AS count FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
-              WHERE companyId = ? AND branchId = ? AND economicLineageKey = ?
-            `).get(command.companyId, command.branchId, persisted.economicLineageKey).count);
-            const revisionCount = Number(db.prepare(`
-              SELECT COUNT(*) AS count FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
-              WHERE companyId = ? AND branchId = ? AND economicSourceRevisionKey = ?
-            `).get(command.companyId, command.branchId, persisted.economicSourceRevisionKey).count);
-            const candidateCount = Number(db.prepare(`
-              SELECT COUNT(*) AS count FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
-              WHERE dryRunId = ? AND candidateId = ?
-            `).get(command.dryRunId, command.candidateId).count);
-            if (lineageCount !== 1 || revisionCount !== 1 || candidateCount !== 1) {
-              throw repositoryError('CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED');
-            }
-            db.exec('COMMIT');
-            return Object.freeze({ event: persisted, replayed: false });
           }
         }
       }

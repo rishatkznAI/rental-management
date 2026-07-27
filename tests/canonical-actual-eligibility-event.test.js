@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 import { Worker } from 'node:worker_threads';
 import {
+  authorityRecord,
   createPr9aContext,
   eligibilityCommand,
 } from './canonical-actual-posting-fixtures.js';
@@ -56,6 +57,22 @@ function mutateCandidateForConflict(context) {
   context.db.prepare('UPDATE actual_source_dry_run_candidates SET dueDateEvidenceRef = ? WHERE id = ?')
     .run('contract-due-date-conflict-v2', context.authority.candidate.id);
   context.db.exec(trigger.sql);
+}
+
+function nextAuthority(previous, version, overrides = {}) {
+  const { recordHash: _recordHash, ...previousWithoutHash } = previous;
+  return authorityRecord({
+    kind: previous.authorityKind,
+    ownershipHash: previous.sourceOwnershipManifestHash,
+    overrides: {
+      ...previousWithoutHash,
+      recordId: `authority-record-${previous.authorityKind}-v${version}`,
+      authorityVersion: version,
+      previousRecordId: previous.recordId,
+      createdAt: `2026-07-27T10:${String(version).padStart(2, '0')}:00.000Z`,
+      ...overrides,
+    },
+  });
 }
 
 function produceConflict(context) {
@@ -115,6 +132,81 @@ test('Algorithm A exact event replay is read-only and returns byte-identical per
     assert.equal(replay.replayed, true);
     assert.equal(canonicalJson(replay.event), canonicalJson(first.event));
     assert.deepEqual(counts(context.db), before);
+  } finally {
+    context.db.close();
+  }
+});
+
+test('Algorithm A applies source-before-producer global authority precedence and persists exact frozen denial evidence', () => {
+  const context = createPr9aContext();
+  try {
+    const sourceDescendant = nextAuthority(context.authority.source, 2);
+    const producerDescendant = nextAuthority(context.authority.producer, 2);
+    context.authority.repository.appendAuthorityRecord(producerDescendant);
+    context.authority.repository.appendAuthorityRecord(sourceDescendant);
+
+    assert.throws(
+      () => context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)),
+      error => {
+        assert.equal(error.code, 'SOURCE_ADAPTER_LATEST_CHAIN_MISMATCH');
+        assert.equal(error.replayed, false);
+        assert.equal(error.conflict.deniedAuthorityKind, 'source_adapter');
+        assert.equal(error.conflict.deniedAuthorityRecordId, sourceDescendant.recordId);
+        assert.equal(error.conflict.deniedAuthorityVersion, 2);
+        assert.equal(error.conflict.deniedAuthorityRecordHash, sourceDescendant.recordHash);
+        assert.equal(error.conflict.economicLineageKey, null);
+        assert.equal(error.conflict.economicSourceRevisionKey, null);
+        return true;
+      },
+    );
+
+    assert.deepEqual(counts(context.db), {
+      events: 0, conflicts: 1, transitions: 1, receivables: 0, operations: 0,
+    });
+    const conflict = context.db.prepare('SELECT * FROM canonical_receivable_posting_conflicts').get();
+    const observation = JSON.parse(conflict.conflictObservationJson);
+    const projectionKeys = [
+      'actorId', 'artifactIdentityHash', 'authorityId', 'authorityKind',
+      'authorityRecordId', 'authorityVersion', 'bindingState', 'configurationHash',
+      'denialAttemptId', 'deniedAttemptedAt', 'effectiveFrom', 'effectiveUntil',
+      'latestRecordHash', 'ownershipManifestHash', 'policyHash',
+      'postingAuthorityChainSnapshotHash', 'producerAuthorityChainSnapshotHash',
+      'recordHash', 'scopeFingerprint', 'sourceAuthorityChainSnapshotHash',
+      'stateCode', 'status', 'temporalEvaluationState', 'temporalWindowFingerprint',
+    ].sort();
+    assert.deepEqual(Object.keys(observation.expectedProjection).sort(), projectionKeys);
+    assert.deepEqual(Object.keys(observation.observedProjection).sort(), projectionKeys);
+    assert.equal(observation.expectedProjection.authorityRecordId, context.authority.source.recordId);
+    assert.equal(observation.observedProjection.authorityRecordId, sourceDescendant.recordId);
+    assert.equal(observation.observedProjection.stateCode, 'LATEST_CHAIN_MISMATCH');
+    assert.equal(JSON.parse(conflict.sourceAuthorityChainSnapshotJson).precedenceState, 'selected');
+    assert.equal(JSON.parse(conflict.producerAuthorityChainSnapshotJson).precedenceState, 'suppressed_by_higher_kind');
+    assert.equal(JSON.parse(conflict.postingAuthorityChainSnapshotJson).precedenceState, 'unaffected_active_latest');
+    assert.equal(
+      context.db.prepare('SELECT state FROM canonical_receivable_posting_conflict_transitions').get().state,
+      'COMPLETE',
+    );
+    assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+  } finally {
+    context.db.close();
+  }
+});
+
+test('later expired authority descendant is unrepresentable and performs zero conflict or event DML', () => {
+  const context = createPr9aContext();
+  try {
+    const expiredDescendant = nextAuthority(context.authority.source, 2, {
+      status: 'expired',
+      revocationReasonCode: 'expired-descendant-fixture',
+    });
+    context.authority.repository.appendAuthorityRecord(expiredDescendant);
+    assert.throws(
+      () => context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)),
+      error => error.code === 'AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1',
+    );
+    assert.deepEqual(counts(context.db), {
+      events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+    });
   } finally {
     context.db.close();
   }
@@ -182,6 +274,19 @@ test('required denial commits a reciprocal pair, synchronously reaches COMPLETE,
     assert.equal(error.code, 'ECONOMIC_SOURCE_EVENT_MISMATCH');
     assert.equal(error.replayed, false);
     assert.ok(error.conflict);
+    const observation = JSON.parse(error.conflict.conflictObservationJson);
+    for (const key of [
+      'denialAttemptId', 'deniedAttemptedAt', 'postingAdapterAuthorityBranchId',
+      'postingAdapterAuthorityCompanyId', 'postingAdapterAuthorityKind',
+      'postingAdapterAuthorityRecordHash', 'postingAdapterAuthorityRecordId',
+      'postingAdapterAuthorityVersion', 'postingAuthorityChainSnapshotHash',
+      'producerAuthorityBranchId', 'producerAuthorityCompanyId', 'producerAuthorityKind',
+      'producerAuthorityRecordHash', 'producerAuthorityRecordId', 'producerAuthorityVersion',
+      'producerAuthorityChainSnapshotHash', 'sourceAuthorityChainSnapshotHash',
+    ]) {
+      assert.ok(Object.hasOwn(observation.expectedProjection, key), key);
+      assert.equal(observation.expectedProjection[key], observation.observedProjection[key], key);
+    }
     const transition = context.db.prepare('SELECT * FROM canonical_receivable_posting_conflict_transitions').get();
     assert.deepEqual(
       { state: transition.state, attemptApplied: transition.attemptApplied, rateApplied: transition.rateApplied, circuitApplied: transition.circuitApplied },

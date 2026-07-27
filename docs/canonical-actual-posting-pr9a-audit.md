@@ -119,6 +119,14 @@ event replay reuses the original ID, correlation ID, and timestamps and performs
 writes. Any validation, trigger, insert, or post-insert reconstruction failure rolls
 the event transaction back.
 
+Authority denial classification reconstructs all three complete chains before event
+lookup, applies source-before-producer-before-posting kind-major precedence, and
+persists one selected snapshot plus every suppressed lower-precedence candidate.
+Algorithm C independently rebuilds the authority observation from the immutable rows
+and frozen snapshots before either exact replay or new evidence admission. A later
+descendant with persisted lifecycle status `expired` takes the registered
+unrepresentable zero-conflict-DML path.
+
 Required safely reconstructable denial evidence is persisted only after the primary
 transaction rolls back. Algorithm C classifies both repository replay keys before
 append-specific admission, proves located conflict/transition pairs and all three
@@ -167,10 +175,9 @@ evidence, adapter approval, activation, migration, read, write, or deployment st
 
 The pre-commit verification result for this implementation is:
 
-- targeted PR9a suites: 39 tests passed, 0 failed;
-- first and second mandated `npm test` passes: 2,381 tests passed, 0 failed in each before the final denial-brand export guard was added;
-- final-tree `npm test`: 2,382 tests passed, 0 failed;
-- final-tree explicit `node --test tests/*.test.js`: 2,382 tests passed, 0 failed;
+- targeted PR9a suites: 41 tests passed, 0 failed;
+- first and second mandated final-tree `npm test` passes: 2,384 tests passed, 0 failed in each;
+- final-tree explicit `node --test tests/*.test.js`: 2,384 tests passed, 0 failed;
 - `npm run build`: passed, 3,385 modules transformed;
 - schema inventory: 7 tables, 38 named indexes, 41 named triggers, clean foreign-key check;
 - changed-file allow-list, PR9a/PR9b separation, Algorithm B absence, canonical business DML absence, route/worker/scheduler/external-access absence, authorization guard, placeholder, repository-secret, and added-line-secret scans: passed.

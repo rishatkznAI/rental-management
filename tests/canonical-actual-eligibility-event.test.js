@@ -396,6 +396,273 @@ function resealAcceptance(context, { acceptedDryRuns, acceptedRuns, authorizatio
   return { authorization: changedAuthorization, activation: changedActivation };
 }
 
+function resealAcceptedPolicyManifestSet(context, policyManifestHashes) {
+  const policyManifestHashesJson = oracleCanonicalJson([...policyManifestHashes].sort());
+  const activation = context.db.prepare(`
+    SELECT * FROM canonical_posting_activation_records WHERE recordId = ?
+  `).get(context.authority.activation.recordId);
+  activation.policyManifestHashesJson = policyManifestHashesJson;
+  activation.cohortHash = oracleCohortHash(activation);
+  activation.recordHash = oracleRecordHash(
+    activation,
+    ORACLE_ACTIVATION_FIELDS,
+    'rentcore.canonical_actual_posting.activation',
+  );
+  rewriteWholeRow(context.db, 'canonical_posting_activation_records', activation);
+
+  const authorization = context.db.prepare(`
+    SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+  `).get(context.authority.authorization.recordId);
+  authorization.policyManifestHashesJson = policyManifestHashesJson;
+  authorization.cohortHash = activation.cohortHash;
+  authorization.recordHash = oracleRecordHash(
+    authorization,
+    ORACLE_WRITE_AUTHORIZATION_FIELDS,
+    'rentcore.canonical_actual_posting.write_authorization',
+  );
+  rewriteWholeRow(context.db, 'canonical_write_authorization_records', authorization);
+  return { activation, authorization };
+}
+
+function reopenAcceptedBillingPeriod(context, suffix = 'p1-red') {
+  const candidate = context.authority.candidate;
+  const closed = context.db.prepare(`
+    SELECT * FROM billing_source_period_versions
+    WHERE id = ? AND companyId = ? AND branchId = ?
+  `).get(candidate.closedPeriodVersionId, candidate.companyId, candidate.branchId);
+  const result = context.service.reopenBillingPeriod(context.commandContext, {
+    operationType: 'reopen_billing_period',
+    idempotencyKey: `reopen-${suffix}`,
+    periodId: candidate.periodId,
+    expectedPeriodVersion: Number(closed.version),
+    reasonCode: 'SOURCE_CORRECTION',
+    reasonText: 'Independent PR9a period-current remediation proof',
+    sourceEventId: `reopen-${suffix}-event`,
+    sourceEventVersion: 1,
+    sourceHash: oracleHash({ mutation: 'billing-period-reopen', suffix }),
+  });
+  const operation = context.db.prepare('SELECT * FROM billing_source_operations WHERE id = ?')
+    .get(result.operationId);
+  const audit = context.db.prepare('SELECT * FROM billing_source_audit_events WHERE operationId = ?')
+    .get(result.operationId);
+  const reopened = context.db.prepare(`
+    SELECT * FROM billing_source_period_versions
+    WHERE periodId = ? ORDER BY version DESC, id DESC LIMIT 1
+  `).get(candidate.periodId);
+  assert.equal(reopened.eventType, 'reopened');
+  assert.equal(reopened.previousVersionId, closed.id);
+  assert.equal(reopened.reopensClosedVersionId, closed.id);
+  assert.equal(result.fingerprint, operation.resultFingerprint);
+  assert.equal(result.fingerprint, audit.afterFingerprint);
+  return { audit, closed, operation, reopened, result };
+}
+
+function appendRawPeriodVersion(context, overrides = {}) {
+  const candidate = context.authority.candidate;
+  const base = context.db.prepare(`
+    SELECT * FROM billing_source_period_versions
+    WHERE id = ?
+  `).get(overrides.baseId || candidate.closedPeriodVersionId);
+  const closedEvidence = context.db.prepare(`
+    SELECT * FROM billing_source_period_versions WHERE id = ?
+  `).get(candidate.closedPeriodVersionId);
+  const eventType = overrides.eventType || 'reopened';
+  const row = {
+    ...base,
+    id: overrides.id || `hostile-period-version-${overrides.suffix || 'next'}`,
+    periodId: overrides.periodId || candidate.periodId,
+    version: overrides.version ?? Number(base.version) + 1,
+    eventType,
+    previousVersionId: overrides.previousVersionId === undefined
+      ? base.id
+      : overrides.previousVersionId,
+    reopensClosedVersionId: eventType === 'reopened'
+      ? (overrides.reopensClosedVersionId || base.id)
+      : null,
+    effectiveTermsVersionId: eventType === 'closed' ? closedEvidence.effectiveTermsVersionId : null,
+    snapshotId: eventType === 'closed' ? closedEvidence.snapshotId : null,
+    capabilityKey: eventType === 'closed' ? 'billing.period.close' : 'billing.period.reopen',
+    reasonCode: eventType === 'closed' ? null : 'HOSTILE_REOPEN',
+    reasonText: eventType === 'closed' ? null : 'Independent hostile period graph mutation',
+    sourceEventId: `hostile-period-event-${overrides.suffix || 'next'}`,
+    sourceHash: oracleHash({
+      eventType,
+      periodId: overrides.periodId || candidate.periodId,
+      suffix: overrides.suffix || 'next',
+      version: overrides.version ?? Number(base.version) + 1,
+    }),
+    createdAt: overrides.createdAt || '2026-07-27T12:05:00.000Z',
+  };
+  insertCopiedRow(context.db, 'billing_source_period_versions', row);
+  return row;
+}
+
+function appendForeignPeriodLifecycle(context, suffix = 'foreign') {
+  const candidate = context.authority.candidate;
+  const period = context.db.prepare('SELECT * FROM billing_source_periods WHERE id = ?')
+    .get(candidate.periodId);
+  const foreignPeriod = {
+    ...period,
+    id: `hostile-${suffix}-period`,
+    periodStartDate: '2026-09-01',
+    periodEndDateExclusive: '2026-10-01',
+    identityHash: oracleHash({ foreignPeriod: suffix }),
+  };
+  insertCopiedRow(context.db, 'billing_source_periods', foreignPeriod);
+  const closed = appendRawPeriodVersion(context, {
+    id: `hostile-${suffix}-period-closed`,
+    periodId: foreignPeriod.id,
+    previousVersionId: null,
+    suffix: `${suffix}-closed`,
+    version: 1,
+    eventType: 'closed',
+  });
+  const reopened = appendRawPeriodVersion(context, {
+    baseId: closed.id,
+    id: `hostile-${suffix}-period-reopened`,
+    periodId: foreignPeriod.id,
+    suffix: `${suffix}-reopened`,
+    version: 2,
+  });
+  return { closed, foreignPeriod, reopened };
+}
+
+function installAfterEventInsertMutation(db, mutation) {
+  const originalPrepare = db.prepare;
+  let armed = true;
+  Object.defineProperty(db, 'prepare', {
+    configurable: true,
+    value(sql) {
+      const statement = originalPrepare.call(db, sql);
+      if (
+        armed
+        && /^\s*INSERT INTO actual_receivable_eligible_events\b/.test(String(sql))
+      ) {
+        return {
+          run(...args) {
+            const result = statement.run(...args);
+            armed = false;
+            mutation();
+            return result;
+          },
+        };
+      }
+      return statement;
+    },
+  });
+  return () => { delete db.prepare; };
+}
+
+function acceptAdditionalPolicyRun(context, manifest, suffix) {
+  const second = context.dryRunService.evaluateActualSourceDryRun(
+    context.dryRunContext,
+    dryRunCommand({
+      asOfDate: '2026-09-15',
+      idempotencyKey: `p1-02-policy-${suffix}`,
+      policyManifest: manifest,
+    }),
+  );
+  const selectedRun = context.db.prepare('SELECT * FROM actual_source_dry_runs WHERE id = ?')
+    .get(second.dryRunId);
+  const selectedCandidate = context.db.prepare(`
+    SELECT * FROM actual_source_dry_run_candidates WHERE runId = ? ORDER BY candidateKey, id LIMIT 1
+  `).get(second.dryRunId);
+  const acceptedRuns = [
+    oracleAcceptedRun(context, context.authority.run.id),
+    oracleAcceptedRun(context, selectedRun.id),
+  ].sort((left, right) => left.dryRunId < right.dryRunId ? -1 : left.dryRunId > right.dryRunId ? 1 : 0);
+  const acceptedDryRuns = acceptedRuns.map(entry => ({
+    dryRunId: entry.dryRunId,
+    resultHash: entry.resultHash,
+  }));
+  const policyManifestHashes = [...new Set(acceptedRuns.map(entry => entry.policyManifestHash))].sort();
+  resealAcceptance(context, {
+    acceptedDryRuns,
+    acceptedRuns,
+    authorization: { policyManifestHashesJson: oracleCanonicalJson(policyManifestHashes) },
+  });
+  resealAcceptedPolicyManifestSet(context, policyManifestHashes);
+  return {
+    command: eligibilityCommand(context, {
+      candidateId: selectedCandidate.id,
+      dryRunId: selectedRun.id,
+    }),
+    selectedCandidate,
+    selectedRun,
+  };
+}
+
+function oracleDueDatePolicySetHash(policySet) {
+  return oracleHash({
+    contractualDueDate: policySet.contractualDueDate,
+    domain: 'rentcore.canonical_actual_posting.due_date_policy_set',
+    unknownDueDateTreatment: policySet.unknownDueDateTreatment,
+    version: 1,
+  });
+}
+
+function oracleDueDatePolicySetFromManifest(manifest) {
+  const contractual = manifest.gates.find(gate => gate.key === 'contractual_due_date');
+  const unknown = manifest.gates.find(gate => gate.key === 'unknown_due_date_treatment');
+  const mappingHash = oracleHash({
+    agingTreatment: 'excluded_from_aging',
+    contractualDueDate: null,
+    domain: 'rentcore.canonical_actual_posting.unknown_due_date_mapping',
+    mappingId: 'rentcore.unknown_due_date_posting_treatment.v1',
+    mappingVersion: 1,
+    postingTreatment: 'post_without_aging_v1',
+    sourceDecisionLiteral: 'allow_unknown_without_aging',
+    sourceGateKind: 'unknown_due_date_treatment',
+    version: 1,
+  });
+  return {
+    contractualDueDate: {
+      expectedSourceRef: contractual.expectedSourceRef,
+      gateKind: contractual.key,
+      policyHash: contractual.decisionHash,
+      policyId: contractual.decisionRef,
+      policyVersion: contractual.decisionVersion,
+    },
+    unknownDueDateTreatment: {
+      decisionLiteral: unknown.decisionValue,
+      gateKind: unknown.key,
+      mappingHash,
+      mappingId: 'rentcore.unknown_due_date_posting_treatment.v1',
+      mappingVersion: 1,
+      policyHash: unknown.decisionHash,
+      policyId: unknown.decisionRef,
+      policyVersion: unknown.decisionVersion,
+    },
+  };
+}
+
+function independentlyResealDueDatePolicies(context, authorizationSet, activationSet = authorizationSet) {
+  const authorization = context.db.prepare(`
+    SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+  `).get(context.authority.authorization.recordId);
+  authorization.dueDatePolicySetJson = oracleCanonicalJson(authorizationSet);
+  authorization.dueDatePolicySetHash = oracleDueDatePolicySetHash(authorizationSet);
+  authorization.recordHash = oracleRecordHash(
+    authorization,
+    ORACLE_WRITE_AUTHORIZATION_FIELDS,
+    'rentcore.canonical_actual_posting.write_authorization',
+  );
+  rewriteWholeRow(context.db, 'canonical_write_authorization_records', authorization);
+
+  const activation = context.db.prepare(`
+    SELECT * FROM canonical_posting_activation_records WHERE recordId = ?
+  `).get(context.authority.activation.recordId);
+  activation.dueDatePolicySetJson = oracleCanonicalJson(activationSet);
+  activation.dueDatePolicySetHash = oracleDueDatePolicySetHash(activationSet);
+  activation.recordHash = oracleRecordHash(
+    activation,
+    ORACLE_ACTIVATION_FIELDS,
+    'rentcore.canonical_actual_posting.activation',
+  );
+  rewriteWholeRow(context.db, 'canonical_posting_activation_records', activation);
+  return { activation, authorization };
+}
+
 function insertDisconnectedCoverageRoot(context, suffix = 'hostile-disconnected') {
   const coverageSet = context.db.prepare('SELECT * FROM billing_source_coverage_sets ORDER BY id LIMIT 1').get();
   const coverageSlice = context.db.prepare(`
@@ -453,6 +720,554 @@ test('independent PR9a hostile oracle matches a fixed external SHA-256 golden', 
     oracleHash(value),
     '8ae402684170acf5b0ebae32faf3d5581a1dae7efa3d80d1394d9d5d6860a87b',
   );
+});
+
+test('P1-01 red proof: a fully sealed accepted-period reopen removes the current revision before event lookup', () => {
+  const context = createPr9aContext();
+  try {
+    const { result } = reopenAcceptedBillingPeriod(context, 'p1-01-red');
+    assert.match(result.fingerprint, /^[0-9a-f]{64}$/);
+    const { observation } = assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION');
+    assert.equal(observation.expectedProjection.currentRevisionState, 'unique');
+    assert.equal(observation.observedProjection.currentRevisionState, 'missing');
+    assert.equal(observation.observedProjection.currentRevisionCount, 0);
+    assert.equal(observation.observedProjection.currentRevisionKeysHash, oracleHash({
+      currentSourceRevisionKeys: [],
+      domain: 'rentcore.canonical_actual_posting.current_revision_keys',
+      version: 1,
+    }));
+  } finally {
+    context.db.close();
+  }
+});
+
+test('P1-02 red proof: selected multi-run named policies cannot come from another accepted run', () => {
+  const context = createPr9aContext();
+  try {
+    const selectedManifest = approvedTestPolicyManifest({
+      manifestId: 'isolated-test-pr8-policy-v2',
+      manifestVersion: 2,
+      gates: {
+        contractual_due_date: {
+          decisionRef: 'isolated-test-contractual_due_date-decision-v2',
+          decisionVersion: 2,
+          decisionHash: oracleHash({ gate: 'contractual_due_date', version: 2 }),
+        },
+        canonical_amount_basis: {
+          decisionRef: 'isolated-test-canonical_amount_basis-decision-v2',
+          decisionVersion: 2,
+          decisionHash: oracleHash({ gate: 'canonical_amount_basis', version: 2 }),
+        },
+      },
+    });
+    const second = context.dryRunService.evaluateActualSourceDryRun(
+      context.dryRunContext,
+      dryRunCommand({
+        asOfDate: '2026-09-15',
+        idempotencyKey: 'p1-02-selected-policy-v2',
+        policyManifest: selectedManifest,
+      }),
+    );
+    const selectedRun = context.db.prepare('SELECT * FROM actual_source_dry_runs WHERE id = ?')
+      .get(second.dryRunId);
+    const selectedCandidate = context.db.prepare(`
+      SELECT * FROM actual_source_dry_run_candidates WHERE runId = ? ORDER BY candidateKey, id LIMIT 1
+    `).get(second.dryRunId);
+    const acceptedRuns = [
+      oracleAcceptedRun(context, context.authority.run.id),
+      oracleAcceptedRun(context, selectedRun.id),
+    ].sort((left, right) => left.dryRunId < right.dryRunId ? -1 : left.dryRunId > right.dryRunId ? 1 : 0);
+    const acceptedDryRuns = acceptedRuns.map(entry => ({
+      dryRunId: entry.dryRunId,
+      resultHash: entry.resultHash,
+    }));
+    const policyManifestHashes = [...new Set(acceptedRuns.map(entry => entry.policyManifestHash))].sort();
+    const resealed = resealAcceptance(context, {
+      acceptedDryRuns,
+      acceptedRuns,
+      authorization: { policyManifestHashesJson: oracleCanonicalJson(policyManifestHashes) },
+    });
+    const bound = resealAcceptedPolicyManifestSet(context, policyManifestHashes);
+    assert.equal(resealed.authorization.acceptedPr8EvidenceHash, bound.authorization.acceptedPr8EvidenceHash);
+    assert.equal(bound.authorization.recordHash, oracleRecordHash(
+      bound.authorization,
+      ORACLE_WRITE_AUTHORIZATION_FIELDS,
+      'rentcore.canonical_actual_posting.write_authorization',
+    ));
+    assert.equal(bound.activation.recordHash, oracleRecordHash(
+      bound.activation,
+      ORACLE_ACTIVATION_FIELDS,
+      'rentcore.canonical_actual_posting.activation',
+    ));
+    const { observation } = assertRequiredDenial(
+      context,
+      'DUE_DATE_POLICY_DRIFT',
+      eligibilityCommand(context, {
+        candidateId: selectedCandidate.id,
+        dryRunId: selectedRun.id,
+      }),
+    );
+    assert.equal(observation.observedProjection.bindingState, 'ambiguous');
+  } finally {
+    context.db.close();
+  }
+});
+
+test('P1-01 hostile billing-period current-state matrix is reconstructed from authoritative PR6 rows', async t => {
+  const deniedCases = [
+    ['closed to reopened', context => reopenAcceptedBillingPeriod(context, 'matrix-reopen')],
+    ['closed to reopened to closed again keeps the old PR8 close non-current', context => {
+      const { reopened } = reopenAcceptedBillingPeriod(context, 'matrix-reclose');
+      appendRawPeriodVersion(context, {
+        baseId: reopened.id,
+        eventType: 'closed',
+        id: 'hostile-period-reclosed-v3',
+        previousVersionId: reopened.id,
+        suffix: 'reclosed-v3',
+        version: 3,
+      });
+    }],
+    ['two reopen descendants', context => {
+      const { reopened } = reopenAcceptedBillingPeriod(context, 'matrix-two-reopens');
+      appendRawPeriodVersion(context, {
+        baseId: reopened.id,
+        id: 'hostile-second-reopen-v3',
+        previousVersionId: reopened.id,
+        reopensClosedVersionId: context.authority.candidate.closedPeriodVersionId,
+        suffix: 'second-reopen-v3',
+        version: 3,
+      });
+    }],
+    ['reopen with wrong previousVersionId', context => {
+      const foreign = appendForeignPeriodLifecycle(context, 'wrong-previous');
+      appendRawPeriodVersion(context, {
+        id: 'hostile-wrong-previous-main-reopen',
+        previousVersionId: foreign.closed.id,
+        reopensClosedVersionId: context.authority.candidate.closedPeriodVersionId,
+        suffix: 'wrong-previous-main',
+        version: 2,
+      });
+    }],
+    ['latest version id order differs from semantic version order', context => {
+      const reopened = appendRawPeriodVersion(context, {
+        id: 'zzzz-hostile-period-v2',
+        suffix: 'physical-v2',
+        version: 2,
+      });
+      appendRawPeriodVersion(context, {
+        baseId: reopened.id,
+        eventType: 'closed',
+        id: 'aaaa-hostile-period-v3',
+        previousVersionId: reopened.id,
+        suffix: 'physical-v3',
+        version: 3,
+      });
+      const byId = context.db.prepare(`
+        SELECT id FROM billing_source_period_versions
+        WHERE periodId = ? ORDER BY id ASC LIMIT 1
+      `).get(context.authority.candidate.periodId);
+      assert.equal(byId.id, 'aaaa-hostile-period-v3');
+    }],
+    ['fully resealed authorization and activation still cannot bless stale old PR8 evidence', context => {
+      reopenAcceptedBillingPeriod(context, 'matrix-resealed-old-pr8');
+      const acceptedRuns = JSON.parse(context.authority.authorization.acceptedPr8EvidenceJson);
+      const acceptedDryRuns = JSON.parse(context.authority.authorization.acceptedDryRunsJson);
+      const resealed = resealAcceptance(context, { acceptedDryRuns, acceptedRuns });
+      const policyHashes = [...new Set(acceptedRuns.map(run => run.policyManifestHash))].sort();
+      const policyResealed = resealAcceptedPolicyManifestSet(context, policyHashes);
+      assert.equal(resealed.authorization.acceptedPr8EvidenceHash, policyResealed.authorization.acceptedPr8EvidenceHash);
+      assert.equal(policyResealed.authorization.recordHash, oracleRecordHash(
+        policyResealed.authorization,
+        ORACLE_WRITE_AUTHORIZATION_FIELDS,
+        'rentcore.canonical_actual_posting.write_authorization',
+      ));
+      assert.equal(policyResealed.activation.recordHash, oracleRecordHash(
+        policyResealed.activation,
+        ORACLE_ACTIVATION_FIELDS,
+        'rentcore.canonical_actual_posting.activation',
+      ));
+    }],
+    ['competing reopened roots cannot manufacture a latest close', context => {
+      appendRawPeriodVersion(context, {
+        id: 'hostile-competing-reopen-a',
+        suffix: 'competing-a',
+        version: 2,
+      });
+      context.db.exec('DROP INDEX uq_billing_source_period_version');
+      appendRawPeriodVersion(context, {
+        id: 'hostile-competing-reopen-b',
+        suffix: 'competing-b',
+        version: 2,
+      });
+    }],
+  ];
+  for (const [name, mutate] of deniedCases) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        mutate(context);
+        const { observation } = assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION');
+        assert.equal(observation.observedProjection.currentRevisionState, 'missing');
+        assert.equal(observation.observedProjection.currentRevisionCount, 0);
+        assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+
+  await t.test('reopen in a foreign period scope is ignored', () => {
+    const context = createPr9aContext();
+    try {
+      appendForeignPeriodLifecycle(context, 'foreign-scope');
+      const result = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      assert.equal(result.replayed, false);
+      assert.deepEqual(counts(context.db), {
+        events: 1, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+      });
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('audit and operation rows without a period successor are ignored', () => {
+    const context = createPr9aContext();
+    try {
+      const operation = context.db.prepare('SELECT * FROM billing_source_operations ORDER BY id LIMIT 1').get();
+      const audit = context.db.prepare(`
+        SELECT * FROM billing_source_audit_events WHERE operationId = ?
+      `).get(operation.id);
+      const copiedOperation = {
+        ...operation,
+        id: 'hostile-audit-only-operation',
+        idempotencyKey: 'hostile-audit-only-idempotency',
+      };
+      const copiedAudit = {
+        ...audit,
+        id: 'hostile-audit-only-event',
+        operationId: copiedOperation.id,
+        aggregateId: context.authority.candidate.periodId,
+      };
+      context.db.exec('BEGIN');
+      insertCopiedRow(context.db, 'billing_source_operations', copiedOperation);
+      insertCopiedRow(context.db, 'billing_source_audit_events', copiedAudit);
+      context.db.exec('COMMIT');
+      const result = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      assert.equal(result.replayed, false);
+      assert.equal(counts(context.db).events, 1);
+    } finally {
+      if (context.db.inTransaction) context.db.exec('ROLLBACK');
+      context.db.close();
+    }
+  });
+
+  await t.test('PR8 evidence mismatch retains precedence over a simultaneous reopen', () => {
+    const context = createPr9aContext();
+    try {
+      reopenAcceptedBillingPeriod(context, 'matrix-precedence');
+      mutateCandidateForConflict(context);
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('semantic reopen validation precedes exact replay lookup', () => {
+    const context = createPr9aContext();
+    try {
+      context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      reopenAcceptedBillingPeriod(context, 'matrix-after-event-replay');
+      const { denial } = assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION');
+      assert.equal(denial.replayed, false);
+      assert.deepEqual(counts(context.db), {
+        events: 1, conflicts: 1, transitions: 1, receivables: 0, operations: 0,
+      });
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('P1-01 post-insert reread rejects a reopen and rolls back the entire event transaction', () => {
+  const context = createPr9aContext();
+  const beforePeriodCount = Number(context.db.prepare(`
+    SELECT COUNT(*) AS count FROM billing_source_period_versions WHERE periodId = ?
+  `).get(context.authority.candidate.periodId).count);
+  const restore = installAfterEventInsertMutation(context.db, () => {
+    appendRawPeriodVersion(context, {
+      id: 'hostile-postinsert-period-reopen',
+      suffix: 'postinsert-reopen',
+      version: 2,
+    });
+  });
+  try {
+    assert.throws(
+      () => context.eligibilityRepository.produceEligibleEvent(eligibilityCommand(context)),
+      error => error.code === 'CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED',
+    );
+    assert.deepEqual(counts(context.db), {
+      events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+    });
+    assert.equal(Number(context.db.prepare(`
+      SELECT COUNT(*) AS count FROM billing_source_period_versions WHERE periodId = ?
+    `).get(context.authority.candidate.periodId).count), beforePeriodCount);
+  } finally {
+    restore();
+    context.db.close();
+  }
+});
+
+test('P1-02 selected-run policy binding hostile matrix rejects cross-run named identities', async t => {
+  const dueDrifts = [
+    ['contractual decisionRef drift', {
+      decisionRef: 'isolated-test-contractual-due-ref-v2',
+    }],
+    ['contractual decisionVersion drift', {
+      decisionVersion: 2,
+    }],
+    ['contractual decisionHash drift', {
+      decisionHash: oracleHash({ contractualDuePolicy: 'v2' }),
+    }],
+  ];
+  for (const [name, patch] of dueDrifts) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        const manifest = approvedTestPolicyManifest({
+          manifestId: `isolated-test-${name.replace(/\W+/g, '-')}`,
+          manifestVersion: 2,
+          gates: { contractual_due_date: patch },
+        });
+        const selected = acceptAdditionalPolicyRun(context, manifest, name.replace(/\W+/g, '-'));
+        const { observation } = assertRequiredDenial(
+          context,
+          'DUE_DATE_POLICY_DRIFT',
+          selected.command,
+        );
+        assert.equal(observation.expectedProjection.bindingState, 'valid');
+        assert.equal(observation.observedProjection.bindingState, 'ambiguous');
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+
+  await t.test('unknown-due literal drift is a due-date denial even for a known-due candidate', () => {
+    const context = createPr9aContext();
+    try {
+      const manifest = approvedTestPolicyManifest({
+        manifestId: 'isolated-test-unknown-due-literal-v2',
+        manifestVersion: 2,
+        gates: {
+          unknown_due_date_treatment: { decisionValue: 'allow_unknown_with_aging' },
+        },
+      });
+      const selected = acceptAdditionalPolicyRun(context, manifest, 'unknown-due-literal');
+      assertRequiredDenial(context, 'DUE_DATE_POLICY_DRIFT', selected.command);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  const amountDrifts = [
+    ['amount decisionRef drift', { decisionRef: 'isolated-test-amount-ref-v2' }],
+    ['amount decisionVersion drift', { decisionVersion: 2 }],
+    ['amount decisionHash drift', { decisionHash: oracleHash({ amountBasisPolicy: 'v2' }) }],
+    ['amount decisionValue drift', { decisionValue: 'slice_net_minor' }],
+  ];
+  for (const [name, patch] of amountDrifts) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        const manifest = approvedTestPolicyManifest({
+          manifestId: `isolated-test-${name.replace(/\W+/g, '-')}`,
+          manifestVersion: 2,
+          gates: { canonical_amount_basis: patch },
+        });
+        const selected = acceptAdditionalPolicyRun(context, manifest, name.replace(/\W+/g, '-'));
+        assert.throws(
+          () => context.eligibilityService.produceEligibleEvent(selected.command),
+          error => error.code === 'CANONICAL_WRITE_AUTHORIZATION_INTEGRITY_FAILED',
+        );
+        assert.deepEqual(counts(context.db), {
+          events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+        });
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+
+  await t.test('selected run v1 and independently valid activation v2 due policies cannot cross-bind', () => {
+    const context = createPr9aContext();
+    try {
+      const baseline = JSON.parse(context.authority.run.policyManifestJson);
+      const activationManifest = approvedTestPolicyManifest({
+        manifestId: 'isolated-test-activation-policy-v2',
+        manifestVersion: 2,
+        gates: {
+          contractual_due_date: {
+            decisionRef: 'isolated-test-activation-due-v2',
+            decisionVersion: 2,
+            decisionHash: oracleHash({ activationDuePolicy: 'v2' }),
+          },
+        },
+      });
+      const baselineSet = oracleDueDatePolicySetFromManifest(baseline);
+      const activationSet = oracleDueDatePolicySetFromManifest(activationManifest);
+      const resealed = independentlyResealDueDatePolicies(context, baselineSet, activationSet);
+      assert.equal(resealed.authorization.recordHash, oracleRecordHash(
+        resealed.authorization,
+        ORACLE_WRITE_AUTHORIZATION_FIELDS,
+        'rentcore.canonical_actual_posting.write_authorization',
+      ));
+      assert.equal(resealed.activation.recordHash, oracleRecordHash(
+        resealed.activation,
+        ORACLE_ACTIVATION_FIELDS,
+        'rentcore.canonical_actual_posting.activation',
+      ));
+      assertRequiredDenial(context, 'DUE_DATE_POLICY_DRIFT');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('authorization and activation each valid but bound to different accepted runs are denied', () => {
+    const context = createPr9aContext();
+    try {
+      const manifest = approvedTestPolicyManifest({
+        manifestId: 'isolated-test-split-binding-v2',
+        manifestVersion: 2,
+        gates: {
+          contractual_due_date: {
+            decisionRef: 'isolated-test-split-due-v2',
+            decisionVersion: 2,
+            decisionHash: oracleHash({ splitDuePolicy: 'v2' }),
+          },
+        },
+      });
+      const selected = acceptAdditionalPolicyRun(context, manifest, 'split-binding');
+      const baselineSet = oracleDueDatePolicySetFromManifest(
+        JSON.parse(context.authority.run.policyManifestJson),
+      );
+      const selectedSet = oracleDueDatePolicySetFromManifest(manifest);
+      independentlyResealDueDatePolicies(context, selectedSet, baselineSet);
+      assertRequiredDenial(context, 'DUE_DATE_POLICY_DRIFT', selected.command);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  const storedManifestMutations = [
+    ['missing named entry', manifest => {
+      manifest.gates = manifest.gates.filter(gate => gate.key !== 'contractual_due_date');
+    }],
+    ['duplicate named entry', manifest => {
+      manifest.gates.push({ ...manifest.gates.find(gate => gate.key === 'contractual_due_date') });
+    }],
+    ['same policyManifestHash label with different logical content', manifest => {
+      manifest.gates.find(gate => gate.key === 'contractual_due_date').decisionRef = 'forged-same-label-ref';
+    }],
+    ['reordered manifest gate membership', manifest => {
+      manifest.gates.reverse();
+    }],
+    ['foreign policy entry', manifest => {
+      manifest.gates.push({
+        ...manifest.gates[0],
+        key: 'foreign_posting_policy',
+        decisionRef: 'foreign-posting-policy-v1',
+      });
+    }],
+  ];
+  for (const [name, mutate] of storedManifestMutations) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        const run = context.db.prepare('SELECT * FROM actual_source_dry_runs WHERE id = ?')
+          .get(context.authority.run.id);
+        const manifest = JSON.parse(run.policyManifestJson);
+        mutate(manifest);
+        mutateAppendOnlyTable(context.db, 'actual_source_dry_runs', () => {
+          context.db.prepare(`
+            UPDATE actual_source_dry_runs SET policyManifestJson = ? WHERE id = ?
+          `).run(oracleCanonicalJson(manifest), run.id);
+        });
+        assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+
+  await t.test('manifest content from a second run cannot be substituted into the selected first pair', () => {
+    const context = createPr9aContext();
+    try {
+      const secondManifest = approvedTestPolicyManifest({
+        manifestId: 'isolated-test-substitution-v2',
+        manifestVersion: 2,
+        gates: {
+          contractual_due_date: {
+            decisionRef: 'isolated-test-substitution-due-v2',
+            decisionVersion: 2,
+            decisionHash: oracleHash({ substitutionDue: 'v2' }),
+          },
+        },
+      });
+      const second = context.dryRunService.evaluateActualSourceDryRun(
+        context.dryRunContext,
+        dryRunCommand({
+          idempotencyKey: 'p1-02-manifest-substitution',
+          policyManifest: secondManifest,
+        }),
+      );
+      const secondRun = context.db.prepare('SELECT * FROM actual_source_dry_runs WHERE id = ?')
+        .get(second.dryRunId);
+      mutateAppendOnlyTable(context.db, 'actual_source_dry_runs', () => {
+        context.db.prepare(`
+          UPDATE actual_source_dry_runs SET policyManifestJson = ? WHERE id = ?
+        `).run(secondRun.policyManifestJson, context.authority.run.id);
+      });
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('P1-02 post-insert reread rolls back an event when amount policy binding changes', () => {
+  const context = createPr9aContext();
+  const original = context.db.prepare(`
+    SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+  `).get(context.authority.authorization.recordId);
+  const restore = installAfterEventInsertMutation(context.db, () => {
+    const authorization = context.db.prepare(`
+      SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+    `).get(context.authority.authorization.recordId);
+    authorization.amountBasisPolicyRef = 'hostile-postinsert-amount-policy';
+    authorization.amountBasisPolicyHash = oracleHash({ hostilePostinsertAmountPolicy: true });
+    authorization.recordHash = oracleRecordHash(
+      authorization,
+      ORACLE_WRITE_AUTHORIZATION_FIELDS,
+      'rentcore.canonical_actual_posting.write_authorization',
+    );
+    rewriteWholeRow(context.db, 'canonical_write_authorization_records', authorization);
+  });
+  try {
+    assert.throws(
+      () => context.eligibilityRepository.produceEligibleEvent(eligibilityCommand(context)),
+      error => error.code === 'CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED',
+    );
+    assert.deepEqual(counts(context.db), {
+      events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+    });
+    const after = context.db.prepare(`
+      SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+    `).get(context.authority.authorization.recordId);
+    assert.equal(oracleCanonicalJson(after), oracleCanonicalJson(original));
+  } finally {
+    restore();
+    context.db.close();
+  }
 });
 
 function insertPostingTriplet(context, event) {
@@ -2379,7 +3194,11 @@ test('one entropy call is reserved for denialAttemptId and every other repositor
     );
     const replay = repository.produceEligibleEvent(eligibilityCommand(success));
     assert.equal(replay.replayed, true);
-    assert.equal(calls.length, 1, 'exact event replay performs zero additional UUID calls');
+    assert.equal(calls.length, 2, 'exact event replay consumes one UUID for its own invocation');
+    assert.deepEqual(calls, [
+      { disableEntropyCache: true },
+      { disableEntropyCache: true },
+    ]);
   } finally {
     success.db.close();
   }
@@ -2421,6 +3240,137 @@ test('one entropy call is reserved for denialAttemptId and every other repositor
     assert.notEqual(conflict.id, conflict.correlationId);
   } finally {
     denial.db.close();
+  }
+});
+
+test('P1-03 UUID cardinality is exact across post-guard failures and pre-entropy guards', () => {
+  const fixedUuid = '33333333-3333-4333-8333-333333333333';
+
+  const loadFailure = createPr9aContext();
+  try {
+    loadFailure.authority.repository.appendAuthorityRecord(nextAuthority(loadFailure.authority.source, 2, {
+      status: 'expired',
+      revocationReasonCode: 'p1-03-load-context-failure',
+    }));
+    const calls = [];
+    const repository = freshRepositoryWith(loadFailure, () => replaceFunction(crypto, 'randomUUID', options => {
+      calls.push(options);
+      return fixedUuid;
+    }));
+    assert.throws(
+      () => repository.produceEligibleEvent(eligibilityCommand(loadFailure)),
+      error => error.code === 'AUTHORITY_LATEST_EXPIRED_DESCENDANT_UNREPRESENTABLE_V1',
+    );
+    assert.deepEqual(calls, [{ disableEntropyCache: true }]);
+    assert.deepEqual(counts(loadFailure.db), {
+      events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+    });
+  } finally {
+    loadFailure.db.close();
+  }
+
+  const replayMismatch = createPr9aContext();
+  try {
+    replayMismatch.eligibilityService.produceEligibleEvent(eligibilityCommand(replayMismatch));
+    const event = replayMismatch.db.prepare('SELECT * FROM actual_receivable_eligible_events').get();
+    mutateAppendOnlyTable(replayMismatch.db, 'actual_receivable_eligible_events', () => {
+      replayMismatch.db.prepare(`
+        UPDATE actual_receivable_eligible_events SET eventHash = ? WHERE id = ?
+      `).run('0'.repeat(64), event.id);
+    });
+    const calls = [];
+    const repository = freshRepositoryWith(replayMismatch, () => replaceFunction(crypto, 'randomUUID', options => {
+      calls.push(options);
+      return fixedUuid;
+    }));
+    assert.throws(
+      () => repository.produceEligibleEvent(eligibilityCommand(replayMismatch)),
+      error => error.code === ERROR_CODES.ENVELOPE_INVALID,
+    );
+    assert.deepEqual(calls, [{ disableEntropyCache: true }]);
+    assert.deepEqual(counts(replayMismatch.db), {
+      events: 1, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+    });
+  } finally {
+    replayMismatch.db.close();
+  }
+
+  const operationalFailure = createPr9aContext();
+  try {
+    const authorization = operationalFailure.db.prepare(`
+      SELECT * FROM canonical_write_authorization_records WHERE recordId = ?
+    `).get(operationalFailure.authority.authorization.recordId);
+    authorization.amountBasisPolicyRef = 'p1-03-hostile-amount-policy';
+    authorization.amountBasisPolicyHash = oracleHash({ p103: 'amount-policy' });
+    authorization.recordHash = oracleRecordHash(
+      authorization,
+      ORACLE_WRITE_AUTHORIZATION_FIELDS,
+      'rentcore.canonical_actual_posting.write_authorization',
+    );
+    rewriteWholeRow(operationalFailure.db, 'canonical_write_authorization_records', authorization);
+    const calls = [];
+    const repository = freshRepositoryWith(operationalFailure, () => replaceFunction(crypto, 'randomUUID', options => {
+      calls.push(options);
+      return fixedUuid;
+    }));
+    assert.throws(
+      () => repository.produceEligibleEvent(eligibilityCommand(operationalFailure)),
+      error => error.code === 'CANONICAL_WRITE_AUTHORIZATION_INTEGRITY_FAILED',
+    );
+    assert.deepEqual(calls, [{ disableEntropyCache: true }]);
+  } finally {
+    operationalFailure.db.close();
+  }
+
+  const clockFailure = createPr9aContext();
+  try {
+    const calls = [];
+    const repository = freshRepositoryWith(clockFailure, () => {
+      const restoreUuid = replaceFunction(crypto, 'randomUUID', options => {
+        calls.push(options);
+        return fixedUuid;
+      });
+      const restoreClock = replaceFunction(Date, 'now', () => { throw new Error('p1-03 clock failure'); });
+      return () => {
+        restoreClock();
+        restoreUuid();
+      };
+    });
+    assert.throws(
+      () => repository.produceEligibleEvent(eligibilityCommand(clockFailure)),
+      error => error.code === 'CANONICAL_REPOSITORY_CLOCK_FAILED',
+    );
+    assert.deepEqual(calls, []);
+  } finally {
+    clockFailure.db.close();
+  }
+
+  const incomplete = createPr9aContext();
+  try {
+    incomplete.eligibilityService.produceEligibleEvent(eligibilityCommand(incomplete));
+    mutateCandidateForConflict(incomplete);
+    incomplete.db.exec(`
+      CREATE TRIGGER pr9_p103_pending_transition
+      BEFORE UPDATE ON canonical_receivable_posting_conflict_transitions
+      BEGIN SELECT RAISE(ABORT, 'p1-03 pending transition'); END;
+    `);
+    assert.throws(
+      () => incomplete.eligibilityService.produceEligibleEvent(eligibilityCommand(incomplete)),
+      error => error.code === ERROR_CODES.CONFLICT_TRANSITION_RECOVERY_REQUIRED,
+    );
+    incomplete.db.exec('DROP TRIGGER pr9_p103_pending_transition');
+    const calls = [];
+    const repository = freshRepositoryWith(incomplete, () => replaceFunction(crypto, 'randomUUID', options => {
+      calls.push(options);
+      return fixedUuid;
+    }));
+    assert.throws(
+      () => repository.produceEligibleEvent(eligibilityCommand(incomplete)),
+      error => error.code === ERROR_CODES.CONFLICT_TRANSITION_RECOVERY_REQUIRED,
+    );
+    assert.deepEqual(calls, []);
+  } finally {
+    incomplete.db.close();
   }
 });
 
@@ -2549,11 +3499,16 @@ test('self-consistent denial UUID collision and corrupted persisted pair are dis
   try {
     produceConflict(collision);
     const conflict = collision.db.prepare('SELECT * FROM canonical_receivable_posting_conflicts').get();
-    const repository = freshRepositoryWith(collision, () => replaceFunction(crypto, 'randomUUID', () => conflict.denialAttemptId));
+    const calls = [];
+    const repository = freshRepositoryWith(collision, () => replaceFunction(crypto, 'randomUUID', options => {
+      calls.push(options);
+      return conflict.denialAttemptId;
+    }));
     assert.throws(
       () => repository.produceEligibleEvent(eligibilityCommand(collision)),
       error => error.code === ERROR_CODES.DENIAL_ATTEMPT_ID_COLLISION,
     );
+    assert.deepEqual(calls, [{ disableEntropyCache: true }]);
     assert.equal(counts(collision.db).conflicts, 1);
   } finally {
     collision.db.close();

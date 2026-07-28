@@ -458,6 +458,7 @@ export function seedAuthorityFoundation(context, dryRunId) {
   const gates = JSON.parse(run.policyManifestJson).gates;
   const contractual = gates.find(gate => gate.key === 'contractual_due_date');
   const unknown = gates.find(gate => gate.key === 'unknown_due_date_treatment');
+  const amount = gates.find(gate => gate.key === 'canonical_amount_basis');
   const dueDatePolicySet = {
     contractualDueDate: {
       expectedSourceRef: candidate.dueDateProvenance,
@@ -555,8 +556,8 @@ export function seedAuthorityFoundation(context, dryRunId) {
     acceptedPr8EvidenceHash: evidence.acceptedPr8EvidenceHash,
     acceptedCompanyTimezoneSnapshot: run.companyTimezone,
     acceptedFreshnessWindowsHash: evidence.acceptedFreshnessWindowsHash,
-    amountBasisPolicyRef: 'canonical-amount-basis-fixture-v1',
-    amountBasisPolicyHash: hash('canonical-amount-basis-fixture'),
+    amountBasisPolicyRef: amount.decisionRef,
+    amountBasisPolicyHash: amount.decisionHash,
     dueDatePolicySetJson: canonicalJson(dueDatePolicySet),
     dueDatePolicySetHash: computeDueDatePolicySetHash(dueDatePolicySet),
     operationalControlRef: 'pr9-operational-control-fixture-v1',

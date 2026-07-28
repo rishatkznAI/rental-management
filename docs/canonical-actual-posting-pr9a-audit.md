@@ -161,6 +161,125 @@ remain the responsibility of a separate independent re-audit.
 | A-06 | Hostile expected values use a test-only restricted canonical serializer and direct Node SHA-256, plus independently written acceptance, cohort, boundary, row and edge envelopes. Production constructors remain only in older parity tests. | A fixed external SHA-256 golden anchors the test oracle; each forgery changes logical data and recomputes outer sealing. | Golden and mutation matrices pass. | Independent tests share Node's cryptographic primitive with production, but not production projection code. |
 | A-07 | This document removes blanket closure claims, records evidence per finding and separates implementation, architecture, merge and production states. | Document and changed-file scans verify the authorization literals and absence of deployment/PR9b activation. | Implementation evidence is recorded; finding closure is not self-authorized. | Final acceptance still requires independent review of the pushed PR head. |
 
+### Draft PR 233 P1 remediation contract
+
+The three findings below were reproduced against audited head
+`9635a39327cd3ca18cf2b1926a35af047afb3121` before production code changed. The
+focused red run was:
+
+```text
+node --test --test-name-pattern='P1-0[12] red proof|one entropy call' \
+  tests/canonical-actual-eligibility-event.test.js
+0 passed, 3 failed
+```
+
+The failures were the expected pre-remediation observations: no reopen denial, no
+selected-run policy denial, and one UUID total rather than two after event plus exact
+replay. General green suites never supersede those reproduced contract violations.
+
+| Contract | Authoritative source | Untrusted derived fields | Success | Required denial / operational failure | DML and accounting | Check points |
+| --- | --- | --- | --- | --- | --- | --- |
+| P1-01 billing-period current state | Complete same-company, same-branch, same-period PR6 `billing_source_period_versions` graph ordered by semantic `version` | Old PR8 `closedPeriodVersionId`, physical row order, operation/audit fingerprints and an unchanged old close row | Exactly one contiguous latest period row, latest event `closed`, and candidate bound to that exact latest close | Zero current: `SOURCE_LINEAGE_NO_CURRENT_REVISION`; multiple conducted current revisions retain `SOURCE_LINEAGE_MULTIPLE_CURRENT_REVISIONS`; PR8 evidence mismatch retains its existing higher precedence | Denial: events 0, conflicts +1, transitions +1; transition `COMPLETE`, attempt/rate/circuit each applied once; no canonical business DML | Before replay/event lookup, before insert, and same-transaction post-insert reread |
+| P1-02 selected-run named policies | Selected persisted PR8 run's canonical `policyManifestJson`, its proven manifest hash/run/candidate graph, exact named gates, write authorization and activation | Aggregate manifest-hash labels, self-hashed due set, authorization-only amount labels, identities from another accepted run | Selected contractual and unknown-due identities exactly match authorization/activation; selected amount ref/hash is authorized and v1 event uses `slice_gross_minor` | Due gate mismatch: `DUE_DATE_POLICY_DRIFT`; amount mismatch: existing `CANONICAL_WRITE_AUTHORIZATION_INTEGRITY_FAILED` because v1 has no registered amount conflict projection | Due denial: events 0, conflicts 1, transitions 1 with complete 1/1/1 accounting. Amount operational failure: events/conflicts/transitions all 0 | Before replay/event lookup, before insert, and same-transaction post-insert reread |
+| P1-03 invocation entropy | Repository-owned clock and `node:crypto.randomUUID` | Replay result and every deterministic repository identity other than denial-attempt UUID | Every invocation past incomplete-transition and clock validation consumes exactly one UUID with entropy cache disabled | Invalid/throwing UUID keeps existing generation error; proven collision keeps existing collision error; incomplete transition and clock failure consume zero UUID | UUID never creates DML by itself; success/replay/denial/collision paths preserve their existing DML contracts | Immediately after guard and one clock read, before context reconstruction and every replay/event lookup |
+
+### P1-01 — authoritative billing-period current state
+
+Independent reproduction appended a normal PR6 `billing_period` successor changing
+exactly `eventType` from the accepted `closed` state to `reopened`, with
+`previousVersionId` and `reopensClosedVersionId` both bound to close v1. The service
+fingerprint, `billing_source_operations.resultFingerprint`, and
+`billing_source_audit_events.afterFingerprint` were all recomputed and equal. Before
+remediation the actual result was one event, zero conflicts, zero transitions and no
+error. The design result is a required `SOURCE_LINEAGE_NO_CURRENT_REVISION` denial
+before event lookup.
+
+Root cause was that locked reconstruction proved the old PR8 input and conducted UPD
+rows but did not reconstruct the current period successor graph; physical immutability
+of close v1 was incorrectly sufficient. `hasUniqueCurrentClosedPeriod` now reads the
+complete scoped version graph, proves unique contiguous versions and predecessor/event
+semantics, and admits only the exact latest close selected by the current slice.
+`analyzeLockedSourceGraph` applies that predicate before it creates any conducted
+revision candidate. The normal pre-insert reconstruction and mandatory post-insert
+reread both use this path inside `BEGIN IMMEDIATE`.
+
+Hostile cases cover closed→reopened, reopened→closed again with the old PR8 close,
+two reopen descendants, wrong predecessor, foreign period scope, operation/audit-only
+rows, version-vs-ID ordering, stale old PR8 membership, independently resealed
+authorization/activation around stale evidence, competing reopened roots, PR8/source
+precedence, replay after reopen, and reopen injected after event insert. Every
+same-scope stale/malformed case produces zero current revisions and the registered
+denial with events 0, conflicts 1, transitions 1 and complete 1/1/1 accounting.
+Foreign-scope and operation/audit-only cases create exactly one event and no conflict
+or transition. The post-insert mutation produces
+`CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED` and rolls back both injected row and
+event, leaving all posting counts zero.
+
+Residual limitation: these tests use isolated PR6 rows. They prove the v1 event types
+`closed`/`reopened`; any future PR6 period lifecycle literal requires a separately
+authorized design/schema update rather than an implicit mapping here.
+
+### P1-02 — selected accepted-run named-policy binding
+
+Independent reproduction added a second valid accepted PR8 run and changed the exact
+`contractual_due_date` and `canonical_amount_basis` decision ref, version and hash.
+It independently recomputed the selected manifest/result, accepted dry-run,
+freshness/evidence hashes, manifest-hash set, cohort, authorization and activation
+record seals. Before remediation Algorithm A created one event with the selected v2
+manifest hash but v1 due/amount identities: events 1, conflicts 0, transitions 0 and
+no error. The minimum required design result was `DUE_DATE_POLICY_DRIFT`, and an
+amount-only mismatch also had to block.
+
+`selectedRunPolicyBinding` now parses the selected persisted manifest, requires exact
+manifest and named-gate membership/shape/scope, and reconstructs contractual due,
+unknown-due mapping and canonical amount identities from that run. PR8 proof binds
+the manifest hash, run and candidate; authorization/activation bind the selected
+manifest set and exact due set; authorization must bind the amount ref/hash. Because
+`ActualReceivableEligibleV1` has no amount-policy-version column, a non-v1 amount gate
+fails closed instead of silently losing its version. Due mismatch uses the registered
+`DUE_DATE_POLICY_DRIFT`; amount mismatch uses the existing design operational error
+`CANONICAL_WRITE_AUTHORIZATION_INTEGRITY_FAILED` and is never disguised as a denial.
+
+The hostile matrix separately covers ref/version/hash drift for due and amount,
+unknown-due literal drift, amount value drift, missing/duplicate/reordered/foreign
+entries, same aggregate label with different logical content, second-run manifest
+substitution, selected v1 plus activation v2, independently valid authorization and
+activation bound to different accepted runs, fully resealed multi-run acceptance,
+and a post-insert amount mutation. Due cases return events 0, conflicts 1,
+transitions 1, `COMPLETE` 1/1/1 accounting and `DUE_DATE_POLICY_DRIFT`. Amount-only
+cases return the exact operational code with events/conflicts/transitions all 0.
+Malformed or stale PR8 manifests retain `PR8_EVIDENCE_MISMATCH` with the normal one
+conflict/one transition accounting. Post-insert mutation rolls back with
+`CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED` and zero durable DML.
+
+Residual limitation: the approved v1 schema exposes amount policy ref/hash but no
+separate amount decision ID/version in authorization, activation, or event. The
+implementation therefore supports only amount decision version 1 and fails closed
+for later versions; widening that projection is outside this remediation contract.
+
+### P1-03 — exactly one UUID after early guards
+
+Independent reproduction observed one UUID on the first invocation and zero on
+byte-exact replay, for one total call. The required result is one
+`randomUUID({ disableEntropyCache: true })` per invocation after the incomplete
+transition guard and one clock read/validation.
+
+Algorithm A now generates and validates the sole denial-attempt UUID and performs the
+collision guard immediately after clock validation, before `loadAcceptedContext`,
+business derivation and every replay/event lookup. Event and correlation identities
+remain deterministic and replay comparison does not contain the unused replay UUID.
+
+The matrix proves first success 1, exact replay an additional 1, required denial 1,
+collision 1, context reconstruction failure 1, corrupted replay validation 1 and
+amount operational failure 1. Every observed call has the exact entropy-cache option.
+Incomplete-transition and clock-failure invocations each consume 0. No tested path
+consumes 2 UUIDs, and all existing success, denial, collision and zero-DML accounting
+contracts remain unchanged.
+
+Residual limitation: UUID call-count proof is at the repository boundary with a
+fresh module and patched Node primitive; it does not evaluate platform entropy
+quality, which remains Node's responsibility.
+
 The red phase was preserved in test output before production remediation: the focused
 hostile parent reported 0 passing and 7 failing tests on the audited behavior. The
 same parent reports 7 passing and 0 failing tests after remediation. Green general
@@ -209,25 +328,31 @@ evidence, adapter approval, activation, migration, read, write, or deployment st
 
 The final local verification result for this remediation tree is:
 
-- focused independent hostile proof before remediation: 0 passed, 7 failed as
-  required by the red phase; after remediation: 7 passed, 0 failed in 4.467 s;
-- targeted PR9a suites, two separate final-tree runs: 140 passed, 0 failed in
-  77.693 s and 77.579 s;
-- `npm test`, two separate final-tree runs: 2,483 passed, 0 failed in 92.727 s
-  and 92.659 s;
-- explicit `node --test tests/*.test.js`: 2,483 passed, 0 failed in 92.718 s;
-- `npm run build`: passed in 7.163 s, 3,385 modules transformed;
-- SQLite `foreign_key_check`: no rows; `integrity_check`: `ok`;
-- schema inventory: 7 tables, 38 named indexes and 41 named triggers;
-- changed-file allow-list, prohibited PR9b filenames, Algorithm B absence,
-  canonical business DML absence, route/worker/scheduler/external-access absence,
-  authorization guard, placeholder, repository-secret and added-line-secret scans:
-  passed;
-- local runtime: Node `v22.22.0`, npm `10.9.4`; the package engine is Node
-  `20.x`. A Node `v20.20.2` test attempt was made, but the existing local
-  `better-sqlite3` binary was built for Node module ABI 127 rather than Node 20 ABI
-  115, so that local cross-runtime attempt is not equivalent evidence and is
-  recorded as an environment limitation, not as a passing run.
+- focused P1 red proof before production remediation: 0 passed, 3 failed with the
+  exact missing-denial/missing-UUID observations; focused final P1-01 matrix:
+  14 passed, 0 failed in 9.603 s; focused final P1-02 matrix: 19 passed, 0 failed
+  in 13.183 s; focused P1-03/entropy/collision matrix: 3 passed, 0 failed in
+  7.825 s;
+- complete Algorithm A/C eligibility file: 140 passed, 0 failed in 110.704 s;
+- targeted PR9a suites, two separate final-tree runs: 174 passed, 0 failed in
+  105.916 s and 105.254 s;
+- `npm test`, two separate final-tree runs: 2,517 passed, 0 failed in 120.672 s
+  and 120.398 s;
+- explicit `node --test tests/*.test.js`: 2,517 passed, 0 failed in 118.666 s;
+- `npm run build`: passed in 6.67 s, 3,385 modules transformed;
+- clean Node `v20.20.2` temporary copy with separately installed root/server
+  dependencies: targeted PR9a 174 passed, 0 failed in 121.982 s; full suite
+  2,517 passed, 0 failed in 136.005 s; build passed in 7.35 s with 3,385 modules;
+- repository `server/data/app.sqlite` opened read-only: `foreign_key_check` returned
+  no rows and `integrity_check` returned `ok`; a fresh isolated full schema returned
+  the same results;
+- schema inventory remains 7 tables, 38 named indexes and 41 named triggers;
+- `git diff --check`, the Gate B changed-file allow-list, prohibited PR9b filenames,
+  Algorithm B absence, canonical business DML absence, route/worker/scheduler/
+  external-access absence, authorization guard, placeholder, repository-secret and
+  added-line-secret scans passed;
+- local primary runtime: Node `v22.22.0`, npm `10.9.4`; required engine verification:
+  Node `v20.20.2` as recorded above.
 
 ## Known boundary
 

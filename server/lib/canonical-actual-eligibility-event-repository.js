@@ -9,6 +9,7 @@ const {
   BILLING_SOURCE_COVERAGE_SETS_TABLE,
   BILLING_SOURCE_COVERAGE_SLICES_TABLE,
   BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
+  BILLING_SOURCE_PERIOD_VERSIONS_TABLE,
   BILLING_SOURCE_SNAPSHOTS_TABLE,
   BILLING_SOURCE_UPD_LINE_VERSIONS_TABLE,
   BILLING_SOURCE_UPD_VERSIONS_TABLE,
@@ -71,6 +72,7 @@ const {
   computeEconomicSourceRevisionKey,
   computeEligibleEventHash,
   computeSourceLineageHash,
+  computeUnknownDueDateMappingHash,
   createFrozenAuthorityChainSnapshot,
   createPendingConflictTransition,
   deriveRepositoryIdentity,
@@ -598,6 +600,40 @@ function sourceCandidateFingerprint(candidate) {
   });
 }
 
+function hasUniqueCurrentClosedPeriod(db, candidate) {
+  const rows = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_PERIOD_VERSIONS_TABLE}
+    WHERE companyId = ? AND branchId = ? AND periodId = ?
+    ORDER BY version ASC, id ASC
+  `).all(candidate.companyId, candidate.branchId, candidate.periodId);
+  if (rows.length === 0) return false;
+  const ids = new Set();
+  const versions = new Set();
+  let previous = null;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const version = Number(row.version);
+    if (
+      !Number.isSafeInteger(version)
+      || version !== index + 1
+      || ids.has(row.id)
+      || versions.has(version)
+      || row.previousVersionId !== (previous?.id ?? null)
+    ) return false;
+    ids.add(row.id);
+    versions.add(version);
+    if (row.eventType === 'closed') {
+      if (row.reopensClosedVersionId !== null) return false;
+    } else if (
+      row.eventType !== 'reopened'
+      || previous?.eventType !== 'closed'
+      || row.reopensClosedVersionId !== previous.id
+    ) return false;
+    previous = row;
+  }
+  return previous.eventType === 'closed' && previous.id === candidate.closedPeriodVersionId;
+}
+
 function currentRevisionKeysHash(keys) {
   return sha256Canonical({
     currentSourceRevisionKeys: [...keys].sort(compareUtf16Ascending),
@@ -986,6 +1022,7 @@ function analyzeLockedSourceGraph(db, acceptedCandidate) {
   const candidateForSlice = currentSlice ? {
     ...acceptedCandidate,
     clientId: currentSlice.clientId,
+    closedPeriodVersionId: currentSlice.closedPeriodVersionId,
     contractualDueDate: currentSlice.contractualDueDate,
     contractId: currentSlice.contractId,
     coverageSetId: currentSlice.coverageSetId,
@@ -996,11 +1033,13 @@ function analyzeLockedSourceGraph(db, acceptedCandidate) {
     sourceGrossMinor: Number(currentSlice.allocatedGrossMinor),
     sourceNetMinor: Number(currentSlice.allocatedNetMinor),
     sourceVatMinor: Number(currentSlice.allocatedVatMinor),
+    snapshotId: currentSlice.snapshotId,
     updId: currentSlice.updId,
     updLineId: currentSlice.updLineId,
     updLineVersionId: currentSlice.updLineVersionId,
   } : null;
-  const conductedRows = candidateForSlice ? db.prepare(`
+  const periodIsCurrent = candidateForSlice && hasUniqueCurrentClosedPeriod(db, candidateForSlice);
+  const conductedRows = periodIsCurrent ? db.prepare(`
     SELECT * FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE}
     WHERE companyId = ? AND branchId = ? AND updId = ?
       AND formedVersionId = ? AND state = 'conducted'
@@ -1123,6 +1162,103 @@ function parsePr8CanonicalJson(value, field, expectedType) {
     || (expectedType === 'object' && (!parsed || Array.isArray(parsed) || typeof parsed !== 'object'))
   ) throw repositoryError('PR8_EVIDENCE_MISMATCH', `Non-canonical PR8 JSON: ${field}`);
   return parsed;
+}
+
+function selectedRunPolicyBinding(run, command, candidate) {
+  const invalid = Object.freeze({
+    amountBasisValid: false,
+    dueDatePolicySet: null,
+    dueDatePoliciesValid: false,
+  });
+  if (!run?.policyManifestJson) return invalid;
+  try {
+    const manifest = parsePr8CanonicalJson(run.policyManifestJson, 'policyManifestJson', 'object');
+    if (
+      canonicalJson(Object.keys(manifest).sort(compareUtf16Ascending))
+        !== canonicalJson(['gates', 'manifestId', 'manifestVersion', 'schemaVersion'])
+      || typeof manifest.manifestId !== 'string'
+      || manifest.manifestId.length === 0
+      || !Number.isSafeInteger(manifest.manifestVersion)
+      || manifest.manifestVersion < 1
+      || manifest.schemaVersion !== 1
+      || !Array.isArray(manifest.gates)
+    ) return invalid;
+    const named = Object.fromEntries([
+      'canonical_amount_basis',
+      'contractual_due_date',
+      'unknown_due_date_treatment',
+    ].map(key => [key, manifest.gates.filter(gate => gate?.key === key)]));
+    if (Object.values(named).some(matches => matches.length !== 1)) return invalid;
+    const expectedGateKeys = canonicalJson([
+      'decisionHash', 'decisionRef', 'decisionValue', 'decisionVersion', 'expectedSourceRef',
+      'key', 'schemaVersion', 'scope', 'status',
+    ]);
+    const gateValid = gate => (
+      gate
+      && canonicalJson(Object.keys(gate).sort(compareUtf16Ascending)) === expectedGateKeys
+      && gate.status === 'approved_by_reference'
+      && typeof gate.decisionRef === 'string'
+      && gate.decisionRef.length > 0
+      && Number.isSafeInteger(gate.decisionVersion)
+      && gate.decisionVersion > 0
+      && typeof gate.decisionHash === 'string'
+      && /^[0-9a-f]{64}$/.test(gate.decisionHash)
+      && gate.schemaVersion === 1
+      && gate.scope
+      && !Array.isArray(gate.scope)
+      && canonicalJson(Object.keys(gate.scope).sort(compareUtf16Ascending))
+        === canonicalJson(['branchId', 'companyId', 'contractId'])
+      && gate.scope.companyId === command.companyId
+      && gate.scope.branchId === command.branchId
+      && (gate.scope.contractId === null || gate.scope.contractId === candidate.contractId)
+    );
+    const contractual = named.contractual_due_date[0];
+    const unknown = named.unknown_due_date_treatment[0];
+    const amount = named.canonical_amount_basis[0];
+    const dueDateGatesValid = (
+      gateValid(contractual)
+      && typeof contractual.expectedSourceRef === 'string'
+      && contractual.expectedSourceRef.length > 0
+      && contractual.decisionValue === null
+      && gateValid(unknown)
+      && unknown.expectedSourceRef === null
+    );
+    const dueDatePoliciesValid = (
+      dueDateGatesValid
+      && unknown.decisionValue === 'allow_unknown_without_aging'
+    );
+    const dueDatePolicySet = dueDateGatesValid ? Object.freeze({
+      contractualDueDate: Object.freeze({
+        expectedSourceRef: contractual.expectedSourceRef,
+        gateKind: contractual.key,
+        policyHash: contractual.decisionHash,
+        policyId: contractual.decisionRef,
+        policyVersion: contractual.decisionVersion,
+      }),
+      unknownDueDateTreatment: Object.freeze({
+        decisionLiteral: 'allow_unknown_without_aging',
+        gateKind: unknown.key,
+        mappingHash: computeUnknownDueDateMappingHash(),
+        mappingId: 'rentcore.unknown_due_date_posting_treatment.v1',
+        mappingVersion: 1,
+        policyHash: unknown.decisionHash,
+        policyId: unknown.decisionRef,
+        policyVersion: unknown.decisionVersion,
+      }),
+    }) : null;
+    return Object.freeze({
+      amountBasisGate: gateValid(amount) ? Object.freeze(amount) : null,
+      amountBasisValid: (
+        gateValid(amount)
+        && amount.decisionVersion === 1
+        && amount.decisionValue === 'slice_gross_minor'
+      ),
+      dueDatePolicySet,
+      dueDatePoliciesValid,
+    });
+  } catch {
+    return invalid;
+  }
 }
 
 function assertPr8RowShape(row, table) {
@@ -2312,8 +2448,6 @@ function loadAcceptedContext(
     || authorization.acceptedCompanyTimezoneSnapshot !== activation.companyTimezoneSnapshot
     || authorization.policyManifestHashesJson !== activation.policyManifestHashesJson
     || authorization.sourceSystemIdsJson !== activation.sourceSystemIdsJson
-    || authorization.dueDatePolicySetHash !== activation.dueDatePolicySetHash
-    || authorization.dueDatePolicySetJson !== activation.dueDatePolicySetJson
     || authorization.postingAdapterAuthorityRecordId !== activation.postingAdapterAuthorityRecordId
     || authorization.postingAdapterAuthorityVersion !== activation.postingAdapterAuthorityVersion
     || authorization.postingAdapterAuthorityRecordHash !== activation.postingAdapterAuthorityRecordHash
@@ -2345,16 +2479,25 @@ function loadAcceptedContext(
   };
   const timezoneObserved = { ...timezoneValues, timezoneState };
 
+  const policyBinding = selectedRunPolicyBinding(run, command, candidate);
   let dueDatePolicySet = null;
   let selectedDueDate = null;
   let dueDateState = 'missing';
   try {
     dueDatePolicySet = parseCanonicalJson(authorization.dueDatePolicySetJson, 'dueDatePolicySetJson');
+    const selectedRunDueDatePolicySet = policyBinding.dueDatePolicySet;
     selectedDueDate = candidate.dueDateProvenance === 'unknown'
-      ? dueDatePolicySet.unknownDueDateTreatment
-      : dueDatePolicySet.contractualDueDate;
+      ? selectedRunDueDatePolicySet?.unknownDueDateTreatment
+      : selectedRunDueDatePolicySet?.contractualDueDate;
+    if (!selectedDueDate) {
+      selectedDueDate = candidate.dueDateProvenance === 'unknown'
+        ? dueDatePolicySet.unknownDueDateTreatment
+        : dueDatePolicySet.contractualDueDate;
+    }
     dueDateState = (
-      computeDueDatePolicySetHash(dueDatePolicySet) === authorization.dueDatePolicySetHash
+      policyBinding.dueDatePoliciesValid
+      && canonicalJson(dueDatePolicySet) === canonicalJson(selectedRunDueDatePolicySet)
+      && computeDueDatePolicySetHash(selectedRunDueDatePolicySet) === authorization.dueDatePolicySetHash
       && activation.dueDatePolicySetHash === authorization.dueDatePolicySetHash
       && activation.dueDatePolicySetJson === authorization.dueDatePolicySetJson
       && (candidate.dueDateProvenance === 'unknown'
@@ -2365,7 +2508,9 @@ function loadAcceptedContext(
   }
   const dueDateSpecific = state => ({
     bindingState: state,
-    dueDatePolicySetHash: state === 'valid' ? authorization.dueDatePolicySetHash : null,
+    dueDatePolicySetHash: state === 'valid'
+      ? computeDueDatePolicySetHash(policyBinding.dueDatePolicySet || dueDatePolicySet)
+      : null,
     dueDateTreatment: state === 'valid'
       ? (candidate.dueDateProvenance === 'unknown' ? 'post_without_aging_v1' : 'proven_contractual_date_v1')
       : null,
@@ -2430,6 +2575,14 @@ function loadAcceptedContext(
     };
   }
 
+  const amountBasisGate = policyBinding.amountBasisGate;
+  const amountBasisValid = (
+    policyBinding.amountBasisValid
+    && authorization.amountBasisPolicyRef === amountBasisGate?.decisionRef
+    && authorization.amountBasisPolicyHash === amountBasisGate?.decisionHash
+    && Number(candidate.proposedOriginalAmountMinor) === Number(candidate.sourceGrossMinor)
+  );
+
   return Object.freeze({
     acceptedRun,
     acceptedCandidate,
@@ -2445,6 +2598,9 @@ function loadAcceptedContext(
     authorityDenial,
     authorityStates: Object.freeze(authorityStates),
     nonAuthorityDenial: nonAuthorityDenial ? Object.freeze(nonAuthorityDenial) : null,
+    operationalFailureCode: amountBasisValid
+      ? null
+      : 'CANONICAL_WRITE_AUTHORIZATION_INTEGRITY_FAILED',
     pr8Proof,
     runtimeContract,
     sourceGraph,
@@ -3851,28 +4007,6 @@ function createCanonicalActualEligibilityEventRepository(
         if (floor !== null && clock.milliseconds < floor) {
           throw repositoryError('CANONICAL_OPERATIONAL_CLOCK_REGRESSION');
         }
-        const context = loadAcceptedContext(
-          db,
-          authorityRepository,
-          command,
-          clock.milliseconds,
-          runtimeContract,
-        );
-        const replayCandidate = db.prepare(`
-          SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
-          WHERE dryRunId = ? AND candidateId = ?
-        `).get(command.dryRunId, command.candidateId);
-        if (!context.authorityDenial && !context.nonAuthorityDenial && replayCandidate) {
-          const persisted = validateEligibleEventRecord(normalizeEventRow(replayCandidate));
-          const replay = deriveEventCore(db, context, {
-            correlationId: persisted.correlationId,
-            occurredAt: persisted.createdAt,
-          });
-          if (exactRowsEqual(persisted, { id: persisted.id, ...replay.event })) {
-            db.exec('COMMIT');
-            return Object.freeze({ event: persisted, replayed: true });
-          }
-        }
         const denialAttemptId = generateDenialAttemptId();
         const existingAttempt = db.prepare(`
           SELECT * FROM ${CANONICAL_RECEIVABLE_POSTING_CONFLICTS_TABLE} WHERE denialAttemptId = ?
@@ -3885,6 +4019,33 @@ function createCanonicalActualEligibilityEventRepository(
           }
           throw repositoryError(ERROR_CODES.DENIAL_ATTEMPT_ID_COLLISION);
         }
+        const context = loadAcceptedContext(
+          db,
+          authorityRepository,
+          command,
+          clock.milliseconds,
+          runtimeContract,
+        );
+        const replayCandidate = db.prepare(`
+          SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
+          WHERE dryRunId = ? AND candidateId = ?
+        `).get(command.dryRunId, command.candidateId);
+        if (
+          !context.authorityDenial
+          && !context.nonAuthorityDenial
+          && !context.operationalFailureCode
+          && replayCandidate
+        ) {
+          const persisted = validateEligibleEventRecord(normalizeEventRow(replayCandidate));
+          const replay = deriveEventCore(db, context, {
+            correlationId: persisted.correlationId,
+            occurredAt: persisted.createdAt,
+          });
+          if (exactRowsEqual(persisted, { id: persisted.id, ...replay.event })) {
+            db.exec('COMMIT');
+            return Object.freeze({ event: persisted, replayed: true });
+          }
+        }
         if (context.authorityDenial) {
           denial = buildAuthorityConflictPackage({
             context,
@@ -3894,6 +4055,9 @@ function createCanonicalActualEligibilityEventRepository(
           });
           rollbackQuietly(db);
         } else {
+          if (!context.nonAuthorityDenial && context.operationalFailureCode) {
+            throw repositoryError(context.operationalFailureCode);
+          }
           const provisionalBasis = deriveAuthorityDenialBasis(db, context);
           const provisionalCorrelationId = deriveRepositoryId(
             'rentcore.canonical_actual_posting.eligibility_correlation_identity',
@@ -4019,7 +4183,11 @@ function createCanonicalActualEligibilityEventRepository(
                 clock.milliseconds,
                 runtimeContract,
               );
-              if (refreshedContext.authorityDenial || refreshedContext.nonAuthorityDenial) {
+              if (
+                refreshedContext.authorityDenial
+                || refreshedContext.nonAuthorityDenial
+                || refreshedContext.operationalFailureCode
+              ) {
                 throw repositoryError('CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED');
               }
               const reconstructed = deriveEventCore(db, refreshedContext, {

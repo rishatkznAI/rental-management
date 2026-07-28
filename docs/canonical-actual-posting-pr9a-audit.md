@@ -101,6 +101,7 @@ The disabled eligibility repository follows the fixed locked prefix:
 ```text
 BEGIN IMMEDIATE
 → exact scope and zero-incomplete-transition guard
+→ complete same-scope 16-table PR6 persisted-storage preflight
 → repository clock read exactly once
 → validate and render RFC3339 UTC milliseconds
 → node:crypto.randomUUID({ disableEntropyCache: true }) exactly once
@@ -372,6 +373,262 @@ same parent reports 7 passing and 0 failing tests after remediation. Green gener
 tests are corroborating evidence, not the sole closure oracle.
 
 ### Authorization state after remediation
+
+```text
+architecture = TRUE
+PR9a = TRUE
+PR9b = FALSE
+full PR9 = FALSE
+merge = FALSE
+production activation = FALSE
+production reads = FALSE
+production writes = FALSE
+```
+
+## Draft PR 233 economic-content and full-storage remediation
+
+This section supersedes any earlier statement that a PR6 aggregate hash, a sealed
+historical `normalizedInputHash`, relationship IDs, or the period-only storage
+preflight were sufficient. The two blockers were reproduced against draft-PR head
+`234038ed1376c330e43a3c2ca705faaa8db9e678` before production implementation
+changed. The base remains
+`da3bd21935abfbd42c95ef8be9eac1eecb56e95c`.
+
+The focused Node 22 RED run reported 4 passing and 28 failing tests. Its exact
+`rateAmountMinor` observation was:
+
+```text
+persisted authoritative value: 100000 → 100001
+persisted PR8 normalizedInputHash: unchanged
+snapshot effectiveTermsVersionId: unchanged
+close effectiveTermsVersionId: unchanged
+actual before remediation: error null, replayed false, events 1, conflicts 0,
+                           transitions 0, canonical business DML 0
+required: PR8_EVIDENCE_MISMATCH, events 0, conflicts 1, transitions 1,
+          COMPLETE attempt/rate/circuit 1/1/1
+```
+
+The same RED run proved that REAL storage in selected effective terms, conducted
+UPD, selected UPD line, coverage set, source operation and audit sequence/version
+columns either created an event or reached a later source denial. None returned the
+required fail-before-hash code.
+
+### P1-01 — current economic content binds selected PR8 evidence
+
+Root cause: Algorithm A reconstructed the persisted PR8 graph and used each stored
+`normalizedInputHash` as a historical label. It proved IDs, relationship edges,
+candidate lineage, aggregate input hashes and outer authorization/activation seals,
+but did not independently rebuild the selected effective-terms and rental-line
+canonical PR8 inputs from their current authoritative PR6 rows.
+
+The remediation implements a repository-owned reconstruction that does not call the
+PR8 input constructor. For the selected candidate it:
+
+1. resolves the current snapshot's `effectiveTermsVersionId`;
+2. resolves the exact selected PR8 terms input and rental-line input;
+3. rereads both authoritative rows by ID plus company/branch;
+4. builds a full canonical stored-row projection, independent source version,
+   external assertion hash, source state, deterministic order key, relationship
+   object and every PR8 relationship column;
+5. computes SHA-256 over
+   `{sourceKind,row:<all current stored columns>}`;
+6. compares every projected field and both normalized hashes with the persisted PR8
+   inputs;
+7. retains the existing exact run/candidate/input-lineage/source-adapter evidence
+   binding; and
+8. repeats the same reconstruction on the locked post-insert reread.
+
+This is deliberately selected-economic-input binding, not a replacement for the
+approved PR6 lifecycle graph. Appending a new immutable lifecycle row without
+changing the selected row remains classified by the existing lifecycle/correction
+state machine. Changing the economic content of the selected terms or rental-line
+row with the same ID is classified first as `PR8_EVIDENCE_MISMATCH`. That boundary
+preserves the previously closed period, correction, replay and Algorithm C
+classifications.
+
+#### PR8 economic content-binding matrix
+
+| Persisted field/group | Authoritative source | Normalized projection and hash binding | Independent mutation | Exact result |
+| --- | --- | --- | --- | --- |
+| terms `id`, `version`, `rentalLineId` | current `billing_source_effective_terms` row | full row in `{sourceKind,row}` plus exact source ID/version/relationship columns | unchanged ID with version/owner drift | `PR8_EVIDENCE_MISMATCH`; event 0; conflict/transition 1/1 |
+| `effectiveFromDate`, `effectiveToDateExclusive` | same terms row | exact half-open boundary strings included in the full-row hash | each boundary changed separately | same denial and `COMPLETE` 1/1/1 accounting |
+| `rateAmountMinor`, `rateUnitCode`, `rateQuantityScale` | same terms row | exact safe integers/literal included, no aggregate-hash substitution | `100000 → 100001` plus independent controls | stale PR8 cannot create or replay an event |
+| billing cycle code/version | terms row plus existing period semantic predicate | exact terms row hash; period equality remains independently checked | cycle code drift | PR8 mismatch before terms/lifecycle denial |
+| minimum term and discount fields | terms row | every stored field included | unchanged-ID `discountValue` drift | PR8 mismatch |
+| currency | terms row; existing snapshot/line/slice equality remains | exact stored literal included | `RUB → USD` under hostile persisted fixture | PR8 mismatch |
+| calculation basis/policy | terms row; snapshot policy reference remains checked | exact `calculationPolicyRef` and complete row hash | calculation-policy drift | PR8 mismatch |
+| VAT semantics | terms row; snapshot/UPD-line equality remains checked | exact `vatPolicyRef`, `policyDecisionRef`, resolution state and unresolved reasons | VAT reference drift | PR8 mismatch |
+| rounding semantics | terms row; snapshot/UPD-line equality remains checked | exact `roundingPolicyRef` and full row hash | rounding reference drift | PR8 mismatch |
+| source system/ref/version/hash | terms row | independent source-version selection and external-assertion hash plus full row hash | system/version/hash changed together | PR8 mismatch |
+| predecessor/successor identity | terms row and existing complete terms chain | `supersedesTermsVersionId` is in relationship/full-row projection; current-chain predicate remains | predecessor identity drift; stale successor append | content drift is PR8 mismatch; immutable successor append retains lifecycle denial |
+| contract-related reference | current `billing_source_rental_lines` owner row | full rental-line projection includes `contractId`, rental/client, source identity/event and provenance | `contractId` drift with all selected IDs unchanged | PR8 mismatch |
+| snapshot and close identity | current snapshot and close rows | existing exact ID predicate plus selected terms input reconstruction | terms content changed while both rows keep the same terms ID | PR8 mismatch, proving ID equality is insufficient |
+| selected run/candidate/input lineage | persisted PR8 run, candidate and inputs | exact candidate, input-lineage and source-adapter evidence refs are retained | candidate corruption plus terms drift | one PR8 mismatch; no event |
+| outer authorization/activation | accepted pair/evidence records | outer hashes are verified but cannot replace current row reconstruction | authorization and activation independently resealed around stale terms input | one PR8 mismatch; no event |
+| existing event/replay | current terms/rental rows are checked before every event lookup | authoritative hash must still equal the event's selected PR8 input | event first, then content drift, then same invocation | replay is not reached; existing event remains; one new denial pair |
+| locked post-insert state | same authoritative projection in refreshed context | full terms/rental projection recomputed after insert | terms drift injected after event insert | `CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED`; event and mutation rolled back |
+| valid control | unchanged authoritative rows | independently calculated test hash equals persisted PR8 hash | no mutation | one event, no conflict/transition |
+| valid successor control | current successor row plus newly generated PR8 evidence | new PR8 input hash equals the new authoritative full-row hash | rate changes on v2 and PR8 is regenerated | one event, no conflict/transition |
+
+Expected hashes in these tests come from a test-only canonical serializer and direct
+`node:crypto` SHA-256. The production reconstruction helper is never used as the
+expected oracle. Assertion diagnostics contain the changed field, old/new values,
+authoritative normalized projection, persisted PR8 projection, expected/actual hash,
+expected/actual outcome, replay state and all event/conflict/transition/canonical-DML
+counts.
+
+### P1-02 — complete PR6 persisted-storage preflight
+
+Root cause: the old direct `typeof(version)` preflight covered only
+`billing_source_period_versions.version`. Every other PR6 row entered generic
+JavaScript deserialization and fingerprint construction first, where SQLite REAL
+`1.0` became JavaScript number `1` and lost its persisted storage identity.
+
+The remediation owns an explicit matrix for all 16 PR6 tables and every strict
+INTEGER column. At Algorithm A admission it performs direct `typeof(column)` reads
+for every row with the exact command company/branch. It accepts nullable NULL only
+where registered, requires SQLite `integer`, JavaScript safe-integer representation,
+the registered lower bound and `Number.MAX_SAFE_INTEGER` upper bound, and performs
+no `Number` coercion. REAL, TEXT, BLOB, forbidden NULL, unknown class, unsafe integer
+and range failures return
+`CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID`.
+
+The preflight runs after the incomplete-transition guard but before clock/UUID,
+PR8 reconstruction, any PR6 fingerprint/current-revision hash, denial
+classification and every replay/event lookup. It runs again after event insertion
+and before refreshed-context reconstruction. Initial failure and post-insert failure
+therefore create no conflict, transition, rate, circuit, event or canonical business
+DML; post-insert failure rolls the whole transaction back. All same-company/branch
+rows are scanned even when disconnected from the selected closure. A row in a
+different company/branch is intentionally out of scope and does not block.
+
+#### Complete 16-table PR6 matrix
+
+All tables use scope keys `companyId, branchId`; all stored `hidden=0` columns remain
+part of the existing row fingerprint in ascending `cid` order after this preflight.
+`positive` means `[1, 9007199254740991]`, `nonnegative` means
+`[0, 9007199254740991]`, `signed` means
+`[-9007199254740991, 9007199254740991]`.
+
+| Table | Strict INTEGER storage contract | Relationship edges / selected-current semantics | Same-scope scan and hash ordering |
+| --- | --- | --- | --- |
+| `billing_source_activation_boundaries` | `schemaVersion` positive | owns governed rental-line/period boundary | every scoped row; validate before fingerprint |
+| `billing_source_rental_lines` | `sourceEventVersion`, `schemaVersion` positive | boundary, rental/client/contract/equipment and selected terms owner | every scoped row; validate before fingerprint |
+| `billing_source_effective_terms` | `version`, `contractualBillingCycleVersion`, `sourceVersion`, `schemaVersion` positive; `rateAmountMinor`, `rateQuantityScale`, `minimumTermQuantity`, `discountValue` nonnegative | rental-line owner, predecessor/successor, selected terminal terms | every scoped and disconnected row; validate before PR8/hash |
+| `billing_source_periods` | `contractualBillingCycleVersion`, `schemaVersion` positive | rental line, activation boundary, period identity | every scoped row; validate before lifecycle/hash |
+| `billing_source_period_versions` | `version`, `actorMembershipVersion`, `capabilityCatalogVersion`, `sourceEventVersion`, `schemaVersion` positive | previous/reopen, terms, snapshot, operation; unique latest close | every root/middle/latest/disconnected scoped row |
+| `billing_source_snapshots` | `calculationAlgorithmVersion`, `schemaVersion` positive; all five monetary fields nonnegative | period close, terms and evidence/calculation content | every scoped row; validate before PR8/hash |
+| `billing_source_snapshot_evidence` | `sourceVersion`, `sourceEventVersion`, `schemaVersion` positive | snapshot evidence set and source identity | every scoped row; validate before PR8/hash |
+| `billing_source_upds` | `schemaVersion` positive | document root, client/contract/source identity | every scoped row; validate before fingerprint |
+| `billing_source_upd_versions` | `version`, actor/catalog/source-event/schema versions positive; nullable `conductedEvidenceVersion` positive when present | previous/formed/corrected/superseded versions and operation; exactly one current conducted revision | every scoped root/middle/latest/disconnected row |
+| `billing_source_upd_lines` | `schemaVersion` positive | UPD line identity root | every scoped row; validate before fingerprint |
+| `billing_source_upd_line_versions` | `version`, `sourceVersion`, `schemaVersion` positive; nullable `displayPosition` positive; quantity/scale/net/VAT/gross nonnegative | formed UPD, predecessor line version and selected coverage line | every scoped root/middle/latest/disconnected row |
+| `billing_source_coverage_sets` | `version`, `mappingAlgorithmVersion`, `schemaVersion` positive; net/VAT/gross deltas signed | UPD/formed version, operation, current validated mapping | every scoped and disconnected row |
+| `billing_source_coverage_supersessions` | actor/catalog/source-event/schema versions positive | original/replacement set correction/supersession edge | every scoped edge, including disconnected/fork evidence |
+| `billing_source_coverage_slices` | allocated net/VAT/gross nonnegative; `schemaVersion` positive | set, UPD/version/line, period/close/snapshot and rental/client/contract | every scoped and disconnected row |
+| `billing_source_operations` | actor/catalog/result/schema versions positive | operation result aggregate and membership/capability | every scoped operation, selected or disconnected |
+| `billing_source_audit_events` | aggregate/actor/catalog/schema versions positive | aggregate, operation, membership/capability and before/after seal | every scoped audit row, selected or disconnected |
+
+The independent storage tests mutate every strict INTEGER column in the matrix to
+REAL while keeping the other columns in canonical storage, then prove the exact
+operational code and zero DML. Seven semantic/sequence columns additionally run the
+full representation matrix: INTEGER, REAL integral/fractional, TEXT `"1"`, `"01"`
+and `"1e0"`, BLOB, NULL, zero, negative, maximum safe and above-maximum integer.
+Separate cases cover invalid root/middle/latest period versions, disconnected
+same-scope terms, foreign-scope terms, invalid storage plus PR8 corruption, an
+invalid billing-period lifecycle, an existing event, and mutation after insert.
+Normal SQLite INTEGER affinity controls show that a textual/REAL literal converted
+by SQLite to stored INTEGER is judged by its persisted class, not its input spelling.
+
+### Error and DML precedence
+
+| Combined condition | Exact result | Event / conflict / transition / accounting |
+| --- | --- | --- |
+| invalid same-scope storage plus PR8 mismatch | `CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID` | all zero |
+| selected terms content drift plus other PR8 candidate corruption | `PR8_EVIDENCE_MISMATCH` | `0 / 1 / 1 / 1-1-1` |
+| valid storage and unchanged selected economic content, invalid terms relationship/lifecycle | existing exact source-lineage code | `0 / 1 / 1 / 1-1-1` |
+| invalid storage plus existing event | storage code before replay lookup | existing event retained; new DML/accounting zero |
+| selected content drift plus existing event | PR8 mismatch before replay lookup | existing event retained; one denial pair |
+| invalid storage after insert | exact storage code and transaction rollback | all durable DML/accounting zero |
+| selected content drift after insert | `CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED` and rollback | all durable DML/accounting zero |
+| invalid disconnected same-scope row | exact storage code | all zero |
+| invalid foreign-scope row | does not block; selected valid control remains eligible | `1 / 0 / 0 / 0-0-0` |
+
+Storage integrity is an operational prerequisite and is not converted into ordinary
+source denial evidence. Within non-authority reconstruction, selected PR8 evidence
+and selected economic content bind before terms/lifecycle classification and before
+replay. The approved global authority kind-major winner remains unchanged when an
+authority denial is concurrently present; this remediation does not weaken the
+previously closed authority contract.
+
+### Adversarial self-audit
+
+The post-green hostile set covers more than the required ten independent cases:
+one economic field with unchanged identity; multiple source economic fields;
+unchanged PR8 hash after terms content drift; outer resealing around stale PR8;
+stale PR8 after a terms successor; valid selected rows plus an invalid disconnected
+same-scope row; integral and fractional REAL across all semantic tables; SQLite
+affinity conversion to INTEGER; storage drift after an existing event; storage drift
+after insert; content drift after insert; replay after authoritative content change;
+invalid storage plus a higher-level PR8 integrity issue; and a foreign-scope invalid
+row that must not block. Existing PR8 hostile-graph tests additionally cover wrong
+row/membership resealing, missing/duplicate children and stale run/input/result
+seals. Existing lifecycle, replacement, policy, authority, Algorithm C and
+frozen-suffix matrices remain green.
+
+### Final GREEN and engine evidence
+
+The final working-tree verification used Node `v22.22.0` and npm `10.9.4`. The
+engine check used an isolated `/tmp` workspace with independent root and server
+`npm ci` installations, copied git metadata only so the structural allow-list test
+could inspect the same diff, and executed with Node `v20.20.2`, ABI `115`, and npm
+`10.8.2`. It did not reuse either root or server Node 22 `node_modules`.
+
+| Command | Runtime | Final result | Duration |
+| --- | --- | --- | --- |
+| `node --test --test-name-pattern='P1-01 PR8 authoritative economic-content binding RED contract' tests/canonical-actual-eligibility-event.test.js` | Node 22.22.0 | 19/19 passed | 12,968.876 ms |
+| `node --test --test-name-pattern='P1-02 full PR6 persisted storage preflight RED contract' tests/canonical-actual-eligibility-event.test.js` | Node 22.22.0 | 31/31 passed | 19,946.964 ms |
+| `node --test tests/canonical-actual-eligibility-event.test.js` | Node 22.22.0 | 271/271 passed | 184,279.270 ms |
+| first `node --test tests/canonical-actual-*.test.js` | Node 22.22.0 | 305/305 passed | 183,882.630 ms |
+| second `node --test tests/canonical-actual-*.test.js` | Node 22.22.0 | 305/305 passed | 183,818.577 ms |
+| first `npm test` | Node 22.22.0 | 2,648/2,648 passed | 196,111.313 ms |
+| second `npm test` | Node 22.22.0 | 2,648/2,648 passed | 196,634.002 ms |
+| `node --test tests/*.test.js` | Node 22.22.0 | 2,648/2,648 passed | 197,370.621 ms |
+| `npm run build` | Node 22.22.0 | passed | 6.38 s |
+| clean `node --test tests/canonical-actual-*.test.js` | Node 20.20.2 / ABI 115 | 305/305 passed | 216,582.829 ms |
+| clean `node --test tests/*.test.js` | Node 20.20.2 / ABI 115 | 2,648/2,648 passed | 228,358.973 ms |
+| clean `npm run build` | Node 20.20.2 / ABI 115 | passed | 6.36 s |
+
+Before the production change, the combined focused RED contract reported 4 passing
+and 28 failing tests in 22,333 ms. After implementation, the final focused groups
+prove all 18 independent PR8 child cases and all 30 independent full-storage child
+cases, including explicit storage-plus-lifecycle precedence. The complete
+eligibility file and repository-wide suites above are additional regression
+evidence, not substitutes for those focused proofs.
+
+Read-only inspection of `server/data/app.sqlite` returned no rows from
+`PRAGMA foreign_key_check` and `ok` from `PRAGMA integrity_check`. Final
+`git diff --check`, staged-diff, allow-list, prohibited PR9b, placeholder, known
+secret-pattern, repository-wide writer/consumer and canonical business DML scans
+are release checks recorded against the remediation commit and pushed head.
+
+### Residual limitations
+
+- PR8 v1 candidates still do not expose `effectiveTermsVersionId` directly.
+  Algorithm A resolves it through the current persisted snapshot and exact PR8
+  terms input. Widening the PR8 schema is outside this remediation.
+- The storage matrix is intentionally tied to the approved PR6 v1 schema. Any new
+  INTEGER column or row class requires an explicit design and matrix update; it is
+  not silently inferred or coerced.
+- The isolated fixtures prove repository behavior, not production source quality,
+  adapter authority, production cardinality or production readiness.
+- This work adds no Algorithm B, canonical business writer, deployment, production
+  read, production write or activation path.
+- Clean root and server installs report pre-existing npm audit advisories (root:
+  one low, four high and one critical; server: three moderate). This narrow
+  remediation neither introduces nor resolves dependency advisories.
+
+Status remains **REMEDIATION COMPLETE — INDEPENDENT RE-AUDIT REQUIRED**.
 
 ```text
 architecture = TRUE

@@ -199,6 +199,157 @@ const ELIGIBILITY_COMMAND_KEYS = Object.freeze([
   'writeAuthorizationRecordId',
 ]);
 
+const PR6_SAFE_INTEGER_MAX = Number.MAX_SAFE_INTEGER;
+const pr6IntegerContract = (minimum, { nullable = false } = {}) => Object.freeze({
+  hashOrderingRequirement: 'validate_before_fingerprint',
+  maximum: PR6_SAFE_INTEGER_MAX,
+  minimum,
+  nullable,
+  safeIntegerRequired: true,
+  sqliteStorageClass: 'integer',
+});
+const pr6PositiveInteger = (options = {}) => pr6IntegerContract(1, options);
+const pr6NonNegativeInteger = (options = {}) => pr6IntegerContract(0, options);
+const pr6SignedInteger = (options = {}) => pr6IntegerContract(-PR6_SAFE_INTEGER_MAX, options);
+
+const PR6_PERSISTED_STORAGE_PREFLIGHT_MATRIX = Object.freeze({
+  billing_source_activation_boundaries: Object.freeze({
+    schemaVersion: pr6PositiveInteger(),
+  }),
+  billing_source_rental_lines: Object.freeze({
+    schemaVersion: pr6PositiveInteger(),
+    sourceEventVersion: pr6PositiveInteger(),
+  }),
+  billing_source_effective_terms: Object.freeze({
+    contractualBillingCycleVersion: pr6PositiveInteger(),
+    discountValue: pr6NonNegativeInteger(),
+    minimumTermQuantity: pr6NonNegativeInteger(),
+    rateAmountMinor: pr6NonNegativeInteger(),
+    rateQuantityScale: pr6NonNegativeInteger(),
+    schemaVersion: pr6PositiveInteger(),
+    sourceVersion: pr6PositiveInteger(),
+    version: pr6PositiveInteger(),
+  }),
+  billing_source_periods: Object.freeze({
+    contractualBillingCycleVersion: pr6PositiveInteger(),
+    schemaVersion: pr6PositiveInteger(),
+  }),
+  billing_source_period_versions: Object.freeze({
+    actorMembershipVersion: pr6PositiveInteger(),
+    capabilityCatalogVersion: pr6PositiveInteger(),
+    schemaVersion: pr6PositiveInteger(),
+    sourceEventVersion: pr6PositiveInteger(),
+    version: pr6PositiveInteger(),
+  }),
+  billing_source_snapshots: Object.freeze({
+    calculationAlgorithmVersion: pr6PositiveInteger(),
+    discountMinor: pr6NonNegativeInteger(),
+    grossMinor: pr6NonNegativeInteger(),
+    netMinor: pr6NonNegativeInteger(),
+    preDiscountNetMinor: pr6NonNegativeInteger(),
+    schemaVersion: pr6PositiveInteger(),
+    vatMinor: pr6NonNegativeInteger(),
+  }),
+  billing_source_snapshot_evidence: Object.freeze({
+    schemaVersion: pr6PositiveInteger(),
+    sourceEventVersion: pr6PositiveInteger(),
+    sourceVersion: pr6PositiveInteger(),
+  }),
+  billing_source_upds: Object.freeze({
+    schemaVersion: pr6PositiveInteger(),
+  }),
+  billing_source_upd_versions: Object.freeze({
+    actorMembershipVersion: pr6PositiveInteger(),
+    capabilityCatalogVersion: pr6PositiveInteger(),
+    conductedEvidenceVersion: pr6PositiveInteger({ nullable: true }),
+    schemaVersion: pr6PositiveInteger(),
+    sourceEventVersion: pr6PositiveInteger(),
+    version: pr6PositiveInteger(),
+  }),
+  billing_source_upd_lines: Object.freeze({
+    schemaVersion: pr6PositiveInteger(),
+  }),
+  billing_source_upd_line_versions: Object.freeze({
+    displayPosition: pr6PositiveInteger({ nullable: true }),
+    grossMinor: pr6NonNegativeInteger(),
+    netMinor: pr6NonNegativeInteger(),
+    quantityScale: pr6NonNegativeInteger(),
+    quantityValueInteger: pr6NonNegativeInteger(),
+    schemaVersion: pr6PositiveInteger(),
+    sourceVersion: pr6PositiveInteger(),
+    vatMinor: pr6NonNegativeInteger(),
+    version: pr6PositiveInteger(),
+  }),
+  billing_source_coverage_sets: Object.freeze({
+    grossDeltaMinor: pr6SignedInteger(),
+    mappingAlgorithmVersion: pr6PositiveInteger(),
+    netDeltaMinor: pr6SignedInteger(),
+    schemaVersion: pr6PositiveInteger(),
+    vatDeltaMinor: pr6SignedInteger(),
+    version: pr6PositiveInteger(),
+  }),
+  billing_source_coverage_supersessions: Object.freeze({
+    actorMembershipVersion: pr6PositiveInteger(),
+    capabilityCatalogVersion: pr6PositiveInteger(),
+    schemaVersion: pr6PositiveInteger(),
+    sourceEventVersion: pr6PositiveInteger(),
+  }),
+  billing_source_coverage_slices: Object.freeze({
+    allocatedGrossMinor: pr6NonNegativeInteger(),
+    allocatedNetMinor: pr6NonNegativeInteger(),
+    allocatedVatMinor: pr6NonNegativeInteger(),
+    schemaVersion: pr6PositiveInteger(),
+  }),
+  billing_source_operations: Object.freeze({
+    actorMembershipVersion: pr6PositiveInteger(),
+    capabilityCatalogVersion: pr6PositiveInteger(),
+    resultVersion: pr6PositiveInteger(),
+    schemaVersion: pr6PositiveInteger(),
+  }),
+  billing_source_audit_events: Object.freeze({
+    actorMembershipVersion: pr6PositiveInteger(),
+    aggregateVersion: pr6PositiveInteger(),
+    capabilityCatalogVersion: pr6PositiveInteger(),
+    schemaVersion: pr6PositiveInteger(),
+  }),
+});
+
+function assertPr6PersistedStoragePreflight(db, { companyId, branchId }) {
+  if (
+    canonicalJson(Object.keys(PR6_PERSISTED_STORAGE_PREFLIGHT_MATRIX))
+      !== canonicalJson(BILLING_SOURCE_AUTHORITY_TABLES)
+  ) throw repositoryError('CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID');
+  for (const tableName of BILLING_SOURCE_AUTHORITY_TABLES) {
+    const matrix = PR6_PERSISTED_STORAGE_PREFLIGHT_MATRIX[tableName];
+    const columns = Object.keys(matrix);
+    const selectColumns = columns.flatMap(column => [
+      `"${column}" AS "${column}"`,
+      `typeof("${column}") AS "__storage_${column}"`,
+    ]);
+    const rows = db.prepare(`
+      SELECT id, ${selectColumns.join(', ')}
+      FROM "${tableName}"
+      WHERE companyId = ? AND branchId = ?
+      ORDER BY id ASC
+    `).all(companyId, branchId);
+    for (const row of rows) {
+      for (const column of columns) {
+        const contract = matrix[column];
+        const value = row[column];
+        const storageClass = row[`__storage_${column}`];
+        if (value === null && contract.nullable && storageClass === 'null') continue;
+        if (
+          storageClass !== contract.sqliteStorageClass
+          || typeof value !== 'number'
+          || !Number.isSafeInteger(value)
+          || value < contract.minimum
+          || value > contract.maximum
+        ) throw repositoryError('CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID');
+      }
+    }
+  }
+}
+
 function repositoryError(code, message = code) {
   return new CanonicalActualPostingError(code, message);
 }
@@ -756,6 +907,10 @@ function hasValidEffectiveTermsBinding(
     !pr8TermsBinding
     || pr8TermsBinding.candidateId !== candidate.id
     || pr8TermsBinding.candidateInputLineageHash !== candidate.inputLineageHash
+    || pr8TermsBinding.authoritativeEffectiveTermsNormalizedInputHash
+      !== pr8TermsBinding.effectiveTermsInputNormalizedInputHash
+    || pr8TermsBinding.authoritativeRentalLineNormalizedInputHash
+      !== pr8TermsBinding.rentalLineInputNormalizedInputHash
     || pr8TermsBinding.effectiveTermsInputSourceId !== terms.id
     || pr8TermsBinding.effectiveTermsInputRentalLineId !== candidate.rentalLineId
     || pr8TermsBinding.effectiveTermsInputRelationshipRentalLineId !== candidate.rentalLineId
@@ -1526,6 +1681,123 @@ function assertPr8RowShape(row, table) {
   }
 }
 
+const PR8_EXTERNAL_ASSERTION_FIELDS = Object.freeze([
+  'sourceHash', 'contentHash', 'evidenceHash', 'sliceHash', 'mappingHash', 'identityHash',
+  'provenanceHash', 'calculationInputsHash', 'evidenceSetHash', 'lineSetHash',
+  'approvalFingerprint', 'commandFingerprint', 'resultFingerprint', 'afterFingerprint',
+]);
+const PR8_RELATIONSHIP_FIELDS = Object.freeze([
+  'activationBoundaryId', 'rentalLineId', 'periodId', 'closedPeriodVersionId',
+  'snapshotId', 'updId', 'formedUpdVersionId', 'previousVersionId',
+  'updLineId', 'updLineVersionId', 'coverageSetId', 'originalCoverageSetId',
+  'replacementCoverageSetId', 'operationId', 'rentalId', 'clientId', 'contractId',
+]);
+const PR8_INPUT_RELATIONSHIP_COLUMNS = Object.freeze([
+  'activationBoundaryId', 'rentalLineId', 'periodId', 'closedPeriodVersionId',
+  'snapshotId', 'updId', 'updVersionId', 'updLineId', 'updLineVersionId',
+  'coverageSetId', 'coverageSliceId', 'sourceOperationId',
+]);
+const PR8_RELATIONSHIP_JSON_BINDING_COLUMNS = Object.freeze([
+  'activationBoundaryId', 'rentalLineId', 'periodId', 'closedPeriodVersionId',
+  'snapshotId', 'updId', 'updLineId', 'updLineVersionId',
+  'coverageSetId', 'sourceOperationId',
+]);
+
+function authoritativePr8SourceVersion(row) {
+  for (const field of ['version', 'sourceVersion', 'sourceEventVersion', 'resultVersion', 'aggregateVersion']) {
+    if (Number.isSafeInteger(row[field]) && row[field] >= 1) return row[field];
+  }
+  return null;
+}
+
+function authoritativePr8ExternalAssertionHash(row) {
+  const assertions = {};
+  for (const field of PR8_EXTERNAL_ASSERTION_FIELDS) {
+    if (typeof row[field] === 'string' && /^[a-f0-9]{64}$/.test(row[field])) {
+      assertions[field] = row[field];
+    }
+  }
+  const fields = Object.keys(assertions);
+  if (fields.length === 0) return null;
+  if (fields.length === 1) return assertions[fields[0]];
+  return pr8Fingerprint(assertions);
+}
+
+function authoritativePr8SourceState(row) {
+  return String(
+    row.state
+    || row.status
+    || row.eventType
+    || row.sourceIntegrityStatus
+    || row.authorityStatus
+    || row.action
+    || row.operationType
+    || 'recorded'
+  );
+}
+
+function authoritativePr8Relationships(row) {
+  const relationships = {};
+  for (const field of PR8_RELATIONSHIP_FIELDS) {
+    if (row[field] !== undefined && row[field] !== null) relationships[field] = row[field];
+  }
+  return relationships;
+}
+
+function authoritativePr8RelationshipColumn(row, field) {
+  if (field === 'updVersionId') return row.id && row.updId && row.version ? row.id : null;
+  if (field === 'coverageSliceId') return row.coverageSetId && row.updLineVersionId ? row.id : null;
+  if (field === 'sourceOperationId') return row.operationId || null;
+  return row[field] || null;
+}
+
+function authoritativePr8InputProjection(sourceKind, sourceRow) {
+  const canonicalRow = Object.fromEntries(Object.entries(sourceRow).sort(([left], [right]) => (
+    compareUtf16Ascending(left, right)
+  )));
+  const relationships = authoritativePr8Relationships(sourceRow);
+  const projection = {
+    externalAssertionHash: authoritativePr8ExternalAssertionHash(sourceRow),
+    normalizedInputHash: pr8Fingerprint({ sourceKind, row: canonicalRow }),
+    relationshipJson: pr8StableJson(relationships),
+    relationships,
+    sourceId: String(sourceRow.id),
+    sourceKind,
+    sourceState: authoritativePr8SourceState(sourceRow),
+    sourceTableIdentity: sourceKind,
+    sourceVersion: authoritativePr8SourceVersion(sourceRow),
+    deterministicOrderKey: pr8Fingerprint({
+      sourceKind,
+      sourceId: String(sourceRow.id),
+    }),
+  };
+  for (const field of PR8_INPUT_RELATIONSHIP_COLUMNS) {
+    projection[field] = authoritativePr8RelationshipColumn(sourceRow, field);
+  }
+  return Object.freeze(projection);
+}
+
+function pr8InputMatchesAuthoritative(input, authoritative) {
+  if (!input || !authoritative) return false;
+  const row = input.row;
+  return (
+    row.sourceKind === authoritative.sourceKind
+    && row.sourceTableIdentity === authoritative.sourceTableIdentity
+    && row.sourceId === authoritative.sourceId
+    && (
+      row.sourceVersion === null
+        ? authoritative.sourceVersion === null
+        : row.sourceVersion === authoritative.sourceVersion
+    )
+    && (row.externalAssertionHash ?? null) === authoritative.externalAssertionHash
+    && row.normalizedInputHash === authoritative.normalizedInputHash
+    && row.sourceState === authoritative.sourceState
+    && row.deterministicOrderKey === authoritative.deterministicOrderKey
+    && row.relationshipJson === authoritative.relationshipJson
+    && PR8_INPUT_RELATIONSHIP_COLUMNS.every(column => row[column] === authoritative[column])
+  );
+}
+
 function pr8CandidateResultCanonical(row, blockerCodes) {
   return {
     candidateKey: row.candidateKey,
@@ -1754,11 +2026,6 @@ function verifyPr8EvidenceGraph(
     const policyManifest = parsePr8CanonicalJson(run.policyManifestJson, 'policyManifestJson', 'object');
     const sourceManifest = parsePr8CanonicalJson(run.sourceInputManifestJson, 'sourceInputManifestJson', 'array');
     requireProof(pr8Fingerprint(policyManifest) === run.policyManifestHash, 'policy_manifest_hash');
-    const inputRelationshipColumns = [
-      'activationBoundaryId', 'rentalLineId', 'periodId', 'closedPeriodVersionId',
-      'snapshotId', 'updId', 'updLineId', 'updLineVersionId',
-      'coverageSetId', 'sourceOperationId',
-    ];
     const persistedInputs = inputRows.map(row => {
       const relationships = parsePr8CanonicalJson(
         row.relationshipJson,
@@ -1778,7 +2045,7 @@ function verifyPr8EvidenceGraph(
         'input_deterministic_order_key',
       );
       requireProof(
-        inputRelationshipColumns.every(column => (
+        PR8_RELATIONSHIP_JSON_BINDING_COLUMNS.every(column => (
           row[column] === null
           || relationships[column === 'sourceOperationId' ? 'operationId' : column] === row[column]
         )),
@@ -1930,13 +2197,54 @@ function verifyPr8EvidenceGraph(
         const rentalLineInput = inputByIdentity.get(
           `billing_source_rental_lines:${row.rentalLineId}`,
         );
+        const authoritativeTermsRow = effectiveTermsInput ? db.prepare(`
+          SELECT * FROM ${BILLING_SOURCE_EFFECTIVE_TERMS_TABLE}
+          WHERE id = ? AND companyId = ? AND branchId = ?
+        `).get(
+          effectiveTermsInput.row.sourceId,
+          command.companyId,
+          command.branchId,
+        ) : null;
+        const authoritativeRentalLineRow = rentalLineInput ? db.prepare(`
+          SELECT * FROM ${BILLING_SOURCE_RENTAL_LINES_TABLE}
+          WHERE id = ? AND companyId = ? AND branchId = ?
+        `).get(
+          rentalLineInput.row.sourceId,
+          command.companyId,
+          command.branchId,
+        ) : null;
+        const authoritativeTermsInput = authoritativeTermsRow
+          ? authoritativePr8InputProjection(
+            BILLING_SOURCE_EFFECTIVE_TERMS_TABLE,
+            authoritativeTermsRow,
+          )
+          : null;
+        const authoritativeRentalLineInput = authoritativeRentalLineRow
+          ? authoritativePr8InputProjection(
+            BILLING_SOURCE_RENTAL_LINES_TABLE,
+            authoritativeRentalLineRow,
+          )
+          : null;
+        requireProof(
+          pr8InputMatchesAuthoritative(effectiveTermsInput, authoritativeTermsInput)
+          && pr8InputMatchesAuthoritative(rentalLineInput, authoritativeRentalLineInput),
+          'selected_economic_input_authoritative_projection',
+        );
         termsBinding = {
+          authoritativeEffectiveTermsNormalizedInputHash:
+            authoritativeTermsInput?.normalizedInputHash ?? null,
+          authoritativeRentalLineNormalizedInputHash:
+            authoritativeRentalLineInput?.normalizedInputHash ?? null,
           candidateId: row.id,
           candidateInputLineageHash: row.inputLineageHash,
           effectiveTermsInputRelationshipRentalLineId:
             effectiveTermsInput?.relationships.rentalLineId ?? null,
           effectiveTermsInputRentalLineId: effectiveTermsInput?.row.rentalLineId ?? null,
+          effectiveTermsInputNormalizedInputHash:
+            effectiveTermsInput?.row.normalizedInputHash ?? null,
           effectiveTermsInputSourceId: effectiveTermsInput?.row.sourceId ?? null,
+          rentalLineInputNormalizedInputHash:
+            rentalLineInput?.row.normalizedInputHash ?? null,
           rentalLineInputSourceId: rentalLineInput?.row.sourceId ?? null,
           sourceAdapterEvidenceRefs: null,
         };
@@ -4296,6 +4604,7 @@ function createCanonicalActualEligibilityEventRepository(
         blockedScope = { companyId: command.companyId, branchId: command.branchId };
         rollbackQuietly(db);
       } else {
+        assertPr6PersistedStoragePreflight(db, command);
         const clock = readRepositoryClock();
         const floor = monotonicFloor(db, command.companyId, command.branchId);
         if (floor !== null && clock.milliseconds < floor) {
@@ -4472,6 +4781,7 @@ function createCanonicalActualEligibilityEventRepository(
                 REQUIRED_COLUMNS[ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE],
               );
               const persisted = readEventById(eventId);
+              assertPr6PersistedStoragePreflight(db, command);
               const refreshedContext = loadAcceptedContext(
                 db,
                 authorityRepository,

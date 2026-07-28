@@ -23,6 +23,10 @@ const {
 const DENIAL_ID = '01234567-89ab-4cde-8fab-0123456789ab';
 const DENIED_AT = '2026-07-27T12:00:00.000Z';
 
+function createAuthorityContext() {
+  return createPr9aContext({ authorityNowMs: Date.parse(DENIED_AT) });
+}
+
 function nextAuthority(previous, version, overrides = {}) {
   const { recordHash: _recordHash, ...previousWithoutHash } = previous;
   return authorityRecord({
@@ -54,7 +58,7 @@ function mutateAppendOnlyTable(db, table, mutation) {
 }
 
 test('authority repository appends and replays an exact root-to-head chain', () => {
-  const context = createPr9aContext();
+  const context = createAuthorityContext();
   try {
     const repository = createCanonicalActualPostingAuthorityRepository(context.db);
     const root = context.authority.source;
@@ -81,7 +85,7 @@ test('authority repository appends and replays an exact root-to-head chain', () 
 });
 
 test('full record hash is recomputed and exact append conflicts fail closed', () => {
-  const context = createPr9aContext();
+  const context = createAuthorityContext();
   try {
     const repository = context.authority.repository;
     const record = context.authority.producer;
@@ -97,7 +101,7 @@ test('full record hash is recomputed and exact append conflicts fail closed', ()
 });
 
 test('frozen snapshots prove every member and reject missing, mutated, or reordered input', () => {
-  const context = createPr9aContext();
+  const context = createAuthorityContext();
   try {
     const row = context.authority.source;
     const built = createFrozenAuthorityChainSnapshot({
@@ -139,7 +143,7 @@ test('frozen snapshots prove every member and reject missing, mutated, or reorde
 });
 
 test('post-boundary descendants are excluded from historical frozen classification', () => {
-  const context = createPr9aContext();
+  const context = createAuthorityContext();
   try {
     const repository = context.authority.repository;
     const root = context.authority.source;
@@ -174,7 +178,7 @@ test('post-boundary descendants are excluded from historical frozen classificati
 
 test('frozen authority verification rejects malformed suffixes, gaps, and pre-boundary mutation', async t => {
   await t.test('malformed contiguous suffix row', () => {
-    const context = createPr9aContext();
+    const context = createAuthorityContext();
     try {
       const repository = context.authority.repository;
       const root = context.authority.source;
@@ -212,7 +216,7 @@ test('frozen authority verification rejects malformed suffixes, gaps, and pre-bo
   });
 
   await t.test('gap above frozen maximum', () => {
-    const context = createPr9aContext();
+    const context = createAuthorityContext();
     try {
       const repository = context.authority.repository;
       const root = context.authority.source;
@@ -256,7 +260,7 @@ test('frozen authority verification rejects malformed suffixes, gaps, and pre-bo
   });
 
   await t.test('mutation at or below frozen maximum', () => {
-    const context = createPr9aContext();
+    const context = createAuthorityContext();
     try {
       const repository = context.authority.repository;
       const root = context.authority.source;

@@ -2,6 +2,8 @@
 
 ## Status and fixed authorization boundary
 
+**REMEDIATION COMPLETE — INDEPENDENT RE-AUDIT REQUIRED**
+
 This document records the repository implementation authorized by Gate B at commit
 `da3bd21935abfbd42c95ef8be9eac1eecb56e95c`, based on architecture baseline
 `fefb5c482bcb63dedbb81ec9eb12da49d57a358a`. The implementation is PR9a only and is
@@ -196,8 +198,8 @@ before event lookup.
 
 Root cause was that locked reconstruction proved the old PR8 input and conducted UPD
 rows but did not reconstruct the current period successor graph; physical immutability
-of close v1 was incorrectly sufficient. `hasUniqueCurrentClosedPeriod` now reads the
-complete scoped version graph, proves unique contiguous versions and predecessor/event
+of close v1 was incorrectly sufficient. `hasValidUniqueCurrentClosedPeriod` now reads
+the complete period graph, proves unique contiguous versions and predecessor/event
 semantics, and admits only the exact latest close selected by the current slice.
 `analyzeLockedSourceGraph` applies that predicate before it creates any conducted
 revision candidate. The normal pre-insert reconstruction and mandatory post-insert
@@ -218,6 +220,88 @@ event, leaving all posting counts zero.
 Residual limitation: these tests use isolated PR6 rows. They prove the v1 event types
 `closed`/`reopened`; any future PR6 period lifecycle literal requires a separately
 authorized design/schema update rather than an implicit mapping here.
+
+### P1-01 follow-up — complete semantic billing-period lifecycle
+
+An independent follow-up audit against head
+`db7c94514a3067142ba214364f44a510f87b55fb` found that the prior P1-01 remediation
+still accepted `closed v1 → closed v2` when a fully accepted and independently
+resealed PR8 candidate selected v2. Both close rows had exact scope, contiguous
+semantic versions, predecessor links, independently created snapshots, writer-created
+operation/audit rows and matching result/after fingerprints. The actual result was
+one eligibility event and no denial. The required result was
+`SOURCE_LINEAGE_NO_CURRENT_REVISION`, events 0, conflicts 1, transitions 1 and a
+`COMPLETE` transition with attempt/rate/circuit `1/1/1`.
+
+The root cause was a partial state check: a `closed` row was required only to have
+`reopensClosedVersionId = null`; its predecessor was not required to be `reopened`.
+This allowed any structurally contiguous chain of closes to become current. The same
+predicate fed initial reconstruction and the post-insert locked reread.
+
+`hasValidUniqueCurrentClosedPeriod` now reconstructs the complete graph by globally
+unique `periodId`, not by an ownership-filtered subset. This deliberately makes a
+same-period company/branch drift visible instead of silently excluding it. It then:
+
+1. requires the period root to match candidate company and branch;
+2. orders every version by integer semantic `version`, independent of row ID, rowid,
+   creation time, or insertion order;
+3. requires exactly one v1 root, no duplicate/gapped versions, one successor at most,
+   exact immediate predecessor links, full traversal and no cycle or disconnected
+   component;
+4. requires the only state sequence to alternate from initial `closed` through
+   `reopened` and independently `closed` revisions;
+5. requires reopen target and predecessor to be the same immediately preceding close;
+6. requires every close to own a distinct snapshot whose scope, period,
+   `closedPeriodVersionId` and `effectiveTermsVersionId` bind back to that close;
+7. returns a current revision only after the entire graph is valid, the terminal state
+   is `closed`, and PR8 selects that exact close.
+
+The same validator is reached by the initial `loadAcceptedContext` before replay,
+event and conflict lookup; it is explicitly rechecked before event lookup and before
+insert against the same `BEGIN IMMEDIATE` snapshot; post-insert `loadAcceptedContext`
+performs the full locked reread. Initial invalid persistence remains a required
+source-lineage denial. Drift injected inside the transaction remains the registered
+`CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED` rollback with no partial event,
+conflict, transition or accounting DML.
+
+#### Lifecycle transition matrix
+
+| State/transition | Allowed | Current revision | Result when PR8 selects stated row |
+| --- | --- | --- | --- |
+| root `closed v1`, null predecessor/reopen target, independent snapshot | yes | v1 | event may be eligible |
+| root `reopened v1` | no | none | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
+| `closed → reopened`, both predecessor fields target the close | yes | none while reopened is terminal | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
+| `closed → closed` | no | none | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
+| `reopened → closed`, null reopen target and independent snapshot | yes | new close | event only when PR8 selects the new close |
+| `reopened → reopened` | no | none | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
+| valid chain but PR8 selects an older close | graph valid, selection stale | latest close only | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
+| duplicate/gap/non-integer version, competing root, fork, cycle or disconnected component | no | none | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
+| foreign predecessor, period/scope ownership drift or snapshot ownership/binding drift | no | none | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
+
+The independent test harness does not call the production lifecycle validator as an
+expected oracle. To create hostile rows with valid writer seals it temporarily exposes
+the state expected by the production writer, lets the writer create the successor,
+then restores the persisted predecessor. PR8 is regenerated over a single resealed
+candidate after independently recomputing coverage slice/set and operation/audit
+hashes. The pre-production RED run had four substantive failing cases: selected
+illegal v2, selected illegal v3, same-period ownership drift and fully resealed
+authorization/activation around illegal v2. The RED TAP therefore reported 16 passing
+children, four failing children and the expected failing parent (16/21 overall). The
+post-remediation contract run reports 21/21 passing tests.
+
+The mandatory matrix covers stale/current PR8 selection, three consecutive closes,
+initial reopen, double reopen, valid reopen/reclose controls, duplicate/gapped/same
+versions, foreign predecessor, ownership drift, roots/forks/multiple current rows,
+physical insertion order, exact replay, post-insert mutation, simultaneous PR8
+corruption and fully resealed authorization/activation. A separate six-mutation
+self-audit additionally covers snapshot reuse, a REAL semantic version, a root cycle,
+reopen-with-close-payload, snapshot ownership drift and replay after predecessor
+corruption. The REAL-version case also proves malformed lifecycle persistence remains
+the required Algorithm C denial instead of becoming an operational type error.
+
+Implementation status is **REMEDIATION COMPLETE — INDEPENDENT RE-AUDIT REQUIRED**.
+This is not a finding-closure, merge, deployment, production-read or production-write
+authorization.
 
 ### P1-02 — selected accepted-run named-policy binding
 
@@ -328,21 +412,20 @@ evidence, adapter approval, activation, migration, read, write, or deployment st
 
 The final local verification result for this remediation tree is:
 
-- focused P1 red proof before production remediation: 0 passed, 3 failed with the
-  exact missing-denial/missing-UUID observations; focused final P1-01 matrix:
-  14 passed, 0 failed in 9.603 s; focused final P1-02 matrix: 19 passed, 0 failed
-  in 13.183 s; focused P1-03/entropy/collision matrix: 3 passed, 0 failed in
-  7.825 s;
-- complete Algorithm A/C eligibility file: 140 passed, 0 failed in 110.704 s;
-- targeted PR9a suites, two separate final-tree runs: 174 passed, 0 failed in
-  105.916 s and 105.254 s;
-- `npm test`, two separate final-tree runs: 2,517 passed, 0 failed in 120.672 s
-  and 120.398 s;
-- explicit `node --test tests/*.test.js`: 2,517 passed, 0 failed in 118.666 s;
-- `npm run build`: passed in 6.67 s, 3,385 modules transformed;
+- focused lifecycle remediation contract plus six-mutation adversarial self-audit:
+  28 passed, 0 failed in 19.792 s; the mandatory contract alone reports 21/21 and
+  the self-audit alone reports 7/7;
+- complete Algorithm A/C eligibility file: 168 passed, 0 failed in 125.106 s;
+- targeted PR9a suites, two separate final-tree runs: 202 passed, 0 failed in
+  126.026 s and 123.322 s;
+- `npm test`, two separate final-tree runs: 2,545 passed, 0 failed in 138.060 s
+  and 143.533 s;
+- explicit `node --test tests/*.test.js`: 2,545 passed, 0 failed in 138.267 s;
+- `npm run build`: passed in 6.74 s, 3,385 modules transformed;
 - clean Node `v20.20.2` temporary copy with separately installed root/server
-  dependencies: targeted PR9a 174 passed, 0 failed in 121.982 s; full suite
-  2,517 passed, 0 failed in 136.005 s; build passed in 7.35 s with 3,385 modules;
+  dependencies and Node 20 inherited by child processes: targeted PR9a 202 passed,
+  0 failed in 149.901 s; full suite 2,545 passed, 0 failed in 167.169 s; build passed
+  in 7.52 s with 3,385 modules transformed;
 - repository `server/data/app.sqlite` opened read-only: `foreign_key_check` returned
   no rows and `integrity_check` returned `ok`; a fresh isolated full schema returned
   the same results;

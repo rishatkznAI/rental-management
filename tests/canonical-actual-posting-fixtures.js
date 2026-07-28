@@ -104,7 +104,7 @@ export function createPr9aSchemaDb({ dbPath = ':memory:' } = {}) {
   return db;
 }
 
-export function createPr9aContext({ dbPath = ':memory:' } = {}) {
+export function createPr9aContext({ dbPath = ':memory:', authorityNowMs = Date.now() } = {}) {
   const db = new Database(dbPath);
   db.pragma('foreign_keys = ON');
   db.exec(`
@@ -200,7 +200,7 @@ export function createPr9aContext({ dbPath = ':memory:' } = {}) {
       policyManifest: approvedTestPolicyManifest(),
     }),
   );
-  const authority = seedAuthorityFoundation(context, dryRun.dryRunId);
+  const authority = seedAuthorityFoundation(context, dryRun.dryRunId, { nowMs: authorityNowMs });
   const runtimeContractInput = runtimeContractForAuthority(authority);
   const runtimeContract = createCanonicalActualPostingRuntimeContract(runtimeContractInput);
   const eligibilityRepository = createCanonicalActualEligibilityEventRepository(db, runtimeContract);
@@ -441,12 +441,15 @@ function acceptedEvidence(db, run) {
   };
 }
 
-export function seedAuthorityFoundation(context, dryRunId) {
+export function seedAuthorityFoundation(
+  context,
+  dryRunId,
+  { nowMs = Date.parse('2026-07-27T12:00:00.000Z') } = {},
+) {
   const { db } = context;
   const repository = createCanonicalActualPostingAuthorityRepository(db);
   const run = db.prepare('SELECT * FROM actual_source_dry_runs WHERE id = ?').get(dryRunId);
   const evidence = acceptedEvidence(db, run);
-  const nowMs = Date.parse('2026-07-27T12:00:00.000Z');
   const source = authorityRecord({ kind: 'source_adapter', ownershipHash: evidence.sourceOwnershipManifestHash, nowMs });
   const producer = authorityRecord({ kind: 'eligibility_producer', ownershipHash: evidence.sourceOwnershipManifestHash, nowMs });
   const posting = authorityRecord({ kind: 'canonical_posting_adapter', ownershipHash: evidence.sourceOwnershipManifestHash, nowMs });

@@ -9,6 +9,7 @@ const {
   BILLING_SOURCE_COVERAGE_SETS_TABLE,
   BILLING_SOURCE_COVERAGE_SLICES_TABLE,
   BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
+  BILLING_SOURCE_PERIODS_TABLE,
   BILLING_SOURCE_PERIOD_VERSIONS_TABLE,
   BILLING_SOURCE_SNAPSHOTS_TABLE,
   BILLING_SOURCE_UPD_LINE_VERSIONS_TABLE,
@@ -338,12 +339,25 @@ function persistedRowFingerprint(db, tableName, row) {
     .filter(column => Number(column.hidden) === 0)
     .sort((left, right) => compareSafeIntegerAscending(Number(left.cid), Number(right.cid)))
     .map(column => {
-      const value = row[column.name];
+      let value = row[column.name];
       if (
         value !== null
         && typeof value !== 'string'
         && !(typeof value === 'number' && Number.isSafeInteger(value))
-      ) throw repositoryError('CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID');
+      ) {
+        if (
+          tableName !== BILLING_SOURCE_PERIOD_VERSIONS_TABLE
+          || column.name !== 'version'
+          || typeof value !== 'number'
+          || !Number.isFinite(value)
+        ) throw repositoryError('CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID');
+        value = Object.freeze({
+          domain: 'rentcore.billing_source_authority.invalid_semantic_version',
+          numericRepresentation: String(value),
+          storageType: 'real',
+          version: 1,
+        });
+      }
       return { columnName: column.name, value };
     });
   const rowVersion = persistedRowVersion(row);
@@ -600,38 +614,115 @@ function sourceCandidateFingerprint(candidate) {
   });
 }
 
-function hasUniqueCurrentClosedPeriod(db, candidate) {
+function hasValidUniqueCurrentClosedPeriod(db, candidate) {
+  const period = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_PERIODS_TABLE} WHERE id = ?
+  `).get(candidate.periodId);
+  if (
+    !period
+    || period.companyId !== candidate.companyId
+    || period.branchId !== candidate.branchId
+  ) return false;
   const rows = db.prepare(`
-    SELECT * FROM ${BILLING_SOURCE_PERIOD_VERSIONS_TABLE}
-    WHERE companyId = ? AND branchId = ? AND periodId = ?
+    SELECT *, typeof(version) AS semanticVersionStorageClass
+    FROM ${BILLING_SOURCE_PERIOD_VERSIONS_TABLE}
+    WHERE periodId = ?
     ORDER BY version ASC, id ASC
-  `).all(candidate.companyId, candidate.branchId, candidate.periodId);
+  `).all(candidate.periodId);
   if (rows.length === 0) return false;
-  const ids = new Set();
-  const versions = new Set();
+  const ids = new Map();
+  const versions = new Map();
+  const successors = new Map();
+  const roots = [];
+  for (const row of rows) {
+    const version = Number(row.version);
+    if (
+      row.companyId !== candidate.companyId
+      || row.branchId !== candidate.branchId
+      || row.periodId !== candidate.periodId
+      || row.semanticVersionStorageClass !== 'integer'
+      || !Number.isSafeInteger(version)
+      || version < 1
+      || ids.has(row.id)
+      || versions.has(version)
+    ) return false;
+    ids.set(row.id, row);
+    versions.set(version, row);
+    if (row.previousVersionId === null) {
+      roots.push(row);
+    } else {
+      const previousSuccessors = successors.get(row.previousVersionId) || [];
+      previousSuccessors.push(row);
+      successors.set(row.previousVersionId, previousSuccessors);
+    }
+  }
+  if (roots.length !== 1 || roots[0].version !== 1) return false;
+  for (const successorRows of successors.values()) {
+    if (successorRows.length !== 1) return false;
+  }
+
+  const snapshots = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_SNAPSHOTS_TABLE} WHERE periodId = ?
+  `).all(candidate.periodId);
+  const snapshotsById = new Map();
+  for (const snapshot of snapshots) {
+    if (snapshotsById.has(snapshot.id)) return false;
+    snapshotsById.set(snapshot.id, snapshot);
+  }
+  const closedSnapshotIds = new Set();
   let previous = null;
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     const version = Number(row.version);
     if (
-      !Number.isSafeInteger(version)
-      || version !== index + 1
-      || ids.has(row.id)
-      || versions.has(version)
+      version !== index + 1
       || row.previousVersionId !== (previous?.id ?? null)
     ) return false;
-    ids.add(row.id);
-    versions.add(version);
     if (row.eventType === 'closed') {
-      if (row.reopensClosedVersionId !== null) return false;
+      if (
+        row.reopensClosedVersionId !== null
+        || (index === 0 ? previous !== null : previous?.eventType !== 'reopened')
+        || row.effectiveTermsVersionId === null
+        || row.snapshotId === null
+        || closedSnapshotIds.has(row.snapshotId)
+      ) return false;
+      const snapshot = snapshotsById.get(row.snapshotId);
+      if (
+        !snapshot
+        || snapshot.companyId !== candidate.companyId
+        || snapshot.branchId !== candidate.branchId
+        || snapshot.periodId !== candidate.periodId
+        || snapshot.closedPeriodVersionId !== row.id
+        || snapshot.effectiveTermsVersionId !== row.effectiveTermsVersionId
+      ) return false;
+      closedSnapshotIds.add(row.snapshotId);
     } else if (
       row.eventType !== 'reopened'
+      || index === 0
       || previous?.eventType !== 'closed'
       || row.reopensClosedVersionId !== previous.id
+      || row.effectiveTermsVersionId !== null
+      || row.snapshotId !== null
     ) return false;
     previous = row;
   }
+  if (ids.size !== rows.length || versions.size !== rows.length) return false;
+  const visited = new Set();
+  let cursor = roots[0];
+  while (cursor) {
+    if (visited.has(cursor.id)) return false;
+    visited.add(cursor.id);
+    const nextRows = successors.get(cursor.id) || [];
+    cursor = nextRows[0] || null;
+  }
+  if (visited.size !== rows.length) return false;
   return previous.eventType === 'closed' && previous.id === candidate.closedPeriodVersionId;
+}
+
+function assertLifecycleSnapshotUnchanged(db, context) {
+  if (!hasValidUniqueCurrentClosedPeriod(db, context.candidate)) {
+    throw repositoryError('CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED');
+  }
 }
 
 function currentRevisionKeysHash(keys) {
@@ -1038,7 +1129,8 @@ function analyzeLockedSourceGraph(db, acceptedCandidate) {
     updLineId: currentSlice.updLineId,
     updLineVersionId: currentSlice.updLineVersionId,
   } : null;
-  const periodIsCurrent = candidateForSlice && hasUniqueCurrentClosedPeriod(db, candidateForSlice);
+  const periodIsCurrent = candidateForSlice
+    && hasValidUniqueCurrentClosedPeriod(db, candidateForSlice);
   const conductedRows = periodIsCurrent ? db.prepare(`
     SELECT * FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE}
     WHERE companyId = ? AND branchId = ? AND updId = ?
@@ -4090,6 +4182,7 @@ function createCanonicalActualEligibilityEventRepository(
             });
             rollbackQuietly(db);
           } else {
+          assertLifecycleSnapshotUnchanged(db, context);
           const locatedRows = [];
           const queries = [
             db.prepare(`
@@ -4168,6 +4261,7 @@ function createCanonicalActualEligibilityEventRepository(
               if (db.prepare(`SELECT 1 FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE} WHERE id = ?`).get(eventId)) {
                 throw repositoryError('CANONICAL_REPOSITORY_ID_COLLISION');
               }
+              assertLifecycleSnapshotUnchanged(db, context);
               const row = { id: eventId, ...derived.event };
               insertExact(
                 db,

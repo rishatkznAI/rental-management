@@ -275,7 +275,8 @@ conflict, transition or accounting DML.
 | `reopened → closed`, null reopen target and independent snapshot | yes | new close | event only when PR8 selects the new close |
 | `reopened → reopened` | no | none | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
 | valid chain but PR8 selects an older close | graph valid, selection stale | latest close only | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
-| duplicate/gap/non-integer version, competing root, fork, cycle or disconnected component | no | none | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
+| duplicate/gap integer version, competing root, fork, cycle or disconnected component | no | none | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
+| non-integer, non-positive or unsafe persisted semantic-version storage/value | operational integrity failure before lifecycle classification | none | `CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID` |
 | foreign predecessor, period/scope ownership drift or snapshot ownership/binding drift | no | none | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
 
 The independent test harness does not call the production lifecycle validator as an
@@ -296,8 +297,9 @@ physical insertion order, exact replay, post-insert mutation, simultaneous PR8
 corruption and fully resealed authorization/activation. A separate six-mutation
 self-audit additionally covers snapshot reuse, a REAL semantic version, a root cycle,
 reopen-with-close-payload, snapshot ownership drift and replay after predecessor
-corruption. The REAL-version case also proves malformed lifecycle persistence remains
-the required Algorithm C denial instead of becoming an operational type error.
+corruption. The later persisted-storage remediation changes the REAL-version result
+to the required operational
+`CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID` failure before lifecycle classification.
 
 Implementation status is **REMEDIATION COMPLETE — INDEPENDENT RE-AUDIT REQUIRED**.
 This is not a finding-closure, merge, deployment, production-read or production-write
@@ -410,7 +412,8 @@ Final command results and the implementation commit/PR identity are recorded in 
 implementation pull request. Local fixtures are artificial and grant no production
 evidence, adapter approval, activation, migration, read, write, or deployment status.
 
-The final local verification result for this remediation tree is:
+The prior `7cc2129` remediation evidence, superseded by the current effective-terms
+and persisted-storage change, was:
 
 - focused lifecycle remediation contract plus six-mutation adversarial self-audit:
   28 passed, 0 failed in 19.792 s; the mandatory contract alone reports 21/21 and
@@ -444,3 +447,210 @@ Canonical business posting, Algorithm B, live authority and adapters, production
 policy/source evidence, deployment and migration execution, production reads/writes,
 activation, settlement, shadow reads, and cutover remain deferred to their separate
 authorizations. No implementation result in this change changes those gates.
+
+## Draft PR 233 effective-terms and persisted-storage remediation
+
+The independent follow-up audit against
+`7cc2129959a2f3c3ddc67ebba562d5b659976554` established two additional blockers:
+Algorithm A did not independently prove the semantic ownership of the persisted
+`effectiveTermsVersionId`, and a non-integer persisted billing-period semantic
+version could be replaced by a synthetic object and hashed before it was rejected.
+The findings were reproduced by test-only SQLite inspection, a restricted
+test-only canonical serializer/SHA-256 implementation, writer-created PR8 evidence,
+and independently resealed acceptance/authorization/activation records before
+production code changed.
+
+The pre-implementation focused RED run was:
+
+```text
+node --test \
+  --test-name-pattern='P1 effectiveTermsVersionId semantic ownership RED contract|P1 persisted semantic-version storage fail-before-hash RED contract' \
+  tests/canonical-actual-eligibility-event.test.js
+45 tests: 9 passed, 36 failed
+```
+
+The terms failures created an eligibility event or selected the wrong denial despite
+foreign rental-line ownership, stale/successor terms, invalid coverage/cycle
+semantics, exact replay, and fully resealed PR8/authorization/activation evidence.
+The storage failures classified REAL, TEXT, NULL, zero, negative and unsafe persisted
+versions as `SOURCE_LINEAGE_NO_CURRENT_REVISION`; malformed storage combined with a
+PR8 mutation selected `PR8_EVIDENCE_MISMATCH`. BLOB controls already reached the
+persisted-row integrity error because the old synthetic replacement handled only
+finite JavaScript numbers. Green pre-existing suites do not supersede this RED proof.
+
+### Error precedence contract fixed before implementation
+
+| Condition | Precedence and exact result | DML/accounting |
+| --- | --- | --- |
+| selected persisted PR6 semantic-version storage/type/value is invalid | `CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID` before every PR6 row/source-lineage fingerprint, PR8/source classification, authority denial selection and replay lookup | eligibility/conflict/transition/accounting all zero |
+| governed authority chain has a registered denial | existing kind-major authority precedence remains higher than non-authority business/source denials | existing Algorithm C contract |
+| authorization or activation drift | existing order before PR8/source classification | existing Algorithm C contract |
+| selected PR8 evidence is invalid | `PR8_EVIDENCE_MISMATCH` before lifecycle/effective-terms/source-current denial | event zero; one conflict/transition and complete 1/1/1 accounting |
+| billing-period lifecycle or effective-terms semantic edge is invalid with valid PR8 evidence | `SOURCE_LINEAGE_NO_CURRENT_REVISION` | event zero; one conflict/transition and complete 1/1/1 accounting |
+| exact event replay candidate exists | considered only after all storage, authority, PR8, lifecycle and terms checks succeed | byte-exact replay is read-only |
+| storage or semantic relationship changes after event insert | the same locked reconstruction reruns; the transaction rolls back and no partial event/conflict/transition/accounting DML survives | exact persisted-type error for invalid storage; persistence failure for a changed semantic edge |
+
+This section records a remediation contract, not independent finding closure or merge,
+deployment, production-read, production-write, or production-activation authority.
+
+### Effective-terms ownership remediation
+
+Root cause: Algorithm A reconstructed the close and snapshot IDs and included the
+reachable terms row in the PR6 hash closure, but it never evaluated the relational
+meaning of that edge. The PR8 verifier also reconstructed candidate
+`inputLineageHash` by following the live snapshot terms ID without proving that the
+selected terms input owned the selected rental line. A foreign row could therefore
+remain completely sealed while being economically unrelated.
+
+The repository now records the selected PR8 terms/rental-line input identities and
+the exact `source_adapter_exact_match` evidence references while independently
+verifying the complete PR8 graph. `hasValidEffectiveTermsBinding` then loads the
+persisted PR6 rental line, terms, period, close, snapshot, coverage slice and UPD line
+version and evaluates their logical fields. It does not accept a caller boolean,
+label, aggregate hash or manifest membership as an oracle. The current terms chain
+must be one contiguous root/successor chain and the selected row must be its terminal
+revision. PR6 closure fingerprints remain evidence inputs, while semantic admission
+is decided by the independent row-identity/relationship predicate so malformed
+ownership retains the established source-denial classification.
+
+The same predicate is reached during initial locked source reconstruction, the
+explicit pre-insert lifecycle/terms assertion, and the full post-insert
+`loadAcceptedContext` reread. Initial representable semantic failure produces
+`SOURCE_LINEAGE_NO_CURRENT_REVISION`, events 0, conflicts 1, transitions 1 and a
+`COMPLETE` transition with attempt/rate/circuit `1/1/1`. Relationship drift after
+insert produces `CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED` and rolls back the
+event and injected mutation.
+
+#### Effective-terms binding matrix
+
+| Expected relationship | Authoritative rows | Validation | Independent test | Result |
+| --- | --- | --- | --- | --- |
+| terms identity exists | `billing_source_snapshots`, `billing_source_effective_terms` | snapshot ID is non-empty and exact terms row is loaded by ID | foreign/missing identity variants | invalid edge denied |
+| company/branch scope is exact | rental line, terms, period, close, snapshot, slice, UPD line version | every row equals selected company/branch | same-scope foreign owner plus existing cross-scope lifecycle coverage | only exact scope admitted |
+| terms owns selected rental line | terms and rental line | `terms.rentalLineId === candidate.rentalLineId` | foreign line with same scope/cycle/coverage; correct ID with mutated owner | `SOURCE_LINEAGE_NO_CURRENT_REVISION` |
+| economic source is the selected source | rental line, period, snapshot, slice | rental/client/contract and rental-line IDs bind the same candidate | foreign economic source; correct line with period drift | invalid edge denied |
+| period and coverage are exact | terms, period, snapshot, slice | period/snapshot/slice intervals are equal and contained in terms half-open interval | other-period interval; shortened coverage | invalid edge denied |
+| billing/contract semantics agree | terms, period, snapshot, UPD line version | cycle code/version, currency and calculation/VAT/rounding refs agree | billing-cycle mutation | invalid edge denied |
+| selected terms revision is current | complete same-line terms chain | integer contiguous versions, immediate predecessor links, selected terminal row | stale predecessor; successor while candidate selects old row | invalid edge denied |
+| snapshot selects exact terms | snapshot and terms | exact persisted ID equality | snapshot-only foreign ID | invalid edge denied |
+| close selects snapshot terms | close and snapshot | both IDs equal the loaded terms identity | close-only foreign ID; split close/snapshot IDs | invalid edge denied |
+| PR8 candidate input selects exact terms | selected PR8 input rows | candidate ID/input-lineage hash plus exact terms/rental-line source IDs and relationship fields | foreign input-lineage identity | invalid edge denied |
+| selected PR8 run/candidate confirms identity | run, candidate, named source-adapter check | exact run/candidate IDs and evidence refs contain both row identities | two-candidate fully resealed run selecting the other candidate's terms | invalid edge denied |
+| current PR6 revision contains the selected evidence rows | repository-owned PR6 closure plus independent semantic predicate | closure fingerprints the reachable persisted rows; rental-line/terms/period/close/snapshot identity is admitted only by the relationship predicate | independent persisted-row fingerprint and foreign closure case | a hashed wrong edge still cannot pass semantic admission |
+| ownership acceptance is the same envelope | accepted PR8 entry, authorization, authority chain, named check | accepted ownership hash equals authorization; authority binding retains existing mismatch denial; exact semantic refs are separately required | aggregate hash unchanged while semantic edge differs | aggregate equality cannot authorize wrong edge |
+| replay and locked reread repeat all checks | event lookup boundary and post-insert transaction snapshot | replay lookup follows validation; refreshed context reruns PR8 and source predicate | mutation after event; mutation after insert | no early replay; atomic rollback |
+
+The post-green five-case self-audit additionally covers correct terms ID with the
+wrong persisted owner, correct rental line with period semantic drift, byte-equal
+labels/source hash on a foreign identity, a stale successor after an existing event,
+and close/snapshot divergence after insert. It passes 6/6 including its parent.
+
+### Persisted semantic-version fail-before-hash remediation
+
+Root cause: `persistedRowFingerprint` special-cased a finite non-integer JavaScript
+number by constructing
+`rentcore.billing_source_authority.invalid_semantic_version` and hashing that
+replacement. Lifecycle classification could then persist a normal source-lineage
+conflict and suppress the required storage-integrity result.
+
+`assertSelectedPeriodVersionStorageIntegrity` now reads `typeof(version)` directly
+from SQLite for every selected-period version before PR8 hashing and before replay.
+Only actual SQLite `integer` storage represented as a positive JavaScript safe integer
+is admitted. `persistedRowFingerprint` repeats the raw storage check before reading
+columns or calling SHA-256 and has no synthetic/fallback path. The lifecycle
+validator repeats the same check; the post-insert PR8 reconstruction repeats the
+preflight. No `Number(value)` conversion occurs before storage validation.
+
+#### Persisted storage matrix
+
+| Raw input | Persisted SQLite class / JS value | Fingerprint construction | Expected and actual code | Event/conflict/transition/accounting |
+| --- | --- | --- | --- | --- |
+| INTEGER `2` | integer / number `2` | called after validation | valid control | `1/0/0/0` |
+| REAL `2.0` in no-affinity corruption fixture | real / number `2` | not called | `CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID` | all zero |
+| REAL `2.5` | real / number `2.5` | not called | same integrity code | all zero |
+| TEXT `"2"` | text / string `"2"` | not called | same integrity code | all zero |
+| TEXT `"02"` | text / string `"02"` | not called | same integrity code | all zero |
+| TEXT `"2e0"` | text / string `"2e0"` | not called | same integrity code | all zero |
+| BLOB `x'32'` | blob / `Buffer(32)` | not called | same integrity code | all zero |
+| NULL in permissive corruption fixture | null / null | not called | same integrity code | all zero |
+| INTEGER `0` | integer / number `0` | not called | same integrity code | all zero |
+| INTEGER `-1` | integer / number `-1` | not called | same integrity code | all zero |
+| INTEGER `9007199254740992` | integer / unsafe number | not called | same integrity code | all zero |
+| INTEGER `9007199254740991` | integer / maximum safe number | called after validation | semantic gap remains `SOURCE_LINEAGE_NO_CURRENT_REVISION` | event 0; conflict/transition 1/1; accounting 1/1/1 |
+| TEXT input `'02'` under normal INTEGER affinity | integer / number `2` | called after persisted validation | valid control | `1/0/0/0` |
+| REAL expression `2.0` under normal INTEGER affinity | integer / number `2` | called after persisted validation | valid control | `1/0/0/0` |
+| apparent numeric duplicate `CAST('3' AS INTEGER)` | integer / number `3` | called after validation | `SOURCE_LINEAGE_NO_CURRENT_REVISION` | event 0; conflict/transition 1/1; accounting 1/1/1 |
+| TEXT version-gap representation | text / string `"4"` | not called | persisted-row integrity code, before gap classification | all zero |
+| malformed root TEXT | text | not called | persisted-row integrity code | all zero |
+| malformed middle REAL | real | not called | persisted-row integrity code | all zero |
+| malformed latest BLOB | blob | not called | persisted-row integrity code | all zero |
+| malformed row after existing event | real | not called | persisted-row integrity code before replay | existing event retained; new DML zero |
+| malformed row after insert | real | not called on locked reread | persisted-row integrity code and rollback | all durable DML zero |
+| malformed row plus independent PR8 mismatch | real | not called | persisted-row integrity code wins | all zero |
+
+The test does not monkeypatch the production fingerprint helper. It combines direct
+SQLite `quote`/`typeof`, JavaScript value/type assertions, exact observable
+error/DML/accounting checks and a structural assertion that the preflight precedes
+the first verifier fingerprint and that the old synthetic domain is absent.
+
+### Final remediation verification evidence
+
+The working-tree verification below used Node `v22.22.0`/npm `10.9.4`. The clean
+engine verification used a separate temporary clone, applied the same working-tree
+diff, ran both root and server `npm ci`, and loaded `better-sqlite3` only from that
+clone. Its runtime was Node `v20.20.2`, ABI `115`, with SQLite `3.53.1`; no Node 22
+`node_modules` was reused.
+
+| Command | Runtime | Result | Duration |
+| --- | --- | --- | --- |
+| focused `P1 effectiveTermsVersionId semantic ownership RED contract` | clean Node 20.20.2 | 23 passed, 0 failed, 39 unrelated skipped | 18,803.716 ms |
+| focused `P1 persisted semantic-version storage fail-before-hash RED contract` | clean Node 20.20.2 | 24 passed, 0 failed, 39 unrelated skipped | 17,416.378 ms |
+| `node --test tests/canonical-actual-eligibility-event.test.js` | Node 22.22.0 | 221/221 passed | 167,239.009 ms |
+| first `node --test tests/canonical-actual-*.test.js` | Node 22.22.0 | 255/255 passed | 170,699.996 ms |
+| second `node --test tests/canonical-actual-*.test.js` | Node 22.22.0 | 255/255 passed | 165,064.097 ms |
+| first `npm test` | Node 22.22.0 | 2,598/2,598 passed | 198,855.585 ms |
+| second `npm test` | Node 22.22.0 | 2,598/2,598 passed | 192,634.411 ms |
+| `node --test tests/*.test.js` | Node 22.22.0 | 2,598/2,598 passed | 184,764.945 ms |
+| `npm run build` | Node 22.22.0 | passed | 7.40 s |
+| clean `node --test tests/canonical-actual-*.test.js` | Node 20.20.2 / ABI 115 | 255/255 passed | 188,746.461 ms |
+| clean `npm test` | Node 20.20.2 / ABI 115 | 2,598/2,598 passed | 197,327.768 ms |
+| clean `npm run build` | Node 20.20.2 / ABI 115 | passed | 6.81 s |
+| clean `node --test tests/canonical-actual-posting-structural.test.js` | Node 20.20.2 / ABI 115 | 7/7 passed | 267.279 ms |
+
+The five-case post-green effective-terms adversarial self-audit separately passed
+6/6 including its parent in 3,938.556 ms. Read-only checks against the local
+`server/data/app.sqlite` returned no rows from `PRAGMA foreign_key_check` and `ok`
+from `PRAGMA integrity_check`. `git diff --check`, the baseline allow-list,
+runtime-consumer, prohibited PR9b, canonical business DML, placeholder and known
+secret-pattern scans were also clean. Staged-diff, pushed-head equality and final
+worktree cleanliness are release actions recorded after the remediation commit,
+not pre-commit evidence embedded in that commit.
+
+### Remediation status and residual limitations
+
+Status: **REMEDIATION COMPLETE — INDEPENDENT RE-AUDIT REQUIRED**.
+
+The approved v1 PR8 candidate schema has no direct `effectiveTermsVersionId` column;
+Algorithm A therefore reconstructs the selected identity through the persisted
+snapshot plus exact PR8 inputs/check evidence. Widening the PR8 candidate contract is
+outside this PR9a remediation. `sourceOwnershipManifestHash` is an accepted opaque
+aggregate in the approved schema; the repository does not pretend to decode it.
+Instead, it requires its existing acceptance/authority equality and proves the
+rental-line/terms edge independently from persisted logical rows and exact PR8
+evidence. Fixtures remain isolated synthetic evidence and grant no production
+authority. Clean installs also report existing npm audit advisories in the root and
+server dependency graphs; this narrow remediation neither introduces nor resolves
+those dependency advisories.
+
+Authorization remains:
+
+```text
+architecture = TRUE
+PR9a = TRUE
+PR9b = FALSE
+full PR9 = FALSE
+merge = FALSE
+production activation = FALSE
+production reads = FALSE
+production writes = FALSE
+```

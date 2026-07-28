@@ -17,7 +17,11 @@ import {
   approvedTestPolicyManifest,
   dryRunCommand,
 } from './actual-source-eligibility-dry-run-fixtures.js';
-import { closePlan } from './billing-source-authority-fixtures.js';
+import {
+  closePlan,
+  conductPlan,
+  formPlan,
+} from './billing-source-authority-fixtures.js';
 
 const require = createRequire(import.meta.url);
 const repositoryPath = require.resolve('../server/lib/canonical-actual-eligibility-event-repository.js');
@@ -758,6 +762,260 @@ function installAfterEventInsertMutation(db, mutation) {
   return () => { delete db.prepare; };
 }
 
+function insertForeignTermsIdentity(context, suffix, overrides = {}) {
+  const candidate = context.authority.candidate;
+  const rentalLine = context.db.prepare(`
+    SELECT * FROM billing_source_rental_lines WHERE id = ?
+  `).get(candidate.rentalLineId);
+  const snapshot = context.db.prepare(`
+    SELECT * FROM billing_source_snapshots WHERE id = ?
+  `).get(candidate.snapshotId);
+  const close = context.db.prepare(`
+    SELECT * FROM billing_source_period_versions WHERE id = ?
+  `).get(candidate.closedPeriodVersionId);
+  const originalTerms = context.db.prepare(`
+    SELECT * FROM billing_source_effective_terms WHERE id = ?
+  `).get(snapshot.effectiveTermsVersionId);
+  const foreignRentalLine = {
+    ...rentalLine,
+    id: `foreign-terms-rental-line-${suffix}`,
+    rentalId: overrides.rentalId || `foreign-terms-rental-${suffix}`,
+    clientId: overrides.clientId || `foreign-terms-client-${suffix}`,
+    contractId: overrides.contractId === undefined
+      ? `foreign-terms-contract-${suffix}`
+      : overrides.contractId,
+    sourceRentalRef: `foreign-terms-rental-source-${suffix}`,
+    sourceLineRef: `foreign-terms-line-source-${suffix}`,
+    sourceEventId: `foreign-terms-line-event-${suffix}`,
+    provenanceHash: overrides.provenanceHash || originalTerms.sourceHash,
+  };
+  insertCopiedRow(context.db, 'billing_source_rental_lines', foreignRentalLine);
+  const foreignTerms = {
+    ...originalTerms,
+    id: `foreign-terms-version-${suffix}`,
+    rentalLineId: foreignRentalLine.id,
+    effectiveFromDate: overrides.effectiveFromDate || originalTerms.effectiveFromDate,
+    effectiveToDateExclusive:
+      overrides.effectiveToDateExclusive || originalTerms.effectiveToDateExclusive,
+    contractualBillingCycleCode:
+      overrides.contractualBillingCycleCode || originalTerms.contractualBillingCycleCode,
+    contractualBillingCycleVersion:
+      overrides.contractualBillingCycleVersion || originalTerms.contractualBillingCycleVersion,
+    sourceRef: overrides.sourceRef || originalTerms.sourceRef,
+    sourceHash: overrides.sourceHash || originalTerms.sourceHash,
+  };
+  insertCopiedRow(context.db, 'billing_source_effective_terms', foreignTerms);
+  if (overrides.bindSnapshot !== false) {
+    rewriteRowById(context.db, 'billing_source_snapshots', {
+      ...snapshot,
+      effectiveTermsVersionId: foreignTerms.id,
+    });
+  }
+  if (overrides.bindClose !== false) {
+    rewriteRowById(context.db, 'billing_source_period_versions', {
+      ...close,
+      effectiveTermsVersionId: foreignTerms.id,
+    });
+  }
+  return {
+    close,
+    foreignRentalLine,
+    foreignTerms,
+    originalTerms,
+    snapshot,
+  };
+}
+
+function appendTermsSuccessor(context, suffix, baseTermsId = null) {
+  const candidate = context.authority.candidate;
+  const snapshot = context.db.prepare(`
+    SELECT * FROM billing_source_snapshots WHERE id = ?
+  `).get(candidate.snapshotId);
+  const base = context.db.prepare(`
+    SELECT * FROM billing_source_effective_terms WHERE id = ?
+  `).get(baseTermsId || snapshot.effectiveTermsVersionId);
+  const successor = {
+    ...base,
+    id: `hostile-terms-successor-${suffix}`,
+    version: Number(base.version) + 1,
+    supersedesTermsVersionId: base.id,
+    sourceRef: `hostile-terms-successor-source-${suffix}`,
+    sourceVersion: Number(base.sourceVersion) + 1,
+    sourceHash: oracleHash({ hostileTermsSuccessor: suffix }),
+  };
+  insertCopiedRow(context.db, 'billing_source_effective_terms', successor);
+  return successor;
+}
+
+function seedSecondPr8CandidateSource(context, suffix) {
+  const existingSnapshotId = context.authority.candidate.snapshotId;
+  context.service.closeBillingPeriod(context.commandContext, closePlan({
+    clientId: `second-candidate-client-${suffix}`,
+    contractId: `second-candidate-contract-${suffix}`,
+    equipmentId: `second-candidate-equipment-${suffix}`,
+    evidence: snapshotEvidencePlan(context, existingSnapshotId),
+    idempotencyKey: `second-candidate-close-${suffix}`,
+    provenanceHash: oracleHash({ secondCandidateRentalLine: suffix }),
+    rentalId: `second-candidate-rental-${suffix}`,
+    sourceEventId: `second-candidate-close-event-${suffix}`,
+    sourceHash: oracleHash({ secondCandidateClose: suffix }),
+    sourceLineRef: `second-candidate-rental-line-ref-${suffix}`,
+    sourceRentalRef: `second-candidate-rental-ref-${suffix}`,
+    snapshotSourceHash: oracleHash({ secondCandidateSnapshot: suffix }),
+    termsSourceRef: `second-candidate-terms-ref-${suffix}`,
+    termsSourceHash: oracleHash({ secondCandidateTerms: suffix }),
+  }));
+  const rentalLine = context.db.prepare(`
+    SELECT * FROM billing_source_rental_lines WHERE rentalId = ?
+  `).get(`second-candidate-rental-${suffix}`);
+  const period = context.db.prepare(`
+    SELECT * FROM billing_source_periods WHERE rentalLineId = ?
+  `).get(rentalLine.id);
+  const close = context.db.prepare(`
+    SELECT * FROM billing_source_period_versions
+    WHERE periodId = ? AND eventType = 'closed'
+  `).get(period.id);
+  const snapshot = context.db.prepare(`
+    SELECT * FROM billing_source_snapshots WHERE id = ?
+  `).get(close.snapshotId);
+  const sourceLineRef = `second-candidate-upd-line-${suffix}`;
+  context.service.formUpd(context.commandContext, formPlan(context, {
+    clientId: rentalLine.clientId,
+    contractId: rentalLine.contractId,
+    documentNumber: `SECOND-${suffix}`,
+    idempotencyKey: `second-candidate-form-${suffix}`,
+    sourceDocumentRef: `second-candidate-upd-${suffix}`,
+    sourceLineRef,
+    slices: [{
+      sourceLineRef,
+      periodId: period.id,
+      closedPeriodVersionId: close.id,
+      snapshotId: snapshot.id,
+      sliceStartDate: period.periodStartDate,
+      sliceEndDateExclusive: period.periodEndDateExclusive,
+      allocatedNetMinor: Number(snapshot.netMinor),
+      allocatedVatMinor: Number(snapshot.vatMinor),
+      allocatedGrossMinor: Number(snapshot.grossMinor),
+      contractualDueDate: '2026-09-10',
+      dueDateProvenance: 'contractual_payment_due_date',
+      dueDateEvidenceRef: `second-candidate-due-date-${suffix}`,
+    }],
+  }));
+  const upd = context.db.prepare(`
+    SELECT * FROM billing_source_upds WHERE sourceDocumentRef = ?
+  `).get(`second-candidate-upd-${suffix}`);
+  const formed = context.db.prepare(`
+    SELECT * FROM billing_source_upd_versions
+    WHERE updId = ? AND state = 'formed'
+  `).get(upd.id);
+  context.service.conductUpd(context.commandContext, {
+    ...conductPlan(context, {
+      idempotencyKey: `second-candidate-conduct-${suffix}`,
+      sourceEventId: `second-candidate-conduct-event-${suffix}`,
+      sourceHash: oracleHash({ secondCandidateConduct: suffix }),
+    }),
+    expectedUpdVersion: Number(formed.version),
+    formedUpdVersionId: formed.id,
+    updId: upd.id,
+  });
+  return {
+    close,
+    period,
+    rentalLine,
+    snapshot,
+    terms: context.db.prepare(`
+      SELECT * FROM billing_source_effective_terms WHERE id = ?
+    `).get(snapshot.effectiveTermsVersionId),
+  };
+}
+
+function acceptForeignTermsIdentity(context, suffix, overrides = {}) {
+  const edge = insertForeignTermsIdentity(context, suffix, overrides);
+  const accepted = acceptAdditionalPolicyRun(
+    context,
+    approvedTestPolicyManifest(),
+    `foreign-terms-${suffix}`,
+  );
+  assert.equal(accepted.selectedCandidate.status, 'eligible_candidate');
+  const acceptedRuns = [oracleAcceptedRun(context, accepted.selectedRun.id)];
+  const acceptedDryRuns = acceptedRuns.map(row => ({
+    dryRunId: row.dryRunId,
+    resultHash: row.resultHash,
+  }));
+  resealAcceptance(context, { acceptedDryRuns, acceptedRuns });
+  resealAcceptedPolicyManifestSet(context, [accepted.selectedRun.policyManifestHash]);
+  const termsInput = context.db.prepare(`
+    SELECT * FROM actual_source_dry_run_inputs
+    WHERE runId = ? AND sourceKind = 'billing_source_effective_terms' AND sourceId = ?
+  `).get(accepted.selectedRun.id, edge.foreignTerms.id);
+  assert.ok(termsInput);
+  assert.equal(
+    JSON.parse(termsInput.relationshipJson).rentalLineId,
+    edge.foreignRentalLine.id,
+  );
+  return { ...accepted, ...edge, termsInput };
+}
+
+function replacePeriodVersionsWithPermissiveStorage(context) {
+  const table = 'billing_source_period_versions';
+  const rows = context.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all();
+  const columns = context.db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name);
+  context.db.pragma('foreign_keys = OFF');
+  context.db.exec(`DROP TABLE ${table}`);
+  context.db.exec(`
+    CREATE TABLE ${table} (
+      ${columns.map(column => `"${column}"${column === 'id' ? ' PRIMARY KEY' : ''}`).join(', ')}
+    )
+  `);
+  const placeholders = columns.map(column => (
+    column === 'version' ? 'CAST(? AS INTEGER)' : '?'
+  )).join(', ');
+  const insert = context.db.prepare(`
+    INSERT INTO ${table} (${columns.map(column => `"${column}"`).join(', ')})
+    VALUES (${placeholders})
+  `);
+  for (const row of rows) insert.run(...columns.map(column => row[column]));
+}
+
+function setRawPeriodSemanticVersion(context, rowId, sqlExpression, { permissive = true } = {}) {
+  if (permissive) replacePeriodVersionsWithPermissiveStorage(context);
+  const update = () => {
+    context.db.exec(`
+      UPDATE billing_source_period_versions
+      SET version = ${sqlExpression}
+      WHERE id = '${rowId.replaceAll("'", "''")}'
+    `);
+  };
+  if (permissive) {
+    update();
+  } else {
+    context.db.pragma('ignore_check_constraints = ON');
+    try {
+      mutateAppendOnlyTable(context.db, 'billing_source_period_versions', update);
+    } finally {
+      context.db.pragma('ignore_check_constraints = OFF');
+    }
+  }
+  const raw = context.db.prepare(`
+    SELECT quote(version) AS rawValue, typeof(version) AS storageClass, version
+    FROM billing_source_period_versions WHERE id = ?
+  `).get(rowId);
+  return {
+    jsType: typeof raw.version,
+    jsValue: raw.version,
+    rawValue: raw.rawValue,
+    storageClass: raw.storageClass,
+  };
+}
+
+function assertOperationalIntegrityFailure(context, command, expectedCode, before = counts(context.db)) {
+  assert.throws(
+    () => context.eligibilityService.produceEligibleEvent(command),
+    error => error.code === expectedCode,
+  );
+  assert.deepEqual(counts(context.db), before);
+}
+
 function acceptAdditionalPolicyRun(context, manifest, suffix, { closedPeriodVersionId = null } = {}) {
   const second = context.dryRunService.evaluateActualSourceDryRun(
     context.dryRunContext,
@@ -1414,7 +1672,11 @@ test('P1 billing-period lifecycle adversarial self-audit beyond the reported fin
       } finally {
         context.db.pragma('ignore_check_constraints = OFF');
       }
-      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', current.command);
+      assertOperationalIntegrityFailure(
+        context,
+        current.command,
+        'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+      );
     } finally {
       context.db.close();
     }
@@ -1507,6 +1769,672 @@ test('P1 billing-period lifecycle adversarial self-audit beyond the reported fin
         events: 1, conflicts: 1, transitions: 1, receivables: 0, operations: 0,
       });
     } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('P1 effectiveTermsVersionId semantic ownership RED contract', async t => {
+  const fullySealedForeignCases = [
+    ['terms from another rental line in the same company and branch', 'foreign-line'],
+    ['terms from another rental line with the same billing cycle', 'same-cycle'],
+    ['terms from another rental line with the same coverage interval', 'same-coverage'],
+    ['terms persisted under another economic source', 'foreign-economic-source'],
+    ['candidate input lineage selects the foreign persisted terms row', 'foreign-input-lineage'],
+    ['foreign terms row is part of the selected PR6 closure', 'foreign-pr6-closure'],
+    ['fully resealed PR8 acceptance retains the foreign terms identity', 'resealed-pr8'],
+    ['fully resealed authorization and activation retain the foreign terms identity', 'resealed-auth'],
+    ['same labels and hashes do not make a foreign persisted identity equivalent', 'same-labels'],
+    ['aggregate ownership hash cannot replace the rental-line/terms edge', 'aggregate-owner'],
+  ];
+  for (const [name, suffix] of fullySealedForeignCases) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        const accepted = acceptForeignTermsIdentity(context, suffix);
+        const acceptedRun = JSON.parse(
+          context.db.prepare(`
+            SELECT acceptedPr8EvidenceJson
+            FROM canonical_write_authorization_records WHERE recordId = ?
+          `).get(context.authority.authorization.recordId).acceptedPr8EvidenceJson,
+        ).find(row => row.dryRunId === accepted.selectedRun.id);
+        assert.ok(acceptedRun);
+        assert.equal(
+          acceptedRun.sourceOwnershipManifestHash,
+          context.authority.authorization.sourceOwnershipManifestHash,
+        );
+        assert.match(
+          oraclePersistedRowFingerprint(
+            context.db,
+            'billing_source_effective_terms',
+            accepted.foreignTerms,
+          ),
+          /^[0-9a-f]{64}$/,
+        );
+        assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', accepted.command);
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+
+  const postAcceptanceMutations = [
+    ['terms effective interval belongs to another billing period', (context, accepted) => {
+      rewriteRowById(context.db, 'billing_source_effective_terms', {
+        ...accepted.foreignTerms,
+        effectiveFromDate: '2026-10-01',
+        effectiveToDateExclusive: '2026-11-01',
+      });
+    }],
+    ['terms do not cover the selected coverage interval', (context, accepted) => {
+      rewriteRowById(context.db, 'billing_source_effective_terms', {
+        ...accepted.foreignTerms,
+        effectiveToDateExclusive: '2026-08-15',
+      });
+    }],
+    ['terms billing cycle semantics differ from the selected period', (context, accepted) => {
+      rewriteRowById(context.db, 'billing_source_effective_terms', {
+        ...accepted.foreignTerms,
+        contractualBillingCycleCode: 'hostile_non_month_cycle',
+      });
+    }],
+  ];
+  for (const [name, mutate] of postAcceptanceMutations) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        const accepted = acceptForeignTermsIdentity(
+          context,
+          name.replace(/\W+/g, '-').toLowerCase(),
+        );
+        mutate(context, accepted);
+        assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', accepted.command);
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+
+  await t.test('stale predecessor terms revision is not current', () => {
+    const context = createPr9aContext();
+    try {
+      appendTermsSuccessor(context, 'stale-predecessor');
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('successor revision cannot coexist with a candidate selecting its predecessor', () => {
+    const context = createPr9aContext();
+    try {
+      const accepted = acceptForeignTermsIdentity(context, 'successor-old-candidate');
+      appendTermsSuccessor(
+        context,
+        'successor-old-candidate',
+        accepted.foreignTerms.id,
+      );
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', accepted.command);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('terms from another PR8 candidate are rejected after complete run resealing', () => {
+    const context = createPr9aContext();
+    try {
+      const foreign = seedSecondPr8CandidateSource(context, 'foreign-candidate');
+      const snapshot = context.db.prepare(`
+        SELECT * FROM billing_source_snapshots WHERE id = ?
+      `).get(context.authority.candidate.snapshotId);
+      const close = context.db.prepare(`
+        SELECT * FROM billing_source_period_versions WHERE id = ?
+      `).get(context.authority.candidate.closedPeriodVersionId);
+      rewriteRowById(context.db, 'billing_source_snapshots', {
+        ...snapshot,
+        effectiveTermsVersionId: foreign.terms.id,
+      });
+      rewriteRowById(context.db, 'billing_source_period_versions', {
+        ...close,
+        effectiveTermsVersionId: foreign.terms.id,
+      });
+      const evaluated = context.dryRunService.evaluateActualSourceDryRun(
+        context.dryRunContext,
+        dryRunCommand({
+          asOfDate: '2026-09-15',
+          idempotencyKey: 'foreign-candidate-terms-run',
+          policyManifest: approvedTestPolicyManifest(),
+        }),
+      );
+      const run = context.db.prepare(`
+        SELECT * FROM actual_source_dry_runs WHERE id = ?
+      `).get(evaluated.dryRunId);
+      const candidates = context.db.prepare(`
+        SELECT * FROM actual_source_dry_run_candidates
+        WHERE runId = ? ORDER BY candidateKey, id
+      `).all(run.id);
+      assert.equal(candidates.length, 2);
+      const selected = candidates.find(row => (
+        row.rentalLineId === context.authority.candidate.rentalLineId
+      ));
+      const foreignCandidate = candidates.find(row => row.rentalLineId === foreign.rentalLine.id);
+      assert.ok(selected);
+      assert.ok(foreignCandidate);
+      const acceptedRuns = [oracleAcceptedRun(context, run.id)];
+      resealAcceptance(context, {
+        acceptedDryRuns: [{ dryRunId: run.id, resultHash: run.resultHash }],
+        acceptedRuns,
+      });
+      resealAcceptedPolicyManifestSet(context, [run.policyManifestHash]);
+      const command = eligibilityCommand(context, {
+        candidateId: selected.id,
+        dryRunId: run.id,
+      });
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', command);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('snapshot with a foreign terms ID is rejected', () => {
+    const context = createPr9aContext();
+    try {
+      const accepted = acceptForeignTermsIdentity(context, 'snapshot-only', {
+        bindClose: false,
+      });
+      assert.equal(
+        context.db.prepare(`
+          SELECT effectiveTermsVersionId FROM billing_source_snapshots WHERE id = ?
+        `).get(context.authority.candidate.snapshotId).effectiveTermsVersionId,
+        accepted.foreignTerms.id,
+      );
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', accepted.command);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('period close with a foreign terms ID is rejected', () => {
+    const context = createPr9aContext();
+    try {
+      insertForeignTermsIdentity(context, 'close-only', { bindSnapshot: false });
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('snapshot and period close cannot point at different terms identities', () => {
+    const context = createPr9aContext();
+    try {
+      const accepted = acceptForeignTermsIdentity(context, 'split-close-snapshot', {
+        bindClose: false,
+      });
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', accepted.command);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('exact replay is blocked after terms ownership mutation', () => {
+    const context = createPr9aContext();
+    try {
+      const command = eligibilityCommand(context);
+      context.eligibilityService.produceEligibleEvent(command);
+      const edge = insertForeignTermsIdentity(context, 'replay-mutation', {
+        bindClose: false,
+        bindSnapshot: false,
+      });
+      rewriteRowById(context.db, 'billing_source_effective_terms', {
+        ...edge.originalTerms,
+        rentalLineId: edge.foreignRentalLine.id,
+        supersedesTermsVersionId: edge.foreignTerms.id,
+        version: 2,
+      });
+      const { denial } = assertRequiredDenial(
+        context,
+        'SOURCE_LINEAGE_NO_CURRENT_REVISION',
+        command,
+      );
+      assert.equal(denial.replayed, false);
+      assert.deepEqual(counts(context.db), {
+        events: 1, conflicts: 1, transitions: 1, receivables: 0, operations: 0,
+      });
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('terms mutation after insert is rejected by the locked reread and rolled back', () => {
+    const context = createPr9aContext();
+    const edge = insertForeignTermsIdentity(context, 'postinsert-mutation', {
+      bindClose: false,
+      bindSnapshot: false,
+    });
+    const before = context.db.prepare(`
+      SELECT * FROM billing_source_effective_terms WHERE id = ?
+    `).get(edge.originalTerms.id);
+    const restore = installAfterEventInsertMutation(context.db, () => {
+      rewriteRowById(context.db, 'billing_source_effective_terms', {
+        ...before,
+        rentalLineId: edge.foreignRentalLine.id,
+        supersedesTermsVersionId: edge.foreignTerms.id,
+        version: 2,
+      });
+    });
+    try {
+      assert.throws(
+        () => context.eligibilityRepository.produceEligibleEvent(eligibilityCommand(context)),
+        error => error.code === 'CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED',
+      );
+      assert.deepEqual(counts(context.db), {
+        events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+      });
+      const after = context.db.prepare(`
+        SELECT * FROM billing_source_effective_terms WHERE id = ?
+      `).get(edge.originalTerms.id);
+      assert.equal(oracleCanonicalJson(after), oracleCanonicalJson(before));
+    } finally {
+      restore();
+      context.db.close();
+    }
+  });
+
+  await t.test('valid control proves the exact rental-line terms relationship', () => {
+    const context = createPr9aContext();
+    try {
+      const result = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+      assert.equal(result.replayed, false);
+      assert.deepEqual(counts(context.db), {
+        events: 1, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+      });
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('P1 persisted semantic-version storage fail-before-hash RED contract', async t => {
+  await t.test('invalid semantic versions have no synthetic fingerprint construction path', () => {
+    const source = fs.readFileSync(repositoryPath, 'utf8');
+    assert.equal(
+      source.includes('rentcore.billing_source_authority.invalid_semantic_version'),
+      false,
+    );
+    const verifierStart = source.indexOf('function verifyPr8EvidenceGraph(');
+    const preflight = source.indexOf(
+      'assertSelectedPeriodVersionStorageIntegrity(db, candidate);',
+      verifierStart,
+    );
+    const firstPr8Hash = source.indexOf('pr8Fingerprint(', verifierStart);
+    assert.ok(verifierStart >= 0 && preflight > verifierStart && firstPr8Hash > preflight);
+    const fingerprintStart = source.indexOf('function persistedRowFingerprint(');
+    const storageCheck = source.indexOf(
+      'assertPersistedPeriodVersionRowStorage(db, row);',
+      fingerprintStart,
+    );
+    const rowHash = source.indexOf('rowFingerprint: sha256Canonical(', fingerprintStart);
+    assert.ok(fingerprintStart >= 0 && storageCheck > fingerprintStart && rowHash > storageCheck);
+  });
+
+  const invalidCases = [
+    ['REAL 2.0', 'CAST(2.0 AS REAL)', 'real', 2],
+    ['REAL 2.5', 'CAST(2.5 AS REAL)', 'real', 2.5],
+    ['TEXT "2"', "CAST('2' AS TEXT)", 'text', '2'],
+    ['TEXT "02"', "CAST('02' AS TEXT)", 'text', '02'],
+    ['TEXT "2e0"', "CAST('2e0' AS TEXT)", 'text', '2e0'],
+    ['BLOB representation', "x'32'", 'blob', Buffer.from('2')],
+    ['NULL representation', 'NULL', 'null', null],
+    ['zero INTEGER', '0', 'integer', 0],
+    ['negative INTEGER', '-1', 'integer', -1],
+    ['unsafe INTEGER above Number.MAX_SAFE_INTEGER', '9007199254740992', 'integer', 9007199254740992],
+  ];
+  for (const [name, expression, storageClass, jsValue] of invalidCases) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        const current = createValidCurrentV3(
+          context,
+          `storage-${name.replace(/\W+/g, '-').toLowerCase()}`,
+        );
+        const middle = context.db.prepare(`
+          SELECT * FROM billing_source_period_versions
+          WHERE periodId = ? AND version = 2
+        `).get(context.authority.candidate.periodId);
+        const observed = setRawPeriodSemanticVersion(context, middle.id, expression);
+        assert.equal(observed.storageClass, storageClass);
+        if (Buffer.isBuffer(jsValue)) assert.deepEqual(observed.jsValue, jsValue);
+        else assert.equal(observed.jsValue, jsValue);
+        assertOperationalIntegrityFailure(
+          context,
+          current.command,
+          'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+        );
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+
+  const malformedPositions = [
+    ['malformed root version', 1, "CAST('root' AS TEXT)", 'text'],
+    ['malformed middle version', 2, 'CAST(2.5 AS REAL)', 'real'],
+    ['malformed latest version', 3, "x'33'", 'blob'],
+  ];
+  for (const [name, version, expression, storageClass] of malformedPositions) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        const current = createValidCurrentV3(
+          context,
+          `storage-${name.replace(/\W+/g, '-').toLowerCase()}`,
+        );
+        const row = context.db.prepare(`
+          SELECT * FROM billing_source_period_versions
+          WHERE periodId = ? AND version = ?
+        `).get(context.authority.candidate.periodId, version);
+        const observed = setRawPeriodSemanticVersion(context, row.id, expression);
+        assert.equal(observed.storageClass, storageClass);
+        assertOperationalIntegrityFailure(
+          context,
+          current.command,
+          'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+        );
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+
+  await t.test('INTEGER 2 is a valid storage control', () => {
+    const context = createPr9aContext();
+    try {
+      const current = createValidCurrentV3(context, 'storage-integer-control');
+      const middle = context.db.prepare(`
+        SELECT id FROM billing_source_period_versions
+        WHERE periodId = ? AND version = 2
+      `).get(context.authority.candidate.periodId);
+      const observed = setRawPeriodSemanticVersion(context, middle.id, '2');
+      assert.deepEqual(
+        [observed.storageClass, observed.jsType, observed.jsValue],
+        ['integer', 'number', 2],
+      );
+      const result = context.eligibilityService.produceEligibleEvent(current.command);
+      assert.equal(result.replayed, false);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('maximum safe INTEGER reaches semantic lifecycle validation without coercion', () => {
+    const context = createPr9aContext();
+    try {
+      const current = createValidCurrentV3(context, 'storage-max-safe');
+      const middle = context.db.prepare(`
+        SELECT id FROM billing_source_period_versions
+        WHERE periodId = ? AND version = 2
+      `).get(context.authority.candidate.periodId);
+      const observed = setRawPeriodSemanticVersion(context, middle.id, '9007199254740991');
+      assert.deepEqual(
+        [observed.storageClass, observed.jsType, observed.jsValue],
+        ['integer', 'number', Number.MAX_SAFE_INTEGER],
+      );
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', current.command);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('TEXT input converted by INTEGER affinity is classified by persisted storage', () => {
+    const context = createPr9aContext();
+    try {
+      const current = createValidCurrentV3(context, 'storage-text-affinity');
+      const middle = context.db.prepare(`
+        SELECT id FROM billing_source_period_versions
+        WHERE periodId = ? AND version = 2
+      `).get(context.authority.candidate.periodId);
+      const observed = setRawPeriodSemanticVersion(context, middle.id, "'02'", {
+        permissive: false,
+      });
+      assert.deepEqual(
+        [observed.storageClass, observed.jsType, observed.jsValue],
+        ['integer', 'number', 2],
+      );
+      const result = context.eligibilityService.produceEligibleEvent(current.command);
+      assert.equal(result.replayed, false);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('REAL expression converted by INTEGER affinity is classified by persisted storage', () => {
+    const context = createPr9aContext();
+    try {
+      const current = createValidCurrentV3(context, 'storage-real-affinity');
+      const middle = context.db.prepare(`
+        SELECT id FROM billing_source_period_versions
+        WHERE periodId = ? AND version = 2
+      `).get(context.authority.candidate.periodId);
+      const observed = setRawPeriodSemanticVersion(context, middle.id, 'CAST(2.0 AS REAL)', {
+        permissive: false,
+      });
+      assert.deepEqual(
+        [observed.storageClass, observed.jsType, observed.jsValue],
+        ['integer', 'number', 2],
+      );
+      const result = context.eligibilityService.produceEligibleEvent(current.command);
+      assert.equal(result.replayed, false);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('duplicate after apparent numeric coercion remains a business lineage denial', () => {
+    const context = createPr9aContext();
+    try {
+      const current = createValidCurrentV3(context, 'storage-coerced-duplicate');
+      const middle = context.db.prepare(`
+        SELECT id FROM billing_source_period_versions
+        WHERE periodId = ? AND version = 2
+      `).get(context.authority.candidate.periodId);
+      const observed = setRawPeriodSemanticVersion(
+        context,
+        middle.id,
+        "CAST('3' AS INTEGER)",
+      );
+      assert.deepEqual([observed.storageClass, observed.jsValue], ['integer', 3]);
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', current.command);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('version gap represented as TEXT fails type integrity before lineage classification', () => {
+    const context = createPr9aContext();
+    try {
+      const current = createValidCurrentV3(context, 'storage-text-gap');
+      const middle = context.db.prepare(`
+        SELECT id FROM billing_source_period_versions
+        WHERE periodId = ? AND version = 2
+      `).get(context.authority.candidate.periodId);
+      const observed = setRawPeriodSemanticVersion(context, middle.id, "CAST('4' AS TEXT)");
+      assert.equal(observed.storageClass, 'text');
+      assertOperationalIntegrityFailure(
+        context,
+        current.command,
+        'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+      );
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('exact replay never precedes malformed persisted storage validation', () => {
+    const context = createPr9aContext();
+    try {
+      const current = createValidCurrentV3(context, 'storage-replay');
+      context.eligibilityService.produceEligibleEvent(current.command);
+      const middle = context.db.prepare(`
+        SELECT id FROM billing_source_period_versions
+        WHERE periodId = ? AND version = 2
+      `).get(context.authority.candidate.periodId);
+      setRawPeriodSemanticVersion(context, middle.id, 'CAST(2.5 AS REAL)');
+      assertOperationalIntegrityFailure(
+        context,
+        current.command,
+        'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+        { events: 1, conflicts: 0, transitions: 0, receivables: 0, operations: 0 },
+      );
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('malformed value after insert rolls back the event and the mutation', () => {
+    const context = createPr9aContext();
+    const current = createValidCurrentV3(context, 'storage-postinsert');
+    const middle = context.db.prepare(`
+      SELECT id FROM billing_source_period_versions
+      WHERE periodId = ? AND version = 2
+    `).get(context.authority.candidate.periodId);
+    replacePeriodVersionsWithPermissiveStorage(context);
+    const restore = installAfterEventInsertMutation(context.db, () => {
+      context.db.exec(`
+        UPDATE billing_source_period_versions
+        SET version = CAST(2.5 AS REAL)
+        WHERE id = '${middle.id.replaceAll("'", "''")}'
+      `);
+    });
+    try {
+      assertOperationalIntegrityFailure(
+        context,
+        current.command,
+        'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+      );
+      const observed = context.db.prepare(`
+        SELECT version, typeof(version) AS storageClass
+        FROM billing_source_period_versions WHERE id = ?
+      `).get(middle.id);
+      assert.deepEqual([observed.version, observed.storageClass], [2, 'integer']);
+    } finally {
+      restore();
+      context.db.close();
+    }
+  });
+
+  await t.test('malformed storage has precedence over an independent PR8 mismatch', () => {
+    const context = createPr9aContext();
+    try {
+      const current = createValidCurrentV3(context, 'storage-pr8-precedence');
+      mutateCandidateForConflict(context);
+      const middle = context.db.prepare(`
+        SELECT id FROM billing_source_period_versions
+        WHERE periodId = ? AND version = 2
+      `).get(context.authority.candidate.periodId);
+      setRawPeriodSemanticVersion(context, middle.id, 'CAST(2.5 AS REAL)');
+      assertOperationalIntegrityFailure(
+        context,
+        current.command,
+        'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+      );
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('P1 effective-terms remediation adversarial self-audit after green proof', async t => {
+  await t.test('correct terms ID with a wrong persisted rental-line owner is denied', () => {
+    const context = createPr9aContext();
+    try {
+      const edge = insertForeignTermsIdentity(context, 'audit-wrong-owner', {
+        bindClose: false,
+        bindSnapshot: false,
+      });
+      rewriteRowById(context.db, 'billing_source_effective_terms', {
+        ...edge.originalTerms,
+        rentalLineId: edge.foreignRentalLine.id,
+        supersedesTermsVersionId: edge.foreignTerms.id,
+        version: 2,
+      });
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('correct rental line with period billing semantics drift is denied', () => {
+    const context = createPr9aContext();
+    try {
+      const period = context.db.prepare(`
+        SELECT * FROM billing_source_periods WHERE id = ?
+      `).get(context.authority.candidate.periodId);
+      rewriteRowById(context.db, 'billing_source_periods', {
+        ...period,
+        contractualBillingCycleCode: 'hostile_period_cycle',
+      });
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('foreign persisted identity with byte-equal labels and source hash is denied', () => {
+    const context = createPr9aContext();
+    try {
+      const accepted = acceptForeignTermsIdentity(context, 'audit-foreign-identity');
+      assert.equal(accepted.foreignTerms.sourceRef, accepted.originalTerms.sourceRef);
+      assert.equal(accepted.foreignTerms.sourceHash, accepted.originalTerms.sourceHash);
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', accepted.command);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('stale terms revision after an existing event blocks exact replay', () => {
+    const context = createPr9aContext();
+    try {
+      const command = eligibilityCommand(context);
+      context.eligibilityService.produceEligibleEvent(command);
+      appendTermsSuccessor(context, 'audit-stale-after-event');
+      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', command);
+      assert.deepEqual(counts(context.db), {
+        events: 1, conflicts: 1, transitions: 1, receivables: 0, operations: 0,
+      });
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('close and snapshot terms divergence after insert rolls back atomically', () => {
+    const context = createPr9aContext();
+    const edge = insertForeignTermsIdentity(context, 'audit-postinsert-divergence', {
+      bindClose: false,
+      bindSnapshot: false,
+    });
+    const close = context.db.prepare(`
+      SELECT * FROM billing_source_period_versions WHERE id = ?
+    `).get(context.authority.candidate.closedPeriodVersionId);
+    const restore = installAfterEventInsertMutation(context.db, () => {
+      rewriteRowById(context.db, 'billing_source_period_versions', {
+        ...close,
+        effectiveTermsVersionId: edge.foreignTerms.id,
+      });
+    });
+    try {
+      assert.throws(
+        () => context.eligibilityRepository.produceEligibleEvent(eligibilityCommand(context)),
+        error => error.code === 'CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED',
+      );
+      assert.deepEqual(counts(context.db), {
+        events: 0, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+      });
+      const after = context.db.prepare(`
+        SELECT * FROM billing_source_period_versions WHERE id = ?
+      `).get(close.id);
+      assert.equal(oracleCanonicalJson(after), oracleCanonicalJson(close));
+    } finally {
+      restore();
       context.db.close();
     }
   });

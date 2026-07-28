@@ -9,8 +9,10 @@ const {
   BILLING_SOURCE_COVERAGE_SETS_TABLE,
   BILLING_SOURCE_COVERAGE_SLICES_TABLE,
   BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
+  BILLING_SOURCE_EFFECTIVE_TERMS_TABLE,
   BILLING_SOURCE_PERIODS_TABLE,
   BILLING_SOURCE_PERIOD_VERSIONS_TABLE,
+  BILLING_SOURCE_RENTAL_LINES_TABLE,
   BILLING_SOURCE_SNAPSHOTS_TABLE,
   BILLING_SOURCE_UPD_LINE_VERSIONS_TABLE,
   BILLING_SOURCE_UPD_VERSIONS_TABLE,
@@ -334,30 +336,52 @@ function persistedRowVersion(row) {
   return null;
 }
 
+function assertPersistedPeriodSemanticVersion(row) {
+  if (
+    row?.semanticVersionStorageClass !== 'integer'
+    || typeof row.version !== 'number'
+    || !Number.isSafeInteger(row.version)
+    || row.version < 1
+  ) throw repositoryError('CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID');
+  return row.version;
+}
+
+function assertPersistedPeriodVersionRowStorage(db, row) {
+  const persisted = db.prepare(`
+    SELECT version, typeof(version) AS semanticVersionStorageClass
+    FROM ${BILLING_SOURCE_PERIOD_VERSIONS_TABLE}
+    WHERE id = ?
+  `).get(row?.id);
+  if (!persisted || persisted.version !== row.version) {
+    throw repositoryError('CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID');
+  }
+  return assertPersistedPeriodSemanticVersion(persisted);
+}
+
+function assertSelectedPeriodVersionStorageIntegrity(db, candidate) {
+  if (!candidate || typeof candidate.periodId !== 'string' || candidate.periodId.length === 0) return;
+  const rows = db.prepare(`
+    SELECT version, typeof(version) AS semanticVersionStorageClass
+    FROM ${BILLING_SOURCE_PERIOD_VERSIONS_TABLE}
+    WHERE periodId = ?
+  `).all(candidate.periodId);
+  for (const row of rows) assertPersistedPeriodSemanticVersion(row);
+}
+
 function persistedRowFingerprint(db, tableName, row) {
+  if (tableName === BILLING_SOURCE_PERIOD_VERSIONS_TABLE) {
+    assertPersistedPeriodVersionRowStorage(db, row);
+  }
   const columns = db.prepare(`PRAGMA table_xinfo(${tableName})`).all()
     .filter(column => Number(column.hidden) === 0)
     .sort((left, right) => compareSafeIntegerAscending(Number(left.cid), Number(right.cid)))
     .map(column => {
-      let value = row[column.name];
+      const value = row[column.name];
       if (
         value !== null
         && typeof value !== 'string'
         && !(typeof value === 'number' && Number.isSafeInteger(value))
-      ) {
-        if (
-          tableName !== BILLING_SOURCE_PERIOD_VERSIONS_TABLE
-          || column.name !== 'version'
-          || typeof value !== 'number'
-          || !Number.isFinite(value)
-        ) throw repositoryError('CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID');
-        value = Object.freeze({
-          domain: 'rentcore.billing_source_authority.invalid_semantic_version',
-          numericRepresentation: String(value),
-          storageType: 'real',
-          version: 1,
-        });
-      }
+      ) throw repositoryError('CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID');
       return { columnName: column.name, value };
     });
   const rowVersion = persistedRowVersion(row);
@@ -614,7 +638,142 @@ function sourceCandidateFingerprint(candidate) {
   });
 }
 
-function hasValidUniqueCurrentClosedPeriod(db, candidate) {
+function hasValidEffectiveTermsBinding(
+  db,
+  candidate,
+  { acceptedRun = null, authorization = null, pr8TermsBinding = null } = {},
+) {
+  const rentalLine = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_RENTAL_LINES_TABLE} WHERE id = ?
+  `).get(candidate.rentalLineId);
+  const period = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_PERIODS_TABLE} WHERE id = ?
+  `).get(candidate.periodId);
+  const close = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_PERIOD_VERSIONS_TABLE} WHERE id = ?
+  `).get(candidate.closedPeriodVersionId);
+  const snapshot = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_SNAPSHOTS_TABLE} WHERE id = ?
+  `).get(candidate.snapshotId);
+  const coverageSlice = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_COVERAGE_SLICES_TABLE} WHERE id = ?
+  `).get(candidate.coverageSliceId);
+  const updLineVersion = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_UPD_LINE_VERSIONS_TABLE} WHERE id = ?
+  `).get(candidate.updLineVersionId);
+  if (
+    !rentalLine
+    || !period
+    || !close
+    || !snapshot
+    || !coverageSlice
+    || !updLineVersion
+    || typeof snapshot.effectiveTermsVersionId !== 'string'
+    || snapshot.effectiveTermsVersionId.length === 0
+  ) return false;
+  const terms = db.prepare(`
+    SELECT * FROM ${BILLING_SOURCE_EFFECTIVE_TERMS_TABLE} WHERE id = ?
+  `).get(snapshot.effectiveTermsVersionId);
+  if (!terms) return false;
+
+  const scopedRows = [rentalLine, period, close, snapshot, coverageSlice, updLineVersion, terms];
+  if (scopedRows.some(row => (
+    row.companyId !== candidate.companyId || row.branchId !== candidate.branchId
+  ))) return false;
+  if (
+    rentalLine.id !== candidate.rentalLineId
+    || rentalLine.rentalId !== candidate.rentalId
+    || rentalLine.clientId !== candidate.clientId
+    || (rentalLine.contractId ?? null) !== (candidate.contractId ?? null)
+    || period.rentalLineId !== candidate.rentalLineId
+    || period.rentalId !== candidate.rentalId
+    || close.periodId !== candidate.periodId
+    || close.eventType !== 'closed'
+    || close.snapshotId !== candidate.snapshotId
+    || close.effectiveTermsVersionId !== terms.id
+    || snapshot.rentalLineId !== candidate.rentalLineId
+    || snapshot.rentalId !== candidate.rentalId
+    || snapshot.periodId !== candidate.periodId
+    || snapshot.closedPeriodVersionId !== candidate.closedPeriodVersionId
+    || snapshot.effectiveTermsVersionId !== terms.id
+    || coverageSlice.rentalLineId !== candidate.rentalLineId
+    || coverageSlice.rentalId !== candidate.rentalId
+    || coverageSlice.periodId !== candidate.periodId
+    || coverageSlice.closedPeriodVersionId !== candidate.closedPeriodVersionId
+    || coverageSlice.snapshotId !== candidate.snapshotId
+    || coverageSlice.id !== candidate.coverageSliceId
+    || terms.rentalLineId !== candidate.rentalLineId
+  ) return false;
+  if (
+    period.periodStartDate !== snapshot.coveredStartDate
+    || period.periodEndDateExclusive !== snapshot.coveredEndDateExclusive
+    || period.periodStartDate !== coverageSlice.sliceStartDate
+    || period.periodEndDateExclusive !== coverageSlice.sliceEndDateExclusive
+    || candidate.sliceStartDate !== coverageSlice.sliceStartDate
+    || candidate.sliceEndDateExclusive !== coverageSlice.sliceEndDateExclusive
+    || terms.effectiveFromDate > period.periodStartDate
+    || terms.effectiveToDateExclusive < period.periodEndDateExclusive
+  ) return false;
+  if (
+    terms.contractualBillingCycleCode !== period.contractualBillingCycleCode
+    || terms.contractualBillingCycleVersion !== period.contractualBillingCycleVersion
+    || terms.currency !== candidate.currency
+    || snapshot.currency !== candidate.currency
+    || updLineVersion.currency !== candidate.currency
+    || terms.calculationPolicyRef !== snapshot.calculationPolicyRef
+    || terms.vatPolicyRef !== snapshot.vatPolicyRef
+    || terms.roundingPolicyRef !== snapshot.roundingPolicyRef
+    || terms.vatPolicyRef !== updLineVersion.vatPolicyRef
+    || terms.roundingPolicyRef !== updLineVersion.roundingPolicyRef
+  ) return false;
+
+  const revisions = db.prepare(`
+    SELECT *, typeof(version) AS semanticVersionStorageClass
+    FROM ${BILLING_SOURCE_EFFECTIVE_TERMS_TABLE}
+    WHERE rentalLineId = ?
+    ORDER BY version ASC, id ASC
+  `).all(candidate.rentalLineId);
+  if (revisions.length === 0) return false;
+  let previous = null;
+  for (let index = 0; index < revisions.length; index += 1) {
+    const row = revisions[index];
+    if (
+      row.companyId !== candidate.companyId
+      || row.branchId !== candidate.branchId
+      || row.rentalLineId !== candidate.rentalLineId
+      || row.semanticVersionStorageClass !== 'integer'
+      || typeof row.version !== 'number'
+      || !Number.isSafeInteger(row.version)
+      || row.version !== index + 1
+      || row.supersedesTermsVersionId !== (previous?.id ?? null)
+    ) return false;
+    previous = row;
+  }
+  if (previous?.id !== terms.id) return false;
+
+  const sourceEvidenceRefs = pr8TermsBinding?.sourceAdapterEvidenceRefs;
+  if (
+    !pr8TermsBinding
+    || pr8TermsBinding.candidateId !== candidate.id
+    || pr8TermsBinding.candidateInputLineageHash !== candidate.inputLineageHash
+    || pr8TermsBinding.effectiveTermsInputSourceId !== terms.id
+    || pr8TermsBinding.effectiveTermsInputRentalLineId !== candidate.rentalLineId
+    || pr8TermsBinding.effectiveTermsInputRelationshipRentalLineId !== candidate.rentalLineId
+    || pr8TermsBinding.rentalLineInputSourceId !== candidate.rentalLineId
+    || !Array.isArray(sourceEvidenceRefs)
+    || !sourceEvidenceRefs.includes(
+      `billing_source_effective_terms:${terms.id}`,
+    )
+    || !sourceEvidenceRefs.includes(
+      `billing_source_rental_lines:${candidate.rentalLineId}`,
+    )
+    || acceptedRun?.dryRunId !== candidate.runId
+    || acceptedRun?.sourceOwnershipManifestHash !== authorization?.sourceOwnershipManifestHash
+  ) return false;
+  return true;
+}
+
+function hasValidUniqueCurrentClosedPeriod(db, candidate, evidence = {}) {
   const period = db.prepare(`
     SELECT * FROM ${BILLING_SOURCE_PERIODS_TABLE} WHERE id = ?
   `).get(candidate.periodId);
@@ -635,14 +794,11 @@ function hasValidUniqueCurrentClosedPeriod(db, candidate) {
   const successors = new Map();
   const roots = [];
   for (const row of rows) {
-    const version = Number(row.version);
+    const version = assertPersistedPeriodSemanticVersion(row);
     if (
       row.companyId !== candidate.companyId
       || row.branchId !== candidate.branchId
       || row.periodId !== candidate.periodId
-      || row.semanticVersionStorageClass !== 'integer'
-      || !Number.isSafeInteger(version)
-      || version < 1
       || ids.has(row.id)
       || versions.has(version)
     ) return false;
@@ -673,7 +829,7 @@ function hasValidUniqueCurrentClosedPeriod(db, candidate) {
   let previous = null;
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
-    const version = Number(row.version);
+    const version = assertPersistedPeriodSemanticVersion(row);
     if (
       version !== index + 1
       || row.previousVersionId !== (previous?.id ?? null)
@@ -716,11 +872,19 @@ function hasValidUniqueCurrentClosedPeriod(db, candidate) {
     cursor = nextRows[0] || null;
   }
   if (visited.size !== rows.length) return false;
-  return previous.eventType === 'closed' && previous.id === candidate.closedPeriodVersionId;
+  return (
+    previous.eventType === 'closed'
+    && previous.id === candidate.closedPeriodVersionId
+    && hasValidEffectiveTermsBinding(db, candidate, evidence)
+  );
 }
 
 function assertLifecycleSnapshotUnchanged(db, context) {
-  if (!hasValidUniqueCurrentClosedPeriod(db, context.candidate)) {
+  if (!hasValidUniqueCurrentClosedPeriod(db, context.candidate, {
+    acceptedRun: context.acceptedRun,
+    authorization: context.authorization,
+    pr8TermsBinding: context.pr8Proof.termsBinding,
+  })) {
     throw repositoryError('CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED');
   }
 }
@@ -802,7 +966,7 @@ function brokenSuccessorDenial(db, candidate, relationInput, rootCoverageLineage
   });
 }
 
-function analyzeLockedSourceGraph(db, acceptedCandidate) {
+function analyzeLockedSourceGraph(db, acceptedCandidate, evidence = {}) {
   const economicLineageCandidateFingerprint = sourceCandidateFingerprint(acceptedCandidate);
   const logicalCoverageRows = sameScopeLogicalCoverageRows(db, acceptedCandidate);
   const logicalSetIds = [...new Set(logicalCoverageRows.map(row => row.coverageSetId))]
@@ -1130,7 +1294,7 @@ function analyzeLockedSourceGraph(db, acceptedCandidate) {
     updLineVersionId: currentSlice.updLineVersionId,
   } : null;
   const periodIsCurrent = candidateForSlice
-    && hasValidUniqueCurrentClosedPeriod(db, candidateForSlice);
+    && hasValidUniqueCurrentClosedPeriod(db, candidateForSlice, evidence);
   const conductedRows = periodIsCurrent ? db.prepare(`
     SELECT * FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE}
     WHERE companyId = ? AND branchId = ? AND updId = ?
@@ -1521,6 +1685,7 @@ function verifyPr8EvidenceGraph(
   const candidate = db.prepare(`
     SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} WHERE id = ? AND runId = ?
   `).get(command.candidateId, command.dryRunId);
+  assertSelectedPeriodVersionStorageIntegrity(db, candidate);
   const acceptedDryRuns = parseCanonicalJson(authorization.acceptedDryRunsJson, 'acceptedDryRunsJson');
   const acceptedRuns = parseCanonicalJson(authorization.acceptedPr8EvidenceJson, 'acceptedPr8EvidenceJson');
   const acceptedRun = acceptedRuns.find(entry => entry.dryRunId === command.dryRunId) || null;
@@ -1533,6 +1698,7 @@ function verifyPr8EvidenceGraph(
   let reconstructedReconciliationSetHash = null;
   let freshnessState = 'invalid_window';
   let observedFreshnessWindowFingerprint = acceptedRun?.freshnessWindowFingerprint ?? null;
+  let termsBinding = null;
 
   try {
     assertPr8RowShape(run, ACTUAL_SOURCE_DRY_RUNS_TABLE);
@@ -1713,6 +1879,7 @@ function verifyPr8EvidenceGraph(
         ['billing_source_coverage_sets', row.coverageSetId],
         ['billing_source_coverage_slices', row.coverageSliceId],
       ].map(([kind, id]) => inputByIdentity.get(`${kind}:${id}`)).filter(Boolean));
+      let effectiveTermsInput = null;
       const sourceSnapshot = db.prepare(`
         SELECT effectiveTermsVersionId FROM billing_source_snapshots WHERE id = ?
       `).get(row.snapshotId);
@@ -1720,7 +1887,10 @@ function verifyPr8EvidenceGraph(
         const terms = inputByIdentity.get(
           `billing_source_effective_terms:${sourceSnapshot.effectiveTermsVersionId}`,
         );
-        if (terms) selectedInputs.add(terms);
+        if (terms) {
+          effectiveTermsInput = terms;
+          selectedInputs.add(terms);
+        }
       }
       for (const input of persistedInputs) {
         if (
@@ -1756,6 +1926,21 @@ function verifyPr8EvidenceGraph(
         }))
         .sort((left, right) => compareUtf16Ascending(pr8StableJson(left), pr8StableJson(right))));
       requireProof(reconstructedInputLineageHash === row.inputLineageHash, 'candidate_input_lineage_hash');
+      if (row.id === candidate.id) {
+        const rentalLineInput = inputByIdentity.get(
+          `billing_source_rental_lines:${row.rentalLineId}`,
+        );
+        termsBinding = {
+          candidateId: row.id,
+          candidateInputLineageHash: row.inputLineageHash,
+          effectiveTermsInputRelationshipRentalLineId:
+            effectiveTermsInput?.relationships.rentalLineId ?? null,
+          effectiveTermsInputRentalLineId: effectiveTermsInput?.row.rentalLineId ?? null,
+          effectiveTermsInputSourceId: effectiveTermsInput?.row.sourceId ?? null,
+          rentalLineInputSourceId: rentalLineInput?.row.sourceId ?? null,
+          sourceAdapterEvidenceRefs: null,
+        };
+      }
       return { row, blockerCodes, recomputedHash };
     });
     for (let index = 1; index < persistedCandidates.length; index += 1) {
@@ -1786,6 +1971,18 @@ function verifyPr8EvidenceGraph(
         === persistedChecks.length,
       'check_duplicate',
     );
+    const selectedSourceAdapterChecks = persistedChecks.filter(row => (
+      row.candidateId === candidate.id && row.gateCode === 'source_adapter_exact_match'
+    ));
+    requireProof(selectedSourceAdapterChecks.length === 1, 'source_adapter_terms_binding');
+    if (termsBinding) {
+      termsBinding = {
+        ...termsBinding,
+        sourceAdapterEvidenceRefs: selectedSourceAdapterChecks.length === 1
+          ? selectedSourceAdapterChecks[0].sourceEvidenceRefs
+          : [],
+      };
+    }
     const selectedDueDateChecks = persistedChecks.filter(row => (
       row.candidateId === candidate.id && row.gateCode === 'contractual_due_date_evidence'
     ));
@@ -2206,6 +2403,7 @@ function verifyPr8EvidenceGraph(
     observedProjection: materializeInert(observedProjection),
     reasons: Object.freeze(reasons),
     run,
+    termsBinding: termsBinding ? Object.freeze(materializeInert(termsBinding)) : null,
     valid: reasons.length === 0,
   });
 }
@@ -2447,7 +2645,11 @@ function loadAcceptedContext(
   if (!run || !sourceCandidate) {
     throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
   }
-  const sourceGraph = analyzeLockedSourceGraph(db, sourceCandidate);
+  const sourceGraph = analyzeLockedSourceGraph(db, sourceCandidate, {
+    acceptedRun,
+    authorization,
+    pr8TermsBinding: pr8Proof.termsBinding,
+  });
   const candidate = sourceGraph.currentCandidate;
 
   const sourceAuthority = authorityRepository.readAuthorityRecord(authorization.sourceAdapterAuthorityRecordId);

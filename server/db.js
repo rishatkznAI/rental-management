@@ -24,6 +24,9 @@ const {
   ensureActualSourceEligibilityDryRunSchema,
 } = require('./lib/actual-source-eligibility-dry-run-schema');
 const {
+  ensureCanonicalActualPostingSchema,
+} = require('./lib/canonical-actual-posting-schema');
+const {
   assertClientInnListUnique,
   assertClientInnWriteAllowed,
   buildClientInnDuplicateReport,
@@ -143,6 +146,7 @@ function ensureDb() {
   ensureBillingSourceAuthoritySchema(db);
   ensureForecastReceivablesPlanningSchema(db);
   ensureActualSourceEligibilityDryRunSchema(db);
+  ensureCanonicalActualPostingSchema(db);
   syncClientInnIndex({ throwOnDuplicates: false });
   return db;
 }

@@ -1702,6 +1702,24 @@ const PR8_RELATIONSHIP_JSON_BINDING_COLUMNS = Object.freeze([
   'snapshotId', 'updId', 'updLineId', 'updLineVersionId',
   'coverageSetId', 'sourceOperationId',
 ]);
+const PR8_AUTHORITATIVE_INPUT_REGISTRY = Object.freeze({
+  billing_source_activation_boundaries: Object.freeze({ table: 'billing_source_activation_boundaries' }),
+  billing_source_rental_lines: Object.freeze({ table: 'billing_source_rental_lines' }),
+  billing_source_effective_terms: Object.freeze({ table: 'billing_source_effective_terms' }),
+  billing_source_periods: Object.freeze({ table: 'billing_source_periods' }),
+  billing_source_period_versions: Object.freeze({ table: 'billing_source_period_versions' }),
+  billing_source_snapshots: Object.freeze({ table: 'billing_source_snapshots' }),
+  billing_source_snapshot_evidence: Object.freeze({ table: 'billing_source_snapshot_evidence' }),
+  billing_source_upds: Object.freeze({ table: 'billing_source_upds' }),
+  billing_source_upd_versions: Object.freeze({ table: 'billing_source_upd_versions' }),
+  billing_source_upd_lines: Object.freeze({ table: 'billing_source_upd_lines' }),
+  billing_source_upd_line_versions: Object.freeze({ table: 'billing_source_upd_line_versions' }),
+  billing_source_coverage_sets: Object.freeze({ table: 'billing_source_coverage_sets' }),
+  billing_source_coverage_supersessions: Object.freeze({ table: 'billing_source_coverage_supersessions' }),
+  billing_source_coverage_slices: Object.freeze({ table: 'billing_source_coverage_slices' }),
+  billing_source_operations: Object.freeze({ table: 'billing_source_operations' }),
+  billing_source_audit_events: Object.freeze({ table: 'billing_source_audit_events' }),
+});
 
 function authoritativePr8SourceVersion(row) {
   for (const field of ['version', 'sourceVersion', 'sourceEventVersion', 'resultVersion', 'aggregateVersion']) {
@@ -1796,6 +1814,50 @@ function pr8InputMatchesAuthoritative(input, authoritative) {
     && row.relationshipJson === authoritative.relationshipJson
     && PR8_INPUT_RELATIONSHIP_COLUMNS.every(column => row[column] === authoritative[column])
   );
+}
+
+function reconstructSelectedAuthoritativePr8Inputs(db, command, selectedInputs) {
+  if (
+    canonicalJson(Object.keys(PR8_AUTHORITATIVE_INPUT_REGISTRY))
+      !== canonicalJson(BILLING_SOURCE_AUTHORITY_TABLES)
+  ) return Object.freeze({ inputs: Object.freeze([]), valid: false });
+  const identities = new Set();
+  const reconstructed = [];
+  let valid = true;
+  for (const input of selectedInputs) {
+    const sourceKind = input?.row?.sourceKind;
+    const registryEntry = PR8_AUTHORITATIVE_INPUT_REGISTRY[sourceKind];
+    const sourceId = input?.row?.sourceId;
+    const identity = `${sourceKind}:${sourceId}`;
+    if (
+      !registryEntry
+      || registryEntry.table !== sourceKind
+      || input.row.sourceTableIdentity !== sourceKind
+      || typeof sourceId !== 'string'
+      || sourceId.length === 0
+      || identities.has(identity)
+    ) {
+      valid = false;
+      continue;
+    }
+    identities.add(identity);
+    const sourceRow = db.prepare(`
+      SELECT * FROM "${registryEntry.table}"
+      WHERE id = ? AND companyId = ? AND branchId = ?
+    `).get(sourceId, command.companyId, command.branchId);
+    const authoritative = sourceRow
+      ? authoritativePr8InputProjection(sourceKind, sourceRow)
+      : null;
+    if (!pr8InputMatchesAuthoritative(input, authoritative)) valid = false;
+    reconstructed.push(Object.freeze({
+      authoritative,
+      identity,
+      input,
+      sourceRow: sourceRow ? Object.freeze({ ...sourceRow }) : null,
+    }));
+  }
+  if (reconstructed.length !== selectedInputs.size) valid = false;
+  return Object.freeze({ inputs: Object.freeze(reconstructed), valid });
 }
 
 function pr8CandidateResultCanonical(row, blockerCodes) {
@@ -2184,6 +2246,17 @@ function verifyPr8EvidenceGraph(
           input.row.sourceKind === 'billing_source_audit_events'
           && operationIds.has(input.relationships.operationId)
         ) selectedInputs.add(input);
+      }
+      if (row.id === candidate.id) {
+        const authoritativeSelectedInputs = reconstructSelectedAuthoritativePr8Inputs(
+          db,
+          command,
+          selectedInputs,
+        );
+        requireProof(
+          authoritativeSelectedInputs.valid,
+          'selected_input_authoritative_projection',
+        );
       }
       const reconstructedInputLineageHash = pr8Fingerprint([...selectedInputs]
         .map(input => ({
@@ -3740,7 +3813,14 @@ function createCanonicalActualEligibilityEventRepository(
     if (context.authorityDenial) {
       throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
     }
-    const basis = deriveAuthorityDenialBasis(db, context);
+    const pr8MismatchWithSourceDenial = (
+      packageValue.conflictType === 'PR8_EVIDENCE_MISMATCH'
+      && Boolean(context.sourceGraph.denial)
+    );
+    const basisContext = pr8MismatchWithSourceDenial
+      ? { ...context, candidate: context.acceptedCandidate || context.candidate }
+      : context;
+    const basis = deriveAuthorityDenialBasis(db, basisContext);
     const correlationId = deriveRepositoryId(
       'rentcore.canonical_actual_posting.eligibility_correlation_identity',
       {
@@ -3750,7 +3830,7 @@ function createCanonicalActualEligibilityEventRepository(
         economicLineageCandidateFingerprint: basis.economicLineageCandidateFingerprint,
       },
     );
-    const derived = mode === 'source_lineage'
+    const derived = mode === 'source_lineage' || pr8MismatchWithSourceDenial
       ? basis
       : deriveEventCore(db, context, {
         correlationId,
@@ -3964,13 +4044,21 @@ function createCanonicalActualEligibilityEventRepository(
     beginImmediate(db);
     try {
       packageValue = assertFrozenDenialPackage(packageInput);
+      const candidateScope = packageValue.conflictCandidateProjection;
+      assertPr6PersistedStoragePreflight(db, {
+        branchId: candidateScope.branchId,
+        companyId: candidateScope.companyId,
+      });
+      assertPr6PersistedStoragePreflight(db, {
+        branchId: candidateScope.branchId,
+        companyId: candidateScope.companyId,
+      });
       const classification = classifyConflictReplay(db, authorityRepository, packageValue);
       verifyFrozenPackageAgainstSnapshots(packageValue);
       if (classification.mode === 'EXACT_REPLAY') {
         db.exec('COMMIT');
         return Object.freeze({ conflict: classification.conflict, replayed: true });
       }
-      const candidateScope = packageValue.conflictCandidateProjection;
       const incomplete = incompleteTransitions(db, candidateScope.companyId, candidateScope.branchId);
       if (incomplete.length > 0) {
         blockedScope = { companyId: candidateScope.companyId, branchId: candidateScope.branchId };
@@ -4077,6 +4165,10 @@ function createCanonicalActualEligibilityEventRepository(
             throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
           }
         }
+        assertPr6PersistedStoragePreflight(db, {
+          branchId: candidateScope.branchId,
+          companyId: candidateScope.companyId,
+        });
         insertExact(
           db,
           CANONICAL_RECEIVABLE_POSTING_CONFLICTS_TABLE,
@@ -4661,7 +4753,14 @@ function createCanonicalActualEligibilityEventRepository(
           if (!context.nonAuthorityDenial && context.operationalFailureCode) {
             throw repositoryError(context.operationalFailureCode);
           }
-          const provisionalBasis = deriveAuthorityDenialBasis(db, context);
+          const pr8MismatchWithSourceDenial = (
+            context.nonAuthorityDenial?.conflictType === 'PR8_EVIDENCE_MISMATCH'
+            && Boolean(context.sourceGraph.denial)
+          );
+          const basisContext = pr8MismatchWithSourceDenial
+            ? { ...context, candidate: context.acceptedCandidate || context.candidate }
+            : context;
+          const provisionalBasis = deriveAuthorityDenialBasis(db, basisContext);
           const provisionalCorrelationId = deriveRepositoryId(
             'rentcore.canonical_actual_posting.eligibility_correlation_identity',
             {
@@ -4675,7 +4774,7 @@ function createCanonicalActualEligibilityEventRepository(
           const sourceLineageDenial = context.nonAuthorityDenial
             && NON_AUTHORITY_RECONSTRUCTION_REGISTRY[context.nonAuthorityDenial.conflictType]
               === 'source_lineage';
-          const provisional = sourceLineageDenial
+          const provisional = sourceLineageDenial || pr8MismatchWithSourceDenial
             ? provisionalBasis
             : deriveEventCore(db, context, {
               correlationId: provisionalCorrelationId,

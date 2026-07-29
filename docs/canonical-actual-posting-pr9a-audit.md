@@ -911,3 +911,180 @@ production activation = FALSE
 production reads = FALSE
 production writes = FALSE
 ```
+
+## Draft PR 233 all-selected-input and Algorithm C transaction remediation
+
+The independent audit against
+`cca10badf197f72f89b3f0e76b4088034e436901` found two further P1 gaps. First,
+authoritative PR6 content was reconstructed for selected rental-line and
+effective-terms PR8 inputs only; the other selected inputs could retain a stale
+`normalizedInputHash`. Second, the separate Algorithm C transaction inherited the
+effect of Algorithm A's storage preflight even though Algorithm A had rolled back.
+This section records the remediation evidence, not independent closure, merge
+approval, deployment approval, or production authority.
+
+### Fixed invariants and RED evidence
+
+Before production changes, the independent all-input contract reported 40 expected
+subtest failures: current authoritative rows could drift while an eligibility event
+was inserted, and an existing event produced
+`SOURCE_REVISION_CHANGED_BEFORE_POSTING` instead of `PR8_EVIDENCE_MISMATCH`.
+Expected hashes are produced by a test-only restricted canonical serializer and
+direct Node SHA-256, not by the repository projection helper.
+
+The independent Algorithm C race contract reported 17 expected subtest failures.
+After Algorithm A rollback, same-scope strict-INTEGER storage changed to REAL was
+fingerprinted or admitted into conflict evidence, yielding PR8, lifecycle, due-date,
+or frozen-package results instead of
+`CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID`; conflict/transition/accounting DML could
+therefore occur. The tests observe the rollback-to-BEGIN mutation boundary, raw
+SQLite `typeof`, preflight queries, fingerprint queries, exact error and durable DML.
+
+The fixed all-input invariant is:
+
+```text
+selected persisted PR8 input identity
+  -> closed source-kind/table registry
+  -> exact PR6 row by id + company + branch
+  -> complete PR8 canonical row projection
+  -> independent normalized-input SHA-256
+  -> exact persisted PR8 identity/type/table/hash/relationship equality
+```
+
+Missing, foreign-scope, duplicate and unknown inputs fail the selected PR8 proof.
+Outer run, candidate, acceptance, authorization and activation seals cannot replace
+the fresh row comparison. The complete comparison executes during initial Algorithm
+A reconstruction before replay/event lookup and insert, during the locked
+post-insert reread, and again when Algorithm C reconstructs the denial package.
+
+### Selected PR8 authoritative input matrix
+
+The registry is deliberately closed and exactly equal to the 16 PR6 authority
+tables. The canonical projection is the complete PR8 v1 persisted-row projection,
+including identity, state, relationships, canonical content and its freshly
+recomputed `normalizedInputHash`.
+
+| PR8 source kind / authoritative persisted row | Representative content and relationship drift in the independent matrix | Result |
+| --- | --- | --- |
+| `billing_source_activation_boundaries` | approval reference; authorized scope/policy fields | stale selected input denied |
+| `billing_source_rental_lines` | source-event identity and version | stale selected input denied |
+| `billing_source_effective_terms` | policy/economic content and ownership edge | stale selected input denied |
+| `billing_source_periods` | cycle evidence and contractual cycle version | stale selected input denied |
+| `billing_source_period_versions` | reason/lifecycle payload, null-to-empty, source event, actor/capability/catalog | stale selected input denied |
+| `billing_source_snapshots` | calculation JSON and hash, evidence-set hash, all money fields, valid-INTEGER algorithm version | stale selected input denied |
+| `billing_source_snapshot_evidence` | authority policy, source ref/hash and evidence/source-event JSON | stale selected input denied |
+| `billing_source_upds` | document/status/source content | stale selected input denied |
+| `billing_source_upd_versions` | conducted evidence, status/content and source-event fields | stale selected input denied |
+| `billing_source_upd_lines` | source identity | stale selected input denied |
+| `billing_source_upd_line_versions` | description, quantity/scale, net/VAT/gross, source identity and display position | stale selected input denied |
+| `billing_source_coverage_sets` | mapping hash and net/VAT/gross deltas | stale selected input denied |
+| `billing_source_coverage_supersessions` | correction/supersession content and relationship edge | stale selected input denied |
+| `billing_source_coverage_slices` | due-date evidence, slice hash and allocated money | stale selected input denied |
+| `billing_source_operations` | command/result fingerprints and actor/catalog/result version | stale selected input denied |
+| `billing_source_audit_events` | metadata JSON, after fingerprint and actor/catalog/aggregate version | stale selected input denied |
+
+Single-row drift, two-row coordinated drift, canonical JSON content change, null versus
+empty string, fully resealed authority around stale PR8, an existing event followed by
+drift, post-insert drift, combined content drift plus independent PR8 corruption and a
+fresh writer-generated PR8 control are covered. Current content drift is the
+representable `PR8_EVIDENCE_MISMATCH` denial: events 0, conflicts 1, transitions 1,
+transition `COMPLETE`, and attempt/rate/circuit applied `1/1/1`. Drift injected after
+event insert returns `CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED` and rolls the
+transaction back to durable event/conflict/transition/accounting `0/0/0/0`.
+
+### Algorithm C transaction and precedence contract
+
+Algorithm C does not consume a cached preflight result. It begins only after
+Algorithm A rollback, derives the scope from the frozen denial package, and scans all
+same-company/branch rows in the same 16-table, 67-strict-INTEGER-column registry used
+by Algorithm A. The admission scan occurs before conflict replay and every frozen or
+PR6 fingerprint reconstruction; the full scan is repeated at the internal reread
+boundary and immediately before conflict/transition insertion.
+
+| Boundary | Fresh preflight and mutation proof | Fingerprint / result | Durable DML and accounting |
+| --- | --- | --- | --- |
+| Algorithm A `BEGIN IMMEDIATE` | full 16-table same-scope scan | reconstruction only after valid storage | existing Algorithm A contract |
+| Algorithm A rollback -> Algorithm C `BEGIN IMMEDIATE` | new transaction; mutation is visible; new full scan | invalid row is not fingerprinted; exact persisted-type error | all new DML/accounting zero |
+| Algorithm C admission | snapshot, terms, UPD, UPD line, coverage set/slice, operation, audit and activation-boundary REAL races | fingerprint counter remains zero after mutation | all new DML/accounting zero |
+| disconnected same-scope row | included in full scan | blocked before reconstruction | all new DML/accounting zero |
+| foreign-scope row | excluded by exact company/branch | original representable denial proceeds | one complete conflict/transition pair and `1/1/1` |
+| after admission preflight | test hook mutates before reconstruction; repeated full scan observes it | invalid row is not fingerprinted | all new DML/accounting zero |
+| existing identical conflict replay | storage scan precedes replay lookup | invalid storage wins; existing durable pair retained byte-for-byte | no new DML/accounting |
+| frozen suffix / lifecycle / due-date denial | storage scan precedes suffix and business reconstruction | invalid storage wins | all new DML/accounting zero |
+| final insert boundary | third complete scan before pair insertion | only validated rows can contribute to frozen evidence | atomic pair plus complete accounting, or rollback |
+
+The implemented order inside the current transaction is persisted storage integrity,
+frozen-package representability/integrity, PR8 evidence, source lifecycle/current
+revision, authority/policy denial, conflict replay, then conflict insertion and
+transition/accounting. Registered authority-chain integrity/authorization guards that
+must establish the package scope retain their pre-existing fail-closed position.
+
+An independent schema matrix asserts exactly 67 strict INTEGER columns across the 16
+tables and verifies both Algorithm A and Algorithm C invoke the shared registry. It
+does not derive its expected table/column inventory from production code.
+
+### Post-green adversarial self-audit
+
+The post-green matrix contains more than ten distinct attacks: an unlisted source
+table content drift, coordinated snapshot/evidence drift, null-to-empty mutation,
+canonical JSON semantic drift, stale PR8 after current content change, fresh authority
+seals around stale evidence, storage races between A and C and after C admission,
+disconnected same-scope and foreign-scope corrupt rows, existing-conflict replay after
+storage drift, frozen suffix plus drift, content plus PR8 corruption, post-insert
+rollback and fresh valid PR8 evidence. These cases supplement rather than substitute
+for the focused contracts and complete suites.
+
+### Verification evidence for this remediation
+
+The local final tree used Node `v22.22.0` and npm `10.9.4`. The engine check cloned
+the branch into `/tmp/pr9a-node20.IIwYfH/repo`, applied the identical working-tree
+diff, and ran independent root and server `npm ci` installations. That clone used
+Node `v20.20.2`, ABI `115`, npm `10.9.4`, and only its own installed dependencies.
+
+| Exact command | Runtime | Result | Duration |
+| --- | --- | --- | --- |
+| `node --test --test-name-pattern='P1-01 all selected PR8 inputs are reconstructed from authoritative PR6 content RED contract' tests/canonical-actual-eligibility-event.test.js` | Node 22.22.0 | 47/47 passed | 36,454.588 ms |
+| `node --test --test-name-pattern='P1-02 Algorithm C repeats full transaction-local PR6 storage preflight RED contract' tests/canonical-actual-eligibility-event.test.js` | Node 22.22.0 | 19/19 passed | 14,638.697 ms |
+| `node --test tests/canonical-actual-eligibility-event.test.js` | Node 22.22.0 | 337/337 passed | 230,164.806 ms |
+| first `node --test tests/canonical-actual-*.test.js` | Node 22.22.0 | 371/371 passed | 240,990.969 ms |
+| second `node --test tests/canonical-actual-*.test.js` | Node 22.22.0 | 371/371 passed | 236,519.098 ms |
+| first `npm test` | Node 22.22.0 | 2,714/2,714 passed | 313,169.313 ms |
+| second `npm test` | Node 22.22.0 | 2,714/2,714 passed | 313,282.773 ms |
+| `node --test tests/*.test.js` | Node 22.22.0 | 2,714/2,714 passed | 314,557.762 ms |
+| `npm run build` | Node 22.22.0 | passed; 3,385 modules | 6.63 s |
+| clean `node --test tests/canonical-actual-*.test.js` | Node 20.20.2 / ABI 115 | 371/371 passed | 303,441.200 ms |
+| clean `node --test tests/*.test.js` | Node 20.20.2 / ABI 115 | 2,714/2,714 passed | 304,765.271 ms |
+| clean `npm run build` | Node 20.20.2 / ABI 115 | passed; 3,385 modules | 6.69 s |
+
+The successful read-only database check used `better-sqlite3` against
+`server/data/app.sqlite`: `PRAGMA foreign_key_check` returned no rows and
+`PRAGMA integrity_check` returned `ok`. `git diff --check`, the exact Gate B
+changed-file allow-list, prohibited PR9b/Algorithm B, placeholder, embedded-secret,
+runtime writer/consumer and canonical-business-DML scans were clean. The structural
+checks also confirmed that no route, worker, scheduler, environment activation,
+network or live-adapter wiring imports PR9a. Staged-diff, final pushed-head equality,
+draft state and worktree cleanliness are recorded after the remediation commit in the
+handoff because those facts cannot be embedded truthfully before that commit exists.
+
+### Concrete residual risks and authorization
+
+The fixtures are isolated synthetic data and do not establish the quality of any
+production PR6/PR8 history. The closed 16-table registry must be extended together
+with the PR6 authority schema and PR8 normalized-input contract; the independent
+67-column schema test intentionally fails if strict INTEGER schema changes are not
+reviewed. SQLite `BEGIN IMMEDIATE` provides the tested single-writer boundary; this
+work does not claim equivalence for another database engine. Existing dependency
+audit findings are outside this narrow remediation. Algorithm B, canonical business
+writers/readers, live adapters, migration execution, deployment, settlement and
+cutover remain out of scope.
+
+```text
+architecture = TRUE
+PR9a = TRUE
+PR9b = FALSE
+full PR9 = FALSE
+merge = FALSE
+production activation = FALSE
+production reads = FALSE
+production writes = FALSE
+```

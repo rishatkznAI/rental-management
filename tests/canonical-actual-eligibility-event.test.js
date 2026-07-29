@@ -697,6 +697,18 @@ function acceptRunForCurrentClosedVersion(context, closedVersion, suffix) {
     { closedPeriodVersionId: closedVersion.id },
   );
   assert.equal(accepted.selectedCandidate.closedPeriodVersionId, closedVersion.id);
+  const acceptedRuns = [oracleAcceptedRun(context, accepted.selectedRun.id)];
+  resealAcceptance(context, {
+    acceptedDryRuns: acceptedRuns.map(entry => ({
+      dryRunId: entry.dryRunId,
+      resultHash: entry.resultHash,
+    })),
+    acceptedRuns,
+    authorization: {
+      policyManifestHashesJson: oracleCanonicalJson([accepted.selectedRun.policyManifestHash]),
+    },
+  });
+  resealAcceptedPolicyManifestSet(context, [accepted.selectedRun.policyManifestHash]);
   return accepted;
 }
 
@@ -760,6 +772,95 @@ function installAfterEventInsertMutation(db, mutation) {
     },
   });
   return () => { delete db.prepare; };
+}
+
+function installAfterAlgorithmARollbackMutation(db, mutation) {
+  const originalExec = db.exec;
+  const originalPrepare = db.prepare;
+  let armed = true;
+  let mutationApplied = false;
+  let fingerprintCountAfterMutation = 0;
+  let preflightQueryCountAfterMutation = 0;
+  Object.defineProperty(db, 'exec', {
+    configurable: true,
+    value(sql) {
+      const result = originalExec.call(db, sql);
+      if (armed && /^\s*ROLLBACK\s*$/i.test(String(sql))) {
+        armed = false;
+        mutation();
+        mutationApplied = true;
+      }
+      return result;
+    },
+  });
+  Object.defineProperty(db, 'prepare', {
+    configurable: true,
+    value(sql) {
+      if (mutationApplied) {
+        if (/^\s*PRAGMA\s+table_xinfo/i.test(String(sql))) fingerprintCountAfterMutation += 1;
+        if (/FROM\s+"billing_source_[a-z_]+"\s+WHERE companyId = \? AND branchId = \?/i.test(String(sql))) {
+          preflightQueryCountAfterMutation += 1;
+        }
+      }
+      return originalPrepare.call(db, sql);
+    },
+  });
+  return {
+    observation: () => ({
+      fingerprintCountAfterMutation,
+      mutationApplied,
+      preflightQueryCountAfterMutation,
+    }),
+    restore() {
+      delete db.exec;
+      delete db.prepare;
+    },
+  };
+}
+
+function installAfterAlgorithmCAdmissionPreflightMutation(db, mutation) {
+  const originalPrepare = db.prepare;
+  let finalTablePreflightCount = 0;
+  let mutationApplied = false;
+  let fingerprintCountAfterMutation = 0;
+  let preflightQueryCountAfterMutation = 0;
+  Object.defineProperty(db, 'prepare', {
+    configurable: true,
+    value(sql) {
+      const statement = originalPrepare.call(db, sql);
+      const text = String(sql);
+      if (mutationApplied && /^\s*PRAGMA\s+table_xinfo/i.test(text)) {
+        fingerprintCountAfterMutation += 1;
+      }
+      if (
+        mutationApplied
+        && /FROM\s+"billing_source_[a-z_]+"\s+WHERE companyId = \? AND branchId = \?/i.test(text)
+      ) preflightQueryCountAfterMutation += 1;
+      if (/FROM\s+"billing_source_audit_events"\s+WHERE companyId = \? AND branchId = \?/i.test(text)) {
+        return {
+          all(...args) {
+            const rows = statement.all(...args);
+            finalTablePreflightCount += 1;
+            if (finalTablePreflightCount === 2) {
+              mutation();
+              mutationApplied = true;
+            }
+            return rows;
+          },
+        };
+      }
+      return statement;
+    },
+  });
+  return {
+    observation: () => ({
+      finalTablePreflightCount,
+      fingerprintCountAfterMutation,
+      mutationApplied,
+      preflightQueryCountAfterMutation,
+    }),
+    restore() { delete db.prepare; },
+  };
 }
 
 function insertForeignTermsIdentity(context, suffix, overrides = {}) {
@@ -1167,6 +1268,63 @@ function selectedEffectiveTermsState(context) {
     WHERE runId = ? AND sourceKind = 'billing_source_effective_terms' AND sourceId = ?
   `).get(context.authority.run.id, terms.id);
   return { candidate, close, input, snapshot, terms };
+}
+
+function selectedPr8AuthoritativeInputState(context, sourceKind) {
+  const candidate = context.db.prepare(`
+    SELECT * FROM actual_source_dry_run_candidates WHERE id = ? AND runId = ?
+  `).get(context.authority.candidate.id, context.authority.run.id);
+  const directIds = {
+    billing_source_activation_boundaries: candidate.activationBoundaryId,
+    billing_source_rental_lines: candidate.rentalLineId,
+    billing_source_periods: candidate.periodId,
+    billing_source_period_versions: candidate.closedPeriodVersionId,
+    billing_source_snapshots: candidate.snapshotId,
+    billing_source_upds: candidate.updId,
+    billing_source_upd_versions: candidate.currentConductedUpdVersionId,
+    billing_source_upd_lines: candidate.updLineId,
+    billing_source_upd_line_versions: candidate.updLineVersionId,
+    billing_source_coverage_sets: candidate.coverageSetId,
+    billing_source_coverage_slices: candidate.coverageSliceId,
+  };
+  let sourceId = directIds[sourceKind] || null;
+  if (sourceKind === 'billing_source_effective_terms') {
+    sourceId = context.db.prepare(`
+      SELECT effectiveTermsVersionId AS id FROM billing_source_snapshots WHERE id = ?
+    `).get(candidate.snapshotId)?.id ?? null;
+  } else if (sourceKind === 'billing_source_snapshot_evidence') {
+    sourceId = context.db.prepare(`
+      SELECT id FROM billing_source_snapshot_evidence
+      WHERE snapshotId = ? ORDER BY evidenceType ASC, id ASC LIMIT 1
+    `).get(candidate.snapshotId)?.id ?? null;
+  } else if (sourceKind === 'billing_source_operations') {
+    sourceId = context.db.prepare(`
+      SELECT operationId AS id FROM billing_source_coverage_sets WHERE id = ?
+    `).get(candidate.coverageSetId)?.id ?? null;
+  } else if (sourceKind === 'billing_source_audit_events') {
+    const operationId = context.db.prepare(`
+      SELECT operationId AS id FROM billing_source_coverage_sets WHERE id = ?
+    `).get(candidate.coverageSetId)?.id ?? null;
+    sourceId = context.db.prepare(`
+      SELECT id FROM billing_source_audit_events
+      WHERE operationId = ? ORDER BY id ASC LIMIT 1
+    `).get(operationId)?.id ?? null;
+  } else if (sourceKind === 'billing_source_coverage_supersessions') {
+    sourceId = context.db.prepare(`
+      SELECT id FROM billing_source_coverage_supersessions
+      WHERE originalCoverageSetId = ? OR replacementCoverageSetId = ?
+      ORDER BY id ASC LIMIT 1
+    `).get(candidate.coverageSetId, candidate.coverageSetId)?.id ?? null;
+  }
+  assert.ok(sourceId, `selected authoritative ${sourceKind} identity`);
+  const sourceRow = context.db.prepare(`SELECT * FROM "${sourceKind}" WHERE id = ?`).get(sourceId);
+  const persistedInput = context.db.prepare(`
+    SELECT * FROM actual_source_dry_run_inputs
+    WHERE runId = ? AND sourceKind = ? AND sourceId = ?
+  `).get(context.authority.run.id, sourceKind, sourceId);
+  assert.ok(sourceRow, `selected authoritative ${sourceKind} row`);
+  assert.ok(persistedInput, `selected persisted PR8 ${sourceKind} input`);
+  return { candidate, persistedInput, sourceKind, sourceRow };
 }
 
 function assertPr8ContentDriftDenial(
@@ -1880,7 +2038,7 @@ test('P1 billing-period lifecycle adversarial self-audit beyond the reported fin
         ...current.closed,
         snapshotId: v1.snapshotId,
       });
-      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', current.command);
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH', current.command);
     } finally {
       context.db.close();
     }
@@ -1968,7 +2126,7 @@ test('P1 billing-period lifecycle adversarial self-audit beyond the reported fin
       } finally {
         context.db.pragma('foreign_keys = ON');
       }
-      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION', current.command);
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH', current.command);
     } finally {
       context.db.close();
     }
@@ -2185,7 +2343,7 @@ test('P1 effectiveTermsVersionId semantic ownership RED contract', async t => {
     const context = createPr9aContext();
     try {
       insertForeignTermsIdentity(context, 'close-only', { bindSnapshot: false });
-      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION');
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
     } finally {
       context.db.close();
     }
@@ -3349,6 +3507,810 @@ test('P1-02 full PR6 persisted storage preflight RED contract', async t => {
   });
 });
 
+test('P1-01 all selected PR8 inputs are reconstructed from authoritative PR6 content RED contract', async t => {
+  const contentCases = [
+    ['activation approval reference', 'billing_source_activation_boundaries', row => ({
+      ...row,
+      approvalReference: `${row.approvalReference}-drift`,
+    }), ['approvalReference']],
+    ['rental-line source event identity', 'billing_source_rental_lines', row => ({
+      ...row,
+      sourceEventId: `${row.sourceEventId}-drift`,
+    }), ['sourceEventId']],
+    ['effective-terms policy content', 'billing_source_effective_terms', row => ({
+      ...row,
+      calculationPolicyRef: `${row.calculationPolicyRef}-drift`,
+    }), ['calculationPolicyRef']],
+    ['period cycle evidence', 'billing_source_periods', row => ({
+      ...row,
+      cycleBoundaryEvidenceRef: `${row.cycleBoundaryEvidenceRef}-drift`,
+    }), ['cycleBoundaryEvidenceRef']],
+    ['period close lifecycle reason payload', 'billing_source_period_versions', row => ({
+      ...row,
+      reasonCode: 'INDEPENDENT_AUDIT',
+      reasonText: 'independent audit lifecycle drift',
+    }), ['reasonCode', 'reasonText']],
+    ['period close null to empty string', 'billing_source_period_versions', row => ({
+      ...row,
+      reasonText: '',
+    }), ['reasonText']],
+    ['period close source event', 'billing_source_period_versions', row => ({
+      ...row,
+      sourceEventId: `${row.sourceEventId}-drift`,
+    }), ['sourceEventId']],
+    ['period close actor and capability catalog', 'billing_source_period_versions', row => ({
+      ...row,
+      actorPrincipalId: `${row.actorPrincipalId}-drift`,
+      capabilityKey: 'receivables.read',
+    }), ['actorPrincipalId', 'capabilityKey']],
+    ['snapshot calculationInputsJson', 'billing_source_snapshots', row => ({
+      ...row,
+      calculationInputsJson: oracleCanonicalJson({
+        ...JSON.parse(row.calculationInputsJson),
+        independentAudit: true,
+      }),
+    }), ['calculationInputsJson']],
+    ['snapshot calculationInputsHash', 'billing_source_snapshots', row => ({
+      ...row,
+      calculationInputsHash: oracleHash({ independentAudit: 'calculation-input-hash' }),
+    }), ['calculationInputsHash']],
+    ['snapshot evidenceSetHash', 'billing_source_snapshots', row => ({
+      ...row,
+      evidenceSetHash: oracleHash({ independentAudit: 'evidence-set-hash' }),
+    }), ['evidenceSetHash']],
+    ['snapshot monetary content', 'billing_source_snapshots', row => ({
+      ...row,
+      preDiscountNetMinor: Number(row.preDiscountNetMinor) + 1,
+    }), ['preDiscountNetMinor']],
+    ['snapshot algorithm version with valid INTEGER storage', 'billing_source_snapshots', row => ({
+      ...row,
+      calculationAlgorithmVersion: Number(row.calculationAlgorithmVersion) + 1,
+    }), ['calculationAlgorithmVersion']],
+    ['snapshot evidence authority policy', 'billing_source_snapshot_evidence', row => ({
+      ...row,
+      authorityPolicyRef: `${row.authorityPolicyRef}-drift`,
+    }), ['authorityPolicyRef']],
+    ['snapshot evidence source reference', 'billing_source_snapshot_evidence', row => ({
+      ...row,
+      sourceId: `${row.sourceId}-drift`,
+    }), ['sourceId']],
+    ['snapshot evidence source hash', 'billing_source_snapshot_evidence', row => ({
+      ...row,
+      evidenceHash: oracleHash({ independentAudit: 'snapshot-evidence-hash' }),
+    }), ['evidenceHash']],
+    ['snapshot evidence source event', 'billing_source_snapshot_evidence', row => ({
+      ...row,
+      sourceEventId: `${row.sourceEventId}-drift`,
+    }), ['sourceEventId']],
+    ['UPD document content', 'billing_source_upds', row => ({
+      ...row,
+      documentNumber: `${row.documentNumber}-DRIFT`,
+    }), ['documentNumber']],
+    ['UPD-version conducted evidence', 'billing_source_upd_versions', row => ({
+      ...row,
+      conductedEvidenceRef: `${row.conductedEvidenceRef}-drift`,
+    }), ['conductedEvidenceRef']],
+    ['UPD-version status and content', 'billing_source_upd_versions', row => ({
+      ...row,
+      state: 'formed',
+      contentHash: oracleHash({ independentAudit: 'upd-version-content' }),
+    }), ['state', 'contentHash']],
+    ['UPD-version source event', 'billing_source_upd_versions', row => ({
+      ...row,
+      sourceEventId: `${row.sourceEventId}-drift`,
+    }), ['sourceEventId']],
+    ['UPD-line source identity', 'billing_source_upd_lines', row => ({
+      ...row,
+      sourceLineRef: `${row.sourceLineRef}-drift`,
+    }), ['sourceLineRef']],
+    ['UPD-line-version description', 'billing_source_upd_line_versions', row => ({
+      ...row,
+      description: `${row.description}-drift`,
+    }), ['description']],
+    ['UPD-line-version quantity integer and scale', 'billing_source_upd_line_versions', row => ({
+      ...row,
+      quantityValueInteger: Number(row.quantityValueInteger) + 1,
+      quantityScale: Number(row.quantityScale) + 1,
+    }), ['quantityValueInteger', 'quantityScale']],
+    ['UPD-line-version net VAT gross', 'billing_source_upd_line_versions', row => ({
+      ...row,
+      netMinor: Number(row.netMinor) + 1,
+      vatMinor: Number(row.vatMinor) + 1,
+      grossMinor: Number(row.grossMinor) + 2,
+    }), ['netMinor', 'vatMinor', 'grossMinor']],
+    ['UPD-line-version source reference', 'billing_source_upd_line_versions', row => ({
+      ...row,
+      sourceRef: `${row.sourceRef}-drift`,
+    }), ['sourceRef']],
+    ['UPD-line-version display position', 'billing_source_upd_line_versions', row => ({
+      ...row,
+      displayPosition: Number(row.displayPosition) + 1,
+    }), ['displayPosition']],
+    ['coverage-set mapping hash', 'billing_source_coverage_sets', row => ({
+      ...row,
+      mappingHash: oracleHash({ independentAudit: 'coverage-mapping' }),
+    }), ['mappingHash']],
+    ['coverage-set deltas', 'billing_source_coverage_sets', row => ({
+      ...row,
+      netDeltaMinor: Number(row.netDeltaMinor) + 1,
+      vatDeltaMinor: Number(row.vatDeltaMinor) - 1,
+    }), ['netDeltaMinor', 'vatDeltaMinor']],
+    ['coverage-slice due-date evidence', 'billing_source_coverage_slices', row => ({
+      ...row,
+      dueDateEvidenceRef: `${row.dueDateEvidenceRef}-drift`,
+    }), ['dueDateEvidenceRef']],
+    ['coverage-slice hash', 'billing_source_coverage_slices', row => ({
+      ...row,
+      sliceHash: oracleHash({ independentAudit: 'coverage-slice' }),
+    }), ['sliceHash']],
+    ['coverage-slice allocated monetary fields', 'billing_source_coverage_slices', row => ({
+      ...row,
+      allocatedNetMinor: Number(row.allocatedNetMinor) + 1,
+      allocatedVatMinor: Number(row.allocatedVatMinor) + 1,
+      allocatedGrossMinor: Number(row.allocatedGrossMinor) + 2,
+    }), ['allocatedNetMinor', 'allocatedVatMinor', 'allocatedGrossMinor']],
+    ['source operation command fingerprint', 'billing_source_operations', row => ({
+      ...row,
+      commandFingerprint: oracleHash({ independentAudit: 'operation-command' }),
+    }), ['commandFingerprint']],
+    ['source operation result fingerprint', 'billing_source_operations', row => ({
+      ...row,
+      resultFingerprint: oracleHash({ independentAudit: 'operation-result' }),
+    }), ['resultFingerprint']],
+    ['source operation actor and catalog version', 'billing_source_operations', row => ({
+      ...row,
+      actorPrincipalId: `${row.actorPrincipalId}-drift`,
+      capabilityKey: 'receivables.read',
+    }), ['actorPrincipalId', 'capabilityKey']],
+    ['source audit metadata JSON', 'billing_source_audit_events', row => ({
+      ...row,
+      metadataJson: oracleCanonicalJson({ independentAudit: true }),
+    }), ['metadataJson']],
+    ['source audit after fingerprint', 'billing_source_audit_events', row => ({
+      ...row,
+      afterFingerprint: oracleHash({ independentAudit: 'audit-after' }),
+    }), ['afterFingerprint']],
+    ['source audit actor and catalog version', 'billing_source_audit_events', row => ({
+      ...row,
+      actorPrincipalId: `${row.actorPrincipalId}-drift`,
+      capabilityKey: 'receivables.read',
+    }), ['actorPrincipalId', 'capabilityKey']],
+  ];
+
+  for (const [name, sourceKind, mutate, changedFields] of contentCases) {
+    await t.test(name, () => {
+      const context = createPr9aContext();
+      try {
+        const state = selectedPr8AuthoritativeInputState(context, sourceKind);
+        const oldProjection = oraclePr8AuthoritativeProjection(sourceKind, state.sourceRow);
+        assert.equal(oldProjection.normalizedInputHash, state.persistedInput.normalizedInputHash);
+        const changed = mutate({ ...state.sourceRow });
+        rewriteRowIgnoringChecks(context.db, sourceKind, changed);
+        const authoritative = context.db.prepare(`SELECT * FROM "${sourceKind}" WHERE id = ?`)
+          .get(changed.id);
+        assertPr8ContentDriftDenial(context, {
+          changedField: changedFields.join(','),
+          newValue: Object.fromEntries(changedFields.map(field => [field, authoritative[field]])),
+          oldValue: Object.fromEntries(changedFields.map(field => [field, state.sourceRow[field]])),
+          persistedInput: state.persistedInput,
+          sourceKind,
+          sourceRow: authoritative,
+        });
+      } finally {
+        context.db.close();
+      }
+    });
+  }
+
+  await t.test('coverage-supersession content is selected and authoritatively rebound', () => {
+    const context = createPr9aContext();
+    try {
+      appendConductedSourceCorrection(context, 'all-input-supersession');
+      const selected = acceptAdditionalPolicyRun(
+        context,
+        approvedTestPolicyManifest(),
+        'all-input-supersession',
+      );
+      const relation = context.db.prepare(`
+        SELECT * FROM billing_source_coverage_supersessions
+        WHERE originalCoverageSetId = ? OR replacementCoverageSetId = ?
+        ORDER BY id LIMIT 1
+      `).get(selected.selectedCandidate.coverageSetId, selected.selectedCandidate.coverageSetId);
+      assert.ok(relation);
+      const persistedInput = context.db.prepare(`
+        SELECT * FROM actual_source_dry_run_inputs
+        WHERE runId = ? AND sourceKind = 'billing_source_coverage_supersessions' AND sourceId = ?
+      `).get(selected.selectedRun.id, relation.id);
+      assert.ok(persistedInput);
+      assert.equal(
+        persistedInput.normalizedInputHash,
+        oraclePr8AuthoritativeProjection('billing_source_coverage_supersessions', relation)
+          .normalizedInputHash,
+      );
+      const changed = { ...relation, reasonText: `${relation.reasonText}-drift` };
+      rewriteRowIgnoringChecks(context.db, 'billing_source_coverage_supersessions', changed);
+      assertPr8ContentDriftDenial(context, {
+        changedField: 'reasonText',
+        newValue: changed.reasonText,
+        oldValue: relation.reasonText,
+        persistedInput,
+        sourceKind: 'billing_source_coverage_supersessions',
+        sourceRow: changed,
+      }, selected.command);
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('two selected rows drifting together retain PR8 mismatch precedence', () => {
+    const context = createPr9aContext();
+    try {
+      const snapshot = selectedPr8AuthoritativeInputState(context, 'billing_source_snapshots');
+      const evidence = selectedPr8AuthoritativeInputState(context, 'billing_source_snapshot_evidence');
+      rewriteRowIgnoringChecks(context.db, snapshot.sourceKind, {
+        ...snapshot.sourceRow,
+        calculationInputsJson: oracleCanonicalJson({ coordinated: true }),
+      });
+      rewriteRowIgnoringChecks(context.db, evidence.sourceKind, {
+        ...evidence.sourceRow,
+        authorityPolicyRef: `${evidence.sourceRow.authorityPolicyRef}-coordinated`,
+      });
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('coordinated snapshot JSON and hash changes do not bless stale PR8 input', () => {
+    const context = createPr9aContext();
+    try {
+      const state = selectedPr8AuthoritativeInputState(context, 'billing_source_snapshots');
+      const calculationInputsJson = oracleCanonicalJson({
+        ...JSON.parse(state.sourceRow.calculationInputsJson),
+        coordinated: true,
+      });
+      const changed = {
+        ...state.sourceRow,
+        calculationInputsJson,
+        calculationInputsHash: oracleHash(JSON.parse(calculationInputsJson)),
+      };
+      rewriteRowIgnoringChecks(context.db, state.sourceKind, changed);
+      assertPr8ContentDriftDenial(context, {
+        changedField: 'calculationInputsJson,calculationInputsHash',
+        newValue: [changed.calculationInputsJson, changed.calculationInputsHash],
+        oldValue: [state.sourceRow.calculationInputsJson, state.sourceRow.calculationInputsHash],
+        persistedInput: state.persistedInput,
+        sourceKind: state.sourceKind,
+        sourceRow: changed,
+      });
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('fully resealed authorization and activation cannot bless stale snapshot input', () => {
+    const context = createPr9aContext();
+    try {
+      const state = selectedPr8AuthoritativeInputState(context, 'billing_source_snapshots');
+      rewriteRowIgnoringChecks(context.db, state.sourceKind, {
+        ...state.sourceRow,
+        calculationInputsJson: oracleCanonicalJson({ resealedAuthority: true }),
+      });
+      const authorization = appendAuthorizationVersion(context);
+      const activation = appendActivationVersion(context, authorization);
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH', eligibilityCommand(context, {
+        activationRecordId: activation.recordId,
+        writeAuthorizationRecordId: authorization.recordId,
+      }));
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('existing event is not replayed after selected snapshot content drift', () => {
+    const context = createPr9aContext();
+    try {
+      const command = eligibilityCommand(context);
+      context.eligibilityService.produceEligibleEvent(command);
+      const state = selectedPr8AuthoritativeInputState(context, 'billing_source_snapshots');
+      const changed = {
+        ...state.sourceRow,
+        calculationInputsJson: oracleCanonicalJson({ existingEventDrift: true }),
+      };
+      rewriteRowIgnoringChecks(context.db, state.sourceKind, changed);
+      assertPr8ContentDriftDenial(context, {
+        changedField: 'calculationInputsJson',
+        newValue: changed.calculationInputsJson,
+        oldValue: state.sourceRow.calculationInputsJson,
+        persistedInput: state.persistedInput,
+        sourceKind: state.sourceKind,
+        sourceRow: changed,
+      }, command, counts(context.db));
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('selected input drift after event insert fails locked reread and rolls back all changes', () => {
+    const context = createPr9aContext();
+    const state = selectedPr8AuthoritativeInputState(context, 'billing_source_snapshots');
+    const restore = installAfterEventInsertMutation(context.db, () => {
+      rewriteRowIgnoringChecks(context.db, state.sourceKind, {
+        ...state.sourceRow,
+        calculationInputsJson: oracleCanonicalJson({ postInsertDrift: true }),
+      });
+    });
+    try {
+      assertOperationalIntegrityFailure(
+        context,
+        eligibilityCommand(context),
+        'CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED',
+      );
+      const restored = context.db.prepare('SELECT * FROM billing_source_snapshots WHERE id = ?')
+        .get(state.sourceRow.id);
+      assert.equal(restored.calculationInputsJson, state.sourceRow.calculationInputsJson);
+    } finally {
+      restore();
+      context.db.close();
+    }
+  });
+
+  await t.test('selected content drift plus separate PR8 corruption is still PR8 evidence mismatch', () => {
+    const context = createPr9aContext();
+    try {
+      const state = selectedPr8AuthoritativeInputState(context, 'billing_source_snapshots');
+      rewriteRowIgnoringChecks(context.db, state.sourceKind, {
+        ...state.sourceRow,
+        calculationInputsJson: oracleCanonicalJson({ separateCorruption: true }),
+      });
+      mutateCandidateForConflict(context);
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('fresh PR8 evidence generated from changed authoritative content is valid', () => {
+    const context = createPr9aContext();
+    try {
+      const state = selectedPr8AuthoritativeInputState(context, 'billing_source_activation_boundaries');
+      const changed = {
+        ...state.sourceRow,
+        approvalReference: `${state.sourceRow.approvalReference}-fresh`,
+      };
+      rewriteRowIgnoringChecks(context.db, state.sourceKind, changed);
+      const evaluated = context.dryRunService.evaluateActualSourceDryRun(
+        context.dryRunContext,
+        dryRunCommand({
+          asOfDate: '2026-09-15',
+          idempotencyKey: 'all-input-fresh-pr8-control',
+          policyManifest: approvedTestPolicyManifest(),
+        }),
+      );
+      const run = context.db.prepare('SELECT * FROM actual_source_dry_runs WHERE id = ?')
+        .get(evaluated.dryRunId);
+      const candidate = context.db.prepare(`
+        SELECT * FROM actual_source_dry_run_candidates
+        WHERE runId = ? ORDER BY candidateKey, id LIMIT 1
+      `).get(run.id);
+      assert.equal(candidate.status, 'eligible_candidate');
+      const input = context.db.prepare(`
+        SELECT * FROM actual_source_dry_run_inputs
+        WHERE runId = ? AND sourceKind = ? AND sourceId = ?
+      `).get(run.id, state.sourceKind, changed.id);
+      assert.equal(
+        input.normalizedInputHash,
+        oraclePr8AuthoritativeProjection(state.sourceKind, changed).normalizedInputHash,
+      );
+      const acceptedRuns = [oracleAcceptedRun(context, run.id)];
+      resealAcceptance(context, {
+        acceptedDryRuns: acceptedRuns.map(entry => ({
+          dryRunId: entry.dryRunId,
+          resultHash: entry.resultHash,
+        })),
+        acceptedRuns,
+        authorization: { policyManifestHashesJson: oracleCanonicalJson([run.policyManifestHash]) },
+      });
+      resealAcceptedPolicyManifestSet(context, [run.policyManifestHash]);
+      const result = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context, {
+        candidateId: candidate.id,
+        dryRunId: run.id,
+      }));
+      assert.equal(result.replayed, false);
+      assert.deepEqual(counts(context.db), {
+        events: 1, conflicts: 0, transitions: 0, receivables: 0, operations: 0,
+      });
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('P1-02 Algorithm C repeats full transaction-local PR6 storage preflight RED contract', async t => {
+  const raceCases = [
+    ['snapshot calculationAlgorithmVersion', 'billing_source_snapshots', 'calculationAlgorithmVersion'],
+    ['effective-terms version', 'billing_source_effective_terms', 'version'],
+    ['UPD version', 'billing_source_upd_versions', 'version'],
+    ['UPD-line version', 'billing_source_upd_line_versions', 'version'],
+    ['coverage-set version', 'billing_source_coverage_sets', 'version'],
+    ['coverage-slice strict monetary value', 'billing_source_coverage_slices', 'allocatedNetMinor'],
+    ['operation resultVersion', 'billing_source_operations', 'resultVersion'],
+    ['audit aggregateVersion', 'billing_source_audit_events', 'aggregateVersion'],
+    ['activation-boundary schemaVersion', 'billing_source_activation_boundaries', 'schemaVersion'],
+  ];
+
+  for (const [name, table, column] of raceCases) {
+    await t.test(`${name} INTEGER to REAL after Algorithm A rollback and before C BEGIN`, () => {
+      const context = createPr9aContext();
+      const state = selectedPr8AuthoritativeInputState(context, table);
+      replacePr6TableWithPermissiveStorage(context, table, [column]);
+      mutateCandidateForConflict(context);
+      let raw = null;
+      const hook = installAfterAlgorithmARollbackMutation(context.db, () => {
+        raw = setRawPr6Integer(
+          context,
+          table,
+          column,
+          state.sourceRow.id,
+          `CAST(${Number(state.sourceRow[column])}.0 AS REAL)`,
+          { replace: false },
+        );
+      });
+      try {
+        assertOperationalIntegrityFailure(
+          context,
+          eligibilityCommand(context),
+          'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+        );
+        assert.equal(raw.storageClass, 'real');
+        assert.equal(raw.jsType, 'number');
+        assert.equal(hook.observation().mutationApplied, true);
+        assert.ok(hook.observation().preflightQueryCountAfterMutation >= 1);
+        assert.equal(hook.observation().fingerprintCountAfterMutation, 0);
+      } finally {
+        hook.restore();
+        context.db.close();
+      }
+    });
+  }
+
+  await t.test('disconnected same-scope invalid row appearing before C blocks before fingerprint', () => {
+    const context = createPr9aContext();
+    const table = 'billing_source_effective_terms';
+    const column = 'version';
+    const selected = selectedPr8AuthoritativeInputState(context, table);
+    replacePr6TableWithPermissiveStorage(context, table, [column]);
+    mutateCandidateForConflict(context);
+    let raw = null;
+    const hook = installAfterAlgorithmARollbackMutation(context.db, () => {
+      const disconnected = {
+        ...selected.sourceRow,
+        id: 'algorithm-c-disconnected-same-scope-terms',
+        rentalLineId: 'algorithm-c-disconnected-rental-line',
+        sourceRef: 'algorithm-c-disconnected-source',
+      };
+      insertCopiedRow(context.db, table, disconnected);
+      raw = setRawPr6Integer(
+        context,
+        table,
+        column,
+        disconnected.id,
+        'CAST(1.0 AS REAL)',
+        { replace: false },
+      );
+    });
+    try {
+      assertOperationalIntegrityFailure(
+        context,
+        eligibilityCommand(context),
+        'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+      );
+      assert.equal(raw.storageClass, 'real');
+      assert.ok(hook.observation().preflightQueryCountAfterMutation >= 1);
+      assert.equal(hook.observation().fingerprintCountAfterMutation, 0);
+    } finally {
+      hook.restore();
+      context.db.close();
+    }
+  });
+
+  await t.test('foreign-scope invalid row appearing before C does not block selected scope', () => {
+    const context = createPr9aContext();
+    const table = 'billing_source_effective_terms';
+    const selected = selectedPr8AuthoritativeInputState(context, table);
+    replacePr6TableWithPermissiveStorage(context, table, ['version']);
+    mutateCandidateForConflict(context);
+    let raw = null;
+    const hook = installAfterAlgorithmARollbackMutation(context.db, () => {
+      const foreign = {
+        ...selected.sourceRow,
+        id: 'algorithm-c-foreign-scope-terms',
+        companyId: 'foreign-company',
+        branchId: 'foreign-branch',
+        rentalLineId: 'algorithm-c-foreign-rental-line',
+        sourceRef: 'algorithm-c-foreign-source',
+      };
+      insertCopiedRow(context.db, table, foreign);
+      raw = setRawPr6Integer(
+        context,
+        table,
+        'version',
+        foreign.id,
+        'CAST(1.0 AS REAL)',
+        { replace: false },
+      );
+    });
+    try {
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+      assert.equal(raw.storageClass, 'real');
+      assert.equal(hook.observation().mutationApplied, true);
+      assert.ok(hook.observation().preflightQueryCountAfterMutation >= 1);
+    } finally {
+      hook.restore();
+      context.db.close();
+    }
+  });
+
+  await t.test('invalid storage after A lifecycle denial has storage precedence in C', () => {
+    const context = createPr9aContext();
+    const state = selectedPr8AuthoritativeInputState(context, 'billing_source_snapshots');
+    reopenAcceptedBillingPeriod(context, 'algorithm-c-storage-lifecycle');
+    replacePr6TableWithPermissiveStorage(
+      context,
+      'billing_source_snapshots',
+      ['calculationAlgorithmVersion'],
+    );
+    const hook = installAfterAlgorithmARollbackMutation(context.db, () => {
+      setRawPr6Integer(
+        context,
+        'billing_source_snapshots',
+        'calculationAlgorithmVersion',
+        state.sourceRow.id,
+        'CAST(1.0 AS REAL)',
+        { replace: false },
+      );
+    });
+    try {
+      assertOperationalIntegrityFailure(
+        context,
+        eligibilityCommand(context),
+        'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+      );
+      assert.equal(hook.observation().fingerprintCountAfterMutation, 0);
+    } finally {
+      hook.restore();
+      context.db.close();
+    }
+  });
+
+  await t.test('invalid storage after A due-date denial has storage precedence in C', () => {
+    const context = createPr9aContext();
+    const state = selectedPr8AuthoritativeInputState(context, 'billing_source_snapshots');
+    const dueDatePolicySet = JSON.parse(context.authority.authorization.dueDatePolicySetJson);
+    dueDatePolicySet.contractualDueDate.expectedSourceRef = 'invoice_due_date';
+    const dueDatePolicySetJson = canonicalJson(dueDatePolicySet);
+    const dueDatePolicySetHash = computeDueDatePolicySetHash(dueDatePolicySet);
+    const authorization = appendAuthorizationVersion(context, {
+      dueDatePolicySetHash,
+      dueDatePolicySetJson,
+    });
+    const activation = appendActivationVersion(context, authorization, {
+      dueDatePolicySetHash,
+      dueDatePolicySetJson,
+    });
+    const command = eligibilityCommand(context, {
+      activationRecordId: activation.recordId,
+      writeAuthorizationRecordId: authorization.recordId,
+    });
+    replacePr6TableWithPermissiveStorage(
+      context,
+      'billing_source_snapshots',
+      ['calculationAlgorithmVersion'],
+    );
+    const hook = installAfterAlgorithmARollbackMutation(context.db, () => {
+      setRawPr6Integer(
+        context,
+        'billing_source_snapshots',
+        'calculationAlgorithmVersion',
+        state.sourceRow.id,
+        'CAST(1.0 AS REAL)',
+        { replace: false },
+      );
+    });
+    try {
+      assertOperationalIntegrityFailure(
+        context,
+        command,
+        'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+      );
+      assert.equal(hook.observation().fingerprintCountAfterMutation, 0);
+    } finally {
+      hook.restore();
+      context.db.close();
+    }
+  });
+
+  await t.test('invalid storage plus frozen suffix descendants fails before frozen reconstruction', () => {
+    const context = createPr9aContext();
+    const state = selectedPr8AuthoritativeInputState(context, 'billing_source_effective_terms');
+    replacePr6TableWithPermissiveStorage(context, 'billing_source_effective_terms', ['version']);
+    mutateCandidateForConflict(context);
+    const hook = installAfterAlgorithmARollbackMutation(context.db, () => {
+      appendConductedSourceCorrection(context, 'algorithm-c-frozen-suffix');
+      setRawPr6Integer(
+        context,
+        'billing_source_effective_terms',
+        'version',
+        state.sourceRow.id,
+        'CAST(1.0 AS REAL)',
+        { replace: false },
+      );
+    });
+    try {
+      assertOperationalIntegrityFailure(
+        context,
+        eligibilityCommand(context),
+        'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+      );
+      assert.equal(hook.observation().fingerprintCountAfterMutation, 0);
+    } finally {
+      hook.restore();
+      context.db.close();
+    }
+  });
+
+  await t.test('invalid storage is checked before replay of an existing conflict', () => {
+    const context = createPr9aContext();
+    mutateCandidateForConflict(context);
+    assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    const durableBefore = counts(context.db);
+    const state = selectedPr8AuthoritativeInputState(context, 'billing_source_snapshots');
+    replacePr6TableWithPermissiveStorage(
+      context,
+      'billing_source_snapshots',
+      ['calculationAlgorithmVersion'],
+    );
+    const hook = installAfterAlgorithmARollbackMutation(context.db, () => {
+      setRawPr6Integer(
+        context,
+        'billing_source_snapshots',
+        'calculationAlgorithmVersion',
+        state.sourceRow.id,
+        'CAST(1.0 AS REAL)',
+        { replace: false },
+      );
+    });
+    try {
+      assertOperationalIntegrityFailure(
+        context,
+        eligibilityCommand(context),
+        'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+        durableBefore,
+      );
+      assert.equal(hook.observation().fingerprintCountAfterMutation, 0);
+    } finally {
+      hook.restore();
+      context.db.close();
+    }
+  });
+
+  await t.test('storage mutation after C admission preflight is caught before reconstruction or insert', () => {
+    const context = createPr9aContext();
+    const state = selectedPr8AuthoritativeInputState(context, 'billing_source_snapshots');
+    replacePr6TableWithPermissiveStorage(
+      context,
+      'billing_source_snapshots',
+      ['calculationAlgorithmVersion'],
+    );
+    mutateCandidateForConflict(context);
+    let raw = null;
+    const hook = installAfterAlgorithmCAdmissionPreflightMutation(context.db, () => {
+      raw = setRawPr6Integer(
+        context,
+        'billing_source_snapshots',
+        'calculationAlgorithmVersion',
+        state.sourceRow.id,
+        'CAST(1.0 AS REAL)',
+        { replace: false },
+      );
+    });
+    try {
+      assertOperationalIntegrityFailure(
+        context,
+        eligibilityCommand(context),
+        'CANONICAL_PR6_PERSISTED_ROW_TYPE_INVALID',
+      );
+      assert.equal(raw.storageClass, 'real');
+      assert.equal(hook.observation().mutationApplied, true);
+      assert.ok(hook.observation().finalTablePreflightCount >= 2);
+      assert.ok(hook.observation().preflightQueryCountAfterMutation >= 1);
+      assert.equal(hook.observation().fingerprintCountAfterMutation, 0);
+    } finally {
+      hook.restore();
+      context.db.close();
+    }
+  });
+
+  await t.test('valid Algorithm C control persists one complete denial pair', () => {
+    const context = createPr9aContext();
+    try {
+      mutateCandidateForConflict(context);
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
+    } finally {
+      context.db.close();
+    }
+  });
+
+  await t.test('independent schema matrix contains exactly 67 strict INTEGER columns in 16 tables', () => {
+    const independentMatrix = {
+      billing_source_activation_boundaries: ['schemaVersion'],
+      billing_source_rental_lines: ['sourceEventVersion', 'schemaVersion'],
+      billing_source_effective_terms: [
+        'version', 'rateAmountMinor', 'rateQuantityScale', 'contractualBillingCycleVersion',
+        'minimumTermQuantity', 'discountValue', 'sourceVersion', 'schemaVersion',
+      ],
+      billing_source_periods: ['contractualBillingCycleVersion', 'schemaVersion'],
+      billing_source_period_versions: [
+        'version', 'actorMembershipVersion', 'capabilityCatalogVersion',
+        'sourceEventVersion', 'schemaVersion',
+      ],
+      billing_source_snapshots: [
+        'preDiscountNetMinor', 'discountMinor', 'netMinor', 'vatMinor', 'grossMinor',
+        'calculationAlgorithmVersion', 'schemaVersion',
+      ],
+      billing_source_snapshot_evidence: ['sourceVersion', 'sourceEventVersion', 'schemaVersion'],
+      billing_source_upds: ['schemaVersion'],
+      billing_source_upd_versions: [
+        'version', 'actorMembershipVersion', 'capabilityCatalogVersion',
+        'sourceEventVersion', 'conductedEvidenceVersion', 'schemaVersion',
+      ],
+      billing_source_upd_lines: ['schemaVersion'],
+      billing_source_upd_line_versions: [
+        'version', 'displayPosition', 'quantityValueInteger', 'quantityScale',
+        'netMinor', 'vatMinor', 'grossMinor', 'sourceVersion', 'schemaVersion',
+      ],
+      billing_source_coverage_sets: [
+        'version', 'mappingAlgorithmVersion', 'netDeltaMinor', 'vatDeltaMinor',
+        'grossDeltaMinor', 'schemaVersion',
+      ],
+      billing_source_coverage_supersessions: [
+        'actorMembershipVersion', 'capabilityCatalogVersion', 'sourceEventVersion', 'schemaVersion',
+      ],
+      billing_source_coverage_slices: [
+        'allocatedNetMinor', 'allocatedVatMinor', 'allocatedGrossMinor', 'schemaVersion',
+      ],
+      billing_source_operations: [
+        'actorMembershipVersion', 'capabilityCatalogVersion', 'resultVersion', 'schemaVersion',
+      ],
+      billing_source_audit_events: [
+        'aggregateVersion', 'actorMembershipVersion', 'capabilityCatalogVersion', 'schemaVersion',
+      ],
+    };
+    assert.equal(Object.keys(independentMatrix).length, 16);
+    assert.equal(Object.values(independentMatrix).flat().length, 67);
+    const source = fs.readFileSync(repositoryPath, 'utf8');
+    const context = createPr9aContext();
+    try {
+      for (const [table, columns] of Object.entries(independentMatrix)) {
+        const schemaIntegerColumns = context.db.prepare(`PRAGMA table_info("${table}")`).all()
+          .filter(column => String(column.type).toUpperCase() === 'INTEGER')
+          .map(column => column.name);
+        assert.deepEqual(schemaIntegerColumns.sort(), [...columns].sort(), table);
+        assert.ok(source.includes(`${table}: Object.freeze({`));
+        for (const column of columns) {
+          assert.match(source, new RegExp(`\\b${column}: pr6(?:Positive|NonNegative|Signed)Integer\\(`));
+        }
+      }
+    } finally {
+      context.db.close();
+    }
+    const producerStart = source.indexOf('function produceEligibleEvent(commandInput)');
+    const algorithmCStart = source.indexOf('function persistDenialEvidence(packageInput)');
+    assert.ok(source.indexOf('assertPr6PersistedStoragePreflight(db, command);', producerStart) > producerStart);
+    assert.ok(source.indexOf('assertPr6PersistedStoragePreflight(db, {', algorithmCStart) > algorithmCStart);
+  });
+});
+
 test('P1 effective-terms remediation adversarial self-audit after green proof', async t => {
   await t.test('correct terms ID with a wrong persisted rental-line owner is denied', () => {
     const context = createPr9aContext();
@@ -3379,7 +4341,7 @@ test('P1 effective-terms remediation adversarial self-audit after green proof', 
         ...period,
         contractualBillingCycleCode: 'hostile_period_cycle',
       });
-      assertRequiredDenial(context, 'SOURCE_LINEAGE_NO_CURRENT_REVISION');
+      assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
     } finally {
       context.db.close();
     }
@@ -5090,19 +6052,16 @@ test('locked source revision state machine classifies revision change, correctio
           UPDATE billing_source_upd_versions SET contentHash = ? WHERE id = ?
         `).run('0'.repeat(64), event.conductedUpdVersionId);
       });
-      const { observation } = assertRequiredDenial(
-        context,
-        'SOURCE_REVISION_CHANGED_BEFORE_POSTING',
-      );
+      const { observation } = assertRequiredDenial(context, 'PR8_EVIDENCE_MISMATCH');
       assertProjectionKeys(observation, [
-        'currentPr6RevisionHash', 'currentSourceRevisionKey', 'economicLineageKey',
-        'eventId', 'sealedPr6RevisionHash', 'sealedSourceRevisionKey',
+        'acceptedDryRunsHash', 'acceptedPr8EvidenceHash',
+        'deniedFreshnessWindowFingerprint', 'dryRunId', 'freshnessState',
+        'freshnessWindowFingerprint', 'reconciliationSetHash', 'resultHash',
       ]);
-      assert.equal(observation.expectedProjection.eventId, event.id);
-      assert.equal(observation.expectedProjection.sealedPr6RevisionHash, event.currentPr6RevisionHash);
-      assert.notEqual(
-        observation.observedProjection.currentPr6RevisionHash,
-        observation.expectedProjection.currentPr6RevisionHash,
+      assert.equal(counts(context.db).events, 1);
+      assert.equal(
+        context.db.prepare('SELECT id FROM actual_receivable_eligible_events WHERE id = ?').get(event.id).id,
+        event.id,
       );
     } finally {
       context.db.close();

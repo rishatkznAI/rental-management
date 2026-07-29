@@ -22,12 +22,13 @@ production evidence acceptance, activation, production read/write, settlement,
 shadow-read, or cutover permission. Merge, CI, a draft PR, review silence, or the
 existence of these files changes no authorization value.
 
-This final package revision closes the remaining concurrent-follower ambiguity in
-hostile case 8 identified against rejected head
-`799e2052ad931228d28d9c6598b97a69f1f74d50`. It preserves the previously remediated
-C-seam transaction ownership and separates follower behavior before and after
-durable `COMPLETE`. Closure is a design proposal only and must be independently
-re-audited at its new exact head.
+The previous package head `bdc6279b2b4ba6adf0d71335d61b0e21dd27ed76`
+was rejected because its global incomplete-replay prohibition conflicted with the
+merged PR9a wrapper contract. This revision adopts the Owner/Architect
+cross-entrypoint decision: the existing wrapper retains stage-preserving exact replay,
+while only the new bounded PR9b seam maps an incomplete exact pair to C7
+`CONFLICT_RECOVERY_REQUIRED`. Closure is a design proposal only and must be
+independently re-audited at its new exact head.
 
 ## 2. Effect of the design PR
 
@@ -71,7 +72,7 @@ Responsibilities are exact:
 | `canonical-actual-posting-domain.js` | Pure posting command, projection, canonical serialization/hash, fingerprint, idempotency, result, and stable-error contracts needed by Algorithm B; no I/O or runtime activation |
 | `canonical-actual-posting-repository.js` | Repository-owned `BEGIN IMMEDIATE`, durable historical-result resolution before current admission, Algorithm B primary triplet, exact replay, rollback, and delegation of only a bounded denial cause to the existing Algorithm C owner |
 | `canonical-actual-posting-service.js` | Inert exact command validation and delegation to the disabled repository only; no registration or caller authority |
-| `canonical-actual-eligibility-event-repository.js` | One narrow C-owned posting-denial seam; exact C1-C8 locked-state outcomes; and extraction of one unexported in-transaction primitive from the existing transaction-owning wrapper so both entry points share unchanged Algorithm C package verification/create/replay/post-write semantics without nested `BEGIN` or an unlock gap |
+| `canonical-actual-eligibility-event-repository.js` | One narrow C-owned posting-denial seam with seam-specific C1-C8 outcomes; extraction of one unexported in-transaction pair-validation/create/replay primitive; and separate entrypoint mappers so the existing wrapper retains stage-preserving exact replay while the new seam returns recovery-required for an incomplete exact pair, without nested `BEGIN` or an unlock gap |
 
 No other production file is implicitly allowed. In particular, the implementation
 may not modify PR9a schema, Algorithm A semantics, Algorithm C state/persistence/
@@ -82,7 +83,10 @@ its transaction ownership and observable behavior. The primitive must not own a
 transaction or be exported. The new seam alone owns its `BEGIN IMMEDIATE`, locked
 classification, fresh reconstruction, private branding, reciprocal-pair invocation,
 post-write proof, and commit/rollback. Algorithm B supplies no connection or
-transaction context.
+transaction context. The PR9b service must call only the new narrow seam for this
+handoff; it may not use the generic existing wrapper for durable-state classification
+or public result mapping. A shared private primitive may validate the pair, but it
+must not force one public outcome on both entrypoints.
 
 ### 3.2 Tests, helper, fixtures, and implementation records
 
@@ -120,6 +124,12 @@ The future PR9b implementation must not include or perform:
   section-3.1 C-owned seam, C1-C8 handling, and private-primitive extraction; its
   service, the PR9a authority repository, or any Algorithm A/C semantic, invariant,
   state, persisted-format, or recovery behavior;
+- changing current wrapper replay precedence, moving the incomplete guard before its
+  exact replay lookup, changing its existing result mapping, modifying/weakening its
+  PR9a replay tests, or making exact replay invoke automatic recovery;
+- using one shared public classifier or mapper that silently changes the existing
+  wrapper while adding the seam; the shared component must remain private and
+  entrypoint-neutral;
 - a generic/exported transaction API, caller-supplied connection/transaction/context,
   nested `BEGIN`, exported private primitive/package factory/brand, caller-created
   branded package, or duplicated Algorithm C conflict/transition DML in the posting
@@ -171,10 +181,12 @@ following against the exact authorized head:
 14. after B rollback, the narrow PR9a C seam alone opens exactly one
     `BEGIN IMMEDIATE`; B cannot supply/nest a transaction, forge a package, perform C
     DML, retry C, or form the response from its non-durable denial object;
-15. the current wrapper retains its transaction-owning behavior while both it and
-    the new seam call one unexported, non-transaction-owning private primitive; fresh
+15. the current wrapper retains its transaction-owning behavior, replay precedence,
+    stage-preserving result mapping, and no-recovery replay behavior while it and the
+    new seam may call one unexported, non-transaction-owning pair-validation/create/
+    replay primitive; final outcome mapping remains entrypoint-specific and fresh
     seam reread/reconstruction/branding and pair persistence have no unlock gap;
-16. C1-C8 retain the exact design classifications and write sets:
+16. the new PR9b seam C1-C8 retain the exact design classifications and write sets:
     `PRIMARY_RESULT_WON`, `PRIMARY_RESULT_INTEGRITY_BLOCKED`,
     `DENIAL_NO_LONGER_CURRENT`, `DENIAL_RECLASSIFIED`,
     `EXACT_CONFLICT_REPLAY`, `CONFLICT_RESULT_MISMATCH`,
@@ -182,9 +194,10 @@ following against the exact authorized head:
     initial `DENIAL_ACCEPTED_FOR_RECOVERY` at `PENDING`, then final
     `DENIAL_PERSISTED` only after durable `COMPLETE` proof;
 17. impossible primary/conflict combinations always precede primary or conflict
-    replay and return the read-only integrity block; an incomplete transition returns
-    recovery-required with zero seam DML and is advanced only through existing
-    separate C reconciliation;
+    replay and return the read-only integrity block; through the PR9b seam an
+    incomplete transition returns recovery-required with zero DML, while an exact
+    branded existing-wrapper replay retains its merged stage-preserving zero-DML
+    result; neither entrypoint advances recovery;
 18. C4/C8 perform exactly two reciprocal-pair inserts in the initial seam-owned
     transaction and the unchanged four monotonic transition updates only through
     the existing reconciler's separate transactions; these six statements are never
@@ -196,12 +209,14 @@ following against the exact authorized head:
     cannot return a false final result; fresh C state may otherwise make a primary
     win, remove/reclassify denial, replay/mismatch conflict evidence, or require
     recovery, and stale caller/B causes are never authority;
-20. independent-process tests cover every design section-17.1 race, including two C
-    callers with separate before-`COMPLETE` and after-`COMPLETE` barriers, private
-    export/nested-transaction rejection, rollback between pair inserts, pre- and
-    post-`COMPLETE` lost C response, and impossible primary-plus-conflict state;
-21. deterministic tests fix command, locked snapshot, captured attemptedAt, and
-    injected generator outcomes and separately exercise lock/commit outcomes;
+20. independent-process tests cover every design section-17.1 race, including the
+    existing-wrapper compatibility matrix, PR9b seam before/after-`COMPLETE`
+    barriers, same-pair cross-entrypoint outcomes, private export/nested-transaction
+    rejection, rollback between pair inserts, entrypoint-specific lost responses,
+    and impossible primary-plus-conflict state;
+21. deterministic tests fix entrypoint contract, command, locked snapshot, captured
+    attemptedAt, and injected generator outcomes and separately exercise lock/commit
+    outcomes;
 22. every other hostile scenario in the design matrix passes, including tampering,
     partial legacy state, post-insert mismatch, and unauthorized activation;
 23. canonical-byte and SHA-256 fixtures are independently reproduced for every new
@@ -215,55 +230,99 @@ following against the exact authorized head:
 26. two focused final-tree runs, two full test runs, explicit Node test run, build,
     static scope scans, and a clean exact-head review are recorded in the PR9b audit.
 
-### 5.1 Mandatory concurrent-follower authorization contract
+### 5.1 Mandatory cross-entrypoint replay authorization contract
 
-No future implementation is eligible for authorization unless all of these
-statements are enforced without fallback or timing-dependent ambiguity:
+Entrypoint contract is part of deterministic API identity and audit evidence:
 
-- No implementation may treat a committed incomplete Algorithm C pair as exact
-  replay.
-- `EXACT_CONFLICT_REPLAY` is legal only for a fully reread and validated
-  `COMPLETE` pair.
-- `PENDING`, `ACCOUNTED`, and `CIRCUIT_APPLIED` always map to
-  `CONFLICT_RECOVERY_REQUIRED` for a follower seam call.
-- One locked snapshot has one classification and one outcome. A follower performs
-  zero DML, never creates a second pair, never runs admission, and never drives the
-  existing pair's recovery.
-- The response for C7 includes the exact current durable stage. The existing
-  Algorithm C pair remains authoritative and its existing reconciler remains the
-  sole recovery owner.
+```text
+entrypoint contract
++ validated command
++ locked persisted snapshot
++ captured attemptedAt
++ injected generator outcomes
+= one deterministic classification, outcome, and write set
+```
 
-| Locked state seen by follower | Classification | Required outcome | Follower DML | Retry behavior |
-|---|---|---|---:|---|
-| `PENDING` | C7 | `CONFLICT_RECOVERY_REQUIRED` with stage `PENDING` | 0 | retry after recovery |
-| `ACCOUNTED` | C7 | `CONFLICT_RECOVERY_REQUIRED` with stage `ACCOUNTED` | 0 | retry after recovery |
-| `CIRCUIT_APPLIED` | C7 | `CONFLICT_RECOVERY_REQUIRED` with stage `CIRCUIT_APPLIED` | 0 | retry after recovery |
-| exact valid `COMPLETE` pair | C5 | `EXACT_CONFLICT_REPLAY` with original IDs, timestamps, hashes, and complete transition evidence | 0 | terminal replay |
-| corrupt or inconsistent stage | C2 / integrity state | exact integrity block | 0 | manual remediation |
+Different bounded entrypoints may legally return different read-only outcomes for
+the same durable pair. That distinction is contractual, not repository
+nondeterminism, scheduler timing, or query-order dependence.
 
-At least two separate independent-process concurrency tests are mandatory in the
-already allowlisted PR9b test files:
+**Existing PR9a wrapper.** For an exact private branded replay request and one exact
+valid reciprocal pair at `PENDING`, `ACCOUNTED`, `CIRCUIT_APPLIED`, or `COMPLETE`,
+the wrapper retains its merged API mapping `{ conflict, replayed: true }`, called
+`EXACT_STAGE_PRESERVING_REPLAY` only as a design-level semantic label. Its existing
+conflict envelope returns original IDs, timestamps, and hashes; the current stage is
+proved through the existing verified pair/read contract alongside that result, not
+through a new or renamed wrapper field. It performs zero DML, does not mutate stage,
+and invokes no recovery. Exact replay remains ordered before the incomplete-transition
+guard. The PRE-PR9 contract and existing PR9a tests remain unchanged compatibility
+authority.
 
-1. **Test A — follower before `COMPLETE`.** Place a deterministic barrier after the
-   winner's initial reciprocal-pair commit and before the next recovery transaction.
-   The follower must obtain `BEGIN IMMEDIATE`, reread the exact incomplete stage,
-   and return C7/`CONFLICT_RECOVERY_REQUIRED` with zero DML. Assert one pair only,
-   unchanged IDs/hashes, no primary, no second pair, no admission, and no follower
-   recovery; after the barrier is released, the existing reconciler can complete the
-   same pair. Repeat this test for `PENDING`, `ACCOUNTED`, and `CIRCUIT_APPLIED`; a
-   parameterized test is permitted.
-2. **Test B — follower after `COMPLETE`.** Release the follower only after all four
-   existing monotonic updates commit and a fresh reread proves `COMPLETE`. The
-   follower must obtain `BEGIN IMMEDIATE` and return C5/`EXACT_CONFLICT_REPLAY` with
-   zero DML, the original conflict/transition IDs, timestamps and hashes, complete
-   transition evidence, and a pair count of one.
+**New PR9b seam.** C5/C7 and `EXACT_CONFLICT_REPLAY` below are seam-specific final
+Algorithm B result terms. The seam must not expose an incomplete pair as final exact
+conflict replay:
 
-Lost-response coverage is also stage-sensitive: a retry after the initial pair
-commit but before `COMPLETE` must return `CONFLICT_RECOVERY_REQUIRED`; a retry after
-`COMPLETE` must return `EXACT_CONFLICT_REPLAY`. A synchronous original winner call
-may return final `DENIAL_PERSISTED` only after proven `COMPLETE`; any failure or
-interrupt between stages must leave C7-recoverable durable state and no false
-complete response.
+| Locked pair state | Seam classification | Seam outcome | Seam DML | Mutation / recovery | Returned evidence |
+|---|---|---|---:|---|---|
+| exact `PENDING` | C7 | `CONFLICT_RECOVERY_REQUIRED` | 0 | none / none | original pair identity/hashes and stage `PENDING` |
+| exact `ACCOUNTED` | C7 | `CONFLICT_RECOVERY_REQUIRED` | 0 | none / none | original pair identity/hashes and stage `ACCOUNTED` |
+| exact `CIRCUIT_APPLIED` | C7 | `CONFLICT_RECOVERY_REQUIRED` | 0 | none / none | original pair identity/hashes and stage `CIRCUIT_APPLIED` |
+| fully reread and validated `COMPLETE` | C5 | `EXACT_CONFLICT_REPLAY` | 0 | none / none | original IDs, timestamps, hashes, and complete transition evidence |
+| corrupt or mismatched pair | C2/C6 or earlier integrity state | exact registered integrity/mismatch result | 0 | none / none | available diagnostic identity only |
+
+C7 is a PR9b seam classification, not a global prohibition on every Algorithm C
+replay entrypoint. PR9b seam final exact conflict replay is legal only at validated
+`COMPLETE`; this does not prohibit the existing wrapper from stage-preserving exact
+replay of an incomplete pair.
+
+The mandatory cross-entrypoint matrix is below. “Stage” in the wrapper column means
+the stage observed through the existing verified pair/read contract alongside the
+stable wrapper envelope; it does not authorize a result-mapping change:
+
+| Durable pair | Existing PR9a wrapper | New PR9b seam |
+|---|---|---|
+| exact `PENDING` | stage-preserving `{ conflict, replayed: true }`; original IDs/timestamps/hashes/stage; DML 0; no mutation; no recovery | C7 `CONFLICT_RECOVERY_REQUIRED`; original pair identity/hashes/stage; DML 0; no mutation; no recovery |
+| exact `ACCOUNTED` | stage-preserving `{ conflict, replayed: true }`; original IDs/timestamps/hashes/stage; DML 0; no mutation; no recovery | C7 `CONFLICT_RECOVERY_REQUIRED`; original pair identity/hashes/stage; DML 0; no mutation; no recovery |
+| exact `CIRCUIT_APPLIED` | stage-preserving `{ conflict, replayed: true }`; original IDs/timestamps/hashes/stage; DML 0; no mutation; no recovery | C7 `CONFLICT_RECOVERY_REQUIRED`; original pair identity/hashes/stage; DML 0; no mutation; no recovery |
+| exact validated `COMPLETE` | stable `{ conflict, replayed: true }`; original complete evidence; DML 0; no mutation; no recovery | C5 `EXACT_CONFLICT_REPLAY`; original complete evidence; DML 0; no mutation; no recovery |
+| corrupt/mismatched | existing registered integrity/collision result; DML 0; no mutation; no recovery | C2/C6 or earlier registered integrity/mismatch result; DML 0; no mutation; no recovery |
+
+The PR9b service must call only the new seam for B-to-C handoff. It may not call the
+generic existing wrapper to classify durable state. Shared private pair validation
+is permitted, but the wrapper and seam must apply their separate final mappers. A
+shared public classifier that changes existing wrapper precedence or behavior is
+forbidden.
+
+Three test groups are mandatory in the already allowlisted PR9b test files:
+
+1. **Existing-wrapper compatibility tests.** Parameterize exact branded replay over
+   `PENDING`, `ACCOUNTED`, `CIRCUIT_APPLIED`, and `COMPLETE`. Assert the current
+   merged replay result, current durable stage through the existing pair read, zero
+   DML, byte-unchanged rows/stage, no recovery, and stable IDs/timestamps/hashes.
+   These are compatibility tests, not new semantic authorization.
+2. **PR9b seam tests.** Test A places deterministic barriers after commits that
+   establish `PENDING`, `ACCOUNTED`, and `CIRCUIT_APPLIED` and before the next
+   recovery transaction; the seam follower must obtain its lock and return
+   C7/`CONFLICT_RECOVERY_REQUIRED` with current stage, zero DML, no recovery,
+   stable one-pair evidence, no primary/admission/second pair, and no row mutation.
+   Test B releases the seam only after all four recovery updates commit and a fresh
+   reread proves `COMPLETE`; it must return C5/`EXACT_CONFLICT_REPLAY`, zero DML,
+   original complete evidence, and one unchanged pair.
+3. **Cross-entrypoint tests.** Against the same exact incomplete pair at each of the
+   three incomplete stages, call the wrapper and seam under one deterministic
+   barrier. The wrapper must return stage-preserving replay and the seam must return
+   recovery-required. Both perform zero DML, invoke no recovery, and leave rows
+   byte-identical before, between, and after calls. Repeat at `COMPLETE` to prove
+   both replay while preserving their stable response envelopes. The asserted
+   distinction must be the entrypoint contract, never timing or query order.
+
+Lost-response coverage is entrypoint-specific. Before `COMPLETE`, an exact existing-
+wrapper retry returns its current replay envelope, with stage proved by the existing
+pair read, and zero DML/no recovery, while a PR9b seam retry returns
+`CONFLICT_RECOVERY_REQUIRED` and stage with zero DML/no recovery. After `COMPLETE`,
+the wrapper retains its stable replay envelope and the seam returns
+`EXACT_CONFLICT_REPLAY`; both are read-only. A synchronous new-evidence winner may
+return final `DENIAL_PERSISTED` only after proven `COMPLETE`.
 
 Minimum commands include:
 
@@ -314,8 +373,11 @@ separate schema design and authorization PR must complete first.
 - **D-PR9B-01 — APPROVE WITH CONDITIONS:** one initial-post business
   responsibility, implemented as durable-result resolution, new admission/primary
   transaction only from `NO_RESULT`, and post-rollback delegation to the sole C
-  transaction owner. B's denial is non-durable; the service returns the exact C1-C8
-  seam outcome and never supplies or nests the C transaction.
+  transaction owner through only the new bounded seam. Conditions are the
+  entrypoint-specific replay contract, unchanged existing-wrapper compatibility,
+  seam-specific C7, cross-entrypoint tests, and no Algorithm C semantic change. B's
+  denial is non-durable; the service returns the exact seam C1-C8 outcome and never
+  calls the generic wrapper for classification or supplies/nests the C transaction.
 - **D-PR9B-02 — APPROVE:** `rental_service_upd` /
   `rootSourceDocumentLineageId` / `economicLineageKey` explicitly supersedes the
   PRE-PR9 mapping; correction/revision fixtures must prove identity semantics.
@@ -407,10 +469,11 @@ The reviewer must independently:
 11. confirm the future allowlist and prohibited scope are closed and sufficient,
     including the single narrow Algorithm C seam/private-primitive exception and
     event-correlation binding;
-12. reproduce C1-C8, the stage/outcome matrix, exact DML counts, impossible-state
-    precedence, absence of nested `BEGIN`/unlock gap/private exports,
-    existing-wrapper preservation, deterministic case-8A/case-8B barriers, both
-    lost-response timelines, and every section-17.1 race outcome;
+12. reproduce seam C1-C8, both entrypoint stage/outcome matrices, exact DML counts,
+    impossible-state precedence, absence of nested `BEGIN`/unlock gap/private
+    exports, existing-wrapper replay precedence/result preservation, deterministic
+    case-8A/8A-compatibility/8B barriers, entrypoint-specific lost-response
+    timelines, and every section-17.1 race outcome;
 13. confirm every authorization field remains fail-closed.
 
 The acceptable independent-review output is either:

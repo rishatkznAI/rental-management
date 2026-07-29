@@ -894,12 +894,12 @@ the same inert command and is resolved through persisted state.
 Determinism is defined over the complete domain tuple, not over persisted rows alone:
 
 ```text
-same entrypoint contract
-+ same validated command
-+ same locked persisted snapshot
-+ same captured attemptedAt
-+ same injected generator outcomes
-= same classification, precedence winner, and intended write set
+entrypoint contract
++ validated command
++ locked persisted snapshot
++ captured attemptedAt
++ injected generator outcomes
+= one deterministic classification, outcome, and write set
 ```
 
 Entry point is part of API identity and audit evidence. Two bounded entrypoints may
@@ -908,6 +908,17 @@ contracts explicitly ask different questions. The existing wrapper's stage-prese
 replay and the PR9b seam's recovery-required response are deterministic for their
 respective tuples; their difference is not repository nondeterminism, scheduler
 timing, or SQL query-order dependence.
+
+For a fixed deterministic-domain tuple, the result must be independent of invocation
+order, prior process-local calls, query order, and concurrent read scheduling. The
+only permitted sources of an outcome are the selected bounded entrypoint, validated
+command, locked durable snapshot, and captured injected inputs explicitly included
+in the deterministic domain. No compliant implementation may select or alter an
+outcome through process-local `last mapper` state, a cached previous disposition, a
+mutable singleton classification, a previous entrypoint identity, a call-order-
+derived mapping, or shared mutable test-fixture state. A process-local optimization
+is permitted only when it cannot affect classification or public outcome, is
+observationally irrelevant, and produces identical cold-state and warm-state results.
 
 SQLite lock acquisition and commit outcome are external infrastructure outcomes;
 they have stable mappings but are not falsely described as deterministic business
@@ -1211,22 +1222,125 @@ row count, IDs, hashes, transition evidence, final state, and next permitted act
 are observable assertions. No PR9b seam implementation may collapse the two
 timelines into one expected result.
 
-**Cross-entrypoint test.** Hold one exact valid incomplete pair at each of
-`PENDING`, `ACCOUNTED`, and `CIRCUIT_APPLIED`. Against the same byte-identical rows,
-the existing wrapper must return its stage-preserving exact replay and the new PR9b
-seam must return C7 `CONFLICT_RECOVERY_REQUIRED`. Both calls must perform zero DML,
-invoke no recovery, return the original pair evidence plus current stage, and leave
-the durable rows byte-identical before, between, and after the calls. The assertion
-must bind the difference to explicit entrypoint contracts, never timing or query
-order. Repeat at `COMPLETE` to prove both entrypoints exact-replay while retaining
-their stable response envelopes.
+**Fresh-equivalent fixture rule.** Every cross-entrypoint ordering scenario must use
+a fresh equivalent durable fixture. “Fresh equivalent” means a byte-equivalent
+durable conflict/transition graph at the same stage, with the same identities,
+hashes, and bindings except for a fixture-local generated database identity where
+exact reuse is impossible; no process-local state inherited from a previous
+scenario; and clean repository/service instances where needed to prove absence of
+mutable mapper state. Tests must not reuse one mutated in-memory object as proof of
+order independence.
+
+**Bidirectional cross-entrypoint ordering tests.** For each monotonic stage
+`PENDING`, `ACCOUNTED`, `CIRCUIT_APPLIED`, and `COMPLETE`, execute both of the
+following orders as separate fresh-fixture scenarios:
+
+1. **Order A — wrapper then seam:** invoke the existing PR9a wrapper against a fresh
+   exact pair, capture its outcome and durable graph, invoke the PR9b seam, and
+   capture its outcome and durable graph again.
+2. **Order B — seam then wrapper:** repeat against a fresh equivalent fixture in
+   reverse order and capture the same evidence after each call.
+
+At every incomplete stage, each wrapper call must return its existing stage-
+preserving exact replay and each seam call must return
+`CONFLICT_RECOVERY_REQUIRED`. At `COMPLETE`, the wrapper must return its existing
+exact replay and the seam must return `EXACT_CONFLICT_REPLAY`. Every call performs
+zero DML, invokes no recovery, changes no stage, and leaves durable rows byte-
+equivalent before, between, and after calls with stable IDs and hashes. Tests must
+explicitly assert that the wrapper outcome in Order A equals the wrapper outcome in
+Order B, the seam outcome in Order A equals the seam outcome in Order B, and the
+write set in both orders is zero. Any order-dependent envelope, classification, or
+evidence is a failure.
+
+**Repeated alternating-call tests.** Against one read-only exact fixture, execute
+`wrapper -> seam -> wrapper -> seam`, then execute
+`seam -> wrapper -> seam -> wrapper` against a fresh equivalent fixture. Every
+wrapper call in a sequence must return the same wrapper-specific outcome; every seam
+call must return the same seam-specific outcome; total DML is zero; the durable graph
+remains byte-identical throughout; and no cached result or entrypoint discriminator
+may leak from one call into the next.
+
+**Simultaneous post-commit reader tests.** For each of `PENDING`, `ACCOUNTED`,
+`CIRCUIT_APPLIED`, and `COMPLETE`, commit the durable stage, then use a deterministic
+barrier to start one existing-wrapper invocation and one PR9b-seam invocation from
+the same persisted snapshot. The incomplete-stage outcomes remain wrapper stage-
+preserving replay and seam `CONFLICT_RECOVERY_REQUIRED`; the `COMPLETE` outcomes
+remain wrapper exact replay and seam `EXACT_CONFLICT_REPLAY`. Assert zero writer DML,
+no recovery, no stage mutation, no lock-order-dependent mapper selection, and the
+same entrypoint-specific outcomes regardless of which reader completes first. If
+SQLite or the repository serializes reads internally, the test must still prove both
+calls observed an equivalent unchanged graph and independently applied their own
+mapper.
+
+**Changed branded-wrapper assertion.** At each of `PENDING`, `ACCOUNTED`,
+`CIRCUIT_APPLIED`, and `COMPLETE`, seed one exact valid pair and invoke the existing
+wrapper with a private branded package assertion that differs from the persisted
+pair in exactly one bounded identity or hash field.
+It must return the existing deterministic mismatch/integrity outcome, not exact
+replay, with zero DML, no recovery, and an unchanged pair. Then invoke the PR9b seam
+against the same unchanged state with a valid seam command. The seam must depend
+only on its durable state and command: an incomplete stage returns
+`CONFLICT_RECOVERY_REQUIRED`, while `COMPLETE` returns `EXACT_CONFLICT_REPLAY`, with
+zero DML and no inherited wrapper mismatch disposition. Repeat seam then hostile
+wrapper on a fresh equivalent fixture and assert the same entrypoint-specific
+outcomes.
+
+**Different bounded seam command.** For the same durable pair, a syntactically valid
+PR9b seam command that asserts an expected ID or hash inconsistent with persisted
+state must return the seam's deterministic read-only assertion mismatch, with zero
+DML and no recovery. It must not alter the pair, become a business denial, affect a
+later valid existing-wrapper invocation, or populate process-local mapper state. If
+different command bytes normalize to the same valid bounded selector/assertion
+semantics, the seam outcome must equal the canonical equivalent command outcome.
+The implementation must define its normalization and command-fingerprint rules
+explicitly; transport serialization alone must not alter entrypoint mapping. Cover
+valid wrapper then changed-command seam and changed-command seam then valid wrapper
+orders with fresh fixtures; the wrapper outcome must remain unchanged in both.
+
+**Corrupt and mismatched cross-entrypoint fixtures.** Test missing reciprocal row,
+mismatched conflict/transition hash, invalid stage progression, duplicate
+intersecting pair, corrupted `COMPLETE`, and primary-plus-conflict impossible graph.
+For each fixture, both entrypoints must return their deterministic integrity or
+mismatch outcome, perform zero DML, and invoke no recovery unless the existing
+Algorithm C contract explicitly classifies that exact state as recoverable. One
+entrypoint's result may not influence the other's later result. Test the reverse
+order on a fresh equivalent fixture. The public envelopes need not be identical when
+the stable entrypoint contracts differ, but both results must agree on the underlying
+persisted classification facts.
+
+The mandatory assertion matrix is:
+
+| Scenario | Order | Wrapper outcome | Seam outcome | Total DML | Durable mutation | Recovery |
+|---|---|---|---|---:|---|---|
+| Exact `PENDING` | wrapper -> seam | existing replay | recovery-required | 0 | none | none |
+| Exact `PENDING` | seam -> wrapper | existing replay | recovery-required | 0 | none | none |
+| Exact `ACCOUNTED` | both orders | existing replay | recovery-required | 0 | none | none |
+| Exact `CIRCUIT_APPLIED` | both orders | existing replay | recovery-required | 0 | none | none |
+| Exact `COMPLETE` | both orders | existing replay | exact conflict replay | 0 | none | none |
+| Changed wrapper assertion | both orders | mismatch | stage-derived seam result | 0 | none | none |
+| Different bounded seam command | both orders | wrapper unchanged | assertion/normalized result | 0 | none | none |
+| Simultaneous readers | concurrent | wrapper-specific | seam-specific | 0 | none | none |
+| Corrupt graph | both orders | integrity result | integrity result | 0 | none | none |
+
+“Both orders” always means separate fresh-fixture executions, not reversing
+assertions in one test body.
+
+**Process-local state prohibition proof.** The implementation audit must combine
+static inspection with the bidirectional, repeated, and concurrent behavioral tests
+above. Static inspection must reject module-level mutable `lastResult` state, a
+cached entrypoint discriminator, global mutable command classification, singleton
+repository state that affects result mapping, and test-only state on which production
+code could accidentally depend. Any process-local cache must be observationally
+irrelevant to classification and public outcome, and cold-process versus warm-process
+tests must return identical results.
 
 ## 18. Production-activation evidence required later
 
 PR9b implementation and its local fixtures cannot authorize production. A later
 runtime gate must be able to identify and independently verify at least:
 
-1. the exact approved design head and independent review with no unresolved P0/P1;
+1. the exact approved design head and independent review with no unresolved P0,
+   P1, or P2 findings;
 2. the exact authorized implementation base/head, changed-file allowlist, commit,
    artifact digest, build provenance, and independent implementation review;
 3. reproducible cross-implementation canonical-byte/SHA-256 fixtures for every
@@ -1304,3 +1418,23 @@ transaction/replay/crash proofs, Algorithm C seam, correlation binding, hostile
 matrix, exact future allowlist, and absence of runtime/production authority. Only
 after a passing re-audit and a separate direct Owner/Architect authorization bound to
 an exact base/head and selected allowlist subset may PR9b implementation begin.
+
+The only acceptable approving design-review verdict is:
+
+```text
+PR9B DESIGN APPROVED FOR OWNER/ARCHITECT AUTHORIZATION
+```
+
+Any unresolved P0, P1, or P2 finding requires:
+
+```text
+pr9bDesignReviewed = FALSE
+pr9bImplementationAuthorized = FALSE
+```
+
+An unresolved P2 may not be described as “approved except for P2,” “conditionally
+ready with unresolved P2,” or “implementation may proceed while P2 remains.” A P3
+may remain only when it is explicitly documented as non-blocking and durably
+accepted by the Owner/Architect. Design approval does not waive the separate future
+implementation-audit requirement that the exact implementation head have no
+unresolved implementation P0, P1, or P2 findings.

@@ -211,12 +211,15 @@ following against the exact authorized head:
     recovery, and stale caller/B causes are never authority;
 20. independent-process tests cover every design section-17.1 race, including the
     existing-wrapper compatibility matrix, PR9b seam before/after-`COMPLETE`
-    barriers, same-pair cross-entrypoint outcomes, private export/nested-transaction
-    rejection, rollback between pair inserts, entrypoint-specific lost responses,
-    and impossible primary-plus-conflict state;
+    barriers, fresh-fixture bidirectional same-pair outcomes, repeated alternating
+    calls, simultaneous post-commit readers, hostile changed assertions and bounded
+    commands, private export/nested-transaction rejection, rollback between pair
+    inserts, entrypoint-specific lost responses, corrupt graphs, and impossible
+    primary-plus-conflict state;
 21. deterministic tests fix entrypoint contract, command, locked snapshot, captured
-    attemptedAt, and injected generator outcomes and separately exercise lock/commit
-    outcomes;
+    attemptedAt, and injected generator outcomes; prove independence from invocation
+    order, prior process-local calls, query order, and concurrent read scheduling;
+    and separately exercise lock/commit outcomes;
 22. every other hostile scenario in the design matrix passes, including tampering,
     partial legacy state, post-insert mismatch, and unauthorized activation;
 23. canonical-byte and SHA-256 fixtures are independently reproduced for every new
@@ -227,7 +230,11 @@ following against the exact authorized head:
     isolation, and absence of dynamic/generic business DML; startup proves exact
     schema/index/trigger definitions, `foreign_keys = 1`, clean
     `foreign_key_check`, and orphan anti-joins;
-26. two focused final-tree runs, two full test runs, explicit Node test run, build,
+26. static inspection rejects module-level mutable mapper/result state, cached
+    entrypoint discriminators, global mutable classification, outcome-affecting
+    singleton repository state, and production dependence on test-only mutable state;
+    any observationally irrelevant cache produces identical cold/warm results;
+27. two focused final-tree runs, two full test runs, explicit Node test run, build,
     static scope scans, and a clean exact-head review are recorded in the PR9b audit.
 
 ### 5.1 Mandatory cross-entrypoint replay authorization contract
@@ -246,6 +253,14 @@ entrypoint contract
 Different bounded entrypoints may legally return different read-only outcomes for
 the same durable pair. That distinction is contractual, not repository
 nondeterminism, scheduler timing, or query-order dependence.
+
+For a fixed deterministic-domain tuple, the result must be independent of invocation
+order, prior process-local calls, query order, and concurrent read scheduling. The
+only permitted outcome sources are the selected bounded entrypoint, validated
+command, locked durable snapshot, and captured injected inputs explicitly included
+in that domain. Process-local `last mapper` state, cached previous disposition,
+mutable singleton classification, previous entrypoint identity, call-order-derived
+mapping, and shared mutable test-fixture state are prohibited.
 
 **Existing PR9a wrapper.** For an exact private branded replay request and one exact
 valid reciprocal pair at `PENDING`, `ACCOUNTED`, `CIRCUIT_APPLIED`, or `COMPLETE`,
@@ -293,7 +308,7 @@ is permitted, but the wrapper and seam must apply their separate final mappers. 
 shared public classifier that changes existing wrapper precedence or behavior is
 forbidden.
 
-Three test groups are mandatory in the already allowlisted PR9b test files:
+The following test groups are mandatory in the already allowlisted PR9b test files:
 
 1. **Existing-wrapper compatibility tests.** Parameterize exact branded replay over
    `PENDING`, `ACCOUNTED`, `CIRCUIT_APPLIED`, and `COMPLETE`. Assert the current
@@ -308,13 +323,77 @@ Three test groups are mandatory in the already allowlisted PR9b test files:
    Test B releases the seam only after all four recovery updates commit and a fresh
    reread proves `COMPLETE`; it must return C5/`EXACT_CONFLICT_REPLAY`, zero DML,
    original complete evidence, and one unchanged pair.
-3. **Cross-entrypoint tests.** Against the same exact incomplete pair at each of the
-   three incomplete stages, call the wrapper and seam under one deterministic
-   barrier. The wrapper must return stage-preserving replay and the seam must return
-   recovery-required. Both perform zero DML, invoke no recovery, and leave rows
-   byte-identical before, between, and after calls. Repeat at `COMPLETE` to prove
-   both replay while preserving their stable response envelopes. The asserted
-   distinction must be the entrypoint contract, never timing or query order.
+3. **Fresh-fixture bidirectional cross-entrypoint tests.** For each of `PENDING`,
+   `ACCOUNTED`, `CIRCUIT_APPLIED`, and `COMPLETE`, run wrapper then seam and seam
+   then wrapper as separate fresh-fixture scenarios. A fresh equivalent fixture has
+   a byte-equivalent durable conflict/transition graph at the same stage; the same
+   identities, hashes, and bindings except for an unavoidable fixture-local database
+   identity; no inherited process-local state; and clean repository/service instances
+   where needed. Reuse of one mutated in-memory object does not prove order
+   independence. At incomplete stages the wrapper returns existing stage-preserving
+   replay and the seam returns recovery-required; at `COMPLETE` the wrapper returns
+   existing exact replay and the seam returns exact conflict replay. Assert zero DML,
+   no recovery or stage mutation, byte-equivalent rows before/between/after calls,
+   stable IDs/hashes, equal per-entrypoint outcomes across orders, and no order-
+   dependent envelope, classification, or evidence.
+4. **Repeated alternating-call tests.** Run
+   `wrapper -> seam -> wrapper -> seam` on one read-only exact fixture and
+   `seam -> wrapper -> seam -> wrapper` on a fresh equivalent fixture. Every call
+   through one entrypoint returns the same entrypoint-specific result, total DML is
+   zero, the graph stays byte-identical, and no cached result leaks between
+   entrypoints.
+5. **Simultaneous post-commit reader tests.** At all four committed stages, use a
+   barrier to start one wrapper and one seam reader against the same snapshot.
+   Outcomes remain entrypoint-specific regardless of reader completion order, with
+   no writer DML, recovery, stage mutation, or lock-order-selected mapper. Internal
+   read serialization is acceptable only if both calls prove equivalent unchanged
+   durable graphs and independently produce their own mapped outcomes.
+6. **Changed branded-wrapper assertion tests.** At all four stages, change exactly
+   one bounded identity/hash assertion in an otherwise exact private branded wrapper
+   package. The wrapper returns its existing deterministic mismatch/integrity result,
+   never exact replay, with zero DML, no recovery, and no row change. A subsequent
+   valid seam command must ignore that disposition and return the stage-derived seam
+   outcome. Repeat in reverse order on a fresh equivalent fixture.
+7. **Different bounded seam-command tests.** A syntactically valid seam selector/
+   assertion mismatch returns a deterministic read-only assertion mismatch, not a
+   business denial, and cannot affect a later valid wrapper call or process-local
+   state. Different seam-command bytes that normalize to identical bounded semantics
+   must use explicit normalization/fingerprint rules and return the canonical-
+   equivalent seam outcome. Cover valid wrapper then changed-command seam and
+   changed-command seam then valid wrapper on fresh fixtures; the wrapper result
+   remains unchanged.
+8. **Corrupt/mismatched cross-entrypoint tests.** Separately seed a missing reciprocal
+   row, mismatched conflict/transition hash, invalid stage progression, duplicate
+   intersecting pair, corrupted `COMPLETE`, and primary-plus-conflict impossible
+   graph. Each entrypoint returns its deterministic integrity/mismatch outcome with
+   zero DML and no recovery unless the existing Algorithm C contract explicitly
+   marks that exact state recoverable. Repeat the reverse order on fresh equivalent
+   fixtures and prove both envelopes agree on underlying persisted classification
+   facts even where their public shapes differ.
+
+The mandatory assertion matrix is:
+
+| Scenario | Order | Wrapper outcome | Seam outcome | Total DML | Durable mutation | Recovery |
+|---|---|---|---|---:|---|---|
+| Exact `PENDING` | wrapper -> seam | existing replay | recovery-required | 0 | none | none |
+| Exact `PENDING` | seam -> wrapper | existing replay | recovery-required | 0 | none | none |
+| Exact `ACCOUNTED` | both orders | existing replay | recovery-required | 0 | none | none |
+| Exact `CIRCUIT_APPLIED` | both orders | existing replay | recovery-required | 0 | none | none |
+| Exact `COMPLETE` | both orders | existing replay | exact conflict replay | 0 | none | none |
+| Changed wrapper assertion | both orders | mismatch | stage-derived seam result | 0 | none | none |
+| Different bounded seam command | both orders | wrapper unchanged | assertion/normalized result | 0 | none | none |
+| Simultaneous readers | concurrent | wrapper-specific | seam-specific | 0 | none | none |
+| Corrupt graph | both orders | integrity result | integrity result | 0 | none | none |
+
+“Both orders” means separate fresh-fixture executions, never reversed assertions in
+one test body.
+
+The implementation audit must pair these behavioral tests with static inspection.
+It must prohibit module-level mutable `lastResult`, cached entrypoint discriminators,
+global mutable command classification, singleton repository state that affects
+result mapping, and test-only state on which production code could depend. A
+process-local cache is allowed only when it cannot affect classification or public
+outcome, is observationally irrelevant, and passes identical cold/warm-state tests.
 
 Lost-response coverage is entrypoint-specific. Before `COMPLETE`, an exact existing-
 wrapper retry returns its current replay envelope, with stage proved by the existing
@@ -349,21 +428,34 @@ writes.
 PR9b implementation may begin only after all of the following are durable and bound
 to an exact repository head:
 
-1. independent re-audit of the exact remediated PR9b design head finds no unresolved
-   P0/P1 and explicitly disposes D-PR9B-01 through D-PR9B-04;
-2. the Product/Business Owner and responsible Architect approve the exact reviewed
-   design head, including the merged-schema source mapping and schema trust boundary;
-3. PR9a remains independently released and the exact implementation base contains
+1. the independent design-audit verdict for the exact remediated PR9b design head is
+   accepted and explicitly disposes D-PR9B-01 through D-PR9B-04;
+2. there are no unresolved design P0 findings;
+3. there are no unresolved design P1 findings;
+4. there are no unresolved design P2 findings;
+5. the exact PR9a implementation base, exact reviewed PR9b design HEAD, and exact
+   reviewed design tree are confirmed;
+6. the exact selected implementation allowlist subset and one responsibility per
+   file are approved;
+7. every required design/authorization CI check is green on the exact design HEAD;
+8. the Product/Business Owner and responsible Architect durably approve the exact
+   reviewed design HEAD and tree, including the merged-schema source mapping, schema
+   trust boundary, and exact implementation allowlist;
+9. PR9a remains independently released and the exact implementation base contains
    its merge tree without unreviewed semantic drift;
-4. the Gate C prerequisites required by the approved PRE-PR9 governance for a
+10. the Gate C prerequisites required by the approved PRE-PR9 governance for a
    production-capable posting implementation are closed by their real role-scoped
    authorities; fixtures or Codex cannot satisfy them;
-5. a new direct Owner instruction names the exact PR9b base, selected file subset,
+11. a new direct Owner instruction names the exact PR9b base, selected file subset,
    Algorithm B scope, risks, and exclusions and authorizes only
    `pr9bImplementationAuthorized = TRUE`;
-6. one narrow authorization record/commit changes only that field or supplies an
+12. one narrow authorization record/commit changes only that field or supplies an
    equivalently immutable exact-head binding, while every deployment/production
    field remains false.
+
+P3 findings may remain only when each is explicitly documented as non-blocking and
+durably accepted by the Owner/Architect. No unresolved P0, P1, or P2 finding may be
+waived by conditional wording.
 
 If the independent review requires a schema change, section 6 cannot close. A
 separate schema design and authorization PR must complete first.
@@ -387,6 +479,16 @@ separate schema design and authorization PR must complete first.
 - **D-PR9B-04 — APPROVE:** all runtime activation and consumers remain PR9c+.
 
 These are remediation proposals, not self-issued review or Owner/Architect approval.
+
+### 6.2 Separate implementation-audit gate
+
+Design approval does not waive later implementation findings. Before the exact
+future implementation HEAD can be approved, its independent implementation audit
+must find no unresolved implementation P0, P1, or P2 findings. This is a separate
+condition from design review and must be bound to the exact implementation HEAD,
+tree, approved file subset, and required green CI evidence. An implementation P3 may
+remain only when explicitly documented as non-blocking and durably accepted by the
+Owner/Architect.
 
 ## 7. Separate gate before runtime activation
 
@@ -472,24 +574,39 @@ The reviewer must independently:
 12. reproduce seam C1-C8, both entrypoint stage/outcome matrices, exact DML counts,
     impossible-state precedence, absence of nested `BEGIN`/unlock gap/private
     exports, existing-wrapper replay precedence/result preservation, deterministic
-    case-8A/8A-compatibility/8B barriers, entrypoint-specific lost-response
-    timelines, and every section-17.1 race outcome;
-13. confirm every authorization field remains fail-closed.
+    case-8A/8A-compatibility/8B barriers, bidirectional fresh fixtures, alternating
+    calls, simultaneous readers, hostile assertion/command cases, entrypoint-specific
+    lost-response timelines, and every section-17.1 race outcome;
+13. inspect for prohibited process-local mapper/classification state and prove cold,
+    warm, reverse-order, and concurrent results are equivalent per entrypoint;
+14. confirm there are no unresolved design P0, P1, or P2 findings and every
+    authorization field remains fail-closed.
 
-The acceptable independent-review output is either:
+The only acceptable approving independent design-review output is:
 
 ```text
-PR9B DESIGN REVIEW PASSED — READY FOR SEPARATE IMPLEMENTATION AUTHORIZATION
+PR9B DESIGN APPROVED FOR OWNER/ARCHITECT AUTHORIZATION
 ```
 
-or:
+The blocking output is:
 
 ```text
 PR9B DESIGN BLOCKED
 ```
 
-with exact findings and required design changes. Neither verdict authorizes
-implementation by itself.
+with exact findings and required design changes. Any unresolved P0, P1, or P2
+finding mandates:
+
+```text
+pr9bDesignReviewed = FALSE
+pr9bImplementationAuthorized = FALSE
+```
+
+Reviewers must not use “approved except for P2,” “conditionally ready with unresolved
+P2,” or “implementation may proceed while P2 remains.” A P3 may remain only when it
+is explicitly documented as non-blocking and accepted by the Owner/Architect.
+Neither design verdict authorizes implementation by itself, and a later design
+approval cannot waive an unresolved implementation P0, P1, or P2 finding.
 
 ## 10. Draft design PR scope statement
 

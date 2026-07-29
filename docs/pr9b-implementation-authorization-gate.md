@@ -336,12 +336,18 @@ The following test groups are mandatory in the already allowlisted PR9b test fil
    no recovery or stage mutation, byte-equivalent rows before/between/after calls,
    stable IDs/hashes, equal per-entrypoint outcomes across orders, and no order-
    dependent envelope, classification, or evidence.
-4. **Repeated alternating-call tests.** Run
-   `wrapper -> seam -> wrapper -> seam` on one read-only exact fixture and
-   `seam -> wrapper -> seam -> wrapper` on a fresh equivalent fixture. Every call
-   through one entrypoint returns the same entrypoint-specific result, total DML is
-   zero, the graph stays byte-identical, and no cached result leaks between
-   entrypoints.
+4. **Repeated alternating-call tests at every stage.** Independently for each of
+   `PENDING`, `ACCOUNTED`, `CIRCUIT_APPLIED`, and `COMPLETE`, run
+   `wrapper -> seam -> wrapper -> seam` on one fresh-equivalent read-only fixture and
+   `seam -> wrapper -> seam -> wrapper` on a separate fresh-equivalent fixture. A
+   single `PENDING` execution cannot satisfy another stage. At incomplete stages,
+   every wrapper call returns the existing stage-preserving replay and every seam
+   call returns `CONFLICT_RECOVERY_REQUIRED`; at `COMPLETE`, every wrapper call
+   returns existing exact replay and every seam call returns
+   `EXACT_CONFLICT_REPLAY`. The first and second outcome from each entrypoint are
+   equal; total DML is zero; no recovery or stage mutation occurs; IDs and hashes are
+   stable; the durable graph is byte-equivalent before, between, and after all calls;
+   and no prior call affects the next mapper, evidence, or intended write set.
 5. **Simultaneous post-commit reader tests.** At all four committed stages, use a
    barrier to start one wrapper and one seam reader against the same snapshot.
    Outcomes remain entrypoint-specific regardless of reader completion order, with
@@ -354,14 +360,22 @@ The following test groups are mandatory in the already allowlisted PR9b test fil
    never exact replay, with zero DML, no recovery, and no row change. A subsequent
    valid seam command must ignore that disposition and return the stage-derived seam
    outcome. Repeat in reverse order on a fresh equivalent fixture.
-7. **Different bounded seam-command tests.** A syntactically valid seam selector/
-   assertion mismatch returns a deterministic read-only assertion mismatch, not a
-   business denial, and cannot affect a later valid wrapper call or process-local
-   state. Different seam-command bytes that normalize to identical bounded semantics
-   must use explicit normalization/fingerprint rules and return the canonical-
-   equivalent seam outcome. Cover valid wrapper then changed-command seam and
-   changed-command seam then valid wrapper on fresh fixtures; the wrapper result
-   remains unchanged.
+7. **Different bounded command tests.** Keep assertion mismatch and normalized
+   equivalence separate at every applicable stage; applicable stages include all of
+   `PENDING`, `ACCOUNTED`, `CIRCUIT_APPLIED`, and `COMPLETE` unless a command field
+   is formally invalid for one named stage and the exclusion is explicit and
+   justified. A changed expected ID/hash returns a deterministic read-only assertion
+   mismatch, not a business denial, with zero DML and no recovery. Its mismatch
+   fingerprint differs from the valid canonical command and its evidence/read set
+   records the comparison; it cannot affect a later valid call through either
+   entrypoint or process-local state. For transport-different commands A and B with
+   identical canonical bounded semantics, tests explicitly assert equal normalized
+   command representations, normalized fingerprints, entrypoint identities and
+   outcomes, canonical evidence/read digests, returned IDs/hashes/stage evidence,
+   intended write sets, and actual zero DML. Equal public outcome alone is
+   insufficient. Cover wrapper then seam and seam then wrapper on separate fresh-
+   equivalent fixtures; run both transport forms through both entrypoints in A-first
+   and B-first variants.
 8. **Corrupt/mismatched cross-entrypoint tests.** Separately seed a missing reciprocal
    row, mismatched conflict/transition hash, invalid stage progression, duplicate
    intersecting pair, corrupted `COMPLETE`, and primary-plus-conflict impossible
@@ -370,6 +384,47 @@ The following test groups are mandatory in the already allowlisted PR9b test fil
    marks that exact state recoverable. Repeat the reverse order on fresh equivalent
    fixtures and prove both envelopes agree on underlying persisted classification
    facts even where their public shapes differ.
+
+The mandatory alternating-stage matrix is:
+
+| Durable stage | Sequence | Wrapper outcome | Seam outcome | Total DML | Mutation | Recovery |
+|---|---|---|---|---:|---|---|
+| `PENDING` | wrapper -> seam -> wrapper -> seam | existing replay, identical both times | recovery-required, identical both times | 0 | none | none |
+| `PENDING` | seam -> wrapper -> seam -> wrapper | existing replay, identical both times | recovery-required, identical both times | 0 | none | none |
+| `ACCOUNTED` | both sequences | stable existing replay | stable recovery-required | 0 | none | none |
+| `CIRCUIT_APPLIED` | both sequences | stable existing replay | stable recovery-required | 0 | none | none |
+| `COMPLETE` | both sequences | stable existing replay | stable exact conflict replay | 0 | none | none |
+
+“Both sequences” means separate executions on fresh-equivalent durable fixtures.
+
+For normalized-command verification, tests must expose a deterministic test/audit
+representation, conceptually `canonicalEvidenceReadDigest`, derived only from the
+authoritative persisted facts used for classification. Equality compares at least
+event, conflict, and transition identities; reciprocal bindings; durable stage;
+conflict and transition hashes; relevant authority/evidence seals; selector/assertion
+fields consumed; collision candidates inspected; and classification facts used by
+the mapper. It uses canonical field order and stable serialization, excludes
+timestamps and process-local values unless they are authoritative evidence, is equal
+for semantically equivalent normalized commands, and is unequal when bounded
+selector/assertion semantics materially differ. SQL execution order may differ when
+the canonical evidence set and classification facts are equal. The digest is test/
+audit evidence only; it creates no database column, schema requirement, or public
+result field.
+
+For both cross-entrypoint orders, run transport A and transport B through each
+entrypoint and assert:
+
+```text
+normalizedFingerprint(commandA) = normalizedFingerprint(commandB)
+evidenceReadSet(commandA) = evidenceReadSet(commandB)
+entrypointOutcome(commandA) = entrypointOutcome(commandB)
+```
+
+The wrapper fingerprints and evidence digests are equal across A/B, the seam
+fingerprints and evidence digests are equal across A/B, and returned evidence and
+zero write sets are equal. Repeat in a cold repository/service instance, a warm
+instance after wrapper calls, and a warm instance after seam calls; fingerprints,
+digests, outcomes, evidence, and intended/actual zero write sets remain equal.
 
 The mandatory assertion matrix is:
 
@@ -388,12 +443,33 @@ The mandatory assertion matrix is:
 “Both orders” means separate fresh-fixture executions, never reversed assertions in
 one test body.
 
+The master P2-01 verification matrix is:
+
+| Scenario | Stages | Orders / process states | Required equality |
+|---|---|---|---|
+| Alternating calls | all four | both alternating sequences | repeated per-entrypoint outcomes and evidence; zero intended/actual write set |
+| Normalized equivalent commands | all applicable stages | wrapper -> seam and seam -> wrapper; A-first and B-first | normalized representation/fingerprint, evidence digest, outcome, IDs/hashes/stage evidence, intended write set and DML |
+| Cold/warm normalized commands | all applicable stages | cold, wrapper-warm, seam-warm | normalized representation/fingerprint, evidence digest, outcome, returned evidence and write set |
+| Assertion mismatch | all applicable stages | both cross-entrypoint orders | deterministic mismatch, differing mismatch fingerprint, recorded comparison, zero DML and no later leakage |
+
+All applicable stages include `PENDING`, `ACCOUNTED`, `CIRCUIT_APPLIED`, and
+`COMPLETE` unless one command field is formally invalid for a named stage and the
+exclusion is explicit and justified.
+
 The implementation audit must pair these behavioral tests with static inspection.
 It must prohibit module-level mutable `lastResult`, cached entrypoint discriminators,
 global mutable command classification, singleton repository state that affects
 result mapping, and test-only state on which production code could depend. A
 process-local cache is allowed only when it cannot affect classification or public
 outcome, is observationally irrelevant, and passes identical cold/warm-state tests.
+
+P2-01 implementation verification is not satisfied unless both alternating
+sequences pass independently for all four stages; normalized-equivalent commands
+have equal normalized fingerprints and canonical evidence/read digests; outcomes,
+returned evidence, and intended/actual write sets are equal; cold, wrapper-warm,
+seam-warm, A-first/B-first, and both cross-entrypoint orders pass; and assertion
+mismatch remains a distinct deterministic read-only result. An outcome-only test may
+not satisfy normalized equivalence.
 
 Lost-response coverage is entrypoint-specific. Before `COMPLETE`, an exact existing-
 wrapper retry returns its current replay envelope, with stage proved by the existing
@@ -574,13 +650,30 @@ The reviewer must independently:
 12. reproduce seam C1-C8, both entrypoint stage/outcome matrices, exact DML counts,
     impossible-state precedence, absence of nested `BEGIN`/unlock gap/private
     exports, existing-wrapper replay precedence/result preservation, deterministic
-    case-8A/8A-compatibility/8B barriers, bidirectional fresh fixtures, alternating
-    calls, simultaneous readers, hostile assertion/command cases, entrypoint-specific
-    lost-response timelines, and every section-17.1 race outcome;
+    case-8A/8A-compatibility/8B barriers, bidirectional fresh fixtures, both
+    alternating sequences independently at all four stages, simultaneous readers,
+    hostile assertion/command cases, entrypoint-specific lost-response timelines,
+    and every section-17.1 race outcome;
 13. inspect for prohibited process-local mapper/classification state and prove cold,
     warm, reverse-order, and concurrent results are equivalent per entrypoint;
-14. confirm there are no unresolved design P0, P1, or P2 findings and every
+14. answer **YES**: were both alternating sequences executed independently for
+    `PENDING`, `ACCOUNTED`, `CIRCUIT_APPLIED`, and `COMPLETE`?;
+15. answer **YES**: did semantically equivalent transport commands produce the same
+    normalized command representation and normalized fingerprint?;
+16. answer **YES**: did those commands produce the same canonical evidence/read
+    digest?;
+17. answer **YES**: were outcomes, returned evidence, and intended/actual write sets
+    equal in both entrypoint orders, A-first/B-first order, and cold, wrapper-warm,
+    and seam-warm states?;
+18. confirm there are no unresolved design P0, P1, or P2 findings and every
     authorization field remains fail-closed.
+
+Any **NO** to reviewer questions 14-17 requires:
+
+```text
+pr9bDesignReviewed = FALSE
+pr9bImplementationAuthorized = FALSE
+```
 
 The only acceptable approving independent design-review output is:
 

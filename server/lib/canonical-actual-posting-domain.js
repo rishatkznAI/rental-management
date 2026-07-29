@@ -48,11 +48,19 @@ const ERROR_CODES = Object.freeze({
   CONFLICT_TRANSITION_RECOVERY_REQUIRED: 'CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED',
   CONFLICT_EVIDENCE_PERSISTENCE_FAILED: 'CANONICAL_CONFLICT_EVIDENCE_PERSISTENCE_FAILED',
   POSTING_CONCURRENT_CONFLICT: 'CANONICAL_POSTING_CONCURRENT_CONFLICT',
+  PR9B_DISABLED: 'CANONICAL_PR9B_DISABLED',
+  POSTING_ASSERTION_MISMATCH: 'CANONICAL_POSTING_ASSERTION_MISMATCH',
+  POSTING_EVENT_NOT_FOUND: 'CANONICAL_POSTING_EVENT_NOT_FOUND',
+  POSTING_INTEGRITY_BLOCKED: 'CANONICAL_POSTING_INTEGRITY_BLOCKED',
+  POSTING_ID_GENERATION_FAILED: 'CANONICAL_POSTING_ID_GENERATION_FAILED',
+  POSTING_PERSISTENCE_FAILED: 'CANONICAL_POSTING_PERSISTENCE_FAILED',
+  POSTING_DATABASE_FAILED: 'CANONICAL_POSTING_DATABASE_FAILED',
+  C_SEAM_INPUT_REJECTED: 'C_SEAM_INPUT_REJECTED',
 });
 
 class CanonicalActualPostingError extends Error {
-  constructor(code, message = code, field = null) {
-    super(message);
+  constructor(code, message = code, field = null, options = undefined) {
+    super(message, options);
     this.name = 'CanonicalActualPostingError';
     this.code = code;
     this.field = field;
@@ -1722,6 +1730,215 @@ function validateEligibleEventRecord(record) {
   return row;
 }
 
+const CANONICAL_POSTING_COMMAND_KEYS = Object.freeze([
+  'companyId',
+  'branchId',
+  'eventId',
+  'operationType',
+  'assertedEventHash',
+  'assertedWriteAuthorizationRecordId',
+  'requestedActivationRecordId',
+  'requestedSourceAdapterAuthorityRecordId',
+  'requestedPostingAdapterAuthorityRecordId',
+  'requestedPostingAdapterAuthorityVersion',
+  'requestedPostingAdapterAuthorityRecordHash',
+  'assertedDueDatePolicySetHash',
+  'assertedSelectedDueDateGateKind',
+  'assertedSelectedDueDatePolicyId',
+  'assertedSelectedDueDatePolicyVersion',
+  'assertedSelectedDueDatePolicyHash',
+  'assertedDueDateTreatment',
+  'assertedUnknownDueDateTreatmentMappingId',
+  'assertedUnknownDueDateTreatmentMappingVersion',
+  'assertedUnknownDueDateTreatmentMappingHash',
+]);
+
+const CANONICAL_RECEIVABLE_FINGERPRINT_FIELDS = Object.freeze([
+  'branchId', 'cancellationReason', 'cancelledAt', 'clientId', 'closedAt',
+  'companyId', 'companyTimezone', 'contractId', 'contractualDueDate', 'createdAt',
+  'currency', 'description', 'dueDateProvenance', 'externalId', 'id',
+  'idempotencyKey', 'issuedAt', 'normalizedSourceLineId', 'originalAmountMinor',
+  'postedAt', 'rentalId', 'sourceDocumentId', 'sourceDocumentType', 'sourceLineId',
+  'sourceSystem', 'updatedAt', 'workflowStatus', 'writtenOffAt',
+]);
+
+const CANONICAL_POSTING_AUDIT_PAYLOAD_FIELDS = Object.freeze([
+  'acceptedDryRunsHash', 'acceptedPr8EvidenceHash', 'activationRecordId',
+  'actorAuthorityRecordId', 'actorIdentityId', 'canonicalReceivableFingerprint',
+  'dueDatePolicySetHash', 'dueDateTreatment', 'economicLineageKey',
+  'economicSourceRevisionKey', 'eventHash', 'eventId', 'operationId',
+  'postingAdapterAuthorityBranchId', 'postingAdapterAuthorityCompanyId',
+  'postingAdapterAuthorityKind', 'postingAdapterAuthorityRecordHash',
+  'postingAdapterAuthorityRecordId', 'postingAdapterAuthorityVersion',
+  'selectedDueDateGateKind', 'selectedDueDatePolicyHash', 'selectedDueDatePolicyId',
+  'selectedDueDatePolicyVersion', 'sourceAdapterAuthorityRecordHash',
+  'sourceAdapterAuthorityRecordId', 'sourceAdapterAuthorityVersion',
+  'sourceLineageHash', 'sourceOwnershipManifestHash',
+  'unknownDueDateTreatmentMappingHash', 'unknownDueDateTreatmentMappingId',
+  'unknownDueDateTreatmentMappingVersion', 'writeAuthorizationRecordId',
+]);
+
+const CANONICAL_POSTING_RESULT_FIELDS = Object.freeze([
+  'acceptedDryRunsHash', 'acceptedPr8EvidenceHash', 'activationId',
+  'activationRecordHash', 'activationRecordId', 'attemptedAt',
+  'auditEventFingerprint', 'auditPayloadFingerprint', 'branchId',
+  'canonicalReceivableFingerprint', 'canonicalReceivableId', 'commandFingerprint',
+  'canonicalWriteAuthorizationId', 'companyId', 'correlationId',
+  'currentPr6RevisionHash', 'dueDatePolicySetHash', 'dueDateTreatment',
+  'economicLineageKey', 'economicSourceRevisionKey', 'eventHash', 'eventId',
+  'financialAuditEventId', 'freshnessWindowFingerprint', 'idempotencyKey',
+  'operationId', 'operationType', 'postingAdapterAuthorityBranchId',
+  'postingAdapterAuthorityCompanyId', 'postingAdapterAuthorityKind',
+  'postingAdapterAuthorityRecordHash', 'postingAdapterAuthorityRecordId',
+  'postingAdapterAuthorityVersion', 'schemaVersion', 'producerAuthorityBranchId',
+  'producerAuthorityCompanyId', 'producerAuthorityKind',
+  'producerAuthorityRecordHash', 'producerAuthorityRecordId',
+  'producerAuthorityVersion', 'selectedDueDateGateKind',
+  'selectedDueDatePolicyHash', 'selectedDueDatePolicyId',
+  'selectedDueDatePolicyVersion', 'sourceAdapterAuthorityRecordHash',
+  'sourceAdapterAuthorityRecordId', 'sourceAdapterAuthorityVersion',
+  'sourceLineageHash', 'sourceOwnershipManifestHash',
+  'unknownDueDateTreatmentMappingHash', 'unknownDueDateTreatmentMappingId',
+  'unknownDueDateTreatmentMappingVersion', 'writeAuthorizationRecordHash',
+  'writeAuthorizationRecordId',
+]);
+
+function normalizeCanonicalPostingCommand(input) {
+  let decoded;
+  try {
+    decoded = typeof input === 'string' || Buffer.isBuffer(input) || input instanceof Uint8Array
+      ? parseJson(input)
+      : materializeInert(input, 'postingCommand');
+  } catch (error) {
+    if (error instanceof CanonicalActualPostingError) throw error;
+    fail(ERROR_CODES.ENVELOPE_INVALID, 'Invalid posting command.', 'postingCommand');
+  }
+  assertExactObjectKeys(decoded, CANONICAL_POSTING_COMMAND_KEYS, 'postingCommand');
+  for (const field of [
+    'companyId', 'branchId', 'eventId', 'assertedWriteAuthorizationRecordId',
+    'requestedActivationRecordId', 'requestedSourceAdapterAuthorityRecordId',
+    'requestedPostingAdapterAuthorityRecordId', 'assertedSelectedDueDatePolicyId',
+  ]) assertIdentifier(decoded[field], field);
+  for (const field of [
+    'assertedEventHash', 'requestedPostingAdapterAuthorityRecordHash',
+    'assertedDueDatePolicySetHash', 'assertedSelectedDueDatePolicyHash',
+  ]) assertHash(decoded[field], field);
+  for (const field of [
+    'requestedPostingAdapterAuthorityVersion', 'assertedSelectedDueDatePolicyVersion',
+  ]) assertSafeInteger(decoded[field], field, { minimum: 1 });
+  if (decoded.operationType !== OPERATION_DOMAIN) {
+    fail(ERROR_CODES.ENVELOPE_INVALID, 'Unsupported posting operation.', 'operationType');
+  }
+  if (!['contractual_due_date', 'unknown_due_date_treatment'].includes(decoded.assertedSelectedDueDateGateKind)) {
+    fail(ERROR_CODES.ENVELOPE_INVALID, 'Invalid selected due-date gate.', 'assertedSelectedDueDateGateKind');
+  }
+  const unknown = decoded.assertedSelectedDueDateGateKind === 'unknown_due_date_treatment';
+  if (unknown) {
+    assertIdentifier(decoded.assertedUnknownDueDateTreatmentMappingId, 'assertedUnknownDueDateTreatmentMappingId');
+    assertSafeInteger(
+      decoded.assertedUnknownDueDateTreatmentMappingVersion,
+      'assertedUnknownDueDateTreatmentMappingVersion',
+      { minimum: 1 },
+    );
+    assertHash(decoded.assertedUnknownDueDateTreatmentMappingHash, 'assertedUnknownDueDateTreatmentMappingHash');
+    if (
+      decoded.assertedDueDateTreatment !== 'post_without_aging_v1'
+      || decoded.assertedUnknownDueDateTreatmentMappingId !== 'rentcore.unknown_due_date_posting_treatment.v1'
+      || decoded.assertedUnknownDueDateTreatmentMappingVersion !== 1
+    ) fail(ERROR_CODES.ENVELOPE_INVALID, 'Invalid unknown due-date mapping.', 'assertedDueDateTreatment');
+  } else if (
+    decoded.assertedDueDateTreatment !== 'proven_contractual_date_v1'
+    || decoded.assertedUnknownDueDateTreatmentMappingId !== null
+    || decoded.assertedUnknownDueDateTreatmentMappingVersion !== null
+    || decoded.assertedUnknownDueDateTreatmentMappingHash !== null
+  ) {
+    fail(ERROR_CODES.ENVELOPE_INVALID, 'Unexpected unknown due-date mapping.', 'assertedDueDateTreatment');
+  }
+  return materializeInert(decoded, 'postingCommand');
+}
+
+function canonicalPostingCommandEnvelope(input) {
+  return exactEnvelope(
+    normalizeCanonicalPostingCommand(input),
+    CANONICAL_POSTING_COMMAND_KEYS,
+    'rentcore.canonical_actual_posting.command',
+  );
+}
+
+function computeCanonicalPostingCommandFingerprint(input) {
+  return sha256Canonical(canonicalPostingCommandEnvelope(input));
+}
+
+function canonicalPostingIdempotencyKeyEnvelope(input) {
+  return exactEnvelope(input, [
+    'activationId', 'canonicalWriteAuthorizationId', 'economicLineageKey',
+    'economicSourceRevisionKey', 'eventHash', 'operationType',
+  ], 'rentcore.canonical_actual_posting.idempotency_key');
+}
+
+function computeCanonicalPostingIdempotencyKey(input) {
+  return sha256Canonical(canonicalPostingIdempotencyKeyEnvelope(input));
+}
+
+function canonicalReceivableFingerprintEnvelope(row) {
+  return exactEnvelope(
+    row,
+    CANONICAL_RECEIVABLE_FINGERPRINT_FIELDS,
+    'rentcore.canonical_receivable.persisted_row',
+  );
+}
+
+function computeCanonicalReceivableFingerprint(row) {
+  return sha256Canonical(canonicalReceivableFingerprintEnvelope(row));
+}
+
+function canonicalPostingAuditPayloadEnvelope(payload) {
+  return exactEnvelope(
+    payload,
+    CANONICAL_POSTING_AUDIT_PAYLOAD_FIELDS,
+    'rentcore.canonical_actual_posting.audit_payload',
+  );
+}
+
+function computeCanonicalPostingAuditPayloadFingerprint(payload) {
+  return sha256Canonical(canonicalPostingAuditPayloadEnvelope(payload));
+}
+
+function canonicalPostingAuditEventEnvelope({ audit, auditPayloadFingerprint }) {
+  return exactEnvelope({
+    ...audit,
+    auditPayloadFingerprint,
+  }, [
+    'actorId', 'actorType', 'aggregateId', 'aggregateType', 'auditPayloadFingerprint',
+    'branchId', 'companyId', 'correlationId', 'createdAt', 'eventType', 'id',
+    'occurredAt', 'previousValueJson', 'reason', 'sourceSystem',
+  ], 'rentcore.canonical_actual_posting.financial_audit_event');
+}
+
+function computeCanonicalPostingAuditEventFingerprint(input) {
+  return sha256Canonical(canonicalPostingAuditEventEnvelope(input));
+}
+
+function canonicalPostingResultEnvelope(result) {
+  return exactEnvelope(
+    result,
+    CANONICAL_POSTING_RESULT_FIELDS,
+    'rentcore.canonical_actual_posting.result',
+  );
+}
+
+function computeCanonicalPostingResultHash(result) {
+  return sha256Canonical(canonicalPostingResultEnvelope(result));
+}
+
+function computeCanonicalEvidenceReadDigest(evidence) {
+  return sha256Canonical({
+    domain: 'rentcore.canonical_actual_posting.evidence_read_set',
+    evidence: materializeInert(evidence, 'canonicalEvidenceReadSet'),
+    version: 1,
+  });
+}
+
 function mapSqliteError(error) {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
@@ -1733,6 +1950,10 @@ function mapSqliteError(error) {
 
 module.exports = {
   ACTIVATION_HASH_FIELDS,
+  CANONICAL_POSTING_AUDIT_PAYLOAD_FIELDS,
+  CANONICAL_POSTING_COMMAND_KEYS,
+  CANONICAL_POSTING_RESULT_FIELDS,
+  CANONICAL_RECEIVABLE_FINGERPRINT_FIELDS,
   CONFLICT_HASH_FIELDS,
   ELIGIBLE_EVENT_HASH_FIELDS,
   ERROR_CODES,
@@ -1761,8 +1982,14 @@ module.exports = {
   attemptAccountingResult,
   buildConflictContracts,
   canonicalJson,
+  canonicalPostingAuditEventEnvelope,
+  canonicalPostingAuditPayloadEnvelope,
   canonicalPostingBoundaryEnvelope,
+  canonicalPostingCommandEnvelope,
   canonicalPostingCohortEnvelope,
+  canonicalPostingIdempotencyKeyEnvelope,
+  canonicalPostingResultEnvelope,
+  canonicalReceivableFingerprintEnvelope,
   circuitTransitionResult,
   compareAuthorityDenialCandidate,
   compareOperationalOrder,
@@ -1776,7 +2003,14 @@ module.exports = {
   computeArtifactIdentityHash,
   computeAuthorityId,
   computeCanonicalPostingBoundaryHash,
+  computeCanonicalPostingAuditEventFingerprint,
+  computeCanonicalPostingAuditPayloadFingerprint,
+  computeCanonicalPostingCommandFingerprint,
   computeCanonicalPostingCohortHash,
+  computeCanonicalPostingIdempotencyKey,
+  computeCanonicalPostingResultHash,
+  computeCanonicalReceivableFingerprint,
+  computeCanonicalEvidenceReadDigest,
   computeConflictHash,
   computeConflictTransitionIntentHash,
   computeCoverageLineageRootId,
@@ -1806,6 +2040,7 @@ module.exports = {
   mapSqliteError,
   materializeInert,
   normalizeSortedUniqueStrings,
+  normalizeCanonicalPostingCommand,
   parseCanonicalJson,
   parseJson,
   parseUtcMilliseconds,

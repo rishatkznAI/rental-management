@@ -27,10 +27,25 @@ const pr9aAllowedFiles = new Set([
   'docs/canonical-receivables-decisions.md',
 ]);
 const pr9bDesignBase = pr9aAuthorizedHead;
+const pr9bDesignHead = 'fe26d1a6f40e93112da3c54bd843d854f40f37fe';
+const pr9bDesignTree = 'c5452561e9268dfc12581f55c492f9a2616e733f';
 const pr9bDesignRemediationAllowedFiles = new Set([
   'docs/canonical-actual-posting-pr9b-design.md',
   'docs/pr9b-implementation-authorization-gate.md',
   'tests/canonical-actual-posting-structural.test.js',
+]);
+const pr9bImplementationAllowedFiles = new Set([
+  'server/lib/canonical-actual-posting-domain.js',
+  'server/lib/canonical-actual-posting-repository.js',
+  'server/lib/canonical-actual-posting-service.js',
+  'server/lib/canonical-actual-eligibility-event-repository.js',
+  'tests/canonical-actual-posting-fixtures.js',
+  'tests/canonical-actual-posting-repository.test.js',
+  'tests/canonical-actual-posting-concurrency.test.js',
+  'tests/canonical-actual-posting-remediation.test.js',
+  'tests/canonical-actual-posting-safety.test.js',
+  'tests/canonical-actual-posting-structural.test.js',
+  'tests/helpers/canonical-actual-posting-concurrency-worker.mjs',
 ]);
 const implementationFiles = [
   'server/lib/canonical-actual-posting-schema.js',
@@ -38,6 +53,8 @@ const implementationFiles = [
   'server/lib/canonical-actual-posting-authority-repository.js',
   'server/lib/canonical-actual-eligibility-event-repository.js',
   'server/lib/canonical-actual-eligibility-event-service.js',
+  'server/lib/canonical-actual-posting-repository.js',
+  'server/lib/canonical-actual-posting-service.js',
 ];
 
 function read(relative) {
@@ -61,19 +78,27 @@ test('historical PR9a changed-file set remains inside the exact Gate B allow-lis
   assert.equal(pr9aAllowedFiles.has('docs/pr9b-implementation-authorization-gate.md'), false);
 });
 
-test('current PR9b design remediation remains inside its exact authorized scope', () => {
-  const changed = new Set(gitLines(['diff', '--name-only', pr9bDesignBase]));
-  for (const file of gitLines(['ls-files', '--others', '--exclude-standard'])) changed.add(file);
+test('authorized PR9b design identity and remediation remain exact', () => {
+  const changed = new Set(gitLines(['diff', '--name-only', pr9bDesignBase, pr9bDesignHead]));
+  assert.equal(gitLines(['rev-parse', `${pr9bDesignHead}^{tree}`])[0], pr9bDesignTree);
   const outside = [...changed].filter(file => !pr9bDesignRemediationAllowedFiles.has(file));
   assert.deepEqual(outside, []);
   assert.deepEqual([...changed].sort(), [...pr9bDesignRemediationAllowedFiles].sort());
+});
+
+test('current PR9b implementation remains inside the exact authorized 11-file scope', () => {
+  const changed = new Set(gitLines(['diff', '--name-only', pr9bDesignHead]));
+  for (const file of gitLines(['ls-files', '--others', '--exclude-standard'])) changed.add(file);
+  const outside = [...changed].filter(file => !pr9bImplementationAllowedFiles.has(file));
+  assert.deepEqual(outside, []);
+  assert.deepEqual([...changed].sort(), [...pr9bImplementationAllowedFiles].sort());
   assert.deepEqual(
-    [...changed].filter(file => file.startsWith('server/') || file.startsWith('src/')),
+    [...changed].filter(file => file.startsWith('server/routes/') || file.startsWith('src/')),
     [],
   );
 });
 
-test('PR9a production modules contain no route, worker, scheduler, environment activation, network, or live-adapter wiring', () => {
+test('PR9 production modules contain no route, worker, scheduler, environment activation, network, or live-adapter wiring', () => {
   const combined = implementationFiles.map(read).join('\n');
   for (const forbidden of [
     /require\(['"]express['"]\)/,
@@ -90,15 +115,20 @@ test('PR9a production modules contain no route, worker, scheduler, environment a
   ]) assert.doesNotMatch(combined, forbidden);
 });
 
-test('PR9a contains no Algorithm B module or canonical business DML', () => {
-  const combined = implementationFiles.map(read).join('\n');
-  assert.doesNotMatch(combined, /algorithm[ _-]?b/i);
-  assert.doesNotMatch(combined, /\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+canonical_receivables\b/i);
-  assert.doesNotMatch(combined, /\bUPDATE\s+canonical_receivables\b/i);
-  assert.doesNotMatch(combined, /\bDELETE\s+FROM\s+canonical_receivables\b/i);
-  assert.doesNotMatch(combined, /\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+canonical_receivable_posting_operations\b/i);
-  assert.equal(fs.existsSync(path.join(root, 'server/lib/canonical-actual-posting-repository.js')), false);
-  assert.equal(fs.existsSync(path.join(root, 'server/lib/canonical-actual-posting-service.js')), false);
+test('Algorithm B owns only the primary triplet and delegates only through the bounded C seam', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const eligibility = read('server/lib/canonical-actual-eligibility-event-repository.js');
+  assert.match(posting, /insertExact\(db, CANONICAL_RECEIVABLES_TABLE, receivable\)/);
+  assert.match(posting, /insertExact\(\s*db,\s*CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE,/);
+  assert.match(posting, /insertExact\(db, FINANCIAL_AUDIT_EVENTS_TABLE, audit\)/);
+  assert.doesNotMatch(posting, /persistDenialEvidence\s*\(/);
+  assert.match(posting, /eligibilityRepository\.orchestratePostingDenial\(\{/);
+  assert.doesNotMatch(posting, /insertExact\(\s*db,\s*CANONICAL_RECEIVABLE_POSTING_CONFLICTS_TABLE,/);
+  assert.doesNotMatch(posting, /UPDATE\s+canonical_receivable_posting_conflict_transitions/i);
+  assert.match(eligibility, /function persistDenialPairInTransaction\(/);
+  assert.match(eligibility, /function orchestratePostingDenial\(commandInput\)/);
+  assert.doesNotMatch(eligibility, /module\.exports\s*=\s*\{[^}]*persistDenialPairInTransaction/s);
+  assert.match(posting, /rollbackQuietly\(db\);[\s\S]*eligibilityRepository\.orchestratePostingDenial/);
 });
 
 test('denial package brand and constructors are not exported to callers', async () => {
@@ -108,14 +138,14 @@ test('denial package brand and constructors are not exported to callers', async 
   assert.equal(exported.assertFrozenDenialPackage, undefined);
 });
 
-test('runtime application graph does not import PR9a repositories or service', () => {
+test('runtime application graph does not import PR9a or PR9b repositories or services', () => {
   const runtimeFiles = [
     'server/server.js',
     ...fs.readdirSync(path.join(root, 'server/routes')).map(name => `server/routes/${name}`),
   ].filter(file => fs.statSync(path.join(root, file)).isFile());
   const runtime = runtimeFiles.map(read).join('\n');
-  assert.doesNotMatch(runtime, /canonical-actual-(?:eligibility-event|posting-authority)-repository/);
-  assert.doesNotMatch(runtime, /canonical-actual-eligibility-event-service/);
+  assert.doesNotMatch(runtime, /canonical-actual-(?:eligibility-event|posting-authority|posting)-repository/);
+  assert.doesNotMatch(runtime, /canonical-actual-(?:eligibility-event|posting)-service/);
   const dbSource = read('server/db.js');
   assert.match(dbSource, /ensureCanonicalActualPostingSchema\(db\)/);
   assert.doesNotMatch(dbSource, /createCanonicalActualEligibilityEvent/);

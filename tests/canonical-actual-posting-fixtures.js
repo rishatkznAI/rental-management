@@ -1,4 +1,6 @@
-import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import Module, { createRequire } from 'node:module';
+import path from 'node:path';
 import {
   SOURCE_CAPABILITIES,
   conductPlan,
@@ -61,6 +63,12 @@ const {
   createCanonicalActualEligibilityEventRepository,
 } = require('../server/lib/canonical-actual-eligibility-event-repository.js');
 const {
+  createCanonicalActualPostingRepository,
+} = require('../server/lib/canonical-actual-posting-repository.js');
+const {
+  createCanonicalActualPostingService,
+} = require('../server/lib/canonical-actual-posting-service.js');
+const {
   canonicalJson,
   canonicalPostingBoundaryEnvelope,
   canonicalPostingCohortEnvelope,
@@ -70,11 +78,14 @@ const {
   computeAuthorityId,
   computeCanonicalPostingBoundaryHash,
   computeCanonicalPostingCohortHash,
+  computeCanonicalPostingCommandFingerprint,
+  computeCanonicalEvidenceReadDigest,
   createCanonicalActualPostingRuntimeContract,
   computeDueDatePolicySetHash,
   computeGovernedAuthorityRecordHash,
   computeUnknownDueDateMappingHash,
   computeWriteAuthorizationRecordHash,
+  normalizeCanonicalPostingCommand,
   sha256Canonical,
 } = require('../server/lib/canonical-actual-posting-domain.js');
 
@@ -645,4 +656,269 @@ export function eligibilityCommand(context, overrides = {}) {
   };
 }
 
-export { hash };
+export function postingCommand(context, event = context.event, overrides = {}) {
+  return {
+    companyId: event.companyId,
+    branchId: event.branchId,
+    eventId: event.id,
+    operationType: 'canonical_receivable.initial_post.v1',
+    assertedEventHash: event.eventHash,
+    assertedWriteAuthorizationRecordId: event.writeAuthorizationRecordId,
+    requestedActivationRecordId: event.activationRecordId,
+    requestedSourceAdapterAuthorityRecordId: event.sourceAdapterAuthorityRecordId,
+    requestedPostingAdapterAuthorityRecordId: context.authority.posting.recordId,
+    requestedPostingAdapterAuthorityVersion: context.authority.posting.authorityVersion,
+    requestedPostingAdapterAuthorityRecordHash: context.authority.posting.recordHash,
+    assertedDueDatePolicySetHash: event.dueDatePolicySetHash,
+    assertedSelectedDueDateGateKind: event.selectedDueDateGateKind,
+    assertedSelectedDueDatePolicyId: event.selectedDueDatePolicyId,
+    assertedSelectedDueDatePolicyVersion: event.selectedDueDatePolicyVersion,
+    assertedSelectedDueDatePolicyHash: event.selectedDueDatePolicyHash,
+    assertedDueDateTreatment: event.dueDateTreatment,
+    assertedUnknownDueDateTreatmentMappingId: event.unknownDueDateTreatmentMappingId,
+    assertedUnknownDueDateTreatmentMappingVersion: event.unknownDueDateTreatmentMappingVersion,
+    assertedUnknownDueDateTreatmentMappingHash: event.unknownDueDateTreatmentMappingHash,
+    ...overrides,
+  };
+}
+
+export function createPr9bContext(options = {}) {
+  const context = createPr9aContext(options);
+  const eventResult = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+  const postingRepository = createCanonicalActualPostingRepository(context.db, context.runtimeContract);
+  const postingService = createCanonicalActualPostingService({
+    db: context.db,
+    runtimeContract: context.runtimeContract,
+  });
+  return {
+    ...context,
+    event: eventResult.event,
+    postingRepository,
+    postingService,
+  };
+}
+
+export function mutatePr8CandidateForPostingConflict(context, value = 'pr9b-conflict-v2') {
+  const trigger = context.db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND name = 'trg_actual_source_dry_run_candidates_no_update'
+  `).get();
+  context.db.exec(`DROP TRIGGER ${trigger.name}`);
+  try {
+    context.db.prepare('UPDATE actual_source_dry_run_candidates SET dueDateEvidenceRef = ? WHERE id = ?')
+      .run(value, context.authority.candidate.id);
+  } finally {
+    context.db.exec(trigger.sql);
+  }
+}
+
+export function appendAuthorityDescendant(context, previous, overrides = {}) {
+  const { recordHash: _recordHash, ...previousWithoutHash } = previous;
+  const version = Number(previous.authorityVersion) + 1;
+  const record = authorityRecord({
+    kind: previous.authorityKind,
+    ownershipHash: previous.sourceOwnershipManifestHash,
+    overrides: {
+      ...previousWithoutHash,
+      authorityVersion: version,
+      createdAt: new Date(Date.now()).toISOString(),
+      previousRecordId: previous.recordId,
+      recordId: `authority-record-${previous.authorityKind}-v${version}`,
+      ...overrides,
+    },
+  });
+  return context.authority.repository.appendAuthorityRecord(record).record;
+}
+
+export function totalChanges(db) {
+  return Number(db.prepare('SELECT total_changes() AS total').get().total);
+}
+
+export function postingGraphSnapshot(db) {
+  const tables = [
+    'actual_receivable_eligible_events',
+    'canonical_receivable_posting_conflicts',
+    'canonical_receivable_posting_conflict_transitions',
+    'canonical_receivable_posting_operations',
+    'canonical_receivables',
+    'financial_audit_events',
+  ];
+  const graph = {};
+  for (const table of tables) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name);
+    const orderBy = columns.includes('id') ? 'id' : 'transitionId';
+    graph[table] = db.prepare(`SELECT * FROM ${table} ORDER BY ${orderBy}`).all();
+  }
+  return canonicalJson(graph);
+}
+
+export function postingEvidenceReadSet(context, commandInput, outcome) {
+  const command = normalizeCanonicalPostingCommand(commandInput);
+  const event = context.db.prepare(`
+    SELECT * FROM actual_receivable_eligible_events
+    WHERE id = ? AND companyId = ? AND branchId = ?
+  `).get(command.eventId, command.companyId, command.branchId) || null;
+  const conflicts = context.db.prepare(`
+    SELECT id, transitionId, conflictHash, conflictType, denialAttemptId,
+           eventId, economicLineageKey, writeAuthorizationRecordId,
+           acceptedDryRunsHash, acceptedPr8EvidenceHash, sourceLineageHash
+    FROM canonical_receivable_posting_conflicts
+    WHERE companyId = ? AND branchId = ?
+      AND (eventId = ? OR economicLineageKey = ?)
+    ORDER BY id
+  `).all(command.companyId, command.branchId, command.eventId, event?.economicLineageKey ?? '');
+  const transitions = conflicts.map(conflict => context.db.prepare(`
+    SELECT transitionId, conflictId, conflictHash, denialAttemptId, state,
+           attemptApplied, rateApplied, circuitApplied, intentHash
+    FROM canonical_receivable_posting_conflict_transitions WHERE transitionId = ?
+  `).get(conflict.transitionId));
+  const operations = context.db.prepare(`
+    SELECT id, eventId, eventHash, economicLineageKey, commandFingerprint,
+           canonicalReceivableId, financialAuditEventId, resultHash
+    FROM canonical_receivable_posting_operations
+    WHERE companyId = ? AND branchId = ?
+      AND (eventId = ? OR economicLineageKey = ?)
+    ORDER BY id
+  `).all(command.companyId, command.branchId, command.eventId, event?.economicLineageKey ?? '');
+  const activation = event ? context.db.prepare(`
+    SELECT recordId, recordHash, acceptedDryRunsHash, acceptedPr8EvidenceHash,
+           dueDatePolicySetHash, postingAdapterAuthorityRecordHash
+    FROM canonical_posting_activation_records WHERE recordId = ?
+  `).get(event.activationRecordId) : null;
+  const authorization = event ? context.db.prepare(`
+    SELECT recordId, recordHash, acceptedDryRunsHash, acceptedPr8EvidenceHash,
+           dueDatePolicySetHash, sourceOwnershipManifestHash
+    FROM canonical_write_authorization_records WHERE recordId = ?
+  `).get(event.writeAuthorizationRecordId) : null;
+  return Object.freeze({
+    activation,
+    authorization,
+    classification: outcome.classification,
+    command,
+    conflicts,
+    event: event ? {
+      id: event.id,
+      eventHash: event.eventHash,
+      economicLineageKey: event.economicLineageKey,
+      acceptedDryRunsHash: event.acceptedDryRunsHash,
+      acceptedPr8EvidenceHash: event.acceptedPr8EvidenceHash,
+      sourceLineageHash: event.sourceLineageHash,
+      writeAuthorizationRecordId: event.writeAuthorizationRecordId,
+      activationRecordId: event.activationRecordId,
+    } : null,
+    operations,
+    transitions,
+  });
+}
+
+export function postingEvidenceReadDigest(context, commandInput, outcome) {
+  return computeCanonicalEvidenceReadDigest(postingEvidenceReadSet(context, commandInput, outcome));
+}
+
+export function normalizedPostingCommandEvidence(commandInput) {
+  const normalized = normalizeCanonicalPostingCommand(commandInput);
+  return Object.freeze({
+    fingerprint: computeCanonicalPostingCommandFingerprint(normalized),
+    normalized,
+  });
+}
+
+export function createInstrumentedEligibilityRepository(context) {
+  const repositoryPath = path.resolve('server/lib/canonical-actual-eligibility-event-repository.js');
+  const marker = `  return Object.freeze({\n    orchestratePostingDenial,`;
+  const source = fs.readFileSync(repositoryPath, 'utf8');
+  if (!source.includes(marker)) throw new Error('PR9B test instrumentation marker not found');
+  const instrumented = source.replace(marker, `  function __testBuildPostingDenialPackage(input) {
+    const seamCommand = assertPostingDenialSeamCommand(input.seamCommand);
+    const deniedAttemptedAt = input.deniedAttemptedAt;
+    const milliseconds = parseUtcMilliseconds(deniedAttemptedAt);
+    beginImmediate(db);
+    try {
+      const eventRaw = db.prepare(\`SELECT * FROM \${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
+        WHERE id = ? AND companyId = ? AND branchId = ?\`).get(
+        seamCommand.postingCommand.eventId,
+        seamCommand.postingCommand.companyId,
+        seamCommand.postingCommand.branchId,
+      );
+      const event = validateEligibleEventRecord(normalizeEventRow(eventRaw));
+      const denial = reconstructPostingDenial(seamCommand, event, {
+        milliseconds,
+        timestamp: deniedAttemptedAt,
+      });
+      rollbackQuietly(db);
+      if (!denial) throw new Error('PR9B test fixture requires a current denial');
+      return denial.packageValue;
+    } catch (error) {
+      rollbackQuietly(db);
+      throw error;
+    }
+  }
+
+  return Object.freeze({
+    __testBuildPostingDenialPackage,
+    orchestratePostingDenial,`);
+  const loaded = new Module(repositoryPath);
+  loaded.filename = repositoryPath;
+  loaded.paths = Module._nodeModulePaths(path.dirname(repositoryPath));
+  loaded._compile(instrumented, repositoryPath);
+  return loaded.exports.createCanonicalActualEligibilityEventRepository(
+    context.db,
+    context.runtimeContract,
+  );
+}
+
+export function createPostingDenialStageFixture(stage, options = {}) {
+  const context = createPr9bContext(options);
+  mutatePr8CandidateForPostingConflict(context);
+  const repository = createInstrumentedEligibilityRepository(context);
+  const command = postingCommand(context);
+  const seamCommand = {
+    assertedDenialCause: 'PR8_EVIDENCE_MISMATCH',
+    denialAttemptId: '11111111-1111-4111-8111-111111111111',
+    postingCommand: command,
+  };
+  const deniedAttemptedAt = new Date(Date.now()).toISOString();
+  const packageValue = repository.__testBuildPostingDenialPackage({
+    deniedAttemptedAt,
+    seamCommand,
+  });
+  const triggerSql = {
+    PENDING: `CREATE TRIGGER pr9b_stage_abort BEFORE UPDATE
+      ON canonical_receivable_posting_conflict_transitions
+      BEGIN SELECT RAISE(ABORT, 'hold PENDING'); END`,
+    ACCOUNTED: `CREATE TRIGGER pr9b_stage_abort BEFORE UPDATE
+      ON canonical_receivable_posting_conflict_transitions
+      WHEN NEW.state = 'CIRCUIT_APPLIED'
+      BEGIN SELECT RAISE(ABORT, 'hold ACCOUNTED'); END`,
+    CIRCUIT_APPLIED: `CREATE TRIGGER pr9b_stage_abort BEFORE UPDATE
+      ON canonical_receivable_posting_conflict_transitions
+      WHEN NEW.state = 'COMPLETE'
+      BEGIN SELECT RAISE(ABORT, 'hold CIRCUIT_APPLIED'); END`,
+  }[stage];
+  if (triggerSql) context.db.exec(triggerSql);
+  let initialError = null;
+  try {
+    repository.persistDenialEvidence(packageValue);
+  } catch (error) {
+    initialError = error;
+  } finally {
+    if (triggerSql) context.db.exec('DROP TRIGGER pr9b_stage_abort');
+  }
+  if (stage === 'COMPLETE' && initialError) throw initialError;
+  if (stage !== 'COMPLETE' && initialError?.code !== 'CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED') {
+    throw initialError || new Error(`Expected recovery interruption at ${stage}`);
+  }
+  const transition = context.db.prepare(`
+    SELECT * FROM canonical_receivable_posting_conflict_transitions
+  `).get();
+  if (transition?.state !== stage) throw new Error(`Expected ${stage}, got ${transition?.state}`);
+  return {
+    ...context,
+    command,
+    packageValue,
+    repository,
+    seamCommand,
+  };
+}
+
+export { canonicalJson, hash };

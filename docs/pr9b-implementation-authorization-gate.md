@@ -2,7 +2,8 @@
 
 ## 1. Status and authority boundary
 
-**Package status:** `PR9B DESIGN REMEDIATED: INDEPENDENT RE-AUDIT REQUIRED`
+**Package status:**
+`PR9B DESIGN REMEDIATION COMPLETE — INDEPENDENT RE-AUDIT REQUIRED`
 
 **Implementation status:** `PR9B IMPLEMENTATION NOT AUTHORIZED`
 
@@ -20,6 +21,11 @@ implementation authorization, canonical business DML, deployment authority,
 production evidence acceptance, activation, production read/write, settlement,
 shadow-read, or cutover permission. Merge, CI, a draft PR, review silence, or the
 existence of these files changes no authorization value.
+
+This final package revision closes the C-seam transaction-ownership and concurrent-
+outcome ambiguity identified against rejected remediation head
+`ebe961a5d17fe9a77f351cc5ba729aa471f12ea5`. Closure is a design proposal only and
+must be independently re-audited at its new exact head.
 
 ## 2. Effect of the design PR
 
@@ -63,13 +69,18 @@ Responsibilities are exact:
 | `canonical-actual-posting-domain.js` | Pure posting command, projection, canonical serialization/hash, fingerprint, idempotency, result, and stable-error contracts needed by Algorithm B; no I/O or runtime activation |
 | `canonical-actual-posting-repository.js` | Repository-owned `BEGIN IMMEDIATE`, durable historical-result resolution before current admission, Algorithm B primary triplet, exact replay, rollback, and delegation of only a bounded denial cause to the existing Algorithm C owner |
 | `canonical-actual-posting-service.js` | Inert exact command validation and delegation to the disabled repository only; no registration or caller authority |
-| `canonical-actual-eligibility-event-repository.js` | One narrow repository-internal posting-denial orchestration seam: fresh authoritative reread, private denial-package reconstruction/branding, and delegation to the unchanged Algorithm C persistence path; no generic factory export and no Algorithm A/C semantic, invariant, schema, or persisted-format change |
+| `canonical-actual-eligibility-event-repository.js` | One narrow C-owned posting-denial seam; exact C1-C8 locked-state outcomes; and extraction of one unexported in-transaction primitive from the existing transaction-owning wrapper so both entry points share unchanged Algorithm C package verification/create/replay/post-write semantics without nested `BEGIN` or an unlock gap |
 
 No other production file is implicitly allowed. In particular, the implementation
 may not modify PR9a schema, Algorithm A semantics, Algorithm C state/persistence/
 accounting/recovery semantics, authority repository, `server/db.js`, or
 `server/server.js`. The eligibility-event repository exception is limited to the
-single seam/export responsibility above.
+single seam plus private-primitive extraction above. The existing wrapper must retain
+its transaction ownership and observable behavior. The primitive must not own a
+transaction or be exported. The new seam alone owns its `BEGIN IMMEDIATE`, locked
+classification, fresh reconstruction, private branding, reciprocal-pair invocation,
+post-write proof, and commit/rollback. Algorithm B supplies no connection or
+transaction context.
 
 ### 3.2 Tests, helper, fixtures, and implementation records
 
@@ -104,8 +115,13 @@ The future PR9b implementation must not include or perform:
 
 - schema, migration, index, trigger, or `server/db.js` changes;
 - changes to `canonical-actual-eligibility-event-repository.js` outside the exact
-  section-3.1 seam/export, its service, the PR9a authority repository, or any
-  Algorithm A/C semantic, invariant, state, persisted-format, or recovery behavior;
+  section-3.1 C-owned seam, C1-C8 handling, and private-primitive extraction; its
+  service, the PR9a authority repository, or any Algorithm A/C semantic, invariant,
+  state, persisted-format, or recovery behavior;
+- a generic/exported transaction API, caller-supplied connection/transaction/context,
+  nested `BEGIN`, exported private primitive/package factory/brand, caller-created
+  branded package, or duplicated Algorithm C conflict/transition DML in the posting
+  repository;
 - routes, `server/server.js`, workers, schedulers, cron, timers, queues, startup
   hooks, CLI, frontend, or runtime consumers;
 - feature flags, environment switches, enabled defaults, resolver wiring, or live
@@ -150,21 +166,43 @@ following against the exact authorized head:
     `NO_RESULT` before current admission; drift cannot hide a committed effect;
 13. operation and financial audit correlation equal the persisted event correlation,
     while canonical is bound relationally and carries no correlation column;
-14. the narrow PR9a repository seam rereads/reconstructs/brands denial evidence
-    privately; Algorithm B cannot forge a package or duplicate Algorithm C;
-15. deterministic tests fix command, locked snapshot, captured attemptedAt, and
+14. after B rollback, the narrow PR9a C seam alone opens exactly one
+    `BEGIN IMMEDIATE`; B cannot supply/nest a transaction, forge a package, perform C
+    DML, retry C, or form the response from its non-durable denial object;
+15. the current wrapper retains its transaction-owning behavior while both it and
+    the new seam call one unexported, non-transaction-owning private primitive; fresh
+    seam reread/reconstruction/branding and pair persistence have no unlock gap;
+16. C1-C8 have the exact design outcomes and write sets:
+    `PRIMARY_RESULT_WON`, `PRIMARY_RESULT_INTEGRITY_BLOCKED`,
+    `DENIAL_NO_LONGER_CURRENT`, `DENIAL_RECLASSIFIED`,
+    `EXACT_CONFLICT_REPLAY`, `CONFLICT_RESULT_MISMATCH`,
+    `CONFLICT_RECOVERY_REQUIRED`, and `DENIAL_PERSISTED`;
+17. impossible primary/conflict combinations always precede primary or conflict
+    replay and return the read-only integrity block; an incomplete transition returns
+    recovery-required with zero seam DML and is advanced only through existing
+    separate C reconciliation;
+18. C4/C8 perform exactly two reciprocal-pair inserts and the unchanged four
+    monotonic transition updates; all other C1-C8 paths perform zero DML, and a
+    pre-pair-commit fault leaves zero durable rows;
+19. the B service returns the immutable seam result; fresh C state may make a
+    primary win, remove/reclassify denial, replay/mismatch conflict evidence, or
+    require recovery, and stale caller/B causes are never authority;
+20. independent-process tests cover every design section-17.1 race, including two C
+    callers, private export/nested-transaction rejection, rollback between pair
+    inserts, lost C response, and impossible primary-plus-conflict state;
+21. deterministic tests fix command, locked snapshot, captured attemptedAt, and
     injected generator outcomes and separately exercise lock/commit outcomes;
-16. every hostile scenario in the design matrix passes, including tampering,
+22. every other hostile scenario in the design matrix passes, including tampering,
     partial legacy state, post-insert mismatch, and unauthorized activation;
-17. canonical-byte and SHA-256 fixtures are independently reproduced for every new
+23. canonical-byte and SHA-256 fixtures are independently reproduced for every new
     posting envelope and mutation;
-18. schema/FK/integrity and no-orphan/extra-row checks pass after every success and
+24. schema/FK/integrity and no-orphan/extra-row checks pass after every success and
     fault case;
-19. static inventory proves every SQL reference to PR9 tables, import/call-graph
+25. static inventory proves every SQL reference to PR9 tables, import/call-graph
     isolation, and absence of dynamic/generic business DML; startup proves exact
     schema/index/trigger definitions, `foreign_keys = 1`, clean
     `foreign_key_check`, and orphan anti-joins;
-20. two focused final-tree runs, two full test runs, explicit Node test run, build,
+26. two focused final-tree runs, two full test runs, explicit Node test run, build,
     static scope scans, and a clean exact-head review are recorded in the PR9b audit.
 
 Minimum commands include:
@@ -215,8 +253,9 @@ separate schema design and authorization PR must complete first.
 
 - **D-PR9B-01 — APPROVE WITH CONDITIONS:** one initial-post business
   responsibility, implemented as durable-result resolution, new admission/primary
-  transaction only from `NO_RESULT`, and post-rollback delegation to the sole
-  Algorithm C owner.
+  transaction only from `NO_RESULT`, and post-rollback delegation to the sole C
+  transaction owner. B's denial is non-durable; the service returns the exact C1-C8
+  seam outcome and never supplies or nests the C transaction.
 - **D-PR9B-02 — APPROVE:** `rental_service_upd` /
   `rootSourceDocumentLineageId` / `economicLineageKey` explicitly supersedes the
   PRE-PR9 mapping; correction/revision fixtures must prove identity semantics.
@@ -299,16 +338,19 @@ The reviewer must independently:
    denial-delegation phases, and the PR9a/PR9b/PR9c split;
 6. validate authoritative input, durable output, ordered mutually exclusive state
    predicates, transaction order, post-insert reread, uncertain-commit resolution,
-   current-status qualifier, and denial transaction separation;
+   current-status qualifier, and B-rollback/C-owned-transaction separation;
 7. prove idempotency serialization/key/uniqueness and double-post prevention;
 8. challenge determinism/error precedence with combined hostile states, injected
    clock/generator outcomes, and independent SQLite lock/commit outcomes;
 9. validate the evidence graph without relying on runtime logs;
 10. confirm no schema change is needed or block PR9b pending a schema-v2 design;
 11. confirm the future allowlist and prohibited scope are closed and sufficient,
-    including the single narrow Algorithm C seam exception and event-correlation
-    binding;
-12. confirm every authorization field remains fail-closed.
+    including the single narrow Algorithm C seam/private-primitive exception and
+    event-correlation binding;
+12. reproduce C1-C8, exact DML counts, impossible-state precedence, absence of nested
+    `BEGIN`/unlock gap/private exports, existing-wrapper preservation, and every
+    section-17.1 race outcome;
+13. confirm every authorization field remains fail-closed.
 
 The acceptable independent-review output is either:
 
@@ -337,7 +379,8 @@ The design PR description must state:
   deployment, Railway,
   production access, activation, reads/writes, settlement, shadow read, and cutover;
 - unresolved decisions: D-PR9B-01 through D-PR9B-04 only;
-- result: `PR9B DESIGN REMEDIATED: INDEPENDENT RE-AUDIT REQUIRED`;
+- result:
+  `PR9B DESIGN REMEDIATION COMPLETE — INDEPENDENT RE-AUDIT REQUIRED`;
 - next gate: independent re-audit, Owner/Architect design approval, applicable Gate C
   closure, and a separate exact-head implementation authorization.
 

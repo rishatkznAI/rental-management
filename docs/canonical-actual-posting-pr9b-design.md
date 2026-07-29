@@ -2,7 +2,8 @@
 
 ## 1. Status and verdict
 
-**Document status:** `PR9B DESIGN REMEDIATED: INDEPENDENT RE-AUDIT REQUIRED`
+**Document status:**
+`PR9B DESIGN REMEDIATION COMPLETE — INDEPENDENT RE-AUDIT REQUIRED`
 
 **Design base:** PR9a squash-merge commit
 `a8987eb8c33a7b8974a21a8d25ad018b05317148`.
@@ -16,11 +17,13 @@ design-only proposal. It does not implement Algorithm B, change the PR9a schema,
 authorize PR9b, deploy code, activate a runtime path, read production data, or
 write production data.
 
-This revision remediates the findings against rejected design head
-`a98e44156b6d74fdade23cca7c7276ab81130116`. It remains a proposal until an
-independent reviewer audits the new exact head. The explicit reviewer decisions in
-section 19 must be accepted before a later implementation authorization can be
-requested. Nothing in this document sets `pr9bDesignReviewed = TRUE` or
+The first remediation revised the findings against rejected design head
+`a98e44156b6d74fdade23cca7c7276ab81130116`. This final revision closes the
+transaction-ownership and concurrent-outcome ambiguity found against rejected
+remediation head `ebe961a5d17fe9a77f351cc5ba729aa471f12ea5`. It remains a proposal
+until an independent reviewer audits the new exact head. The explicit reviewer
+decisions in section 19 must be accepted before a later implementation authorization
+can be requested. Nothing in this document sets `pr9bDesignReviewed = TRUE` or
 `pr9bImplementationAuthorized = TRUE`.
 
 ## 2. Repository archaeology and authority hierarchy
@@ -409,36 +412,142 @@ not part of this proof. The event row is the sole authoritative correlation sour
 - post-insert reread proves both equalities against the event;
 - the canonical row carries no correlation column and is linked only relationally.
 
-### 7.4 Denial output
+### 7.4 Denial handoff and sole transaction owner
 
 A safely reconstructable registered denial produces no primary effect. Algorithm B
-rolls back and invokes one future narrow repository-internal orchestration seam in
-`canonical-actual-eligibility-event-repository.js`. Algorithm B passes only its
-bounded selector command and one immutable denial cause code/result from the closed
-registry. It never passes conflict/transition IDs, timestamps, hashes, observed or
-expected audit projections, a branded package, or free-form payload.
+first rolls back its primary-attempt transaction and only then invokes one future
+narrow repository-internal Algorithm C orchestration seam in
+`canonical-actual-eligibility-event-repository.js`. The handoff begins a new attempt
+boundary:
 
-Under a new transaction, the existing PR9a repository must independently reread the
-authoritative persisted graph, verify that the selected denial still wins,
-reconstruct every expected/observed projection, generate its private IDs and clock,
-create the existing private `WeakSet` brand, and call the existing Algorithm C
-persistence path. It returns the immutable durable result only after the reciprocal
-`canonical_receivable_posting_conflicts` +
-`canonical_receivable_posting_conflict_transitions` pair is fully `COMPLETE` with
-one attempt, rate, and circuit result.
+```text
+B primary attempt transaction: ROLLED BACK
+C denial transaction: independent and owned only by the C seam
+```
 
-The seam is an orchestration entry point, not a generic brand or package factory.
-The private factory/assertion remain unexported, caller-forged packages remain
-impossible, and Algorithm B must not duplicate Algorithm C state transitions or
-persisted formats. A future change to the merged repository is justified and limited
-to this seam/export because denial evidence is required, the current private brand
-makes the authorized call physically impossible, and duplicating Algorithm C would
-break its single-owner invariant. No Algorithm A semantics, Algorithm C invariant,
-schema, or persisted format may change.
+Algorithm B passes only the bounded event selector, bounded assertions, the closed
+denial-cause enum selected by B, and, when required, one immutable B-attempt
+reference that is itself only an assertion. B does not pass an open database
+connection, transaction object or context, conflict/transition IDs, timestamps,
+hashes, observed/expected persisted projections, audit payload, branded package, or
+free-form data. B does not create a package, reconstruct C payload, perform C DML,
+call the current `persistDenialEvidence` from an external transaction, or retry C.
 
-Unsafe corruption, malformed input, generation failure, disabled invocation,
-unrepresentable denial, database failure, and pre-commit failure may intentionally
-produce no denial row. They never produce a primary effect.
+Persisted state is allowed to change between the two transactions. The B denial
+object is non-durable and is never authority for C. The seam is the sole owner of
+this complete initial denial-persistence transaction:
+
+```text
+BEGIN IMMEDIATE
+-> exact storage/schema/FK/registered-structure preflight
+-> section-7.6 durable-state classification
+-> fresh authoritative graph reread
+-> current winning-denial reconstruction
+-> private package construction and WeakSet branding
+-> Algorithm C create-or-replay decision through the private primitive
+-> reciprocal-pair post-write reread
+-> COMMIT
+```
+
+Every failure before commit rolls this transaction back. There is exactly one lock
+and no unlock gap from durable-state classification and fresh authoritative reread
+through private package construction and reciprocal-pair persistence. Algorithm B
+cannot open, commit, roll back, inject, or nest this transaction.
+
+The initial transaction either performs no C DML or atomically inserts exactly one
+reciprocal conflict row plus one `PENDING` transition row. After that pair commits,
+the existing Algorithm C reconciler alone may advance its established monotonic
+`PENDING -> ACCOUNTED -> CIRCUIT_APPLIED -> COMPLETE` sequence in its existing
+separate C-owned transactions. Those post-pair recovery transactions do not create
+an unlock gap in denial admission: once the reciprocal pair commits, every future B
+classification must observe completed or incomplete conflict evidence and cannot
+admit a primary result. The seam returns `DENIAL_PERSISTED` only after the pair is
+fully `COMPLETE`.
+
+The Algorithm B service forms its response exclusively from the immutable seam
+result. It does not return or reinterpret the pre-rollback B denial object. The seam
+may therefore return a primary result that won before its lock, report that denial
+disappeared, persist a newly winning denial cause, replay existing conflict evidence,
+or require separate C recovery.
+
+### 7.5 Single private in-transaction Algorithm C primitive
+
+The merged `persistDenialEvidence` wrapper already owns `BEGIN IMMEDIATE`. Future
+implementation is authorized to perform exactly one minimal internal refactor so
+the new seam cannot create a nested transaction:
+
+1. preserve the current externally callable transaction-owning wrapper and its
+   observable validation, create/replay, rollback, completion, and recovery behavior;
+2. extract from it one private in-transaction Algorithm C primitive containing the
+   existing package verification, exact replay, reciprocal-pair DML, and post-write
+   reread semantics;
+3. keep the wrapper responsible for its own `BEGIN IMMEDIATE`, invocation of the
+   private primitive, and commit/rollback;
+4. make the new seam responsible for its separate `BEGIN IMMEDIATE`, fresh
+   classification/reconstruction/private branding, invocation of the same primitive
+   while that seam-owned transaction is open, and commit/rollback;
+5. keep all existing monotonic transition reconciliation in the current Algorithm C
+   owner after reciprocal-pair commit.
+
+The primitive neither begins nor ends a transaction, is not exported, and accepts
+only a package branded inside this repository. It is the one implementation of
+Algorithm C reciprocal-pair create/replay DML used by both transaction-owning entry
+points. The refactor may not change the Algorithm C state machine, precedence,
+hashes, IDs, persisted projections, transition recovery, schema, or formats.
+
+Normative constraints are: **no nested `BEGIN`; no transaction supplied by Algorithm
+B; no unlock between authoritative reread and reciprocal-pair persistence; one
+private in-transaction Algorithm C primitive; no generic transaction or package
+factory export.**
+
+### 7.6 C-seam precedence and exact concurrent outcomes
+
+After its own `BEGIN IMMEDIATE`, the seam classifies one locked snapshot in this
+exact order. Every later predicate includes the negation of every earlier one:
+
+1. database, schema, FK, registered-structure, or storage integrity failure;
+2. any partial/corrupt primary graph, or any impossible primary/conflict combination;
+3. one incomplete Algorithm C transition with no primary evidence;
+4. one exact complete primary triplet with no conflict evidence;
+5. one completed conflict pair: exact replay first, otherwise mismatch;
+6. any other intersecting identity collision;
+7. fresh authoritative graph reconstruction, including closed-cause representability;
+8. denial disappeared;
+9. denial changed to another closed, safely reconstructable winning cause;
+10. the asserted denial remains the current winning cause;
+11. Algorithm C reciprocal-pair create/replay through the private primitive.
+
+A complete primary plus any completed or incomplete conflict pair, a partial primary
+plus any conflict, multiple primary/conflict candidates, and malformed reciprocal
+bindings are impossible combinations under item 2. They return
+`PRIMARY_RESULT_INTEGRITY_BLOCKED` with zero DML; SQL query order may not choose a
+primary or conflict replay from such a graph.
+
+The exact outcomes are:
+
+| Case | Locked predicate after the C seam obtains its lock | Outcome | Exact DML owned by this invocation | Final durable state |
+|---|---|---|---|---|
+| C1 | No conflicting evidence; one byte-exact complete primary triplet appeared after B rollback | `PRIMARY_RESULT_WON` with original canonical/operation/audit IDs, timestamps, correlation, fingerprints and result seal | zero | exact primary triplet unchanged; no denial evidence |
+| C2 | Any orphan, partial, mismatched, multiple or corrupt primary graph, including primary plus completed/incomplete conflict | `PRIMARY_RESULT_INTEGRITY_BLOCKED` | zero | corrupt/impossible graph unchanged for separate integrity remediation |
+| C3 | No primary/conflict/collision evidence and fresh authoritative reconstruction produces no denial | `DENIAL_NO_LONGER_CURRENT` | zero | no primary or denial result for the old attempt; a new external B attempt is permitted |
+| C4 | No prior result exists and fresh deterministic precedence selects a different closed, safely reconstructable denial cause | `DENIAL_RECLASSIFIED`, containing both asserted and authoritative causes plus the immutable completed conflict result for the authoritative cause | exactly two reciprocal-pair `INSERT`s, then exactly four existing monotonic transition `UPDATE`s; no primary DML | one `COMPLETE` pair for the fresh cause; the asserted old cause is never persisted |
+| C5 | Exactly one valid `COMPLETE` pair matches the asserted attempt/cause and full durable conflict identity | `EXACT_CONFLICT_REPLAY` with original conflict/transition IDs, timestamps and hashes | zero | original complete pair byte-unchanged |
+| C6 | Exactly one valid `COMPLETE` pair intersects the request but does not match its asserted/durable conflict identity | `CONFLICT_RESULT_MISMATCH` | zero | existing complete pair unchanged; no second pair |
+| C7 | With no primary evidence, exactly one reciprocal pair is `PENDING`, `ACCOUNTED`, or `CIRCUIT_APPLIED` | `CONFLICT_RECOVERY_REQUIRED` | zero in the seam; it does not create a pair or synchronously reconcile | incomplete pair unchanged; only the existing separate Algorithm C reconciliation entry point may advance it, and B never resumes |
+| C8 | No primary/conflict/collision evidence and fresh reconstruction proves the asserted cause remains current | `DENIAL_PERSISTED` | exactly two reciprocal-pair `INSERT`s, then exactly four existing monotonic transition `UPDATE`s; no primary DML | one immutable `COMPLETE` pair for the current cause |
+
+The two inserts in C4/C8 commit atomically under the seam-owned transaction. The four
+bounded updates are the unchanged Algorithm C attempt, rate, circuit, and final
+`COMPLETE` reconciliation steps, each in its existing C-owned transaction. Failure
+before the reciprocal-pair commit leaves zero rows. Failure or process loss after
+that commit leaves one detectable incomplete pair; it cannot become `NO_RESULT` and
+is governed only by C7. Loss of the response after the final `COMPLETE` commit is C5
+on retry.
+
+An old or forged asserted cause is never written merely because B supplied it. A
+changed safe cause follows only C4; an absent cause follows only C3; a malformed or
+unrepresentable fresh graph returns the earlier stable integrity result with zero
+DML. The seam never resumes B admission under its C transaction.
 
 ## 8. Deterministic state machine
 
@@ -539,10 +648,13 @@ fingerprint/result; requires exact counts, byte equality, clean FKs, no orphan/e
 rows, and an unchanged locked graph; and commits once.
 
 For denial, the primary transaction is rolled back before invoking the section-7.4
-Algorithm C seam. That PR9a owner opens its own transaction, rereads and reconstructs
-the cause, generates its private clock/IDs, and either returns one complete durable
-denial result or a stable C recovery/infrastructure result. Algorithm B never resumes
-primary admission after this delegation.
+Algorithm C seam. That seam is the only owner of the new C transaction and performs
+the exact section-7.6 precedence under its own lock. It may return
+`PRIMARY_RESULT_WON`, `PRIMARY_RESULT_INTEGRITY_BLOCKED`,
+`DENIAL_NO_LONGER_CURRENT`, `DENIAL_RECLASSIFIED`, `EXACT_CONFLICT_REPLAY`,
+`CONFLICT_RESULT_MISMATCH`, `CONFLICT_RECOVERY_REQUIRED`, or `DENIAL_PERSISTED`.
+Algorithm B supplies no transaction and never resumes primary admission after this
+delegation. Its service response is the seam result, not the pre-rollback denial.
 
 No savepoint, nested caller transaction, transaction injection, or split primary
 commit is permitted. SQLite automatic retries are zero.
@@ -568,12 +680,14 @@ returns `CANONICAL_POSTING_PERSISTENCE_FAILED` and rolls the whole transaction b
 
 ### 9.4 Multiple transactions
 
-Multiple transactions are forbidden for a successful primary effect. They are
-permitted only after Algorithm B has rolled back and selected a denial: Algorithm C
-atomically commits its reciprocal pair and advances durable evidence-accounting
-stages in separate idempotent transactions. Those transactions cannot write a
-canonical receivable, posting operation, financial audit, settlement, PR6, PR8,
-legacy, or `app_data` row.
+Multiple transactions are forbidden for a successful primary effect. After
+Algorithm B rolls back, the C seam owns one separate initial denial transaction from
+fresh classification through atomic reciprocal-pair commit, with no unlock gap and
+no nested `BEGIN`. Only after that commit may the existing Algorithm C reconciler
+advance durable evidence-accounting stages in its separate idempotent transactions.
+The seam returns a newly persisted denial only after those stages are `COMPLETE`.
+These C-owned transactions cannot write a canonical receivable, posting operation,
+financial audit, settlement, PR6, PR8, legacy, or `app_data` row.
 
 ## 10. Idempotency and exact replay
 
@@ -681,7 +795,10 @@ the same inert command and is resolved through persisted state.
 | During commit with unknown client outcome | either zero or one complete triplet, never a valid partial triplet | retry Phase 1 returns `EXACT_COMMITTED_RESULT` when commit succeeded; otherwise `NO_RESULT` enters a new current admission |
 | After commit but before response | one complete immutable triplet | later call proves and returns the original historical result before current drift checks |
 | Authority or policy drifts after a successful commit/lost response | original complete triplet | retry returns `EXACT_COMMITTED_RESULT` plus `CURRENTLY_DENIED`; zero DML and no C conflict |
+| After B rollback but before the C seam lock | B state is zero; another writer may commit a primary or C pair | the C seam disregards the non-durable B decision and applies section 7.6; an exact primary returns `PRIMARY_RESULT_WON` and stale denial evidence is never written |
+| After a C conflict or transition insert but before reciprocal-pair commit | zero C rows after rollback/recovery | later invocation reclassifies the durable state; no orphan pair is accepted |
 | After denial pair commit but before Algorithm C completion | no primary rows; one incomplete reciprocal pair | retry classifies `CONFLICT_RECOVERY_INCOMPLETE`, rolls back, runs only separate C recovery, returns recovery-required, and never resumes B |
+| After final C `COMPLETE` commit but before response | one immutable complete reciprocal pair | retry returns `EXACT_CONFLICT_REPLAY` with original IDs/timestamps/hashes and zero DML |
 
 ## 12. Failure and error precedence
 
@@ -746,10 +863,12 @@ The mandatory precedence is:
     outcome is resolved by the next invocation's Phase 1.
 
 When a safely reconstructable registered denial is selected, Algorithm B retains
-only one bounded immutable cause and rolls back. The Algorithm C seam reconstructs
-and persists the single observation from fresh authoritative rows. Multiple conflict
-rows for one attempt are forbidden. Unsafe evidence takes the existing `not allowed`
-path and writes no conflict row.
+only one bounded immutable asserted cause and rolls back. Final authority moves to
+the Algorithm C seam's new locked snapshot and exact section-7.6 precedence. The
+seam may return a newly won primary result, no-current-denial result, reclassified
+denial, conflict replay/mismatch/recovery result, or one newly completed denial.
+Multiple conflict rows for one attempt are forbidden. Unsafe evidence takes the
+stable read-only integrity path and writes no conflict row.
 
 ## 13. Accounting evidence and immutable audit trail
 
@@ -849,13 +968,15 @@ separate additive schema design/authorization PR. It may not be hidden inside PR
 
 The exact future implementation allowlist is normative in
 `docs/pr9b-implementation-authorization-gate.md`. In summary it permits only the
-shared pure domain extension, isolated posting repository/service, the one narrow
-Algorithm C orchestration seam in
-`canonical-actual-eligibility-event-repository.js`, focused fixtures/tests, and
-implementation audit/status documents. The seam exception permits no Algorithm A
-or Algorithm C semantic, invariant, schema, or persisted-format change. The list
-excludes all other schema, `server/db.js`, routes, server wiring, frontend,
-dependencies, configuration, deployment, and production access.
+shared pure domain extension, isolated posting repository/service, and in
+`canonical-actual-eligibility-event-repository.js` the one narrow C-owned seam plus
+extraction of one unexported in-transaction primitive from the existing wrapper.
+That extraction must preserve wrapper behavior and every Algorithm C semantic,
+invariant, state transition, recovery rule, hash, schema, and persisted format. It
+also permits focused fixtures/tests and implementation audit/status documents. The
+list excludes generic transaction APIs, private factory export, duplicate C DML,
+all other schema, `server/db.js`, routes, server wiring, frontend, dependencies,
+configuration, deployment, and production access.
 
 ## 16. Prohibited scope
 
@@ -863,8 +984,12 @@ PR9b must not include:
 
 - schema or migration changes;
 - modifications to Algorithm A semantics or Algorithm C state, persistence,
-  accounting, recovery, branding, or persisted-format invariants; the section-7.4
-  narrow orchestration seam/export is the only permitted PR9a repository delta;
+  accounting, recovery, branding, or persisted-format invariants; the sections
+  7.4-7.6 narrow C-owned seam and section-7.5 private-primitive extraction are the
+  only permitted PR9a repository delta;
+- a generic transaction API, caller-supplied transaction/context, exported private
+  primitive/package factory/brand, nested `BEGIN`, or duplicate Algorithm C DML in
+  the posting repository;
 - routes, workers, schedulers, cron, timers, queues, startup hooks, CLI, UI, or live
   adapters;
 - feature flags, environment activation, resolver wiring, or runtime consumers;
@@ -899,9 +1024,32 @@ mutations but must retain the exact durable/outcome contract.
 | Partial/impossible legacy state | Seed orphan PR9-source canonical, orphan/mismatched operation/audit, duplicate-looking non-PR9 row, dirty FK, or schema drift | No new primary rows; impossible state retained only for diagnosis | Integrity or identity conflict before replay/new DML | No repair, delete, normalization, replacement, settlement, or second effect |
 | Combined durable states | Seed each section-8.1 combination, including partial primary plus conflict and completed conflict plus restored authority | Existing evidence remains byte-identical except permitted C recovery advancement | Exact section-8 classification independent of SQL query order | No write outside the classification's closed write set |
 | Deterministic injected inputs | Repeat one command/snapshot with fixed clock/generators, then vary only attemptedAt, generator failure, UUID collision, or lock/commit outcome | Fixed tuple is byte-identical; varied external input follows its registered branch | Same tuple has same winner/write set; external failures use fixed mapping | UUID collision/failure never changes business classification or leaves DML |
-| Algorithm C seam and private brand | Call the seam with each bounded registered cause; attempt caller-forged package/IDs/timestamp/hash/payload and stale cause | Valid call creates/replays one C-owned pair; forged/stale inputs create no fabricated evidence | Durable C result or stable mismatch/integrity result | No exported factory, duplicated C transition, or primary DML |
+| Algorithm C seam and private brand | Call the seam with each bounded registered cause; attempt caller-forged package/IDs/timestamp/hash/payload and stale cause | Exact section-7.6 state; only C4/C8 may create one C-owned pair | Exact C1-C8 outcome; no generic mismatch fallback | No exported factory, duplicate C state machine, transaction injection, nested `BEGIN`, or primary DML |
 | Correlation binding | Attempt caller correlation, new B correlation, operation/audit mismatch, or mismatch with event | Valid triplet uses event correlation in operation/audit; canonical remains relational only | Success/replay only for exact event correlation; otherwise rollback | No caller/new correlation and no partial triplet |
 | Unauthorized activation attempt | Call disabled service, forge runtime contract/activation selectors, import from route/server, or use environment defaults | PR9 tables unchanged | `CANONICAL_PR9B_DISABLED` or structural safety-test failure | All business/conflict DML and runtime wiring absent |
+
+### 17.1 Mandatory B-to-C race and ownership cases
+
+The following cases are separate mandatory tests, not variants that may share a
+generic expected error. `DML` counts committed business statements unless an
+attempted statement followed by rollback is stated explicitly.
+
+| Scenario | Initial persisted state | Mutation before/during C | Classification | Returned outcome and exact DML | Final durable state |
+|---|---|---|---|---|---|
+| 1. Primary wins before C lock | B classified `NO_RESULT`, selected denial, and rolled back | another process commits the exact primary triplet | C1 exact primary, no conflict | `PRIMARY_RESULT_WON`; 0 DML | exact triplet only; no conflict pair |
+| 2. Orphan canonical before C lock | zero result at B rollback | another writer leaves one intersecting orphan canonical | C2 partial primary | `PRIMARY_RESULT_INTEGRITY_BLOCKED`; 0 DML | orphan unchanged; no denial pair |
+| 3. Denial disappears before C lock | zero result and one asserted B denial | authority/source graph changes so fresh state is admitted | C3 no current denial | `DENIAL_NO_LONGER_CURRENT`; 0 DML | no result for old attempt; external caller may start a new B attempt |
+| 4. Denial cause changes before C lock | zero result and asserted cause A | fresh graph makes closed cause B the unique winner | C4 reclassified denial | `DENIAL_RECLASSIFIED`; 2 pair INSERTs + 4 transition UPDATEs = 6 DML | one `COMPLETE` pair for cause B; cause A absent |
+| 5. Same conflict completes before C lock | one exact reciprocal pair for the asserted attempt/cause reaches `COMPLETE` | none after C lock | C5 exact completed conflict | `EXACT_CONFLICT_REPLAY`; 0 DML | same pair byte-unchanged |
+| 6. Different conflict completes before C lock | one intersecting `COMPLETE` pair has a different durable identity | none after C lock | C6 completed-conflict mismatch | `CONFLICT_RESULT_MISMATCH`; 0 DML | existing pair unchanged; no second pair |
+| 7. Incomplete transition before C lock | one pair is `PENDING`, `ACCOUNTED`, or `CIRCUIT_APPLIED`; no primary | none after C lock | C7 incomplete recovery | `CONFLICT_RECOVERY_REQUIRED`; 0 seam DML | incomplete state unchanged until separate existing C reconciliation |
+| 8. Two C seam calls for one event | no result; same current denial | two independent seam calls cross a pre-lock barrier | lock winner C8; follower C5 | winner `DENIAL_PERSISTED`, 6 DML; follower `EXACT_CONFLICT_REPLAY`, 0 DML | exactly one `COMPLETE` pair |
+| 9. Stale asserted cause | no result; asserted cause A | fresh locked graph proves different closed cause B | C4, never caller authority | `DENIAL_RECLASSIFIED`; exactly 6 DML | one `COMPLETE` cause-B pair; no cause-A evidence |
+| 10. Nested transaction attempt | unchanged database | caller attempts to pass a connection/transaction or unknown transaction field | invalid seam command before database access | `C_SEAM_INPUT_REJECTED`; 0 DML and no `BEGIN` | unchanged |
+| 11. Private primitive import | unchanged database | external module attempts to import the in-transaction primitive or package factory | structural export violation | structural test failure; 0 DML | unchanged; primitive/factory remain unexported |
+| 12. Rollback between pair inserts | C8 new current denial | inject failure after conflict INSERT and before reciprocal transition INSERT/post-write proof/commit | C persistence failure | `CONFLICT_EVIDENCE_PERSISTENCE_FAILED`; 1 attempted INSERT, transaction rollback, 0 committed DML | no conflict or transition row |
+| 13. C response lost after completion | one new pair completed and final `COMPLETE` commit succeeded | response is lost; same seam assertion is retried | retry C5 | `EXACT_CONFLICT_REPLAY`; 0 retry DML | original pair and all IDs/timestamps/hashes unchanged |
+| 14. Exact primary plus completed conflict | exact triplet and one completed intersecting conflict coexist | none; impossible graph is seeded directly in a disposable fixture | C2 impossible primary/conflict combination | `PRIMARY_RESULT_INTEGRITY_BLOCKED`; 0 DML | both facts retained only for integrity remediation; neither is selected as replay |
 
 Every case must also assert `foreign_key_check`, `integrity_check`, exact row counts,
 and byte-preservation of pre-existing evidence where the database remains structurally
@@ -949,7 +1097,7 @@ Owner/Architect disposition before an implementation authorization request:
 
 | Decision | Proposed disposition | Why explicit approval is required |
 |---|---|---|
-| D-PR9B-01 Algorithm B responsibility | **APPROVE WITH CONDITIONS:** Algorithm B owns one initial-post outcome; its mandatory workflow is durable result resolution, new admission/primary transaction only from `NO_RESULT`, and post-rollback delegation of denial persistence to the Algorithm C owner | The section-7.4 callable seam and phase boundary must be implemented exactly; B may not duplicate C or turn current drift into a historical failure |
+| D-PR9B-01 Algorithm B responsibility | **APPROVE WITH CONDITIONS:** Algorithm B owns one initial-post outcome; its mandatory workflow is durable result resolution, new admission/primary transaction only from `NO_RESULT`, and post-rollback delegation to the sole C transaction owner | Sections 7.4-7.6 must be implemented exactly: the B decision is non-durable, the service returns the C seam result, and B may not own/nest a C transaction, duplicate C, or turn current drift into a historical failure |
 | D-PR9B-02 physical source mapping | **APPROVE:** merged-schema mapping `rental_service_upd` / `rootSourceDocumentLineageId` / `economicLineageKey` explicitly supersedes the three PRE-PR9 section-15 values | Existing trigger makes alternatives mutually exclusive; correction/revision fixtures must independently prove identity semantics |
 | D-PR9B-03 schema trust boundary | **APPROVE WITH CONDITIONS:** PR9a v1 is sufficient only for repository-exclusive Algorithm B business DML | Future proof must include static inventory of every PR9 SQL reference, import/call-graph isolation, prohibition of dynamic/generic business DML, `PRAGMA foreign_keys = ON`, clean `foreign_key_check`, startup schema/index/trigger assertions, orphan anti-joins, and hostile independent-process tests; arbitrary database-owner raw SQL remains outside the threat model |
 | D-PR9B-04 activation split | **APPROVE:** isolated unreachable PR9b places every runtime consumer/live adapter/activation action in PR9c or later | Prevents implementation merge from implying runtime authority |
@@ -963,7 +1111,7 @@ fixtures or defaults.
 This document proposes only:
 
 ```text
-PR9b design = REMEDIATED; INDEPENDENT RE-AUDIT REQUIRED
+PR9b design = REMEDIATION COMPLETE; INDEPENDENT RE-AUDIT REQUIRED
 architectureDesignApproved = TRUE          # existing Gate A only
 pr9aImplementationAuthorized = TRUE        # existing merged PR9a only
 pr9bDesignReviewed = FALSE

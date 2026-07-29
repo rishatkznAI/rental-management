@@ -22,10 +22,12 @@ production evidence acceptance, activation, production read/write, settlement,
 shadow-read, or cutover permission. Merge, CI, a draft PR, review silence, or the
 existence of these files changes no authorization value.
 
-This final package revision closes the C-seam transaction-ownership and concurrent-
-outcome ambiguity identified against rejected remediation head
-`ebe961a5d17fe9a77f351cc5ba729aa471f12ea5`. Closure is a design proposal only and
-must be independently re-audited at its new exact head.
+This final package revision closes the remaining concurrent-follower ambiguity in
+hostile case 8 identified against rejected head
+`799e2052ad931228d28d9c6598b97a69f1f74d50`. It preserves the previously remediated
+C-seam transaction ownership and separates follower behavior before and after
+durable `COMPLETE`. Closure is a design proposal only and must be independently
+re-audited at its new exact head.
 
 ## 2. Effect of the design PR
 
@@ -172,24 +174,32 @@ following against the exact authorized head:
 15. the current wrapper retains its transaction-owning behavior while both it and
     the new seam call one unexported, non-transaction-owning private primitive; fresh
     seam reread/reconstruction/branding and pair persistence have no unlock gap;
-16. C1-C8 have the exact design outcomes and write sets:
+16. C1-C8 retain the exact design classifications and write sets:
     `PRIMARY_RESULT_WON`, `PRIMARY_RESULT_INTEGRITY_BLOCKED`,
     `DENIAL_NO_LONGER_CURRENT`, `DENIAL_RECLASSIFIED`,
     `EXACT_CONFLICT_REPLAY`, `CONFLICT_RESULT_MISMATCH`,
-    `CONFLICT_RECOVERY_REQUIRED`, and `DENIAL_PERSISTED`;
+    `CONFLICT_RECOVERY_REQUIRED`, and C8's two explicit result milestones:
+    initial `DENIAL_ACCEPTED_FOR_RECOVERY` at `PENDING`, then final
+    `DENIAL_PERSISTED` only after durable `COMPLETE` proof;
 17. impossible primary/conflict combinations always precede primary or conflict
     replay and return the read-only integrity block; an incomplete transition returns
     recovery-required with zero seam DML and is advanced only through existing
     separate C reconciliation;
-18. C4/C8 perform exactly two reciprocal-pair inserts and the unchanged four
-    monotonic transition updates; all other C1-C8 paths perform zero DML, and a
-    pre-pair-commit fault leaves zero durable rows;
-19. the B service returns the immutable seam result; fresh C state may make a
-    primary win, remove/reclassify denial, replay/mismatch conflict evidence, or
-    require recovery, and stale caller/B causes are never authority;
+18. C4/C8 perform exactly two reciprocal-pair inserts in the initial seam-owned
+    transaction and the unchanged four monotonic transition updates only through
+    the existing reconciler's separate transactions; these six statements are never
+    represented as one SQLite transaction; all other C1-C8 paths perform zero DML,
+    and a pre-pair-commit fault leaves zero durable rows;
+19. the B service returns only an immutable C result; a synchronous winner may
+    return `DENIAL_PERSISTED` only after a durable `COMPLETE` reread, while
+    interruption after the initial commit leaves a recoverable incomplete pair and
+    cannot return a false final result; fresh C state may otherwise make a primary
+    win, remove/reclassify denial, replay/mismatch conflict evidence, or require
+    recovery, and stale caller/B causes are never authority;
 20. independent-process tests cover every design section-17.1 race, including two C
-    callers, private export/nested-transaction rejection, rollback between pair
-    inserts, lost C response, and impossible primary-plus-conflict state;
+    callers with separate before-`COMPLETE` and after-`COMPLETE` barriers, private
+    export/nested-transaction rejection, rollback between pair inserts, pre- and
+    post-`COMPLETE` lost C response, and impossible primary-plus-conflict state;
 21. deterministic tests fix command, locked snapshot, captured attemptedAt, and
     injected generator outcomes and separately exercise lock/commit outcomes;
 22. every other hostile scenario in the design matrix passes, including tampering,
@@ -204,6 +214,56 @@ following against the exact authorized head:
     `foreign_key_check`, and orphan anti-joins;
 26. two focused final-tree runs, two full test runs, explicit Node test run, build,
     static scope scans, and a clean exact-head review are recorded in the PR9b audit.
+
+### 5.1 Mandatory concurrent-follower authorization contract
+
+No future implementation is eligible for authorization unless all of these
+statements are enforced without fallback or timing-dependent ambiguity:
+
+- No implementation may treat a committed incomplete Algorithm C pair as exact
+  replay.
+- `EXACT_CONFLICT_REPLAY` is legal only for a fully reread and validated
+  `COMPLETE` pair.
+- `PENDING`, `ACCOUNTED`, and `CIRCUIT_APPLIED` always map to
+  `CONFLICT_RECOVERY_REQUIRED` for a follower seam call.
+- One locked snapshot has one classification and one outcome. A follower performs
+  zero DML, never creates a second pair, never runs admission, and never drives the
+  existing pair's recovery.
+- The response for C7 includes the exact current durable stage. The existing
+  Algorithm C pair remains authoritative and its existing reconciler remains the
+  sole recovery owner.
+
+| Locked state seen by follower | Classification | Required outcome | Follower DML | Retry behavior |
+|---|---|---|---:|---|
+| `PENDING` | C7 | `CONFLICT_RECOVERY_REQUIRED` with stage `PENDING` | 0 | retry after recovery |
+| `ACCOUNTED` | C7 | `CONFLICT_RECOVERY_REQUIRED` with stage `ACCOUNTED` | 0 | retry after recovery |
+| `CIRCUIT_APPLIED` | C7 | `CONFLICT_RECOVERY_REQUIRED` with stage `CIRCUIT_APPLIED` | 0 | retry after recovery |
+| exact valid `COMPLETE` pair | C5 | `EXACT_CONFLICT_REPLAY` with original IDs, timestamps, hashes, and complete transition evidence | 0 | terminal replay |
+| corrupt or inconsistent stage | C2 / integrity state | exact integrity block | 0 | manual remediation |
+
+At least two separate independent-process concurrency tests are mandatory in the
+already allowlisted PR9b test files:
+
+1. **Test A — follower before `COMPLETE`.** Place a deterministic barrier after the
+   winner's initial reciprocal-pair commit and before the next recovery transaction.
+   The follower must obtain `BEGIN IMMEDIATE`, reread the exact incomplete stage,
+   and return C7/`CONFLICT_RECOVERY_REQUIRED` with zero DML. Assert one pair only,
+   unchanged IDs/hashes, no primary, no second pair, no admission, and no follower
+   recovery; after the barrier is released, the existing reconciler can complete the
+   same pair. Repeat this test for `PENDING`, `ACCOUNTED`, and `CIRCUIT_APPLIED`; a
+   parameterized test is permitted.
+2. **Test B — follower after `COMPLETE`.** Release the follower only after all four
+   existing monotonic updates commit and a fresh reread proves `COMPLETE`. The
+   follower must obtain `BEGIN IMMEDIATE` and return C5/`EXACT_CONFLICT_REPLAY` with
+   zero DML, the original conflict/transition IDs, timestamps and hashes, complete
+   transition evidence, and a pair count of one.
+
+Lost-response coverage is also stage-sensitive: a retry after the initial pair
+commit but before `COMPLETE` must return `CONFLICT_RECOVERY_REQUIRED`; a retry after
+`COMPLETE` must return `EXACT_CONFLICT_REPLAY`. A synchronous original winner call
+may return final `DENIAL_PERSISTED` only after proven `COMPLETE`; any failure or
+interrupt between stages must leave C7-recoverable durable state and no false
+complete response.
 
 Minimum commands include:
 
@@ -347,9 +407,10 @@ The reviewer must independently:
 11. confirm the future allowlist and prohibited scope are closed and sufficient,
     including the single narrow Algorithm C seam/private-primitive exception and
     event-correlation binding;
-12. reproduce C1-C8, exact DML counts, impossible-state precedence, absence of nested
-    `BEGIN`/unlock gap/private exports, existing-wrapper preservation, and every
-    section-17.1 race outcome;
+12. reproduce C1-C8, the stage/outcome matrix, exact DML counts, impossible-state
+    precedence, absence of nested `BEGIN`/unlock gap/private exports,
+    existing-wrapper preservation, deterministic case-8A/case-8B barriers, both
+    lost-response timelines, and every section-17.1 race outcome;
 13. confirm every authorization field remains fail-closed.
 
 The acceptable independent-review output is either:

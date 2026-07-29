@@ -2,7 +2,7 @@
 
 ## 1. Status and verdict
 
-**Document status:** `PR9B DESIGN: READY FOR INDEPENDENT REVIEW`
+**Document status:** `PR9B DESIGN REMEDIATED: INDEPENDENT RE-AUDIT REQUIRED`
 
 **Design base:** PR9a squash-merge commit
 `a8987eb8c33a7b8974a21a8d25ad018b05317148`.
@@ -16,10 +16,11 @@ design-only proposal. It does not implement Algorithm B, change the PR9a schema,
 authorize PR9b, deploy code, activate a runtime path, read production data, or
 write production data.
 
-The proposed design is internally complete enough for independent architecture,
-financial-integrity, SQLite, idempotency, and security review. The explicit
-reviewer decisions in section 19 must be accepted before a later implementation
-authorization can be requested. Nothing in this document sets
+This revision remediates the findings against rejected design head
+`a98e44156b6d74fdade23cca7c7276ab81130116`. It remains a proposal until an
+independent reviewer audits the new exact head. The explicit reviewer decisions in
+section 19 must be accepted before a later implementation authorization can be
+requested. Nothing in this document sets `pr9bDesignReviewed = TRUE` or
 `pr9bImplementationAuthorized = TRUE`.
 
 ## 2. Repository archaeology and authority hierarchy
@@ -137,13 +138,15 @@ sourceDocumentId = event.rootSourceDocumentLineageId
 sourceLineId = event.economicLineageKey
 ```
 
-This is a real design contradiction, not a naming preference. PR9b cannot implement
-the older mapping without changing the authorized PR9a schema. This design proposes
-the merged relational contract as D-PR9B-02 because it keeps document class aligned
-with the activation allowlist, uses the stable root source document, and uses the
-policy-independent economic lineage as the stable source line. Independent review
-and Owner/Architect acceptance of this explicit delta are mandatory before
-implementation authorization.
+This is a real design contradiction, not a naming preference. D-PR9B-02 explicitly
+supersedes the three PRE-PR9 section-15 values with the merged relational contract.
+That contract keeps the document class aligned with the activation allowlist, uses
+the stable root source document, and uses the policy-independent economic lineage as
+the stable source line. Correction and revision fixtures must prove that changing a
+current UPD version, coverage set/slice, amount, due date, policy, or authority does
+not create a second business identity while changing a lineage-defining member does
+not collapse a distinct obligation. No PR9a schema change is required for this
+decision.
 
 ### 3.4 Physical evidence limitation
 
@@ -178,7 +181,9 @@ repository must recompute them from persisted rows.
 - immutable authority/write-authorization/activation records;
 - bounded canonical serialization and common identity primitives;
 - Algorithm A production/replay of `ActualReceivableEligibleV1`;
-- Algorithm C denial evidence, transition accounting, and recovery;
+- Algorithm C denial evidence, transition accounting, and recovery, including the
+  future narrow repository-internal posting-denial orchestration seam in section
+  7.4;
 - the default-disabled runtime contract and absence of runtime consumers.
 
 PR9b consumes these contracts without changing their rows or lifecycle.
@@ -187,7 +192,10 @@ PR9b consumes these contracts without changing their rows or lifecycle.
 
 - an isolated posting command whose root selector is an already persisted
   `actual_receivable_eligible_events.id`;
-- a fresh locked proof of the complete persisted eligibility graph;
+- read-only resolution of any existing durable posting/conflict result before a new
+  admission decision;
+- a fresh locked proof of the complete persisted eligibility graph only when no
+  prior result exists;
 - exact derivation of one `canonical_receivable.initial_post.v1` effect;
 - one atomic canonical receivable + posting operation + financial audit triplet;
 - exact replay, conflict classification, and use of the existing Algorithm C
@@ -214,12 +222,19 @@ those scopes.
 
 ### 5.1 Single responsibility
 
-Algorithm B has exactly one responsibility:
+Algorithm B has exactly one business responsibility:
 
-> Given one persisted PR9a eligibility graph rooted at `eventId`, atomically prove
-> that it is still eligible and currently authorized, then create or exactly replay
-> one immutable initial-post canonical receivable effect and its complete durable
-> evidence triplet.
+> Resolve, admit, and produce the one authoritative outcome for an initial-post
+> request rooted at one persisted PR9a `eventId`, without ever creating more than
+> one canonical accounting effect.
+
+That responsibility has three mandatory workflow phases, not three independent
+business responsibilities:
+
+1. resolve any durable historical primary or conflict result;
+2. only for `NO_RESULT`, decide current admission and create one primary triplet;
+3. after primary rollback, delegate a safely reconstructable denial to the sole
+   Algorithm C owner through the section-7.4 seam.
 
 It does not calculate eligibility, choose an amount basis, invent a due date,
 activate a cohort, settle a balance, or correct an already posted fact.
@@ -232,8 +247,9 @@ Algorithm B must not:
 - create a PR9a eligibility event;
 - treat the event row alone as sufficient authority;
 - read PR7 forecast data or convert forecast into actual;
-- accept caller authority, time, IDs, hashes, policy, idempotency key, audit payload,
-  canonical row, or transaction;
+- treat caller selector/assertion IDs, hashes, or policy references as authority;
+- accept a caller clock, generated output row ID, correlation, UUID, idempotency
+  key, canonical payload, audit payload, branded denial package, or transaction;
 - create `draft`, update, cancel, correct, compensate, allocate, refund, write off,
   settle, backfill, dual-write, shadow-read, or cut over;
 - mutate legacy collections or `app_data`;
@@ -268,9 +284,13 @@ assertedUnknownDueDateTreatmentMappingHash
 ```
 
 Unknown fields reject. `operationType` is exactly
-`canonical_receivable.initial_post.v1`. The command contains no idempotency key,
-clock, correlation ID, row ID, actor, free-form text, policy object, or payload.
-Selectors prevent accidental cross-command use but confer no authority.
+`canonical_receivable.initial_post.v1`. These bounded values are selectors and
+assertions only, even when they are persisted IDs, hashes, or policy references.
+The repository rereads every corresponding authoritative value under its lock; an
+assertion mismatch is a deterministic read-only failure and never grants authority.
+The command contains no generated output row ID, idempotency key, clock, timestamp,
+UUID, correlation, actor, free-form text, policy object, canonical payload, audit
+payload, or denial evidence package.
 
 ### 6.2 Sole authoritative persisted input
 
@@ -299,8 +319,8 @@ legacy documents/payments, and PR7 are never fallback inputs.
 
 ### 6.3 Eligibility requirements at posting time
 
-A new post or replay is eligible only when all of the following are true under the
-same lock:
+A new post is eligible only when all of the following are true under the same lock.
+These predicates do not precede or suppress durable historical-result resolution:
 
 - the schema/FK/integrity prerequisites are exact and the scope has no incomplete
   conflict transition;
@@ -316,7 +336,7 @@ same lock:
 - write authorization and activation are current, exact-scope, exact-operation,
   exact-evidence, exact-cohort, and exact-policy records;
 - the event's gross amount and due-date treatment map without recalculation;
-- every colliding identity is absent for a new post or byte-exact for replay.
+- every intersecting primary/conflict identity has been proved absent by Phase 1.
 
 ## 7. Durable output model
 
@@ -330,8 +350,12 @@ The only successful primary operation is
    authority, input, mapping, idempotency, fingerprint, and result seal;
 3. `financial_audit_events` — the immutable repository-derived audit evidence.
 
-The three rows share one repository-owned `attemptedAt`, correlation identity, and
-relational scope. They commit in one SQLite transaction or none commit.
+The three rows share one repository-owned `attemptedAt` and relational scope. The
+canonical row has no `correlationId`; it is bound to the graph by the operation FK,
+canonical fingerprint, source identity, and scope. The operation and financial audit
+rows both copy the persisted eligibility event's `correlationId`. Algorithm B never
+creates or accepts another correlation identity. All three rows commit in one SQLite
+transaction or none commit.
 
 ### 7.2 Exact canonical projection
 
@@ -376,17 +400,41 @@ audit, correlation, and result. Its unique keys are:
 The audit row has exact literal type
 `canonical_receivable.initial_posted.v1`, exact integration actor, exact aggregate,
 exact null previous value, and the exact canonical 33-key payload. Runtime logs are
-not part of this proof.
+not part of this proof. The event row is the sole authoritative correlation source:
+
+- `operation.correlationId = event.correlationId`;
+- `financialAuditEvent.correlationId = event.correlationId`;
+- operation and audit correlation are therefore byte-identical;
+- the audit payload and `resultHash` use that persisted event correlation;
+- post-insert reread proves both equalities against the event;
+- the canonical row carries no correlation column and is linked only relationally.
 
 ### 7.4 Denial output
 
 A safely reconstructable registered denial produces no primary effect. Algorithm B
-rolls back, freezes the denial package, and invokes existing Algorithm C in a
-separate transaction. The durable output is exactly one reciprocal immutable
+rolls back and invokes one future narrow repository-internal orchestration seam in
+`canonical-actual-eligibility-event-repository.js`. Algorithm B passes only its
+bounded selector command and one immutable denial cause code/result from the closed
+registry. It never passes conflict/transition IDs, timestamps, hashes, observed or
+expected audit projections, a branded package, or free-form payload.
+
+Under a new transaction, the existing PR9a repository must independently reread the
+authoritative persisted graph, verify that the selected denial still wins,
+reconstruct every expected/observed projection, generate its private IDs and clock,
+create the existing private `WeakSet` brand, and call the existing Algorithm C
+persistence path. It returns the immutable durable result only after the reciprocal
 `canonical_receivable_posting_conflicts` +
-`canonical_receivable_posting_conflict_transitions` pair. Normal denial return is
-permitted only after the transition is fully `COMPLETE` with one attempt, rate, and
-circuit result.
+`canonical_receivable_posting_conflict_transitions` pair is fully `COMPLETE` with
+one attempt, rate, and circuit result.
+
+The seam is an orchestration entry point, not a generic brand or package factory.
+The private factory/assertion remain unexported, caller-forged packages remain
+impossible, and Algorithm B must not duplicate Algorithm C state transitions or
+persisted formats. A future change to the merged repository is justified and limited
+to this seam/export because denial evidence is required, the current private brand
+makes the authorized call physically impossible, and duplicating Algorithm C would
+break its single-owner invariant. No Algorithm A semantics, Algorithm C invariant,
+schema, or persisted format may change.
 
 Unsafe corruption, malformed input, generation failure, disabled invocation,
 unrepresentable denial, database failure, and pre-commit failure may intentionally
@@ -394,16 +442,36 @@ produce no denial row. They never produce a primary effect.
 
 ## 8. Deterministic state machine
 
-Algorithm B has no durable in-progress primary state. Its logical state is derived
-from immutable rows:
+Algorithm B has no durable in-progress primary state. Phase 1 classifies persisted
+state using the following ordered, mutually exclusive predicates. Each predicate
+includes the negation of every earlier predicate; `NO_RESULT` is therefore proved
+absence, not a fallback for an unrecognized graph.
 
-| State | Persisted condition | Terminal? | Allowed transition |
-|---|---|---|---|
-| `ABSENT` | no operation/canonical/audit triplet for the event/lineage/key | no | `POSTED` or `DENIED` |
-| `POSTED` | one complete byte-exact triplet and every current admission predicate passes | yes | read-only `EXACT_REPLAY` response only |
-| `CONFLICTED` | colliding primary rows or current input/authority state differs and a registered denial is safely reconstructable | yes for this attempt | Algorithm C evidence only; never primary mutation |
-| `INTEGRITY_BLOCKED` | corrupt, missing-unrepresentable, cross-scope, or impossible persisted state | yes for this invocation | operator remediation outside Algorithm B; zero primary DML |
-| `RECOVERY_BLOCKED` | a same-scope conflict transition is outside `COMPLETE` | non-terminal for the evidence subsystem, terminal for the current B call | rollback B, invoke separate reconciler, return recovery-required; a later external call starts over |
+| Precedence | Classification | Exact persisted predicate | Terminal? | Outcome and permitted write set |
+|---:|---|---|---|---|
+| 1 | `PRIMARY_PARTIAL_OR_CORRUPT` | Any primary identity resolves to an orphan canonical, operation, or audit; a structurally invalid/mismatched triplet; multiple primary candidates; or otherwise incompatible primary and conflict evidence | terminal for B invocation | integrity-blocked; zero primary/conflict DML and no repair |
+| 2 | `CONFLICT_RECOVERY_INCOMPLETE` | No primary evidence from state 1; exactly one same-scope reciprocal conflict pair exists and its transition is `PENDING`, `ACCOUNTED`, or `CIRCUIT_APPLIED` | non-terminal for Algorithm C, terminal for current B invocation | rollback B; invoke only existing C reconciliation in a separate transaction; return recovery-required; zero primary/new-conflict DML |
+| 3 | `CONFLICT_COMPLETED` | No state 1 or 2; exactly one structurally valid reciprocal pair exists in `COMPLETE`, with no colliding primary or second conflict result | terminal historical denial | read-only return of the immutable completed denial; zero DML regardless of restored current authority |
+| 4 | `PRIMARY_POSTED_EXACT` | No earlier state; exactly one complete immutable event/canonical/operation/audit graph matches every historical command, identity, fingerprint, payload, FK, seal, and result byte | terminal historical posting | return `EXACT_COMMITTED_RESULT`; zero DML; current admission is a separate read-only qualifier |
+| 5 | `IDENTITY_CONFLICT` | No earlier state; a structurally valid complete primary result or other row intersects event/lineage/source/external/idempotency identity but is not the requested exact historical result | terminal for this B attempt | rollback; delegate one safely reconstructable denial through the Algorithm C seam, or return integrity-blocked with zero writes if it cannot be reconstructed; never primary DML |
+| 6 | `NO_RESULT` | Proven zero matching/intersecting canonical, operation, audit, partial primary graph, identity collision, completed conflict pair, or incomplete conflict transition | non-terminal | proceed to current admission; then one primary triplet or one delegated C denial |
+
+`DENIED` is not a persisted state name. A denial is either the historical
+`CONFLICT_COMPLETED` result or the outcome of current admission that is delegated to
+Algorithm C. Current authority/business status is never folded into the durable
+state predicate.
+
+### 8.1 Combined-state precedence
+
+| Hostile combined state | Mandatory classification | Reason and write set |
+|---|---|---|
+| Complete exact primary + current authority/policy/business denial | `PRIMARY_POSTED_EXACT` | historical result is returned with `currentAdmissionStatus = CURRENTLY_DENIED`; zero DML |
+| Partial primary + any conflict pair | `PRIMARY_PARTIAL_OR_CORRUPT` | primary integrity failure wins; no repair or new evidence |
+| Complete conflict + current authority restored | `CONFLICT_COMPLETED` | completed historical denial cannot become a new post; zero DML |
+| Valid primary for a competing event/identity | `IDENTITY_CONFLICT` | never replay as the requested event and never create a second effect; C-only denial if safely reconstructable |
+| Incomplete Algorithm C transition without partial primary | `CONFLICT_RECOVERY_INCOMPLETE` | C reconciler alone may advance the existing transition; B never resumes the same call |
+| Orphan PR9-source canonical | `PRIMARY_PARTIAL_OR_CORRUPT` | zero DML; arbitrary repair is outside B |
+| Orphan operation, audit, or mismatched operation/audit binding | `PRIMARY_PARTIAL_OR_CORRUPT` | zero DML; result cannot be replayed or treated as absence |
 
 Algorithm C alone owns the durable non-terminal sequence:
 
@@ -418,35 +486,63 @@ after recovery and never turns a denial into success.
 
 ### 9.1 Primary transaction boundary
 
-The repository owns exactly one `BEGIN IMMEDIATE` transaction for one Algorithm B
-attempt. The command is deeply materialized and shape-validated before the lock, but
-no authority, eligibility, replay, conflict, or business decision is made pre-lock.
+The repository owns exactly one `BEGIN IMMEDIATE` transaction for primary result
+resolution and possible creation. The command is deeply materialized and
+shape-validated before the lock, but no authority, eligibility, replay, conflict, or
+business decision is made pre-lock. `resolveExistingResult` and
+`admitAndCreateNewResult` are mandatory internal phases, not separately callable
+public operations.
 
-Inside the transaction the fixed order is:
+After `BEGIN IMMEDIATE`, exact schema/FK/registered-structure and same-scope PR6
+storage preflight run first. The repository captures and validates `attemptedAt`
+from its injected clock exactly once. Every expiry, freshness, and current-status
+decision in the invocation uses this one value.
 
-1. validate exact inert scope and operation domain;
-2. require zero same-scope transition rows outside `COMPLETE`;
-3. execute the complete same-scope PR6 persisted-storage preflight;
-4. read the repository clock exactly once, validate it, and enforce the monotonic
-   floor;
-5. generate and validate exactly one internal denial-attempt UUIDv4;
-6. prove a UUID hit as corruption or genuine collision before proceeding;
-7. reread and verify the complete authoritative graph from section 6;
-8. apply the single error/denial precedence from section 12;
-9. derive the command fingerprint, idempotency key, canonical projection, audit
-   payload, and all candidate fingerprints from locked rows;
-10. query every event/lineage/revision/source/external/idempotency/operation/
-    canonical/audit identity before DML;
-11. return an exact replay with zero writes, construct one frozen denial and roll
-    back, or select the proven-new path;
-12. only on the new path generate canonical, operation, and audit IDs;
-13. insert canonical receivable, then operation, then audit;
-14. reread the complete triplet and every referenced authoritative row;
-15. recompute canonical, command, audit-payload, audit-event, and result fingerprints
-    from persisted values;
-16. require exact row counts, no orphan/extra PR9 source rows, byte equality, clean
-    FKs, and unchanged locked authority graph;
-17. commit once.
+**Phase 1 — durable result resolution (`resolveExistingResult`)**
+
+1. query the event identity and every available event/lineage/revision/source/
+   external/idempotency/operation/canonical/audit/conflict identity;
+2. classify the immutable rows by the exact section-8 precedence;
+3. perform no UUID generation and no DML;
+4. return completed conflict/recovery/integrity outcomes as prescribed;
+5. for `PRIMARY_POSTED_EXACT`, prove the complete historical triplet first and
+   return `historicalPostingOutcome = EXACT_COMMITTED_RESULT` with original IDs,
+   timestamps, correlation, fingerprints, and result hash;
+6. after that historical proof, evaluate current graph status read-only and attach
+   exactly one non-persisted qualifier: `CURRENTLY_ADMITTED`, `CURRENTLY_DENIED`, or
+   `CURRENT_STATUS_INTEGRITY_BLOCKED`; qualifier failure never hides or changes the
+   historical result;
+7. only `NO_RESULT` may continue to Phase 2.
+
+**Phase 2 — new admission decision (`admitAndCreateNewResult`)**
+
+1. reread and verify the complete authoritative graph from section 6;
+2. apply current authority, authorization, activation, source/business,
+   policy/timezone, and eligibility precedence using captured `attemptedAt`;
+3. derive the command fingerprint, idempotency key, canonical projection, audit
+   payload, and candidate fingerprints solely from locked persisted values;
+4. requery all collision identities and require the classification still to be
+   `NO_RESULT`;
+5. on safely reconstructable denial, retain only the bounded immutable cause,
+   rollback B, and proceed to the Algorithm C seam in Phase 3;
+6. on admission, select the proven-new primary path.
+
+**Phase 3 — primary insertion or denial orchestration**
+
+For an admitted primary path, UUIDs are generated from injected generators only
+after the read-only classification and admission are complete and immediately before
+their inserts. Generator failure has the fixed section-12 precedence; UUID collision
+cannot change the already established business classification and produces zero
+DML. The repository then inserts canonical receivable, operation, and audit in that
+order; rereads the complete triplet and authoritative parents; recomputes every
+fingerprint/result; requires exact counts, byte equality, clean FKs, no orphan/extra
+rows, and an unchanged locked graph; and commits once.
+
+For denial, the primary transaction is rolled back before invoking the section-7.4
+Algorithm C seam. That PR9a owner opens its own transaction, rereads and reconstructs
+the cause, generates its private clock/IDs, and either returns one complete durable
+denial result or a stable C recovery/infrastructure result. Algorithm B never resumes
+primary admission after this delegation.
 
 No savepoint, nested caller transaction, transaction injection, or split primary
 commit is permitted. SQLite automatic retries are zero.
@@ -514,10 +610,13 @@ publish independent byte fixtures.
 
 ### 10.3 Replay contract
 
-An exact duplicate is returned only after the current authoritative graph and all
-three persisted result rows pass full proof. The response reuses original IDs,
-`attemptedAt`, correlation, fingerprints, and result hash and sets
-`replayed = true`. It performs zero DML and does not consume a second row ID.
+An exact duplicate is returned after all three persisted result rows and their
+historical event/authority/policy bindings pass full immutable proof. This durable
+result proof precedes current freshness, expiry, authority, policy, timezone, and
+business admission. The response sets
+`historicalPostingOutcome = EXACT_COMMITTED_RESULT`, reuses original IDs,
+`attemptedAt`, event correlation, fingerprints, and result hash, and sets
+`replayed = true`. It performs zero DML and consumes no UUID.
 
 The same derived key or any intersecting event/lineage/source/external identity with
 different command, canonical, operation, audit, result, authority, policy, or source
@@ -525,10 +624,13 @@ content is `IDEMPOTENCY_CONTENT_CONFLICT` or the earlier more specific registere
 denial. The committed triplet remains byte-unchanged; no second financial fact is
 created.
 
-Current revocation, expiry, source correction, PR8 staleness, timezone drift, or
-policy drift takes precedence over exact replay. This does not rewrite historical
-meaning: the original immutable result stays sealed by its original rows and hashes;
-the new invocation is a new admission decision and is denied under current state.
+After historical proof, the repository separately evaluates current status using the
+single captured invocation time. Current revocation, expiry, source correction, PR8
+staleness, timezone drift, policy drift, or current-graph corruption can set
+`currentAdmissionStatus` to `CURRENTLY_DENIED` or
+`CURRENT_STATUS_INTEGRITY_BLOCKED`; they never replace, suppress, or mutate
+`historicalPostingOutcome`. A current-status qualifier creates no Algorithm C
+denial, because no new admission is attempted once a committed result exists.
 
 ### 10.4 Double-posting proof
 
@@ -576,57 +678,78 @@ the same inert command and is resolved through persisted state.
 | After in-transaction intent/result construction but before canonical DML | zero rows | in-memory values are discarded |
 | After canonical insert or operation insert but before audit/commit | zero rows after SQLite rollback/recovery | later call starts fresh; no partial evidence is trusted |
 | After audit insert but before commit | zero rows if transaction did not commit | deferred FK/audit checks still decide commit atomically |
-| During commit with unknown client outcome | either zero or one complete triplet, never a valid partial triplet | later call performs full durable replay proof |
-| After commit but before response | one complete immutable triplet | later call returns exact replay with original result |
-| After denial pair commit but before Algorithm C completion | no primary rows; one incomplete reciprocal pair | next same-scope new admission is blocked, runs separate recovery, returns recovery-required, and never resumes |
+| During commit with unknown client outcome | either zero or one complete triplet, never a valid partial triplet | retry Phase 1 returns `EXACT_COMMITTED_RESULT` when commit succeeded; otherwise `NO_RESULT` enters a new current admission |
+| After commit but before response | one complete immutable triplet | later call proves and returns the original historical result before current drift checks |
+| Authority or policy drifts after a successful commit/lost response | original complete triplet | retry returns `EXACT_COMMITTED_RESULT` plus `CURRENTLY_DENIED`; zero DML and no C conflict |
+| After denial pair commit but before Algorithm C completion | no primary rows; one incomplete reciprocal pair | retry classifies `CONFLICT_RECOVERY_INCOMPLETE`, rolls back, runs only separate C recovery, returns recovery-required, and never resumes B |
 
 ## 12. Failure and error precedence
 
-For the same command bytes and same persisted database snapshot, the following
-order is mandatory. Implementations may optimize reads only if tests prove the same
-observable winner and write set.
+Determinism is defined over the complete input tuple, not over persisted rows alone:
 
-1. **Malformed/unbounded/non-inert command** — stable input/envelope error before a
-   transaction; zero writes.
-2. **Disabled or unauthorized invocation surface** — `CANONICAL_PR9B_DISABLED` in
-   PR9b; zero database reads beyond constructor/schema checks and zero writes.
-3. **Schema/FK/registered-structure or inaccessible-database failure** — integrity
-   or infrastructure result; no denial evidence is fabricated.
+```text
+same validated command
++ same locked persisted snapshot
++ same captured attemptedAt
++ same injected generator outcomes
+= same classification, precedence winner, and intended write set
+```
+
+SQLite lock acquisition and commit outcome are external infrastructure outcomes;
+they have stable mappings but are not falsely described as deterministic business
+inputs. Tests inject a deterministic clock and UUID generators. The clock is read
+exactly once after lock, every time-window predicate uses that captured value, and
+primary UUID generators run only after read-only classification/admission and
+immediately before insert. A generator failure has one fixed position below. A UUID
+collision cannot change the prior business classification and produces zero DML.
+
+The mandatory precedence is:
+
+1. **Malformed/unbounded/non-inert command or assertion mismatch knowable from
+   shape** — stable input error before transaction; zero writes.
+2. **Disabled or unauthorized invocation surface** — `CANONICAL_PR9B_DISABLED`;
+   zero business reads and writes.
+3. **Inaccessible database or schema/FK/registered-structure failure** — stable
+   integrity/infrastructure result; no fabricated denial.
 4. **Lock acquisition/contention** — `CANONICAL_POSTING_CONCURRENT_CONFLICT`; no
    automatic retry.
-5. **Existing incomplete same-scope conflict transition** —
-   `CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED`; Algorithm B rolls back before
-   clock/UUID/event reads, invokes recovery separately, and never resumes.
-6. **Persisted PR6 storage-class/range corruption or impossible PR9a graph** — exact
-   storage/integrity result before hashes, replay, or denial DML.
-7. **Repository clock/UUID failure or proved UUID replay corruption/collision** —
-   the existing exact generation, replay-integrity, or collision literal; zero
-   primary/conflict DML.
-8. **Missing authoritative event root** — `CANONICAL_POSTING_EVENT_NOT_FOUND` when
-   the exact event cannot be loaded and therefore no safe posting/denial graph can be
-   constructed; never a guessed fallback. Missing referenced PR6/PR8 evidence is
-   frozen as a prospective business denial and remains subject to the higher
-   authority precedence below.
-9. **Authority denial** — source-adapter kind, then eligibility-producer kind, then
-   posting-adapter kind; within each kind use the existing suffix order.
-10. **Write-authorization then activation denial** — `AUTHORIZATION_DRIFT` before
+5. **Persisted same-scope PR6 storage-class/range preflight failure** — exact
+   storage/integrity result before result classification or DML.
+6. **Repository clock failure** — stable clock error; zero DML.
+7. **Phase-1 durable state** — exact section-8 order:
+   `PRIMARY_PARTIAL_OR_CORRUPT`, `CONFLICT_RECOVERY_INCOMPLETE`,
+   `CONFLICT_COMPLETED`, `PRIMARY_POSTED_EXACT`, `IDENTITY_CONFLICT`, then
+   `NO_RESULT`. A complete historical result is never hidden by the following
+   current predicates.
+8. **Current-status qualifier for `PRIMARY_POSTED_EXACT`** — current graph is
+   classified read-only as admitted, denied, or integrity-blocked; historical result
+   remains the observable primary outcome and no DML occurs.
+9. **Missing authoritative event root for `NO_RESULT`** —
+   `CANONICAL_POSTING_EVENT_NOT_FOUND`; no guessed fallback.
+10. **Impossible/corrupt authoritative PR6/PR8/PR9a graph** — exact integrity result
+    before business denial or generated IDs.
+11. **Authority denial** — source-adapter, eligibility-producer, posting-adapter;
+    within each kind use the existing suffix order.
+12. **Write-authorization then activation denial** — `AUTHORIZATION_DRIFT` before
     `ACTIVATION_DRIFT`.
-11. **Business/source denial** — exact existing registry order: root conflict,
-    broken successor, no current, multiple current, correction after posting,
-    correction after eligibility, revision change, PR6 drift, PR8 mismatch, due-date
-    drift, timezone drift.
-12. **Persisted result integrity and identity collision** — corrupt/partial triplet
-    before exact replay; then `IDEMPOTENCY_CONTENT_CONFLICT`, `AUDIT_SEAL_MISMATCH`,
-    or `ECONOMIC_SOURCE_EVENT_MISMATCH` in the registered order.
-13. **Exact replay** — only after every current predicate and complete triplet proof.
-14. **New primary insert** — constraint/trigger/post-insert mismatch is
+13. **Business/source denial** — root conflict, broken successor, no current,
+    multiple current, correction after posting, correction after eligibility,
+    revision change, PR6 drift, PR8 mismatch, due-date drift, timezone drift.
+14. **Primary UUID generator failure or collision after admitted classification** —
+    stable generation/collision result; zero primary/conflict DML and no change to
+    the previously determined business classification.
+15. **New primary insert/reread failure** — constraint, trigger, ignored/coerced
+    field, or post-insert mismatch maps to
     `CANONICAL_POSTING_PERSISTENCE_FAILED` and rolls back all primary rows.
-15. **Commit infrastructure failure** — mapped concurrency failure when locked/busy,
-    otherwise stable database failure; never success without a proved commit.
+16. **Commit infrastructure failure** — mapped concurrency failure when busy/locked,
+    otherwise stable database failure; never success without proved commit. Unknown
+    outcome is resolved by the next invocation's Phase 1.
 
-When a safely reconstructable registered denial is selected, Algorithm B constructs
-only that one observation. Multiple conflict rows for one attempt are forbidden.
-Unsafe evidence takes the existing `not allowed` path and writes no conflict row.
+When a safely reconstructable registered denial is selected, Algorithm B retains
+only one bounded immutable cause and rolls back. The Algorithm C seam reconstructs
+and persists the single observation from fresh authoritative rows. Multiple conflict
+rows for one attempt are forbidden. Unsafe evidence takes the existing `not allowed`
+path and writes no conflict row.
 
 ## 13. Accounting evidence and immutable audit trail
 
@@ -726,17 +849,22 @@ separate additive schema design/authorization PR. It may not be hidden inside PR
 
 The exact future implementation allowlist is normative in
 `docs/pr9b-implementation-authorization-gate.md`. In summary it permits only the
-shared pure domain extension, isolated posting repository/service, focused fixtures
-and tests, and implementation audit/status documents. It excludes schema,
-`server/db.js`, Algorithm A/C modules, routes, server wiring, frontend, dependencies,
-configuration, deployment, and production access.
+shared pure domain extension, isolated posting repository/service, the one narrow
+Algorithm C orchestration seam in
+`canonical-actual-eligibility-event-repository.js`, focused fixtures/tests, and
+implementation audit/status documents. The seam exception permits no Algorithm A
+or Algorithm C semantic, invariant, schema, or persisted-format change. The list
+excludes all other schema, `server/db.js`, routes, server wiring, frontend,
+dependencies, configuration, deployment, and production access.
 
 ## 16. Prohibited scope
 
 PR9b must not include:
 
 - schema or migration changes;
-- modifications to Algorithm A or Algorithm C;
+- modifications to Algorithm A semantics or Algorithm C state, persistence,
+  accounting, recovery, branding, or persisted-format invariants; the section-7.4
+  narrow orchestration seam/export is the only permitted PR9a repository delta;
 - routes, workers, schedulers, cron, timers, queues, startup hooks, CLI, UI, or live
   adapters;
 - feature flags, environment activation, resolver wiring, or runtime consumers;
@@ -756,19 +884,23 @@ mutations but must retain the exact durable/outcome contract.
 |---|---|---|---|---|
 | Tampered PR9a evidence | Mutate/reseal one event, PR8 child, selected PR6 row, authority member, authorization, or activation | Existing rows unchanged; optional one complete conflict pair only when the observation is safely reconstructable | Exact integrity error or registered denial by precedence | No new canonical, operation, audit, settlement, source, PR8, legacy, or `app_data` row |
 | Reused key/identity with changed payload | Seed a valid triplet, then change one command assertion, event field, mapping, fingerprint, amount, due date, policy, authority, canonical field, or audit field while preserving an intersecting identity | Original triplet byte-unchanged; at most one complete denial pair | Earlier specific denial or `IDEMPOTENCY_CONTENT_CONFLICT`/`AUDIT_SEAL_MISMATCH` | No second/updated canonical, operation, or audit |
-| Exact duplicate and successful replay | Submit the byte-exact command after one committed post | Exactly the original triplet; no new conflict | Original result and timestamps, `replayed=true` | All DML absent |
+| Exact duplicate and successful replay | Submit the byte-exact command after one committed post | Exactly the original triplet; no new conflict | `EXACT_COMMITTED_RESULT`, original IDs/timestamps/event correlation, `replayed=true`, plus separate current qualifier | All DML absent |
 | Concurrent same event | Two independent processes cross a barrier and post one event | Exactly one triplet | One success; other exact replay or deterministic conflict, never raw busy | No duplicate or partial rows |
 | Competing inputs for one obligation | Two current/correction candidates share one economic lineage or source identity | At most one triplet; optional complete conflict pair for loser | Registered correction/revision/idempotency denial | No second canonical effect |
 | Stale, missing, or incomplete graph | Remove one required PR8/PR6/event parent, create zero/multiple roots/current revisions, or stale freshness | No primary rows; one conflict pair only for registered safe evidence | `EVENT_NOT_FOUND`, exact integrity error, or registered source/PR8 denial | All primary, settlement, legacy, and source writes absent |
-| Conflicting denial transition | Seed `PENDING`, `ACCOUNTED`, or `CIRCUIT_APPLIED` in same scope | Existing pair advances only through reconciler; B adds no attempt | `CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED` for blocked B call | Clock/UUID/row IDs, primary DML, and new conflict admission absent from B |
+| Conflicting denial transition | Seed `PENDING`, `ACCOUNTED`, or `CIRCUIT_APPLIED` in same scope | Existing pair advances only through reconciler; B adds no attempt | `CONFLICT_RECOVERY_INCOMPLETE`; separate C recovery runs and current B call never resumes | Primary DML and new conflict admission absent from B |
 | Crash before commit | Inject exit/failure before DML, after each primary insert, after audit, and during deferred constraint evaluation | Zero primary rows when commit did not complete | Persistence/infrastructure failure or process loss | No partial canonical/operation/audit and no denial pair for the rolled-back success path |
-| Crash after uncertain commit | Kill after SQLite commit boundary but before response | Either zero rows or one complete triplet | Retry returns new success only from zero state, otherwise exact replay | Never a second triplet |
-| Replay after successful post under later drift | Revoke/expire authority, change timezone/policy/source, or append a correction after post | Original triplet unchanged; optional complete conflict pair | Current-state denial, not replay | No update/delete/second post |
-| Replay after denial | Retry the exact frozen denial package and separately retry the original B command | Same package replays one pair; new B invocation gets its own attempt decision | C exact replay for same package; deterministic new B denial | No duplicate pair for package and no primary rows |
+| Crash after uncertain commit | Kill after SQLite commit boundary but before response; test both actual commit outcomes | Either zero rows or one complete triplet | Retry Phase 1 returns `NO_RESULT` only for failed commit and `EXACT_COMMITTED_RESULT` only for successful commit | Never a second triplet |
+| Replay after successful post under later drift | Revoke/expire authority, change timezone/policy/source, or append a correction after post | Original triplet unchanged; no current-drift conflict pair | `EXACT_COMMITTED_RESULT` plus `CURRENTLY_DENIED` | All DML, update/delete, and second post absent |
+| Replay after denial | Retry the original B command after one completed denial; separately repeat an internal seam call with the same bounded selector/cause | One immutable completed pair | B returns `CONFLICT_COMPLETED`; the C owner internally replays the same durable result without exposing a package | No duplicate pair and no primary rows |
 | Database lock contention | Hold a writer lock at begin and inject busy/locked at DML/reread/commit | Existing durable state unchanged | `CANONICAL_POSTING_CONCURRENT_CONFLICT` | Automatic retries and partial DML absent |
 | Constraint or audit failure | Mutate every FK/scope/literal/null/key/payload binding and force audit/operation trigger rejection | Zero new primary rows | `CANONICAL_POSTING_PERSISTENCE_FAILED` or stable mapped integrity error | No surviving canonical, operation, or audit |
 | Post-insert reread mismatch | Ignore/coerce/mutate one inserted field, parent, generated column, hash, count, or graph row before reread | Transaction rolls back to zero new primary rows | `CANONICAL_POSTING_PERSISTENCE_FAILED` | No conflict evidence for an uncommitted primary attempt and no partial effect |
 | Partial/impossible legacy state | Seed orphan PR9-source canonical, orphan/mismatched operation/audit, duplicate-looking non-PR9 row, dirty FK, or schema drift | No new primary rows; impossible state retained only for diagnosis | Integrity or identity conflict before replay/new DML | No repair, delete, normalization, replacement, settlement, or second effect |
+| Combined durable states | Seed each section-8.1 combination, including partial primary plus conflict and completed conflict plus restored authority | Existing evidence remains byte-identical except permitted C recovery advancement | Exact section-8 classification independent of SQL query order | No write outside the classification's closed write set |
+| Deterministic injected inputs | Repeat one command/snapshot with fixed clock/generators, then vary only attemptedAt, generator failure, UUID collision, or lock/commit outcome | Fixed tuple is byte-identical; varied external input follows its registered branch | Same tuple has same winner/write set; external failures use fixed mapping | UUID collision/failure never changes business classification or leaves DML |
+| Algorithm C seam and private brand | Call the seam with each bounded registered cause; attempt caller-forged package/IDs/timestamp/hash/payload and stale cause | Valid call creates/replays one C-owned pair; forged/stale inputs create no fabricated evidence | Durable C result or stable mismatch/integrity result | No exported factory, duplicated C transition, or primary DML |
+| Correlation binding | Attempt caller correlation, new B correlation, operation/audit mismatch, or mismatch with event | Valid triplet uses event correlation in operation/audit; canonical remains relational only | Success/replay only for exact event correlation; otherwise rollback | No caller/new correlation and no partial triplet |
 | Unauthorized activation attempt | Call disabled service, forge runtime contract/activation selectors, import from route/server, or use environment defaults | PR9 tables unchanged | `CANONICAL_PR9B_DISABLED` or structural safety-test failure | All business/conflict DML and runtime wiring absent |
 
 Every case must also assert `foreign_key_check`, `integrity_check`, exact row counts,
@@ -817,10 +949,10 @@ Owner/Architect disposition before an implementation authorization request:
 
 | Decision | Proposed disposition | Why explicit approval is required |
 |---|---|---|
-| D-PR9B-01 Algorithm B responsibility | Approve the single graph-to-initial-post-triplet responsibility and all non-responsibilities in section 5 | It fixes the first canonical business DML boundary |
-| D-PR9B-02 physical source mapping | Approve merged-schema mapping `rental_service_upd` / `rootSourceDocumentLineageId` / `economicLineageKey` as superseding the three conflicting PRE-PR9 section-15 values | Existing PR9a trigger makes the alternatives mutually exclusive |
-| D-PR9B-03 schema trust boundary | Accept PR9a v1 as sufficient for repository-exclusive Algorithm B DML, with arbitrary raw database-owner DML explicitly outside the guarantee; otherwise require a separate schema-v2 design before PR9b | SQLite has no reverse commit-time FK from an arbitrary raw canonical row to an operation |
-| D-PR9B-04 activation split | Approve isolated unreachable PR9b and place every runtime consumer/live adapter/activation action in PR9c or later | Prevents implementation merge from implying runtime authority |
+| D-PR9B-01 Algorithm B responsibility | **APPROVE WITH CONDITIONS:** Algorithm B owns one initial-post outcome; its mandatory workflow is durable result resolution, new admission/primary transaction only from `NO_RESULT`, and post-rollback delegation of denial persistence to the Algorithm C owner | The section-7.4 callable seam and phase boundary must be implemented exactly; B may not duplicate C or turn current drift into a historical failure |
+| D-PR9B-02 physical source mapping | **APPROVE:** merged-schema mapping `rental_service_upd` / `rootSourceDocumentLineageId` / `economicLineageKey` explicitly supersedes the three PRE-PR9 section-15 values | Existing trigger makes alternatives mutually exclusive; correction/revision fixtures must independently prove identity semantics |
+| D-PR9B-03 schema trust boundary | **APPROVE WITH CONDITIONS:** PR9a v1 is sufficient only for repository-exclusive Algorithm B business DML | Future proof must include static inventory of every PR9 SQL reference, import/call-graph isolation, prohibition of dynamic/generic business DML, `PRAGMA foreign_keys = ON`, clean `foreign_key_check`, startup schema/index/trigger assertions, orphan anti-joins, and hostile independent-process tests; arbitrary database-owner raw SQL remains outside the threat model |
+| D-PR9B-04 activation split | **APPROVE:** isolated unreachable PR9b places every runtime consumer/live adapter/activation action in PR9c or later | Prevents implementation merge from implying runtime authority |
 
 Gate C production policy/evidence approvals are not unresolved Algorithm B mechanics;
 they are mandatory later authorization inputs. No implementation may fill them with
@@ -831,10 +963,15 @@ fixtures or defaults.
 This document proposes only:
 
 ```text
-PR9b design = READY FOR INDEPENDENT REVIEW
+PR9b design = REMEDIATED; INDEPENDENT RE-AUDIT REQUIRED
 architectureDesignApproved = TRUE          # existing Gate A only
 pr9aImplementationAuthorized = TRUE        # existing merged PR9a only
+pr9bDesignReviewed = FALSE
 pr9bImplementationAuthorized = FALSE
+runtimeAuthorized = FALSE
+deploymentAuthorized = FALSE
+productionReadsAuthorized = FALSE
+productionWritesAuthorized = FALSE
 pr9ImplementationAuthorized = FALSE
 pr9DisabledDeploymentAuthorized = FALSE
 productionActivationAuthorized = FALSE
@@ -845,10 +982,11 @@ shadowReadAuthorized = FALSE
 cutoverAuthorized = FALSE
 ```
 
-The next gate is an independent review of this exact document and its authorization
-package. The reviewer must reproduce the repository map, verify all four residual
-decisions, prove schema sufficiency or require a separate schema design, validate
-the single deterministic precedence, transaction/replay/crash proofs, hostile
-matrix, exact future allowlist, and absence of any runtime or production authority.
-Only after that review, the applicable Gate C prerequisites, and a separate direct
-Owner authorization bound to an exact base/head may a PR9b implementation begin.
+The only next gate is an independent re-audit of the exact remediation head. The
+reviewer must reproduce the repository map, verify all four residual decisions,
+prove schema sufficiency or require a separate schema design, validate the ordered
+state predicates, two-phase result/admission contract, deterministic input domain,
+transaction/replay/crash proofs, Algorithm C seam, correlation binding, hostile
+matrix, exact future allowlist, and absence of runtime/production authority. Only
+after a passing re-audit and a separate direct Owner/Architect authorization bound to
+an exact base/head and selected allowlist subset may PR9b implementation begin.

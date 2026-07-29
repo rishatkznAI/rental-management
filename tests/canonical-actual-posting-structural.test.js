@@ -5,8 +5,9 @@ import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 
 const root = path.resolve(new URL('..', import.meta.url).pathname);
-const authorizationBaseline = 'da3bd21935abfbd42c95ef8be9eac1eecb56e95c';
-const allowedFiles = new Set([
+const pr9aAuthorizationBaseline = 'da3bd21935abfbd42c95ef8be9eac1eecb56e95c';
+const pr9aAuthorizedHead = 'a8987eb8c33a7b8974a21a8d25ad018b05317148';
+const pr9aAllowedFiles = new Set([
   'server/db.js',
   'server/lib/canonical-actual-posting-schema.js',
   'server/lib/canonical-actual-posting-domain.js',
@@ -25,6 +26,12 @@ const allowedFiles = new Set([
   'docs/canonical-receivables-contract.md',
   'docs/canonical-receivables-decisions.md',
 ]);
+const pr9bDesignBase = pr9aAuthorizedHead;
+const pr9bDesignRemediationAllowedFiles = new Set([
+  'docs/canonical-actual-posting-pr9b-design.md',
+  'docs/pr9b-implementation-authorization-gate.md',
+  'tests/canonical-actual-posting-structural.test.js',
+]);
 const implementationFiles = [
   'server/lib/canonical-actual-posting-schema.js',
   'server/lib/canonical-actual-posting-domain.js',
@@ -41,11 +48,29 @@ function gitLines(args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean);
 }
 
-test('changed-file set remains inside the exact Gate B allow-list', () => {
-  const changed = new Set(gitLines(['diff', '--name-only', authorizationBaseline]));
-  for (const file of gitLines(['ls-files', '--others', '--exclude-standard'])) changed.add(file);
-  const outside = [...changed].filter(file => !allowedFiles.has(file));
+test('historical PR9a changed-file set remains inside the exact Gate B allow-list', () => {
+  const changed = new Set(gitLines([
+    'diff',
+    '--name-only',
+    pr9aAuthorizationBaseline,
+    pr9aAuthorizedHead,
+  ]));
+  const outside = [...changed].filter(file => !pr9aAllowedFiles.has(file));
   assert.deepEqual(outside, []);
+  assert.equal(pr9aAllowedFiles.has('docs/canonical-actual-posting-pr9b-design.md'), false);
+  assert.equal(pr9aAllowedFiles.has('docs/pr9b-implementation-authorization-gate.md'), false);
+});
+
+test('current PR9b design remediation remains inside its exact authorized scope', () => {
+  const changed = new Set(gitLines(['diff', '--name-only', pr9bDesignBase]));
+  for (const file of gitLines(['ls-files', '--others', '--exclude-standard'])) changed.add(file);
+  const outside = [...changed].filter(file => !pr9bDesignRemediationAllowedFiles.has(file));
+  assert.deepEqual(outside, []);
+  assert.deepEqual([...changed].sort(), [...pr9bDesignRemediationAllowedFiles].sort());
+  assert.deepEqual(
+    [...changed].filter(file => file.startsWith('server/') || file.startsWith('src/')),
+    [],
+  );
 });
 
 test('PR9a production modules contain no route, worker, scheduler, environment activation, network, or live-adapter wiring', () => {

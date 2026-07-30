@@ -52,6 +52,9 @@ const {
   createActualSourceEligibilityDryRunService,
 } = require('../server/lib/actual-source-eligibility-dry-run-service.js');
 const {
+  fingerprint: pr8Fingerprint,
+} = require('../server/lib/actual-source-eligibility-dry-run-domain.js');
+const {
   createCanonicalActualPostingAuthorityRepository,
 } = require('../server/lib/canonical-actual-posting-authority-repository.js');
 const {
@@ -385,6 +388,64 @@ function acceptedEvidence(db, run) {
     reconciliationHashes,
     version: 1,
   });
+  const candidateKeys = new Map(db.prepare(`
+    SELECT id, candidateKey FROM actual_source_dry_run_candidates WHERE runId = ?
+  `).all(run.id).map(row => [row.id, row.candidateKey]));
+  const checkIdentityMembers = db.prepare(`
+    SELECT * FROM actual_source_dry_run_checks WHERE runId = ?
+  `).all(run.id).map(row => {
+    const candidateKey = row.candidateId == null ? null : candidateKeys.get(row.candidateId);
+    const sourceEvidenceRefs = JSON.parse(row.sourceEvidenceRefsJson);
+    const payload = {
+      candidateKey,
+      gateCode: row.gateCode,
+      outcome: row.outcome,
+      policyDecisionRef: row.policyDecisionRef ?? null,
+      policyDecisionVersion: row.policyDecisionVersion == null
+        ? null
+        : Number(row.policyDecisionVersion),
+      policyDecisionHash: row.policyDecisionHash ?? null,
+      sourceEvidenceRefs,
+      expectedFingerprint: row.expectedFingerprint ?? null,
+      observedFingerprint: row.observedFingerprint ?? null,
+      reasonCode: row.reasonCode ?? null,
+    };
+    const identity = {
+      acceptedResultHash: run.resultHash,
+      checkHash: row.checkHash,
+      childId: row.id,
+      childMembershipHash: pr8Fingerprint({
+        candidateId: row.candidateId ?? null,
+        candidateKey,
+        gateCode: row.gateCode,
+        runId: row.runId,
+      }),
+      childType: 'actual_source_dry_run_checks',
+      domain: 'rentcore.canonical_actual_posting.pr8_check_identity',
+      parentCandidateId: row.candidateId ?? null,
+      parentCandidateKey: candidateKey,
+      parentRunId: row.runId,
+      payload,
+      sourceEvidenceRefs,
+      version: 1,
+    };
+    return {
+      childId: row.id,
+      childIdentityHash: pr8Fingerprint(identity),
+    };
+  }).sort((left, right) => {
+    const leftKey = `${left.childId}:${left.childIdentityHash}`;
+    const rightKey = `${right.childId}:${right.childIdentityHash}`;
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
+  const checkIdentitySetHash = pr8Fingerprint({
+    acceptedResultHash: run.resultHash,
+    childType: 'actual_source_dry_run_checks',
+    domain: 'rentcore.canonical_actual_posting.pr8_check_identity_set',
+    dryRunId: run.id,
+    members: checkIdentityMembers,
+    version: 1,
+  });
   const validFrom = run.finalizedAt;
   const freshnessDurationMs = 900000;
   const validUntilExclusive = new Date(Date.parse(validFrom) + freshnessDurationMs).toISOString();
@@ -410,6 +471,7 @@ function acceptedEvidence(db, run) {
   const evidencePackHash = hash('accepted-pr8-evidence-pack-fixture');
   const sourceOwnershipManifestHash = hash('pr9-source-ownership-manifest-fixture');
   const acceptedRuns = [{
+    checkIdentitySetHash,
     companyTimezoneSnapshot: run.companyTimezone,
     dryRunId: run.id,
     finalizedAt: run.finalizedAt,
@@ -696,6 +758,18 @@ export function createPr9bContext(options = {}) {
   };
 }
 
+export function createAdditionalPr8Run(context, suffix = 'additional') {
+  return context.dryRunService.evaluateActualSourceDryRun(
+    context.dryRunContext,
+    dryRunCommand({
+      asOfDate: '2026-09-15',
+      correlationId: `pr9-${suffix}-dry-run-correlation`,
+      idempotencyKey: `pr9-${suffix}-dry-run`,
+      policyManifest: approvedTestPolicyManifest(),
+    }),
+  );
+}
+
 export function createPostingRepositoryForTest(context, dependencies = {}) {
   return createCanonicalActualPostingRepository(
     context.db,
@@ -859,10 +933,7 @@ export function createInstrumentedEligibilityRepository(context, dependencies = 
   return createCanonicalActualEligibilityEventRepository(
     context.db,
     context.runtimeContract,
-    {
-      ...dependencies,
-      testOnlyBuildPostingDenialPackage: true,
-    },
+    dependencies,
   );
 }
 
@@ -876,11 +947,6 @@ export function createPostingDenialStageFixture(stage, options = {}) {
     denialAttemptId: '11111111-1111-4111-8111-111111111111',
     postingCommand: command,
   };
-  const deniedAttemptedAt = new Date(Date.now()).toISOString();
-  const packageValue = repository.__testBuildPostingDenialPackage({
-    deniedAttemptedAt,
-    seamCommand,
-  });
   const triggerSql = {
     PENDING: `CREATE TRIGGER pr9b_stage_abort BEFORE UPDATE
       ON canonical_receivable_posting_conflict_transitions
@@ -897,7 +963,7 @@ export function createPostingDenialStageFixture(stage, options = {}) {
   if (triggerSql) context.db.exec(triggerSql);
   let initialError = null;
   try {
-    repository.persistDenialEvidence(packageValue);
+    repository.orchestratePostingDenial(seamCommand);
   } catch (error) {
     initialError = error;
   } finally {
@@ -914,7 +980,6 @@ export function createPostingDenialStageFixture(stage, options = {}) {
   return {
     ...context,
     command,
-    packageValue,
     repository,
     seamCommand,
   };

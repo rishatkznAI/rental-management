@@ -8,6 +8,9 @@ const {
   createCanonicalActualPostingService,
 } = require('../../server/lib/canonical-actual-posting-service.js');
 const {
+  createCanonicalActualPostingRepository,
+} = require('../../server/lib/canonical-actual-posting-repository.js');
+const {
   createCanonicalActualEligibilityEventRepository,
 } = require('../../server/lib/canonical-actual-eligibility-event-repository.js');
 const {
@@ -59,31 +62,81 @@ const eligibilityRepository = createCanonicalActualEligibilityEventRepository(
   {
     clock: input.clockMs === undefined ? undefined : () => input.clockMs,
     hooks,
-    testOnlyBuildPostingDenialPackage: input.entrypoint === 'wrapper',
   },
 );
+const postingRepository = createCanonicalActualPostingRepository(
+  db,
+  runtimeContract,
+  {
+    clock: input.clockMs === undefined ? undefined : () => input.clockMs,
+    hooks,
+  },
+);
+
+const protocolState = {
+  lockAcquired: false,
+  protectedStageReached: false,
+};
+
+function protocolEvent(type, details = {}) {
+  const file = input.protocolPaths?.[type];
+  if (file && !fs.existsSync(file)) {
+    fs.writeFileSync(file, JSON.stringify({ ...details, type }));
+  }
+  send({ ...details, type });
+}
+
+const originalExec = db.exec.bind(db);
+const originalPrepare = db.prepare.bind(db);
+db.exec = sql => {
+  const statement = String(sql);
+  if (/^\s*BEGIN\s+IMMEDIATE\s*;?\s*$/i.test(statement)) {
+    protocolEvent('begin_immediate_attempted');
+    const result = originalExec(sql);
+    protocolState.lockAcquired = true;
+    protocolState.protectedStageReached = false;
+    protocolEvent('lock_acquired');
+    return result;
+  }
+  const result = originalExec(sql);
+  if (/^\s*(?:COMMIT|ROLLBACK)\s*;?\s*$/i.test(statement)) {
+    protocolState.lockAcquired = false;
+    protocolEvent('release_completed', { statement: statement.trim().toUpperCase() });
+  }
+  return result;
+};
+db.prepare = sql => {
+  const statement = originalPrepare(sql);
+  return new Proxy(statement, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (
+        protocolState.lockAcquired
+        && !protocolState.protectedStageReached
+        && ['all', 'get', 'iterate', 'run'].includes(property)
+      ) {
+        return (...args) => {
+          protocolState.protectedStageReached = true;
+          protocolEvent('protected_stage_reached');
+          return value.apply(target, args);
+        };
+      }
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+};
 
 send({ type: 'ready' });
 process.on('message', message => {
   if (message?.type !== 'go') return;
-  send({ type: 'attempting' });
+  protocolEvent('repository_entrypoint_invoked', { entrypoint: input.entrypoint });
   const before = Number(db.prepare('SELECT total_changes() AS total').get().total);
   try {
     let result;
     if (input.entrypoint === 'seam') {
       result = eligibilityRepository.orchestratePostingDenial(input.command);
     } else if (input.entrypoint === 'wrapper') {
-      const packageValue = eligibilityRepository.__testBuildPostingDenialPackage({
-        deniedAttemptedAt: input.deniedAttemptedAt,
-        seamCommand: input.command,
-      });
-      const wrapper = eligibilityRepository.persistDenialEvidence(packageValue);
-      const pair = eligibilityRepository.readConflictPair(wrapper.conflict.transitionId);
-      result = {
-        conflict: wrapper.conflict,
-        replayed: wrapper.replayed,
-        stage: pair.transition.state,
-      };
+      result = postingRepository.post(input.command.postingCommand);
     } else if (input.entrypoint === 'reconcile') {
       result = eligibilityRepository.reconcileTransition(input.command.transitionId);
     } else {

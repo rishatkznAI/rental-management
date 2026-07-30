@@ -8,8 +8,11 @@ const {
 } = require('./billing-source-authority-schema');
 const {
   ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE,
+  CANONICAL_POSTING_ACTIVATION_RECORDS_TABLE,
   CANONICAL_RECEIVABLE_POSTING_CONFLICTS_TABLE,
   CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE,
+  CANONICAL_WRITE_AUTHORIZATION_RECORDS_TABLE,
+  GOVERNED_ADAPTER_AUTHORITY_RECORDS_TABLE,
   REQUIRED_COLUMNS,
   assertCanonicalActualPostingStructure,
 } = require('./canonical-actual-posting-schema');
@@ -53,6 +56,56 @@ const EMPTY_WRITE_SET = Object.freeze([]);
 
 function repositoryError(code, message = code) {
   return new CanonicalActualPostingError(code, message);
+}
+
+const AUTHORITY_READ_BOUNDARY_TABLES = new Set([
+  CANONICAL_POSTING_ACTIVATION_RECORDS_TABLE,
+  CANONICAL_WRITE_AUTHORIZATION_RECORDS_TABLE,
+  GOVERNED_ADAPTER_AUTHORITY_RECORDS_TABLE,
+]);
+
+function createAuthorityReadBoundary(db, recordEvidence) {
+  let enabled = false;
+  function recordSqlRead(sql, value, method) {
+    if (!enabled) return;
+    const tables = [...String(sql).matchAll(/\b(?:FROM|JOIN)\s+(?:"|`|\[)?([a-z_][a-z0-9_]*)/gi)]
+      .map(match => match[1])
+      .filter(table => AUTHORITY_READ_BOUNDARY_TABLES.has(table));
+    for (const table of new Set(tables)) {
+      const rows = method === 'all' ? value : value ? [value] : [];
+      recordEvidence({ phase: 'authority_authoritative_read', table, rows });
+    }
+  }
+  const proxy = new Proxy(db, {
+    get(target, property) {
+      if (property === 'prepare') {
+        return sql => {
+          const statement = target.prepare(sql);
+          return new Proxy(statement, {
+            get(statementTarget, statementProperty) {
+              const value = Reflect.get(statementTarget, statementProperty, statementTarget);
+              if (statementProperty === 'get' || statementProperty === 'all') {
+                return (...args) => {
+                  const result = value.apply(statementTarget, args);
+                  recordSqlRead(sql, result, statementProperty);
+                  return result;
+                };
+              }
+              return typeof value === 'function' ? value.bind(statementTarget) : value;
+            },
+          });
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return Object.freeze({
+    enable() {
+      enabled = true;
+    },
+    proxy,
+  });
 }
 
 function rollbackQuietly(db) {
@@ -249,7 +302,13 @@ function createCanonicalActualPostingRepository(
       throw repositoryError(ERROR_CODES.POSTING_ID_GENERATION_FAILED);
     }
   }
-  const authorityRepository = createCanonicalActualPostingAuthorityRepository(db);
+  const authorityReadBoundary = evidenceRecorder
+    ? createAuthorityReadBoundary(db, recordEvidence)
+    : null;
+  const authorityRepository = createCanonicalActualPostingAuthorityRepository(
+    authorityReadBoundary?.proxy || db,
+  );
+  authorityReadBoundary?.enable();
   const eligibilityRepository = createCanonicalActualEligibilityEventRepository(
     db,
     exactRuntimeContract,
@@ -268,17 +327,21 @@ function createCanonicalActualPostingRepository(
       SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
       WHERE id = ? AND companyId = ? AND branchId = ?
     `).get(command.eventId, command.companyId, command.branchId);
+    recordEvidence({
+      phase: 'posting_event_read',
+      table: ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE,
+      rows: row ? [row] : [],
+    });
     return row ? validateEligibleEventRecord(normalizeEventRow(row)) : null;
   }
 
   function readPrimaryCandidates(command, event) {
-    const operations = db.prepare(`
+    const operationRows = db.prepare(`
       SELECT * FROM ${CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE}
       WHERE companyId = ? AND branchId = ? AND (eventId = ? OR economicLineageKey = ?)
       ORDER BY id ASC
-    `).all(command.companyId, command.branchId, command.eventId, event?.economicLineageKey ?? '')
-      .map(normalizeOperationRow);
-    const receivables = event ? db.prepare(`
+    `).all(command.companyId, command.branchId, command.eventId, event?.economicLineageKey ?? '');
+    const receivableRows = event ? db.prepare(`
       SELECT * FROM ${CANONICAL_RECEIVABLES_TABLE}
       WHERE companyId = ? AND branchId = ?
         AND sourceSystem = 'rentcore.billing_source_authority.v1'
@@ -293,10 +356,27 @@ function createCanonicalActualPostingRepository(
       event.rootSourceDocumentLineageId,
       event.economicLineageKey,
       event.economicLineageKey,
-    ).map(normalizeReceivableRow) : [];
+    ) : [];
+    const operations = operationRows.map(normalizeOperationRow);
+    const receivables = receivableRows.map(normalizeReceivableRow);
     const audits = operations.map(operation => db.prepare(`
       SELECT * FROM ${FINANCIAL_AUDIT_EVENTS_TABLE} WHERE id = ?
     `).get(operation.financialAuditEventId)).filter(Boolean);
+    recordEvidence({
+      phase: 'durable_classification_read',
+      table: CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE,
+      rows: operationRows,
+    });
+    recordEvidence({
+      phase: 'durable_classification_read',
+      table: CANONICAL_RECEIVABLES_TABLE,
+      rows: receivableRows,
+    });
+    recordEvidence({
+      phase: 'durable_classification_read',
+      table: FINANCIAL_AUDIT_EVENTS_TABLE,
+      rows: audits,
+    });
     return Object.freeze({ audits, operations, receivables });
   }
 
@@ -306,6 +386,11 @@ function createCanonicalActualPostingRepository(
       WHERE companyId = ? AND branchId = ? AND (eventId = ? OR economicLineageKey = ?)
       ORDER BY id ASC
     `).all(command.companyId, command.branchId, command.eventId, event?.economicLineageKey ?? '');
+    recordEvidence({
+      phase: 'durable_classification_read',
+      table: CANONICAL_RECEIVABLE_POSTING_CONFLICTS_TABLE,
+      rows,
+    });
     const pairs = [];
     for (const row of rows) {
       try {
@@ -702,18 +787,21 @@ function createCanonicalActualPostingRepository(
           normalizedCommand: command,
           phase: 'durable_classification',
         });
+        const result = event ? qualifyHistoricalResult(command, event, durable, clock) : durable;
         db.exec('COMMIT');
-        return event ? qualifyHistoricalResult(command, event, durable, clock) : durable;
+        return result;
       }
       if (!event) {
+        const result = postingResult(ERROR_CODES.POSTING_EVENT_NOT_FOUND, { classification: 'NO_RESULT' });
         db.exec('COMMIT');
-        return postingResult(ERROR_CODES.POSTING_EVENT_NOT_FOUND, { classification: 'NO_RESULT' });
+        return result;
       }
       const assertionActivation = authorityRepository.readActivationRecord(event.activationRecordId);
       const comparisons = commandAssertionComparisons(command, event, assertionActivation);
       if (comparisons.some(entry => !entry.matches)) {
+        const result = assertionMismatchResult(commandFingerprint, comparisons);
         db.exec('COMMIT');
-        return assertionMismatchResult(commandFingerprint, comparisons);
+        return result;
       }
       const admission = eligibilityInternal.verifyPostingAdmission(command, event, clock);
       recordEvidence({
@@ -729,8 +817,9 @@ function createCanonicalActualPostingRepository(
       } else {
         const repeated = resolveExistingResult(command, event, commandFingerprint);
         if (repeated) {
+          const result = qualifyHistoricalResult(command, event, repeated, clock);
           db.exec('COMMIT');
-          return qualifyHistoricalResult(command, event, repeated, clock);
+          return result;
         }
         assertNoPrimaryOrphans(command, event);
         const generatedIds = generateAndAssertUnusedPrimaryIds();
@@ -750,8 +839,7 @@ function createCanonicalActualPostingRepository(
           if (error instanceof CanonicalActualPostingError) throw error;
           throw repositoryError(ERROR_CODES.POSTING_PERSISTENCE_FAILED);
         }
-        db.exec('COMMIT');
-        return Object.freeze({
+        const result = Object.freeze({
           classification: 'NO_RESULT_ADMITTED',
           currentAdmissionStatus: 'CURRENTLY_ADMITTED',
           evidence: publicPrimaryEvidence(triplet.operation),
@@ -760,6 +848,8 @@ function createCanonicalActualPostingRepository(
           outcome: 'POSTED',
           replayed: false,
         });
+        db.exec('COMMIT');
+        return result;
       }
     } catch (error) {
       rollbackQuietly(db);

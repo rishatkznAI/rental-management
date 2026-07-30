@@ -736,6 +736,7 @@ const ACCEPTED_PR8_RUN_FIELDS = Object.freeze([
   'resultHash', 'sourceInputManifestHash', 'sourceOwnershipManifestHash', 'validFrom',
   'validUntilExclusive',
 ]);
+const ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD = 'checkIdentitySetHash';
 
 function acceptedPr8EvidenceEnvelope({
   acceptedDryRunsHash,
@@ -749,13 +750,22 @@ function acceptedPr8EvidenceEnvelope({
   if (!Array.isArray(acceptedRuns) || acceptedRuns.length === 0) fail(ERROR_CODES.ENVELOPE_INVALID);
   const runs = acceptedRuns.map((run, index) => {
     const inert = materializeInert(run, `acceptedRuns[${index}]`);
-    assertExactObjectKeys(inert, ACCEPTED_PR8_RUN_FIELDS, `acceptedRuns[${index}]`);
+    const fields = Object.prototype.hasOwnProperty.call(
+      inert,
+      ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD,
+    )
+      ? [...ACCEPTED_PR8_RUN_FIELDS, ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD]
+      : ACCEPTED_PR8_RUN_FIELDS;
+    assertExactObjectKeys(inert, fields, `acceptedRuns[${index}]`);
     assertIdentifier(inert.dryRunId, 'dryRunId');
     for (const field of [
       'freshnessPolicyHash', 'freshnessWindowFingerprint', 'policyManifestHash',
       'reconciliationSetHash', 'resultHash', 'sourceInputManifestHash',
       'sourceOwnershipManifestHash',
     ]) assertHash(inert[field], field);
+    if (Object.prototype.hasOwnProperty.call(inert, ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD)) {
+      assertHash(inert[ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD], ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD);
+    }
     assertSafeInteger(inert.freshnessDurationMs, 'freshnessDurationMs', { minimum: 1 });
     assertSafeInteger(inert.freshnessPolicyVersion, 'freshnessPolicyVersion', { minimum: 1 });
     assertRfc3339Milliseconds(inert.finalizedAt, 'finalizedAt');

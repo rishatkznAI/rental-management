@@ -401,6 +401,56 @@ function repositoryError(code, message = code) {
   return new CanonicalActualPostingError(code, message);
 }
 
+const AUTHORITY_READ_BOUNDARY_TABLES = new Set([
+  CANONICAL_POSTING_ACTIVATION_RECORDS_TABLE,
+  CANONICAL_WRITE_AUTHORIZATION_RECORDS_TABLE,
+  GOVERNED_ADAPTER_AUTHORITY_RECORDS_TABLE,
+]);
+
+function createAuthorityReadBoundary(db, recordEvidence) {
+  let enabled = false;
+  function recordSqlRead(sql, value, method) {
+    if (!enabled) return;
+    const tables = [...String(sql).matchAll(/\b(?:FROM|JOIN)\s+(?:"|`|\[)?([a-z_][a-z0-9_]*)/gi)]
+      .map(match => match[1])
+      .filter(table => AUTHORITY_READ_BOUNDARY_TABLES.has(table));
+    for (const table of new Set(tables)) {
+      const rows = method === 'all' ? value : value ? [value] : [];
+      recordEvidence({ phase: 'authority_authoritative_read', table, rows });
+    }
+  }
+  const proxy = new Proxy(db, {
+    get(target, property) {
+      if (property === 'prepare') {
+        return sql => {
+          const statement = target.prepare(sql);
+          return new Proxy(statement, {
+            get(statementTarget, statementProperty) {
+              const value = Reflect.get(statementTarget, statementProperty, statementTarget);
+              if (statementProperty === 'get' || statementProperty === 'all') {
+                return (...args) => {
+                  const result = value.apply(statementTarget, args);
+                  recordSqlRead(sql, result, statementProperty);
+                  return result;
+                };
+              }
+              return typeof value === 'function' ? value.bind(statementTarget) : value;
+            },
+          });
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return Object.freeze({
+    enable() {
+      enabled = true;
+    },
+    proxy,
+  });
+}
+
 function normalizeEventRow(row) {
   if (!row) return row;
   const result = { ...row };
@@ -1963,6 +2013,52 @@ function pr8CheckCanonical(row, candidateKey, sourceEvidenceRefs) {
   };
 }
 
+function pr8CheckIdentityCanonical(row, candidateKey, sourceEvidenceRefs, acceptedResultHash) {
+  const payload = pr8CheckCanonical(row, candidateKey, sourceEvidenceRefs);
+  return {
+    acceptedResultHash,
+    checkHash: row.checkHash,
+    childId: row.id,
+    childMembershipHash: pr8Fingerprint({
+      candidateId: row.candidateId ?? null,
+      candidateKey,
+      gateCode: row.gateCode,
+      runId: row.runId,
+    }),
+    childType: ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE,
+    domain: 'rentcore.canonical_actual_posting.pr8_check_identity',
+    parentCandidateId: row.candidateId ?? null,
+    parentCandidateKey: candidateKey,
+    parentRunId: row.runId,
+    payload,
+    sourceEvidenceRefs,
+    version: 1,
+  };
+}
+
+function pr8CheckIdentitySetHash(run, checks) {
+  const members = checks.map(check => ({
+    childId: check.row.id,
+    childIdentityHash: pr8Fingerprint(pr8CheckIdentityCanonical(
+      check.row,
+      check.candidateKey,
+      check.sourceEvidenceRefs,
+      run.resultHash,
+    )),
+  })).sort((left, right) => compareUtf16Ascending(
+    `${left.childId}:${left.childIdentityHash}`,
+    `${right.childId}:${right.childIdentityHash}`,
+  ));
+  return pr8Fingerprint({
+    acceptedResultHash: run.resultHash,
+    childType: ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE,
+    domain: 'rentcore.canonical_actual_posting.pr8_check_identity_set',
+    dryRunId: run.id,
+    members,
+    version: 1,
+  });
+}
+
 function pr8ReconciliationCanonical(row, candidateKey, dimensionIds) {
   return {
     candidateKey,
@@ -2079,7 +2175,11 @@ function verifyPr8EvidenceGraph(
   authorization,
   activation,
   deniedAttemptedAt,
-  { recordEvidence = null, validateCompleteAcceptanceSet = true } = {},
+  {
+    recordEvidence = null,
+    requirePostingCheckIdentitySeal = false,
+    validateCompleteAcceptanceSet = true,
+  } = {},
 ) {
   const attemptedAt = parseUtcMilliseconds(deniedAttemptedAt);
   const run = db.prepare(`SELECT * FROM ${ACTUAL_SOURCE_DRY_RUNS_TABLE} WHERE id = ?`).get(command.dryRunId);
@@ -2101,6 +2201,7 @@ function verifyPr8EvidenceGraph(
   };
   let reconstructedResultHash = run?.resultHash ?? null;
   let reconstructedReconciliationSetHash = null;
+  let reconstructedCheckIdentitySetHash = null;
   let freshnessState = 'invalid_window';
   let observedFreshnessWindowFingerprint = acceptedRun?.freshnessWindowFingerprint ?? null;
   let termsBinding = null;
@@ -2416,7 +2517,14 @@ function verifyPr8EvidenceGraph(
       const refs = parsePr8CanonicalJson(row.sourceEvidenceRefsJson, 'sourceEvidenceRefsJson', 'array');
       const canonical = pr8CheckCanonical(row, candidateKey, refs);
       requireProof(pr8Fingerprint(canonical) === row.checkHash, 'check_hash');
-      return { ...canonical, checkHash: row.checkHash, candidateId: row.candidateId };
+      return {
+        ...canonical,
+        candidateId: row.candidateId,
+        candidateKey,
+        checkHash: row.checkHash,
+        row,
+        sourceEvidenceRefs: refs,
+      };
     }).sort((left, right) => compareUtf16Ascending(
       `${left.candidateKey}:${left.gateCode}`,
       `${right.candidateKey}:${right.gateCode}`,
@@ -2426,6 +2534,13 @@ function verifyPr8EvidenceGraph(
         === persistedChecks.length,
       'check_duplicate',
     );
+    reconstructedCheckIdentitySetHash = pr8CheckIdentitySetHash(run, persistedChecks);
+    if (requirePostingCheckIdentitySeal) {
+      requireProof(
+        acceptedRun?.checkIdentitySetHash === reconstructedCheckIdentitySetHash,
+        'check_identity_set_hash',
+      );
+    }
     const selectedSourceAdapterChecks = persistedChecks.filter(row => (
       row.candidateId === candidate.id && row.gateCode === 'source_adapter_exact_match'
     ));
@@ -2714,6 +2829,10 @@ function verifyPr8EvidenceGraph(
         && acceptedRun.policyManifestHash === run?.policyManifestHash
         && acceptedRun.sourceInputManifestHash === run?.sourceInputManifestHash
         && acceptedRun.reconciliationSetHash === reconstructedReconciliationSetHash
+        && (
+          !requirePostingCheckIdentitySeal
+          || acceptedRun.checkIdentitySetHash === reconstructedCheckIdentitySetHash
+        )
         && acceptedRun.companyTimezoneSnapshot === run?.companyTimezone
         && acceptedRun.companyTimezoneSnapshot === authorization.acceptedCompanyTimezoneSnapshot
         && acceptedRun.companyTimezoneSnapshot === activation.companyTimezoneSnapshot
@@ -2763,6 +2882,20 @@ function verifyPr8EvidenceGraph(
           SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}
           WHERE runId = ? ORDER BY candidateKey ASC, id ASC LIMIT 1
         `).get(entry.dryRunId) : null;
+        if (recordEvidence) {
+          recordEvidence({
+            phase: 'pr8_acceptance_membership_read',
+            table: ACTUAL_SOURCE_DRY_RUNS_TABLE,
+            rows: persistedRun ? [persistedRun] : [],
+          });
+          if (persistedRun) {
+            recordEvidence({
+              phase: 'pr8_acceptance_membership_read',
+              table: ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE,
+              rows: persistedCandidate ? [persistedCandidate] : [],
+            });
+          }
+        }
         if (!persistedRun || !persistedCandidate) {
           requireProof(false, `accepted_run_persisted_graph:${entry.dryRunId}`);
           continue;
@@ -2777,7 +2910,11 @@ function verifyPr8EvidenceGraph(
           authorization,
           activation,
           deniedAttemptedAt,
-          { recordEvidence, validateCompleteAcceptanceSet: false },
+          {
+            recordEvidence,
+            requirePostingCheckIdentitySeal,
+            validateCompleteAcceptanceSet: false,
+          },
         );
         requireProof(entryProof.valid, `accepted_run_complete_graph:${entry.dryRunId}`);
       }
@@ -2827,6 +2964,9 @@ function verifyPr8EvidenceGraph(
     reconciliationSetHash: acceptedRun?.reconciliationSetHash ?? null,
     resultHash: acceptedRun?.resultHash ?? acceptedPair?.resultHash ?? null,
   };
+  if (requirePostingCheckIdentitySeal) {
+    expectedProjection.checkIdentitySetHash = acceptedRun?.checkIdentitySetHash ?? null;
+  }
   const observedDryRunsHash = observedAcceptedDryRunsHash(acceptedDryRuns);
   const observedFreshnessWindowsHash = observedAcceptedFreshnessWindowsHash(acceptedRuns);
   const observedProjection = {
@@ -2848,6 +2988,9 @@ function verifyPr8EvidenceGraph(
     reconciliationSetHash: reconstructedReconciliationSetHash,
     resultHash: reconstructedResultHash,
   };
+  if (requirePostingCheckIdentitySeal) {
+    observedProjection.checkIdentitySetHash = reconstructedCheckIdentitySetHash;
+  }
   if (validateCompleteAcceptanceSet) {
     requireProof(canonicalJson(expectedProjection) === canonicalJson(observedProjection), 'projection_mismatch');
   }
@@ -3059,7 +3202,11 @@ function loadAcceptedContext(
   command,
   attemptedAt,
   runtimeContract,
-  { historicalAuthorityChains = null, recordEvidence = null } = {},
+  {
+    historicalAuthorityChains = null,
+    recordEvidence = null,
+    requirePostingCheckIdentitySeal = false,
+  } = {},
 ) {
   const deniedAttemptedAt = renderUtcMilliseconds(attemptedAt);
   const requestedAuthorization = authorityRepository.readWriteAuthorizationRecord(
@@ -3079,7 +3226,7 @@ function loadAcceptedContext(
     authorization,
     activation,
     deniedAttemptedAt,
-    { recordEvidence },
+    { recordEvidence, requirePostingCheckIdentitySeal },
   );
   const { run: persistedRun, candidate: acceptedCandidate, acceptedRun } = pr8Proof;
   const run = persistedRun || (acceptedRun ? Object.freeze({
@@ -3747,7 +3894,6 @@ function createCanonicalActualEligibilityEventRepository(
         'clock',
         'evidenceRecorder',
         'hooks',
-        'testOnlyBuildPostingDenialPackage',
         'uuid',
       ].includes(key))
     )
@@ -3780,7 +3926,13 @@ function createCanonicalActualEligibilityEventRepository(
   function readRepositoryClock() {
     return readRepositoryClockFromDependency(clockDependency);
   }
-  const authorityRepository = createCanonicalActualPostingAuthorityRepository(db);
+  const authorityReadBoundary = evidenceRecorder
+    ? createAuthorityReadBoundary(db, recordEvidence)
+    : null;
+  const authorityRepository = createCanonicalActualPostingAuthorityRepository(
+    authorityReadBoundary?.proxy || db,
+  );
+  authorityReadBoundary?.enable();
 
   function readEventById(id) {
     assertIdentifier(id, 'eventId');
@@ -3960,7 +4112,11 @@ function createCanonicalActualEligibilityEventRepository(
       command,
       deniedAt,
       runtimeContract,
-      { historicalAuthorityChains, recordEvidence },
+      {
+        historicalAuthorityChains,
+        recordEvidence,
+        requirePostingCheckIdentitySeal: selectors.reconstructionEntrypoint === 'pr9b_seam',
+      },
     );
     if (context.authorityDenial) {
       throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
@@ -4626,7 +4782,7 @@ function createCanonicalActualEligibilityEventRepository(
       },
       clock.milliseconds,
       runtimeContract,
-      { recordEvidence },
+      { recordEvidence, requirePostingCheckIdentitySeal: true },
     );
     if (context.operationalFailureCode) throw repositoryError(context.operationalFailureCode);
     let denialCause = authorityDenialCause(context)
@@ -4684,7 +4840,7 @@ function createCanonicalActualEligibilityEventRepository(
       },
       clock.milliseconds,
       runtimeContract,
-      { recordEvidence },
+      { recordEvidence, requirePostingCheckIdentitySeal: true },
     );
     if (context.operationalFailureCode) throw repositoryError(context.operationalFailureCode);
     if (context.authorityDenial) {
@@ -5662,37 +5818,6 @@ function createCanonicalActualEligibilityEventRepository(
     throw repositoryError('CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED');
   }
 
-  function buildPostingDenialPackageForTest(input) {
-    if (dependencies?.testOnlyBuildPostingDenialPackage !== true) {
-      throw repositoryError(ERROR_CODES.C_SEAM_INPUT_REJECTED);
-    }
-    const seamCommand = assertPostingDenialSeamCommand(input.seamCommand);
-    const deniedAttemptedAt = input.deniedAttemptedAt;
-    const milliseconds = parseUtcMilliseconds(deniedAttemptedAt);
-    beginImmediate(db);
-    try {
-      const eventRaw = db.prepare(`
-        SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
-        WHERE id = ? AND companyId = ? AND branchId = ?
-      `).get(
-        seamCommand.postingCommand.eventId,
-        seamCommand.postingCommand.companyId,
-        seamCommand.postingCommand.branchId,
-      );
-      const event = validateEligibleEventRecord(normalizeEventRow(eventRaw));
-      const denial = reconstructPostingDenial(seamCommand, event, {
-        milliseconds,
-        timestamp: deniedAttemptedAt,
-      });
-      rollbackQuietly(db);
-      if (!denial) throw repositoryError(ERROR_CODES.C_SEAM_INPUT_REJECTED);
-      return denial.packageValue;
-    } catch (error) {
-      rollbackQuietly(db);
-      throw error;
-    }
-  }
-
   const publicRepository = {
     orchestratePostingDenial,
     persistDenialEvidence,
@@ -5702,9 +5827,6 @@ function createCanonicalActualEligibilityEventRepository(
     reconcileScope,
     reconcileTransition,
   };
-  if (dependencies?.testOnlyBuildPostingDenialPackage === true) {
-    publicRepository.__testBuildPostingDenialPackage = buildPostingDenialPackageForTest;
-  }
   Object.defineProperty(publicRepository, CANONICAL_ACTUAL_POSTING_INTERNAL, {
     enumerable: false,
     value: Object.freeze({

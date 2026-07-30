@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   appendAuthorityDescendant,
   canonicalJson,
+  createAdditionalPr8Run,
   createPr9bContext,
   createEvidenceTrace,
   createInstrumentedEligibilityRepository,
@@ -30,6 +31,166 @@ function primaryCounts(db) {
     table,
     Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count),
   ]));
+}
+
+function mutateProtectedCheckGraph(db, mutation) {
+  const triggers = db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND tbl_name = 'actual_source_dry_run_checks' AND sql IS NOT NULL
+    ORDER BY name
+  `).all();
+  for (const trigger of triggers) db.exec(`DROP TRIGGER "${trigger.name}"`);
+  try {
+    mutation();
+  } finally {
+    for (const trigger of triggers) db.exec(trigger.sql);
+  }
+}
+
+function changeCheckId(db, replacement, selector = '') {
+  const row = db.prepare(`
+    SELECT id FROM actual_source_dry_run_checks
+    ${selector}
+    ORDER BY id LIMIT 1
+  `).get();
+  mutateProtectedCheckGraph(db, () => {
+    db.prepare('UPDATE actual_source_dry_run_checks SET id = ? WHERE id = ?')
+      .run(replacement, row.id);
+  });
+}
+
+const PR8_CHILD_ID_HOSTILES = [
+  {
+    mutate(context) {
+      changeCheckId(context.db, 'hostile-mutated-check-id');
+    },
+    name: 'one changed child ID',
+  },
+  {
+    mutate(context) {
+      const [left, right] = context.db.prepare(`
+        SELECT id FROM actual_source_dry_run_checks ORDER BY id LIMIT 2
+      `).all();
+      const temporary = 'actual-source-check-00000000-0000-4000-8000-000000000000';
+      mutateProtectedCheckGraph(context.db, () => {
+        context.db.prepare('UPDATE actual_source_dry_run_checks SET id = ? WHERE id = ?')
+          .run(temporary, left.id);
+        context.db.prepare('UPDATE actual_source_dry_run_checks SET id = ? WHERE id = ?')
+          .run(left.id, right.id);
+        context.db.prepare('UPDATE actual_source_dry_run_checks SET id = ? WHERE id = ?')
+          .run(right.id, temporary);
+      });
+    },
+    name: 'IDs exchanged between two children',
+  },
+  {
+    mutate(context) {
+      changeCheckId(context.db, context.authority.candidate.id);
+    },
+    name: 'child ID duplicated across the PR8 child graph',
+  },
+  {
+    mutate(context) {
+      changeCheckId(
+        context.db,
+        'actual-source-check-22222222-2222-4222-8222-222222222222',
+      );
+    },
+    name: 'well-formed new unique child ID',
+  },
+  {
+    mutate(context) {
+      const foreign = createPr9bContext();
+      let foreignId;
+      try {
+        foreignId = foreign.db.prepare(`
+          SELECT id FROM actual_source_dry_run_checks ORDER BY id LIMIT 1
+        `).get().id;
+      } finally {
+        foreign.db.close();
+      }
+      changeCheckId(context.db, foreignId);
+    },
+    name: 'child ID belonging to another fresh fixture',
+  },
+  {
+    mutate(context) {
+      changeCheckId(
+        context.db,
+        'actual-source-check-33333333-3333-4333-8333-333333333333',
+        'WHERE candidateId IS NOT NULL',
+      );
+    },
+    name: 'FK-consistent candidate child ID mutation',
+  },
+  {
+    mutate(context) {
+      const additional = createAdditionalPr8Run(context, 'cross-binding');
+      const original = context.db.prepare(`
+        SELECT * FROM actual_source_dry_run_checks
+        WHERE runId = ? AND candidateId IS NOT NULL
+        ORDER BY gateCode LIMIT 1
+      `).get(context.authority.run.id);
+      const replacement = context.db.prepare(`
+        SELECT * FROM actual_source_dry_run_checks
+        WHERE runId = ? AND gateCode = ? AND candidateId IS NOT NULL
+      `).get(additional.dryRunId, original.gateCode);
+      mutateProtectedCheckGraph(context.db, () => {
+        context.db.prepare(`
+          UPDATE actual_source_dry_run_checks SET gateCode = ? WHERE id = ?
+        `).run(`temporary_${replacement.gateCode}`, replacement.id);
+        context.db.prepare(`
+          UPDATE actual_source_dry_run_checks SET runId = ?, candidateId = ? WHERE id = ?
+        `).run(replacement.runId, replacement.candidateId, original.id);
+        context.db.prepare(`
+          UPDATE actual_source_dry_run_checks
+          SET runId = ?, candidateId = ?, gateCode = ? WHERE id = ?
+        `).run(original.runId, original.candidateId, original.gateCode, replacement.id);
+      });
+    },
+    name: 'fresh-run parent and child cross-binding',
+  },
+];
+
+for (const hostile of PR8_CHILD_ID_HOSTILES) {
+  test(`PR9B PR8 child identity seal rejects ${hostile.name}`, () => {
+    const context = createPr9bContext();
+    try {
+      hostile.mutate(context);
+      assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+      const before = totalChanges(context.db);
+      const result = context.postingRepository.post(postingCommand(context));
+      assert.deepEqual(
+        {
+          authoritativeDenialCause: result.authoritativeDenialCause,
+          classification: result.classification,
+          outcome: result.outcome,
+          stage: result.evidence?.stage,
+        },
+        {
+          authoritativeDenialCause: 'PR8_EVIDENCE_MISMATCH',
+          classification: 'C8',
+          outcome: 'DENIAL_PERSISTED',
+          stage: 'COMPLETE',
+        },
+      );
+      assert.equal(totalChanges(context.db) - before, 6);
+      assert.deepEqual(primaryCounts(context.db), {
+        canonical_receivables: 0,
+        canonical_receivable_posting_operations: 0,
+        financial_audit_events: 0,
+      });
+      assert.equal(Number(context.db.prepare(
+        'SELECT COUNT(*) AS count FROM canonical_receivable_posting_conflicts',
+      ).get().count), 1);
+      assert.equal(Number(context.db.prepare(
+        'SELECT COUNT(*) AS count FROM canonical_receivable_posting_conflict_transitions WHERE state = \'COMPLETE\'',
+      ).get().count), 1);
+      assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+    } finally {
+      context.db.close();
+    }
+  });
 }
 
 test('PR9B normalizes transport-equivalent commands and rejects assertion mismatch read-only', () => {

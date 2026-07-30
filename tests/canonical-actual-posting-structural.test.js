@@ -192,10 +192,47 @@ test('P2-04 clock and UUID dependencies are constructor-owned and absent from ca
 });
 
 test('denial package brand and constructors are not exported to callers', async () => {
+  const eligibilitySource = read('server/lib/canonical-actual-eligibility-event-repository.js');
   const domain = await import('../server/lib/canonical-actual-posting-domain.js');
+  const eligibility = await import('../server/lib/canonical-actual-eligibility-event-repository.js');
   const exported = domain.default || domain;
   assert.equal(exported.freezeDenialPackageForRepository, undefined);
   assert.equal(exported.assertFrozenDenialPackage, undefined);
+  assert.equal(eligibility.__testBuildPostingDenialPackage, undefined);
+  assert.doesNotMatch(eligibilitySource, /testOnlyBuildPostingDenialPackage|__testBuildPostingDenialPackage/);
+  assert.doesNotMatch(eligibilitySource, /publicRepository\.[A-Za-z0-9_]*Build[A-Za-z0-9_]*/);
+});
+
+test('PR9B PR8 check identity is sealed into accepted evidence and locked reconstruction', () => {
+  const domain = read('server/lib/canonical-actual-posting-domain.js');
+  const eligibility = read('server/lib/canonical-actual-eligibility-event-repository.js');
+  assert.match(domain, /ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD = 'checkIdentitySetHash'/);
+  assert.match(eligibility, /function pr8CheckIdentityCanonical\(/);
+  assert.match(eligibility, /childId: row\.id/);
+  assert.match(eligibility, /parentRunId: row\.runId/);
+  assert.match(eligibility, /parentCandidateId: row\.candidateId/);
+  assert.match(eligibility, /checkHash: row\.checkHash/);
+  assert.match(eligibility, /sourceEvidenceRefs/);
+  assert.match(eligibility, /acceptedResultHash: run\.resultHash/);
+  assert.match(eligibility, /acceptedRun\?\.checkIdentitySetHash === reconstructedCheckIdentitySetHash/);
+  assert.match(eligibility, /requirePostingCheckIdentitySeal: true/);
+});
+
+test('PR9B replay qualifier is computed before COMMIT and concurrency proof is event-driven', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const concurrency = read('tests/canonical-actual-posting-concurrency.test.js');
+  const worker = read('tests/helpers/canonical-actual-posting-concurrency-worker.mjs');
+  assert.match(posting, /const result = event \? qualifyHistoricalResult[\s\S]{0,200}db\.exec\('COMMIT'\);[\s\S]{0,80}return result/);
+  assert.doesNotMatch(posting, /db\.exec\('COMMIT'\);\s*return qualifyHistoricalResult/);
+  assert.doesNotMatch(concurrency, /Promise\.race|assertStillBlocked|setTimeout\(.*100/);
+  assert.doesNotMatch(worker, /type:\s*['"]attempting['"]/);
+  for (const event of [
+    'repository_entrypoint_invoked',
+    'begin_immediate_attempted',
+    'lock_acquired',
+    'protected_stage_reached',
+    'release_completed',
+  ]) assert.match(worker, new RegExp(event));
 });
 
 test('runtime application graph does not import PR9a or PR9b repositories or services', () => {

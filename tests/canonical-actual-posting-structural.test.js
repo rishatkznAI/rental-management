@@ -226,9 +226,16 @@ test('PR9B replay qualifier is computed before COMMIT and concurrency proof is e
   assert.doesNotMatch(posting, /db\.exec\('COMMIT'\);\s*return qualifyHistoricalResult/);
   assert.doesNotMatch(concurrency, /Promise\.race|assertStillBlocked|setTimeout\(.*100/);
   assert.doesNotMatch(worker, /type:\s*['"]attempting['"]/);
+  assert.doesNotMatch(worker, /begin_immediate_attempted/);
+  assert.match(worker, /new Database\(input\.dbPath,[\s\S]{0,300}verbose\(sql\)[\s\S]{0,300}protocolEvent\('sqlite_begin_trace', \{ source: 'better_sqlite3_verbose' \}\)/);
+  assert.match(worker, /protocolEvent\('pre_sql_boundary_reached'\);[\s\S]{0,300}const result = originalExec\(sql\)/);
+  assert.match(concurrency, /function assertWriteTransactionHeld\(/);
+  assert.match(concurrency, /function assertNativeBeginTrace\(/);
+  assert.match(concurrency, /await assert\.rejects\(worker\.result, \/code=7\//);
   for (const event of [
     'repository_entrypoint_invoked',
-    'begin_immediate_attempted',
+    'pre_sql_boundary_reached',
+    'sqlite_begin_trace',
     'lock_acquired',
     'protected_stage_reached',
     'release_completed',

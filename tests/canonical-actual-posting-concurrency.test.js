@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -15,6 +16,9 @@ import {
 } from './canonical-actual-posting-fixtures.js';
 
 const workerPath = new URL('./helpers/canonical-actual-posting-concurrency-worker.mjs', import.meta.url);
+const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
+const Database = serverRequire('better-sqlite3');
+const activeWorkers = new Set();
 
 function startWorker(input) {
   const child = fork(workerPath, [], {
@@ -22,17 +26,29 @@ function startWorker(input) {
       ...process.env,
       PR9B_WORKER_INPUT: JSON.stringify(input),
     },
-    stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+  });
+  let resultReceived = false;
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', chunk => {
+    stderr += chunk;
   });
   const ready = new Promise((resolve, reject) => {
     child.once('error', reject);
+    const onExit = (code, signal) => {
+      child.off('message', onMessage);
+      reject(new Error(`PR9B worker exited before ready: code=${code} signal=${signal}`));
+    };
     const onMessage = message => {
       if (message?.type === 'ready') {
         child.off('message', onMessage);
+        child.off('exit', onExit);
         resolve();
       }
     };
     child.on('message', onMessage);
+    child.once('exit', onExit);
   });
   function waitFor(type) {
     return new Promise((resolve, reject) => {
@@ -46,16 +62,62 @@ function startWorker(input) {
       child.on('message', onMessage);
     });
   }
+  let worker;
   const result = new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.on('message', message => {
-      if (message?.type === 'result') resolve(message);
+    let childError = null;
+    let closeSeen = false;
+    let disconnectSeen = false;
+    let exitCode = null;
+    let exitSeen = false;
+    let exitSignal = null;
+    let resultMessage = null;
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, 30000);
+    child.once('error', error => {
+      childError = error;
     });
-    child.once('exit', code => {
-      if (code !== 0) reject(new Error(`PR9B worker exited ${code}`));
+    child.on('message', message => {
+      if (message?.type === 'result') {
+        resultMessage = message;
+        resultReceived = true;
+      }
+    });
+    child.once('disconnect', () => {
+      disconnectSeen = true;
+    });
+    child.once('exit', (code, signal) => {
+      exitCode = code;
+      exitSeen = true;
+      exitSignal = signal;
+    });
+    child.once('close', () => {
+      closeSeen = true;
+      clearTimeout(timeout);
+      activeWorkers.delete(worker);
+      const diagnostic = `code=${exitCode} signal=${exitSignal} stderr=${JSON.stringify(stderr)}`;
+      if (timedOut) reject(new Error(`PR9B worker timed out: ${diagnostic}`));
+      else if (childError) reject(childError);
+      else if (!exitSeen || !closeSeen) reject(new Error(`PR9B worker lifecycle incomplete: ${diagnostic}`));
+      else if (!disconnectSeen) reject(new Error(`PR9B worker IPC did not close: ${diagnostic}`));
+      else if (!resultMessage) reject(new Error(`PR9B worker exited without result: ${diagnostic}`));
+      else if (exitCode !== 0 || exitSignal !== null) reject(new Error(`PR9B worker failed: ${diagnostic}`));
+      else if (stderr.length !== 0) reject(new Error(`PR9B worker wrote stderr: ${diagnostic}`));
+      else resolve(resultMessage);
     });
   });
-  return { child, ready, result, waitFor };
+  worker = {
+    child,
+    dbPath: input.dbPath,
+    hasResult: () => resultReceived,
+    ready,
+    result,
+    waitFor,
+  };
+  activeWorkers.add(worker);
+  return worker;
 }
 
 async function waitForFile(file, timeoutMs = 10000) {
@@ -68,11 +130,12 @@ async function waitForFile(file, timeoutMs = 10000) {
 
 function contentionProtocol(directory, prefix) {
   return {
-    begin_immediate_attempted: path.join(directory, `${prefix}-begin-attempted`),
     lock_acquired: path.join(directory, `${prefix}-lock-acquired`),
+    pre_sql_boundary_reached: path.join(directory, `${prefix}-pre-sql-boundary`),
     protected_stage_reached: path.join(directory, `${prefix}-protected-stage`),
     release_completed: path.join(directory, `${prefix}-release-completed`),
     repository_entrypoint_invoked: path.join(directory, `${prefix}-entrypoint-invoked`),
+    sqlite_begin_trace: path.join(directory, `${prefix}-sqlite-begin-trace`),
   };
 }
 
@@ -88,8 +151,65 @@ function withTempDb(name, body) {
   const dbPath = path.join(directory, 'posting.sqlite');
   return Promise.resolve()
     .then(() => body(dbPath))
-    .finally(() => fs.rmSync(directory, { force: true, recursive: true }));
+    .finally(async () => {
+      const workers = [...activeWorkers].filter(worker => worker.dbPath === dbPath);
+      for (const worker of workers) {
+        if (worker.child.exitCode === null && worker.child.signalCode === null) worker.child.kill('SIGKILL');
+      }
+      await Promise.allSettled(workers.map(worker => worker.result));
+      fs.rmSync(directory, { force: true, recursive: true });
+      assert.equal(fs.existsSync(directory), false);
+    });
 }
+
+function assertWriteTransactionHeld(dbPath) {
+  const observer = new Database(dbPath);
+  let acquired = false;
+  let observedError = null;
+  try {
+    observer.pragma('busy_timeout = 0');
+    try {
+      observer.exec('BEGIN IMMEDIATE');
+      acquired = true;
+    } catch (error) {
+      observedError = error;
+    }
+  } finally {
+    if (observer.inTransaction) observer.exec('ROLLBACK');
+    observer.close();
+  }
+  assert.equal(acquired, false);
+  assert.match(String(observedError?.code || observedError?.message), /SQLITE_(?:BUSY|LOCKED)|locked/i);
+}
+
+function assertNativeBeginTrace(file) {
+  const event = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(event, {
+    source: 'better_sqlite3_verbose',
+    type: 'sqlite_begin_trace',
+  });
+}
+
+test('PR9B worker result is rejected when the child later exits non-zero', async () => {
+  await withTempDb('worker-lifecycle', async dbPath => {
+    const context = createPr9bContext({ dbPath });
+    try {
+      const worker = startWorker({
+        command: { postingCommand: postingCommand(context) },
+        dbPath,
+        entrypoint: 'wrapper',
+        exitCodeAfterResult: 7,
+        runtimeContractInput: context.runtimeContractInput,
+      });
+      await worker.ready;
+      worker.child.send({ type: 'go' });
+      await assert.rejects(worker.result, /code=7/);
+      assert.equal(worker.hasResult(), true);
+    } finally {
+      context.db.close();
+    }
+  });
+});
 
 test('PR9B independent processes serialize one primary winner and one exact follower', async () => {
   await withTempDb('primary-race', async dbPath => {
@@ -210,8 +330,13 @@ for (const stage of ['PENDING', 'ACCOUNTED', 'CIRCUIT_APPLIED', 'COMPLETE']) {
           await writer.ready;
           writer.child.send({ type: 'go' });
           await waitForFile(beforeReached);
+          assertWriteTransactionHeld(dbPath);
 
           const followerEntrypoint = writerEntrypoint === 'wrapper' ? 'seam' : 'wrapper';
+          const nativeBeginReleasePath = path.join(
+            path.dirname(dbPath),
+            `follower-${writerEntrypoint}-${stage.toLowerCase()}-native-begin-release`,
+          );
           const protocolPaths = contentionProtocol(
             path.dirname(dbPath),
             `follower-${writerEntrypoint}-${stage.toLowerCase()}`,
@@ -219,20 +344,32 @@ for (const stage of ['PENDING', 'ACCOUNTED', 'CIRCUIT_APPLIED', 'COMPLETE']) {
           const follower = startWorker({
             ...common,
             entrypoint: followerEntrypoint,
+            nativeBeginReleasePath,
             protocolPaths,
           });
           await follower.ready;
           follower.child.send({ type: 'go' });
           await waitForFile(protocolPaths.repository_entrypoint_invoked);
-          await waitForFile(protocolPaths.begin_immediate_attempted);
+          await waitForFile(protocolPaths.pre_sql_boundary_reached);
+          assert.equal(fs.existsSync(protocolPaths.sqlite_begin_trace), false);
           assert.equal(fs.existsSync(protocolPaths.lock_acquired), false);
           assert.equal(fs.existsSync(protocolPaths.protected_stage_reached), false);
+          assert.equal(follower.hasResult(), false);
+          assertWriteTransactionHeld(dbPath);
+
+          fs.writeFileSync(nativeBeginReleasePath, 'enter sqlite');
+          await waitForFile(protocolPaths.sqlite_begin_trace);
+          assertNativeBeginTrace(protocolPaths.sqlite_begin_trace);
+          assert.equal(fs.existsSync(protocolPaths.lock_acquired), false);
+          assert.equal(follower.hasResult(), false);
+          assertWriteTransactionHeld(dbPath);
 
           fs.writeFileSync(beforeRelease, 'release');
           await waitForFile(afterReached);
           await waitForFile(protocolPaths.lock_acquired);
           await waitForFile(protocolPaths.protected_stage_reached);
           const followerResult = await follower.result;
+          assert.equal(fs.existsSync(protocolPaths.release_completed), true);
           fs.writeFileSync(afterRelease, 'release');
           const writerResult = await writer.result;
           assert.equal(followerResult.error, undefined);
@@ -329,7 +466,12 @@ for (const stage of ['PENDING', 'ACCOUNTED', 'CIRCUIT_APPLIED', 'COMPLETE']) {
       await reader.ready;
       reader.child.send({ type: 'go' });
       await waitForFile(snapshotReached);
+      assertWriteTransactionHeld(dbPath);
 
+      const nativeBeginReleasePath = path.join(
+        path.dirname(dbPath),
+        `reconciler-${stage.toLowerCase()}-native-begin-release`,
+      );
       const protocolPaths = contentionProtocol(
         path.dirname(dbPath),
         `reconciler-${stage.toLowerCase()}`,
@@ -338,15 +480,26 @@ for (const stage of ['PENDING', 'ACCOUNTED', 'CIRCUIT_APPLIED', 'COMPLETE']) {
         command: { transitionId },
         dbPath,
         entrypoint: 'reconcile',
+        nativeBeginReleasePath,
         protocolPaths,
         runtimeContractInput: context.runtimeContractInput,
       });
       await reconciler.ready;
       reconciler.child.send({ type: 'go' });
       await waitForFile(protocolPaths.repository_entrypoint_invoked);
-      await waitForFile(protocolPaths.begin_immediate_attempted);
+      await waitForFile(protocolPaths.pre_sql_boundary_reached);
+      assert.equal(fs.existsSync(protocolPaths.sqlite_begin_trace), false);
       assert.equal(fs.existsSync(protocolPaths.lock_acquired), false);
       assert.equal(fs.existsSync(protocolPaths.protected_stage_reached), false);
+      assert.equal(reconciler.hasResult(), false);
+      assertWriteTransactionHeld(dbPath);
+
+      fs.writeFileSync(nativeBeginReleasePath, 'enter sqlite');
+      await waitForFile(protocolPaths.sqlite_begin_trace);
+      assertNativeBeginTrace(protocolPaths.sqlite_begin_trace);
+      assert.equal(fs.existsSync(protocolPaths.lock_acquired), false);
+      assert.equal(reconciler.hasResult(), false);
+      assertWriteTransactionHeld(dbPath);
 
       fs.writeFileSync(snapshotRelease, 'release');
       const readerResult = await reader.result;
@@ -361,6 +514,7 @@ for (const stage of ['PENDING', 'ACCOUNTED', 'CIRCUIT_APPLIED', 'COMPLETE']) {
       await waitForFile(protocolPaths.lock_acquired);
       await waitForFile(protocolPaths.protected_stage_reached);
       const reconcilerResult = await reconciler.result;
+      assert.equal(fs.existsSync(protocolPaths.release_completed), true);
       assert.equal(reconcilerResult.error, undefined);
       assert.equal(reconcilerResult.dml, {
         PENDING: 4,

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import {
   SOURCE_CAPABILITIES,
@@ -80,7 +81,6 @@ const {
   computeCanonicalPostingBoundaryHash,
   computeCanonicalPostingCohortHash,
   computeCanonicalPostingCommandFingerprint,
-  computeCanonicalEvidenceReadDigest,
   createCanonicalActualPostingRuntimeContract,
   computeDueDatePolicySetHash,
   computeGovernedAuthorityRecordHash,
@@ -782,11 +782,14 @@ export function createEvidenceTrace() {
   const entries = [];
   return Object.freeze({
     digest() {
-      const entryDigests = entries.map((entry, index) => ({
-        digest: computeCanonicalEvidenceReadDigest([entry]),
-        index,
-      }));
-      return computeCanonicalEvidenceReadDigest(entryDigests);
+      const digest = createHash('sha256');
+      for (const entry of entries) {
+        const encoded = Buffer.from(JSON.stringify(entry), 'utf8');
+        const length = Buffer.allocUnsafe(8);
+        length.writeBigUInt64BE(BigInt(encoded.length));
+        digest.update(length).update(encoded);
+      }
+      return digest.digest('hex');
     },
     entries,
     record(entry) {

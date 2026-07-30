@@ -106,6 +106,49 @@ function invokeWithPostCommitProof(db, invocation, afterCommit = null) {
   }
 }
 
+function instrumentSqliteReadCount(db) {
+  const originalPragma = db.pragma.bind(db);
+  const originalPrepare = db.prepare.bind(db);
+  let count = 0;
+  db.prepare = sql => {
+    const statement = originalPrepare(sql);
+    return new Proxy(statement, {
+      get(target, property) {
+        const value = Reflect.get(target, property, target);
+        if (['all', 'get', 'iterate'].includes(property)) {
+          return (...args) => {
+            count += 1;
+            return value.apply(target, args);
+          };
+        }
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  };
+  db.pragma = (...args) => {
+    count += 1;
+    return originalPragma(...args);
+  };
+  return Object.freeze({
+    count: () => count,
+    restore() {
+      db.pragma = originalPragma;
+      db.prepare = originalPrepare;
+    },
+  });
+}
+
+function rawColumn(entries, table, column) {
+  for (const entry of entries) {
+    if (entry.phase !== 'sqlite_raw_read' || entry.table !== table) continue;
+    for (const row of entry.rows) {
+      const found = row.columns.find(candidate => candidate.column === column);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 test('PR9B denial-package capability is absent from constructor, repository, and module exports', () => {
   const context = createPr9bContext();
   try {
@@ -343,6 +386,182 @@ test('PR9B recorder captures successful authority reads at the raw DB boundary',
   assert.deepEqual(attempt.primary, ZERO_PRIMARY);
 });
 
+test('PR9B recorder captures a corrupt actual event before event validation fails', () => {
+  const context = createPr9bContext();
+  const trace = createEvidenceTrace();
+  try {
+    mutateProtectedRow(
+      context.db,
+      'actual_receivable_eligible_events',
+      "eventHash = '0000000000000000000000000000000000000000000000000000000000000000'",
+    );
+    const repository = createInstrumentedEligibilityRepository(context, {
+      clock: () => Date.parse(context.event.createdAt),
+      evidenceRecorder: trace.record,
+    });
+    assert.throws(
+      () => repository.orchestratePostingDenial({
+        assertedDenialCause: 'PR8_EVIDENCE_MISMATCH',
+        denialAttemptId: '42000000-0000-4000-8000-000000000001',
+        postingCommand: postingCommand(context),
+      }),
+      error => error.code === 'CANONICAL_ENVELOPE_INVALID' && /eventHash mismatch/.test(error.message),
+    );
+    const eventHash = rawColumn(
+      trace.entries,
+      'actual_receivable_eligible_events',
+      'eventHash',
+    );
+    assert.equal(eventHash?.storageClass, 'text');
+    assert.deepEqual(primaryCounts(context.db), ZERO_PRIMARY);
+  } finally {
+    context.db.close();
+  }
+});
+
+test('PR9B raw recorder preserves malformed authorization BLOB error precedence', () => {
+  const mutation = context => mutateProtectedRow(
+    context.db,
+    'canonical_write_authorization_records',
+    'acceptedPr8EvidenceHash = ?',
+    [Buffer.from([0])],
+  );
+  const recorded = traceAttempt(mutation);
+  const controlContext = createPr9bContext();
+  let controlError;
+  try {
+    mutation(controlContext);
+    const repository = createPostingRepositoryForTest(controlContext, {
+      clock: () => Date.parse(controlContext.event.createdAt),
+      uuid() {
+        throw new Error('stop after authoritative reads');
+      },
+    });
+    try {
+      repository.post(postingCommand(controlContext));
+    } catch (error) {
+      controlError = error;
+    }
+  } finally {
+    controlContext.db.close();
+  }
+  assert.equal(recorded.error?.code, controlError?.code);
+  assert.equal(recorded.error?.message, controlError?.message);
+  assert.equal(rawColumn(
+    recorded.entries,
+    'canonical_write_authorization_records',
+    'acceptedPr8EvidenceHash',
+  )?.storageClass, 'blob');
+  assert.deepEqual(recorded.primary, ZERO_PRIMARY);
+});
+
+test('PR9B raw recorder covers SQLite storage classes and malformed JSON deterministically', () => {
+  const baselineA = traceAttempt();
+  const blob = traceAttempt(context => mutateProtectedRow(
+    context.db,
+    'canonical_write_authorization_records',
+    'acceptedPr8EvidenceHash = ?',
+    [Buffer.from([0, 255, 1])],
+  ));
+  const real = traceAttempt(context => mutateProtectedRow(
+    context.db,
+    'canonical_write_authorization_records',
+    'authorizationVersion = 1.5',
+  ));
+  const malformedJson = traceAttempt(context => mutateProtectedRow(
+    context.db,
+    'canonical_write_authorization_records',
+    "acceptedPr8EvidenceJson = '{'",
+  ));
+  const baselineHashA = rawColumn(
+    baselineA.entries,
+    'canonical_write_authorization_records',
+    'acceptedPr8EvidenceHash',
+  );
+  const repeatedBaselineHashes = baselineA.entries.flatMap(entry => (
+    entry.phase === 'sqlite_raw_read' && entry.table === 'canonical_write_authorization_records'
+      ? entry.rows.flatMap(row => row.columns
+        .filter(column => column.column === 'acceptedPr8EvidenceHash')
+        .map(column => column.rawDigest))
+      : []
+  ));
+  assert.equal(baselineHashA.storageClass, 'text');
+  assert.equal(rawColumn(
+    baselineA.entries,
+    'canonical_write_authorization_records',
+    'authorizationVersion',
+  ).storageClass, 'integer');
+  assert.equal(rawColumn(
+    baselineA.entries,
+    'canonical_write_authorization_records',
+    'previousRecordId',
+  ).storageClass, 'null');
+  assert.equal(rawColumn(
+    blob.entries,
+    'canonical_write_authorization_records',
+    'acceptedPr8EvidenceHash',
+  ).storageClass, 'blob');
+  assert.equal(rawColumn(
+    real.entries,
+    'canonical_write_authorization_records',
+    'authorizationVersion',
+  ).storageClass, 'real');
+  assert.equal(rawColumn(
+    malformedJson.entries,
+    'canonical_write_authorization_records',
+    'acceptedPr8EvidenceJson',
+  ).storageClass, 'text');
+  assert.equal(repeatedBaselineHashes.length > 1, true);
+  assert.equal(new Set(repeatedBaselineHashes).size, 1);
+  assert.notEqual(baselineHashA.rawDigest, blob.entries.length === 0 ? null : rawColumn(
+    blob.entries,
+    'canonical_write_authorization_records',
+    'acceptedPr8EvidenceHash',
+  ).rawDigest);
+  assert.notEqual(baselineA.digest, blob.digest);
+  assert.deepEqual(blob.primary, ZERO_PRIMARY);
+  assert.deepEqual(real.primary, ZERO_PRIMARY);
+  assert.deepEqual(malformedJson.primary, ZERO_PRIMARY);
+});
+
+test('PR9B recorder adds no SQLite reads and callback failure remains observational', () => {
+  const context = createPr9bContext();
+  function invoke(evidenceRecorder) {
+    const counter = instrumentSqliteReadCount(context.db);
+    try {
+      const repository = createPostingRepositoryForTest(context, {
+        clock: () => Date.parse(context.event.createdAt),
+        evidenceRecorder,
+      });
+      const result = repository.post(postingCommand(context, context.event, {
+        assertedSelectedDueDatePolicyHash: '0000000000000000000000000000000000000000000000000000000000000000',
+      }));
+      return {
+        graph: postingGraphSnapshot(context.db),
+        reads: counter.count(),
+        result,
+      };
+    } finally {
+      counter.restore();
+    }
+  }
+  try {
+    const control = invoke(undefined);
+    const recorded = invoke(() => {});
+    const throwing = invoke(() => {
+      throw new Error('recorder unavailable');
+    });
+    assert.equal(JSON.stringify(recorded.result), JSON.stringify(control.result));
+    assert.equal(JSON.stringify(throwing.result), JSON.stringify(control.result));
+    assert.equal(recorded.graph, control.graph);
+    assert.equal(throwing.graph, control.graph);
+    assert.equal(recorded.reads, control.reads);
+    assert.equal(throwing.reads, control.reads);
+  } finally {
+    context.db.close();
+  }
+});
+
 for (const hostile of [
   {
     expectedTable: 'governed_adapter_authority_records',
@@ -426,7 +645,12 @@ test('PR9B recorder digest changes on corruption and omits authority tables neve
   assert.notEqual(corrupted.digest, admitted.digest);
   assert.equal(tables.has('canonical_write_authorization_records'), true);
   assert.equal(tables.has('canonical_posting_activation_records'), true);
-  assert.equal(tables.has('governed_adapter_authority_records'), false);
+  assert.equal(tables.has('pr9b_table_that_was_never_read'), false);
+  assert.equal(rawColumn(
+    corrupted.entries,
+    'governed_adapter_authority_records',
+    'recordId',
+  ), null);
 });
 
 test('PR9B recorder captures durable classification rows before corrupt replay classification', () => {

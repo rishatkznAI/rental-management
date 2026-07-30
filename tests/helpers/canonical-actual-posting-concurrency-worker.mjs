@@ -28,7 +28,26 @@ function finish(message) {
 }
 
 const input = JSON.parse(process.env.PR9B_WORKER_INPUT || '{}');
-const db = new Database(input.dbPath);
+const protocolState = {
+  lockAcquired: false,
+  protectedStageReached: false,
+};
+
+function protocolEvent(type, details = {}) {
+  const file = input.protocolPaths?.[type];
+  if (file && !fs.existsSync(file)) {
+    fs.writeFileSync(file, JSON.stringify({ ...details, type }));
+  }
+  send({ ...details, type });
+}
+
+const db = new Database(input.dbPath, {
+  verbose(sql) {
+    if (/^\s*BEGIN\s+IMMEDIATE\s*;?\s*$/i.test(String(sql))) {
+      protocolEvent('sqlite_begin_trace', { source: 'better_sqlite3_verbose' });
+    }
+  },
+});
 db.pragma('foreign_keys = ON');
 db.pragma('busy_timeout = 10000');
 const runtimeContract = createCanonicalActualPostingRuntimeContract(input.runtimeContractInput);
@@ -73,25 +92,15 @@ const postingRepository = createCanonicalActualPostingRepository(
   },
 );
 
-const protocolState = {
-  lockAcquired: false,
-  protectedStageReached: false,
-};
-
-function protocolEvent(type, details = {}) {
-  const file = input.protocolPaths?.[type];
-  if (file && !fs.existsSync(file)) {
-    fs.writeFileSync(file, JSON.stringify({ ...details, type }));
-  }
-  send({ ...details, type });
-}
-
 const originalExec = db.exec.bind(db);
 const originalPrepare = db.prepare.bind(db);
 db.exec = sql => {
   const statement = String(sql);
   if (/^\s*BEGIN\s+IMMEDIATE\s*;?\s*$/i.test(statement)) {
-    protocolEvent('begin_immediate_attempted');
+    protocolEvent('pre_sql_boundary_reached');
+    while (input.nativeBeginReleasePath && !fs.existsSync(input.nativeBeginReleasePath)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
     const result = originalExec(sql);
     protocolState.lockAcquired = true;
     protocolState.protectedStageReached = false;
@@ -143,9 +152,11 @@ process.on('message', message => {
       result = service.postCanonicalReceivable(input.command);
     }
     const after = Number(db.prepare('SELECT total_changes() AS total').get().total);
+    if (input.exitCodeAfterResult !== undefined) process.exitCode = Number(input.exitCodeAfterResult);
     finish({ dml: after - before, result, type: 'result' });
   } catch (error) {
     const after = Number(db.prepare('SELECT total_changes() AS total').get().total);
+    if (input.exitCodeAfterResult !== undefined) process.exitCode = Number(input.exitCodeAfterResult);
     finish({
       dml: after - before,
       error: { code: error?.code || null, message: error?.message || String(error) },

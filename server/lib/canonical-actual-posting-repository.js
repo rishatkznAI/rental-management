@@ -1,4 +1,4 @@
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const {
   CANONICAL_RECEIVABLES_TABLE,
   FINANCIAL_AUDIT_EVENTS_TABLE,
@@ -58,30 +58,133 @@ function repositoryError(code, message = code) {
   return new CanonicalActualPostingError(code, message);
 }
 
-const AUTHORITY_READ_BOUNDARY_TABLES = new Set([
-  CANONICAL_POSTING_ACTIVATION_RECORDS_TABLE,
-  CANONICAL_WRITE_AUTHORIZATION_RECORDS_TABLE,
-  GOVERNED_ADAPTER_AUTHORITY_RECORDS_TABLE,
-]);
+const SQLITE_READ_EVIDENCE_BOUNDARY = Symbol.for(
+  'rentcore.canonical_actual_posting.sqlite_read_evidence_boundary.v1',
+);
 
-function createAuthorityReadBoundary(db, recordEvidence) {
-  let enabled = false;
+function rawDigest(storageClass, bytes) {
+  return createHash('sha256')
+    .update(storageClass, 'utf8')
+    .update(Buffer.from([0]))
+    .update(bytes)
+    .digest('hex');
+}
+
+function safeSqliteValue(value) {
+  let bytes;
+  let safeScalar;
+  let storageClass;
+  if (value === null) {
+    bytes = Buffer.alloc(0);
+    safeScalar = null;
+    storageClass = 'null';
+  } else if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    bytes = Buffer.from(value);
+    safeScalar = Object.freeze({
+      encoding: 'base64-prefix',
+      truncated: bytes.length > 128,
+      value: bytes.subarray(0, 128).toString('base64'),
+    });
+    storageClass = 'blob';
+  } else if (typeof value === 'string') {
+    bytes = Buffer.from(value, 'utf8');
+    safeScalar = Object.freeze({
+      encoding: 'utf8-base64-prefix',
+      truncated: bytes.length > 128,
+      value: bytes.subarray(0, 128).toString('base64'),
+    });
+    storageClass = 'text';
+  } else if (typeof value === 'bigint') {
+    bytes = Buffer.from(value.toString(10), 'ascii');
+    safeScalar = value.toString(10);
+    storageClass = 'integer';
+  } else if (typeof value === 'number') {
+    const rendered = Object.is(value, -0) ? '-0' : String(value);
+    bytes = Buffer.from(rendered, 'ascii');
+    safeScalar = rendered;
+    storageClass = Number.isInteger(value) ? 'integer' : 'real';
+  } else {
+    const rendered = Object.prototype.toString.call(value);
+    bytes = Buffer.from(rendered, 'utf8');
+    safeScalar = rendered;
+    storageClass = 'unexpected';
+  }
+  return Object.freeze({
+    byteLength: bytes.length,
+    rawDigest: rawDigest(storageClass, bytes),
+    safeScalar,
+    storageClass,
+  });
+}
+
+function safeSqliteRow(row) {
+  let entries;
+  if (Array.isArray(row)) {
+    entries = row.map((value, index) => [String(index), value]);
+  } else if (row !== null && typeof row === 'object' && !Buffer.isBuffer(row)) {
+    entries = Object.keys(row).map(column => [column, row[column]]);
+  } else {
+    entries = [['$value', row]];
+  }
+  const columns = entries.map(([column, value], index) => Object.freeze({
+    column,
+    index,
+    ...safeSqliteValue(value),
+  }));
+  const identity = columns
+    .filter(column => ['id', 'recordId', 'transitionId'].includes(column.column))
+    .map(column => Object.freeze({
+      column: column.column,
+      rawDigest: column.rawDigest,
+      safeScalar: column.safeScalar,
+      storageClass: column.storageClass,
+    }));
+  return Object.freeze({ columns: Object.freeze(columns), identity: Object.freeze(identity) });
+}
+
+function sqliteReadTables(sql) {
+  const source = String(sql);
+  const tables = [...source.matchAll(/\b(?:FROM|JOIN)\s+(?:"|`|\[)?([a-z_][a-z0-9_]*)/gi)]
+    .map(match => match[1]);
+  const pragma = source.match(/\bPRAGMA\s+(?:[a-z_][a-z0-9_]*\.)?(?:table_info|table_xinfo|foreign_key_list)\s*\(\s*(?:"|`|\[)?([a-z_][a-z0-9_]*)/i);
+  if (pragma) tables.push(pragma[1]);
+  return Object.freeze([...new Set(tables)]);
+}
+
+function createSqliteReadEvidenceBoundary(db, recordEvidence) {
+  if (db[SQLITE_READ_EVIDENCE_BOUNDARY]) return db;
   function recordSqlRead(sql, value, method) {
-    if (!enabled) return;
-    const tables = [...String(sql).matchAll(/\b(?:FROM|JOIN)\s+(?:"|`|\[)?([a-z_][a-z0-9_]*)/gi)]
-      .map(match => match[1])
-      .filter(table => AUTHORITY_READ_BOUNDARY_TABLES.has(table));
-    for (const table of new Set(tables)) {
-      const rows = method === 'all' ? value : value ? [value] : [];
-      recordEvidence({ phase: 'authority_authoritative_read', table, rows });
+    try {
+      const rows = method === 'all' || (method === 'pragma' && Array.isArray(value))
+        ? value
+        : value === undefined ? [] : [value];
+      const tables = sqliteReadTables(sql);
+      const evidenceRows = Object.freeze(rows.map(safeSqliteRow));
+      const statementBytes = Buffer.from(String(sql), 'utf8');
+      const statementDigest = rawDigest('sql', statementBytes);
+      for (const table of tables.length > 0 ? tables : [null]) {
+        recordEvidence(Object.freeze({
+          method,
+          phase: 'sqlite_raw_read',
+          rowCount: evidenceRows.length,
+          rows: evidenceRows,
+          statementDigest,
+          table,
+          tables,
+        }));
+      }
+    } catch {
+      // Observational capture must preserve the original SQLite/validation outcome.
     }
   }
   const proxy = new Proxy(db, {
     get(target, property) {
+      if (property === SQLITE_READ_EVIDENCE_BOUNDARY) return true;
       if (property === 'prepare') {
         return sql => {
           const statement = target.prepare(sql);
-          return new Proxy(statement, {
+          let statementProxy;
+          statementProxy = new Proxy(statement, {
             get(statementTarget, statementProperty) {
               const value = Reflect.get(statementTarget, statementProperty, statementTarget);
               if (statementProperty === 'get' || statementProperty === 'all') {
@@ -91,21 +194,30 @@ function createAuthorityReadBoundary(db, recordEvidence) {
                   return result;
                 };
               }
+              if (['expand', 'pluck', 'raw', 'safeIntegers'].includes(statementProperty)) {
+                return (...args) => {
+                  value.apply(statementTarget, args);
+                  return statementProxy;
+                };
+              }
               return typeof value === 'function' ? value.bind(statementTarget) : value;
             },
           });
+          return statementProxy;
+        };
+      }
+      if (property === 'pragma') {
+        return (source, ...args) => {
+          const result = target.pragma(source, ...args);
+          if (!String(source).includes('=')) recordSqlRead(`PRAGMA ${source}`, result, 'pragma');
+          return result;
         };
       }
       const value = Reflect.get(target, property, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
-  return Object.freeze({
-    enable() {
-      enabled = true;
-    },
-    proxy,
-  });
+  return proxy;
 }
 
 function rollbackQuietly(db) {
@@ -278,6 +390,14 @@ function createCanonicalActualPostingRepository(
       // Test/audit instrumentation cannot affect the production result.
     }
   }
+  function recordRawEvidence(entry) {
+    if (!evidenceRecorder) return;
+    try {
+      evidenceRecorder(entry);
+    } catch {
+      // Raw audit capture is observational and cannot change production precedence.
+    }
+  }
   function invokeHook(name, details) {
     const hook = hooks?.[name];
     if (typeof hook === 'function') hook(Object.freeze({ ...details }));
@@ -302,15 +422,9 @@ function createCanonicalActualPostingRepository(
       throw repositoryError(ERROR_CODES.POSTING_ID_GENERATION_FAILED);
     }
   }
-  const authorityReadBoundary = evidenceRecorder
-    ? createAuthorityReadBoundary(db, recordEvidence)
-    : null;
-  const authorityRepository = createCanonicalActualPostingAuthorityRepository(
-    authorityReadBoundary?.proxy || db,
-  );
-  authorityReadBoundary?.enable();
+  const baseDb = db;
   const eligibilityRepository = createCanonicalActualEligibilityEventRepository(
-    db,
+    baseDb,
     exactRuntimeContract,
     {
       clock: clockDependency,
@@ -319,6 +433,8 @@ function createCanonicalActualPostingRepository(
       uuid: uuidDependency,
     },
   );
+  if (evidenceRecorder) db = createSqliteReadEvidenceBoundary(baseDb, recordRawEvidence);
+  const authorityRepository = createCanonicalActualPostingAuthorityRepository(db);
   const eligibilityInternal = eligibilityRepository[CANONICAL_ACTUAL_POSTING_INTERNAL];
   if (!eligibilityInternal) throw repositoryError(ERROR_CODES.POSTING_INTEGRITY_BLOCKED);
 

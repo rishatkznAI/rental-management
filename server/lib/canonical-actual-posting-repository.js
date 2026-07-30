@@ -4,22 +4,12 @@ const {
   FINANCIAL_AUDIT_EVENTS_TABLE,
 } = require('./canonical-receivables-schema');
 const {
-  BILLING_SOURCE_COVERAGE_SETS_TABLE,
-  BILLING_SOURCE_COVERAGE_SLICES_TABLE,
-  BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
   BILLING_SOURCE_UPD_VERSIONS_TABLE,
 } = require('./billing-source-authority-schema');
-const {
-  ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE,
-  ACTUAL_SOURCE_DRY_RUNS_TABLE,
-} = require('./actual-source-eligibility-dry-run-schema');
 const {
   ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE,
   CANONICAL_RECEIVABLE_POSTING_CONFLICTS_TABLE,
   CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE,
-  CANONICAL_WRITE_AUTHORIZATION_RECORDS_TABLE,
-  CANONICAL_POSTING_ACTIVATION_RECORDS_TABLE,
-  GOVERNED_ADAPTER_AUTHORITY_RECORDS_TABLE,
   REQUIRED_COLUMNS,
   assertCanonicalActualPostingStructure,
 } = require('./canonical-actual-posting-schema');
@@ -29,7 +19,10 @@ const {
   CanonicalActualPostingError,
   DISABLED_CANONICAL_ACTUAL_POSTING_RUNTIME_CONTRACT,
   assertCanonicalActualPostingRuntimeContract,
+  assertUuidV4,
   canonicalJson,
+  canonicalPrimaryAuditPayloadProjection,
+  canonicalPrimaryResultProjection,
   computeCanonicalPostingAuditEventFingerprint,
   computeCanonicalPostingAuditPayloadFingerprint,
   computeCanonicalPostingCommandFingerprint,
@@ -39,19 +32,17 @@ const {
   mapSqliteError,
   normalizeCanonicalPostingCommand,
   parseCanonicalJson,
-  parseUtcMilliseconds,
   renderUtcMilliseconds,
   validateEligibleEventRecord,
+  verifyCanonicalPrimaryTriplet,
 } = require('./canonical-actual-posting-domain');
 const {
   createCanonicalActualPostingAuthorityRepository,
 } = require('./canonical-actual-posting-authority-repository');
 const {
+  CANONICAL_ACTUAL_POSTING_INTERNAL,
   createCanonicalActualEligibilityEventRepository,
 } = require('./canonical-actual-eligibility-event-repository');
-
-const postingClockReadUtcMilliseconds = Date.now.bind(Date);
-const postingUuidV4 = randomUUID;
 
 const PRIMARY_WRITE_SET = Object.freeze([
   CANONICAL_RECEIVABLES_TABLE,
@@ -121,34 +112,19 @@ function normalizeOperationRow(row) {
   return result;
 }
 
-function readClock() {
-  let value;
-  try {
-    value = postingClockReadUtcMilliseconds();
-    return Object.freeze({ milliseconds: value, timestamp: renderUtcMilliseconds(value) });
-  } catch {
-    throw repositoryError('CANONICAL_REPOSITORY_CLOCK_FAILED');
-  }
-}
-
-function generatePostingId() {
-  try {
-    return postingUuidV4({ disableEntropyCache: true });
-  } catch {
-    throw repositoryError(ERROR_CODES.POSTING_ID_GENERATION_FAILED);
-  }
-}
-
 function exactJson(left, right) {
   return canonicalJson(left) === canonicalJson(right);
 }
 
-function commandAssertionComparisons(command, event) {
+function commandAssertionComparisons(command, event, activation) {
   return Object.freeze([
     ['assertedEventHash', command.assertedEventHash, event.eventHash],
     ['assertedWriteAuthorizationRecordId', command.assertedWriteAuthorizationRecordId, event.writeAuthorizationRecordId],
     ['requestedActivationRecordId', command.requestedActivationRecordId, event.activationRecordId],
     ['requestedSourceAdapterAuthorityRecordId', command.requestedSourceAdapterAuthorityRecordId, event.sourceAdapterAuthorityRecordId],
+    ['requestedPostingAdapterAuthorityRecordId', command.requestedPostingAdapterAuthorityRecordId, activation?.postingAdapterAuthorityRecordId ?? null],
+    ['requestedPostingAdapterAuthorityVersion', command.requestedPostingAdapterAuthorityVersion, activation?.postingAdapterAuthorityVersion ?? null],
+    ['requestedPostingAdapterAuthorityRecordHash', command.requestedPostingAdapterAuthorityRecordHash, activation?.postingAdapterAuthorityRecordHash ?? null],
     ['assertedDueDatePolicySetHash', command.assertedDueDatePolicySetHash, event.dueDatePolicySetHash],
     ['assertedSelectedDueDateGateKind', command.assertedSelectedDueDateGateKind, event.selectedDueDateGateKind],
     ['assertedSelectedDueDatePolicyId', command.assertedSelectedDueDatePolicyId, event.selectedDueDatePolicyId],
@@ -192,113 +168,6 @@ function acceptedFreshnessWindow(authorization, event) {
   return entry;
 }
 
-function resultProjection({
-  activation,
-  auditEventFingerprint,
-  auditPayloadFingerprint,
-  authorization,
-  canonicalReceivableFingerprint,
-  commandFingerprint,
-  event,
-  freshnessWindowFingerprint,
-  idempotencyKey,
-  operation,
-}) {
-  return {
-    acceptedDryRunsHash: event.acceptedDryRunsHash,
-    acceptedPr8EvidenceHash: event.acceptedPr8EvidenceHash,
-    activationId: activation.activationId,
-    activationRecordHash: activation.recordHash,
-    activationRecordId: activation.recordId,
-    attemptedAt: operation.createdAt,
-    auditEventFingerprint,
-    auditPayloadFingerprint,
-    branchId: event.branchId,
-    canonicalReceivableFingerprint,
-    canonicalReceivableId: operation.canonicalReceivableId,
-    commandFingerprint,
-    canonicalWriteAuthorizationId: authorization.authorizationId,
-    companyId: event.companyId,
-    correlationId: event.correlationId,
-    currentPr6RevisionHash: event.currentPr6RevisionHash,
-    dueDatePolicySetHash: event.dueDatePolicySetHash,
-    dueDateTreatment: event.dueDateTreatment,
-    economicLineageKey: event.economicLineageKey,
-    economicSourceRevisionKey: event.economicSourceRevisionKey,
-    eventHash: event.eventHash,
-    eventId: event.id,
-    financialAuditEventId: operation.financialAuditEventId,
-    freshnessWindowFingerprint,
-    idempotencyKey,
-    operationId: operation.id,
-    operationType: operation.operationType,
-    postingAdapterAuthorityBranchId: operation.postingAdapterAuthorityBranchId,
-    postingAdapterAuthorityCompanyId: operation.postingAdapterAuthorityCompanyId,
-    postingAdapterAuthorityKind: operation.postingAdapterAuthorityKind,
-    postingAdapterAuthorityRecordHash: operation.postingAdapterAuthorityRecordHash,
-    postingAdapterAuthorityRecordId: operation.postingAdapterAuthorityRecordId,
-    postingAdapterAuthorityVersion: operation.postingAdapterAuthorityVersion,
-    schemaVersion: operation.schemaVersion,
-    producerAuthorityBranchId: event.producerAuthorityBranchId,
-    producerAuthorityCompanyId: event.producerAuthorityCompanyId,
-    producerAuthorityKind: event.producerAuthorityKind,
-    producerAuthorityRecordHash: event.producerAuthorityRecordHash,
-    producerAuthorityRecordId: event.producerAuthorityRecordId,
-    producerAuthorityVersion: event.producerAuthorityVersion,
-    selectedDueDateGateKind: event.selectedDueDateGateKind,
-    selectedDueDatePolicyHash: event.selectedDueDatePolicyHash,
-    selectedDueDatePolicyId: event.selectedDueDatePolicyId,
-    selectedDueDatePolicyVersion: event.selectedDueDatePolicyVersion,
-    sourceAdapterAuthorityRecordHash: event.sourceAdapterAuthorityRecordHash,
-    sourceAdapterAuthorityRecordId: event.sourceAdapterAuthorityRecordId,
-    sourceAdapterAuthorityVersion: event.sourceAdapterAuthorityVersion,
-    sourceLineageHash: event.sourceLineageHash,
-    sourceOwnershipManifestHash: event.sourceOwnershipManifestHash,
-    unknownDueDateTreatmentMappingHash: event.unknownDueDateTreatmentMappingHash,
-    unknownDueDateTreatmentMappingId: event.unknownDueDateTreatmentMappingId,
-    unknownDueDateTreatmentMappingVersion: event.unknownDueDateTreatmentMappingVersion,
-    writeAuthorizationRecordHash: authorization.recordHash,
-    writeAuthorizationRecordId: authorization.recordId,
-  };
-}
-
-function auditPayloadProjection({ event, operation, canonicalReceivableFingerprint }) {
-  return {
-    acceptedDryRunsHash: operation.acceptedDryRunsHash,
-    acceptedPr8EvidenceHash: operation.acceptedPr8EvidenceHash,
-    activationRecordId: operation.activationRecordId,
-    actorAuthorityRecordId: operation.postingAdapterAuthorityRecordId,
-    actorIdentityId: 'integration:rentcore-canonical-receivable-posting',
-    canonicalReceivableFingerprint,
-    dueDatePolicySetHash: operation.dueDatePolicySetHash,
-    dueDateTreatment: operation.dueDateTreatment,
-    economicLineageKey: operation.economicLineageKey,
-    economicSourceRevisionKey: operation.economicSourceRevisionKey,
-    eventHash: operation.eventHash,
-    eventId: operation.eventId,
-    operationId: operation.id,
-    postingAdapterAuthorityBranchId: operation.postingAdapterAuthorityBranchId,
-    postingAdapterAuthorityCompanyId: operation.postingAdapterAuthorityCompanyId,
-    postingAdapterAuthorityKind: operation.postingAdapterAuthorityKind,
-    postingAdapterAuthorityRecordHash: operation.postingAdapterAuthorityRecordHash,
-    postingAdapterAuthorityRecordId: operation.postingAdapterAuthorityRecordId,
-    postingAdapterAuthorityVersion: operation.postingAdapterAuthorityVersion,
-    selectedDueDateGateKind: operation.selectedDueDateGateKind,
-    selectedDueDatePolicyHash: operation.selectedDueDatePolicyHash,
-    selectedDueDatePolicyId: operation.selectedDueDatePolicyId,
-    selectedDueDatePolicyVersion: operation.selectedDueDatePolicyVersion,
-    sourceAdapterAuthorityRecordHash: operation.sourceAdapterAuthorityRecordHash,
-    sourceAdapterAuthorityRecordId: operation.sourceAdapterAuthorityRecordId,
-    sourceAdapterAuthorityVersion: operation.sourceAdapterAuthorityVersion,
-    sourceLineageHash: operation.sourceLineageHash,
-    sourceOwnershipManifestHash: operation.sourceOwnershipManifestHash,
-    unknownDueDateTreatmentMappingHash: operation.unknownDueDateTreatmentMappingHash,
-    unknownDueDateTreatmentMappingId: operation.unknownDueDateTreatmentMappingId,
-    unknownDueDateTreatmentMappingVersion: operation.unknownDueDateTreatmentMappingVersion,
-    writeAuthorizationRecordId: operation.writeAuthorizationRecordId,
-  };
-}
-
 function publicPrimaryEvidence(operation) {
   return Object.freeze({
     auditEventFingerprint: operation.auditEventFingerprint,
@@ -317,11 +186,82 @@ function publicPrimaryEvidence(operation) {
 function createCanonicalActualPostingRepository(
   db,
   runtimeContract = DISABLED_CANONICAL_ACTUAL_POSTING_RUNTIME_CONTRACT,
+  dependencies = undefined,
 ) {
   assertCanonicalActualPostingStructure(db);
   const exactRuntimeContract = assertCanonicalActualPostingRuntimeContract(runtimeContract);
+  if (
+    dependencies !== undefined
+    && (
+      dependencies === null
+      || typeof dependencies !== 'object'
+      || Array.isArray(dependencies)
+      || Object.keys(dependencies).some(key => ![
+        'clock',
+        'evidenceRecorder',
+        'hooks',
+        'uuid',
+      ].includes(key))
+    )
+  ) throw repositoryError(ERROR_CODES.ENVELOPE_INVALID);
+  const clockDependency = dependencies?.clock || Date.now.bind(Date);
+  const uuidDependency = dependencies?.uuid || (() => randomUUID({ disableEntropyCache: true }));
+  const evidenceRecorder = dependencies?.evidenceRecorder;
+  const hooks = dependencies?.hooks;
+  if (typeof clockDependency !== 'function' || typeof uuidDependency !== 'function') {
+    throw repositoryError(ERROR_CODES.ENVELOPE_INVALID);
+  }
+  if (evidenceRecorder !== undefined && typeof evidenceRecorder !== 'function') {
+    throw repositoryError(ERROR_CODES.ENVELOPE_INVALID);
+  }
+  if (hooks !== undefined && (hooks === null || typeof hooks !== 'object' || Array.isArray(hooks))) {
+    throw repositoryError(ERROR_CODES.ENVELOPE_INVALID);
+  }
+  function recordEvidence(entry) {
+    if (!evidenceRecorder) return;
+    try {
+      evidenceRecorder(Object.freeze(parseCanonicalJson(canonicalJson(entry), 'evidenceRecord')));
+    } catch {
+      // Test/audit instrumentation cannot affect the production result.
+    }
+  }
+  function invokeHook(name, details) {
+    const hook = hooks?.[name];
+    if (typeof hook === 'function') hook(Object.freeze({ ...details }));
+  }
+  function readClock() {
+    try {
+      const milliseconds = clockDependency();
+      return Object.freeze({
+        milliseconds,
+        timestamp: renderUtcMilliseconds(milliseconds),
+      });
+    } catch {
+      throw repositoryError('CANONICAL_REPOSITORY_CLOCK_FAILED');
+    }
+  }
+  function generatePostingId() {
+    try {
+      const id = uuidDependency();
+      assertUuidV4(id, 'postingId');
+      return id;
+    } catch {
+      throw repositoryError(ERROR_CODES.POSTING_ID_GENERATION_FAILED);
+    }
+  }
   const authorityRepository = createCanonicalActualPostingAuthorityRepository(db);
-  const eligibilityRepository = createCanonicalActualEligibilityEventRepository(db, exactRuntimeContract);
+  const eligibilityRepository = createCanonicalActualEligibilityEventRepository(
+    db,
+    exactRuntimeContract,
+    {
+      clock: clockDependency,
+      evidenceRecorder,
+      hooks,
+      uuid: uuidDependency,
+    },
+  );
+  const eligibilityInternal = eligibilityRepository[CANONICAL_ACTUAL_POSTING_INTERNAL];
+  if (!eligibilityInternal) throw repositoryError(ERROR_CODES.POSTING_INTEGRITY_BLOCKED);
 
   function loadEvent(command) {
     const row = db.prepare(`
@@ -377,52 +317,27 @@ function createCanonicalActualPostingRepository(
     return Object.freeze({ corrupt: false, pairs: Object.freeze(pairs) });
   }
 
-  function verifyPrimaryTriplet({ audit, event, operation, receivable }) {
+  function verifyPrimaryTriplet({ audit, event, operation, receivable, commandFingerprint }) {
     const authorization = authorityRepository.readWriteAuthorizationRecord(operation.writeAuthorizationRecordId);
     const activation = authorityRepository.readActivationRecord(operation.activationRecordId);
-    if (!authorization || !activation) throw repositoryError(ERROR_CODES.POSTING_INTEGRITY_BLOCKED);
-    if (
-      operation.eventId !== event.id
-      || operation.eventHash !== event.eventHash
-      || operation.canonicalReceivableId !== receivable.id
-      || operation.financialAuditEventId !== audit.id
-      || operation.correlationId !== event.correlationId
-      || audit.correlationId !== event.correlationId
-      || receivable.sourceDocumentType !== 'rental_service_upd'
-      || receivable.sourceDocumentId !== event.rootSourceDocumentLineageId
-      || receivable.sourceLineId !== event.economicLineageKey
-      || receivable.externalId !== event.economicLineageKey
-      || receivable.originalAmountMinor !== event.grossAmountMinor
-    ) throw repositoryError(ERROR_CODES.POSTING_INTEGRITY_BLOCKED);
-    const canonicalReceivableFingerprint = computeCanonicalReceivableFingerprint(receivable);
-    const payload = parseCanonicalJson(audit.newValueJson, 'financialAuditEvent.newValueJson');
-    const { auditPayloadFingerprint, ...payloadProjection } = payload;
-    const recomputedPayloadFingerprint = computeCanonicalPostingAuditPayloadFingerprint(payloadProjection);
-    const auditEventFingerprint = computeCanonicalPostingAuditEventFingerprint({
-      audit,
-      auditPayloadFingerprint: recomputedPayloadFingerprint,
-    });
-    const freshnessWindowFingerprint = acceptedFreshnessWindow(authorization, event).freshnessWindowFingerprint;
-    const resultHash = computeCanonicalPostingResultHash(resultProjection({
+    const conducted = db.prepare(`
+      SELECT * FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} WHERE id = ?
+    `).get(event.conductedUpdVersionId);
+    if (!authorization || !activation || !conducted) {
+      throw repositoryError(ERROR_CODES.POSTING_INTEGRITY_BLOCKED);
+    }
+    return verifyCanonicalPrimaryTriplet({
       activation,
-      auditEventFingerprint,
-      auditPayloadFingerprint: recomputedPayloadFingerprint,
+      audit,
       authorization,
-      canonicalReceivableFingerprint,
-      commandFingerprint: operation.commandFingerprint,
+      commandFingerprint,
+      conductedCreatedAt: conducted.createdAt,
       event,
-      freshnessWindowFingerprint,
-      idempotencyKey: operation.idempotencyKey,
+      freshnessWindowFingerprint:
+        acceptedFreshnessWindow(authorization, event).freshnessWindowFingerprint,
       operation,
-    }));
-    if (
-      canonicalReceivableFingerprint !== operation.canonicalReceivableFingerprint
-      || recomputedPayloadFingerprint !== auditPayloadFingerprint
-      || recomputedPayloadFingerprint !== operation.auditPayloadFingerprint
-      || auditEventFingerprint !== operation.auditEventFingerprint
-      || resultHash !== operation.resultHash
-    ) throw repositoryError(ERROR_CODES.POSTING_INTEGRITY_BLOCKED);
-    return Object.freeze({ activation, authorization, resultHash });
+      receivable,
+    });
   }
 
   function resolveExistingResult(command, event, commandFingerprint) {
@@ -469,6 +384,7 @@ function createCanonicalActualPostingRepository(
       try {
         verifyPrimaryTriplet({
           audit: primary.audits[0],
+          commandFingerprint: operation.commandFingerprint,
           event,
           operation,
           receivable: primary.receivables[0],
@@ -494,125 +410,10 @@ function createCanonicalActualPostingRepository(
     return null;
   }
 
-  function authorityDenial(prefix, record, attemptedAt) {
-    if (!record) return `${prefix}_RECORD_HASH_MISMATCH`;
-    const latest = authorityRepository.readLatestAuthority(record);
-    if (!latest) return `${prefix}_RECORD_HASH_MISMATCH`;
-    if (latest.recordId !== record.recordId) {
-      if (latest.status === 'revoked') return `${prefix}_REVOKED`;
-      if (latest.status === 'superseded') return `${prefix}_SUPERSEDED`;
-      return `${prefix}_LATEST_CHAIN_MISMATCH`;
-    }
-    if (record.status === 'revoked') return `${prefix}_REVOKED`;
-    if (record.status === 'superseded') return `${prefix}_SUPERSEDED`;
-    if (attemptedAt < parseUtcMilliseconds(record.effectiveFrom)) return `${prefix}_NOT_YET_EFFECTIVE`;
-    if (attemptedAt >= parseUtcMilliseconds(record.expiresAt)) return `${prefix}_EXPIRED`;
-    return null;
-  }
-
-  function currentAdmission(command, event, clock) {
-    const authorization = authorityRepository.readWriteAuthorizationRecord(event.writeAuthorizationRecordId);
-    const activation = authorityRepository.readActivationRecord(event.activationRecordId);
-    if (!authorization || authorityRepository.readLatestWriteAuthorization(event)?.recordId !== authorization.recordId) {
-      return Object.freeze({ denialCause: 'AUTHORIZATION_DRIFT' });
-    }
-    if (
-      authorization.status !== 'authorized'
-      || clock.milliseconds < parseUtcMilliseconds(authorization.effectiveFrom)
-      || clock.milliseconds >= parseUtcMilliseconds(authorization.expiresAt)
-    ) return Object.freeze({ denialCause: 'AUTHORIZATION_DRIFT' });
-    if (!activation || authorityRepository.readLatestActivation(event)?.recordId !== activation.recordId) {
-      return Object.freeze({ denialCause: 'ACTIVATION_DRIFT' });
-    }
-    if (
-      activation.status !== 'authorized'
-      || clock.milliseconds < parseUtcMilliseconds(activation.effectiveFrom)
-      || clock.milliseconds >= parseUtcMilliseconds(activation.expiresAt)
-      || activation.writeAuthorizationRecordId !== authorization.recordId
-    ) return Object.freeze({ denialCause: 'ACTIVATION_DRIFT' });
-    const authorityEntries = [
-      ['SOURCE_ADAPTER', authorityRepository.readAuthorityRecord(event.sourceAdapterAuthorityRecordId), 'source_adapter'],
-      ['ELIGIBILITY_PRODUCER', authorityRepository.readAuthorityRecord(event.producerAuthorityRecordId), 'eligibility_producer'],
-      ['CANONICAL_POSTING_ADAPTER', authorityRepository.readAuthorityRecord(activation.postingAdapterAuthorityRecordId), 'canonical_posting_adapter'],
-    ];
-    for (const [prefix, record, kind] of authorityEntries) {
-      const denialCause = authorityDenial(prefix, record, clock.milliseconds);
-      if (denialCause) return Object.freeze({ denialCause });
-      const expectedRuntime = exactRuntimeContract.authorities[kind];
-      if (record.artifactDigest !== expectedRuntime.artifactDigest || record.sourceCommitSha !== expectedRuntime.sourceCommitSha) {
-        return Object.freeze({ denialCause: `${prefix}_ARTIFACT_IDENTITY_DRIFT` });
-      }
-      if (record.configurationHash !== expectedRuntime.configurationHash) {
-        return Object.freeze({ denialCause: `${prefix}_CONFIGURATION_HASH_DRIFT` });
-      }
-      if (record.policyHash !== expectedRuntime.policyHash) {
-        return Object.freeze({ denialCause: `${prefix}_POLICY_HASH_DRIFT` });
-      }
-    }
-    const posting = authorityEntries[2][1];
-    const comparisons = [
-      [authorization.acceptedDryRunsHash, event.acceptedDryRunsHash],
-      [authorization.acceptedPr8EvidenceHash, event.acceptedPr8EvidenceHash],
-      [authorization.dueDatePolicySetHash, event.dueDatePolicySetHash],
-      [activation.acceptedDryRunsHash, event.acceptedDryRunsHash],
-      [activation.acceptedPr8EvidenceHash, event.acceptedPr8EvidenceHash],
-      [activation.dueDatePolicySetHash, event.dueDatePolicySetHash],
-      [posting.recordId, command.requestedPostingAdapterAuthorityRecordId],
-      [posting.authorityVersion, command.requestedPostingAdapterAuthorityVersion],
-      [posting.recordHash, command.requestedPostingAdapterAuthorityRecordHash],
-    ];
-    if (comparisons.some(([left, right]) => left !== right)) {
-      return Object.freeze({ denialCause: 'ACTIVATION_DRIFT' });
-    }
-    const company = db.prepare('SELECT receivablesTimezone FROM canonical_companies WHERE id = ?').get(event.companyId);
-    if (!company || company.receivablesTimezone !== event.companyTimezoneSnapshot) {
-      return Object.freeze({ denialCause: 'COMPANY_TIMEZONE_DRIFT' });
-    }
-    const run = db.prepare(`SELECT * FROM ${ACTUAL_SOURCE_DRY_RUNS_TABLE} WHERE id = ?`).get(event.dryRunId);
-    const candidate = db.prepare(`SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} WHERE id = ?`).get(event.candidateId);
-    if (
-      !run
-      || !candidate
-      || candidate.resultHash !== event.candidateResultHash
-      || (candidate.dueDateEvidenceRef ?? null) !== event.dueDateEvidenceRef
-      || candidate.currentConductedUpdVersionId !== event.conductedUpdVersionId
-      || candidate.coverageSetId !== event.coverageSetId
-      || candidate.coverageSliceId !== event.coverageSliceId
-      || Number(candidate.sourceGrossMinor) !== event.grossAmountMinor
-    ) {
-      return Object.freeze({ denialCause: 'PR8_EVIDENCE_MISMATCH' });
-    }
-    const freshness = acceptedFreshnessWindow(authorization, event);
-    if (
-      clock.milliseconds < parseUtcMilliseconds(freshness.validFrom)
-      || clock.milliseconds >= parseUtcMilliseconds(freshness.validUntilExclusive)
-    ) return Object.freeze({ denialCause: 'PR8_EVIDENCE_MISMATCH' });
-    const slice = db.prepare(`SELECT * FROM ${BILLING_SOURCE_COVERAGE_SLICES_TABLE} WHERE id = ?`).get(event.coverageSliceId);
-    const set = db.prepare(`SELECT * FROM ${BILLING_SOURCE_COVERAGE_SETS_TABLE} WHERE id = ?`).get(event.coverageSetId);
-    const conducted = db.prepare(`SELECT * FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} WHERE id = ?`).get(event.conductedUpdVersionId);
-    if (!slice || !set || !conducted || set.status !== 'validated' || conducted.state !== 'conducted') {
-      return Object.freeze({ denialCause: 'SOURCE_LINEAGE_NO_CURRENT_REVISION' });
-    }
-    const successors = db.prepare(`
-      SELECT * FROM ${BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE}
-      WHERE originalCoverageSetId = ? ORDER BY id ASC
-    `).all(event.coverageSetId);
-    if (successors.length > 0) return Object.freeze({ denialCause: 'SOURCE_CORRECTION_AFTER_ELIGIBILITY' });
-    if (
-      Number(slice.allocatedGrossMinor) !== event.grossAmountMinor
-      || slice.clientId !== event.clientId
-      || slice.rentalId !== event.rentalId
-      || (slice.contractId ?? null) !== event.contractId
-      || slice.dueDateProvenance !== event.dueDateProvenance
-      || (slice.contractualDueDate ?? null) !== event.contractualDueDate
-    ) return Object.freeze({ denialCause: 'PR6_LINEAGE_DRIFT' });
-    return Object.freeze({ activation, authorization, conducted, denialCause: null });
-  }
-
   function qualifyHistoricalResult(command, event, result, clock) {
     if (result.outcome !== 'EXACT_COMMITTED_RESULT') return result;
     try {
-      const admission = currentAdmission(command, event, clock);
+      const admission = eligibilityInternal.verifyPostingAdmission(command, event, clock);
       return Object.freeze({
         ...result,
         currentAdmissionStatus: admission.denialCause ? 'CURRENTLY_DENIED' : 'CURRENTLY_ADMITTED',
@@ -628,7 +429,7 @@ function createCanonicalActualPostingRepository(
   }
 
   function assertNoPrimaryOrphans(command, event) {
-    const orphanCanonical = db.prepare(`
+    const orphanCanonical = event ? db.prepare(`
       SELECT COUNT(*) AS count FROM ${CANONICAL_RECEIVABLES_TABLE} AS receivable
       LEFT JOIN ${CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE} AS operation
         ON operation.canonicalReceivableId = receivable.id
@@ -637,20 +438,80 @@ function createCanonicalActualPostingRepository(
         AND receivable.sourceDocumentType = 'rental_service_upd'
         AND receivable.sourceDocumentId = ? AND receivable.sourceLineId = ?
         AND operation.id IS NULL
-    `).get(command.companyId, command.branchId, event.rootSourceDocumentLineageId, event.economicLineageKey).count;
+    `).get(
+      command.companyId,
+      command.branchId,
+      event.rootSourceDocumentLineageId,
+      event.economicLineageKey,
+    ).count : 0;
     const orphanOperation = db.prepare(`
       SELECT COUNT(*) AS count FROM ${CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE} AS operation
       LEFT JOIN ${CANONICAL_RECEIVABLES_TABLE} AS receivable ON receivable.id = operation.canonicalReceivableId
       LEFT JOIN ${FINANCIAL_AUDIT_EVENTS_TABLE} AS audit ON audit.id = operation.financialAuditEventId
-      WHERE operation.companyId = ? AND operation.branchId = ? AND operation.eventId = ?
+      WHERE operation.companyId = ? AND operation.branchId = ?
+        AND (operation.eventId = ? OR operation.economicLineageKey = ?)
         AND (receivable.id IS NULL OR audit.id IS NULL)
-    `).get(command.companyId, command.branchId, event.id).count;
-    if (Number(orphanCanonical) !== 0 || Number(orphanOperation) !== 0) {
+    `).get(
+      command.companyId,
+      command.branchId,
+      command.eventId,
+      event?.economicLineageKey ?? '',
+    ).count;
+    const orphanAudit = event ? db.prepare(`
+      SELECT COUNT(*) AS count FROM ${FINANCIAL_AUDIT_EVENTS_TABLE} AS audit
+      LEFT JOIN ${CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE} AS operation
+        ON operation.financialAuditEventId = audit.id
+      WHERE audit.companyId = ? AND audit.branchId = ?
+        AND audit.eventType = 'canonical_receivable.initial_posted.v1'
+        AND audit.correlationId = ?
+        AND operation.id IS NULL
+    `).get(command.companyId, command.branchId, event.correlationId).count : 0;
+    recordEvidence({
+      facts: {
+        orphanAudit: Number(orphanAudit),
+        orphanCanonical: Number(orphanCanonical),
+        orphanOperation: Number(orphanOperation),
+      },
+      phase: 'primary_anti_join',
+      tables: [
+        CANONICAL_RECEIVABLES_TABLE,
+        CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE,
+        FINANCIAL_AUDIT_EVENTS_TABLE,
+      ],
+    });
+    if (
+      Number(orphanCanonical) !== 0
+      || Number(orphanOperation) !== 0
+      || Number(orphanAudit) !== 0
+    ) {
       throw repositoryError(ERROR_CODES.POSTING_INTEGRITY_BLOCKED);
     }
   }
 
-  function createPrimaryTriplet(command, event, commandFingerprint, clock, admission) {
+  function generateAndAssertUnusedPrimaryIds() {
+    const generatedIds = Object.freeze({
+      canonicalReceivableId: generatePostingId(),
+      operationId: generatePostingId(),
+      auditEventId: generatePostingId(),
+    });
+    if (new Set(Object.values(generatedIds)).size !== 3) {
+      throw repositoryError('CANONICAL_REPOSITORY_ID_COLLISION');
+    }
+    for (const id of Object.values(generatedIds)) {
+      for (const table of [
+        CANONICAL_RECEIVABLES_TABLE,
+        CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE,
+        FINANCIAL_AUDIT_EVENTS_TABLE,
+      ]) {
+        if (db.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).get(id)) {
+          throw repositoryError('CANONICAL_REPOSITORY_ID_COLLISION');
+        }
+      }
+    }
+    return generatedIds;
+  }
+
+  function createPrimaryTriplet(command, event, commandFingerprint, clock, admission, generatedIds) {
     const { activation, authorization, conducted } = admission;
     const idempotencyKey = computeCanonicalPostingIdempotencyKey({
       activationId: activation.activationId,
@@ -660,9 +521,11 @@ function createCanonicalActualPostingRepository(
       eventHash: event.eventHash,
       operationType: OPERATION_DOMAIN,
     });
-    const canonicalReceivableId = generatePostingId();
-    const operationId = generatePostingId();
-    const auditEventId = generatePostingId();
+    const {
+      auditEventId,
+      canonicalReceivableId,
+      operationId,
+    } = generatedIds;
     const receivable = {
       id: canonicalReceivableId,
       companyId: event.companyId,
@@ -744,7 +607,11 @@ function createCanonicalActualPostingRepository(
       schemaVersion: 1,
       createdAt: clock.timestamp,
     };
-    const payloadProjection = auditPayloadProjection({ event, operation, canonicalReceivableFingerprint });
+    const payloadProjection = canonicalPrimaryAuditPayloadProjection({
+      event,
+      operation,
+      canonicalReceivableFingerprint,
+    });
     const auditPayloadFingerprint = computeCanonicalPostingAuditPayloadFingerprint(payloadProjection);
     const payload = { ...payloadProjection, auditPayloadFingerprint };
     const audit = {
@@ -768,7 +635,7 @@ function createCanonicalActualPostingRepository(
     operation.auditPayloadFingerprint = auditPayloadFingerprint;
     operation.auditEventFingerprint = auditEventFingerprint;
     const freshnessWindowFingerprint = acceptedFreshnessWindow(authorization, event).freshnessWindowFingerprint;
-    operation.resultHash = computeCanonicalPostingResultHash(resultProjection({
+    operation.resultHash = computeCanonicalPostingResultHash(canonicalPrimaryResultProjection({
       activation,
       auditEventFingerprint,
       auditPayloadFingerprint,
@@ -793,6 +660,7 @@ function createCanonicalActualPostingRepository(
     const rereadAudit = db.prepare(`SELECT * FROM ${FINANCIAL_AUDIT_EVENTS_TABLE} WHERE id = ?`).get(auditEventId);
     const proof = verifyPrimaryTriplet({
       audit: rereadAudit,
+      commandFingerprint,
       event,
       operation: rereadOperation,
       receivable: persistedReceivable,
@@ -800,6 +668,13 @@ function createCanonicalActualPostingRepository(
     if (!exactJson(operation, rereadOperation) || !exactJson(audit, rereadAudit) || proof.resultHash !== operation.resultHash) {
       throw repositoryError(ERROR_CODES.POSTING_PERSISTENCE_FAILED);
     }
+    invokeHook('beforePrecommitAntiJoin', {
+      auditEventId,
+      canonicalReceivableId,
+      command,
+      event,
+      operationId,
+    });
     assertNoPrimaryOrphans(command, event);
     if (db.pragma('foreign_key_check').length !== 0 || db.pragma('integrity_check', { simple: true }) !== 'ok') {
       throw repositoryError(ERROR_CODES.POSTING_PERSISTENCE_FAILED);
@@ -816,10 +691,17 @@ function createCanonicalActualPostingRepository(
     db.exec('BEGIN IMMEDIATE');
     try {
       assertCanonicalActualPostingStructure(db);
+      eligibilityInternal.assertPostingStoragePreflight(command, 'algorithm_b_initial');
       const clock = readClock();
       const event = loadEvent(command);
+      assertNoPrimaryOrphans(command, event);
       const durable = resolveExistingResult(command, event, commandFingerprint);
       if (durable) {
+        recordEvidence({
+          classification: durable.classification,
+          normalizedCommand: command,
+          phase: 'durable_classification',
+        });
         db.exec('COMMIT');
         return event ? qualifyHistoricalResult(command, event, durable, clock) : durable;
       }
@@ -827,13 +709,19 @@ function createCanonicalActualPostingRepository(
         db.exec('COMMIT');
         return postingResult(ERROR_CODES.POSTING_EVENT_NOT_FOUND, { classification: 'NO_RESULT' });
       }
-      const comparisons = commandAssertionComparisons(command, event);
+      const assertionActivation = authorityRepository.readActivationRecord(event.activationRecordId);
+      const comparisons = commandAssertionComparisons(command, event, assertionActivation);
       if (comparisons.some(entry => !entry.matches)) {
         db.exec('COMMIT');
         return assertionMismatchResult(commandFingerprint, comparisons);
       }
-      assertNoPrimaryOrphans(command, event);
-      const admission = currentAdmission(command, event, clock);
+      const admission = eligibilityInternal.verifyPostingAdmission(command, event, clock);
+      recordEvidence({
+        classification: admission.denialCause ? 'DENIED' : 'ADMITTED',
+        denialCause: admission.denialCause,
+        eventId: event.id,
+        phase: 'authoritative_admission',
+      });
       if (admission.denialCause) {
         denialCause = admission.denialCause;
         denialAttemptId = generatePostingId();
@@ -844,9 +732,20 @@ function createCanonicalActualPostingRepository(
           db.exec('COMMIT');
           return qualifyHistoricalResult(command, event, repeated, clock);
         }
+        assertNoPrimaryOrphans(command, event);
+        const generatedIds = generateAndAssertUnusedPrimaryIds();
+        invokeHook('beforeFinalStoragePreflight', { command, event, generatedIds });
+        eligibilityInternal.assertPostingStoragePreflight(command, 'algorithm_b_final_pre_dml');
         let triplet;
         try {
-          triplet = createPrimaryTriplet(command, event, commandFingerprint, clock, admission);
+          triplet = createPrimaryTriplet(
+            command,
+            event,
+            commandFingerprint,
+            clock,
+            admission,
+            generatedIds,
+          );
         } catch (error) {
           if (error instanceof CanonicalActualPostingError) throw error;
           throw repositoryError(ERROR_CODES.POSTING_PERSISTENCE_FAILED);

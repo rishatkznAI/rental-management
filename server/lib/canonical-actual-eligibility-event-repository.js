@@ -92,6 +92,7 @@ const {
   selectRateQualifyingAttempts,
   sha256Canonical,
   validateEligibleEventRecord,
+  verifyCanonicalPrimaryTriplet,
   verifyConflictTransition,
   verifyFrozenAuthorityChainSnapshot,
 } = require('./canonical-actual-posting-domain');
@@ -100,8 +101,7 @@ const {
   selectGlobalAuthorityDenial,
 } = require('./canonical-actual-posting-authority-repository');
 
-const denialAttemptUuidV4 = randomUUID;
-const repositoryClockReadUtcMilliseconds = Date.now.bind(Date);
+const CANONICAL_ACTUAL_POSTING_INTERNAL = Symbol('canonicalActualPostingInternal');
 
 const frozenDenialPackages = new WeakSet();
 const frozenDenialSelectors = new WeakMap();
@@ -343,7 +343,12 @@ const PR6_PERSISTED_STORAGE_PREFLIGHT_MATRIX = Object.freeze({
   }),
 });
 
-function assertPr6PersistedStoragePreflight(db, { companyId, branchId }) {
+function assertPr6PersistedStoragePreflight(
+  db,
+  { companyId, branchId },
+  recordEvidence = null,
+  phase = 'pr6_storage_preflight',
+) {
   if (
     canonicalJson(Object.keys(PR6_PERSISTED_STORAGE_PREFLIGHT_MATRIX))
       !== canonicalJson(BILLING_SOURCE_AUTHORITY_TABLES)
@@ -361,6 +366,19 @@ function assertPr6PersistedStoragePreflight(db, { companyId, branchId }) {
       WHERE companyId = ? AND branchId = ?
       ORDER BY id ASC
     `).all(companyId, branchId);
+    if (recordEvidence) {
+      recordEvidence({
+        phase,
+        table: tableName,
+        rows: rows.map(row => ({
+          id: row.id,
+          ...Object.fromEntries(columns.flatMap(column => [
+            [column, row[column]],
+            [`storage:${column}`, row[`__storage_${column}`]],
+          ])),
+        })),
+      });
+    }
     for (const row of rows) {
       for (const column of columns) {
         const contract = matrix[column];
@@ -409,6 +427,26 @@ function normalizeConflictRow(row) {
   return result;
 }
 
+function normalizePostingOperationRow(row) {
+  if (!row) return row;
+  const result = { ...row };
+  for (const field of [
+    'sourceAdapterAuthorityVersion', 'postingAdapterAuthorityVersion',
+    'selectedDueDatePolicyVersion', 'unknownDueDateTreatmentMappingVersion',
+    'schemaVersion',
+  ]) if (result[field] !== null && result[field] !== undefined) result[field] = Number(result[field]);
+  return result;
+}
+
+function normalizeCanonicalReceivableRow(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    originalAmountMinor: Number(row.originalAmountMinor),
+    version: Number(row.version),
+  };
+}
+
 function normalizeTransitionRow(row) {
   if (!row) return row;
   const result = { ...row };
@@ -418,10 +456,10 @@ function normalizeTransitionRow(row) {
   return result;
 }
 
-function readRepositoryClock() {
+function readRepositoryClockFromDependency(clockReadUtcMilliseconds = Date.now.bind(Date)) {
   let value;
   try {
-    value = repositoryClockReadUtcMilliseconds();
+    value = clockReadUtcMilliseconds();
   } catch {
     throw repositoryError('CANONICAL_REPOSITORY_CLOCK_FAILED');
   }
@@ -432,10 +470,10 @@ function readRepositoryClock() {
   }
 }
 
-function generateDenialAttemptId() {
+function generateDenialAttemptId(uuidV4 = () => randomUUID({ disableEntropyCache: true })) {
   let value;
   try {
-    value = denialAttemptUuidV4({ disableEntropyCache: true });
+    value = uuidV4();
     assertUuidV4(value, 'denialAttemptId');
   } catch {
     throw repositoryError(ERROR_CODES.DENIAL_ATTEMPT_ID_GENERATION_FAILED);
@@ -2041,13 +2079,17 @@ function verifyPr8EvidenceGraph(
   authorization,
   activation,
   deniedAttemptedAt,
-  { validateCompleteAcceptanceSet = true } = {},
+  { recordEvidence = null, validateCompleteAcceptanceSet = true } = {},
 ) {
   const attemptedAt = parseUtcMilliseconds(deniedAttemptedAt);
   const run = db.prepare(`SELECT * FROM ${ACTUAL_SOURCE_DRY_RUNS_TABLE} WHERE id = ?`).get(command.dryRunId);
   const candidate = db.prepare(`
     SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE} WHERE id = ? AND runId = ?
   `).get(command.candidateId, command.dryRunId);
+  if (recordEvidence) {
+    recordEvidence({ phase: 'pr8_authoritative_read', table: ACTUAL_SOURCE_DRY_RUNS_TABLE, rows: run ? [run] : [] });
+    recordEvidence({ phase: 'pr8_authoritative_read', table: ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE, rows: candidate ? [candidate] : [] });
+  }
   assertSelectedPeriodVersionStorageIntegrity(db, candidate);
   const acceptedDryRuns = parseCanonicalJson(authorization.acceptedDryRunsJson, 'acceptedDryRunsJson');
   const acceptedRuns = parseCanonicalJson(authorization.acceptedPr8EvidenceJson, 'acceptedPr8EvidenceJson');
@@ -2107,6 +2149,9 @@ function verifyPr8EvidenceGraph(
       [auditRows, ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE],
     ];
     for (const [rows, table] of childSets) {
+      if (recordEvidence) {
+        recordEvidence({ phase: 'pr8_authoritative_read', table, rows });
+      }
       for (const row of rows) {
         assertPr8RowShape(row, table);
         requireProof(row.companyId === run.companyId && row.branchId === run.branchId, `${table}_scope`);
@@ -2732,7 +2777,7 @@ function verifyPr8EvidenceGraph(
           authorization,
           activation,
           deniedAttemptedAt,
-          { validateCompleteAcceptanceSet: false },
+          { recordEvidence, validateCompleteAcceptanceSet: false },
         );
         requireProof(entryProof.valid, `accepted_run_complete_graph:${entry.dryRunId}`);
       }
@@ -3014,7 +3059,7 @@ function loadAcceptedContext(
   command,
   attemptedAt,
   runtimeContract,
-  { historicalAuthorityChains = null } = {},
+  { historicalAuthorityChains = null, recordEvidence = null } = {},
 ) {
   const deniedAttemptedAt = renderUtcMilliseconds(attemptedAt);
   const requestedAuthorization = authorityRepository.readWriteAuthorizationRecord(
@@ -3034,6 +3079,7 @@ function loadAcceptedContext(
     authorization,
     activation,
     deniedAttemptedAt,
+    { recordEvidence },
   );
   const { run: persistedRun, candidate: acceptedCandidate, acceptedRun } = pr8Proof;
   const run = persistedRun || (acceptedRun ? Object.freeze({
@@ -3121,6 +3167,23 @@ function loadAcceptedContext(
     authorityKind: state.authorityKind,
     candidates: state.candidates,
   })));
+  if (recordEvidence) {
+    recordEvidence({
+      phase: 'authority_graph',
+      table: CANONICAL_WRITE_AUTHORIZATION_RECORDS_TABLE,
+      rows: [authorization],
+    });
+    recordEvidence({
+      phase: 'authority_graph',
+      table: CANONICAL_POSTING_ACTIVATION_RECORDS_TABLE,
+      rows: [activation],
+    });
+    recordEvidence({
+      phase: 'authority_graph',
+      table: GOVERNED_ADAPTER_AUTHORITY_RECORDS_TABLE,
+      rows: authorityStates.flatMap(state => state.chain),
+    });
+  }
 
   const authorizationDrift = (
     !requestedAuthorization
@@ -3670,9 +3733,53 @@ function classifyConflictReplay(db, authorityRepository, packageValue) {
 function createCanonicalActualEligibilityEventRepository(
   db,
   runtimeContract = DISABLED_CANONICAL_ACTUAL_POSTING_RUNTIME_CONTRACT,
+  dependencies = undefined,
 ) {
   assertCanonicalActualPostingStructure(db);
   assertCanonicalActualPostingRuntimeContract(runtimeContract);
+  if (
+    dependencies !== undefined
+    && (
+      dependencies === null
+      || typeof dependencies !== 'object'
+      || Array.isArray(dependencies)
+      || Object.keys(dependencies).some(key => ![
+        'clock',
+        'evidenceRecorder',
+        'hooks',
+        'testOnlyBuildPostingDenialPackage',
+        'uuid',
+      ].includes(key))
+    )
+  ) throw repositoryError(ERROR_CODES.ENVELOPE_INVALID);
+  const clockDependency = dependencies?.clock || Date.now.bind(Date);
+  const uuidDependency = dependencies?.uuid || (() => randomUUID({ disableEntropyCache: true }));
+  const evidenceRecorder = dependencies?.evidenceRecorder;
+  const hooks = dependencies?.hooks;
+  if (typeof clockDependency !== 'function' || typeof uuidDependency !== 'function') {
+    throw repositoryError(ERROR_CODES.ENVELOPE_INVALID);
+  }
+  if (evidenceRecorder !== undefined && typeof evidenceRecorder !== 'function') {
+    throw repositoryError(ERROR_CODES.ENVELOPE_INVALID);
+  }
+  if (hooks !== undefined && (hooks === null || typeof hooks !== 'object' || Array.isArray(hooks))) {
+    throw repositoryError(ERROR_CODES.ENVELOPE_INVALID);
+  }
+  function recordEvidence(entry) {
+    if (!evidenceRecorder) return;
+    try {
+      evidenceRecorder(Object.freeze(parseCanonicalJson(canonicalJson(entry), 'evidenceRecord')));
+    } catch {
+      // Test/audit instrumentation cannot affect the production result.
+    }
+  }
+  function invokeHook(name, details) {
+    const hook = hooks?.[name];
+    if (typeof hook === 'function') hook(Object.freeze({ ...details }));
+  }
+  function readRepositoryClock() {
+    return readRepositoryClockFromDependency(clockDependency);
+  }
   const authorityRepository = createCanonicalActualPostingAuthorityRepository(db);
 
   function readEventById(id) {
@@ -3771,12 +3878,21 @@ function createCanonicalActualEligibilityEventRepository(
         const reread = db.prepare(`
           SELECT * FROM ${CANONICAL_RECEIVABLE_POSTING_CONFLICTS_TABLE} WHERE transitionId = ?
         `).get(transitionId);
+        let verifiedAfter;
         try {
-          verifyPersistedConflictPair(db, authorityRepository, reread);
+          verifiedAfter = verifyPersistedConflictPair(db, authorityRepository, reread);
         } catch {
           throw repositoryError(ERROR_CODES.CONFLICT_TRANSITION_INTEGRITY_FAILED);
         }
+        invokeHook('beforeRecoveryStageCommit', {
+          stage: verifiedAfter.transition.state,
+          transitionId,
+        });
         db.exec('COMMIT');
+        invokeHook('afterRecoveryStageCommit', {
+          stage: verifiedAfter.transition.state,
+          transitionId,
+        });
       } catch (error) {
         rollbackQuietly(db);
         mapAndThrow(error);
@@ -3844,7 +3960,7 @@ function createCanonicalActualEligibilityEventRepository(
       command,
       deniedAt,
       runtimeContract,
-      { historicalAuthorityChains },
+      { historicalAuthorityChains, recordEvidence },
     );
     if (context.authorityDenial) {
       throw repositoryError(ERROR_CODES.CONFLICT_FROZEN_DENIAL_INTEGRITY_FAILED);
@@ -4098,11 +4214,11 @@ function createCanonicalActualEligibilityEventRepository(
       assertPr6PersistedStoragePreflight(db, {
         branchId: candidateScope.branchId,
         companyId: candidateScope.companyId,
-      });
+      }, recordEvidence, 'algorithm_c_initial');
       assertPr6PersistedStoragePreflight(db, {
         branchId: candidateScope.branchId,
         companyId: candidateScope.companyId,
-      });
+      }, recordEvidence, 'algorithm_c_final_pre_dml');
     }
     const classification = classifyConflictReplay(db, authorityRepository, packageValue);
     verifyFrozenPackageAgainstSnapshots(packageValue);
@@ -4111,8 +4227,18 @@ function createCanonicalActualEligibilityEventRepository(
     }
     const incomplete = incompleteTransitions(db, candidateScope.companyId, candidateScope.branchId);
     if (incomplete.length > 0) {
+      let pair;
+      try {
+        pair = readConflictPair(incomplete[0].transitionId);
+      } catch {
+        throw repositoryError(ERROR_CODES.CONFLICT_TRANSITION_INTEGRITY_FAILED);
+      }
+      if (!pair || pair.transition.state === 'COMPLETE') {
+        throw repositoryError(ERROR_CODES.CONFLICT_TRANSITION_INTEGRITY_FAILED);
+      }
       return Object.freeze({
         mode: 'BLOCKED_SCOPE',
+        pair,
         scope: Object.freeze({ companyId: candidateScope.companyId, branchId: candidateScope.branchId }),
       });
     }
@@ -4220,7 +4346,7 @@ function createCanonicalActualEligibilityEventRepository(
     assertPr6PersistedStoragePreflight(db, {
       branchId: candidateScope.branchId,
       companyId: candidateScope.companyId,
-    });
+    }, recordEvidence, 'algorithm_c_final_pre_dml');
     insertExact(
       db,
       CANONICAL_RECEIVABLE_POSTING_CONFLICTS_TABLE,
@@ -4246,18 +4372,30 @@ function createCanonicalActualEligibilityEventRepository(
       assertPr6PersistedStoragePreflight(db, {
         branchId: candidateScope.branchId,
         companyId: candidateScope.companyId,
-      });
+      }, recordEvidence, 'algorithm_c_initial');
       assertPr6PersistedStoragePreflight(db, {
         branchId: candidateScope.branchId,
         companyId: candidateScope.companyId,
-      });
+      }, recordEvidence, 'algorithm_c_final_pre_dml');
       disposition = persistDenialPairInTransaction(packageValue, {
         admissionPreflightVerified: true,
       });
       if (disposition.mode === 'BLOCKED_SCOPE') {
         rollbackQuietly(db);
       } else {
+        if (disposition.mode === 'NEW_EVIDENCE_INSERT') {
+          invokeHook('beforePairCommit', {
+            stage: disposition.pair.transition.state,
+            transitionId: disposition.pair.transition.transitionId,
+          });
+        }
         db.exec('COMMIT');
+        if (disposition.mode === 'NEW_EVIDENCE_INSERT') {
+          invokeHook('afterPairCommit', {
+            stage: disposition.pair.transition.state,
+            transitionId: disposition.pair.transition.transitionId,
+          });
+        }
       }
     } catch (error) {
       rollbackQuietly(db);
@@ -4308,7 +4446,8 @@ function createCanonicalActualEligibilityEventRepository(
       WHERE companyId = ? AND branchId = ?
         AND (eventId = ? OR economicLineageKey = ?)
       ORDER BY id ASC
-    `).all(command.companyId, command.branchId, command.eventId, event?.economicLineageKey ?? '');
+    `).all(command.companyId, command.branchId, command.eventId, event?.economicLineageKey ?? '')
+      .map(normalizePostingOperationRow);
     const canonicalRows = event ? db.prepare(`
       SELECT * FROM ${CANONICAL_RECEIVABLES_TABLE}
       WHERE companyId = ? AND branchId = ?
@@ -4324,28 +4463,64 @@ function createCanonicalActualEligibilityEventRepository(
       event.rootSourceDocumentLineageId,
       event.economicLineageKey,
       event.economicLineageKey,
-    ) : [];
-    if (operations.length === 0 && canonicalRows.length === 0) {
+    ).map(normalizeCanonicalReceivableRow) : [];
+    const auditRows = event ? db.prepare(`
+      SELECT * FROM ${FINANCIAL_AUDIT_EVENTS_TABLE}
+      WHERE companyId = ? AND branchId = ?
+        AND eventType = 'canonical_receivable.initial_posted.v1'
+        AND correlationId = ?
+      ORDER BY id ASC
+    `).all(command.companyId, command.branchId, event.correlationId) : [];
+    recordEvidence({
+      phase: 'primary_graph',
+      table: CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE,
+      rows: operations,
+    });
+    recordEvidence({
+      phase: 'primary_graph',
+      table: CANONICAL_RECEIVABLES_TABLE,
+      rows: canonicalRows,
+    });
+    recordEvidence({
+      phase: 'primary_graph',
+      table: FINANCIAL_AUDIT_EVENTS_TABLE,
+      rows: auditRows,
+    });
+    if (operations.length === 0 && canonicalRows.length === 0 && auditRows.length === 0) {
       return Object.freeze({ mode: 'NO_PRIMARY' });
     }
-    if (operations.length !== 1 || canonicalRows.length !== 1) {
+    if (operations.length !== 1 || canonicalRows.length !== 1 || auditRows.length !== 1 || !event) {
       return Object.freeze({ mode: 'PRIMARY_INTEGRITY_BLOCKED' });
     }
     const operation = operations[0];
     const receivable = canonicalRows[0];
-    const audit = db.prepare(`SELECT * FROM ${FINANCIAL_AUDIT_EVENTS_TABLE} WHERE id = ?`)
-      .get(operation.financialAuditEventId);
-    if (
-      !audit
-      || operation.eventId !== command.eventId
-      || operation.canonicalReceivableId !== receivable.id
-      || audit.aggregateId !== receivable.id
-      || audit.companyId !== command.companyId
-      || audit.branchId !== command.branchId
-      || audit.eventType !== 'canonical_receivable.initial_posted.v1'
-      || operation.correlationId !== event.correlationId
-      || audit.correlationId !== event.correlationId
-    ) return Object.freeze({ mode: 'PRIMARY_INTEGRITY_BLOCKED' });
+    const audit = auditRows[0];
+    try {
+      const authorization = authorityRepository.readWriteAuthorizationRecord(
+        operation.writeAuthorizationRecordId,
+      );
+      const activation = authorityRepository.readActivationRecord(operation.activationRecordId);
+      const conducted = db.prepare(`
+        SELECT * FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} WHERE id = ?
+      `).get(event.conductedUpdVersionId);
+      const acceptedRuns = authorization
+        ? parseCanonicalJson(authorization.acceptedPr8EvidenceJson, 'acceptedPr8EvidenceJson')
+        : [];
+      const freshness = acceptedRuns.find(entry => entry.dryRunId === event.dryRunId);
+      verifyCanonicalPrimaryTriplet({
+        activation,
+        audit,
+        authorization,
+        commandFingerprint: computeCanonicalPostingCommandFingerprint(command),
+        conductedCreatedAt: conducted?.createdAt,
+        event,
+        freshnessWindowFingerprint: freshness?.freshnessWindowFingerprint,
+        operation,
+        receivable,
+      });
+    } catch {
+      return Object.freeze({ mode: 'PRIMARY_INTEGRITY_BLOCKED' });
+    }
     return Object.freeze({ audit, mode: 'PRIMARY_COMPLETE', operation, receivable });
   }
 
@@ -4362,12 +4537,28 @@ function createCanonicalActualEligibilityEventRepository(
       event?.economicLineageKey ?? '',
       denialAttemptId,
     );
+    recordEvidence({
+      phase: 'conflict_graph',
+      table: CANONICAL_RECEIVABLE_POSTING_CONFLICTS_TABLE,
+      rows,
+    });
     if (rows.length === 0) return Object.freeze({ mode: 'NO_CONFLICT', pairs: Object.freeze([]) });
     if (rows.length !== 1) return Object.freeze({ mode: 'CONFLICT_INTEGRITY_BLOCKED', pairs: Object.freeze([]) });
     try {
+      const pair = verifyPersistedConflictPair(db, authorityRepository, rows[0]);
+      recordEvidence({
+        classificationFacts: {
+          conflictHash: pair.conflict.conflictHash,
+          stage: pair.transition.state,
+          transitionHash: pair.transition.intentHash,
+        },
+        phase: 'conflict_graph',
+        table: CANONICAL_RECEIVABLE_POSTING_CONFLICT_TRANSITIONS_TABLE,
+        rows: [pair.transition],
+      });
       return Object.freeze({
         mode: 'ONE_CONFLICT',
-        pairs: Object.freeze([verifyPersistedConflictPair(db, authorityRepository, rows[0])]),
+        pairs: Object.freeze([pair]),
       });
     } catch {
       return Object.freeze({ mode: 'CONFLICT_INTEGRITY_BLOCKED', pairs: Object.freeze([]) });
@@ -4410,6 +4601,74 @@ function createCanonicalActualEligibilityEventRepository(
     })));
   }
 
+  function authorityDenialCause(context) {
+    if (!context.authorityDenial) return null;
+    const prefix = {
+      source_adapter: 'SOURCE_ADAPTER',
+      eligibility_producer: 'ELIGIBILITY_PRODUCER',
+      canonical_posting_adapter: 'CANONICAL_POSTING_ADAPTER',
+    }[context.authorityDenial.authorityKind];
+    if (!prefix) throw repositoryError(ERROR_CODES.POSTING_INTEGRITY_BLOCKED);
+    return `${prefix}_${context.authorityDenial.candidate.stateCode}`;
+  }
+
+  function verifyPostingAdmission(command, event, clock) {
+    const context = loadAcceptedContext(
+      db,
+      authorityRepository,
+      {
+        activationRecordId: event.activationRecordId,
+        branchId: event.branchId,
+        candidateId: event.candidateId,
+        companyId: event.companyId,
+        dryRunId: event.dryRunId,
+        writeAuthorizationRecordId: event.writeAuthorizationRecordId,
+      },
+      clock.milliseconds,
+      runtimeContract,
+      { recordEvidence },
+    );
+    if (context.operationalFailureCode) throw repositoryError(context.operationalFailureCode);
+    let denialCause = authorityDenialCause(context)
+      || context.nonAuthorityDenial?.conflictType
+      || null;
+    if (!denialCause) {
+      const reconstructed = deriveEventCore(db, context, {
+        correlationId: event.correlationId,
+        occurredAt: event.createdAt,
+      });
+      if (!exactRowsEqual(event, { id: event.id, ...reconstructed.event })) {
+        denialCause = 'ECONOMIC_SOURCE_EVENT_MISMATCH';
+      }
+    }
+    const conducted = db.prepare(`
+      SELECT * FROM ${BILLING_SOURCE_UPD_VERSIONS_TABLE} WHERE id = ?
+    `).get(context.candidate.currentConductedUpdVersionId);
+    if (!conducted || conducted.state !== 'conducted') {
+      throw repositoryError(ERROR_CODES.POSTING_INTEGRITY_BLOCKED);
+    }
+    recordEvidence({
+      classificationFacts: {
+        authorityDenial: authorityDenialCause(context),
+        nonAuthorityDenial: context.nonAuthorityDenial?.conflictType ?? null,
+        operationalFailureCode: context.operationalFailureCode,
+        selectedDenial: denialCause,
+      },
+      eventId: event.id,
+      phase: 'posting_authoritative_admission',
+    });
+    return Object.freeze({
+      activation: context.activation,
+      authorization: context.authorization,
+      conducted,
+      denialCause,
+    });
+  }
+
+  function assertPostingStoragePreflight(scope, phase) {
+    assertPr6PersistedStoragePreflight(db, scope, recordEvidence, phase);
+  }
+
   function reconstructPostingDenial(seamCommand, event, clock) {
     const command = seamCommand.postingCommand;
     const context = loadAcceptedContext(
@@ -4425,6 +4684,7 @@ function createCanonicalActualEligibilityEventRepository(
       },
       clock.milliseconds,
       runtimeContract,
+      { recordEvidence },
     );
     if (context.operationalFailureCode) throw repositoryError(context.operationalFailureCode);
     if (context.authorityDenial) {
@@ -4483,12 +4743,23 @@ function createCanonicalActualEligibilityEventRepository(
   function orchestratePostingDenial(commandInput) {
     const seamCommand = assertPostingDenialSeamCommand(commandInput);
     if (!runtimeContract.enabled) throw repositoryError(ERROR_CODES.PR9B_DISABLED);
+    recordEvidence({
+      entrypoint: 'pr9b_seam',
+      normalizedCommand: seamCommand.postingCommand,
+      normalizedFingerprint: computeCanonicalPostingCommandFingerprint(seamCommand.postingCommand),
+      phase: 'normalized_command',
+    });
     let inserted = null;
     let reclassified = false;
     beginImmediate(db);
     try {
       assertCanonicalActualPostingStructure(db);
-      assertPr6PersistedStoragePreflight(db, seamCommand.postingCommand);
+      assertPr6PersistedStoragePreflight(
+        db,
+        seamCommand.postingCommand,
+        recordEvidence,
+        'algorithm_c_seam_initial',
+      );
       const eventRaw = db.prepare(`
         SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
         WHERE id = ? AND companyId = ? AND branchId = ?
@@ -4518,6 +4789,10 @@ function createCanonicalActualEligibilityEventRepository(
         const comparisons = postingCommandAssertionComparisons(seamCommand.postingCommand, event);
         const mismatches = comparisons.filter(comparison => !comparison.matches);
         if (mismatches.length > 0) {
+          recordEvidence({
+            mismatches,
+            phase: 'posting_assertion_comparison',
+          });
           db.exec('COMMIT');
           return postingSeamResult(ERROR_CODES.POSTING_ASSERTION_MISMATCH, {
             classification: 'ASSERTION_MISMATCH',
@@ -4528,6 +4803,10 @@ function createCanonicalActualEligibilityEventRepository(
       }
       if (conflict.mode === 'ONE_CONFLICT') {
         const pair = conflict.pairs[0];
+        invokeHook('beforeSeamSnapshotRelease', {
+          stage: pair.transition.state,
+          transitionId: pair.transition.transitionId,
+        });
         db.exec('COMMIT');
         if (pair.transition.state !== 'COMPLETE') {
           return postingSeamResult('CONFLICT_RECOVERY_REQUIRED', {
@@ -4574,16 +4853,11 @@ function createCanonicalActualEligibilityEventRepository(
         capturedClock: clock,
       });
       if (disposition.mode === 'BLOCKED_SCOPE') {
+        const pair = disposition.pair;
         rollbackQuietly(db);
-        const transition = incompleteTransitions(
-          db,
-          seamCommand.postingCommand.companyId,
-          seamCommand.postingCommand.branchId,
-        )[0];
-        const pair = transition ? readConflictPair(transition.transitionId) : null;
         return postingSeamResult('CONFLICT_RECOVERY_REQUIRED', {
           classification: 'C7',
-          evidence: pair ? postingPairEvidence(pair) : null,
+          evidence: postingPairEvidence(pair),
         });
       }
       if (disposition.mode === 'EXACT_REPLAY') {
@@ -4601,7 +4875,15 @@ function createCanonicalActualEligibilityEventRepository(
         });
       }
       inserted = disposition.pair;
+      invokeHook('beforePairCommit', {
+        stage: inserted.transition.state,
+        transitionId: inserted.transition.transitionId,
+      });
       db.exec('COMMIT');
+      invokeHook('afterPairCommit', {
+        stage: inserted.transition.state,
+        transitionId: inserted.transition.transitionId,
+      });
     } catch (error) {
       rollbackQuietly(db);
       mapAndThrow(error);
@@ -5129,7 +5411,7 @@ function createCanonicalActualEligibilityEventRepository(
         if (floor !== null && clock.milliseconds < floor) {
           throw repositoryError('CANONICAL_OPERATIONAL_CLOCK_REGRESSION');
         }
-        const denialAttemptId = generateDenialAttemptId();
+        const denialAttemptId = generateDenialAttemptId(uuidDependency);
         const existingAttempt = db.prepare(`
           SELECT * FROM ${CANONICAL_RECEIVABLE_POSTING_CONFLICTS_TABLE} WHERE denialAttemptId = ?
         `).get(denialAttemptId);
@@ -5147,6 +5429,7 @@ function createCanonicalActualEligibilityEventRepository(
           command,
           clock.milliseconds,
           runtimeContract,
+          { recordEvidence },
         );
         const replayCandidate = db.prepare(`
           SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
@@ -5314,6 +5597,7 @@ function createCanonicalActualEligibilityEventRepository(
                 command,
                 clock.milliseconds,
                 runtimeContract,
+                { recordEvidence },
               );
               if (
                 refreshedContext.authorityDenial
@@ -5378,7 +5662,38 @@ function createCanonicalActualEligibilityEventRepository(
     throw repositoryError('CANONICAL_ELIGIBILITY_EVENT_PERSISTENCE_FAILED');
   }
 
-  return Object.freeze({
+  function buildPostingDenialPackageForTest(input) {
+    if (dependencies?.testOnlyBuildPostingDenialPackage !== true) {
+      throw repositoryError(ERROR_CODES.C_SEAM_INPUT_REJECTED);
+    }
+    const seamCommand = assertPostingDenialSeamCommand(input.seamCommand);
+    const deniedAttemptedAt = input.deniedAttemptedAt;
+    const milliseconds = parseUtcMilliseconds(deniedAttemptedAt);
+    beginImmediate(db);
+    try {
+      const eventRaw = db.prepare(`
+        SELECT * FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
+        WHERE id = ? AND companyId = ? AND branchId = ?
+      `).get(
+        seamCommand.postingCommand.eventId,
+        seamCommand.postingCommand.companyId,
+        seamCommand.postingCommand.branchId,
+      );
+      const event = validateEligibleEventRecord(normalizeEventRow(eventRaw));
+      const denial = reconstructPostingDenial(seamCommand, event, {
+        milliseconds,
+        timestamp: deniedAttemptedAt,
+      });
+      rollbackQuietly(db);
+      if (!denial) throw repositoryError(ERROR_CODES.C_SEAM_INPUT_REJECTED);
+      return denial.packageValue;
+    } catch (error) {
+      rollbackQuietly(db);
+      throw error;
+    }
+  }
+
+  const publicRepository = {
     orchestratePostingDenial,
     persistDenialEvidence,
     produceEligibleEvent,
@@ -5386,10 +5701,22 @@ function createCanonicalActualEligibilityEventRepository(
     readEventById,
     reconcileScope,
     reconcileTransition,
+  };
+  if (dependencies?.testOnlyBuildPostingDenialPackage === true) {
+    publicRepository.__testBuildPostingDenialPackage = buildPostingDenialPackageForTest;
+  }
+  Object.defineProperty(publicRepository, CANONICAL_ACTUAL_POSTING_INTERNAL, {
+    enumerable: false,
+    value: Object.freeze({
+      assertPostingStoragePreflight,
+      verifyPostingAdmission,
+    }),
   });
+  return Object.freeze(publicRepository);
 }
 
 module.exports = {
+  CANONICAL_ACTUAL_POSTING_INTERNAL,
   ELIGIBILITY_COMMAND_KEYS,
   createCanonicalActualEligibilityEventRepository,
 };

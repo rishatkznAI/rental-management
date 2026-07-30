@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   createPostingDenialStageFixture,
   createPr9bContext,
+  mutatePr8CandidateForPostingConflict,
   postingCommand,
   postingGraphSnapshot,
   totalChanges,
@@ -33,6 +34,18 @@ function startWorker(input) {
     };
     child.on('message', onMessage);
   });
+  function waitFor(type) {
+    return new Promise((resolve, reject) => {
+      child.once('error', reject);
+      const onMessage = message => {
+        if (message?.type === type) {
+          child.off('message', onMessage);
+          resolve(message);
+        }
+      };
+      child.on('message', onMessage);
+    });
+  }
   const result = new Promise((resolve, reject) => {
     child.once('error', reject);
     child.on('message', message => {
@@ -42,7 +55,23 @@ function startWorker(input) {
       if (code !== 0) reject(new Error(`PR9B worker exited ${code}`));
     });
   });
-  return { child, ready, result };
+  return { child, ready, result, waitFor };
+}
+
+async function waitForFile(file, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!fs.existsSync(file)) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${file}`);
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
+
+async function assertStillBlocked(promise) {
+  const completed = await Promise.race([
+    promise.then(() => true),
+    new Promise(resolve => setTimeout(() => resolve(false), 100)),
+  ]);
+  assert.equal(completed, false, 'follower completed while the writer still held BEGIN IMMEDIATE');
 }
 
 async function runAtBarrier(inputs) {
@@ -141,3 +170,164 @@ for (const stage of ['PENDING', 'ACCOUNTED', 'CIRCUIT_APPLIED', 'COMPLETE']) {
     });
   });
 }
+
+for (const stage of ['PENDING', 'ACCOUNTED', 'CIRCUIT_APPLIED', 'COMPLETE']) {
+  for (const writerEntrypoint of ['wrapper', 'seam']) {
+    test(`P2-02 ${writerEntrypoint} writer and ${writerEntrypoint === 'wrapper' ? 'seam' : 'wrapper'} follower serialize at ${stage}`, async () => {
+      await withTempDb(`c8-${writerEntrypoint}-${stage.toLowerCase()}`, async dbPath => {
+        const context = createPr9bContext({ dbPath });
+        try {
+          mutatePr8CandidateForPostingConflict(context);
+          const command = postingCommand(context);
+          const seamCommand = {
+            assertedDenialCause: 'PR8_EVIDENCE_MISMATCH',
+            denialAttemptId: '41000000-0000-4000-8000-000000000001',
+            postingCommand: command,
+          };
+          const deniedAttemptedAt = new Date(Date.parse(context.event.createdAt) + 1).toISOString();
+          const beforeReached = path.join(path.dirname(dbPath), 'before-reached');
+          const beforeRelease = path.join(path.dirname(dbPath), 'before-release');
+          const afterReached = path.join(path.dirname(dbPath), 'after-reached');
+          const afterRelease = path.join(path.dirname(dbPath), 'after-release');
+          const barriers = {
+            before: {
+              [stage]: { reachedPath: beforeReached, releasePath: beforeRelease },
+            },
+            after: {
+              [stage]: { reachedPath: afterReached, releasePath: afterRelease },
+            },
+          };
+          const common = {
+            clockMs: Date.parse(deniedAttemptedAt),
+            command: seamCommand,
+            dbPath,
+            deniedAttemptedAt,
+            runtimeContractInput: context.runtimeContractInput,
+          };
+          const writer = startWorker({ ...common, barriers, entrypoint: writerEntrypoint });
+          await writer.ready;
+          writer.child.send({ type: 'go' });
+          await waitForFile(beforeReached);
+
+          const followerEntrypoint = writerEntrypoint === 'wrapper' ? 'seam' : 'wrapper';
+          const follower = startWorker({ ...common, entrypoint: followerEntrypoint });
+          await follower.ready;
+          const attempting = follower.waitFor('attempting');
+          follower.child.send({ type: 'go' });
+          await attempting;
+          await assertStillBlocked(follower.result);
+
+          fs.writeFileSync(beforeRelease, 'release');
+          await waitForFile(afterReached);
+          const followerResult = await follower.result;
+          assert.equal(followerResult.error, undefined);
+          assert.equal(followerResult.dml, 0);
+          if (followerEntrypoint === 'seam') {
+            assert.deepEqual(
+              {
+                classification: followerResult.result.classification,
+                outcome: followerResult.result.outcome,
+                stage: followerResult.result.evidence.stage,
+              },
+              stage === 'COMPLETE'
+                ? { classification: 'C5', outcome: 'EXACT_CONFLICT_REPLAY', stage }
+                : { classification: 'C7', outcome: 'CONFLICT_RECOVERY_REQUIRED', stage },
+            );
+          } else {
+            assert.equal(followerResult.result.replayed, true);
+            assert.equal(followerResult.result.stage, stage);
+          }
+
+          fs.writeFileSync(afterRelease, 'release');
+          const writerResult = await writer.result;
+          assert.equal(writerResult.error, undefined);
+          assert.equal(writerResult.dml, 6);
+          if (writerEntrypoint === 'seam') {
+            assert.equal(writerResult.result.outcome, 'DENIAL_PERSISTED');
+            assert.equal(writerResult.result.evidence.stage, 'COMPLETE');
+          } else {
+            assert.equal(writerResult.result.replayed, false);
+            assert.equal(writerResult.result.stage, 'COMPLETE');
+          }
+          assert.equal(Number(context.db.prepare(
+            'SELECT COUNT(*) AS count FROM canonical_receivable_posting_conflicts',
+          ).get().count), 1);
+          assert.equal(Number(context.db.prepare(
+            'SELECT COUNT(*) AS count FROM canonical_receivable_posting_conflict_transitions',
+          ).get().count), 1);
+          assert.equal(context.db.prepare(
+            'SELECT state FROM canonical_receivable_posting_conflict_transitions',
+          ).get().state, 'COMPLETE');
+          assert.equal(Number(context.db.prepare(
+            'SELECT COUNT(*) AS count FROM canonical_receivable_posting_operations',
+          ).get().count), 0);
+          assert.equal(Number(context.db.prepare(
+            'SELECT COUNT(*) AS count FROM canonical_receivables',
+          ).get().count), 0);
+          assert.equal(Number(context.db.prepare(
+            'SELECT COUNT(*) AS count FROM financial_audit_events',
+          ).get().count), 0);
+          assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+        } finally {
+          context.db.close();
+        }
+      });
+    });
+  }
+}
+
+test('P1-04 C7 returns one immutable locked snapshot while a reconciler waits', async () => {
+  await withTempDb('c7-locked-snapshot', async dbPath => {
+    const context = createPostingDenialStageFixture('PENDING', { dbPath });
+    try {
+      const transitionId = context.db.prepare(
+        'SELECT transitionId FROM canonical_receivable_posting_conflict_transitions',
+      ).get().transitionId;
+      const snapshotReached = path.join(path.dirname(dbPath), 'snapshot-reached');
+      const snapshotRelease = path.join(path.dirname(dbPath), 'snapshot-release');
+      const reader = startWorker({
+        barrierPhase: 'snapshot',
+        barrierReachedPath: snapshotReached,
+        barrierReleasePath: snapshotRelease,
+        barrierStage: 'PENDING',
+        command: context.seamCommand,
+        dbPath,
+        entrypoint: 'seam',
+        runtimeContractInput: context.runtimeContractInput,
+      });
+      await reader.ready;
+      reader.child.send({ type: 'go' });
+      await waitForFile(snapshotReached);
+
+      const reconciler = startWorker({
+        command: { transitionId },
+        dbPath,
+        entrypoint: 'reconcile',
+        runtimeContractInput: context.runtimeContractInput,
+      });
+      await reconciler.ready;
+      const attempting = reconciler.waitFor('attempting');
+      reconciler.child.send({ type: 'go' });
+      await attempting;
+      await assertStillBlocked(reconciler.result);
+
+      fs.writeFileSync(snapshotRelease, 'release');
+      const readerResult = await reader.result;
+      assert.equal(readerResult.error, undefined);
+      assert.equal(readerResult.dml, 0);
+      assert.equal(readerResult.result.classification, 'C7');
+      assert.equal(readerResult.result.outcome, 'CONFLICT_RECOVERY_REQUIRED');
+      assert.equal(readerResult.result.evidence.stage, 'PENDING');
+      const reconcilerResult = await reconciler.result;
+      assert.equal(reconcilerResult.error, undefined);
+      assert.equal(reconcilerResult.dml, 4);
+      assert.equal(reconcilerResult.result.transition.state, 'COMPLETE');
+      assert.equal(context.db.prepare(
+        'SELECT state FROM canonical_receivable_posting_conflict_transitions',
+      ).get().state, 'COMPLETE');
+      assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+    } finally {
+      context.db.close();
+    }
+  });
+});

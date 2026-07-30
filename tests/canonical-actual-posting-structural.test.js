@@ -131,6 +131,66 @@ test('Algorithm B owns only the primary triplet and delegates only through the b
   assert.match(posting, /rollbackQuietly\(db\);[\s\S]*eligibilityRepository\.orchestratePostingDenial/);
 });
 
+test('PR9B remediation preserves storage, authoritative verification, and C7 lock ordering', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const eligibility = read('server/lib/canonical-actual-eligibility-event-repository.js');
+  assert.match(posting, /BEGIN IMMEDIATE[\s\S]*assertPostingStoragePreflight\(command, 'algorithm_b_initial'\)[\s\S]*const clock = readClock\(\)/);
+  assert.match(posting, /beforeFinalStoragePreflight[\s\S]*assertPostingStoragePreflight\(command, 'algorithm_b_final_pre_dml'\)[\s\S]*createPrimaryTriplet/);
+  assert.match(posting, /verifyPostingAdmission\(command, event, clock\)/);
+  assert.match(posting, /verifyCanonicalPrimaryTriplet\(\{/);
+  assert.match(eligibility, /verifyCanonicalPrimaryTriplet\(\{/);
+  assert.match(eligibility, /mode: 'BLOCKED_SCOPE',[\s\S]*pair,[\s\S]*scope:/);
+  assert.match(eligibility, /const pair = disposition\.pair;[\s\S]*rollbackQuietly\(db\);[\s\S]*postingPairEvidence\(pair\)/);
+  assert.doesNotMatch(
+    eligibility,
+    /disposition\.mode === 'BLOCKED_SCOPE'[\s\S]{0,500}rollbackQuietly\(db\);[\s\S]{0,500}incompleteTransitions\(/,
+  );
+});
+
+test('P2-03 anti-join is called in Phase 1 and immediately before precommit proof', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const calls = posting.match(/assertNoPrimaryOrphans\(command, event\);/g) || [];
+  assert.equal(calls.length >= 3, true);
+  assert.match(posting, /const event = loadEvent\(command\);\s*assertNoPrimaryOrphans\(command, event\);\s*const durable = resolveExistingResult/);
+  assert.match(posting, /verifyPrimaryTriplet\([\s\S]*assertNoPrimaryOrphans\(command, event\);[\s\S]*foreign_key_check/);
+  assert.match(posting, /orphanCanonical/);
+  assert.match(posting, /orphanOperation/);
+  assert.match(posting, /orphanAudit/);
+});
+
+test('P2-01 instrumentation records in-flight reads without post-hoc fixture SQL', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const eligibility = read('server/lib/canonical-actual-eligibility-event-repository.js');
+  const fixtures = read('tests/canonical-actual-posting-fixtures.js');
+  assert.match(posting, /evidenceRecorder/);
+  assert.match(eligibility, /phase: 'pr8_authoritative_read'/);
+  assert.match(eligibility, /phase: 'posting_authoritative_admission'/);
+  assert.match(eligibility, /phase: 'conflict_graph'/);
+  const evidenceHelper = fixtures.slice(
+    fixtures.indexOf('export function postingEvidenceReadSet'),
+    fixtures.indexOf('export function normalizedPostingCommandEvidence'),
+  );
+  assert.doesNotMatch(evidenceHelper, /SELECT|prepare\s*\(/);
+  assert.match(evidenceHelper, /trace\.snapshot\(\)/);
+  const postingRecorder = posting.slice(
+    posting.indexOf('  function recordEvidence'),
+    posting.indexOf('  function invokeHook'),
+  );
+  assert.doesNotMatch(postingRecorder, /\b(?:INSERT|UPDATE|DELETE)\b|db\.prepare|db\.exec/);
+});
+
+test('P2-04 clock and UUID dependencies are constructor-owned and absent from caller commands', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const domain = read('server/lib/canonical-actual-posting-domain.js');
+  assert.match(posting, /dependencies = undefined/);
+  assert.match(posting, /dependencies\?\.clock \|\| Date\.now\.bind\(Date\)/);
+  assert.match(posting, /dependencies\?\.uuid \|\| \(\(\) => randomUUID/);
+  assert.match(posting, /generateAndAssertUnusedPrimaryIds\(\)/);
+  assert.match(posting, /new Set\(Object\.values\(generatedIds\)\)\.size !== 3/);
+  assert.doesNotMatch(domain, /CANONICAL_POSTING_COMMAND_KEYS[\s\S]{0,600}\bclock\b/);
+  assert.doesNotMatch(domain, /CANONICAL_POSTING_COMMAND_KEYS[\s\S]{0,600}\buuid\b/i);
+});
+
 test('denial package brand and constructors are not exported to callers', async () => {
   const domain = await import('../server/lib/canonical-actual-posting-domain.js');
   const exported = domain.default || domain;

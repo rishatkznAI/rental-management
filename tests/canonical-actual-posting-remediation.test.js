@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   createInstrumentedEligibilityRepository,
+  createEvidenceTrace,
   createPostingDenialStageFixture,
   hash,
   normalizedPostingCommandEvidence,
@@ -37,7 +38,15 @@ function expectedSeam(stage) {
     : { classification: 'C7', outcome: 'CONFLICT_RECOVERY_REQUIRED' };
 }
 
-function invokeReadOnly(context, { command, entrypoint, packageValue, repository, seamCommand }) {
+function invokeReadOnly(context, {
+  command,
+  entrypoint,
+  packageValue,
+  repository,
+  seamCommand,
+  trace,
+}) {
+  trace.reset();
   const graphBefore = postingGraphSnapshot(context.db);
   const changesBefore = totalChanges(context.db);
   let result;
@@ -56,9 +65,9 @@ function invokeReadOnly(context, { command, entrypoint, packageValue, repository
   assert.deepEqual(result.intendedWriteSet, []);
   assert.equal(totalChanges(context.db) - changesBefore, 0);
   assert.equal(postingGraphSnapshot(context.db), graphBefore);
-  const readSet = postingEvidenceReadSet(context, command, result);
+  const readSet = postingEvidenceReadSet(trace);
   return {
-    digest: postingEvidenceReadDigest(context, command, result),
+    digest: postingEvidenceReadDigest(trace),
     readSet,
     result,
   };
@@ -103,8 +112,12 @@ for (const stage of STAGES) {
     test(`PR9B ${stage} preserves cross-entrypoint state for ${sequence.join(' -> ')}`, () => {
       const context = createPostingDenialStageFixture(stage);
       try {
+        const trace = createEvidenceTrace();
+        const repository = createInstrumentedEligibilityRepository(context, {
+          evidenceRecorder: trace.record,
+        });
         const { commandA, commandB } = transportForms(context);
-        const transports = packagesForTransports(context, context.repository, commandA, commandB);
+        const transports = packagesForTransports(context, repository, commandA, commandB);
         const originalGraph = postingGraphSnapshot(context.db);
         const calls = sequence.map(step => {
           const [entrypoint, transport] = step.split('-');
@@ -113,8 +126,9 @@ for (const stage of STAGES) {
             command: suffix === 'A' ? commandA : commandB,
             entrypoint,
             packageValue: transports[`package${suffix}`],
-            repository: context.repository,
+            repository,
             seamCommand: transports[`seam${suffix}`],
+            trace,
           });
         });
         const wrapperCalls = calls.filter((_, index) => sequence[index].startsWith('wrapper'));
@@ -146,16 +160,23 @@ for (const stage of STAGES) {
     const context = createPostingDenialStageFixture(stage);
     try {
       const { commandA, commandB } = transportForms(context);
-      const coldRepository = createInstrumentedEligibilityRepository(context);
+      const coldTrace = createEvidenceTrace();
+      const coldRepository = createInstrumentedEligibilityRepository(context, {
+        evidenceRecorder: coldTrace.record,
+      });
       const coldTransports = packagesForTransports(context, coldRepository, commandA, commandB);
       const cold = invokeReadOnly(context, {
         command: commandA,
         entrypoint: 'seam',
         repository: coldRepository,
         seamCommand: coldTransports.seamA,
+        trace: coldTrace,
       });
 
-      const wrapperWarmRepository = createInstrumentedEligibilityRepository(context);
+      const wrapperWarmTrace = createEvidenceTrace();
+      const wrapperWarmRepository = createInstrumentedEligibilityRepository(context, {
+        evidenceRecorder: wrapperWarmTrace.record,
+      });
       const wrapperWarmTransports = packagesForTransports(
         context,
         wrapperWarmRepository,
@@ -167,27 +188,34 @@ for (const stage of STAGES) {
         entrypoint: 'wrapper',
         packageValue: wrapperWarmTransports.packageA,
         repository: wrapperWarmRepository,
+        trace: wrapperWarmTrace,
       });
       const wrapperWarm = invokeReadOnly(context, {
         command: commandB,
         entrypoint: 'seam',
         repository: wrapperWarmRepository,
         seamCommand: wrapperWarmTransports.seamB,
+        trace: wrapperWarmTrace,
       });
 
-      const seamWarmRepository = createInstrumentedEligibilityRepository(context);
+      const seamWarmTrace = createEvidenceTrace();
+      const seamWarmRepository = createInstrumentedEligibilityRepository(context, {
+        evidenceRecorder: seamWarmTrace.record,
+      });
       const seamWarmTransports = packagesForTransports(context, seamWarmRepository, commandA, commandB);
       invokeReadOnly(context, {
         command: commandB,
         entrypoint: 'seam',
         repository: seamWarmRepository,
         seamCommand: seamWarmTransports.seamB,
+        trace: seamWarmTrace,
       });
       const seamWarm = invokeReadOnly(context, {
         command: commandA,
         entrypoint: 'seam',
         repository: seamWarmRepository,
         seamCommand: seamWarmTransports.seamA,
+        trace: seamWarmTrace,
       });
       assert.deepEqual(wrapperWarm, cold);
       assert.deepEqual(seamWarm, cold);
@@ -202,6 +230,10 @@ for (const stage of STAGES) {
     test(`PR9B ${stage} ${order} mismatches are read-only and do not leak`, () => {
       const context = createPostingDenialStageFixture(stage);
       try {
+        const trace = createEvidenceTrace();
+        const repository = createInstrumentedEligibilityRepository(context, {
+          evidenceRecorder: trace.record,
+        });
         const validCommand = postingCommand(context);
         const validFingerprint = normalizedPostingCommandEvidence(validCommand).fingerprint;
         const mismatchCommand = postingCommand(context, context.event, {
@@ -210,7 +242,7 @@ for (const stage of STAGES) {
         const mismatchFingerprint = normalizedPostingCommandEvidence(mismatchCommand).fingerprint;
         assert.notEqual(mismatchFingerprint, validFingerprint);
         const conflict = context.db.prepare('SELECT * FROM canonical_receivable_posting_conflicts').get();
-        const hostilePackage = context.repository.__testBuildPostingDenialPackage({
+        const hostilePackage = repository.__testBuildPostingDenialPackage({
           deniedAttemptedAt: new Date(Date.parse(conflict.deniedAttemptedAt) + 1).toISOString(),
           seamCommand: context.seamCommand,
         });
@@ -222,7 +254,7 @@ for (const stage of STAGES) {
         const hostileWrapper = () => {
           const before = totalChanges(context.db);
           assert.throws(
-            () => context.repository.persistDenialEvidence(hostilePackage),
+            () => repository.persistDenialEvidence(hostilePackage),
             error => error.code === 'CANONICAL_DENIAL_ATTEMPT_ID_COLLISION',
           );
           assert.equal(totalChanges(context.db) - before, 0);
@@ -230,7 +262,8 @@ for (const stage of STAGES) {
         };
         const mismatchedSeam = () => {
           const before = totalChanges(context.db);
-          const result = context.repository.orchestratePostingDenial(mismatchSeam);
+          trace.reset();
+          const result = repository.orchestratePostingDenial(mismatchSeam);
           assert.equal(result.outcome, 'CANONICAL_POSTING_ASSERTION_MISMATCH');
           assert.equal(result.classification, 'ASSERTION_MISMATCH');
           assert.equal(result.normalizedFingerprint, mismatchFingerprint);
@@ -243,12 +276,10 @@ for (const stage of STAGES) {
           }]);
           assert.equal(totalChanges(context.db) - before, 0);
           assert.equal(postingGraphSnapshot(context.db), graphBefore);
-          assert.notEqual(
-            postingEvidenceReadDigest(context, mismatchCommand, result),
-            postingEvidenceReadDigest(context, validCommand, {
-              classification: expectedSeam(stage).classification,
-            }),
-          );
+          assert.equal(trace.entries.some(entry => (
+            entry.phase === 'posting_assertion_comparison'
+            && entry.mismatches?.some(mismatch => mismatch.field === 'assertedEventHash')
+          )), true);
         };
         if (order === 'wrapper-first') {
           hostileWrapper();
@@ -257,12 +288,12 @@ for (const stage of STAGES) {
           mismatchedSeam();
           hostileWrapper();
         }
-        const validSeam = context.repository.orchestratePostingDenial(context.seamCommand);
+        const validSeam = repository.orchestratePostingDenial(context.seamCommand);
         assert.deepEqual(
           { classification: validSeam.classification, outcome: validSeam.outcome },
           expectedSeam(stage),
         );
-        const validWrapper = context.repository.persistDenialEvidence(context.packageValue);
+        const validWrapper = repository.persistDenialEvidence(context.packageValue);
         assert.equal(validWrapper.replayed, true);
         assert.equal(postingGraphSnapshot(context.db), graphBefore);
       } finally {

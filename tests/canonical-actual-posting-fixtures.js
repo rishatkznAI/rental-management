@@ -1,6 +1,4 @@
-import fs from 'node:fs';
-import Module, { createRequire } from 'node:module';
-import path from 'node:path';
+import { createRequire } from 'node:module';
 import {
   SOURCE_CAPABILITIES,
   conductPlan,
@@ -698,6 +696,95 @@ export function createPr9bContext(options = {}) {
   };
 }
 
+export function createPostingRepositoryForTest(context, dependencies = {}) {
+  return createCanonicalActualPostingRepository(
+    context.db,
+    context.runtimeContract,
+    dependencies,
+  );
+}
+
+export function createEvidenceTrace() {
+  const entries = [];
+  return Object.freeze({
+    digest() {
+      const entryDigests = entries.map((entry, index) => ({
+        digest: computeCanonicalEvidenceReadDigest([entry]),
+        index,
+      }));
+      return computeCanonicalEvidenceReadDigest(entryDigests);
+    },
+    entries,
+    record(entry) {
+      entries.push(entry);
+    },
+    reset() {
+      entries.length = 0;
+    },
+    snapshot() {
+      return JSON.parse(canonicalJson(entries));
+    },
+  });
+}
+
+export function mutateProtectedRow(db, table, setClause, parameters = []) {
+  const triggers = db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND tbl_name = ? AND sql IS NOT NULL
+    ORDER BY name
+  `).all(table);
+  for (const trigger of triggers) db.exec(`DROP TRIGGER "${trigger.name}"`);
+  const previousIgnoreChecks = Number(db.pragma('ignore_check_constraints', { simple: true }));
+  db.pragma('ignore_check_constraints = ON');
+  try {
+    db.prepare(`UPDATE "${table}" SET ${setClause}`).run(...parameters);
+  } finally {
+    db.pragma(`ignore_check_constraints = ${previousIgnoreChecks ? 'ON' : 'OFF'}`);
+    for (const trigger of triggers) db.exec(trigger.sql);
+  }
+}
+
+export function insertProtectedRow(db, table, row) {
+  const triggers = db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND tbl_name = ? AND sql IS NOT NULL
+    ORDER BY name
+  `).all(table);
+  for (const trigger of triggers) db.exec(`DROP TRIGGER "${trigger.name}"`);
+  const previousIgnoreChecks = Number(db.pragma('ignore_check_constraints', { simple: true }));
+  const previousForeignKeys = Number(db.pragma('foreign_keys', { simple: true }));
+  db.pragma('ignore_check_constraints = ON');
+  db.pragma('foreign_keys = OFF');
+  try {
+    const columns = Object.keys(row);
+    db.prepare(`
+      INSERT INTO "${table}" (${columns.map(column => `"${column}"`).join(', ')})
+      VALUES (${columns.map(() => '?').join(', ')})
+    `).run(...columns.map(column => row[column]));
+  } finally {
+    db.pragma(`foreign_keys = ${previousForeignKeys ? 'ON' : 'OFF'}`);
+    db.pragma(`ignore_check_constraints = ${previousIgnoreChecks ? 'ON' : 'OFF'}`);
+    for (const trigger of triggers) db.exec(trigger.sql);
+  }
+}
+
+export function deleteProtectedRows(db, table, whereClause, parameters = []) {
+  const triggers = db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND tbl_name = ? AND sql IS NOT NULL
+    ORDER BY name
+  `).all(table);
+  for (const trigger of triggers) db.exec(`DROP TRIGGER "${trigger.name}"`);
+  const previousForeignKeys = Number(db.pragma('foreign_keys', { simple: true }));
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.prepare(`DELETE FROM "${table}" WHERE ${whereClause}`).run(...parameters);
+  } finally {
+    db.pragma(`foreign_keys = ${previousForeignKeys ? 'ON' : 'OFF'}`);
+    for (const trigger of triggers) db.exec(trigger.sql);
+  }
+}
+
 export function mutatePr8CandidateForPostingConflict(context, value = 'pr9b-conflict-v2') {
   const trigger = context.db.prepare(`
     SELECT name, sql FROM sqlite_master
@@ -752,67 +839,12 @@ export function postingGraphSnapshot(db) {
   return canonicalJson(graph);
 }
 
-export function postingEvidenceReadSet(context, commandInput, outcome) {
-  const command = normalizeCanonicalPostingCommand(commandInput);
-  const event = context.db.prepare(`
-    SELECT * FROM actual_receivable_eligible_events
-    WHERE id = ? AND companyId = ? AND branchId = ?
-  `).get(command.eventId, command.companyId, command.branchId) || null;
-  const conflicts = context.db.prepare(`
-    SELECT id, transitionId, conflictHash, conflictType, denialAttemptId,
-           eventId, economicLineageKey, writeAuthorizationRecordId,
-           acceptedDryRunsHash, acceptedPr8EvidenceHash, sourceLineageHash
-    FROM canonical_receivable_posting_conflicts
-    WHERE companyId = ? AND branchId = ?
-      AND (eventId = ? OR economicLineageKey = ?)
-    ORDER BY id
-  `).all(command.companyId, command.branchId, command.eventId, event?.economicLineageKey ?? '');
-  const transitions = conflicts.map(conflict => context.db.prepare(`
-    SELECT transitionId, conflictId, conflictHash, denialAttemptId, state,
-           attemptApplied, rateApplied, circuitApplied, intentHash
-    FROM canonical_receivable_posting_conflict_transitions WHERE transitionId = ?
-  `).get(conflict.transitionId));
-  const operations = context.db.prepare(`
-    SELECT id, eventId, eventHash, economicLineageKey, commandFingerprint,
-           canonicalReceivableId, financialAuditEventId, resultHash
-    FROM canonical_receivable_posting_operations
-    WHERE companyId = ? AND branchId = ?
-      AND (eventId = ? OR economicLineageKey = ?)
-    ORDER BY id
-  `).all(command.companyId, command.branchId, command.eventId, event?.economicLineageKey ?? '');
-  const activation = event ? context.db.prepare(`
-    SELECT recordId, recordHash, acceptedDryRunsHash, acceptedPr8EvidenceHash,
-           dueDatePolicySetHash, postingAdapterAuthorityRecordHash
-    FROM canonical_posting_activation_records WHERE recordId = ?
-  `).get(event.activationRecordId) : null;
-  const authorization = event ? context.db.prepare(`
-    SELECT recordId, recordHash, acceptedDryRunsHash, acceptedPr8EvidenceHash,
-           dueDatePolicySetHash, sourceOwnershipManifestHash
-    FROM canonical_write_authorization_records WHERE recordId = ?
-  `).get(event.writeAuthorizationRecordId) : null;
-  return Object.freeze({
-    activation,
-    authorization,
-    classification: outcome.classification,
-    command,
-    conflicts,
-    event: event ? {
-      id: event.id,
-      eventHash: event.eventHash,
-      economicLineageKey: event.economicLineageKey,
-      acceptedDryRunsHash: event.acceptedDryRunsHash,
-      acceptedPr8EvidenceHash: event.acceptedPr8EvidenceHash,
-      sourceLineageHash: event.sourceLineageHash,
-      writeAuthorizationRecordId: event.writeAuthorizationRecordId,
-      activationRecordId: event.activationRecordId,
-    } : null,
-    operations,
-    transitions,
-  });
+export function postingEvidenceReadSet(trace) {
+  return trace.snapshot();
 }
 
-export function postingEvidenceReadDigest(context, commandInput, outcome) {
-  return computeCanonicalEvidenceReadDigest(postingEvidenceReadSet(context, commandInput, outcome));
+export function postingEvidenceReadDigest(trace) {
+  return trace.digest();
 }
 
 export function normalizedPostingCommandEvidence(commandInput) {
@@ -823,47 +855,14 @@ export function normalizedPostingCommandEvidence(commandInput) {
   });
 }
 
-export function createInstrumentedEligibilityRepository(context) {
-  const repositoryPath = path.resolve('server/lib/canonical-actual-eligibility-event-repository.js');
-  const marker = `  return Object.freeze({\n    orchestratePostingDenial,`;
-  const source = fs.readFileSync(repositoryPath, 'utf8');
-  if (!source.includes(marker)) throw new Error('PR9B test instrumentation marker not found');
-  const instrumented = source.replace(marker, `  function __testBuildPostingDenialPackage(input) {
-    const seamCommand = assertPostingDenialSeamCommand(input.seamCommand);
-    const deniedAttemptedAt = input.deniedAttemptedAt;
-    const milliseconds = parseUtcMilliseconds(deniedAttemptedAt);
-    beginImmediate(db);
-    try {
-      const eventRaw = db.prepare(\`SELECT * FROM \${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
-        WHERE id = ? AND companyId = ? AND branchId = ?\`).get(
-        seamCommand.postingCommand.eventId,
-        seamCommand.postingCommand.companyId,
-        seamCommand.postingCommand.branchId,
-      );
-      const event = validateEligibleEventRecord(normalizeEventRow(eventRaw));
-      const denial = reconstructPostingDenial(seamCommand, event, {
-        milliseconds,
-        timestamp: deniedAttemptedAt,
-      });
-      rollbackQuietly(db);
-      if (!denial) throw new Error('PR9B test fixture requires a current denial');
-      return denial.packageValue;
-    } catch (error) {
-      rollbackQuietly(db);
-      throw error;
-    }
-  }
-
-  return Object.freeze({
-    __testBuildPostingDenialPackage,
-    orchestratePostingDenial,`);
-  const loaded = new Module(repositoryPath);
-  loaded.filename = repositoryPath;
-  loaded.paths = Module._nodeModulePaths(path.dirname(repositoryPath));
-  loaded._compile(instrumented, repositoryPath);
-  return loaded.exports.createCanonicalActualEligibilityEventRepository(
+export function createInstrumentedEligibilityRepository(context, dependencies = {}) {
+  return createCanonicalActualEligibilityEventRepository(
     context.db,
     context.runtimeContract,
+    {
+      ...dependencies,
+      testOnlyBuildPostingDenialPackage: true,
+    },
   );
 }
 

@@ -1993,6 +1993,55 @@ export interface ReceivablesResponse {
   summary: ReceivablesSummary;
 }
 
+export type CanonicalActualPostingReadiness = 'ready' | 'already_created' | 'runtime_disabled';
+
+export interface CanonicalActualPostingPreviewItem {
+  eventId: string;
+  companyId: string;
+  branchId: string;
+  branch: string;
+  clientId: string;
+  client: string;
+  contractId: string | null;
+  rentalId: string;
+  sourceDocumentId: string;
+  periodId: string;
+  periodStartDate: string;
+  periodEndDateExclusive: string;
+  amount: number;
+  currency: string;
+  basis: string;
+  dueDate: string | null;
+  readiness: CanonicalActualPostingReadiness;
+  canPost: boolean;
+  disabledReason: string | null;
+  replayed: boolean;
+  receivableId: string | null;
+  operationId: string | null;
+  preparedAt: string;
+}
+
+export interface CanonicalActualPostingPreviewResponse {
+  ok: true;
+  runtime: {
+    enabled: boolean;
+    message: string | null;
+  };
+  items: CanonicalActualPostingPreviewItem[];
+  requestId: string;
+}
+
+export interface CanonicalActualPostingResult {
+  ok: true;
+  status: 'created' | 'already_created';
+  replayed: boolean;
+  receivableId: string;
+  operationId: string;
+  amount: number;
+  currency: string;
+  requestId: string;
+}
+
 export interface ManagerBreakdownPayment {
   id: string;
   invoiceNumber: string;

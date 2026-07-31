@@ -161,6 +161,9 @@ const { registerTasksCenterRoutes } = require('./routes/tasks-center');
 const { registerCanonicalReceivablesReadRoutes } = require('./routes/canonical-receivables-read');
 const { registerForecastReceivablesReadRoutes } = require('./routes/forecast-receivables-read');
 const {
+  registerCanonicalActualPostingProductRoutes,
+} = require('./routes/canonical-actual-posting-product');
+const {
   registerCanonicalActualPostingRuntimeRoutes,
 } = require('./routes/canonical-actual-posting-runtime');
 const {
@@ -1343,6 +1346,16 @@ registerForecastReceivablesReadRoutes(apiRouter, {
 registerCanonicalActualPostingRuntimeRoutes(apiRouter, {
   ...canonicalActualPostingRuntimeConfig,
   db: canonicalActualPostingRuntimeConfig.enabled ? ensureDb() : null,
+  logger: console,
+});
+
+registerCanonicalActualPostingProductRoutes(apiRouter, {
+  db: ensureDb(),
+  runtimeConfig: canonicalActualPostingRuntimeConfig,
+  requireAuth,
+  requireFinanceWrite: requireWrite('finance_operations'),
+  readUsers: () => readData('users') || [],
+  readClients: () => readData('clients') || [],
   logger: console,
 });
 

@@ -4,6 +4,8 @@ import type {
   FinanceEconomicsResponse,
   FinanceOperation,
   CashFlowResponse,
+  CanonicalActualPostingPreviewResponse,
+  CanonicalActualPostingResult,
   CompanyTaxSettings,
   DepreciationResponse,
   ManagerBreakdownResponse,
@@ -112,6 +114,13 @@ export const financeService = {
     const suffix = params.toString() ? `?${params.toString()}` : '';
     return api.get<ReceivablesResponse>(`/api/finance/receivables${suffix}`);
   },
+  getCanonicalActualPostingEvents: (): Promise<CanonicalActualPostingPreviewResponse> =>
+    api.get<CanonicalActualPostingPreviewResponse>('/api/canonical-receivables/actual-posting/events'),
+  postCanonicalActualPostingEvent: (eventId: string): Promise<CanonicalActualPostingResult> =>
+    api.post<CanonicalActualPostingResult>(
+      `/api/canonical-receivables/actual-posting/events/${encodeURIComponent(eventId)}`,
+      {},
+    ),
   createReceivableAction: (
     data: Omit<ReceivableCollectionAction, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<ReceivableCollectionAction> =>

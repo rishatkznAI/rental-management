@@ -30,6 +30,7 @@ const pr9bDesignBase = pr9aAuthorizedHead;
 const pr9bDesignHead = 'fe26d1a6f40e93112da3c54bd843d854f40f37fe';
 const pr9bDesignTree = 'c5452561e9268dfc12581f55c492f9a2616e733f';
 const pr9bImplementationHead = '2ae448451d60fe8cd05c4025038b707bdfaedce3';
+const pr9cRuntimeHead = '182890a2db379472b53a755db6fc7db3f80638dd';
 const pr9bDesignRemediationAllowedFiles = new Set([
   'docs/canonical-actual-posting-pr9b-design.md',
   'docs/pr9b-implementation-authorization-gate.md',
@@ -108,9 +109,13 @@ test('merged PR9b implementation remains inside the exact authorized 11-file sco
   );
 });
 
-test('current PR9C runtime activation remains inside its exact minimal scope', () => {
-  const changed = new Set(gitLines(['diff', '--name-only', pr9bImplementationHead]));
-  for (const file of gitLines(['ls-files', '--others', '--exclude-standard'])) changed.add(file);
+test('merged PR9C runtime activation remains inside its exact minimal scope', () => {
+  const changed = new Set(gitLines([
+    'diff',
+    '--name-only',
+    pr9bImplementationHead,
+    pr9cRuntimeHead,
+  ]));
   const outside = [...changed].filter(file => !pr9cRuntimeAllowedFiles.has(file));
   assert.deepEqual(outside, []);
   assert.deepEqual([...changed].sort(), [...pr9cRuntimeAllowedFiles].sort());

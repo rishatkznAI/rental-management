@@ -24,6 +24,7 @@ import type {
   ReceivablePaymentPlanItem,
   ReceivableRow,
 } from '../../types';
+import { CanonicalActualPostingPanel } from './CanonicalActualPostingPanel';
 
 const QUERY_KEY = ['finance', 'receivables'] as const;
 
@@ -461,6 +462,8 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
 
   return (
     <div className="space-y-4">
+      <CanonicalActualPostingPanel canManageFinance={canManageFinance} />
+
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <KpiCard title="Общий долг" value={formatCurrency(summary?.totalDebt || 0)} />
         <KpiCard title="Просрочено" value={formatCurrency(summary?.overdueDebt || 0)} />

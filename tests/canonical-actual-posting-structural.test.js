@@ -135,7 +135,7 @@ test('PR9B remediation preserves storage, authoritative verification, and C7 loc
   const posting = read('server/lib/canonical-actual-posting-repository.js');
   const eligibility = read('server/lib/canonical-actual-eligibility-event-repository.js');
   assert.match(posting, /BEGIN IMMEDIATE[\s\S]*assertPostingStoragePreflight\(command, 'algorithm_b_initial'\)[\s\S]*const clock = readClock\(\)/);
-  assert.match(posting, /beforeFinalStoragePreflight[\s\S]*assertPostingStoragePreflight\(command, 'algorithm_b_final_pre_dml'\)[\s\S]*createPrimaryTriplet/);
+  assert.match(posting, /generateAndAssertUnusedPrimaryIds\(\);[\s\S]*assertPostingStoragePreflight\(command, 'algorithm_b_final_pre_dml'\)[\s\S]*createPrimaryTriplet/);
   assert.match(posting, /verifyPostingAdmission\(command, event, clock\)/);
   assert.match(posting, /verifyCanonicalPrimaryTriplet\(\{/);
   assert.match(eligibility, /verifyCanonicalPrimaryTriplet\(\{/);
@@ -174,9 +174,17 @@ test('P2-01 instrumentation records in-flight reads without post-hoc fixture SQL
   assert.match(evidenceHelper, /trace\.snapshot\(\)/);
   const postingRecorder = posting.slice(
     posting.indexOf('  function recordEvidence'),
-    posting.indexOf('  function invokeHook'),
+    posting.indexOf('  function readClock'),
   );
   assert.doesNotMatch(postingRecorder, /\b(?:INSERT|UPDATE|DELETE)\b|db\.prepare|db\.exec/);
+});
+
+test('PR9B production repositories expose no hook dependency or invocation capability', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const eligibility = read('server/lib/canonical-actual-eligibility-event-repository.js');
+  for (const source of [posting, eligibility]) {
+    assert.doesNotMatch(source, /\bhooks?\b|invokeHook|beforePairCommit|afterPairCommit|beforeRecoveryStageCommit|afterRecoveryStageCommit|beforeSeamSnapshotRelease|beforePrecommitAntiJoin|beforeFinalStoragePreflight/);
+  }
 });
 
 test('P2-04 clock and UUID dependencies are constructor-owned and absent from caller commands', () => {
@@ -227,19 +235,24 @@ test('PR9B replay qualifier is computed before COMMIT and concurrency proof is e
   assert.doesNotMatch(concurrency, /Promise\.race|assertStillBlocked|setTimeout\(.*100/);
   assert.doesNotMatch(worker, /type:\s*['"]attempting['"]/);
   assert.doesNotMatch(worker, /begin_immediate_attempted/);
-  assert.match(worker, /new Database\(input\.dbPath,[\s\S]{0,300}verbose\(sql\)[\s\S]{0,300}protocolEvent\('sqlite_begin_trace', \{ source: 'better_sqlite3_verbose' \}\)/);
+  assert.match(worker, /new Database\(input\.dbPath,[\s\S]*verbose\(sql\)[\s\S]*BEGIN\\s\+IMMEDIATE\|COMMIT\|ROLLBACK[\s\S]*nativeTransactionTrace\.push/);
   assert.match(worker, /protocolEvent\('pre_sql_boundary_reached'\);[\s\S]{0,300}const result = originalExec\(sql\)/);
   assert.match(concurrency, /function assertWriteTransactionHeld\(/);
-  assert.match(concurrency, /function assertNativeBeginTrace\(/);
+  assert.match(concurrency, /function assertNativeTransactionTrace\(/);
+  assert.match(concurrency, /function assertWorkerResultMessage\(/);
+  assert.match(concurrency, /function observerPostingState\(/);
+  assert.match(concurrency, /resultMessages\.length !== 1/);
   assert.match(concurrency, /await assert\.rejects\(worker\.result, \/code=7\//);
   for (const event of [
     'repository_entrypoint_invoked',
     'pre_sql_boundary_reached',
-    'sqlite_begin_trace',
     'lock_acquired',
     'protected_stage_reached',
     'release_completed',
   ]) assert.match(worker, new RegExp(event));
+  for (const event of ['sqlite_begin_trace', 'sqlite_commit_trace', 'sqlite_rollback_trace']) {
+    assert.match(concurrency, new RegExp(event));
+  }
 });
 
 test('runtime application graph does not import PR9a or PR9b repositories or services', () => {

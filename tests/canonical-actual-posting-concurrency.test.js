@@ -20,6 +20,20 @@ const serverRequire = createRequire(new URL('../server/package.json', import.met
 const Database = serverRequire('better-sqlite3');
 const activeWorkers = new Set();
 
+function assertWorkerResultMessage(message) {
+  assert.equal(message?.type, 'result');
+  assert.equal(Number.isSafeInteger(message.dml), true);
+  assert.equal(Array.isArray(message.transactionTrace), true);
+  assert.equal(
+    message.transactionTrace.every(entry => (
+      entry?.source === 'better_sqlite3_verbose'
+      && ['BEGIN IMMEDIATE', 'COMMIT', 'ROLLBACK'].includes(entry.statement)
+    )),
+    true,
+  );
+  assert.equal(Object.hasOwn(message, 'result') !== Object.hasOwn(message, 'error'), true);
+}
+
 function startWorker(input) {
   const child = fork(workerPath, [], {
     env: {
@@ -70,7 +84,7 @@ function startWorker(input) {
     let exitCode = null;
     let exitSeen = false;
     let exitSignal = null;
-    let resultMessage = null;
+    const resultMessages = [];
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -81,7 +95,7 @@ function startWorker(input) {
     });
     child.on('message', message => {
       if (message?.type === 'result') {
-        resultMessage = message;
+        resultMessages.push(message);
         resultReceived = true;
       }
     });
@@ -102,10 +116,19 @@ function startWorker(input) {
       else if (childError) reject(childError);
       else if (!exitSeen || !closeSeen) reject(new Error(`PR9B worker lifecycle incomplete: ${diagnostic}`));
       else if (!disconnectSeen) reject(new Error(`PR9B worker IPC did not close: ${diagnostic}`));
-      else if (!resultMessage) reject(new Error(`PR9B worker exited without result: ${diagnostic}`));
+      else if (resultMessages.length !== 1) reject(new Error(
+        `PR9B worker emitted ${resultMessages.length} result messages; expected exactly one: ${diagnostic}`,
+      ));
       else if (exitCode !== 0 || exitSignal !== null) reject(new Error(`PR9B worker failed: ${diagnostic}`));
       else if (stderr.length !== 0) reject(new Error(`PR9B worker wrote stderr: ${diagnostic}`));
-      else resolve(resultMessage);
+      else {
+        try {
+          assertWorkerResultMessage(resultMessages[0]);
+          resolve(resultMessages[0]);
+        } catch (error) {
+          reject(error);
+        }
+      }
     });
   });
   worker = {
@@ -136,6 +159,8 @@ function contentionProtocol(directory, prefix) {
     release_completed: path.join(directory, `${prefix}-release-completed`),
     repository_entrypoint_invoked: path.join(directory, `${prefix}-entrypoint-invoked`),
     sqlite_begin_trace: path.join(directory, `${prefix}-sqlite-begin-trace`),
+    sqlite_commit_trace: path.join(directory, `${prefix}-sqlite-commit-trace`),
+    sqlite_rollback_trace: path.join(directory, `${prefix}-sqlite-rollback-trace`),
   };
 }
 
@@ -182,12 +207,36 @@ function assertWriteTransactionHeld(dbPath) {
   assert.match(String(observedError?.code || observedError?.message), /SQLITE_(?:BUSY|LOCKED)|locked/i);
 }
 
-function assertNativeBeginTrace(file) {
+function assertNativeTransactionTrace(file, statement) {
   const event = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.deepEqual(event, {
     source: 'better_sqlite3_verbose',
-    type: 'sqlite_begin_trace',
+    statement,
+    type: `sqlite_${statement.split(/\s+/)[0].toLowerCase()}_trace`,
   });
+}
+
+function observerPostingState(dbPath) {
+  const observer = new Database(dbPath, { fileMustExist: true, readonly: true });
+  try {
+    const count = table => Number(observer.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
+    const transition = observer.prepare(`
+      SELECT transitionId, state AS stage
+      FROM canonical_receivable_posting_conflict_transitions
+      ORDER BY scopeSequence DESC, transitionId DESC
+      LIMIT 1
+    `).get() || null;
+    return {
+      auditCount: count('financial_audit_events'),
+      conflictCount: count('canonical_receivable_posting_conflicts'),
+      operationCount: count('canonical_receivable_posting_operations'),
+      receivableCount: count('canonical_receivables'),
+      transition,
+      transitionCount: count('canonical_receivable_posting_conflict_transitions'),
+    };
+  } finally {
+    observer.close();
+  }
 }
 
 test('PR9B worker result is rejected when the child later exits non-zero', async () => {
@@ -205,6 +254,111 @@ test('PR9B worker result is rejected when the child later exits non-zero', async
       worker.child.send({ type: 'go' });
       await assert.rejects(worker.result, /code=7/);
       assert.equal(worker.hasResult(), true);
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('PR9B worker lifecycle accepts exactly one validated result message', async () => {
+  await withTempDb('worker-exact-one-result', async dbPath => {
+    const context = createPr9bContext({ dbPath });
+    try {
+      const worker = startWorker({
+        command: postingCommand(context),
+        dbPath,
+        duplicateResultMessage: true,
+        entrypoint: 'posting',
+        runtimeContractInput: context.runtimeContractInput,
+      });
+      await worker.ready;
+      worker.child.send({ type: 'go' });
+      await assert.rejects(worker.result, /emitted 2 result messages; expected exactly one/);
+      assert.equal(worker.hasResult(), true);
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('PR9B native COMMIT trace is followed by fresh observer confirmation', async () => {
+  await withTempDb('commit-observer', async dbPath => {
+    const context = createPr9bContext({ dbPath });
+    try {
+      const reachedPath = path.join(path.dirname(dbPath), 'commit-observer-reached');
+      const releasePath = path.join(path.dirname(dbPath), 'commit-observer-release');
+      const protocolPaths = contentionProtocol(path.dirname(dbPath), 'commit-observer');
+      const worker = startWorker({
+        barriers: { after: { PRIMARY: { reachedPath, releasePath } } },
+        command: postingCommand(context),
+        dbPath,
+        entrypoint: 'posting',
+        protocolPaths,
+        runtimeContractInput: context.runtimeContractInput,
+      });
+      await worker.ready;
+      worker.child.send({ type: 'go' });
+      await waitForFile(reachedPath);
+      await waitForFile(protocolPaths.sqlite_commit_trace);
+      assertNativeTransactionTrace(protocolPaths.sqlite_commit_trace, 'COMMIT');
+      assert.deepEqual(observerPostingState(dbPath), {
+        auditCount: 1,
+        conflictCount: 0,
+        operationCount: 1,
+        receivableCount: 1,
+        transition: null,
+        transitionCount: 0,
+      });
+      fs.writeFileSync(releasePath, 'release');
+      const result = await worker.result;
+      assert.equal(result.error, undefined);
+      assert.equal(result.dml, 3);
+      assert.deepEqual(result.transactionTrace, [
+        { source: 'better_sqlite3_verbose', statement: 'BEGIN IMMEDIATE' },
+        { source: 'better_sqlite3_verbose', statement: 'COMMIT' },
+      ]);
+    } finally {
+      context.db.close();
+    }
+  });
+});
+
+test('PR9B native Algorithm B ROLLBACK trace is followed by fresh observer confirmation', async () => {
+  await withTempDb('rollback-observer', async dbPath => {
+    const context = createPr9bContext({ dbPath });
+    try {
+      mutatePr8CandidateForPostingConflict(context);
+      const reachedPath = path.join(path.dirname(dbPath), 'rollback-observer-reached');
+      const releasePath = path.join(path.dirname(dbPath), 'rollback-observer-release');
+      const protocolPaths = contentionProtocol(path.dirname(dbPath), 'rollback-observer');
+      const worker = startWorker({
+        barriers: { rollback: { ALGORITHM_B: { reachedPath, releasePath } } },
+        clockMs: Date.parse(context.event.createdAt),
+        command: { postingCommand: postingCommand(context) },
+        dbPath,
+        entrypoint: 'wrapper',
+        protocolPaths,
+        runtimeContractInput: context.runtimeContractInput,
+      });
+      await worker.ready;
+      worker.child.send({ type: 'go' });
+      await waitForFile(reachedPath);
+      await waitForFile(protocolPaths.sqlite_rollback_trace);
+      assertNativeTransactionTrace(protocolPaths.sqlite_rollback_trace, 'ROLLBACK');
+      assert.deepEqual(observerPostingState(dbPath), {
+        auditCount: 0,
+        conflictCount: 0,
+        operationCount: 0,
+        receivableCount: 0,
+        transition: null,
+        transitionCount: 0,
+      });
+      fs.writeFileSync(releasePath, 'release');
+      const result = await worker.result;
+      assert.equal(result.error, undefined);
+      assert.equal(result.result.outcome, 'DENIAL_PERSISTED');
+      assert.equal(result.transactionTrace.some(entry => entry.statement === 'ROLLBACK'), true);
+      assert.equal(result.transactionTrace.some(entry => entry.statement === 'COMMIT'), true);
     } finally {
       context.db.close();
     }
@@ -359,7 +513,7 @@ for (const stage of ['PENDING', 'ACCOUNTED', 'CIRCUIT_APPLIED', 'COMPLETE']) {
 
           fs.writeFileSync(nativeBeginReleasePath, 'enter sqlite');
           await waitForFile(protocolPaths.sqlite_begin_trace);
-          assertNativeBeginTrace(protocolPaths.sqlite_begin_trace);
+          assertNativeTransactionTrace(protocolPaths.sqlite_begin_trace, 'BEGIN IMMEDIATE');
           assert.equal(fs.existsSync(protocolPaths.lock_acquired), false);
           assert.equal(follower.hasResult(), false);
           assertWriteTransactionHeld(dbPath);
@@ -496,7 +650,7 @@ for (const stage of ['PENDING', 'ACCOUNTED', 'CIRCUIT_APPLIED', 'COMPLETE']) {
 
       fs.writeFileSync(nativeBeginReleasePath, 'enter sqlite');
       await waitForFile(protocolPaths.sqlite_begin_trace);
-      assertNativeBeginTrace(protocolPaths.sqlite_begin_trace);
+      assertNativeTransactionTrace(protocolPaths.sqlite_begin_trace, 'BEGIN IMMEDIATE');
       assert.equal(fs.existsSync(protocolPaths.lock_acquired), false);
       assert.equal(reconciler.hasResult(), false);
       assertWriteTransactionHeld(dbPath);

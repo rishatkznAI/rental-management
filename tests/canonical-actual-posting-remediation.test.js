@@ -142,8 +142,17 @@ function rawColumn(entries, table, column) {
   for (const entry of entries) {
     if (entry.phase !== 'sqlite_raw_read' || entry.table !== table) continue;
     for (const row of entry.rows) {
-      const found = row.columns.find(candidate => candidate.column === column);
-      if (found) return found;
+      const index = entry.columns.findIndex(candidate => (
+        candidate.column === column || candidate.name === column
+      ));
+      if (index !== -1) {
+        return {
+          ...entry.columns[index],
+          rawDigest: row.rowDigest,
+          storageClass: row.storageClasses[index],
+          storageClassProof: entry.storageClassProof,
+        };
+      }
     }
   }
   return null;
@@ -158,6 +167,18 @@ test('PR9B denial-package capability is absent from constructor, repository, and
         context.runtimeContract,
         { testOnlyBuildPostingDenialPackage: true },
       ),
+      error => error.code === 'CANONICAL_ENVELOPE_INVALID',
+    );
+    assert.throws(
+      () => eligibilityModule.createCanonicalActualEligibilityEventRepository(
+        context.db,
+        context.runtimeContract,
+        { hooks: {} },
+      ),
+      error => error.code === 'CANONICAL_ENVELOPE_INVALID',
+    );
+    assert.throws(
+      () => createPostingRepositoryForTest(context, { hooks: {} }),
       error => error.code === 'CANONICAL_ENVELOPE_INVALID',
     );
     const repository = createInstrumentedEligibilityRepository(context);
@@ -357,6 +378,7 @@ function traceAttempt(mutate) {
         throw new Error('stop after authoritative reads');
       },
     });
+    trace.reset();
     let result = null;
     let error = null;
     try {
@@ -386,6 +408,66 @@ test('PR9B recorder captures successful authority reads at the raw DB boundary',
   assert.deepEqual(attempt.primary, ZERO_PRIMARY);
 });
 
+test('PR9B recorder boundary precedes the first constructor DB read and retains read order', () => {
+  const context = createPr9bContext();
+  const counter = instrumentSqliteReadCount(context.db);
+  let duplicateStatementRetained = false;
+  let rawReadCount = 0;
+  let rowOrderExact = true;
+  const statementCounts = new Map();
+  try {
+    createPostingRepositoryForTest(context, {
+      evidenceRecorder(entry) {
+        if (entry.phase !== 'sqlite_raw_read') return;
+        rawReadCount += 1;
+        rowOrderExact &&= entry.rows.every((row, index) => row.rowIndex === index);
+        const count = (statementCounts.get(entry.statementDigest) || 0) + 1;
+        statementCounts.set(entry.statementDigest, count);
+        if (count > 1) duplicateStatementRetained = true;
+        assert.equal(entry.readIndex, rawReadCount - 1);
+      },
+    });
+    assert.equal(rawReadCount, counter.count());
+    assert.equal(rawReadCount > 0, true);
+    assert.equal(rowOrderExact, true);
+    assert.equal(duplicateStatementRetained, true);
+  } finally {
+    counter.restore();
+    context.db.close();
+  }
+});
+
+test('PR9B zero-row raw read retains exact result-column metadata', () => {
+  const context = createPr9bContext();
+  let armed = false;
+  let zeroRowRead = null;
+  try {
+    const repository = createPostingRepositoryForTest(context, {
+      evidenceRecorder(entry) {
+        if (
+          armed
+          && entry.phase === 'sqlite_raw_read'
+          && entry.table === 'actual_receivable_eligible_events'
+          && entry.method === 'get'
+          && entry.rowCount === 0
+        ) zeroRowRead = entry;
+      },
+    });
+    armed = true;
+    const result = repository.post(postingCommand(context, context.event, {
+      eventId: '43000000-0000-4000-8000-000000000001',
+    }));
+    assert.equal(result.outcome, 'CANONICAL_POSTING_EVENT_NOT_FOUND');
+    assert.deepEqual(zeroRowRead?.rows, []);
+    assert.equal(zeroRowRead?.columns.length > 0, true);
+    assert.equal(zeroRowRead?.columns[0].index, 0);
+    assert.equal(zeroRowRead?.columns.some(column => column.name === 'id'), true);
+    assert.equal(zeroRowRead?.storageClassProof, 'better_sqlite3_raw_safe_integers.v1');
+  } finally {
+    context.db.close();
+  }
+});
+
 test('PR9B recorder captures a corrupt actual event before event validation fails', () => {
   const context = createPr9bContext();
   const trace = createEvidenceTrace();
@@ -399,6 +481,7 @@ test('PR9B recorder captures a corrupt actual event before event validation fail
       clock: () => Date.parse(context.event.createdAt),
       evidenceRecorder: trace.record,
     });
+    trace.reset();
     assert.throws(
       () => repository.orchestratePostingDenial({
         assertedDenialCause: 'PR8_EVIDENCE_MISMATCH',
@@ -480,17 +563,23 @@ test('PR9B raw recorder covers SQLite storage classes and malformed JSON determi
   );
   const repeatedBaselineHashes = baselineA.entries.flatMap(entry => (
     entry.phase === 'sqlite_raw_read' && entry.table === 'canonical_write_authorization_records'
-      ? entry.rows.flatMap(row => row.columns
-        .filter(column => column.column === 'acceptedPr8EvidenceHash')
-        .map(column => column.rawDigest))
+      ? entry.rows.flatMap(row => {
+        const index = entry.columns.findIndex(column => (
+          column.column === 'acceptedPr8EvidenceHash'
+        ));
+        return index === -1 ? [] : [row.rowDigest];
+      })
       : []
   ));
   assert.equal(baselineHashA.storageClass, 'text');
-  assert.equal(rawColumn(
+  assert.equal(baselineHashA.storageClassProof, 'better_sqlite3_raw_safe_integers.v1');
+  const integerColumn = rawColumn(
     baselineA.entries,
     'canonical_write_authorization_records',
     'authorizationVersion',
-  ).storageClass, 'integer');
+  );
+  assert.equal(integerColumn.storageClass, 'integer');
+  assert.equal(integerColumn.storageClassProof, 'better_sqlite3_raw_safe_integers.v1');
   assert.equal(rawColumn(
     baselineA.entries,
     'canonical_write_authorization_records',
@@ -501,11 +590,13 @@ test('PR9B raw recorder covers SQLite storage classes and malformed JSON determi
     'canonical_write_authorization_records',
     'acceptedPr8EvidenceHash',
   ).storageClass, 'blob');
-  assert.equal(rawColumn(
+  const realColumn = rawColumn(
     real.entries,
     'canonical_write_authorization_records',
     'authorizationVersion',
-  ).storageClass, 'real');
+  );
+  assert.equal(realColumn.storageClass, 'real');
+  assert.equal(realColumn.storageClassProof, 'better_sqlite3_raw_safe_integers.v1');
   assert.equal(rawColumn(
     malformedJson.entries,
     'canonical_write_authorization_records',
@@ -665,6 +756,7 @@ test('PR9B recorder captures durable classification rows before corrupt replay c
       "resultHash = '0000000000000000000000000000000000000000000000000000000000000000'",
     );
     const repository = createPostingRepositoryForTest(context, { evidenceRecorder: trace.record });
+    trace.reset();
     const result = repository.post(command);
     assert.equal(result.outcome, 'PRIMARY_RESULT_INTEGRITY_BLOCKED');
     assert.equal(trace.entries.some(entry => (

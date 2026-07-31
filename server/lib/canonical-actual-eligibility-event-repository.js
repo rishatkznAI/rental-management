@@ -445,7 +445,7 @@ function safeSqliteValue(value) {
     const rendered = Object.is(value, -0) ? '-0' : String(value);
     bytes = Buffer.from(rendered, 'ascii');
     safeScalar = rendered;
-    storageClass = Number.isInteger(value) ? 'integer' : 'real';
+    storageClass = 'real';
   } else {
     const rendered = Object.prototype.toString.call(value);
     bytes = Buffer.from(rendered, 'utf8');
@@ -460,29 +460,43 @@ function safeSqliteValue(value) {
   });
 }
 
-function safeSqliteRow(row) {
-  let entries;
-  if (Array.isArray(row)) {
-    entries = row.map((value, index) => [String(index), value]);
-  } else if (row !== null && typeof row === 'object' && !Buffer.isBuffer(row)) {
-    entries = Object.keys(row).map(column => [column, row[column]]);
-  } else {
-    entries = [['$value', row]];
-  }
-  const columns = entries.map(([column, value], index) => Object.freeze({
-    column,
+function safeSqliteColumn(column, index) {
+  return Object.freeze({
+    column: column.column,
+    database: column.database,
+    declaredType: column.type,
     index,
-    ...safeSqliteValue(value),
-  }));
-  const identity = columns
-    .filter(column => ['id', 'recordId', 'transitionId'].includes(column.column))
-    .map(column => Object.freeze({
-      column: column.column,
-      rawDigest: column.rawDigest,
-      safeScalar: column.safeScalar,
-      storageClass: column.storageClass,
+    name: column.name,
+    table: column.table,
+  });
+}
+
+function safeSqliteRow(row, metadata, rowIndex) {
+  const values = row.map(safeSqliteValue);
+  const identity = metadata
+    .map((column, index) => ({ column, index }))
+    .filter(({ column }) => ['id', 'recordId', 'transitionId'].includes(column.name))
+    .map(({ column, index }) => Object.freeze({
+      column: column.name,
+      index,
+      rawDigest: values[index].rawDigest,
+      safeScalar: values[index].safeScalar,
+      storageClass: values[index].storageClass,
     }));
-  return Object.freeze({ columns: Object.freeze(columns), identity: Object.freeze(identity) });
+  const rowDigest = rawDigest(
+    'sqlite_row',
+    Buffer.from(JSON.stringify(values.map(value => [
+      value.byteLength,
+      value.rawDigest,
+      value.storageClass,
+    ])), 'utf8'),
+  );
+  return Object.freeze({
+    identity: Object.freeze(identity),
+    rowDigest,
+    rowIndex,
+    storageClasses: Object.freeze(values.map(value => value.storageClass)),
+  });
 }
 
 function sqliteReadTables(sql) {
@@ -491,34 +505,66 @@ function sqliteReadTables(sql) {
     .map(match => match[1]);
   const pragma = source.match(/\bPRAGMA\s+(?:[a-z_][a-z0-9_]*\.)?(?:table_info|table_xinfo|foreign_key_list)\s*\(\s*(?:"|`|\[)?([a-z_][a-z0-9_]*)/i);
   if (pragma) tables.push(pragma[1]);
-  return Object.freeze([...new Set(tables)]);
+  return Object.freeze(tables);
 }
 
 function createSqliteReadEvidenceBoundary(db, recordEvidence) {
   if (db[SQLITE_READ_EVIDENCE_BOUNDARY]) return db;
-  function recordSqlRead(sql, value, method) {
+  let readIndex = 0;
+  function recordSqlRead(sql, rows, metadata, method) {
     try {
-      const rows = method === 'all' || (method === 'pragma' && Array.isArray(value))
-        ? value
-        : value === undefined ? [] : [value];
       const tables = sqliteReadTables(sql);
-      const evidenceRows = Object.freeze(rows.map(safeSqliteRow));
+      const evidenceRows = Object.freeze(rows.map((row, rowIndex) => (
+        safeSqliteRow(row, metadata, rowIndex)
+      )));
+      const columns = Object.freeze(metadata.map(safeSqliteColumn));
       const statementBytes = Buffer.from(String(sql), 'utf8');
       const statementDigest = rawDigest('sql', statementBytes);
-      for (const table of tables.length > 0 ? tables : [null]) {
-        recordEvidence(Object.freeze({
-          method,
-          phase: 'sqlite_raw_read',
-          rowCount: evidenceRows.length,
-          rows: evidenceRows,
-          statementDigest,
-          table,
-          tables,
-        }));
-      }
+      recordEvidence(Object.freeze({
+        columns,
+        method,
+        phase: 'sqlite_raw_read',
+        readIndex,
+        rowCount: evidenceRows.length,
+        rows: evidenceRows,
+        storageClassProof: 'better_sqlite3_raw_safe_integers.v1',
+        statementDigest,
+        table: tables[0] || null,
+        tables,
+      }));
     } catch {
       // Observational capture must preserve the original SQLite/validation outcome.
+    } finally {
+      readIndex += 1;
     }
+  }
+  function consumerValue(value, safeIntegers) {
+    if (typeof value !== 'bigint' || safeIntegers) return value;
+    return Number(value);
+  }
+  function materializeRow(row, metadata, mode) {
+    const values = row.map(value => consumerValue(value, mode.safeIntegers));
+    if (mode.raw) return values;
+    if (mode.pluck) return values[0];
+    if (mode.expand) {
+      const expanded = {};
+      for (let index = 0; index < metadata.length; index += 1) {
+        const namespace = metadata[index].table || '$';
+        if (!expanded[namespace]) expanded[namespace] = {};
+        expanded[namespace][metadata[index].name] = values[index];
+      }
+      return expanded;
+    }
+    return Object.fromEntries(metadata.map((column, index) => [column.name, values[index]]));
+  }
+  function executeRead(statement, sql, method, args, mode) {
+    const metadata = statement.columns();
+    statement.raw(true).safeIntegers(true);
+    const value = statement[method](...args);
+    const rows = method === 'all' ? value : value === undefined ? [] : [value];
+    recordSqlRead(sql, rows, metadata, method);
+    if (method === 'all') return rows.map(row => materializeRow(row, metadata, mode));
+    return rows.length === 0 ? undefined : materializeRow(rows[0], metadata, mode);
   }
   const proxy = new Proxy(db, {
     get(target, property) {
@@ -526,20 +572,28 @@ function createSqliteReadEvidenceBoundary(db, recordEvidence) {
       if (property === 'prepare') {
         return sql => {
           const statement = target.prepare(sql);
+          const mode = { expand: false, pluck: false, raw: false, safeIntegers: false };
           let statementProxy;
           statementProxy = new Proxy(statement, {
             get(statementTarget, statementProperty) {
               const value = Reflect.get(statementTarget, statementProperty, statementTarget);
               if (statementProperty === 'get' || statementProperty === 'all') {
-                return (...args) => {
-                  const result = value.apply(statementTarget, args);
-                  recordSqlRead(sql, result, statementProperty);
-                  return result;
-                };
+                return (...args) => executeRead(
+                  statementTarget,
+                  sql,
+                  statementProperty,
+                  args,
+                  mode,
+                );
               }
               if (['expand', 'pluck', 'raw', 'safeIntegers'].includes(statementProperty)) {
-                return (...args) => {
-                  value.apply(statementTarget, args);
+                return (enabled = true) => {
+                  mode[statementProperty] = Boolean(enabled);
+                  if (statementProperty !== 'safeIntegers' && enabled) {
+                    for (const candidate of ['expand', 'pluck', 'raw']) {
+                      if (candidate !== statementProperty) mode[candidate] = false;
+                    }
+                  }
                   return statementProxy;
                 };
               }
@@ -550,10 +604,23 @@ function createSqliteReadEvidenceBoundary(db, recordEvidence) {
         };
       }
       if (property === 'pragma') {
-        return (source, ...args) => {
-          const result = target.pragma(source, ...args);
-          if (!String(source).includes('=')) recordSqlRead(`PRAGMA ${source}`, result, 'pragma');
-          return result;
+        return (source, options = undefined) => {
+          if (String(source).includes('=')) {
+            return options === undefined ? target.pragma(source) : target.pragma(source, options);
+          }
+          const sql = `PRAGMA ${source}`;
+          const statement = target.prepare(sql);
+          const metadata = statement.columns();
+          statement.raw(true).safeIntegers(true);
+          const rows = statement.all();
+          recordSqlRead(sql, rows, metadata, 'pragma');
+          const materialized = rows.map(row => materializeRow(row, metadata, {
+            expand: false,
+            pluck: false,
+            raw: false,
+            safeIntegers: false,
+          }));
+          return options?.simple ? materialized[0]?.[metadata[0]?.name] : materialized;
         };
       }
       const value = Reflect.get(target, property, target);
@@ -3994,8 +4061,6 @@ function createCanonicalActualEligibilityEventRepository(
   runtimeContract = DISABLED_CANONICAL_ACTUAL_POSTING_RUNTIME_CONTRACT,
   dependencies = undefined,
 ) {
-  assertCanonicalActualPostingStructure(db);
-  assertCanonicalActualPostingRuntimeContract(runtimeContract);
   if (
     dependencies !== undefined
     && (
@@ -4005,7 +4070,6 @@ function createCanonicalActualEligibilityEventRepository(
       || Object.keys(dependencies).some(key => ![
         'clock',
         'evidenceRecorder',
-        'hooks',
         'uuid',
       ].includes(key))
     )
@@ -4013,14 +4077,10 @@ function createCanonicalActualEligibilityEventRepository(
   const clockDependency = dependencies?.clock || Date.now.bind(Date);
   const uuidDependency = dependencies?.uuid || (() => randomUUID({ disableEntropyCache: true }));
   const evidenceRecorder = dependencies?.evidenceRecorder;
-  const hooks = dependencies?.hooks;
   if (typeof clockDependency !== 'function' || typeof uuidDependency !== 'function') {
     throw repositoryError(ERROR_CODES.ENVELOPE_INVALID);
   }
   if (evidenceRecorder !== undefined && typeof evidenceRecorder !== 'function') {
-    throw repositoryError(ERROR_CODES.ENVELOPE_INVALID);
-  }
-  if (hooks !== undefined && (hooks === null || typeof hooks !== 'object' || Array.isArray(hooks))) {
     throw repositoryError(ERROR_CODES.ENVELOPE_INVALID);
   }
   function recordEvidence(entry) {
@@ -4039,14 +4099,12 @@ function createCanonicalActualEligibilityEventRepository(
       // Raw audit capture is observational and cannot change production precedence.
     }
   }
-  function invokeHook(name, details) {
-    const hook = hooks?.[name];
-    if (typeof hook === 'function') hook(Object.freeze({ ...details }));
-  }
   function readRepositoryClock() {
     return readRepositoryClockFromDependency(clockDependency);
   }
   if (evidenceRecorder) db = createSqliteReadEvidenceBoundary(db, recordRawEvidence);
+  assertCanonicalActualPostingStructure(db);
+  assertCanonicalActualPostingRuntimeContract(runtimeContract);
   const authorityRepository = createCanonicalActualPostingAuthorityRepository(db);
 
   function readEventById(id) {
@@ -4151,15 +4209,7 @@ function createCanonicalActualEligibilityEventRepository(
         } catch {
           throw repositoryError(ERROR_CODES.CONFLICT_TRANSITION_INTEGRITY_FAILED);
         }
-        invokeHook('beforeRecoveryStageCommit', {
-          stage: verifiedAfter.transition.state,
-          transitionId,
-        });
         db.exec('COMMIT');
-        invokeHook('afterRecoveryStageCommit', {
-          stage: verifiedAfter.transition.state,
-          transitionId,
-        });
       } catch (error) {
         rollbackQuietly(db);
         mapAndThrow(error);
@@ -4654,19 +4704,7 @@ function createCanonicalActualEligibilityEventRepository(
       if (disposition.mode === 'BLOCKED_SCOPE') {
         rollbackQuietly(db);
       } else {
-        if (disposition.mode === 'NEW_EVIDENCE_INSERT') {
-          invokeHook('beforePairCommit', {
-            stage: disposition.pair.transition.state,
-            transitionId: disposition.pair.transition.transitionId,
-          });
-        }
         db.exec('COMMIT');
-        if (disposition.mode === 'NEW_EVIDENCE_INSERT') {
-          invokeHook('afterPairCommit', {
-            stage: disposition.pair.transition.state,
-            transitionId: disposition.pair.transition.transitionId,
-          });
-        }
       }
     } catch (error) {
       rollbackQuietly(db);
@@ -5074,10 +5112,6 @@ function createCanonicalActualEligibilityEventRepository(
       }
       if (conflict.mode === 'ONE_CONFLICT') {
         const pair = conflict.pairs[0];
-        invokeHook('beforeSeamSnapshotRelease', {
-          stage: pair.transition.state,
-          transitionId: pair.transition.transitionId,
-        });
         db.exec('COMMIT');
         if (pair.transition.state !== 'COMPLETE') {
           return postingSeamResult('CONFLICT_RECOVERY_REQUIRED', {
@@ -5146,15 +5180,7 @@ function createCanonicalActualEligibilityEventRepository(
         });
       }
       inserted = disposition.pair;
-      invokeHook('beforePairCommit', {
-        stage: inserted.transition.state,
-        transitionId: inserted.transition.transitionId,
-      });
       db.exec('COMMIT');
-      invokeHook('afterPairCommit', {
-        stage: inserted.transition.state,
-        transitionId: inserted.transition.transitionId,
-      });
     } catch (error) {
       rollbackQuietly(db);
       mapAndThrow(error);

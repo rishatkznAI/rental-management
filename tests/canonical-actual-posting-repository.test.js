@@ -33,6 +33,40 @@ function primaryCounts(db) {
   ]));
 }
 
+function injectAfterAuditReread(db, inject) {
+  let injected = false;
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === 'prepare') {
+        return sql => {
+          const statement = target.prepare(sql);
+          if (!/^\s*SELECT \* FROM financial_audit_events WHERE id = \?/i.test(String(sql))) {
+            return statement;
+          }
+          return new Proxy(statement, {
+            get(statementTarget, statementProperty) {
+              const value = Reflect.get(statementTarget, statementProperty, statementTarget);
+              if (statementProperty === 'get') {
+                return (...args) => {
+                  const row = value.apply(statementTarget, args);
+                  if (row && !injected) {
+                    injected = true;
+                    inject(row);
+                  }
+                  return row;
+                };
+              }
+              return typeof value === 'function' ? value.bind(statementTarget) : value;
+            },
+          });
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 function mutateProtectedCheckGraph(db, mutation) {
   const triggers = db.prepare(`
     SELECT name, sql FROM sqlite_master
@@ -453,18 +487,16 @@ test('P1-01 final pre-DML PR6 storage verification catches a locked-snapshot mut
         clockCalls += 1;
         return Date.now();
       },
-      hooks: {
-        beforeFinalStoragePreflight() {
+      uuid() {
+        uuidCalls += 1;
+        if (uuidCalls === ids.length) {
           mutateProtectedRow(
             context.db,
             'billing_source_coverage_slices',
             'schemaVersion = 0 WHERE id = ?',
             [context.authority.candidate.coverageSliceId],
           );
-        },
-      },
-      uuid() {
-        uuidCalls += 1;
+        }
         return ids[uuidCalls - 1];
       },
     });
@@ -964,19 +996,13 @@ test('P2-03 final pre-commit anti-join rolls back an orphan injected after prima
   const context = createPr9bContext();
   try {
     const graphBefore = postingGraphSnapshot(context.db);
-    const repository = createPostingRepositoryForTest(context, {
-      hooks: {
-        beforePrecommitAntiJoin({ auditEventId }) {
-          const audit = context.db.prepare(
-            'SELECT * FROM financial_audit_events WHERE id = ?',
-          ).get(auditEventId);
-          insertProtectedRow(context.db, 'financial_audit_events', {
-            ...audit,
-            id: '34000000-0000-4000-8000-000000000003',
-          });
-        },
-      },
+    const db = injectAfterAuditReread(context.db, audit => {
+      insertProtectedRow(context.db, 'financial_audit_events', {
+        ...audit,
+        id: '34000000-0000-4000-8000-000000000003',
+      });
     });
+    const repository = createPostingRepositoryForTest({ ...context, db });
     assert.throws(
       () => repository.post(postingCommand(context)),
       error => error.code === 'CANONICAL_POSTING_INTEGRITY_BLOCKED',

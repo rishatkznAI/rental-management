@@ -32,6 +32,7 @@ const protocolState = {
   lockAcquired: false,
   protectedStageReached: false,
 };
+const nativeTransactionTrace = [];
 
 function protocolEvent(type, details = {}) {
   const file = input.protocolPaths?.[type];
@@ -43,9 +44,17 @@ function protocolEvent(type, details = {}) {
 
 const db = new Database(input.dbPath, {
   verbose(sql) {
-    if (/^\s*BEGIN\s+IMMEDIATE\s*;?\s*$/i.test(String(sql))) {
-      protocolEvent('sqlite_begin_trace', { source: 'better_sqlite3_verbose' });
-    }
+    const match = String(sql).match(/^\s*(BEGIN\s+IMMEDIATE|COMMIT|ROLLBACK)\s*;?\s*$/i);
+    if (!match) return;
+    const statement = match[1].toUpperCase();
+    nativeTransactionTrace.push(Object.freeze({
+      source: 'better_sqlite3_verbose',
+      statement,
+    }));
+    protocolEvent(`sqlite_${statement.split(/\s+/)[0].toLowerCase()}_trace`, {
+      source: 'better_sqlite3_verbose',
+      statement,
+    });
   },
 });
 db.pragma('foreign_keys = ON');
@@ -68,19 +77,11 @@ function holdBarrier(phase, details) {
   }
 }
 
-const hooks = input.barrierStage || input.barriers ? {
-  afterPairCommit: details => holdBarrier('after', details),
-  afterRecoveryStageCommit: details => holdBarrier('after', details),
-  beforePairCommit: details => holdBarrier('before', details),
-  beforeRecoveryStageCommit: details => holdBarrier('before', details),
-  beforeSeamSnapshotRelease: details => holdBarrier('snapshot', details),
-} : undefined;
 const eligibilityRepository = createCanonicalActualEligibilityEventRepository(
   db,
   runtimeContract,
   {
     clock: input.clockMs === undefined ? undefined : () => input.clockMs,
-    hooks,
   },
 );
 const postingRepository = createCanonicalActualPostingRepository(
@@ -88,12 +89,20 @@ const postingRepository = createCanonicalActualPostingRepository(
   runtimeContract,
   {
     clock: input.clockMs === undefined ? undefined : () => input.clockMs,
-    hooks,
   },
 );
 
 const originalExec = db.exec.bind(db);
 const originalPrepare = db.prepare.bind(db);
+function transactionDetails(fallbackStage) {
+  const row = originalPrepare(`
+    SELECT transitionId, state AS stage
+    FROM canonical_receivable_posting_conflict_transitions
+    ORDER BY scopeSequence DESC, transitionId DESC
+    LIMIT 1
+  `).get();
+  return row || { stage: fallbackStage, transitionId: null };
+}
 db.exec = sql => {
   const statement = String(sql);
   if (/^\s*BEGIN\s+IMMEDIATE\s*;?\s*$/i.test(statement)) {
@@ -107,11 +116,24 @@ db.exec = sql => {
     protocolEvent('lock_acquired');
     return result;
   }
-  const result = originalExec(sql);
-  if (/^\s*(?:COMMIT|ROLLBACK)\s*;?\s*$/i.test(statement)) {
+  if (/^\s*COMMIT\s*;?\s*$/i.test(statement)) {
+    const details = transactionDetails('PRIMARY');
+    holdBarrier('snapshot', details);
+    holdBarrier('before', details);
+    const result = originalExec(sql);
     protocolState.lockAcquired = false;
-    protocolEvent('release_completed', { statement: statement.trim().toUpperCase() });
+    protocolEvent('release_completed', { statement: 'COMMIT' });
+    holdBarrier('after', details);
+    return result;
   }
+  if (/^\s*ROLLBACK\s*;?\s*$/i.test(statement)) {
+    const result = originalExec(sql);
+    protocolState.lockAcquired = false;
+    protocolEvent('release_completed', { statement: 'ROLLBACK' });
+    holdBarrier('rollback', { stage: 'ALGORITHM_B', transitionId: null });
+    return result;
+  }
+  const result = originalExec(sql);
   return result;
 };
 db.prepare = sql => {
@@ -153,13 +175,21 @@ process.on('message', message => {
     }
     const after = Number(db.prepare('SELECT total_changes() AS total').get().total);
     if (input.exitCodeAfterResult !== undefined) process.exitCode = Number(input.exitCodeAfterResult);
-    finish({ dml: after - before, result, type: 'result' });
+    const message = {
+      dml: after - before,
+      result,
+      transactionTrace: nativeTransactionTrace,
+      type: 'result',
+    };
+    if (input.duplicateResultMessage) send(message);
+    finish(message);
   } catch (error) {
     const after = Number(db.prepare('SELECT total_changes() AS total').get().total);
     if (input.exitCodeAfterResult !== undefined) process.exitCode = Number(input.exitCodeAfterResult);
     finish({
       dml: after - before,
       error: { code: error?.code || null, message: error?.message || String(error) },
+      transactionTrace: nativeTransactionTrace,
       type: 'result',
     });
   } finally {

@@ -29,6 +29,7 @@ const pr9aAllowedFiles = new Set([
 const pr9bDesignBase = pr9aAuthorizedHead;
 const pr9bDesignHead = 'fe26d1a6f40e93112da3c54bd843d854f40f37fe';
 const pr9bDesignTree = 'c5452561e9268dfc12581f55c492f9a2616e733f';
+const pr9bImplementationHead = '2ae448451d60fe8cd05c4025038b707bdfaedce3';
 const pr9bDesignRemediationAllowedFiles = new Set([
   'docs/canonical-actual-posting-pr9b-design.md',
   'docs/pr9b-implementation-authorization-gate.md',
@@ -46,6 +47,16 @@ const pr9bImplementationAllowedFiles = new Set([
   'tests/canonical-actual-posting-safety.test.js',
   'tests/canonical-actual-posting-structural.test.js',
   'tests/helpers/canonical-actual-posting-concurrency-worker.mjs',
+]);
+const pr9cRuntimeAllowedFiles = new Set([
+  'server/server.js',
+  'server/lib/canonical-actual-posting-runtime-config.js',
+  'server/lib/canonical-actual-posting-runtime-service.js',
+  'server/routes/canonical-actual-posting-runtime.js',
+  'tests/actual-source-eligibility-dry-run-safety.test.js',
+  'tests/canonical-actual-posting-runtime.test.js',
+  'tests/canonical-actual-posting-structural.test.js',
+  'tests/helpers/canonical-actual-posting-runtime-worker.mjs',
 ]);
 const implementationFiles = [
   'server/lib/canonical-actual-posting-schema.js',
@@ -86,14 +97,25 @@ test('authorized PR9b design identity and remediation remain exact', () => {
   assert.deepEqual([...changed].sort(), [...pr9bDesignRemediationAllowedFiles].sort());
 });
 
-test('current PR9b implementation remains inside the exact authorized 11-file scope', () => {
-  const changed = new Set(gitLines(['diff', '--name-only', pr9bDesignHead]));
-  for (const file of gitLines(['ls-files', '--others', '--exclude-standard'])) changed.add(file);
+test('merged PR9b implementation remains inside the exact authorized 11-file scope', () => {
+  const changed = new Set(gitLines(['diff', '--name-only', pr9bDesignHead, pr9bImplementationHead]));
   const outside = [...changed].filter(file => !pr9bImplementationAllowedFiles.has(file));
   assert.deepEqual(outside, []);
   assert.deepEqual([...changed].sort(), [...pr9bImplementationAllowedFiles].sort());
   assert.deepEqual(
     [...changed].filter(file => file.startsWith('server/routes/') || file.startsWith('src/')),
+    [],
+  );
+});
+
+test('current PR9C runtime activation remains inside its exact minimal scope', () => {
+  const changed = new Set(gitLines(['diff', '--name-only', pr9bImplementationHead]));
+  for (const file of gitLines(['ls-files', '--others', '--exclude-standard'])) changed.add(file);
+  const outside = [...changed].filter(file => !pr9cRuntimeAllowedFiles.has(file));
+  assert.deepEqual(outside, []);
+  assert.deepEqual([...changed].sort(), [...pr9cRuntimeAllowedFiles].sort());
+  assert.deepEqual(
+    [...changed].filter(file => file.startsWith('src/') || file.startsWith('server/scripts/')),
     [],
   );
 });
@@ -255,14 +277,27 @@ test('PR9B replay qualifier is computed before COMMIT and concurrency proof is e
   }
 });
 
-test('runtime application graph does not import PR9a or PR9b repositories or services', () => {
-  const runtimeFiles = [
+test('PR9C runtime graph reaches PR9B only through the bounded runtime orchestration service', () => {
+  const ordinaryRuntimeFiles = [
     'server/server.js',
-    ...fs.readdirSync(path.join(root, 'server/routes')).map(name => `server/routes/${name}`),
+    ...fs.readdirSync(path.join(root, 'server/routes'))
+      .filter(name => name !== 'canonical-actual-posting-runtime.js')
+      .map(name => `server/routes/${name}`),
   ].filter(file => fs.statSync(path.join(root, file)).isFile());
-  const runtime = runtimeFiles.map(read).join('\n');
-  assert.doesNotMatch(runtime, /canonical-actual-(?:eligibility-event|posting-authority|posting)-repository/);
-  assert.doesNotMatch(runtime, /canonical-actual-(?:eligibility-event|posting)-service/);
+  const ordinaryRuntime = ordinaryRuntimeFiles.map(read).join('\n');
+  assert.doesNotMatch(ordinaryRuntime, /canonical-actual-(?:eligibility-event|posting-authority|posting)-repository/);
+  assert.doesNotMatch(ordinaryRuntime, /canonical-actual-(?:eligibility-event|posting)-service/);
+  const server = read('server/server.js');
+  const route = read('server/routes/canonical-actual-posting-runtime.js');
+  const orchestration = read('server/lib/canonical-actual-posting-runtime-service.js');
+  assert.match(server, /registerCanonicalActualPostingRuntimeRoutes/);
+  assert.doesNotMatch(server, /canonical-actual-(?:eligibility-event|posting-authority|posting)-repository/);
+  assert.doesNotMatch(route, /canonical-actual-(?:eligibility-event|posting-authority|posting)-repository/);
+  assert.match(route, /canonical-actual-posting-runtime-service/);
+  assert.match(orchestration, /canonical-actual-eligibility-event-repository/);
+  assert.match(orchestration, /canonical-actual-posting-authority-repository/);
+  assert.match(orchestration, /canonical-actual-posting-service/);
+  assert.doesNotMatch(orchestration, /canonical-actual-posting-repository/);
   const dbSource = read('server/db.js');
   assert.match(dbSource, /ensureCanonicalActualPostingSchema\(db\)/);
   assert.doesNotMatch(dbSource, /createCanonicalActualEligibilityEvent/);

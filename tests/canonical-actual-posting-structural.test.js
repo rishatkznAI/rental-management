@@ -27,10 +27,25 @@ const pr9aAllowedFiles = new Set([
   'docs/canonical-receivables-decisions.md',
 ]);
 const pr9bDesignBase = pr9aAuthorizedHead;
+const pr9bDesignHead = 'fe26d1a6f40e93112da3c54bd843d854f40f37fe';
+const pr9bDesignTree = 'c5452561e9268dfc12581f55c492f9a2616e733f';
 const pr9bDesignRemediationAllowedFiles = new Set([
   'docs/canonical-actual-posting-pr9b-design.md',
   'docs/pr9b-implementation-authorization-gate.md',
   'tests/canonical-actual-posting-structural.test.js',
+]);
+const pr9bImplementationAllowedFiles = new Set([
+  'server/lib/canonical-actual-posting-domain.js',
+  'server/lib/canonical-actual-posting-repository.js',
+  'server/lib/canonical-actual-posting-service.js',
+  'server/lib/canonical-actual-eligibility-event-repository.js',
+  'tests/canonical-actual-posting-fixtures.js',
+  'tests/canonical-actual-posting-repository.test.js',
+  'tests/canonical-actual-posting-concurrency.test.js',
+  'tests/canonical-actual-posting-remediation.test.js',
+  'tests/canonical-actual-posting-safety.test.js',
+  'tests/canonical-actual-posting-structural.test.js',
+  'tests/helpers/canonical-actual-posting-concurrency-worker.mjs',
 ]);
 const implementationFiles = [
   'server/lib/canonical-actual-posting-schema.js',
@@ -38,6 +53,8 @@ const implementationFiles = [
   'server/lib/canonical-actual-posting-authority-repository.js',
   'server/lib/canonical-actual-eligibility-event-repository.js',
   'server/lib/canonical-actual-eligibility-event-service.js',
+  'server/lib/canonical-actual-posting-repository.js',
+  'server/lib/canonical-actual-posting-service.js',
 ];
 
 function read(relative) {
@@ -61,19 +78,27 @@ test('historical PR9a changed-file set remains inside the exact Gate B allow-lis
   assert.equal(pr9aAllowedFiles.has('docs/pr9b-implementation-authorization-gate.md'), false);
 });
 
-test('current PR9b design remediation remains inside its exact authorized scope', () => {
-  const changed = new Set(gitLines(['diff', '--name-only', pr9bDesignBase]));
-  for (const file of gitLines(['ls-files', '--others', '--exclude-standard'])) changed.add(file);
+test('authorized PR9b design identity and remediation remain exact', () => {
+  const changed = new Set(gitLines(['diff', '--name-only', pr9bDesignBase, pr9bDesignHead]));
+  assert.equal(gitLines(['rev-parse', `${pr9bDesignHead}^{tree}`])[0], pr9bDesignTree);
   const outside = [...changed].filter(file => !pr9bDesignRemediationAllowedFiles.has(file));
   assert.deepEqual(outside, []);
   assert.deepEqual([...changed].sort(), [...pr9bDesignRemediationAllowedFiles].sort());
+});
+
+test('current PR9b implementation remains inside the exact authorized 11-file scope', () => {
+  const changed = new Set(gitLines(['diff', '--name-only', pr9bDesignHead]));
+  for (const file of gitLines(['ls-files', '--others', '--exclude-standard'])) changed.add(file);
+  const outside = [...changed].filter(file => !pr9bImplementationAllowedFiles.has(file));
+  assert.deepEqual(outside, []);
+  assert.deepEqual([...changed].sort(), [...pr9bImplementationAllowedFiles].sort());
   assert.deepEqual(
-    [...changed].filter(file => file.startsWith('server/') || file.startsWith('src/')),
+    [...changed].filter(file => file.startsWith('server/routes/') || file.startsWith('src/')),
     [],
   );
 });
 
-test('PR9a production modules contain no route, worker, scheduler, environment activation, network, or live-adapter wiring', () => {
+test('PR9 production modules contain no route, worker, scheduler, environment activation, network, or live-adapter wiring', () => {
   const combined = implementationFiles.map(read).join('\n');
   for (const forbidden of [
     /require\(['"]express['"]\)/,
@@ -90,32 +115,154 @@ test('PR9a production modules contain no route, worker, scheduler, environment a
   ]) assert.doesNotMatch(combined, forbidden);
 });
 
-test('PR9a contains no Algorithm B module or canonical business DML', () => {
-  const combined = implementationFiles.map(read).join('\n');
-  assert.doesNotMatch(combined, /algorithm[ _-]?b/i);
-  assert.doesNotMatch(combined, /\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+canonical_receivables\b/i);
-  assert.doesNotMatch(combined, /\bUPDATE\s+canonical_receivables\b/i);
-  assert.doesNotMatch(combined, /\bDELETE\s+FROM\s+canonical_receivables\b/i);
-  assert.doesNotMatch(combined, /\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+canonical_receivable_posting_operations\b/i);
-  assert.equal(fs.existsSync(path.join(root, 'server/lib/canonical-actual-posting-repository.js')), false);
-  assert.equal(fs.existsSync(path.join(root, 'server/lib/canonical-actual-posting-service.js')), false);
+test('Algorithm B owns only the primary triplet and delegates only through the bounded C seam', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const eligibility = read('server/lib/canonical-actual-eligibility-event-repository.js');
+  assert.match(posting, /insertExact\(db, CANONICAL_RECEIVABLES_TABLE, receivable\)/);
+  assert.match(posting, /insertExact\(\s*db,\s*CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE,/);
+  assert.match(posting, /insertExact\(db, FINANCIAL_AUDIT_EVENTS_TABLE, audit\)/);
+  assert.doesNotMatch(posting, /persistDenialEvidence\s*\(/);
+  assert.match(posting, /eligibilityRepository\.orchestratePostingDenial\(\{/);
+  assert.doesNotMatch(posting, /insertExact\(\s*db,\s*CANONICAL_RECEIVABLE_POSTING_CONFLICTS_TABLE,/);
+  assert.doesNotMatch(posting, /UPDATE\s+canonical_receivable_posting_conflict_transitions/i);
+  assert.match(eligibility, /function persistDenialPairInTransaction\(/);
+  assert.match(eligibility, /function orchestratePostingDenial\(commandInput\)/);
+  assert.doesNotMatch(eligibility, /module\.exports\s*=\s*\{[^}]*persistDenialPairInTransaction/s);
+  assert.match(posting, /rollbackQuietly\(db\);[\s\S]*eligibilityRepository\.orchestratePostingDenial/);
+});
+
+test('PR9B remediation preserves storage, authoritative verification, and C7 lock ordering', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const eligibility = read('server/lib/canonical-actual-eligibility-event-repository.js');
+  assert.match(posting, /BEGIN IMMEDIATE[\s\S]*assertPostingStoragePreflight\(command, 'algorithm_b_initial'\)[\s\S]*const clock = readClock\(\)/);
+  assert.match(posting, /generateAndAssertUnusedPrimaryIds\(\);[\s\S]*assertPostingStoragePreflight\(command, 'algorithm_b_final_pre_dml'\)[\s\S]*createPrimaryTriplet/);
+  assert.match(posting, /verifyPostingAdmission\(command, event, clock\)/);
+  assert.match(posting, /verifyCanonicalPrimaryTriplet\(\{/);
+  assert.match(eligibility, /verifyCanonicalPrimaryTriplet\(\{/);
+  assert.match(eligibility, /mode: 'BLOCKED_SCOPE',[\s\S]*pair,[\s\S]*scope:/);
+  assert.match(eligibility, /const pair = disposition\.pair;[\s\S]*rollbackQuietly\(db\);[\s\S]*postingPairEvidence\(pair\)/);
+  assert.doesNotMatch(
+    eligibility,
+    /disposition\.mode === 'BLOCKED_SCOPE'[\s\S]{0,500}rollbackQuietly\(db\);[\s\S]{0,500}incompleteTransitions\(/,
+  );
+});
+
+test('P2-03 anti-join is called in Phase 1 and immediately before precommit proof', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const calls = posting.match(/assertNoPrimaryOrphans\(command, event\);/g) || [];
+  assert.equal(calls.length >= 3, true);
+  assert.match(posting, /const event = loadEvent\(command\);\s*assertNoPrimaryOrphans\(command, event\);\s*const durable = resolveExistingResult/);
+  assert.match(posting, /verifyPrimaryTriplet\([\s\S]*assertNoPrimaryOrphans\(command, event\);[\s\S]*foreign_key_check/);
+  assert.match(posting, /orphanCanonical/);
+  assert.match(posting, /orphanOperation/);
+  assert.match(posting, /orphanAudit/);
+});
+
+test('P2-01 instrumentation records in-flight reads without post-hoc fixture SQL', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const eligibility = read('server/lib/canonical-actual-eligibility-event-repository.js');
+  const fixtures = read('tests/canonical-actual-posting-fixtures.js');
+  assert.match(posting, /evidenceRecorder/);
+  assert.match(eligibility, /phase: 'pr8_authoritative_read'/);
+  assert.match(eligibility, /phase: 'posting_authoritative_admission'/);
+  assert.match(eligibility, /phase: 'conflict_graph'/);
+  const evidenceHelper = fixtures.slice(
+    fixtures.indexOf('export function postingEvidenceReadSet'),
+    fixtures.indexOf('export function normalizedPostingCommandEvidence'),
+  );
+  assert.doesNotMatch(evidenceHelper, /SELECT|prepare\s*\(/);
+  assert.match(evidenceHelper, /trace\.snapshot\(\)/);
+  const postingRecorder = posting.slice(
+    posting.indexOf('  function recordEvidence'),
+    posting.indexOf('  function readClock'),
+  );
+  assert.doesNotMatch(postingRecorder, /\b(?:INSERT|UPDATE|DELETE)\b|db\.prepare|db\.exec/);
+});
+
+test('PR9B production repositories expose no hook dependency or invocation capability', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const eligibility = read('server/lib/canonical-actual-eligibility-event-repository.js');
+  for (const source of [posting, eligibility]) {
+    assert.doesNotMatch(source, /\bhooks?\b|invokeHook|beforePairCommit|afterPairCommit|beforeRecoveryStageCommit|afterRecoveryStageCommit|beforeSeamSnapshotRelease|beforePrecommitAntiJoin|beforeFinalStoragePreflight/);
+  }
+});
+
+test('P2-04 clock and UUID dependencies are constructor-owned and absent from caller commands', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const domain = read('server/lib/canonical-actual-posting-domain.js');
+  assert.match(posting, /dependencies = undefined/);
+  assert.match(posting, /dependencies\?\.clock \|\| Date\.now\.bind\(Date\)/);
+  assert.match(posting, /dependencies\?\.uuid \|\| \(\(\) => randomUUID/);
+  assert.match(posting, /generateAndAssertUnusedPrimaryIds\(\)/);
+  assert.match(posting, /new Set\(Object\.values\(generatedIds\)\)\.size !== 3/);
+  assert.doesNotMatch(domain, /CANONICAL_POSTING_COMMAND_KEYS[\s\S]{0,600}\bclock\b/);
+  assert.doesNotMatch(domain, /CANONICAL_POSTING_COMMAND_KEYS[\s\S]{0,600}\buuid\b/i);
 });
 
 test('denial package brand and constructors are not exported to callers', async () => {
+  const eligibilitySource = read('server/lib/canonical-actual-eligibility-event-repository.js');
   const domain = await import('../server/lib/canonical-actual-posting-domain.js');
+  const eligibility = await import('../server/lib/canonical-actual-eligibility-event-repository.js');
   const exported = domain.default || domain;
   assert.equal(exported.freezeDenialPackageForRepository, undefined);
   assert.equal(exported.assertFrozenDenialPackage, undefined);
+  assert.equal(eligibility.__testBuildPostingDenialPackage, undefined);
+  assert.doesNotMatch(eligibilitySource, /testOnlyBuildPostingDenialPackage|__testBuildPostingDenialPackage/);
+  assert.doesNotMatch(eligibilitySource, /publicRepository\.[A-Za-z0-9_]*Build[A-Za-z0-9_]*/);
 });
 
-test('runtime application graph does not import PR9a repositories or service', () => {
+test('PR9B PR8 check identity is sealed into accepted evidence and locked reconstruction', () => {
+  const domain = read('server/lib/canonical-actual-posting-domain.js');
+  const eligibility = read('server/lib/canonical-actual-eligibility-event-repository.js');
+  assert.match(domain, /ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD = 'checkIdentitySetHash'/);
+  assert.match(eligibility, /function pr8CheckIdentityCanonical\(/);
+  assert.match(eligibility, /childId: row\.id/);
+  assert.match(eligibility, /parentRunId: row\.runId/);
+  assert.match(eligibility, /parentCandidateId: row\.candidateId/);
+  assert.match(eligibility, /checkHash: row\.checkHash/);
+  assert.match(eligibility, /sourceEvidenceRefs/);
+  assert.match(eligibility, /acceptedResultHash: run\.resultHash/);
+  assert.match(eligibility, /acceptedRun\?\.checkIdentitySetHash === reconstructedCheckIdentitySetHash/);
+  assert.match(eligibility, /requirePostingCheckIdentitySeal: true/);
+});
+
+test('PR9B replay qualifier is computed before COMMIT and concurrency proof is event-driven', () => {
+  const posting = read('server/lib/canonical-actual-posting-repository.js');
+  const concurrency = read('tests/canonical-actual-posting-concurrency.test.js');
+  const worker = read('tests/helpers/canonical-actual-posting-concurrency-worker.mjs');
+  assert.match(posting, /const result = event \? qualifyHistoricalResult[\s\S]{0,200}db\.exec\('COMMIT'\);[\s\S]{0,80}return result/);
+  assert.doesNotMatch(posting, /db\.exec\('COMMIT'\);\s*return qualifyHistoricalResult/);
+  assert.doesNotMatch(concurrency, /Promise\.race|assertStillBlocked|setTimeout\(.*100/);
+  assert.doesNotMatch(worker, /type:\s*['"]attempting['"]/);
+  assert.doesNotMatch(worker, /begin_immediate_attempted/);
+  assert.match(worker, /new Database\(input\.dbPath,[\s\S]*verbose\(sql\)[\s\S]*BEGIN\\s\+IMMEDIATE\|COMMIT\|ROLLBACK[\s\S]*nativeTransactionTrace\.push/);
+  assert.match(worker, /protocolEvent\('pre_sql_boundary_reached'\);[\s\S]{0,300}const result = originalExec\(sql\)/);
+  assert.match(concurrency, /function assertWriteTransactionHeld\(/);
+  assert.match(concurrency, /function assertNativeTransactionTrace\(/);
+  assert.match(concurrency, /function assertWorkerResultMessage\(/);
+  assert.match(concurrency, /function observerPostingState\(/);
+  assert.match(concurrency, /resultMessages\.length !== 1/);
+  assert.match(concurrency, /await assert\.rejects\(worker\.result, \/code=7\//);
+  for (const event of [
+    'repository_entrypoint_invoked',
+    'pre_sql_boundary_reached',
+    'lock_acquired',
+    'protected_stage_reached',
+    'release_completed',
+  ]) assert.match(worker, new RegExp(event));
+  for (const event of ['sqlite_begin_trace', 'sqlite_commit_trace', 'sqlite_rollback_trace']) {
+    assert.match(concurrency, new RegExp(event));
+  }
+});
+
+test('runtime application graph does not import PR9a or PR9b repositories or services', () => {
   const runtimeFiles = [
     'server/server.js',
     ...fs.readdirSync(path.join(root, 'server/routes')).map(name => `server/routes/${name}`),
   ].filter(file => fs.statSync(path.join(root, file)).isFile());
   const runtime = runtimeFiles.map(read).join('\n');
-  assert.doesNotMatch(runtime, /canonical-actual-(?:eligibility-event|posting-authority)-repository/);
-  assert.doesNotMatch(runtime, /canonical-actual-eligibility-event-service/);
+  assert.doesNotMatch(runtime, /canonical-actual-(?:eligibility-event|posting-authority|posting)-repository/);
+  assert.doesNotMatch(runtime, /canonical-actual-(?:eligibility-event|posting)-service/);
   const dbSource = read('server/db.js');
   assert.match(dbSource, /ensureCanonicalActualPostingSchema\(db\)/);
   assert.doesNotMatch(dbSource, /createCanonicalActualEligibilityEvent/);

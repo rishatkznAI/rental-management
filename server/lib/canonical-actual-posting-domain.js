@@ -48,11 +48,19 @@ const ERROR_CODES = Object.freeze({
   CONFLICT_TRANSITION_RECOVERY_REQUIRED: 'CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED',
   CONFLICT_EVIDENCE_PERSISTENCE_FAILED: 'CANONICAL_CONFLICT_EVIDENCE_PERSISTENCE_FAILED',
   POSTING_CONCURRENT_CONFLICT: 'CANONICAL_POSTING_CONCURRENT_CONFLICT',
+  PR9B_DISABLED: 'CANONICAL_PR9B_DISABLED',
+  POSTING_ASSERTION_MISMATCH: 'CANONICAL_POSTING_ASSERTION_MISMATCH',
+  POSTING_EVENT_NOT_FOUND: 'CANONICAL_POSTING_EVENT_NOT_FOUND',
+  POSTING_INTEGRITY_BLOCKED: 'CANONICAL_POSTING_INTEGRITY_BLOCKED',
+  POSTING_ID_GENERATION_FAILED: 'CANONICAL_POSTING_ID_GENERATION_FAILED',
+  POSTING_PERSISTENCE_FAILED: 'CANONICAL_POSTING_PERSISTENCE_FAILED',
+  POSTING_DATABASE_FAILED: 'CANONICAL_POSTING_DATABASE_FAILED',
+  C_SEAM_INPUT_REJECTED: 'C_SEAM_INPUT_REJECTED',
 });
 
 class CanonicalActualPostingError extends Error {
-  constructor(code, message = code, field = null) {
-    super(message);
+  constructor(code, message = code, field = null, options = undefined) {
+    super(message, options);
     this.name = 'CanonicalActualPostingError';
     this.code = code;
     this.field = field;
@@ -728,6 +736,7 @@ const ACCEPTED_PR8_RUN_FIELDS = Object.freeze([
   'resultHash', 'sourceInputManifestHash', 'sourceOwnershipManifestHash', 'validFrom',
   'validUntilExclusive',
 ]);
+const ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD = 'checkIdentitySetHash';
 
 function acceptedPr8EvidenceEnvelope({
   acceptedDryRunsHash,
@@ -741,13 +750,22 @@ function acceptedPr8EvidenceEnvelope({
   if (!Array.isArray(acceptedRuns) || acceptedRuns.length === 0) fail(ERROR_CODES.ENVELOPE_INVALID);
   const runs = acceptedRuns.map((run, index) => {
     const inert = materializeInert(run, `acceptedRuns[${index}]`);
-    assertExactObjectKeys(inert, ACCEPTED_PR8_RUN_FIELDS, `acceptedRuns[${index}]`);
+    const fields = Object.prototype.hasOwnProperty.call(
+      inert,
+      ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD,
+    )
+      ? [...ACCEPTED_PR8_RUN_FIELDS, ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD]
+      : ACCEPTED_PR8_RUN_FIELDS;
+    assertExactObjectKeys(inert, fields, `acceptedRuns[${index}]`);
     assertIdentifier(inert.dryRunId, 'dryRunId');
     for (const field of [
       'freshnessPolicyHash', 'freshnessWindowFingerprint', 'policyManifestHash',
       'reconciliationSetHash', 'resultHash', 'sourceInputManifestHash',
       'sourceOwnershipManifestHash',
     ]) assertHash(inert[field], field);
+    if (Object.prototype.hasOwnProperty.call(inert, ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD)) {
+      assertHash(inert[ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD], ACCEPTED_PR8_CHECK_IDENTITY_SEAL_FIELD);
+    }
     assertSafeInteger(inert.freshnessDurationMs, 'freshnessDurationMs', { minimum: 1 });
     assertSafeInteger(inert.freshnessPolicyVersion, 'freshnessPolicyVersion', { minimum: 1 });
     assertRfc3339Milliseconds(inert.finalizedAt, 'finalizedAt');
@@ -1722,6 +1740,498 @@ function validateEligibleEventRecord(record) {
   return row;
 }
 
+const CANONICAL_POSTING_COMMAND_KEYS = Object.freeze([
+  'companyId',
+  'branchId',
+  'eventId',
+  'operationType',
+  'assertedEventHash',
+  'assertedWriteAuthorizationRecordId',
+  'requestedActivationRecordId',
+  'requestedSourceAdapterAuthorityRecordId',
+  'requestedPostingAdapterAuthorityRecordId',
+  'requestedPostingAdapterAuthorityVersion',
+  'requestedPostingAdapterAuthorityRecordHash',
+  'assertedDueDatePolicySetHash',
+  'assertedSelectedDueDateGateKind',
+  'assertedSelectedDueDatePolicyId',
+  'assertedSelectedDueDatePolicyVersion',
+  'assertedSelectedDueDatePolicyHash',
+  'assertedDueDateTreatment',
+  'assertedUnknownDueDateTreatmentMappingId',
+  'assertedUnknownDueDateTreatmentMappingVersion',
+  'assertedUnknownDueDateTreatmentMappingHash',
+]);
+
+const CANONICAL_RECEIVABLE_FINGERPRINT_FIELDS = Object.freeze([
+  'branchId', 'cancellationReason', 'cancelledAt', 'clientId', 'closedAt',
+  'companyId', 'companyTimezone', 'contractId', 'contractualDueDate', 'createdAt',
+  'currency', 'description', 'dueDateProvenance', 'externalId', 'id',
+  'idempotencyKey', 'issuedAt', 'normalizedSourceLineId', 'originalAmountMinor',
+  'postedAt', 'rentalId', 'sourceDocumentId', 'sourceDocumentType', 'sourceLineId',
+  'sourceSystem', 'updatedAt', 'workflowStatus', 'writtenOffAt',
+]);
+
+const CANONICAL_POSTING_AUDIT_PAYLOAD_FIELDS = Object.freeze([
+  'acceptedDryRunsHash', 'acceptedPr8EvidenceHash', 'activationRecordId',
+  'actorAuthorityRecordId', 'actorIdentityId', 'canonicalReceivableFingerprint',
+  'dueDatePolicySetHash', 'dueDateTreatment', 'economicLineageKey',
+  'economicSourceRevisionKey', 'eventHash', 'eventId', 'operationId',
+  'postingAdapterAuthorityBranchId', 'postingAdapterAuthorityCompanyId',
+  'postingAdapterAuthorityKind', 'postingAdapterAuthorityRecordHash',
+  'postingAdapterAuthorityRecordId', 'postingAdapterAuthorityVersion',
+  'selectedDueDateGateKind', 'selectedDueDatePolicyHash', 'selectedDueDatePolicyId',
+  'selectedDueDatePolicyVersion', 'sourceAdapterAuthorityRecordHash',
+  'sourceAdapterAuthorityRecordId', 'sourceAdapterAuthorityVersion',
+  'sourceLineageHash', 'sourceOwnershipManifestHash',
+  'unknownDueDateTreatmentMappingHash', 'unknownDueDateTreatmentMappingId',
+  'unknownDueDateTreatmentMappingVersion', 'writeAuthorizationRecordId',
+]);
+
+const CANONICAL_POSTING_RESULT_FIELDS = Object.freeze([
+  'acceptedDryRunsHash', 'acceptedPr8EvidenceHash', 'activationId',
+  'activationRecordHash', 'activationRecordId', 'attemptedAt',
+  'auditEventFingerprint', 'auditPayloadFingerprint', 'branchId',
+  'canonicalReceivableFingerprint', 'canonicalReceivableId', 'commandFingerprint',
+  'canonicalWriteAuthorizationId', 'companyId', 'correlationId',
+  'currentPr6RevisionHash', 'dueDatePolicySetHash', 'dueDateTreatment',
+  'economicLineageKey', 'economicSourceRevisionKey', 'eventHash', 'eventId',
+  'financialAuditEventId', 'freshnessWindowFingerprint', 'idempotencyKey',
+  'operationId', 'operationType', 'postingAdapterAuthorityBranchId',
+  'postingAdapterAuthorityCompanyId', 'postingAdapterAuthorityKind',
+  'postingAdapterAuthorityRecordHash', 'postingAdapterAuthorityRecordId',
+  'postingAdapterAuthorityVersion', 'schemaVersion', 'producerAuthorityBranchId',
+  'producerAuthorityCompanyId', 'producerAuthorityKind',
+  'producerAuthorityRecordHash', 'producerAuthorityRecordId',
+  'producerAuthorityVersion', 'selectedDueDateGateKind',
+  'selectedDueDatePolicyHash', 'selectedDueDatePolicyId',
+  'selectedDueDatePolicyVersion', 'sourceAdapterAuthorityRecordHash',
+  'sourceAdapterAuthorityRecordId', 'sourceAdapterAuthorityVersion',
+  'sourceLineageHash', 'sourceOwnershipManifestHash',
+  'unknownDueDateTreatmentMappingHash', 'unknownDueDateTreatmentMappingId',
+  'unknownDueDateTreatmentMappingVersion', 'writeAuthorizationRecordHash',
+  'writeAuthorizationRecordId',
+]);
+
+function normalizeCanonicalPostingCommand(input) {
+  let decoded;
+  try {
+    decoded = typeof input === 'string' || Buffer.isBuffer(input) || input instanceof Uint8Array
+      ? parseJson(input)
+      : materializeInert(input, 'postingCommand');
+  } catch (error) {
+    if (error instanceof CanonicalActualPostingError) throw error;
+    fail(ERROR_CODES.ENVELOPE_INVALID, 'Invalid posting command.', 'postingCommand');
+  }
+  assertExactObjectKeys(decoded, CANONICAL_POSTING_COMMAND_KEYS, 'postingCommand');
+  for (const field of [
+    'companyId', 'branchId', 'eventId', 'assertedWriteAuthorizationRecordId',
+    'requestedActivationRecordId', 'requestedSourceAdapterAuthorityRecordId',
+    'requestedPostingAdapterAuthorityRecordId', 'assertedSelectedDueDatePolicyId',
+  ]) assertIdentifier(decoded[field], field);
+  for (const field of [
+    'assertedEventHash', 'requestedPostingAdapterAuthorityRecordHash',
+    'assertedDueDatePolicySetHash', 'assertedSelectedDueDatePolicyHash',
+  ]) assertHash(decoded[field], field);
+  for (const field of [
+    'requestedPostingAdapterAuthorityVersion', 'assertedSelectedDueDatePolicyVersion',
+  ]) assertSafeInteger(decoded[field], field, { minimum: 1 });
+  if (decoded.operationType !== OPERATION_DOMAIN) {
+    fail(ERROR_CODES.ENVELOPE_INVALID, 'Unsupported posting operation.', 'operationType');
+  }
+  if (!['contractual_due_date', 'unknown_due_date_treatment'].includes(decoded.assertedSelectedDueDateGateKind)) {
+    fail(ERROR_CODES.ENVELOPE_INVALID, 'Invalid selected due-date gate.', 'assertedSelectedDueDateGateKind');
+  }
+  const unknown = decoded.assertedSelectedDueDateGateKind === 'unknown_due_date_treatment';
+  if (unknown) {
+    assertIdentifier(decoded.assertedUnknownDueDateTreatmentMappingId, 'assertedUnknownDueDateTreatmentMappingId');
+    assertSafeInteger(
+      decoded.assertedUnknownDueDateTreatmentMappingVersion,
+      'assertedUnknownDueDateTreatmentMappingVersion',
+      { minimum: 1 },
+    );
+    assertHash(decoded.assertedUnknownDueDateTreatmentMappingHash, 'assertedUnknownDueDateTreatmentMappingHash');
+    if (
+      decoded.assertedDueDateTreatment !== 'post_without_aging_v1'
+      || decoded.assertedUnknownDueDateTreatmentMappingId !== 'rentcore.unknown_due_date_posting_treatment.v1'
+      || decoded.assertedUnknownDueDateTreatmentMappingVersion !== 1
+    ) fail(ERROR_CODES.ENVELOPE_INVALID, 'Invalid unknown due-date mapping.', 'assertedDueDateTreatment');
+  } else if (
+    decoded.assertedDueDateTreatment !== 'proven_contractual_date_v1'
+    || decoded.assertedUnknownDueDateTreatmentMappingId !== null
+    || decoded.assertedUnknownDueDateTreatmentMappingVersion !== null
+    || decoded.assertedUnknownDueDateTreatmentMappingHash !== null
+  ) {
+    fail(ERROR_CODES.ENVELOPE_INVALID, 'Unexpected unknown due-date mapping.', 'assertedDueDateTreatment');
+  }
+  return materializeInert(decoded, 'postingCommand');
+}
+
+function canonicalPostingCommandEnvelope(input) {
+  return exactEnvelope(
+    normalizeCanonicalPostingCommand(input),
+    CANONICAL_POSTING_COMMAND_KEYS,
+    'rentcore.canonical_actual_posting.command',
+  );
+}
+
+function computeCanonicalPostingCommandFingerprint(input) {
+  return sha256Canonical(canonicalPostingCommandEnvelope(input));
+}
+
+function canonicalPostingIdempotencyKeyEnvelope(input) {
+  return exactEnvelope(input, [
+    'activationId', 'canonicalWriteAuthorizationId', 'economicLineageKey',
+    'economicSourceRevisionKey', 'eventHash', 'operationType',
+  ], 'rentcore.canonical_actual_posting.idempotency_key');
+}
+
+function computeCanonicalPostingIdempotencyKey(input) {
+  return sha256Canonical(canonicalPostingIdempotencyKeyEnvelope(input));
+}
+
+function canonicalReceivableFingerprintEnvelope(row) {
+  return exactEnvelope(
+    row,
+    CANONICAL_RECEIVABLE_FINGERPRINT_FIELDS,
+    'rentcore.canonical_receivable.persisted_row',
+  );
+}
+
+function computeCanonicalReceivableFingerprint(row) {
+  return sha256Canonical(canonicalReceivableFingerprintEnvelope(row));
+}
+
+function canonicalPostingAuditPayloadEnvelope(payload) {
+  return exactEnvelope(
+    payload,
+    CANONICAL_POSTING_AUDIT_PAYLOAD_FIELDS,
+    'rentcore.canonical_actual_posting.audit_payload',
+  );
+}
+
+function computeCanonicalPostingAuditPayloadFingerprint(payload) {
+  return sha256Canonical(canonicalPostingAuditPayloadEnvelope(payload));
+}
+
+function canonicalPostingAuditEventEnvelope({ audit, auditPayloadFingerprint }) {
+  return exactEnvelope({
+    ...audit,
+    auditPayloadFingerprint,
+  }, [
+    'actorId', 'actorType', 'aggregateId', 'aggregateType', 'auditPayloadFingerprint',
+    'branchId', 'companyId', 'correlationId', 'createdAt', 'eventType', 'id',
+    'occurredAt', 'previousValueJson', 'reason', 'sourceSystem',
+  ], 'rentcore.canonical_actual_posting.financial_audit_event');
+}
+
+function computeCanonicalPostingAuditEventFingerprint(input) {
+  return sha256Canonical(canonicalPostingAuditEventEnvelope(input));
+}
+
+function canonicalPostingResultEnvelope(result) {
+  return exactEnvelope(
+    result,
+    CANONICAL_POSTING_RESULT_FIELDS,
+    'rentcore.canonical_actual_posting.result',
+  );
+}
+
+function computeCanonicalPostingResultHash(result) {
+  return sha256Canonical(canonicalPostingResultEnvelope(result));
+}
+
+function canonicalPrimaryAuditPayloadProjection({ event, operation, canonicalReceivableFingerprint }) {
+  return {
+    acceptedDryRunsHash: operation.acceptedDryRunsHash,
+    acceptedPr8EvidenceHash: operation.acceptedPr8EvidenceHash,
+    activationRecordId: operation.activationRecordId,
+    actorAuthorityRecordId: operation.postingAdapterAuthorityRecordId,
+    actorIdentityId: 'integration:rentcore-canonical-receivable-posting',
+    canonicalReceivableFingerprint,
+    dueDatePolicySetHash: operation.dueDatePolicySetHash,
+    dueDateTreatment: operation.dueDateTreatment,
+    economicLineageKey: operation.economicLineageKey,
+    economicSourceRevisionKey: operation.economicSourceRevisionKey,
+    eventHash: operation.eventHash,
+    eventId: operation.eventId,
+    operationId: operation.id,
+    postingAdapterAuthorityBranchId: operation.postingAdapterAuthorityBranchId,
+    postingAdapterAuthorityCompanyId: operation.postingAdapterAuthorityCompanyId,
+    postingAdapterAuthorityKind: operation.postingAdapterAuthorityKind,
+    postingAdapterAuthorityRecordHash: operation.postingAdapterAuthorityRecordHash,
+    postingAdapterAuthorityRecordId: operation.postingAdapterAuthorityRecordId,
+    postingAdapterAuthorityVersion: operation.postingAdapterAuthorityVersion,
+    selectedDueDateGateKind: operation.selectedDueDateGateKind,
+    selectedDueDatePolicyHash: operation.selectedDueDatePolicyHash,
+    selectedDueDatePolicyId: operation.selectedDueDatePolicyId,
+    selectedDueDatePolicyVersion: operation.selectedDueDatePolicyVersion,
+    sourceAdapterAuthorityRecordHash: operation.sourceAdapterAuthorityRecordHash,
+    sourceAdapterAuthorityRecordId: operation.sourceAdapterAuthorityRecordId,
+    sourceAdapterAuthorityVersion: operation.sourceAdapterAuthorityVersion,
+    sourceLineageHash: operation.sourceLineageHash,
+    sourceOwnershipManifestHash: operation.sourceOwnershipManifestHash,
+    unknownDueDateTreatmentMappingHash: operation.unknownDueDateTreatmentMappingHash,
+    unknownDueDateTreatmentMappingId: operation.unknownDueDateTreatmentMappingId,
+    unknownDueDateTreatmentMappingVersion: operation.unknownDueDateTreatmentMappingVersion,
+    writeAuthorizationRecordId: operation.writeAuthorizationRecordId,
+  };
+}
+
+function canonicalPrimaryResultProjection({
+  activation,
+  auditEventFingerprint,
+  auditPayloadFingerprint,
+  authorization,
+  canonicalReceivableFingerprint,
+  commandFingerprint,
+  event,
+  freshnessWindowFingerprint,
+  idempotencyKey,
+  operation,
+}) {
+  return {
+    acceptedDryRunsHash: event.acceptedDryRunsHash,
+    acceptedPr8EvidenceHash: event.acceptedPr8EvidenceHash,
+    activationId: activation.activationId,
+    activationRecordHash: activation.recordHash,
+    activationRecordId: activation.recordId,
+    attemptedAt: operation.createdAt,
+    auditEventFingerprint,
+    auditPayloadFingerprint,
+    branchId: event.branchId,
+    canonicalReceivableFingerprint,
+    canonicalReceivableId: operation.canonicalReceivableId,
+    canonicalWriteAuthorizationId: authorization.authorizationId,
+    commandFingerprint,
+    companyId: event.companyId,
+    correlationId: event.correlationId,
+    currentPr6RevisionHash: event.currentPr6RevisionHash,
+    dueDatePolicySetHash: event.dueDatePolicySetHash,
+    dueDateTreatment: event.dueDateTreatment,
+    economicLineageKey: event.economicLineageKey,
+    economicSourceRevisionKey: event.economicSourceRevisionKey,
+    eventHash: event.eventHash,
+    eventId: event.id,
+    financialAuditEventId: operation.financialAuditEventId,
+    freshnessWindowFingerprint,
+    idempotencyKey,
+    operationId: operation.id,
+    operationType: operation.operationType,
+    postingAdapterAuthorityBranchId: operation.postingAdapterAuthorityBranchId,
+    postingAdapterAuthorityCompanyId: operation.postingAdapterAuthorityCompanyId,
+    postingAdapterAuthorityKind: operation.postingAdapterAuthorityKind,
+    postingAdapterAuthorityRecordHash: operation.postingAdapterAuthorityRecordHash,
+    postingAdapterAuthorityRecordId: operation.postingAdapterAuthorityRecordId,
+    postingAdapterAuthorityVersion: operation.postingAdapterAuthorityVersion,
+    producerAuthorityBranchId: event.producerAuthorityBranchId,
+    producerAuthorityCompanyId: event.producerAuthorityCompanyId,
+    producerAuthorityKind: event.producerAuthorityKind,
+    producerAuthorityRecordHash: event.producerAuthorityRecordHash,
+    producerAuthorityRecordId: event.producerAuthorityRecordId,
+    producerAuthorityVersion: event.producerAuthorityVersion,
+    schemaVersion: operation.schemaVersion,
+    selectedDueDateGateKind: event.selectedDueDateGateKind,
+    selectedDueDatePolicyHash: event.selectedDueDatePolicyHash,
+    selectedDueDatePolicyId: event.selectedDueDatePolicyId,
+    selectedDueDatePolicyVersion: event.selectedDueDatePolicyVersion,
+    sourceAdapterAuthorityRecordHash: event.sourceAdapterAuthorityRecordHash,
+    sourceAdapterAuthorityRecordId: event.sourceAdapterAuthorityRecordId,
+    sourceAdapterAuthorityVersion: event.sourceAdapterAuthorityVersion,
+    sourceLineageHash: event.sourceLineageHash,
+    sourceOwnershipManifestHash: event.sourceOwnershipManifestHash,
+    unknownDueDateTreatmentMappingHash: event.unknownDueDateTreatmentMappingHash,
+    unknownDueDateTreatmentMappingId: event.unknownDueDateTreatmentMappingId,
+    unknownDueDateTreatmentMappingVersion: event.unknownDueDateTreatmentMappingVersion,
+    writeAuthorizationRecordHash: authorization.recordHash,
+    writeAuthorizationRecordId: authorization.recordId,
+  };
+}
+
+function primaryIntegrityFailure() {
+  fail(ERROR_CODES.POSTING_INTEGRITY_BLOCKED);
+}
+
+function verifyCanonicalPrimaryTriplet({
+  activation,
+  audit,
+  authorization,
+  commandFingerprint,
+  conductedCreatedAt,
+  event,
+  freshnessWindowFingerprint,
+  operation,
+  receivable,
+}) {
+  if (!activation || !audit || !authorization || !event || !operation || !receivable) {
+    primaryIntegrityFailure();
+  }
+  try {
+    assertUuidV4(receivable.id, 'canonicalReceivableId');
+    assertUuidV4(operation.id, 'operationId');
+    assertUuidV4(audit.id, 'financialAuditEventId');
+  } catch {
+    primaryIntegrityFailure();
+  }
+  const idempotencyKey = computeCanonicalPostingIdempotencyKey({
+    activationId: activation.activationId,
+    canonicalWriteAuthorizationId: authorization.authorizationId,
+    economicLineageKey: event.economicLineageKey,
+    economicSourceRevisionKey: event.economicSourceRevisionKey,
+    eventHash: event.eventHash,
+    operationType: OPERATION_DOMAIN,
+  });
+  const expectedReceivable = {
+    id: receivable.id,
+    companyId: event.companyId,
+    branchId: event.branchId,
+    clientId: event.clientId,
+    contractId: event.contractId,
+    rentalId: event.rentalId,
+    sourceDocumentType: 'rental_service_upd',
+    sourceDocumentId: event.rootSourceDocumentLineageId,
+    sourceLineId: event.economicLineageKey,
+    normalizedSourceLineId: event.economicLineageKey,
+    sourceSystem: 'rentcore.billing_source_authority.v1',
+    externalId: event.economicLineageKey,
+    idempotencyKey,
+    currency: 'RUB',
+    originalAmountMinor: event.grossAmountMinor,
+    issuedAt: conductedCreatedAt,
+    postedAt: operation.createdAt,
+    contractualDueDate: event.contractualDueDate,
+    dueDateProvenance: event.dueDateProvenance,
+    companyTimezone: event.companyTimezoneSnapshot,
+    workflowStatus: 'posted',
+    cancellationReason: null,
+    description: 'Governed UPD coverage slice',
+    createdAt: operation.createdAt,
+    updatedAt: operation.createdAt,
+    cancelledAt: null,
+    closedAt: null,
+    writtenOffAt: null,
+    version: 1,
+  };
+  if (canonicalJson(receivable) !== canonicalJson(expectedReceivable)) primaryIntegrityFailure();
+  const canonicalReceivableFingerprint = computeCanonicalReceivableFingerprint(expectedReceivable);
+  const operationBase = {
+    id: operation.id,
+    companyId: event.companyId,
+    branchId: event.branchId,
+    operationType: OPERATION_DOMAIN,
+    idempotencyKey,
+    eventId: event.id,
+    eventHash: event.eventHash,
+    economicLineageKey: event.economicLineageKey,
+    economicSourceRevisionKey: event.economicSourceRevisionKey,
+    currentPr6RevisionHash: event.currentPr6RevisionHash,
+    sourceAdapterAuthorityRecordId: event.sourceAdapterAuthorityRecordId,
+    sourceAdapterAuthorityVersion: event.sourceAdapterAuthorityVersion,
+    sourceAdapterAuthorityRecordHash: event.sourceAdapterAuthorityRecordHash,
+    sourceOwnershipManifestHash: event.sourceOwnershipManifestHash,
+    postingAdapterAuthorityRecordId: activation.postingAdapterAuthorityRecordId,
+    postingAdapterAuthorityVersion: activation.postingAdapterAuthorityVersion,
+    postingAdapterAuthorityRecordHash: activation.postingAdapterAuthorityRecordHash,
+    postingAdapterAuthorityCompanyId: activation.postingAdapterAuthorityCompanyId,
+    postingAdapterAuthorityBranchId: activation.postingAdapterAuthorityBranchId,
+    postingAdapterAuthorityKind: activation.postingAdapterAuthorityKind,
+    writeAuthorizationRecordId: authorization.recordId,
+    activationRecordId: activation.recordId,
+    acceptedDryRunsHash: event.acceptedDryRunsHash,
+    acceptedPr8EvidenceHash: event.acceptedPr8EvidenceHash,
+    dueDatePolicySetHash: event.dueDatePolicySetHash,
+    selectedDueDateGateKind: event.selectedDueDateGateKind,
+    selectedDueDatePolicyId: event.selectedDueDatePolicyId,
+    selectedDueDatePolicyVersion: event.selectedDueDatePolicyVersion,
+    selectedDueDatePolicyHash: event.selectedDueDatePolicyHash,
+    dueDateTreatment: event.dueDateTreatment,
+    unknownDueDateTreatmentMappingId: event.unknownDueDateTreatmentMappingId,
+    unknownDueDateTreatmentMappingVersion: event.unknownDueDateTreatmentMappingVersion,
+    unknownDueDateTreatmentMappingHash: event.unknownDueDateTreatmentMappingHash,
+    canonicalReceivableId: receivable.id,
+    canonicalReceivableFingerprint,
+    sourceLineageHash: event.sourceLineageHash,
+    commandFingerprint,
+    auditPayloadFingerprint: null,
+    auditEventFingerprint: null,
+    resultHash: null,
+    financialAuditEventId: audit.id,
+    correlationId: event.correlationId,
+    schemaVersion: 1,
+    createdAt: operation.createdAt,
+  };
+  const payloadProjection = canonicalPrimaryAuditPayloadProjection({
+    canonicalReceivableFingerprint,
+    event,
+    operation: operationBase,
+  });
+  const auditPayloadFingerprint = computeCanonicalPostingAuditPayloadFingerprint(payloadProjection);
+  const payload = { ...payloadProjection, auditPayloadFingerprint };
+  let persistedPayload;
+  try {
+    persistedPayload = parseCanonicalJson(audit.newValueJson, 'financialAuditEvent.newValueJson');
+  } catch {
+    primaryIntegrityFailure();
+  }
+  if (canonicalJson(persistedPayload) !== canonicalJson(payload)) primaryIntegrityFailure();
+  const expectedAudit = {
+    id: audit.id,
+    companyId: event.companyId,
+    branchId: event.branchId,
+    aggregateType: 'canonical_receivable',
+    aggregateId: receivable.id,
+    eventType: 'canonical_receivable.initial_posted.v1',
+    actorId: 'integration:rentcore-canonical-receivable-posting',
+    actorType: 'integration',
+    occurredAt: operation.createdAt,
+    reason: 'canonical_actual_posting_initial_post_v1',
+    previousValueJson: null,
+    newValueJson: canonicalJson(payload),
+    correlationId: event.correlationId,
+    sourceSystem: 'rentcore.billing_source_authority.v1',
+    createdAt: operation.createdAt,
+  };
+  if (canonicalJson(audit) !== canonicalJson(expectedAudit)) primaryIntegrityFailure();
+  const auditEventFingerprint = computeCanonicalPostingAuditEventFingerprint({
+    audit: expectedAudit,
+    auditPayloadFingerprint,
+  });
+  const operationWithSeals = {
+    ...operationBase,
+    auditPayloadFingerprint,
+    auditEventFingerprint,
+  };
+  const resultHash = computeCanonicalPostingResultHash(canonicalPrimaryResultProjection({
+    activation,
+    auditEventFingerprint,
+    auditPayloadFingerprint,
+    authorization,
+    canonicalReceivableFingerprint,
+    commandFingerprint,
+    event,
+    freshnessWindowFingerprint,
+    idempotencyKey,
+    operation: operationWithSeals,
+  }));
+  const expectedOperation = { ...operationWithSeals, resultHash };
+  if (canonicalJson(operation) !== canonicalJson(expectedOperation)) primaryIntegrityFailure();
+  return Object.freeze({
+    auditEventFingerprint,
+    auditPayloadFingerprint,
+    canonicalReceivableFingerprint,
+    idempotencyKey,
+    resultHash,
+  });
+}
+
+function computeCanonicalEvidenceReadDigest(evidence) {
+  return sha256Canonical({
+    domain: 'rentcore.canonical_actual_posting.evidence_read_set',
+    evidence: materializeInert(evidence, 'canonicalEvidenceReadSet'),
+    version: 1,
+  });
+}
+
 function mapSqliteError(error) {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
@@ -1733,6 +2243,10 @@ function mapSqliteError(error) {
 
 module.exports = {
   ACTIVATION_HASH_FIELDS,
+  CANONICAL_POSTING_AUDIT_PAYLOAD_FIELDS,
+  CANONICAL_POSTING_COMMAND_KEYS,
+  CANONICAL_POSTING_RESULT_FIELDS,
+  CANONICAL_RECEIVABLE_FINGERPRINT_FIELDS,
   CONFLICT_HASH_FIELDS,
   ELIGIBLE_EVENT_HASH_FIELDS,
   ERROR_CODES,
@@ -1761,8 +2275,16 @@ module.exports = {
   attemptAccountingResult,
   buildConflictContracts,
   canonicalJson,
+  canonicalPostingAuditEventEnvelope,
+  canonicalPostingAuditPayloadEnvelope,
   canonicalPostingBoundaryEnvelope,
+  canonicalPostingCommandEnvelope,
   canonicalPostingCohortEnvelope,
+  canonicalPostingIdempotencyKeyEnvelope,
+  canonicalPrimaryAuditPayloadProjection,
+  canonicalPrimaryResultProjection,
+  canonicalPostingResultEnvelope,
+  canonicalReceivableFingerprintEnvelope,
   circuitTransitionResult,
   compareAuthorityDenialCandidate,
   compareOperationalOrder,
@@ -1776,7 +2298,14 @@ module.exports = {
   computeArtifactIdentityHash,
   computeAuthorityId,
   computeCanonicalPostingBoundaryHash,
+  computeCanonicalPostingAuditEventFingerprint,
+  computeCanonicalPostingAuditPayloadFingerprint,
+  computeCanonicalPostingCommandFingerprint,
   computeCanonicalPostingCohortHash,
+  computeCanonicalPostingIdempotencyKey,
+  computeCanonicalPostingResultHash,
+  computeCanonicalReceivableFingerprint,
+  computeCanonicalEvidenceReadDigest,
   computeConflictHash,
   computeConflictTransitionIntentHash,
   computeCoverageLineageRootId,
@@ -1806,6 +2335,7 @@ module.exports = {
   mapSqliteError,
   materializeInert,
   normalizeSortedUniqueStrings,
+  normalizeCanonicalPostingCommand,
   parseCanonicalJson,
   parseJson,
   parseUtcMilliseconds,
@@ -1817,6 +2347,7 @@ module.exports = {
   sourceLineageEnvelope,
   unknownDueDateMappingEnvelope,
   validateEligibleEventRecord,
+  verifyCanonicalPrimaryTriplet,
   verifyConflictTransition,
   verifyFrozenAuthorityChainSnapshot,
   writeAuthorizationEnvelope,

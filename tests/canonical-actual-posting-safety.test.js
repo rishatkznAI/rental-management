@@ -7,12 +7,18 @@ import {
   createPr9aContext,
   eligibilityCommand,
   hash,
+  postingCommand,
+  postingGraphSnapshot,
+  totalChanges,
 } from './canonical-actual-posting-fixtures.js';
 
 const require = createRequire(import.meta.url);
 const {
   canonicalJson,
 } = require('../server/lib/canonical-actual-posting-domain.js');
+const {
+  createCanonicalActualPostingService,
+} = require('../server/lib/canonical-actual-posting-service.js');
 
 const root = path.resolve(new URL('..', import.meta.url).pathname);
 
@@ -289,4 +295,59 @@ test('PR9a remains disabled by default and authorization state is unchanged', ()
     shadowReadAuthorized: 'FALSE',
     cutoverAuthorized: 'FALSE',
   })) assert.match(gate, new RegExp(`${field}\\s*[=:|]\\s*(?:\\*\\*)?${value}`));
+});
+
+test('PR9B service remains default-disabled with zero business DML and no graph mutation', () => {
+  const context = createPr9aContext();
+  try {
+    const event = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)).event;
+    const service = createCanonicalActualPostingService({ db: context.db });
+    const graphBefore = postingGraphSnapshot(context.db);
+    const changesBefore = totalChanges(context.db);
+    assert.throws(
+      () => service.postCanonicalReceivable(postingCommand(context, event)),
+      error => error.code === 'CANONICAL_PR9B_DISABLED',
+    );
+    assert.equal(totalChanges(context.db) - changesBefore, 0);
+    assert.equal(postingGraphSnapshot(context.db), graphBefore);
+  } finally {
+    context.db.close();
+  }
+});
+
+test('PR9B posting failures cannot leave a partial primary or denial graph', () => {
+  for (const table of [
+    'canonical_receivables',
+    'canonical_receivable_posting_operations',
+    'financial_audit_events',
+  ]) {
+    const context = createPr9aContext();
+    try {
+      const event = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context)).event;
+      context.db.exec(`CREATE TRIGGER pr9b_safety_abort BEFORE INSERT ON ${table}
+        BEGIN SELECT RAISE(ABORT, 'PR9B safety rollback'); END`);
+      const service = createCanonicalActualPostingService({
+        db: context.db,
+        runtimeContract: context.runtimeContract,
+      });
+      assert.throws(
+        () => service.postCanonicalReceivable(postingCommand(context, event)),
+        error => error.code === 'CANONICAL_POSTING_PERSISTENCE_FAILED',
+      );
+      for (const businessTable of [
+        'canonical_receivables',
+        'canonical_receivable_posting_operations',
+        'financial_audit_events',
+        'canonical_receivable_posting_conflicts',
+        'canonical_receivable_posting_conflict_transitions',
+      ]) {
+        assert.equal(Number(context.db.prepare(
+          `SELECT COUNT(*) AS count FROM ${businessTable}`,
+        ).get().count), 0, `${table} -> ${businessTable}`);
+      }
+      assert.deepEqual(context.db.pragma('foreign_key_check'), []);
+    } finally {
+      context.db.close();
+    }
+  }
 });

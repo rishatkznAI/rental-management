@@ -21,6 +21,20 @@ const {
 } = require('./platform-authorization');
 
 const PRODUCT_RUNTIME_DISABLED_MESSAGE = 'Функция пока не включена в этом окружении.';
+const PRODUCT_CONFLICT_POSTING_OUTCOMES = new Set([
+  'CONFLICT_COMPLETED',
+  'CONFLICT_RECOVERY_REQUIRED',
+  'CONFLICT_RESULT_MISMATCH',
+  'DENIAL_PERSISTED',
+  'DENIAL_RECLASSIFIED',
+  'EXACT_CONFLICT_REPLAY',
+  'IDEMPOTENCY_CONTENT_CONFLICT',
+  'PRIMARY_RESULT_INTEGRITY_BLOCKED',
+  ERROR_CODES.POSTING_ASSERTION_MISMATCH,
+]);
+const PRODUCT_NOT_READY_POSTING_OUTCOMES = new Set([
+  'DENIAL_NO_LONGER_CURRENT',
+]);
 
 class CanonicalActualPostingProductError extends Error {
   constructor(status, productStatus, publicMessage, internalCode = productStatus) {
@@ -52,7 +66,10 @@ function normalizePostingFailure(error) {
   if (code === ERROR_CODES.POSTING_EVENT_NOT_FOUND) {
     return productError(404, 'not_found', 'Подготовленная операция не найдена.', code);
   }
-  if (/CONFLICT|MISMATCH|INTEGRITY|DRIFT|RECOVERY|CONCURRENT/.test(String(code))) {
+  if (
+    PRODUCT_CONFLICT_POSTING_OUTCOMES.has(String(code))
+    || /CONFLICT|MISMATCH|INTEGRITY|DRIFT|RECOVERY|CONCURRENT/.test(String(code))
+  ) {
     return productError(
       409,
       'conflict',
@@ -249,7 +266,14 @@ function createCanonicalActualPostingProductService({
           currency: event.currency,
         });
       }
-      throw new CanonicalActualPostingError(ERROR_CODES.POSTING_DATABASE_FAILED);
+      const outcome = String(result.posting?.outcome || '');
+      if (
+        PRODUCT_CONFLICT_POSTING_OUTCOMES.has(outcome)
+        || PRODUCT_NOT_READY_POSTING_OUTCOMES.has(outcome)
+      ) {
+        throw new CanonicalActualPostingError(outcome);
+      }
+      throw new Error('Unexpected canonical actual posting outcome.');
     } catch (error) {
       throw normalizePostingFailure(error);
     }

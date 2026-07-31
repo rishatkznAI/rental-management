@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
   createPr9bContext,
+  mutatePr8CandidateForPostingConflict,
   postingGraphSnapshot,
   totalChanges,
 } from './canonical-actual-posting-fixtures.js';
@@ -12,8 +13,12 @@ const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const express = serverRequire('express');
 const {
+  CanonicalActualPostingError,
   DISABLED_CANONICAL_ACTUAL_POSTING_RUNTIME_CONTRACT,
 } = require('../server/lib/canonical-actual-posting-domain.js');
+const {
+  normalizePostingFailure,
+} = require('../server/lib/canonical-actual-posting-product-service.js');
 const {
   CANONICAL_ACTUAL_POSTING_PRODUCT_PATH,
   registerCanonicalActualPostingProductRoutes,
@@ -46,7 +51,7 @@ function productApp(context, options = {}) {
       }
       return next();
     },
-    logger: { log() {}, warn() {}, error() {} },
+    logger: options.logger || { log() {}, warn() {}, error() {} },
   });
   app.use('/api', router);
   app.use((_req, res) => res.status(404).json({ ok: false, error: 'not-found' }));
@@ -166,6 +171,66 @@ test('disabled runtime is visible to the UI and fails closed without business DM
   } finally {
     context.db.close();
   }
+});
+
+test('canonical denial outcome is preserved as a safe product conflict', async () => {
+  const context = createPr9bContext();
+  const logEntries = [];
+  const logger = {
+    log() {},
+    warn(message, details) { logEntries.push({ details, message }); },
+    error(message, details) { logEntries.push({ details, message }); },
+  };
+  try {
+    const appDataBefore = context.db.prepare(`
+      SELECT name, json, updated_at FROM app_data ORDER BY name
+    `).all();
+    mutatePr8CandidateForPostingConflict(context);
+
+    await withServer(productApp(context, { logger }), async baseUrl => {
+      const result = await json(
+        baseUrl,
+        'POST',
+        eventPath(context.event.id),
+        'admin-token',
+        {},
+      );
+      assert.equal(result.response.status, 409);
+      assert.equal(result.body.status, 'conflict');
+      assert.equal(result.body.error, 'Начисление не создано. Обнаружен конфликт данных.');
+      assert.equal(typeof result.body.requestId, 'string');
+      assert.doesNotMatch(
+        JSON.stringify(result.body),
+        /stack|sqlite|database path|authority|token|Error:/i,
+      );
+    });
+
+    assert.equal(logEntries.length, 1);
+    assert.equal(logEntries[0].details.code, 'DENIAL_PERSISTED');
+    assert.equal(context.db.prepare('SELECT COUNT(*) count FROM canonical_receivables').get().count, 0);
+    assert.equal(context.db.prepare('SELECT COUNT(*) count FROM canonical_receivable_posting_conflicts').get().count, 1);
+    assert.equal(context.db.prepare('SELECT COUNT(*) count FROM canonical_receivable_posting_conflict_transitions').get().count, 1);
+    assert.deepEqual(
+      context.db.prepare('SELECT name, json, updated_at FROM app_data ORDER BY name').all(),
+      appDataBefore,
+    );
+  } finally {
+    context.db.close();
+  }
+});
+
+test('not-ready and generic technical failure normalization remain distinct', () => {
+  const notReady = normalizePostingFailure(
+    new CanonicalActualPostingError('DENIAL_NO_LONGER_CURRENT'),
+  );
+  assert.equal(notReady.status, 409);
+  assert.equal(notReady.productStatus, 'not_ready');
+  assert.equal(notReady.internalCode, 'DENIAL_NO_LONGER_CURRENT');
+
+  const technical = normalizePostingFailure(new Error('private technical failure'));
+  assert.equal(technical.status, 500);
+  assert.equal(technical.productStatus, 'failed');
+  assert.equal(technical.internalCode, 'CANONICAL_POSTING_DATABASE_FAILED');
 });
 
 test('first product invocation returns created and exact replay returns already_created', async () => {

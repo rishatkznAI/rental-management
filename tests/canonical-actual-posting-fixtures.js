@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import {
   SOURCE_CAPABILITIES,
@@ -52,6 +53,9 @@ const {
   createActualSourceEligibilityDryRunService,
 } = require('../server/lib/actual-source-eligibility-dry-run-service.js');
 const {
+  fingerprint: pr8Fingerprint,
+} = require('../server/lib/actual-source-eligibility-dry-run-domain.js');
+const {
   createCanonicalActualPostingAuthorityRepository,
 } = require('../server/lib/canonical-actual-posting-authority-repository.js');
 const {
@@ -60,6 +64,12 @@ const {
 const {
   createCanonicalActualEligibilityEventRepository,
 } = require('../server/lib/canonical-actual-eligibility-event-repository.js');
+const {
+  createCanonicalActualPostingRepository,
+} = require('../server/lib/canonical-actual-posting-repository.js');
+const {
+  createCanonicalActualPostingService,
+} = require('../server/lib/canonical-actual-posting-service.js');
 const {
   canonicalJson,
   canonicalPostingBoundaryEnvelope,
@@ -70,11 +80,13 @@ const {
   computeAuthorityId,
   computeCanonicalPostingBoundaryHash,
   computeCanonicalPostingCohortHash,
+  computeCanonicalPostingCommandFingerprint,
   createCanonicalActualPostingRuntimeContract,
   computeDueDatePolicySetHash,
   computeGovernedAuthorityRecordHash,
   computeUnknownDueDateMappingHash,
   computeWriteAuthorizationRecordHash,
+  normalizeCanonicalPostingCommand,
   sha256Canonical,
 } = require('../server/lib/canonical-actual-posting-domain.js');
 
@@ -376,6 +388,64 @@ function acceptedEvidence(db, run) {
     reconciliationHashes,
     version: 1,
   });
+  const candidateKeys = new Map(db.prepare(`
+    SELECT id, candidateKey FROM actual_source_dry_run_candidates WHERE runId = ?
+  `).all(run.id).map(row => [row.id, row.candidateKey]));
+  const checkIdentityMembers = db.prepare(`
+    SELECT * FROM actual_source_dry_run_checks WHERE runId = ?
+  `).all(run.id).map(row => {
+    const candidateKey = row.candidateId == null ? null : candidateKeys.get(row.candidateId);
+    const sourceEvidenceRefs = JSON.parse(row.sourceEvidenceRefsJson);
+    const payload = {
+      candidateKey,
+      gateCode: row.gateCode,
+      outcome: row.outcome,
+      policyDecisionRef: row.policyDecisionRef ?? null,
+      policyDecisionVersion: row.policyDecisionVersion == null
+        ? null
+        : Number(row.policyDecisionVersion),
+      policyDecisionHash: row.policyDecisionHash ?? null,
+      sourceEvidenceRefs,
+      expectedFingerprint: row.expectedFingerprint ?? null,
+      observedFingerprint: row.observedFingerprint ?? null,
+      reasonCode: row.reasonCode ?? null,
+    };
+    const identity = {
+      acceptedResultHash: run.resultHash,
+      checkHash: row.checkHash,
+      childId: row.id,
+      childMembershipHash: pr8Fingerprint({
+        candidateId: row.candidateId ?? null,
+        candidateKey,
+        gateCode: row.gateCode,
+        runId: row.runId,
+      }),
+      childType: 'actual_source_dry_run_checks',
+      domain: 'rentcore.canonical_actual_posting.pr8_check_identity',
+      parentCandidateId: row.candidateId ?? null,
+      parentCandidateKey: candidateKey,
+      parentRunId: row.runId,
+      payload,
+      sourceEvidenceRefs,
+      version: 1,
+    };
+    return {
+      childId: row.id,
+      childIdentityHash: pr8Fingerprint(identity),
+    };
+  }).sort((left, right) => {
+    const leftKey = `${left.childId}:${left.childIdentityHash}`;
+    const rightKey = `${right.childId}:${right.childIdentityHash}`;
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
+  const checkIdentitySetHash = pr8Fingerprint({
+    acceptedResultHash: run.resultHash,
+    childType: 'actual_source_dry_run_checks',
+    domain: 'rentcore.canonical_actual_posting.pr8_check_identity_set',
+    dryRunId: run.id,
+    members: checkIdentityMembers,
+    version: 1,
+  });
   const validFrom = run.finalizedAt;
   const freshnessDurationMs = 900000;
   const validUntilExclusive = new Date(Date.parse(validFrom) + freshnessDurationMs).toISOString();
@@ -401,6 +471,7 @@ function acceptedEvidence(db, run) {
   const evidencePackHash = hash('accepted-pr8-evidence-pack-fixture');
   const sourceOwnershipManifestHash = hash('pr9-source-ownership-manifest-fixture');
   const acceptedRuns = [{
+    checkIdentitySetHash,
     companyTimezoneSnapshot: run.companyTimezone,
     dryRunId: run.id,
     finalizedAt: run.finalizedAt,
@@ -645,4 +716,276 @@ export function eligibilityCommand(context, overrides = {}) {
   };
 }
 
-export { hash };
+export function postingCommand(context, event = context.event, overrides = {}) {
+  return {
+    companyId: event.companyId,
+    branchId: event.branchId,
+    eventId: event.id,
+    operationType: 'canonical_receivable.initial_post.v1',
+    assertedEventHash: event.eventHash,
+    assertedWriteAuthorizationRecordId: event.writeAuthorizationRecordId,
+    requestedActivationRecordId: event.activationRecordId,
+    requestedSourceAdapterAuthorityRecordId: event.sourceAdapterAuthorityRecordId,
+    requestedPostingAdapterAuthorityRecordId: context.authority.posting.recordId,
+    requestedPostingAdapterAuthorityVersion: context.authority.posting.authorityVersion,
+    requestedPostingAdapterAuthorityRecordHash: context.authority.posting.recordHash,
+    assertedDueDatePolicySetHash: event.dueDatePolicySetHash,
+    assertedSelectedDueDateGateKind: event.selectedDueDateGateKind,
+    assertedSelectedDueDatePolicyId: event.selectedDueDatePolicyId,
+    assertedSelectedDueDatePolicyVersion: event.selectedDueDatePolicyVersion,
+    assertedSelectedDueDatePolicyHash: event.selectedDueDatePolicyHash,
+    assertedDueDateTreatment: event.dueDateTreatment,
+    assertedUnknownDueDateTreatmentMappingId: event.unknownDueDateTreatmentMappingId,
+    assertedUnknownDueDateTreatmentMappingVersion: event.unknownDueDateTreatmentMappingVersion,
+    assertedUnknownDueDateTreatmentMappingHash: event.unknownDueDateTreatmentMappingHash,
+    ...overrides,
+  };
+}
+
+export function createPr9bContext(options = {}) {
+  const context = createPr9aContext(options);
+  const eventResult = context.eligibilityService.produceEligibleEvent(eligibilityCommand(context));
+  const postingRepository = createCanonicalActualPostingRepository(context.db, context.runtimeContract);
+  const postingService = createCanonicalActualPostingService({
+    db: context.db,
+    runtimeContract: context.runtimeContract,
+  });
+  return {
+    ...context,
+    event: eventResult.event,
+    postingRepository,
+    postingService,
+  };
+}
+
+export function createAdditionalPr8Run(context, suffix = 'additional') {
+  return context.dryRunService.evaluateActualSourceDryRun(
+    context.dryRunContext,
+    dryRunCommand({
+      asOfDate: '2026-09-15',
+      correlationId: `pr9-${suffix}-dry-run-correlation`,
+      idempotencyKey: `pr9-${suffix}-dry-run`,
+      policyManifest: approvedTestPolicyManifest(),
+    }),
+  );
+}
+
+export function createPostingRepositoryForTest(context, dependencies = {}) {
+  return createCanonicalActualPostingRepository(
+    context.db,
+    context.runtimeContract,
+    dependencies,
+  );
+}
+
+export function createEvidenceTrace() {
+  const entries = [];
+  return Object.freeze({
+    digest() {
+      const digest = createHash('sha256');
+      for (const entry of entries) {
+        const encoded = Buffer.from(JSON.stringify(entry), 'utf8');
+        const length = Buffer.allocUnsafe(8);
+        length.writeBigUInt64BE(BigInt(encoded.length));
+        digest.update(length).update(encoded);
+      }
+      return digest.digest('hex');
+    },
+    entries,
+    record(entry) {
+      entries.push(entry);
+    },
+    reset() {
+      entries.length = 0;
+    },
+    snapshot() {
+      return JSON.parse(canonicalJson(entries));
+    },
+  });
+}
+
+export function mutateProtectedRow(db, table, setClause, parameters = []) {
+  const triggers = db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND tbl_name = ? AND sql IS NOT NULL
+    ORDER BY name
+  `).all(table);
+  for (const trigger of triggers) db.exec(`DROP TRIGGER "${trigger.name}"`);
+  const previousIgnoreChecks = Number(db.pragma('ignore_check_constraints', { simple: true }));
+  db.pragma('ignore_check_constraints = ON');
+  try {
+    db.prepare(`UPDATE "${table}" SET ${setClause}`).run(...parameters);
+  } finally {
+    db.pragma(`ignore_check_constraints = ${previousIgnoreChecks ? 'ON' : 'OFF'}`);
+    for (const trigger of triggers) db.exec(trigger.sql);
+  }
+}
+
+export function insertProtectedRow(db, table, row) {
+  const triggers = db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND tbl_name = ? AND sql IS NOT NULL
+    ORDER BY name
+  `).all(table);
+  for (const trigger of triggers) db.exec(`DROP TRIGGER "${trigger.name}"`);
+  const previousIgnoreChecks = Number(db.pragma('ignore_check_constraints', { simple: true }));
+  const previousForeignKeys = Number(db.pragma('foreign_keys', { simple: true }));
+  db.pragma('ignore_check_constraints = ON');
+  db.pragma('foreign_keys = OFF');
+  try {
+    const columns = Object.keys(row);
+    db.prepare(`
+      INSERT INTO "${table}" (${columns.map(column => `"${column}"`).join(', ')})
+      VALUES (${columns.map(() => '?').join(', ')})
+    `).run(...columns.map(column => row[column]));
+  } finally {
+    db.pragma(`foreign_keys = ${previousForeignKeys ? 'ON' : 'OFF'}`);
+    db.pragma(`ignore_check_constraints = ${previousIgnoreChecks ? 'ON' : 'OFF'}`);
+    for (const trigger of triggers) db.exec(trigger.sql);
+  }
+}
+
+export function deleteProtectedRows(db, table, whereClause, parameters = []) {
+  const triggers = db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND tbl_name = ? AND sql IS NOT NULL
+    ORDER BY name
+  `).all(table);
+  for (const trigger of triggers) db.exec(`DROP TRIGGER "${trigger.name}"`);
+  const previousForeignKeys = Number(db.pragma('foreign_keys', { simple: true }));
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.prepare(`DELETE FROM "${table}" WHERE ${whereClause}`).run(...parameters);
+  } finally {
+    db.pragma(`foreign_keys = ${previousForeignKeys ? 'ON' : 'OFF'}`);
+    for (const trigger of triggers) db.exec(trigger.sql);
+  }
+}
+
+export function mutatePr8CandidateForPostingConflict(context, value = 'pr9b-conflict-v2') {
+  const trigger = context.db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'trigger' AND name = 'trg_actual_source_dry_run_candidates_no_update'
+  `).get();
+  context.db.exec(`DROP TRIGGER ${trigger.name}`);
+  try {
+    context.db.prepare('UPDATE actual_source_dry_run_candidates SET dueDateEvidenceRef = ? WHERE id = ?')
+      .run(value, context.authority.candidate.id);
+  } finally {
+    context.db.exec(trigger.sql);
+  }
+}
+
+export function appendAuthorityDescendant(context, previous, overrides = {}) {
+  const { recordHash: _recordHash, ...previousWithoutHash } = previous;
+  const version = Number(previous.authorityVersion) + 1;
+  const record = authorityRecord({
+    kind: previous.authorityKind,
+    ownershipHash: previous.sourceOwnershipManifestHash,
+    overrides: {
+      ...previousWithoutHash,
+      authorityVersion: version,
+      createdAt: new Date(Date.now()).toISOString(),
+      previousRecordId: previous.recordId,
+      recordId: `authority-record-${previous.authorityKind}-v${version}`,
+      ...overrides,
+    },
+  });
+  return context.authority.repository.appendAuthorityRecord(record).record;
+}
+
+export function totalChanges(db) {
+  return Number(db.prepare('SELECT total_changes() AS total').get().total);
+}
+
+export function postingGraphSnapshot(db) {
+  const tables = [
+    'actual_receivable_eligible_events',
+    'canonical_receivable_posting_conflicts',
+    'canonical_receivable_posting_conflict_transitions',
+    'canonical_receivable_posting_operations',
+    'canonical_receivables',
+    'financial_audit_events',
+  ];
+  const graph = {};
+  for (const table of tables) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name);
+    const orderBy = columns.includes('id') ? 'id' : 'transitionId';
+    graph[table] = db.prepare(`SELECT * FROM ${table} ORDER BY ${orderBy}`).all();
+  }
+  return canonicalJson(graph);
+}
+
+export function postingEvidenceReadSet(trace) {
+  return trace.snapshot();
+}
+
+export function postingEvidenceReadDigest(trace) {
+  return trace.digest();
+}
+
+export function normalizedPostingCommandEvidence(commandInput) {
+  const normalized = normalizeCanonicalPostingCommand(commandInput);
+  return Object.freeze({
+    fingerprint: computeCanonicalPostingCommandFingerprint(normalized),
+    normalized,
+  });
+}
+
+export function createInstrumentedEligibilityRepository(context, dependencies = {}) {
+  return createCanonicalActualEligibilityEventRepository(
+    context.db,
+    context.runtimeContract,
+    dependencies,
+  );
+}
+
+export function createPostingDenialStageFixture(stage, options = {}) {
+  const context = createPr9bContext(options);
+  mutatePr8CandidateForPostingConflict(context);
+  const repository = createInstrumentedEligibilityRepository(context);
+  const command = postingCommand(context);
+  const seamCommand = {
+    assertedDenialCause: 'PR8_EVIDENCE_MISMATCH',
+    denialAttemptId: '11111111-1111-4111-8111-111111111111',
+    postingCommand: command,
+  };
+  const triggerSql = {
+    PENDING: `CREATE TRIGGER pr9b_stage_abort BEFORE UPDATE
+      ON canonical_receivable_posting_conflict_transitions
+      BEGIN SELECT RAISE(ABORT, 'hold PENDING'); END`,
+    ACCOUNTED: `CREATE TRIGGER pr9b_stage_abort BEFORE UPDATE
+      ON canonical_receivable_posting_conflict_transitions
+      WHEN NEW.state = 'CIRCUIT_APPLIED'
+      BEGIN SELECT RAISE(ABORT, 'hold ACCOUNTED'); END`,
+    CIRCUIT_APPLIED: `CREATE TRIGGER pr9b_stage_abort BEFORE UPDATE
+      ON canonical_receivable_posting_conflict_transitions
+      WHEN NEW.state = 'COMPLETE'
+      BEGIN SELECT RAISE(ABORT, 'hold CIRCUIT_APPLIED'); END`,
+  }[stage];
+  if (triggerSql) context.db.exec(triggerSql);
+  let initialError = null;
+  try {
+    repository.orchestratePostingDenial(seamCommand);
+  } catch (error) {
+    initialError = error;
+  } finally {
+    if (triggerSql) context.db.exec('DROP TRIGGER pr9b_stage_abort');
+  }
+  if (stage === 'COMPLETE' && initialError) throw initialError;
+  if (stage !== 'COMPLETE' && initialError?.code !== 'CANONICAL_CONFLICT_TRANSITION_RECOVERY_REQUIRED') {
+    throw initialError || new Error(`Expected recovery interruption at ${stage}`);
+  }
+  const transition = context.db.prepare(`
+    SELECT * FROM canonical_receivable_posting_conflict_transitions
+  `).get();
+  if (transition?.state !== stage) throw new Error(`Expected ${stage}, got ${transition?.state}`);
+  return {
+    ...context,
+    command,
+    repository,
+    seamCommand,
+  };
+}
+
+export { canonicalJson, hash };

@@ -128,6 +128,10 @@ const {
   normalizeRole,
 } = require('./lib/role-groups');
 const { startServer } = require('./lib/startup');
+const {
+  buildCanonicalActualPostingRuntimeConfig,
+  logCanonicalActualPostingRuntimeConfig,
+} = require('./lib/canonical-actual-posting-runtime-config');
 const { registerAuthRoutes } = require('./routes/auth');
 const {
   createBotUpdateProcessor,
@@ -156,6 +160,9 @@ const { registerSystemRoutes } = require('./routes/system');
 const { registerTasksCenterRoutes } = require('./routes/tasks-center');
 const { registerCanonicalReceivablesReadRoutes } = require('./routes/canonical-receivables-read');
 const { registerForecastReceivablesReadRoutes } = require('./routes/forecast-receivables-read');
+const {
+  registerCanonicalActualPostingRuntimeRoutes,
+} = require('./routes/canonical-actual-posting-runtime');
 const {
   resolveCanonicalReceivablesTrustedScope,
 } = require('./lib/canonical-receivables-scope-adapter');
@@ -188,6 +195,8 @@ const {
 const DEMO_MODE = isDemoMode();
 const CANONICAL_RECEIVABLES_READ_API_ENABLED = isCanonicalReceivablesReadApiEnabled();
 const FORECAST_RECEIVABLES_READ_API_ENABLED = isForecastReceivablesReadApiEnabled();
+const canonicalActualPostingRuntimeConfig = buildCanonicalActualPostingRuntimeConfig();
+logCanonicalActualPostingRuntimeConfig(canonicalActualPostingRuntimeConfig, console);
 
 // ── Пароли ────────────────────────────────────────────────────────────────────
 
@@ -1328,6 +1337,12 @@ registerForecastReceivablesReadRoutes(apiRouter, {
   requireAuth,
   resolveTrustedScope: resolveForecastReceivablesTrustedScope,
   cursorSecret: process.env.FORECAST_RECEIVABLES_CURSOR_SECRET,
+  logger: console,
+});
+
+registerCanonicalActualPostingRuntimeRoutes(apiRouter, {
+  ...canonicalActualPostingRuntimeConfig,
+  db: canonicalActualPostingRuntimeConfig.enabled ? ensureDb() : null,
   logger: console,
 });
 

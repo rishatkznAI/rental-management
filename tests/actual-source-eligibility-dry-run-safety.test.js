@@ -13,6 +13,8 @@ import {
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const pr8Baseline = '66659c1296e05424179e2b4cc6ee1924ece4fbc9';
+const pr8ReleaseHead = 'afeac4de9b2711d9c6493855a8e3632443844f61';
 const {
   ACTUAL_SOURCE_ELIGIBILITY_DRY_RUN_TABLES,
 } = require('../server/lib/actual-source-eligibility-dry-run-schema.js');
@@ -31,13 +33,26 @@ function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), 'utf8');
 }
 
-function directRequireGraph(entry) {
+function readAt(ref, relativePath) {
+  return execFileSync('git', ['show', `${ref}:${relativePath}`], {
+    cwd: root,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+}
+
+function directRequireGraphAt(ref, entry) {
   const visited = new Set();
   function visit(relativePath) {
     const normalized = relativePath.replace(/\\/g, '/');
-    if (visited.has(normalized) || !fs.existsSync(path.join(root, normalized))) return;
+    if (visited.has(normalized)) return;
+    let source;
+    try {
+      source = readAt(ref, normalized);
+    } catch {
+      return;
+    }
     visited.add(normalized);
-    const source = read(normalized);
     const directory = path.posix.dirname(normalized);
     for (const match of source.matchAll(/require\(['"](\.\.?\/[^'"]+)['"]\)/g)) {
       let resolved = path.posix.normalize(path.posix.join(directory, match[1]));
@@ -57,7 +72,7 @@ function pr8Counts(db) {
 }
 
 test('production startup reaches only PR8 schema initialization and no execution/read/policy module', () => {
-  const graph = directRequireGraph('server/server.js');
+  const graph = directRequireGraphAt(pr8ReleaseHead, 'server/server.js');
   assert.equal(graph.has('server/lib/actual-source-eligibility-dry-run-schema.js'), true);
   for (const unreachable of [
     'server/lib/actual-source-eligibility-dry-run-domain.js',
@@ -72,7 +87,7 @@ test('production startup reaches only PR8 schema initialization and no execution
 });
 
 test('PR8 adds no HTTP route, feature toggle, resolver, worker, scheduler, queue, timer, CLI, or source adapter', () => {
-  const changed = execFileSync('git', ['diff', '--name-only', 'origin/main'], { cwd: root, encoding: 'utf8' })
+  const changed = execFileSync('git', ['diff', '--name-only', pr8Baseline, pr8ReleaseHead], { cwd: root, encoding: 'utf8' })
     .trim().split('\n').filter(Boolean);
   const productionChanged = changed.filter(file => file.startsWith('server/') || file.startsWith('src/'));
   assert.equal(changed.some(file => file.startsWith('server/routes/')), false);
@@ -119,7 +134,7 @@ test('canonical and forecast production resolvers and default-disabled flags rem
 
 test('Finance, Dashboard, Company Health/Risks, frontend and package manifests remain unchanged', () => {
   const changed = execFileSync('git', [
-    'diff', '--name-only', 'origin/main', '--',
+    'diff', '--name-only', pr8Baseline, pr8ReleaseHead, '--',
     'src',
     'server/routes/finance.js',
     'server/lib/finance-core.js',

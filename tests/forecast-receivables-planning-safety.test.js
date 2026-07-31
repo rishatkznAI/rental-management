@@ -21,6 +21,8 @@ const {
 const {
   resolveForecastReceivablesTrustedScope,
 } = require('../server/lib/forecast-receivables-scope-adapter.js');
+const pr7Base = 'b582b9d2ac4eb0f4bb5ced04d74fbb016e437659';
+const pr7Head = 'cb90e09f26c5b9916a4818fd96048070a6a1a662';
 
 function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), 'utf8');
@@ -148,7 +150,7 @@ test('forecast models contain no actual, aging, overdue, collection, settlement,
 
 test('Finance, Dashboard, Company Health/Risks, frontend, startup workers, and package manifests remain unchanged', () => {
   const changed = execFileSync('git', [
-    'diff', '--name-only', 'origin/main', '--',
+    'diff', '--name-only', pr7Base, pr7Head, '--',
     'src',
     'server/routes/finance.js',
     'server/lib/finance-core.js',

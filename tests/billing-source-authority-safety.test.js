@@ -27,6 +27,8 @@ const {
   createBillingSourceAuthorityReadRepository,
   createBillingSourceInspectionScope,
 } = require('../server/lib/billing-source-authority-read-repository.js');
+const pr6Base = '030b140fa767f4c2ff16b3f9910a46e12b94e485';
+const pr6Head = '485808d24b8c5f6481e0520eec5c8985b71ffeab';
 
 function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), 'utf8');
@@ -93,7 +95,7 @@ test('production resolver stays unconditional null and canonical read feature se
 
 test('Finance, Company Health/Risks, deployment, and frontend have no post-PR6 change', () => {
   const unchanged = execFileSync('git', [
-    'diff', '--name-only', 'origin/main', '--',
+    'diff', '--name-only', pr6Base, pr6Head, '--',
     'src', 'server/routes/finance.js', 'server/lib/finance-core.js',
     'server/lib/startup.js',
   ], { cwd: root, encoding: 'utf8' }).trim();

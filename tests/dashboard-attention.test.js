@@ -182,19 +182,21 @@ test('dashboard command board uses enterprise grid without dominant company heal
   const commandScreenBlock = sourceBlock(dashboardSource, '<div className="rentcore-command-screen">', 'return (\n    <div className="space-y-4');
 
   assert.match(commandScreenBlock, /data-testid="dashboard-command-board"/);
-  assert.match(commandScreenBlock, /md:grid-cols-2 xl:grid-cols-12/);
-  assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-key-signals"/);
-  assert.match(commandScreenBlock, /xl:col-span-3[\s\S]*data-testid="dashboard-tasks"/);
-  assert.match(commandScreenBlock, /xl:col-span-5[\s\S]*data-testid="dashboard-month-dynamics"/);
-  assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-fleet-utilization"/);
-  assert.match(commandScreenBlock, /xl:col-span-4[\s\S]*data-testid="dashboard-receivables-aging"/);
-  assert.match(commandScreenBlock, /xl:col-span-8[\s\S]*data-testid="dashboard-operational-summary"/);
+  assert.match(commandScreenBlock, /rentcore-dashboard-grid[\s\S]*data-testid="dashboard-command-board"/);
+  assert.match(commandScreenBlock, /rentcore-dashboard-signals[\s\S]*data-testid="dashboard-key-signals"/);
+  assert.match(commandScreenBlock, /rentcore-dashboard-tasks[\s\S]*data-testid="dashboard-tasks"/);
+  assert.match(commandScreenBlock, /rentcore-dashboard-month[\s\S]*data-testid="dashboard-month-dynamics"/);
+  assert.match(commandScreenBlock, /rentcore-dashboard-fleet[\s\S]*data-testid="dashboard-fleet-utilization"/);
+  assert.match(commandScreenBlock, /rentcore-dashboard-aging[\s\S]*data-testid="dashboard-receivables-aging"/);
+  assert.match(commandScreenBlock, /rentcore-dashboard-health[\s\S]*data-testid="dashboard-operational-summary"/);
   assert.doesNotMatch(commandScreenBlock, /xl:justify-center[\s\S]*data-testid="dashboard-operational-summary"/);
   assert.doesNotMatch(commandScreenBlock, /dashboard-company-health-svg/);
   assert.doesNotMatch(commandScreenBlock, /text-5xl[\s\S]*N\/A|text-6xl[\s\S]*N\/A|text-7xl[\s\S]*N\/A/);
   assert.doesNotMatch(commandScreenBlock, /xl:grid-rows-\[/);
   assert.doesNotMatch(commandScreenBlock, /xl:overflow-hidden/);
 
+  assert.match(themeSource, /\.rentcore-dashboard-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\);[\s\S]*gap:\s*14px !important;[\s\S]*align-items:\s*stretch;/);
+  assert.match(themeSource, /@media \(min-width: 1600px\)[\s\S]*\.rentcore-dashboard-signals\s*\{[\s\S]*span 4[\s\S]*\.rentcore-dashboard-tasks,[\s\S]*\.rentcore-dashboard-fleet[\s\S]*span 3[\s\S]*\.rentcore-dashboard-month,[\s\S]*\.rentcore-dashboard-health[\s\S]*span 5[\s\S]*\.rentcore-dashboard-aging[\s\S]*span 4/);
   assert.match(themeSource, /\.rentcore-command-screen\s*\{[\s\S]*min-height: 0;/);
   assert.match(themeSource, /\.rentcore-command-shell\s*\{[\s\S]*min-height: 0;/);
 });

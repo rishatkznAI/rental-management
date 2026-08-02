@@ -2420,6 +2420,129 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
   }
 }
 
+/* Dashboard layout: one 12-column track system across KPI and command cards. */
+.rentcore-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 14px !important;
+  align-items: stretch;
+  flex: 0 0 auto;
+  height: auto !important;
+}
+
+.rentcore-dashboard-kpi-row {
+  order: 1;
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.rentcore-dashboard-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 14px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.rentcore-dashboard-kpi-grid > * {
+  grid-column: span 12 / span 12;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.rentcore-dashboard-secondary,
+.rentcore-dashboard-tertiary {
+  grid-column: span 12 / span 12;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.rentcore-dashboard-secondary {
+  min-height: 280px;
+}
+
+.rentcore-dashboard-tertiary {
+  min-height: 285px;
+}
+
+.rentcore-dashboard-signals { order: 2; }
+.rentcore-dashboard-tasks { order: 3; }
+.rentcore-dashboard-month { order: 4; }
+.rentcore-dashboard-health { order: 5; }
+.rentcore-dashboard-aging { order: 6; }
+.rentcore-dashboard-fleet { order: 7; }
+
+.rentcore-dashboard-health > [data-testid="dashboard-company-health"] {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+}
+
+.rentcore-dashboard-kpi-grid .rentcore-command-kpi {
+  container-type: inline-size;
+}
+
+@container (max-width: 280px) {
+  .rentcore-dashboard-kpi-grid .dashboard-kpi-value {
+    font-size: 24px !important;
+    line-height: 1.05;
+  }
+}
+
+@media (min-width: 640px) and (max-width: 1199px) {
+  .rentcore-dashboard-kpi-grid > * {
+    grid-column: span 6 / span 6;
+  }
+}
+
+@media (min-width: 1200px) {
+  .rentcore-dashboard-kpi-grid > * {
+    grid-column: span 4 / span 4;
+  }
+
+  .rentcore-dashboard-signals,
+  .rentcore-dashboard-tasks {
+    grid-column: span 6 / span 6;
+  }
+
+  .rentcore-dashboard-month,
+  .rentcore-dashboard-health {
+    grid-column: span 12 / span 12;
+  }
+
+  .rentcore-dashboard-aging,
+  .rentcore-dashboard-fleet {
+    grid-column: span 6 / span 6;
+  }
+}
+
+@media (min-width: 1600px) {
+  .rentcore-dashboard-kpi-grid > * {
+    grid-column: span 2 / span 2;
+  }
+
+  .rentcore-dashboard-signals {
+    grid-column: span 4 / span 4;
+  }
+
+  .rentcore-dashboard-tasks,
+  .rentcore-dashboard-fleet {
+    grid-column: span 3 / span 3;
+  }
+
+  .rentcore-dashboard-month,
+  .rentcore-dashboard-health {
+    grid-column: span 5 / span 5;
+  }
+
+  .rentcore-dashboard-aging {
+    grid-column: span 4 / span 4;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -277,10 +277,11 @@ test('dashboard reference mode cannot override global app shell sidebar or logo'
 });
 
 test('dashboard KPI cards prefer readable wrapping over compression', () => {
-  assert.match(dashboardSource, /repeat\(auto-fit,minmax\(220px,1fr\)\)/);
-  assert.match(dashboardSource, /min-w-\[220px\]/);
+  assert.match(themeSource, /\.rentcore-dashboard-kpi-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\);/);
+  assert.match(dashboardSource, /rentcore-command-kpi group h-full min-w-0 w-full/);
+  assert.doesNotMatch(dashboardSource, /min-w-\[220px\]/);
   assert.match(dashboardSource, /dashboard-kpi-value/);
   assert.match(themeSource, /\.dashboard-kpi-value\s*\{[\s\S]*word-break: normal;[\s\S]*overflow-wrap: normal;[\s\S]*hyphens: none;/);
   assert.doesNotMatch(dashboardSource, /xl:grid-cols-7/);
-  assert.doesNotMatch(sourceBlock(dashboardSource, 'data-testid="dashboard-executive-cockpit"', '<section className="rentcore-command-board'), /break-words/);
+  assert.doesNotMatch(sourceBlock(dashboardSource, 'data-testid="dashboard-executive-cockpit"', 'data-testid="dashboard-key-signals"'), /break-words/);
 });

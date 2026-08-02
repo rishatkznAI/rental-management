@@ -27,6 +27,8 @@ export type ArchivedPhotoReference = {
   mimeType?: string;
   size?: number;
   archivedAt?: string;
+  uploadedAt?: string;
+  uploadedBy?: string;
   archiveStatus?: 'archived' | 'failed' | 'skipped';
   archiveErrorCode?: string;
 };

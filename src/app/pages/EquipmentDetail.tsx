@@ -65,6 +65,7 @@ import {
 import { getEffectivePaidAmount } from '../lib/finance';
 import { deriveSignalState } from '../lib/gsm';
 import { getGsmCoordinateStatus } from '../lib/gsmEquipmentLabel.js';
+import { getEquipmentPhotoGallery, isSameEquipmentPhoto, uniqueEquipmentPhotos } from '../lib/equipmentPhotoGallery.js';
 import {
   PRODUCTION_SMOKE_FIXTURE_PROTECTED_MESSAGE,
   isProductionSmokeEquipmentFixture,
@@ -1224,6 +1225,7 @@ export default function EquipmentDetail() {
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [isDownloadingPhotoZip, setIsDownloadingPhotoZip] = useState(false);
   const [collapsedShippingEventIds, setCollapsedShippingEventIds] = useState<string[]>([]);
+  const [isSavingEquipmentPhoto, setIsSavingEquipmentPhoto] = useState(false);
   const mainPhotoInputRef = React.useRef<HTMLInputElement>(null);
   const shippingPhotoInputRefs = React.useRef<Partial<Record<EquipmentOperationPhotoCategory, HTMLInputElement | null>>>({});
   const signatureCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -1258,7 +1260,7 @@ export default function EquipmentDetail() {
 
   // Compress image to base64 (max 800px, 70% quality)
   const compressToBase64 = (file: File): Promise<string> =>
-    new Promise(resolve => {
+    new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = e => {
         const img = new Image();
@@ -1271,31 +1273,104 @@ export default function EquipmentDetail() {
           canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
           resolve(canvas.toDataURL('image/jpeg', 0.72));
         };
-        img.src = e.target!.result as string;
+        img.onerror = () => reject(new Error('Не удалось прочитать изображение.'));
+        if (typeof e.target?.result !== 'string') {
+          reject(new Error('Не удалось прочитать файл.'));
+          return;
+        }
+        img.src = e.target.result;
       };
+      reader.onerror = () => reject(new Error('Не удалось прочитать файл.'));
       reader.readAsDataURL(file);
     });
 
+  const applySavedEquipment = React.useCallback((saved: Equipment) => {
+    setAllEquipment(current => current.map(item => item.id === saved.id ? saved : item));
+    queryClient.setQueryData<Equipment[] | undefined>(EQUIPMENT_KEYS.all, current => (
+      current?.map(item => item.id === saved.id ? saved : item)
+    ));
+    queryClient.setQueryData(EQUIPMENT_KEYS.detail(saved.id), saved);
+  }, [queryClient]);
+
+  const refreshEquipmentAfterPhotoMutation = React.useCallback((saved: Equipment) => {
+    applySavedEquipment(saved);
+    void queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
+  }, [applySavedEquipment, queryClient]);
+
   const handleMainPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
     if (!canEditCurrentEquipment) {
-      e.target.value = '';
+      input.value = '';
       return;
     }
-    const file = e.target.files?.[0];
+    const file = input.files?.[0];
     if (!file || !equipment) return;
-    const base64 = await compressToBase64(file);
-    const updated = allEquipment.map(eq =>
-      eq.id === equipment.id ? { ...eq, photo: base64 } : eq,
-    );
-    await persistEquipment(updated);
-    e.target.value = '';
+    if (!file.type.startsWith('image/')) {
+      toast.error('Выберите файл изображения.');
+      input.value = '';
+      return;
+    }
+
+    setIsSavingEquipmentPhoto(true);
+    try {
+      const base64 = await compressToBase64(file);
+      if (saleMode) {
+        const saved = await equipmentService.addPhoto(equipment.id, {
+          photo: base64,
+          filename: file.name,
+          mimeType: file.type,
+        });
+        refreshEquipmentAfterPhotoMutation(saved);
+      } else {
+        const updated = allEquipment.map(item => item.id === equipment.id ? { ...item, photo: base64 } : item);
+        await persistEquipment(updated);
+      }
+      toast.success(saleMode ? 'Фото добавлено в галерею.' : 'Фото техники сохранено.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось загрузить фотографию.');
+    } finally {
+      setIsSavingEquipmentPhoto(false);
+      input.value = '';
+    }
+  };
+
+  const handleEquipmentPhotoMakeMain = async (photoIndex: number) => {
+    if (!equipment || !canEditCurrentEquipment) return;
+    setIsSavingEquipmentPhoto(true);
+    try {
+      const saved = await equipmentService.makePhotoMain(equipment.id, photoIndex);
+      refreshEquipmentAfterPhotoMutation(saved);
+      toast.success('Основное фото изменено.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось изменить основное фото.');
+    } finally {
+      setIsSavingEquipmentPhoto(false);
+    }
+  };
+
+  const handleEquipmentPhotoDelete = async (photoIndex: number) => {
+    if (!equipment || !canEditCurrentEquipment) return;
+    if (!window.confirm('Удалить эту фотографию? Действие нельзя отменить.')) return;
+    setIsSavingEquipmentPhoto(true);
+    try {
+      const saved = await equipmentService.deletePhoto(equipment.id, photoIndex);
+      refreshEquipmentAfterPhotoMutation(saved);
+      toast.success('Фотография удалена.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось удалить фотографию.');
+    } finally {
+      setIsSavingEquipmentPhoto(false);
+    }
   };
 
   const handleMainPhotoDelete = () => {
     if (!equipment || !canEditCurrentEquipment) return;
-    const updated = allEquipment.map(eq =>
-      eq.id === equipment.id ? { ...eq, photo: undefined } : eq,
-    );
+    if (saleMode) {
+      const photoIndex = getEquipmentPhotoGallery(equipment).findIndex(photo => isSameEquipmentPhoto(photo, equipment.photo));
+      if (photoIndex >= 0) void handleEquipmentPhotoDelete(photoIndex);
+      return;
+    }
+    const updated = allEquipment.map(item => item.id === equipment.id ? { ...item, photo: undefined } : item);
     void persistEquipment(updated);
   };
 
@@ -1768,7 +1843,7 @@ export default function EquipmentDetail() {
   useEffect(() => {
     const validTabsByMode = {
       rental: ['overview', 'acceptance', 'rentals', 'economics', 'service', 'documents', 'history'],
-      sale: ['sale-overview', 'pdi', 'commerce', 'sale-service', 'sale-documents', 'sale-history'],
+      sale: ['sale-overview', 'sale-photos', 'pdi', 'commerce', 'sale-service', 'sale-documents', 'sale-history'],
       repair: ['repair-overview', 'acceptance', 'diagnostics', 'work-parts', 'field-trips', 'repair-documents', 'service-history'],
     };
     const validTabs = validTabsByMode[cardMode];
@@ -2016,15 +2091,17 @@ export default function EquipmentDetail() {
   const saleCostPrice = equipment.salePrice3 || 0;
   const saleMargin = saleMainPrice > 0 && saleCostPrice > 0 ? Math.max(saleMainPrice - saleCostPrice, 0) : 0;
   const saleMarginPercent = saleMainPrice > 0 && saleMargin > 0 ? Math.round((saleMargin / saleMainPrice) * 1000) / 10 : 0;
-  const saleGalleryPhotos = [
-    equipment.photo,
+  const equipmentGalleryPhotos = getEquipmentPhotoGallery(equipment) as PhotoReference[];
+  const saleGalleryPhotos = uniqueEquipmentPhotos([
+    ...equipmentGalleryPhotos,
     ...shippingPhotos.flatMap(event => [
       ...(Array.isArray(event.photos) ? event.photos : []),
       ...Object.values(event.photoCategories || {}).flatMap(photos => Array.isArray(photos) ? photos : []),
     ]),
     ...Object.values(equipment.acceptancePhotos || {}).flatMap(photos => Array.isArray(photos) ? photos : []),
-  ].filter(Boolean) as PhotoReference[];
-  const saleGalleryPreview = saleGalleryPhotos.slice(0, 4);
+  ].filter(Boolean)) as PhotoReference[];
+  const saleGalleryPreview = saleGalleryPhotos.slice(0, 3);
+  const saleAdditionalPhotoCount = Math.max(saleGalleryPhotos.length - saleGalleryPreview.length, 0);
   const saleReceiptReady = !saleReceiptStatus || saleReceiptStatus === 'accepted';
   const saleDocsReady = saleDocsReadiness.count > 0;
   const salePhotoReady = Boolean(equipment.photo);
@@ -2500,6 +2577,8 @@ export default function EquipmentDetail() {
                     type="file"
                     accept="image/*"
                     className="hidden"
+                    data-testid="sale-photo-input"
+                    disabled={isSavingEquipmentPhoto}
                     onChange={handleMainPhotoUpload}
                   />
                   <div className="flex min-h-[22rem] items-center justify-center bg-secondary">
@@ -2517,6 +2596,7 @@ export default function EquipmentDetail() {
                       <button
                         type="button"
                         className="flex h-full min-h-[22rem] w-full flex-col items-center justify-center gap-3 text-muted-foreground"
+                        disabled={isSavingEquipmentPhoto}
                         onClick={() => mainPhotoInputRef.current?.click()}
                       >
                         <ImageIcon className="h-16 w-16" />
@@ -2545,6 +2625,7 @@ export default function EquipmentDetail() {
                       <button
                         type="button"
                         className="col-span-3 h-16 rounded-lg border border-dashed border-border text-xs text-muted-foreground"
+                        disabled={isSavingEquipmentPhoto}
                         onClick={() => mainPhotoInputRef.current?.click()}
                       >
                         Галерея пуста
@@ -2558,12 +2639,16 @@ export default function EquipmentDetail() {
                       <button
                         type="button"
                         className="h-16 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-2 text-xs font-medium text-blue-300"
+                        disabled={isSavingEquipmentPhoto}
                         onClick={() => mainPhotoInputRef.current?.click()}
                       >
-                        +{Math.max(shippingGalleryPhotoCount + saleGalleryPhotos.length - saleGalleryPreview.length, 0)} фото
+                        {saleAdditionalPhotoCount > 0 ? `+${saleAdditionalPhotoCount} фото` : '+ Фото'}
                       </button>
                     )}
                   </div>
+                  <p className="px-3 pb-3 text-xs text-muted-foreground" data-testid="sale-photo-count">
+                    {equipmentGalleryPhotos.length} фото в галерее
+                  </p>
                 </div>
 
                 <SalePanel title="Паспорт техники">
@@ -3008,6 +3093,7 @@ export default function EquipmentDetail() {
             {cardMode === 'sale' && (
               <>
                 <TabsTrigger value="sale-overview" className={tabTriggerClass}>Обзор продажи</TabsTrigger>
+                <TabsTrigger value="sale-photos" className={tabTriggerClass}>Фото</TabsTrigger>
                 <TabsTrigger value="pdi" className={tabTriggerClass}>PDI / подготовка</TabsTrigger>
                 <TabsTrigger value="commerce" className={tabTriggerClass}>Коммерция</TabsTrigger>
                 {canViewService && <TabsTrigger value="sale-service" className={tabTriggerClass}>Сервисная готовность</TabsTrigger>}
@@ -3334,6 +3420,78 @@ export default function EquipmentDetail() {
                 return action.to ? <Link key={action.id} to={action.to}>{button}</Link> : <span key={action.id}>{button}</span>;
               })}
             </div>
+          </SalePanel>
+        </TabsContent>
+
+        <TabsContent value="sale-photos" className="space-y-4">
+          <SalePanel title="Фото техники для продажи">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">
+                {equipmentGalleryPhotos.length} фото · основное меняется только вручную
+              </p>
+              {canEditCurrentEquipment && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={isSavingEquipmentPhoto}
+                  onClick={() => mainPhotoInputRef.current?.click()}
+                >
+                  <Camera className="h-4 w-4" />
+                  Добавить фото
+                </Button>
+              )}
+            </div>
+            {equipmentGalleryPhotos.length > 0 ? (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {equipmentGalleryPhotos.map((photo, index) => {
+                  const isMain = isSameEquipmentPhoto(photo, equipment.photo);
+                  return (
+                    <div
+                      key={`${photoSource(photo)}-${index}`}
+                      className="overflow-hidden rounded-xl border border-border bg-secondary/40"
+                      data-testid={`sale-gallery-photo-${index}`}
+                    >
+                      <SafeEquipmentPhoto
+                        photo={photo}
+                        idPrefix={`${equipment.id}-sale-photo-${index}`}
+                        alt={`${saleTitle} фото ${index + 1}`}
+                        className="h-44 w-full rounded-none border-0"
+                        imgClassName="h-full w-full cursor-zoom-in object-cover"
+                        fallbackClassName="h-44 min-h-0 rounded-none border-0"
+                        onOpen={setPreviewImage}
+                      />
+                      <div className="flex min-h-12 items-center justify-between gap-2 p-2">
+                        {isMain ? (
+                          <Badge variant="success"><Star className="h-3 w-3" /> Основное</Badge>
+                        ) : canEditCurrentEquipment ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={isSavingEquipmentPhoto}
+                            onClick={() => void handleEquipmentPhotoMakeMain(index)}
+                          >
+                            Сделать основным
+                          </Button>
+                        ) : <span />}
+                        {canEditCurrentEquipment && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Удалить фото ${index + 1}`}
+                            disabled={isSavingEquipmentPhoto}
+                            onClick={() => void handleEquipmentPhotoDelete(index)}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-400" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <EmptyState icon={<Camera className="h-12 w-12" />} text="Фото техники для продажи пока нет" />
+            )}
           </SalePanel>
         </TabsContent>
 

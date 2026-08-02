@@ -68,6 +68,15 @@ export const equipmentService = {
   update: (id: string, data: Partial<Equipment>): Promise<Equipment> =>
     api.patch<Equipment>(`/api/equipment/${id}`, normalizeEquipmentPatch(data)).then(normalizeEquipment),
 
+  addPhoto: (id: string, data: { photo: string; filename?: string; mimeType?: string }): Promise<Equipment> =>
+    api.post<Equipment>(`/api/equipment/${encodeURIComponent(id)}/photos`, data).then(normalizeEquipment),
+
+  makePhotoMain: (id: string, photoIndex: number): Promise<Equipment> =>
+    api.patch<Equipment>(`/api/equipment/${encodeURIComponent(id)}/photos/main`, { photoIndex }).then(normalizeEquipment),
+
+  deletePhoto: (id: string, photoIndex: number): Promise<Equipment> =>
+    api.del<Equipment>(`/api/equipment/${encodeURIComponent(id)}/photos/${photoIndex}`, { confirm: true }).then(normalizeEquipment),
+
   delete: (id: string): Promise<void> =>
     api.del(`/api/equipment/${id}`),
 

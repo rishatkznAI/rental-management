@@ -175,6 +175,8 @@ jobs:
     needs: classify-release
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

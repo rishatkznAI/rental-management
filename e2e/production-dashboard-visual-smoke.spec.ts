@@ -482,9 +482,9 @@ async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnaps
       healthWidth: healthRect.width,
       healthWidthShare: healthRect.width / Math.max(boardRect.width, 1),
       lowerGridAlignment: blockRects.fleet && blockRects.receivables && blockRects.health ? {
-        leftDelta: Math.abs(blockRects.health.left - blockRects.fleet.left),
-        rightDelta: Math.abs(blockRects.health.right - blockRects.receivables.right),
-        widthDelta: Math.abs(blockRects.health.width - (blockRects.receivables.right - blockRects.fleet.left)),
+        leftDelta: Math.abs(blockRects.health.left - blockRects.receivables.left),
+        rightDelta: Math.abs(blockRects.health.right - blockRects.fleet.right),
+        widthDelta: Math.abs(blockRects.health.width - (blockRects.fleet.right - blockRects.receivables.left)),
       } : null,
       lowerGridWhitespace: blockRects.health && boardFullRect ? {
         left: Math.max(0, blockRects.health.left - boardFullRect.left),
@@ -843,14 +843,12 @@ async function expectDashboardContract(
     expect(snapshot.kpiReadability.filter(item => item.clipped), `${viewportCase.name}: KPI values should not clip`).toEqual([]);
     expect(snapshot.kpiReadability.filter(item => item.wordBreak === 'break-all' || item.overflowWrap === 'anywhere'), `${viewportCase.name}: KPI values should not force letter wrapping`).toEqual([]);
     if (viewportCase.name === 'desktop') {
-      expect(snapshot.healthWidth, `${viewportCase.name}: company health should be a compact executive-width module`).toBeGreaterThanOrEqual(760);
-      expect(snapshot.healthWidth, `${viewportCase.name}: company health should be a compact executive-width module`).toBeLessThanOrEqual(900);
-      expect(snapshot.healthWidthShare, `${viewportCase.name}: company health should use the lower two-card grid width, not the full board`).toBeLessThan(0.75);
-      expect(snapshot.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should align with fleet card left edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-      expect(snapshot.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should align with receivables card right edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-      expect(snapshot.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should span the fleet plus receivables grid width (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+      expect(snapshot.healthWidth, `${viewportCase.name}: company health should use the full 12-column row`).toBeGreaterThanOrEqual(1000);
+      expect(snapshot.healthWidthShare, `${viewportCase.name}: company health should fill the available board width`).toBeGreaterThanOrEqual(0.95);
+      expect(snapshot.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should align with receivables left edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+      expect(snapshot.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should align with fleet right edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+      expect(snapshot.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should span the receivables plus fleet row (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
       expect(snapshot.lowerGridWhitespace?.left ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should not float in a centered empty row (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(16);
-      expect(snapshot.healthWidthShare, `${viewportCase.name}: company health should remain compact inside the lower grid`).toBeGreaterThan(0.6);
       expect(snapshot.healthScoreWidthShare, `${viewportCase.name}: status row should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
       expect(snapshot.healthVisualWidthShare, `${viewportCase.name}: health chart should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
       expect(snapshot.healthDirectionsWidthShare, `${viewportCase.name}: business signals should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);

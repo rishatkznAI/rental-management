@@ -4707,7 +4707,7 @@ export default function Dashboard() {
   return (
     <div className="rentcore-command-screen">
       <div className="relative h-full px-1 py-1 sm:px-1.5 sm:py-1.5 lg:px-2">
-        <div className="rentcore-command-shell mx-0 flex h-full max-w-none flex-col gap-2 p-2 sm:p-2.5 min-[1360px]:min-h-0">
+        <div className="rentcore-command-shell mx-0 flex min-h-full max-w-none flex-col gap-2 p-2 sm:p-2.5 min-[1360px]:min-h-0">
           <header className="rentcore-command-header grid min-h-[72px] flex-none gap-2 rounded-[14px] px-4 py-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-muted-foreground">
@@ -4742,8 +4742,9 @@ export default function Dashboard() {
             </div>
           </header>
 
-          <section data-testid="dashboard-top-cockpit">
-            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] min-[1440px]:[grid-template-columns:repeat(auto-fit,minmax(230px,1fr))]" data-testid="dashboard-executive-cockpit">
+          <section className="rentcore-command-board rentcore-dashboard-grid min-h-0 overflow-visible rounded-[16px] p-2" data-testid="dashboard-command-board">
+            <section className="rentcore-dashboard-kpi-row" data-testid="dashboard-top-cockpit">
+              <div className="rentcore-dashboard-kpi-grid" data-testid="dashboard-executive-cockpit">
               {executiveSummaryCards.map(card => {
               const Icon = card.icon;
               const tone = toneStyles[card.tone ?? 'default'];
@@ -4779,16 +4780,15 @@ export default function Dashboard() {
                   </div>
                 </div>
               );
-              const className = "rentcore-command-kpi group min-w-[220px] p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35";
+              const className = "rentcore-command-kpi group h-full min-w-0 w-full p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35";
               if (card.href) return <Link key={card.id} to={card.href} data-testid={testId} className={className}>{content}</Link>;
               if (card.onClick) return <button key={card.id} type="button" onClick={card.onClick} data-testid={testId} className={className}>{content}</button>;
               return <div key={card.id} data-testid={testId} className={className}>{content}</div>;
               })}
-            </div>
-          </section>
+              </div>
+            </section>
 
-          <section className="rentcore-command-board grid min-h-0 grid-cols-1 gap-3 overflow-visible rounded-[16px] p-2 md:grid-cols-2 xl:grid-cols-12" data-testid="dashboard-command-board">
-            <aside className="rentcore-command-panel flex min-h-[310px] flex-col overflow-hidden rounded-[14px] p-3.5 md:min-h-[340px] xl:col-span-4 xl:min-h-[360px] min-[1600px]:p-4" data-testid="dashboard-key-signals">
+            <aside className="rentcore-command-panel rentcore-dashboard-secondary rentcore-dashboard-signals flex flex-col overflow-hidden rounded-[14px] p-3.5 min-[1600px]:p-4" data-testid="dashboard-key-signals">
               <div data-testid="dashboard-key-signals-command" className="flex min-h-0 flex-1 flex-col">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -4800,9 +4800,9 @@ export default function Dashboard() {
                     {criticalCount + highCount ? `${criticalCount + highCount} всего` : 'OK'}
                   </span>
                 </div>
-                <div className="mt-3 min-h-0 flex-1 space-y-1.5 overflow-hidden pr-1" data-testid="dashboard-legacy-attention-list">
+                <div className="mt-3 flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden pr-1" data-testid="dashboard-legacy-attention-list">
                   {visibleAlerts.length === 0 ? (
-                    <div className="rounded-[14px] border border-emerald-200 bg-emerald-50 px-3 py-4 text-sm font-semibold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-200">
+                    <div className="my-auto flex min-h-28 max-h-40 items-center justify-center rounded-[14px] border border-emerald-200 bg-emerald-50 px-3 py-4 text-center text-sm font-semibold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-200">
                       Критичных действий на сегодня нет. Источник: очередь внимания техники, доставки, сервиса, документов и платежей. Откройте очередь, чтобы проверить задачи без ответственного.
                     </div>
                   ) : visibleAlerts.slice(0, 5).map((alert, index) => {
@@ -4856,15 +4856,15 @@ export default function Dashboard() {
               </div>
             </aside>
 
-            <div className="rentcore-command-analytics flex min-h-[310px] min-w-0 flex-col overflow-hidden p-3 md:min-h-[340px] xl:col-span-3 xl:min-h-[360px]" data-testid="dashboard-tasks">
+            <div className="rentcore-command-analytics rentcore-dashboard-secondary rentcore-dashboard-tasks flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-tasks">
               <div className="mb-0.5">
                 <p className="text-xs font-semibold text-muted-foreground">Задачи</p>
                 <h3 className="app-shell-title text-[17px] font-extrabold leading-tight text-foreground">Задачи сегодня</h3>
                 <p className="text-xs text-muted-foreground">Сегодняшний цикл: возвраты, доставки, платежи, сервис и документы</p>
               </div>
-              <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden pt-1.5">
+              <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden pt-1.5">
                 {commandCenterTasks.length === 0 ? (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-4 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-200">
+                  <div className="my-auto flex min-h-28 max-h-40 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-4 text-center text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-200">
                     Критичных задач на сегодня нет. Источник: аренды, доставки, платежи, сервис, документы и очередь действий. Откройте очередь, чтобы проверить задачи без владельца.
                   </div>
                 ) : commandCenterTasks.slice(0, 5).map(row => {
@@ -4886,7 +4886,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-h-[310px] min-w-0 flex-col overflow-hidden p-3 md:col-span-2 md:min-h-[340px] xl:col-span-5 xl:min-h-[360px]" data-testid="dashboard-month-dynamics">
+            <div className="rentcore-command-analytics rentcore-dashboard-secondary rentcore-dashboard-month flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-month-dynamics">
               <div data-testid="dashboard-month-dynamics-command" className="flex min-h-0 flex-1 flex-col">
                 <div className="mb-2 flex items-start justify-between gap-3">
                   <div>
@@ -4899,7 +4899,7 @@ export default function Dashboard() {
                     <span className="flex items-center gap-1"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-rose-400" />Проср.</span>
                   </div>
                 </div>
-                <div className="mt-1.5 min-h-0 flex-1">
+                <div className="mt-1.5 flex min-h-0 flex-1 items-center justify-center">
                   {hasMonthCashflowDisplay ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart data={monthCashflowDisplayData} margin={{ top: 8, right: 8, left: -2, bottom: 0 }}>
@@ -4926,7 +4926,7 @@ export default function Dashboard() {
                       </ComposedChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="flex h-full min-h-28 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-background px-3 text-center text-sm font-semibold text-muted-foreground">
+                    <div className="flex min-h-28 max-h-40 w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-background px-3 text-center text-sm font-semibold text-muted-foreground">
                       <span>Нет поступлений за месяц. Проверьте раздел Платежи, связь платежей с клиентами/арендами и выбранный период.</span>
                       <span className="inline-flex flex-wrap items-center justify-center gap-1.5 text-[10px] font-extrabold uppercase text-muted-foreground">
                         {['Платежи', 'Аренды', 'Клиенты'].map(source => (
@@ -4939,7 +4939,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-h-[300px] min-w-0 flex-col overflow-hidden p-3 xl:col-span-4" data-testid="dashboard-fleet-utilization">
+            <div className="rentcore-command-analytics rentcore-dashboard-tertiary rentcore-dashboard-fleet flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-fleet-utilization">
               <h3 className="app-shell-title text-lg font-extrabold text-foreground">Загрузка техники</h3>
               <p className="text-xs text-muted-foreground">
                 {activeEquipment > 0
@@ -4985,7 +4985,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics flex min-h-[300px] min-w-0 flex-col overflow-hidden p-3 xl:col-span-4" data-testid="dashboard-receivables-aging">
+            <div className="rentcore-command-analytics rentcore-dashboard-tertiary rentcore-dashboard-aging flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-receivables-aging">
               <div className="mb-2 flex items-start justify-between gap-3">
                 <div>
                   <h3 className="app-shell-title text-lg font-extrabold text-foreground">Возраст дебиторки</h3>
@@ -4993,7 +4993,7 @@ export default function Dashboard() {
                 </div>
                 <span className="shrink-0 text-right text-[11px] font-semibold text-muted-foreground">Всего: <b className="text-foreground">{formatCurrency(totalDebt)}</b></span>
               </div>
-              <div className="mt-1 min-h-0 flex-1">
+              <div className="mt-1 flex min-h-0 flex-1 items-center justify-center">
                 {hasReceivablesAging ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={receivablesAgingData} margin={{ top: 8, right: 8, left: -4, bottom: 0 }}>
@@ -5012,7 +5012,7 @@ export default function Dashboard() {
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="flex h-full min-h-28 items-center justify-center rounded-xl border border-dashed border-border bg-background px-3 text-center text-sm font-semibold text-muted-foreground">
+                  <div className="flex min-h-28 max-h-40 w-full items-center justify-center rounded-xl border border-dashed border-border bg-background px-3 text-center text-sm font-semibold text-muted-foreground">
                     {hasDebtSourceData
                       ? 'Просроченной дебиторки нет. Финансовый контур чистый: проверено по строкам задолженности на дату дашборда.'
                       : 'Нет данных по дебиторке. Просрочка не считается: нет строк задолженности. Проверьте начисления, закрытие аренд и финансовую синхронизацию.'}
@@ -5021,7 +5021,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="flex min-w-0 md:col-span-2 xl:col-span-8 xl:w-[calc(100%+1px)]" data-testid="dashboard-operational-summary">
+            <div className="rentcore-dashboard-tertiary rentcore-dashboard-health flex min-w-0" data-testid="dashboard-operational-summary">
               <CompanyHealthCommandCenter
                 leftDirections={commandCenterLeftDirections}
                 rightDirections={commandCenterRightDirections}

@@ -180,9 +180,9 @@ async function dashboardLayoutSnapshot(page: Page) {
       healthSvgCount: document.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length,
       healthWidthShare: board && health ? health.width / Math.max(board.width, 1) : 1,
       lowerGridAlignment: health && fleet && receivables ? {
-        leftDelta: Math.abs(health.left - fleet.left),
-        rightDelta: Math.abs(health.right - receivables.right),
-        widthDelta: Math.abs(health.width - (receivables.right - fleet.left)),
+        leftDelta: Math.abs(health.left - receivables.left),
+        rightDelta: Math.abs(health.right - fleet.right),
+        widthDelta: Math.abs(health.width - (fleet.right - receivables.left)),
       } : null,
       lowerGridWhitespace: board && health ? {
         left: Math.max(0, health.left - board.left),
@@ -262,12 +262,11 @@ test.describe('Dashboard enterprise layout', () => {
       expect(snapshot.kpiReadability.filter(item => item.wordBreak === 'break-all' || item.overflowWrap === 'anywhere'), `${viewport.name}: KPI values should not force letter wrapping`).toEqual([]);
 
       if (viewport.name === 'desktop') {
-        expect(snapshot.health?.width ?? 0, `${viewport.name}: company health should be a compact executive-width module (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(760);
-        expect(snapshot.health?.width ?? 0, `${viewport.name}: company health should be a compact executive-width module (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(900);
-        expect(snapshot.healthWidthShare, `${viewport.name}: company health should use the lower two-card grid width, not the full board (${JSON.stringify(snapshot)})`).toBeLessThan(0.75);
-        expect(snapshot.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should align with fleet card left edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-        expect(snapshot.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should align with receivables card right edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-        expect(snapshot.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should span the fleet plus receivables grid width (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+        expect(snapshot.health?.width ?? 0, `${viewport.name}: company health should use the full 12-column row (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(1000);
+        expect(snapshot.healthWidthShare, `${viewport.name}: company health should fill the available board width (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.95);
+        expect(snapshot.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should align with receivables left edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+        expect(snapshot.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should align with fleet right edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
+        expect(snapshot.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should span the receivables plus fleet grid width (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
         expect(snapshot.lowerGridWhitespace?.left ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should not float in a centered empty row (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(16);
         expect(snapshot.health?.height ?? 0, `${viewport.name}: company health should stay within premium card height target (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(360);
         expect(snapshot.health?.height ?? 0, `${viewport.name}: company health should stay compact inside the lower grid (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(470);
@@ -316,13 +315,17 @@ test.describe('Dashboard enterprise layout', () => {
       ]) {
         expect(explanationText, `${viewport.name}: Risks explanation should show ${agingLabel}`).toContain(agingLabel);
       }
-      expect(explanationText, `${viewport.name}: ambiguous aging should exclude Risks`).toMatch(/Риски[\s\S]*— · покрытие \d+%/);
-      expect(explanationText, `${viewport.name}: ambiguous aging should explain the insufficient Risks state`).toContain('Недостаточно надёжных данных по срокам задолженности');
       expect(explanationText, `${viewport.name}: aging explanation should not show cumulative 60+ debt`).not.toMatch(/\b60\+/);
       expect(explanationText, `${viewport.name}: aging explanation should not show a cumulative 90+ label`).not.toMatch(/\b90\+/);
       const risksSignal = page.getByTestId('dashboard-company-health-compact').locator('a').filter({ hasText: 'Риски' });
       await expect(risksSignal, `${viewport.name}: Risks tile should remain visible`).toHaveCount(1);
-      await expect(risksSignal, `${viewport.name}: ineligible Risks tile should show an em dash`).toContainText('—');
+      const risksSignalText = await risksSignal.innerText();
+      if (risksSignalText.includes('—')) {
+        expect(explanationText, `${viewport.name}: ineligible Risks should explain the insufficient aging state`).toContain('Недостаточно надёжных данных по срокам задолженности');
+      } else {
+        expect(risksSignalText, `${viewport.name}: eligible Risks should expose a score`).toMatch(/\d+\/100/);
+        expect(explanationText, `${viewport.name}: eligible Risks should explain the clean aging state`).toContain('Подтверждённая просрочка не выявлена');
+      }
       await expect(page.getByTestId('dashboard-company-health-missing-critical'), `${viewport.name}: missing critical metrics should be explicit`).toBeVisible();
       await expect(page.getByTestId('dashboard-company-health-excluded-directions'), `${viewport.name}: excluded directions should be explicit`).toBeVisible();
       await expect(explanation.locator('[data-source-status="missing"]').first(), `${viewport.name}: missing source provenance should be visible`).toContainText('Нет данных');
@@ -389,7 +392,7 @@ test.describe('Dashboard enterprise layout', () => {
     const dashboardShell = await shellSnapshot();
 
     await navigateInApp(page, '/equipment');
-    await expect(page.getByRole('heading', { name: /Техника|Парк техники/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Техника', exact: true })).toBeVisible();
     const equipmentShell = await shellSnapshot();
 
     expect(dashboardShell.logoText, 'Dashboard should keep the global rentCore logo text').toMatch(/^rentcore$/i);

@@ -413,9 +413,9 @@ async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Loc
       healthSvgCount: health?.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length || 0,
       healthWidthShare: healthRect && boardRect ? healthRect.width / Math.max(boardRect.width, 1) : 1,
       lowerGridAlignment: healthRect && fleetRect && receivablesRect ? {
-        leftDelta: Math.round(Math.abs(healthRect.left - fleetRect.left)),
-        rightDelta: Math.round(Math.abs(healthRect.right - receivablesRect.right)),
-        widthDelta: Math.round(Math.abs(healthRect.width - (receivablesRect.right - fleetRect.left))),
+        leftDelta: Math.round(Math.abs(healthRect.left - receivablesRect.left)),
+        rightDelta: Math.round(Math.abs(healthRect.right - fleetRect.right)),
+        widthDelta: Math.round(Math.abs(healthRect.width - (fleetRect.right - receivablesRect.left))),
       } : null,
       overflowX: scrollWidth - viewportWidth,
       radialEmptyExists: Boolean(radialEmpty),
@@ -434,14 +434,15 @@ async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Loc
   expect(layout.compactCards, 'dashboard company health compact list should include all six direction cards').toBe(6);
   expect(layout.overflowX, `dashboard company health layout should not create horizontal overflow (${JSON.stringify(layout)})`).toBe(0);
   if (viewport.width >= 1024) {
-    expect(layout.health?.width ?? 0, `desktop company health should use compact lower-grid width (${JSON.stringify(layout)})`).toBeGreaterThanOrEqual(740);
-    expect(layout.health?.width ?? 0, `desktop company health should not exceed compact lower-grid width (${JSON.stringify(layout)})`).toBeLessThanOrEqual(900);
-    expect(layout.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `desktop company health should align with the lower grid left edge (${JSON.stringify(layout)})`).toBeLessThanOrEqual(2);
-    expect(
-      (layout.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY) <= 2
-        || (layout.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY) <= 2,
-      `desktop company health should align with the lower grid right edge or span width (${JSON.stringify(layout)})`,
-    ).toBe(true);
+    if (viewport.width >= 1600) {
+      expect(layout.healthWidthShare, `wide desktop company health should span five of twelve columns (${JSON.stringify(layout)})`).toBeGreaterThan(0.38);
+      expect(layout.healthWidthShare, `wide desktop company health should span five of twelve columns (${JSON.stringify(layout)})`).toBeLessThan(0.46);
+    } else {
+      expect(layout.healthWidthShare, `company health should fill its 12-column row (${JSON.stringify(layout)})`).toBeGreaterThanOrEqual(0.95);
+      expect(layout.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `company health should align with receivables left edge (${JSON.stringify(layout)})`).toBeLessThanOrEqual(2);
+      expect(layout.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY, `company health should align with fleet right edge (${JSON.stringify(layout)})`).toBeLessThanOrEqual(2);
+      expect(layout.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY, `company health should match the lower row width (${JSON.stringify(layout)})`).toBeLessThanOrEqual(2);
+    }
   }
 }
 

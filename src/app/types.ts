@@ -163,6 +163,7 @@ export interface Equipment {
   currentClient?: string;
   returnDate?: string;
   photo?: PhotoReference;
+  photos?: PhotoReference[];
   gsmTrackerId?: string;
   gsmImei?: string | null;
   gsmDeviceId?: string | null;

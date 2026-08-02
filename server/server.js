@@ -976,6 +976,7 @@ function generateId(prefix) {
 
 const ID_PREFIXES = {
   equipment:      'eq',
+  equipment_photos: 'EPH',
   equipment_downtimes: 'EDT',
   equipment_finance: 'EF',
   rentals:        'R',

@@ -52,6 +52,12 @@ const {
   normalizeEquipmentStorageRecord,
 } = require('../lib/equipment-classification');
 const {
+  appendEquipmentPhoto,
+  createUploadedPhoto,
+  deleteEquipmentPhoto,
+  makeEquipmentPhotoMain,
+} = require('../lib/equipment-photo-gallery');
+const {
   SYSTEM_FIXTURE_PROTECTED_CODE,
   SYSTEM_FIXTURE_PROTECTED_MESSAGE,
   assertProductionSmokeFixtureMutationAllowed,
@@ -2327,6 +2333,92 @@ function registerCrudRoutes(deps) {
     });
   }
 
+  function registerEquipmentPhotoRoutes() {
+    const collection = 'equipment';
+
+    function persistPhotoChange(req, res, action, mutate, successStatus = 200) {
+      const equipment = readData(collection) || [];
+      const index = equipment.findIndex(item => item?.id === req.params.id);
+      if (index === -1) return res.status(404).json({ ok: false, error: 'Not found' });
+
+      const previous = equipment[index];
+      try {
+        accessControl.assertCanUpdateEntity(collection, previous, req.user);
+        assertNoRawProductionSmokeFixturePatch(previous, req.body);
+        const next = normalizeEquipmentStorageRecord(mutate(previous));
+        validateEquipmentRecord(next, equipment, previous);
+        assertProductionSmokeFixtureMutationAllowed({
+          action: 'update',
+          previous,
+          next,
+        });
+
+        // Build a new collection so a storage failure cannot mutate the in-memory
+        // gallery returned by readData before persistence succeeds.
+        const nextEquipment = equipment.map((item, itemIndex) => itemIndex === index ? next : item);
+        writeData(collection, nextEquipment);
+        auditLog?.(req, {
+          action,
+          entityType: collection,
+          entityId: next.id,
+          before: previous,
+          after: next,
+        });
+        return res.status(successStatus).json(accessControl.sanitizeEntityForRead(collection, next, req.user));
+      } catch (error) {
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, error);
+        }
+        if (error?.code?.startsWith('EQUIPMENT_') && !error.status) {
+          return sendEquipmentValidationError(res, error);
+        }
+        return res.status(error?.status || 500).json({ ok: false, error: error?.message || 'Не удалось сохранить фотографию.' });
+      }
+    }
+
+    router.post('/equipment/:id/photos', ...writeMiddlewares(collection), (req, res) => {
+      let photo;
+      try {
+        photo = createUploadedPhoto(req.body, {
+          id: generateId(idPrefixes.equipment_photos || 'EPH'),
+          uploadedAt: nowIso(),
+          uploadedBy: req.user?.userName,
+        });
+      } catch (error) {
+        return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Некорректная фотография.' });
+      }
+      return persistPhotoChange(
+        req,
+        res,
+        'equipment.photo.add',
+        equipment => appendEquipmentPhoto(equipment, photo),
+        201,
+      );
+    });
+
+    router.patch('/equipment/:id/photos/main', ...writeMiddlewares(collection), (req, res) => (
+      persistPhotoChange(
+        req,
+        res,
+        'equipment.photo.make_main',
+        equipment => makeEquipmentPhotoMain(equipment, req.body?.photoIndex),
+      )
+    ));
+
+    router.delete('/equipment/:id/photos/:photoIndex', ...writeMiddlewares(collection), (req, res) => {
+      if (req.body?.confirm !== true) {
+        return res.status(400).json({ ok: false, error: 'Удаление фотографии требует подтверждения.' });
+      }
+      return persistPhotoChange(
+        req,
+        res,
+        'equipment.photo.delete',
+        equipment => deleteEquipmentPhoto(equipment, req.params.photoIndex),
+      );
+    });
+  }
+
+  registerEquipmentPhotoRoutes();
   for (const collection of collections) {
     registerCRUD(collection);
   }

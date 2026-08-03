@@ -2,7 +2,7 @@ import React from 'react';
 import { ImageOff } from 'lucide-react';
 import { getToken } from '../../lib/api';
 import { cn } from '../../lib/utils';
-import { isAuthenticatedMediaUrl, mediaAvailabilityUrl, type NormalizedPhoto } from '../../lib/media';
+import { isAuthenticatedMediaUrl, type NormalizedPhoto } from '../../lib/media';
 
 function statusReason(status: number) {
   if (status === 401 || status === 403) return 'Нет доступа';
@@ -48,25 +48,6 @@ export function AuthenticatedImage({
       try {
         const token = getToken();
         const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-        const availabilityUrl = mediaAvailabilityUrl(thumbnailUrl);
-        if (availabilityUrl) {
-          const availabilityResponse = await fetch(availabilityUrl, {
-            headers,
-            credentials: 'include',
-            signal: controller.signal,
-          });
-          if (!availabilityResponse.ok) {
-            setReason(statusReason(availabilityResponse.status));
-            setFailed(true);
-            return;
-          }
-          const availability = await availabilityResponse.json() as { available?: boolean };
-          if (!availability.available) {
-            setReason('Файл не найден');
-            setFailed(true);
-            return;
-          }
-        }
         const response = await fetch(thumbnailUrl, {
           headers,
           credentials: 'include',

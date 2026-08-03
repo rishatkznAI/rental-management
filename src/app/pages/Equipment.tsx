@@ -1279,9 +1279,6 @@ export default function Equipment() {
   );
 
   React.useEffect(() => {
-    if (!requestedStatusFilter || requestedStatusFilter === 'all') return;
-    if (!EQUIPMENT_STATUS_FILTER_OPTIONS.some(option => option.value === requestedStatusFilter)) return;
-    setStatusFilter(requestedStatusFilter);
     const tabByStatus: Partial<Record<string, EquipmentTab>> = {
       available: 'available',
       rented: 'rented',
@@ -1291,7 +1288,12 @@ export default function Equipment() {
       for_sale: 'for_sale',
       sold: 'sold',
     };
-    setActiveTab(tabByStatus[requestedStatusFilter] || 'all');
+    const nextStatusFilter = requestedStatusFilter !== 'all'
+      && EQUIPMENT_STATUS_FILTER_OPTIONS.some(option => option.value === requestedStatusFilter)
+      ? requestedStatusFilter
+      : 'all';
+    setStatusFilter(nextStatusFilter);
+    setActiveTab(tabByStatus[nextStatusFilter] || 'all');
     setCurrentPage(1);
   }, [requestedStatusFilter]);
   const equipmentQuery = useEquipmentList();

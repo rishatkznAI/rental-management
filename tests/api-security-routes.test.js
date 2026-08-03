@@ -7,6 +7,7 @@ const serverRequire = createRequire(new URL('../server/package.json', import.met
 const express = serverRequire('express');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { buildCompanyEconomics } = require('../server/lib/finance-core.js');
 const { createServiceAuditLog } = require('../server/lib/service-audit-log.js');
 const { assertProductionSmokeFixtureMutationAllowed } = require('../server/lib/protected-fixtures.js');
 const { normalizeRole } = require('../server/lib/role-groups.js');
@@ -1418,6 +1419,41 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     assert.equal((await request(baseUrl, 'GET', '/api/spare_parts/SP-1', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/repair_work_items/RW-1', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/repair_part_items/RP-1', 'warranty-token')).status, 200);
+    const serviceExpenseTotal = () => buildCompanyEconomics({
+      service: [{ ...structuredClone(state.service.find(item => item.id === 'S-other')), date: '2026-04-28' }],
+    }, {
+      dateFrom: '2026-04-01',
+      dateTo: '2026-04-30',
+      includeDepreciation: false,
+    }).summary.serviceExpensesTotal;
+    const protectedServiceSnapshot = structuredClone(state.service.find(item => item.id === 'S-other'));
+    const protectedExpenseTotal = serviceExpenseTotal();
+    const forbiddenResultDataPayloads = [
+      { label: 'partsUsed', resultData: { partsUsed: [{ name: 'Подмена', qty: 100, cost: 999999 }] } },
+      { label: 'worksPerformed', resultData: { worksPerformed: [{ name: 'Подмена', totalCost: 500000 }] } },
+      { label: 'cost', resultData: { cost: 999999 } },
+      { label: 'amount', resultData: { amount: 999999 } },
+      { label: 'totalCost', resultData: { totalCost: 999999 } },
+      { label: 'approvedBy', resultData: { approvedBy: 'U-admin' } },
+      { label: 'mixed summary and cost', resultData: { summary: 'Допустимое резюме', cost: 999999 } },
+    ];
+    for (const payload of forbiddenResultDataPayloads) {
+      const { label, ...patch } = payload;
+      const response = await request(baseUrl, 'PATCH', '/api/service/S-other', 'warranty-token', patch);
+      assert.equal(response.status, 403, label);
+      assert.deepEqual(state.service.find(item => item.id === 'S-other'), protectedServiceSnapshot, label);
+      assert.equal(serviceExpenseTotal(), protectedExpenseTotal, label);
+    }
+    const warrantySummaryPatch = await request(baseUrl, 'PATCH', '/api/service/S-other', 'warranty-token', {
+      resultData: { summary: 'Гарантийная диагностика завершена' },
+    });
+    assert.equal(warrantySummaryPatch.status, 200);
+    assert.equal(state.service.find(item => item.id === 'S-other').resultData.summary, 'Гарантийная диагностика завершена');
+    assert.deepEqual(
+      state.service.find(item => item.id === 'S-other').resultData.partsUsed,
+      protectedServiceSnapshot.resultData.partsUsed,
+    );
+    assert.equal(serviceExpenseTotal(), protectedExpenseTotal);
     const warrantyAllowedPatch = await request(baseUrl, 'PATCH', '/api/service/S-other', 'warranty-token', {
       status: 'in_progress',
       result: 'Гарантийная диагностика завершена',

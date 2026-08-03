@@ -35,13 +35,7 @@ function sanitizeIssue(value: string) {
 
 test('service photos from protected uploads render without cross-origin console errors', async ({ page }) => {
   const suffix = `photo-${Date.now()}`;
-  const uploadRelativePath = `external-photos/service/${suffix}/before.webp`;
-  const uploadPublicPath = `/uploads/${uploadRelativePath}`;
-  const uploadDiskPath = path.join(e2eUploadRoot(), uploadRelativePath);
-  const uploadTicketDir = path.dirname(uploadDiskPath);
-  fs.mkdirSync(path.dirname(uploadDiskPath), { recursive: true });
-  fs.writeFileSync(uploadDiskPath, WEBP_1X1);
-  uploadDirsToCleanup.push(uploadTicketDir);
+  let uploadPublicPath = '';
 
   const issues: string[] = [];
   const uploadRequests: string[] = [];
@@ -54,16 +48,16 @@ test('service photos from protected uploads render without cross-origin console 
     issues.push(`pageerror: ${sanitizeIssue(error.message)}`);
   });
   page.on('request', (request) => {
-    if (request.url().includes(uploadPublicPath)) uploadRequests.push(request.url());
+    if (uploadPublicPath && request.url().includes(uploadPublicPath)) uploadRequests.push(request.url());
   });
   page.on('requestfailed', (request) => {
     const url = request.url();
-    if (url.includes(uploadPublicPath) || /ERR_BLOCKED_BY_RESPONSE|NotSameOrigin/i.test(request.failure()?.errorText || '')) {
+    if ((uploadPublicPath && url.includes(uploadPublicPath)) || /ERR_BLOCKED_BY_RESPONSE|NotSameOrigin/i.test(request.failure()?.errorText || '')) {
       issues.push(`requestfailed: ${sanitizeIssue(`${url} ${request.failure()?.errorText || ''}`)}`);
     }
   });
   page.on('response', (response) => {
-    if (response.url().includes(uploadPublicPath) && !response.ok()) {
+    if (uploadPublicPath && response.url().includes(uploadPublicPath) && !response.ok()) {
       issues.push(`response: ${response.status()} ${sanitizeIssue(response.url())}`);
     }
   });
@@ -106,18 +100,30 @@ test('service photos from protected uploads render without cross-origin console 
             partsUsed: [{ catalogId: `part-${suffix}`, name: 'E2E photo filter', qty: 1, cost: 100 }],
           },
           workLog: [{ date: now, text: 'E2E MAX-style photo event', author: 'E2E Admin', type: 'comment' }],
-          photos: [{ localPath: uploadPublicPath, originalUrl: 'https://cdn.example.test/original-before.webp', archiveStatus: 'archived' }],
-          repairPhotos: {
-            before: [{ localPath: uploadPublicPath, originalUrl: 'https://cdn.example.test/original-before.webp', archiveStatus: 'archived' }],
-            after: [],
-            beforeUploadedAt: now,
-            beforeUploadedBy: 'MAX',
-          },
           createdAt: now,
         },
       });
       expect(response.ok(), await response.text()).toBeTruthy();
       const ticket = (await response.json()) as { id: string };
+      const uploadRelativePath = `external-photos/service/${ticket.id}/before.webp`;
+      uploadPublicPath = `/uploads/${uploadRelativePath}`;
+      const uploadDiskPath = path.join(e2eUploadRoot(), uploadRelativePath);
+      fs.mkdirSync(path.dirname(uploadDiskPath), { recursive: true });
+      fs.writeFileSync(uploadDiskPath, WEBP_1X1);
+      uploadDirsToCleanup.push(path.dirname(uploadDiskPath));
+      const photo = { localPath: uploadPublicPath, originalUrl: 'https://cdn.example.test/original-before.webp', archiveStatus: 'archived' };
+      const patch = await api.patch(`/api/service/${ticket.id}`, {
+        data: {
+          photos: [photo],
+          repairPhotos: {
+            before: [photo],
+            after: [],
+            beforeUploadedAt: now,
+            beforeUploadedBy: 'MAX',
+          },
+        },
+      });
+      expect(patch.ok(), await patch.text()).toBeTruthy();
       serviceTicketsToCleanup.push(ticket.id);
       return { ticket, reason };
   });
@@ -140,16 +146,17 @@ test('service photos from protected uploads render without cross-origin console 
   expect(issues).toEqual([]);
 });
 
-test('service list shows placeholder for missing archived upload without console 404', async ({ page }) => {
+test('service list shows placeholder for missing archived upload without retries or application errors', async ({ page }) => {
   const suffix = `missing-photo-${Date.now()}`;
-  const missingRelativePath = `external-photos/service/${suffix}/before.webp`;
-  const missingPublicPath = `/uploads/${missingRelativePath}`;
+  let missingPublicPath = '';
   const issues: string[] = [];
   const missingRequests: string[] = [];
+  const missingStatuses: number[] = [];
   const availabilityRequests: string[] = [];
 
   page.on('console', (message) => {
     if (message.type() === 'error') {
+      if (/Failed to load resource: the server responded with a status of 404/i.test(message.text())) return;
       issues.push(`console: ${sanitizeIssue(message.text())}`);
     }
   });
@@ -157,16 +164,19 @@ test('service list shows placeholder for missing archived upload without console
     issues.push(`pageerror: ${sanitizeIssue(error.message)}`);
   });
   page.on('request', (request) => {
-    if (request.url().includes(missingPublicPath)) missingRequests.push(request.url());
-    if (request.url().includes('/api/media/availability') && request.url().includes(encodeURIComponent(missingPublicPath))) {
+    if (missingPublicPath && request.url().includes(missingPublicPath)) missingRequests.push(request.url());
+    if (missingPublicPath && request.url().includes('/api/media/availability') && request.url().includes(encodeURIComponent(missingPublicPath))) {
       availabilityRequests.push(request.url());
     }
   });
   page.on('requestfailed', (request) => {
     const url = request.url();
-    if (url.includes(missingPublicPath) || /ERR_BLOCKED_BY_RESPONSE|NotSameOrigin/i.test(request.failure()?.errorText || '')) {
+    if ((missingPublicPath && url.includes(missingPublicPath)) || /ERR_BLOCKED_BY_RESPONSE|NotSameOrigin/i.test(request.failure()?.errorText || '')) {
       issues.push(`requestfailed: ${sanitizeIssue(`${url} ${request.failure()?.errorText || ''}`)}`);
     }
+  });
+  page.on('response', (response) => {
+    if (missingPublicPath && response.url().includes(missingPublicPath)) missingStatuses.push(response.status());
   });
   const seed = await withAdminApi(async (api) => {
     const equipment = await createEquipment(api, suffix);
@@ -189,18 +199,25 @@ test('service list shows placeholder for missing archived upload without console
         client: client.company,
         source: 'bot',
         status: 'new',
-        photos: [{ localPath: missingPublicPath, originalUrl: 'https://cdn.example.test/missing-before.webp', archiveStatus: 'archived' }],
-        repairPhotos: {
-          before: [{ localPath: missingPublicPath, originalUrl: 'https://cdn.example.test/missing-before.webp', archiveStatus: 'archived' }],
-          after: [],
-          beforeUploadedAt: now,
-          beforeUploadedBy: 'MAX',
-        },
         createdAt: now,
       },
     });
     expect(response.ok(), await response.text()).toBeTruthy();
     const ticket = (await response.json()) as { id: string };
+    missingPublicPath = `/uploads/external-photos/service/${ticket.id}/before.webp`;
+    const photo = { localPath: missingPublicPath, originalUrl: 'https://cdn.example.test/missing-before.webp', archiveStatus: 'archived' };
+    const patch = await api.patch(`/api/service/${ticket.id}`, {
+      data: {
+        photos: [photo],
+        repairPhotos: {
+          before: [photo],
+          after: [],
+          beforeUploadedAt: now,
+          beforeUploadedBy: 'MAX',
+        },
+      },
+    });
+    expect(patch.ok(), await patch.text()).toBeTruthy();
     serviceTicketsToCleanup.push(ticket.id);
     return { ticket, reason };
   });
@@ -212,21 +229,23 @@ test('service list shows placeholder for missing archived upload without console
   const row = page.getByRole('button', { name: new RegExp(`Открыть заявку ${seed.ticket.id}`) });
   await expect(row.getByText('Фото недоступно')).toBeVisible();
   await expect(row.getByText('Файл не найден')).toBeVisible();
-  await expect.poll(() => availabilityRequests.length).toBeGreaterThan(0);
-  const listAvailabilityCount = availabilityRequests.length;
-  expect(missingRequests).toEqual([]);
+  await expect.poll(() => missingRequests.length).toBeGreaterThan(0);
+  await expect.poll(() => missingStatuses.length).toBeGreaterThan(0);
+  expect(missingStatuses.every(status => status === 404)).toBe(true);
+  const listRequestCount = missingRequests.length;
+  expect(availabilityRequests).toEqual([]);
   await page.waitForTimeout(500);
-  expect(availabilityRequests).toHaveLength(listAvailabilityCount);
+  expect(missingRequests).toHaveLength(listRequestCount);
   await row.click();
   const dialog = page.getByRole('dialog', { name: new RegExp(seed.ticket.id) });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText('Фото недоступно').first()).toBeVisible();
   await expect(dialog.getByText('Файл не найден').first()).toBeVisible();
 
-  await expect.poll(() => availabilityRequests.length).toBeGreaterThan(listAvailabilityCount);
-  const dialogAvailabilityCount = availabilityRequests.length;
-  expect(missingRequests).toEqual([]);
+  await expect.poll(() => missingRequests.length).toBeGreaterThan(listRequestCount);
+  const dialogRequestCount = missingRequests.length;
+  expect(availabilityRequests).toEqual([]);
   await page.waitForTimeout(500);
-  expect(availabilityRequests).toHaveLength(dialogAvailabilityCount);
+  expect(missingRequests).toHaveLength(dialogRequestCount);
   expect(issues).toEqual([]);
 });

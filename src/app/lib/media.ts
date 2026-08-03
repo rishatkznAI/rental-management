@@ -102,15 +102,3 @@ export function absoluteMediaUrl(src: string): string {
 export function isAuthenticatedMediaUrl(url: string | null | undefined): boolean {
   return isAuthenticatedMediaUrlImpl(url, API_BASE_URL);
 }
-
-export function mediaAvailabilityUrl(url: string | null | undefined): string {
-  if (!url) return '';
-  try {
-    const origin = typeof window === 'undefined' ? 'http://localhost' : window.location.origin;
-    const parsed = new URL(absoluteMediaUrl(url), origin);
-    if (!parsed.pathname.startsWith('/uploads/')) return '';
-    return `${API_BASE_URL}/api/media/availability?path=${encodeURIComponent(parsed.pathname)}`;
-  } catch {
-    return '';
-  }
-}

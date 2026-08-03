@@ -304,6 +304,7 @@ test('new mass assignment protected fields are stripped or rejected for non-admi
   const access = createAccess({});
   const manager = { userId: 'U-manager', userName: 'Руслан', userRole: 'Менеджер по аренде' };
   const mechanic = { userId: 'U-mechanic', userName: 'Петров', userRole: 'Механик' };
+  const warrantyMechanic = { userId: 'U-warranty', userName: 'Гарантия', userRole: 'Механик по гарантии' };
   const carrier = { userId: 'U-carrier', userName: 'Перевозчик', userRole: 'Перевозчик', carrierId: 'carrier-1' };
   const investor = { userId: 'U-investor', userName: 'Инвестор', userRole: 'Инвестор', ownerId: 'OW-1' };
 
@@ -327,6 +328,26 @@ test('new mass assignment protected fields are stripped or rejected for non-admi
       status: 'in_progress',
       [field]: field === 'closedAt' ? '2026-04-28T12:00:00.000Z' : 'M-other',
     }, mechanic), /Недостаточно прав/);
+  }
+
+  const existingService = {
+    resultData: {
+      summary: 'Старое резюме',
+      partsUsed: [{ name: 'Фильтр', qty: 1, cost: 5000 }],
+      worksPerformed: [{ name: 'Диагностика', totalCost: 2500 }],
+    },
+  };
+  const warrantySafe = access.sanitizeUpdateInput('service', {
+    resultData: { summary: 'Новое резюме' },
+  }, warrantyMechanic, existingService);
+  assert.deepEqual(warrantySafe.resultData, {
+    ...existingService.resultData,
+    summary: 'Новое резюме',
+  });
+  for (const forbiddenField of ['partsUsed', 'worksPerformed', 'cost', 'amount', 'totalCost', 'approvedBy']) {
+    assert.throws(() => access.sanitizeUpdateInput('service', {
+      resultData: { summary: 'Смешанный payload', [forbiddenField]: [] },
+    }, warrantyMechanic, existingService), /разрешено менять только summary/);
   }
 
   const carrierSafe = access.sanitizeUpdateInput('deliveries', {

@@ -855,17 +855,23 @@ export default function ServiceDetail({
 
   const saveResultSummary = () => {
     if (!ticket || !canEditTicketFields) return;
+    const summary = resultSummary.trim();
     const updated = {
       ...ticket,
-      result: resultSummary.trim(),
+      result: summary,
       resultData: {
         ...ticket.resultData,
-        summary: resultSummary.trim(),
-        worksPerformed: legacyWorks(ticket),
-        partsUsed: legacyParts(ticket),
+        summary,
+        ...(isWarrantyMechanic ? {} : {
+          worksPerformed: legacyWorks(ticket),
+          partsUsed: legacyParts(ticket),
+        }),
       },
     };
-    persist(updated, { result: updated.result, resultData: updated.resultData });
+    persist(updated, {
+      result: updated.result,
+      resultData: isWarrantyMechanic ? { summary } : updated.resultData,
+    });
   };
 
   const savePlannedDate = () => {

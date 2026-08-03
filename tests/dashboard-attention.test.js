@@ -10,6 +10,7 @@ const documentsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/
 const documentsRouteSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/documents.js'), 'utf8');
 const equipmentServiceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/equipment.service.ts'), 'utf8');
 const equipmentHooksSource = fs.readFileSync(path.join(process.cwd(), 'src/app/hooks/useEquipment.ts'), 'utf8');
+const equipmentPageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
 const dashboardDesignStandardSource = fs.readFileSync(path.join(process.cwd(), 'docs/dashboard-design-standard.md'), 'utf8');
 const stagingSmokeSource = fs.readFileSync(path.join(process.cwd(), 'e2e/staging-smoke.spec.ts'), 'utf8');
 const productionUiSelectorSmokeSource = fs.readFileSync(path.join(process.cwd(), 'e2e/production-ui-selector-smoke.spec.ts'), 'utf8');
@@ -259,6 +260,10 @@ test('dashboard cockpit renders executive KPI grid with fleet and service analyt
     assert.match(dashboardSource, new RegExp(label));
   }
   assert.match(dashboardSource, /id: 'executive-fleet-utilization'[\s\S]*href: '\/equipment\?status=rented'/);
+  assert.match(equipmentPageSource, /const nextStatusFilter = requestedStatusFilter !== 'all'[\s\S]*\? requestedStatusFilter[\s\S]*: 'all'/);
+  assert.match(equipmentPageSource, /setStatusFilter\(nextStatusFilter\)/);
+  assert.match(equipmentPageSource, /setActiveTab\(tabByStatus\[nextStatusFilter\] \|\| 'all'\)/);
+  assert.doesNotMatch(equipmentPageSource, /if \(!requestedStatusFilter \|\| requestedStatusFilter === 'all'\) return/);
   assert.match(dashboardSource, /Donut gauge утилизации парка/);
   assert.match(dashboardSource, /setSelectedKPI\('utilization'\)/);
   assert.match(dashboardSource, /plannerHref: '\/planner'/);

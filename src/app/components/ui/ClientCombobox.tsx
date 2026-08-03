@@ -51,6 +51,10 @@ export interface ClientComboboxProps {
   placeholder?: string;
   className?: string;
   initialLimit?: number;
+  inputId?: string;
+  ariaLabelledBy?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 }
 
 export function ClientCombobox({
@@ -62,6 +66,10 @@ export function ClientCombobox({
   placeholder = 'Введите название, ИНН, контакт или телефон…',
   className,
   initialLimit = 10,
+  inputId,
+  ariaLabelledBy,
+  ariaInvalid,
+  ariaDescribedBy,
 }: ClientComboboxProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -155,6 +163,14 @@ export function ClientCombobox({
   return (
     <div ref={containerRef} className={cn('relative w-full', className)}>
       <div
+        id={inputId}
+        role="combobox"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-labelledby={ariaLabelledBy}
+        aria-invalid={ariaInvalid || undefined}
+        aria-describedby={ariaDescribedBy}
         className={cn(
           'flex h-10 w-full cursor-text items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 text-sm',
           'dark:border-gray-600 dark:bg-gray-700',
@@ -165,6 +181,12 @@ export function ClientCombobox({
         onClick={() => {
           setOpen(true);
           inputRef.current?.focus();
+        }}
+        onKeyDown={(event) => {
+          if (open || !['Enter', ' ', 'ArrowDown'].includes(event.key)) return;
+          event.preventDefault();
+          setOpen(true);
+          window.requestAnimationFrame(() => inputRef.current?.focus());
         }}
       >
         <Search className="h-3.5 w-3.5 shrink-0 text-gray-400" />
@@ -202,6 +224,7 @@ export function ClientCombobox({
       {open && (
         <div
           ref={dropdownRef}
+          role="listbox"
           className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800"
         >
           {filteredClients.length === 0 ? (
@@ -217,6 +240,8 @@ export function ClientCombobox({
                   <li
                     key={clientItem.id}
                     data-client-item
+                    role="option"
+                    aria-selected={isSelected}
                     onMouseDown={() => handleSelect(clientItem)}
                     onMouseEnter={() => setHighlighted(index)}
                     className={cn(

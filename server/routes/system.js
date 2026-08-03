@@ -179,6 +179,21 @@ function nonEmptyString(...values) {
   return values.map(value => String(value || '').trim()).find(Boolean) || '';
 }
 
+function recordReferencesLocalMedia(value, publicPath) {
+  if (typeof value === 'string') return value === publicPath;
+  if (Array.isArray(value)) return value.some(item => recordReferencesLocalMedia(item, publicPath));
+  if (!value || typeof value !== 'object') return false;
+  return Object.values(value).some(item => recordReferencesLocalMedia(item, publicPath));
+}
+
+function archivedMediaContext(relativePath) {
+  const parts = String(relativePath || '').split('/').filter(Boolean);
+  if (parts.length !== 4 || parts[0] !== 'external-photos') return null;
+  const [, collection, entityId, filename] = parts;
+  if (!collection || !entityId || !filename) return null;
+  return { collection, entityId, filename };
+}
+
 function sendSystemFixtureProtectedError(req, res, auditLog, error) {
   auditLog?.(req, {
     action: `equipment.${error?.action || 'mutation'}.blocked`,
@@ -1098,6 +1113,7 @@ function registerSystemRoutes(app, deps) {
     getBuildInfo,
     getAppDisabledConfig,
     getRoleAccessSummary,
+    accessControl,
     jsonCollections = [],
     createDatabaseBackup,
     fileRoots,
@@ -1685,30 +1701,25 @@ function registerSystemRoutes(app, deps) {
 
   app.get('/uploads/*', requireAuth, (req, res) => {
     const relative = String(req.params?.[0] || '').replace(/\\/g, '/');
+    const mediaContext = archivedMediaContext(relative);
+    const notFound = () => res.status(404).json({ ok: false, error: 'Файл не найден.' });
+    if (!mediaContext || !accessControl?.canAccessEntity) return notFound();
+    const publicPath = `/uploads/${relative}`;
+    const collectionData = readData(mediaContext.collection);
+    const entity = (Array.isArray(collectionData) ? collectionData : []).find(item => (
+      String(item?.id || '') === mediaContext.entityId
+      && recordReferencesLocalMedia(item, publicPath)
+    ));
+    if (!entity || !accessControl.canAccessEntity(mediaContext.collection, entity, req.user)) return notFound();
     const targetPath = path.resolve(uploadsRoot, relative);
     const inside = path.relative(uploadsRoot, targetPath);
     if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) {
-      return res.status(400).json({ ok: false, error: 'Некорректный путь файла.' });
+      return notFound();
     }
     if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isFile()) {
-      return res.status(404).json({ ok: false, error: 'Файл не найден.' });
+      return notFound();
     }
     return res.sendFile(targetPath);
-  });
-
-  app.get('/api/media/availability', requireAuth, (req, res) => {
-    const publicPath = String(req.query?.path || '').replace(/\\/g, '/');
-    if (!publicPath.startsWith('/uploads/')) {
-      return res.status(400).json({ ok: false, error: 'Некорректный путь файла.' });
-    }
-    const relative = publicPath.slice('/uploads/'.length);
-    const targetPath = path.resolve(uploadsRoot, relative);
-    const inside = path.relative(uploadsRoot, targetPath);
-    if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) {
-      return res.status(400).json({ ok: false, error: 'Некорректный путь файла.' });
-    }
-    const available = fs.existsSync(targetPath) && fs.statSync(targetPath).isFile();
-    return res.json({ ok: true, available });
   });
 
   app.post('/api/admin/system-data/import/dry-run', requireAuth, requireAdmin, (req, res) => {

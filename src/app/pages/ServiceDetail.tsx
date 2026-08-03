@@ -64,7 +64,7 @@ import {
 } from '../lib/serviceWorkOrder';
 import { buildServiceQuickActions } from '../lib/quickActions.js';
 import { normalizePhotoForDisplay, normalizePhotoReference } from '../lib/media';
-import { normalizeUserRole } from '../lib/userStorage';
+import { isWarrantyMechanicRole, normalizeUserRole } from '../lib/userStorage';
 import { animationDurations, useAnimatedPresence } from '../lib/animations';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -236,8 +236,8 @@ function normalizeWorkPerformed(work: Partial<ServiceWorkPerformed> | undefined)
 }
 
 function formatServiceDate(value: string | null | undefined) {
-  const timestamp = Date.parse(String(value || ''));
-  return Number.isFinite(timestamp) ? formatDate(new Date(timestamp).toISOString()) : 'не указана';
+  const formatted = formatDate(String(value || ''));
+  return formatted === '—' ? 'не указана' : formatted;
 }
 
 function repairMutationErrorMessage(error: unknown) {
@@ -452,6 +452,7 @@ export default function ServiceDetail({
     user?.role,
     user?.rawRole,
   ].map(role => normalizeUserRole(role)).find(Boolean) || '';
+  const isWarrantyMechanic = isWarrantyMechanicRole(currentUserRole);
   const canEdit = can('edit', 'service');
   const canDeleteService = isAdmin && can('delete', 'service');
   const canEditEquipment = can('edit', 'equipment');
@@ -627,7 +628,7 @@ export default function ServiceDetail({
       ...ticket,
       photos: [...(ticket.photos ?? []), ...photoPending],
     };
-    persist(updated);
+    persist(updated, { photos: updated.photos });
     setPhotoPending([]);
   };
 
@@ -637,15 +638,15 @@ export default function ServiceDetail({
       ...ticket,
       photos: (ticket.photos ?? []).filter((_, i) => i !== idx),
     };
-    persist(updated);
+    persist(updated, { photos: updated.photos });
   };
 
   // Persist changes — optimistic local update + server PATCH
-  const persist = useCallback((updated: ServiceTicket) => {
+  const persist = useCallback((updated: ServiceTicket, patch: Partial<ServiceTicket> & { comment?: string }) => {
     const normalized = normalizeTicket(updated);
     setTicket(normalized);
-    updateTicket.mutate({ id: normalized.id, data: normalized });
-  }, [updateTicket]);
+    updateTicket.mutate({ id: normalized.id, data: isAdmin ? normalized : patch });
+  }, [isAdmin, updateTicket]);
 
   const currentEquipment = ticket
     ? (
@@ -743,7 +744,7 @@ export default function ServiceDetail({
         { date: now, text: logText, author, type: 'status_change' },
       ],
     };
-    persist(updated);
+    persist(updated, { status: newStatus });
 
     if ((!ticket.equipmentId && !ticket.inventoryNumber) || !canEditEquipment) return;
 
@@ -819,19 +820,20 @@ export default function ServiceDetail({
   const addComment = () => {
     if (!ticket || !canEditTicketFields || !newComment.trim()) return;
     const now = new Date().toISOString();
-    persist({
+    const updated = {
       ...ticket,
       workLog: [...ticket.workLog, { date: now, text: newComment.trim(), author: user?.name || 'Оператор', type: 'comment' }],
-    });
+    };
+    persist(updated, { comment: newComment.trim() });
     setNewComment('');
   };
 
   const saveAssignee = () => {
-    if (!ticket || !canEditTicketFields || !newAssigneeId) return;
+    if (!ticket || !canManageTicketMetadata || !newAssigneeId) return;
     const mechanic = mechanics.find(item => item.id === newAssigneeId);
     if (!mechanic) return;
     const now = new Date().toISOString();
-    persist({
+    const updated = {
       ...ticket,
       assignedTo: mechanic.name,
       assignedMechanicId: mechanic.id,
@@ -842,13 +844,18 @@ export default function ServiceDetail({
         author: user?.name || 'Оператор',
         type: 'assign',
       }],
+    };
+    persist(updated, {
+      assignedTo: mechanic.name,
+      assignedMechanicId: mechanic.id,
+      assignedMechanicName: mechanic.name,
     });
     setNewAssigneeId('');
   };
 
   const saveResultSummary = () => {
     if (!ticket || !canEditTicketFields) return;
-    persist({
+    const updated = {
       ...ticket,
       result: resultSummary.trim(),
       resultData: {
@@ -857,12 +864,13 @@ export default function ServiceDetail({
         worksPerformed: legacyWorks(ticket),
         partsUsed: legacyParts(ticket),
       },
-    });
+    };
+    persist(updated, { result: updated.result, resultData: updated.resultData });
   };
 
   const savePlannedDate = () => {
-    if (!ticket || !canEditTicketFields || !newPlannedDate) return;
-    persist({ ...ticket, plannedDate: newPlannedDate });
+    if (!ticket || !canManageTicketMetadata || !newPlannedDate) return;
+    persist({ ...ticket, plannedDate: newPlannedDate }, { plannedDate: newPlannedDate });
     setNewPlannedDate('');
   };
 
@@ -1024,15 +1032,16 @@ export default function ServiceDetail({
 
     try {
       await repairWorkItemsService.add({ repairId: ticket.id, workId: work.id, quantity: qty });
+      const workLog = [...ticket.workLog, {
+        date: new Date().toISOString(),
+        text: `Добавлена работа: ${work.name} × ${qty}`,
+        author: user?.name || 'Оператор',
+        type: 'repair_result' as const,
+      }];
       persist({
         ...ticket,
-        workLog: [...ticket.workLog, {
-          date: new Date().toISOString(),
-          text: `Добавлена работа: ${work.name} × ${qty}`,
-          author: user?.name || 'Оператор',
-          type: 'repair_result',
-        }],
-      });
+        workLog,
+      }, { workLog });
       await queryClient.invalidateQueries({ queryKey: ['repairWorkItems', ticket.id] });
       await queryClient.invalidateQueries({ queryKey: ['serviceAuditLog', ticket.id] });
       await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
@@ -1048,15 +1057,16 @@ export default function ServiceDetail({
     if (!ticket || !canDeleteRepairItems) return;
     try {
       await repairWorkItemsService.remove(item.id);
+      const workLog = [...ticket.workLog, {
+        date: new Date().toISOString(),
+        text: `Удалена работа: ${name}`,
+        author: user?.name || 'Оператор',
+        type: 'repair_result' as const,
+      }];
       persist({
         ...ticket,
-        workLog: [...ticket.workLog, {
-          date: new Date().toISOString(),
-          text: `Удалена работа: ${name}`,
-          author: user?.name || 'Оператор',
-          type: 'repair_result',
-        }],
-      });
+        workLog,
+      }, { workLog });
       await queryClient.invalidateQueries({ queryKey: ['repairWorkItems', ticket.id] });
       await queryClient.invalidateQueries({ queryKey: ['serviceAuditLog', ticket.id] });
       await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
@@ -1081,15 +1091,16 @@ export default function ServiceDetail({
 
     try {
       await repairPartItemsService.add({ repairId: ticket.id, partId: part.id, quantity: qty, priceSnapshot: cost });
+      const workLog = [...ticket.workLog, {
+        date: new Date().toISOString(),
+        text: `Добавлена запчасть: ${part.name} × ${qty}`,
+        author: user?.name || 'Оператор',
+        type: 'repair_result' as const,
+      }];
       persist({
         ...ticket,
-        workLog: [...ticket.workLog, {
-          date: new Date().toISOString(),
-          text: `Добавлена запчасть: ${part.name} × ${qty}`,
-          author: user?.name || 'Оператор',
-          type: 'repair_result',
-        }],
-      });
+        workLog,
+      }, { workLog });
       await queryClient.invalidateQueries({ queryKey: ['repairPartItems', ticket.id] });
       await queryClient.invalidateQueries({ queryKey: ['serviceAuditLog', ticket.id] });
       await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
@@ -1106,15 +1117,16 @@ export default function ServiceDetail({
     if (!ticket || !canDeleteRepairItems) return;
     try {
       await repairPartItemsService.remove(item.id);
+      const workLog = [...ticket.workLog, {
+        date: new Date().toISOString(),
+        text: `Удалена запчасть: ${name}`,
+        author: user?.name || 'Оператор',
+        type: 'repair_result' as const,
+      }];
       persist({
         ...ticket,
-        workLog: [...ticket.workLog, {
-          date: new Date().toISOString(),
-          text: `Удалена запчасть: ${name}`,
-          author: user?.name || 'Оператор',
-          type: 'repair_result',
-        }],
-      });
+        workLog,
+      }, { workLog });
       await queryClient.invalidateQueries({ queryKey: ['repairPartItems', ticket.id] });
       await queryClient.invalidateQueries({ queryKey: ['serviceAuditLog', ticket.id] });
       await queryClient.invalidateQueries({ queryKey: ['reports', 'mechanicsWorkload'] });
@@ -1239,6 +1251,7 @@ export default function ServiceDetail({
       ticket.assignedTo,
     ].filter(Boolean).some(ticketValue => String(ticketValue).trim().toLowerCase() === String(value).trim().toLowerCase()));
   const canEditTicketFields = canEdit && (ticket.status !== 'closed' || isAdmin);
+  const canManageTicketMetadata = canEditTicketFields && !isWarrantyMechanic;
   const canReturnForRevision = canEdit && ['ready', 'closed'].includes(ticket.status) && (
     isAdmin ||
     currentUserRole === 'Офис-менеджер' ||
@@ -1248,6 +1261,7 @@ export default function ServiceDetail({
   const canAddRepairItems = (isAdmin || (ticket.status === 'needs_revision' && isAssignedMechanic)) && canEditTicketFields;
   const canDeleteRepairItems = isAdmin && canEditTicketFields;
   const canChangeTicketStatus = canEdit && ticket.status !== 'closed';
+  const canCloseTicket = canChangeTicketStatus && !isWarrantyMechanic;
   const quickActions = buildServiceQuickActions({
     ticket: {
       ...ticket,
@@ -1298,7 +1312,7 @@ export default function ServiceDetail({
       </Button>
     );
   }
-  if (canChangeTicketStatus && ticket.status === 'ready') {
+  if (canCloseTicket && ticket.status === 'ready') {
     actions.push(
       <Button key="close" className="w-full sm:w-auto" onClick={() => changeStatus('closed', scenarioIsRepair ? 'Заявка закрыта' : `${serviceScenarioLabel} зафиксировано и закрыто`)}>
         <CheckCircle className="h-4 w-4" />
@@ -1322,7 +1336,7 @@ export default function ServiceDetail({
       </Button>,
     );
   }
-  if (canChangeTicketStatus) {
+  if (canCloseTicket) {
     actions.push(
       <Button key="cancel" variant="secondary" className="w-full sm:w-auto border-red-200 text-red-600 hover:bg-red-50"
         onClick={() => changeStatus('closed', 'Заявка отменена / закрыта без выполнения')}>
@@ -2169,7 +2183,7 @@ export default function ServiceDetail({
                   {ticket.assignedMechanicName || ticket.assignedTo || <span className="text-gray-400 font-normal italic">Не назначен</span>}
                 </p>
               </div>
-              {canEditTicketFields && (
+              {canManageTicketMetadata && (
                 <>
                   <Divider />
                   <div data-service-detail-form-row="assignee" className="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -2216,9 +2230,9 @@ export default function ServiceDetail({
                         </p>
                         <p className="break-all font-mono text-xs text-gray-500">{sv.plateNumber}</p>
                       </div>
-                      {canEditTicketFields && (
+                      {canManageTicketMetadata && (
                         <Button variant="outline" size="sm" className="w-full sm:w-auto"
-                          onClick={() => persist({ ...ticket, serviceVehicleId: null })}
+                          onClick={() => persist({ ...ticket, serviceVehicleId: null }, { serviceVehicleId: null })}
                         >
                           <X className="h-3.5 w-3.5" />
                         </Button>
@@ -2231,7 +2245,7 @@ export default function ServiceDetail({
               ) : (
                 <p className="text-sm text-gray-400">Машина не назначена</p>
               )}
-              {canEditTicketFields && (
+              {canManageTicketMetadata && (
                 <>
                   <Divider />
                   <div data-service-detail-form-row="service-vehicle" className="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -2243,7 +2257,7 @@ export default function ServiceDetail({
                         defaultValue=""
                         onChange={e => {
                           if (e.target.value) {
-                            persist({ ...ticket, serviceVehicleId: e.target.value });
+                            persist({ ...ticket, serviceVehicleId: e.target.value }, { serviceVehicleId: e.target.value });
                             e.target.value = '';
                           }
                         }}
@@ -2278,7 +2292,7 @@ export default function ServiceDetail({
               <Field label="Дата создания" value={formatServiceDate(ticket.createdAt)} />
               {ticket.plannedDate
                 ? <Field label="Плановая дата" value={formatServiceDate(ticket.plannedDate)} />
-                : canEditTicketFields && (
+                : canManageTicketMetadata && (
                   <>
                     <Divider />
                     <div data-service-detail-form-row="planned-date" className="flex flex-col gap-2 sm:flex-row sm:items-end">

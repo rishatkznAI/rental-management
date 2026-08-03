@@ -241,13 +241,21 @@ function registerDeliveryRoutes(router, deps) {
     const neededBy = body.neededBy === undefined
       ? (existing?.neededBy || null)
       : normalizeDeliveryDate(body.neededBy, 'Дедлайн');
+    const contactName = String(body.contactName || '').trim();
+    const contactPhone = String(body.contactPhone || '').trim();
+    const existingContactName = String(existing?.contactName || '').trim();
+    const existingContactPhone = String(existing?.contactPhone || '').trim();
 
     ensureNonEmpty(transportDate, 'Дата перевозки');
     ensureNonEmpty(body.origin, 'Откуда');
     ensureNonEmpty(body.destination, 'Куда');
     ensureNonEmpty(body.cargo, 'Что перевозим');
-    ensureNonEmpty(body.contactName, 'Контактное лицо');
-    ensureNonEmpty(body.contactPhone, 'Контактный номер');
+    if (!existing || existingContactName || contactName) {
+      ensureNonEmpty(contactName, 'Контактное лицо');
+    }
+    if (!existing || existingContactPhone || contactPhone) {
+      ensureNonEmpty(contactPhone, 'Контактный номер');
+    }
     ensureNonEmpty(body.client, 'Клиент');
     ensureNonEmpty(body.manager || existing?.manager || author, 'Ответственный менеджер');
 
@@ -264,8 +272,8 @@ function registerDeliveryRoutes(router, deps) {
       origin: String(body.origin || '').trim(),
       destination: String(body.destination || '').trim(),
       cargo: String(body.cargo || '').trim(),
-      contactName: String(body.contactName || '').trim(),
-      contactPhone: String(body.contactPhone || '').trim(),
+      contactName,
+      contactPhone,
       cost: normalizeDeliveryCost(body.cost, existing),
       comment: String(body.comment || '').trim(),
       client: String(body.client || '').trim(),

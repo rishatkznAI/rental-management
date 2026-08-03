@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Car, AlertTriangle, ChevronRight, RefreshCw } from 'lucide-react';
-import { cn, formatDate } from '../lib/utils';
+import { cn, formatDate, parseDateValue } from '../lib/utils';
 import { usePermissions } from '../lib/permissions';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -42,13 +42,16 @@ function statusVariant(s: VehicleStatus): BadgeVariant {
 
 function isExpiringSoon(dateStr: string | null, daysAhead = 30): boolean {
   if (!dateStr) return false;
-  const diff = (new Date(dateStr).getTime() - Date.now()) / 86400000;
+  const date = parseDateValue(dateStr);
+  if (!date) return false;
+  const diff = (date.getTime() - Date.now()) / 86400000;
   return diff >= 0 && diff <= daysAhead;
 }
 
 function isExpired(dateStr: string | null): boolean {
   if (!dateStr) return false;
-  return new Date(dateStr).getTime() < Date.now();
+  const date = parseDateValue(dateStr);
+  return Boolean(date && date.getTime() < Date.now());
 }
 
 function formatMileage(value: unknown): string {

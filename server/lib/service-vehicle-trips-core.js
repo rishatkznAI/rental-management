@@ -1,3 +1,5 @@
+const { normalizeDateOnly } = require('./date-only');
+
 const VEHICLE_TRIP_STATUSES = new Set(['draft', 'issued', 'in_progress', 'completed', 'cancelled']);
 
 function tripError(message, status = 400) {
@@ -11,11 +13,7 @@ function normalizeTripText(value) {
 }
 
 function normalizeTripDate(value) {
-  const text = normalizeTripText(value);
-  if (!text) return '';
-  const parsed = new Date(`${text.slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return '';
-  return parsed.toISOString().slice(0, 10);
+  return normalizeDateOnly(normalizeTripText(value).slice(0, 10));
 }
 
 function parseTripNumber(value, { required = false } = {}) {

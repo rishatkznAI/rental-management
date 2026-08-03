@@ -67,7 +67,7 @@ import {
   type AdminFormFieldSetting,
   type AdminListOption,
 } from '../lib/adminConfig';
-import { formatCurrency, formatDate } from '../lib/utils';
+import { formatCurrency, formatDate, parseDateOnly as parseCalendarDateOnly } from '../lib/utils';
 import { COMPANY_EXPENSE_KEYS, companyExpensesService } from '../services/company-expenses.service';
 import { financeService } from '../services/finance.service';
 import { LEASING_KEYS, leasingService } from '../services/leasing.service';
@@ -1217,7 +1217,7 @@ export default function Finance() {
 
   const buildOperationPayload = () => {
     const amount = Number(operationForm.amount);
-    if (!operationForm.date || Number.isNaN(new Date(`${operationForm.date}T00:00:00`).getTime())) {
+    if (!parseCalendarDateOnly(operationForm.date)) {
       setOperationFormError('Укажите корректную дату.');
       return null;
     }
@@ -1380,7 +1380,7 @@ export default function Finance() {
       setTransferFormError('Сумма перевода должна быть больше нуля.');
       return;
     }
-    if (!transferForm.date || Number.isNaN(new Date(`${transferForm.date}T00:00:00`).getTime())) {
+    if (!parseCalendarDateOnly(transferForm.date)) {
       setTransferFormError('Укажите корректную дату перевода.');
       return;
     }

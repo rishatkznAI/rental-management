@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
@@ -1585,8 +1585,7 @@ export default function Documents() {
 
   function openDocumentChainAction(source: Doc, type: DocumentType) {
     if (!['rental_specification', 'transfer_act_to_client', 'return_act_from_client'].includes(type)) return;
-    setSelectedDocument(null);
-    openDocumentWizard({
+    const initial: Partial<DocumentWizardState> = {
       type,
       parentDocumentId: source.type === 'rental_contract' ? source.id : source.parentDocumentId || '',
       specificationId: source.type === 'rental_specification' ? source.id : '',
@@ -1598,7 +1597,9 @@ export default function Documents() {
       dailyRate: source.dailyRate || '',
       quantityDays: source.quantityDays || '',
       amount: source.amount ? String(source.amount) : '',
-    });
+    };
+    setSelectedDocument(null);
+    window.requestAnimationFrame(() => openDocumentWizard(initial));
   }
 
   function applyWizardType(type: DocumentType) {
@@ -2035,9 +2036,11 @@ export default function Documents() {
             Контроль
           </Button>
           {isAdmin ? (
-            <Button variant="secondary" className="border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]">
-              <Settings2 className="h-4 w-4" />
-              Настройки полей
+            <Button asChild variant="secondary" className="border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]">
+              <Link to="/admin?modal=details&tab=configuration">
+                <Settings2 className="h-4 w-4" />
+                Настройки полей
+              </Link>
             </Button>
           ) : null}
           <Button
@@ -3461,7 +3464,7 @@ export default function Documents() {
                     </div>
                   </div>
 
-                  <DialogFooter>
+                  <DialogFooter className="flex-wrap">
                     {canManageDocuments && selectedDocument.type === 'rental_contract' ? (
                       <>
                         <Button variant="secondary" onClick={() => openDocumentChainAction(selectedDocument, 'rental_specification')}>

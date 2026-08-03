@@ -10,8 +10,20 @@ const WEBP_1X1 = Buffer.from(
 );
 
 const uploadDirsToCleanup: string[] = [];
+const serviceTicketsToCleanup: string[] = [];
 
-test.afterAll(() => {
+function e2eUploadRoot() {
+  const databasePath = path.resolve(process.env.DB_PATH || path.join('server', 'data', 'app.sqlite'));
+  return path.join(path.dirname(databasePath), 'uploads');
+}
+
+test.afterAll(async () => {
+  await withAdminApi(async (api) => {
+    for (const ticketId of serviceTicketsToCleanup) {
+      const response = await api.delete(`/api/service/${ticketId}`);
+      expect(response.ok() || response.status() === 404, await response.text()).toBeTruthy();
+    }
+  });
   for (const dir of uploadDirsToCleanup) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -25,7 +37,7 @@ test('service photos from protected uploads render without cross-origin console 
   const suffix = `photo-${Date.now()}`;
   const uploadRelativePath = `external-photos/service/${suffix}/before.webp`;
   const uploadPublicPath = `/uploads/${uploadRelativePath}`;
-  const uploadDiskPath = path.join(process.cwd(), 'server', 'data', 'uploads', uploadRelativePath);
+  const uploadDiskPath = path.join(e2eUploadRoot(), uploadRelativePath);
   const uploadTicketDir = path.dirname(uploadDiskPath);
   fs.mkdirSync(path.dirname(uploadDiskPath), { recursive: true });
   fs.writeFileSync(uploadDiskPath, WEBP_1X1);
@@ -106,6 +118,7 @@ test('service photos from protected uploads render without cross-origin console 
       });
       expect(response.ok(), await response.text()).toBeTruthy();
       const ticket = (await response.json()) as { id: string };
+      serviceTicketsToCleanup.push(ticket.id);
       return { ticket, reason };
   });
 
@@ -133,6 +146,7 @@ test('service list shows placeholder for missing archived upload without console
   const missingPublicPath = `/uploads/${missingRelativePath}`;
   const issues: string[] = [];
   const missingRequests: string[] = [];
+  const availabilityRequests: string[] = [];
 
   page.on('console', (message) => {
     if (message.type() === 'error') {
@@ -144,6 +158,9 @@ test('service list shows placeholder for missing archived upload without console
   });
   page.on('request', (request) => {
     if (request.url().includes(missingPublicPath)) missingRequests.push(request.url());
+    if (request.url().includes('/api/media/availability') && request.url().includes(encodeURIComponent(missingPublicPath))) {
+      availabilityRequests.push(request.url());
+    }
   });
   page.on('requestfailed', (request) => {
     const url = request.url();
@@ -151,15 +168,6 @@ test('service list shows placeholder for missing archived upload without console
       issues.push(`requestfailed: ${sanitizeIssue(`${url} ${request.failure()?.errorText || ''}`)}`);
     }
   });
-  page.on('response', (response) => {
-    if (response.url().includes(missingPublicPath)) {
-      issues.push(`response: ${response.status()} ${sanitizeIssue(response.url())}`);
-    }
-    if (response.status() === 404) {
-      issues.push(`response404: ${sanitizeIssue(response.url())}`);
-    }
-  });
-
   const seed = await withAdminApi(async (api) => {
     const equipment = await createEquipment(api, suffix);
     const client = await createClient(api, `Missing Service Photo ${suffix}`);
@@ -181,9 +189,9 @@ test('service list shows placeholder for missing archived upload without console
         client: client.company,
         source: 'bot',
         status: 'new',
-        photos: [{ localPath: missingPublicPath, originalUrl: 'https://cdn.example.test/missing-before.webp' }],
+        photos: [{ localPath: missingPublicPath, originalUrl: 'https://cdn.example.test/missing-before.webp', archiveStatus: 'archived' }],
         repairPhotos: {
-          before: [{ localPath: missingPublicPath, originalUrl: 'https://cdn.example.test/missing-before.webp' }],
+          before: [{ localPath: missingPublicPath, originalUrl: 'https://cdn.example.test/missing-before.webp', archiveStatus: 'archived' }],
           after: [],
           beforeUploadedAt: now,
           beforeUploadedBy: 'MAX',
@@ -193,6 +201,7 @@ test('service list shows placeholder for missing archived upload without console
     });
     expect(response.ok(), await response.text()).toBeTruthy();
     const ticket = (await response.json()) as { id: string };
+    serviceTicketsToCleanup.push(ticket.id);
     return { ticket, reason };
   });
 
@@ -203,12 +212,21 @@ test('service list shows placeholder for missing archived upload without console
   const row = page.getByRole('button', { name: new RegExp(`Открыть заявку ${seed.ticket.id}`) });
   await expect(row.getByText('Фото недоступно')).toBeVisible();
   await expect(row.getByText('Файл не найден')).toBeVisible();
+  await expect.poll(() => availabilityRequests.length).toBeGreaterThan(0);
+  const listAvailabilityCount = availabilityRequests.length;
+  expect(missingRequests).toEqual([]);
+  await page.waitForTimeout(500);
+  expect(availabilityRequests).toHaveLength(listAvailabilityCount);
   await row.click();
   const dialog = page.getByRole('dialog', { name: new RegExp(seed.ticket.id) });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText('Фото недоступно').first()).toBeVisible();
   await expect(dialog.getByText('Файл не найден').first()).toBeVisible();
 
+  await expect.poll(() => availabilityRequests.length).toBeGreaterThan(listAvailabilityCount);
+  const dialogAvailabilityCount = availabilityRequests.length;
   expect(missingRequests).toEqual([]);
+  await page.waitForTimeout(500);
+  expect(availabilityRequests).toHaveLength(dialogAvailabilityCount);
   expect(issues).toEqual([]);
 });

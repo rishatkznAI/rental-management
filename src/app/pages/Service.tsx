@@ -223,16 +223,13 @@ function serviceQueueGroupTone(group: string) {
 }
 
 function formatTicketDate(value: ServiceTicket['createdAt']) {
-  const timestamp = Date.parse(String(value || ''));
-  return Number.isFinite(timestamp) ? formatDate(new Date(timestamp).toISOString()) : 'не указана';
+  const formatted = formatDate(String(value || ''));
+  return formatted === '—' ? 'не указана' : formatted;
 }
 
 function formatShortDate(value?: string) {
-  const text = String(value || '').trim();
-  if (!text) return '—';
-  const timestamp = Date.parse(text);
-  if (!Number.isFinite(timestamp)) return '—';
-  return new Date(timestamp).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  const formatted = formatDate(String(value || ''));
+  return formatted === '—' ? formatted : formatted.slice(0, 5);
 }
 
 function getTicketClientObject(ticket: ServiceTicket) {

@@ -69,5 +69,10 @@ test('payments add modal is portaled and centered by a viewport wrapper', () => 
   assert.match(modalSource, /max-h-\[min\(92dvh,calc\(100dvh-2rem\)\)\]/);
   assert.match(modalSource, /min-h-0 flex-1 space-y-4 overflow-y-auto/);
   assert.match(modalSource, /pb-\[calc\(1rem\+env\(safe-area-inset-bottom\)\)\]/);
+  assert.match(modalSource, /role="dialog"/);
+  assert.match(modalSource, /aria-modal="true"/);
+  assert.match(modalSource, /aria-labelledby="new-payment-dialog-title"/);
+  assert.match(modalSource, /previousFocusRef/);
+  assert.match(modalSource, /event\.key !== 'Tab'/);
   assert.doesNotMatch(modalSource, /app-animate-modal fixed left-1\/2 top-1\/2/);
 });

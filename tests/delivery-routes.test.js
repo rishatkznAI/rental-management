@@ -597,6 +597,57 @@ test('delivery API reads and updates pickupTime', async () => {
   });
 });
 
+test('new delivery still requires contact name and phone', async () => {
+  const { app, state } = createDeliveryApp();
+  state.deliveries = [];
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      transportDate: '2026-08-02',
+      origin: 'Новая база',
+      destination: 'Казань',
+      cargo: 'Подъёмник',
+      client: 'ИНЖИНИРИНГ',
+      manager: 'Администратор',
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Контактное лицо/);
+    assert.equal(state.deliveries.length, 0);
+  });
+});
+
+test('legacy delivery without contacts remains editable for unrelated fields', async () => {
+  const { app, state } = createDeliveryApp({ contactName: undefined, contactPhone: undefined });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'PATCH', '/api/deliveries/DL-1', {
+      comment: 'Уточнён порядок въезда на объект',
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.comment, 'Уточнён порядок въезда на объект');
+    assert.equal(response.body.contactName, '');
+    assert.equal(response.body.contactPhone, '');
+    assert.equal(state.deliveries[0].comment, 'Уточнён порядок въезда на объект');
+  });
+});
+
+test('delivery rejects explicit removal of an existing required contact', async () => {
+  const { app, state } = createDeliveryApp();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'PATCH', '/api/deliveries/DL-1', {
+      contactName: '',
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /Контактное лицо/);
+    assert.equal(state.deliveries[0].contactName, 'Олег');
+  });
+});
+
 test('creating a delivery rejects negative delivery cost', async () => {
   const { app } = createDeliveryApp();
 

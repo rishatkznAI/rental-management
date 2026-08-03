@@ -10,6 +10,7 @@ const {
 } = require('../lib/documents-core');
 const { getRentalBillingAmount } = require('../lib/rental-billing');
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
+const { normalizeDateOnly } = require('../lib/date-only');
 
 function registerFinanceRoutes(router, deps) {
   const {
@@ -125,10 +126,7 @@ function registerFinanceRoutes(router, deps) {
   }
 
   function dateOnly(value) {
-    const text = String(value || '').trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
-    const parsed = new Date(`${text}T00:00:00.000Z`);
-    return Number.isNaN(parsed.getTime()) ? '' : text;
+    return normalizeDateOnly(value);
   }
 
   function text(value) {

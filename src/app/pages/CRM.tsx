@@ -42,6 +42,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { isCrmEnabled } from '../lib/features';
 import { usePermissions } from '../lib/permissions';
+import { formatDate, formatDateTime } from '../lib/utils';
 import { staffService } from '../services/staff.service';
 import { useClientsList } from '../hooks/useClients';
 import {
@@ -178,24 +179,6 @@ function nowIso() {
 function formatCurrency(value?: number | null) {
   const amount = Number(value) || 0;
   return `${amount.toLocaleString('ru-RU')} ₽`;
-}
-
-function formatDate(value?: string | null) {
-  if (!value) return '—';
-  try {
-    return new Date(value).toLocaleDateString('ru-RU');
-  } catch {
-    return value;
-  }
-}
-
-function formatDateTime(value?: string | null) {
-  if (!value) return '—';
-  try {
-    return new Date(value).toLocaleString('ru-RU');
-  } catch {
-    return value;
-  }
 }
 
 function parseBudgetInput(value: string): number | null {

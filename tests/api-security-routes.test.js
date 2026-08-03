@@ -1418,6 +1418,19 @@ test('real Express API routes deny direct object-level bypasses', async () => {
     assert.equal((await request(baseUrl, 'GET', '/api/spare_parts/SP-1', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/repair_work_items/RW-1', 'warranty-token')).status, 200);
     assert.equal((await request(baseUrl, 'GET', '/api/repair_part_items/RP-1', 'warranty-token')).status, 200);
+    const warrantyAllowedPatch = await request(baseUrl, 'PATCH', '/api/service/S-other', 'warranty-token', {
+      status: 'in_progress',
+      result: 'Гарантийная диагностика завершена',
+      comment: 'Результат передан в гарантийный отдел',
+      photos: ['data:image/png;base64,c21va2U='],
+    });
+    assert.equal(warrantyAllowedPatch.status, 200);
+    assert.equal(state.service.find(item => item.id === 'S-other').status, 'in_progress');
+    assert.equal(state.service.find(item => item.id === 'S-other').result, 'Гарантийная диагностика завершена');
+    assert.deepEqual(state.service.find(item => item.id === 'S-other').photos, ['data:image/png;base64,c21va2U=']);
+    assert.equal(state.service.find(item => item.id === 'S-other').comment, 'Результат передан в гарантийный отдел');
+    assert.equal(state.service.find(item => item.id === 'S-other').workLog.at(-1).text, 'Результат передан в гарантийный отдел');
+    assert.equal(state.service.find(item => item.id === 'S-other').workLog.at(-1).author, 'Гарантия');
     assert.equal((await request(baseUrl, 'PATCH', '/api/service/S-other', 'warranty-token', { status: 'in_progress', assignedMechanicId: 'M-1' })).status, 403);
     assert.equal(state.service.find(item => item.id === 'S-other').assignedMechanicId, 'M-2');
     assert.equal((await request(baseUrl, 'GET', '/api/rentals/R-own', 'warranty-token')).status, 200);

@@ -1696,6 +1696,21 @@ function registerSystemRoutes(app, deps) {
     return res.sendFile(targetPath);
   });
 
+  app.get('/api/media/availability', requireAuth, (req, res) => {
+    const publicPath = String(req.query?.path || '').replace(/\\/g, '/');
+    if (!publicPath.startsWith('/uploads/')) {
+      return res.status(400).json({ ok: false, error: 'Некорректный путь файла.' });
+    }
+    const relative = publicPath.slice('/uploads/'.length);
+    const targetPath = path.resolve(uploadsRoot, relative);
+    const inside = path.relative(uploadsRoot, targetPath);
+    if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) {
+      return res.status(400).json({ ok: false, error: 'Некорректный путь файла.' });
+    }
+    const available = fs.existsSync(targetPath) && fs.statSync(targetPath).isFile();
+    return res.json({ ok: true, available });
+  });
+
   app.post('/api/admin/system-data/import/dry-run', requireAuth, requireAdmin, (req, res) => {
     const importEquipment = req.body?.collections?.equipment;
     if (Array.isArray(importEquipment)) {

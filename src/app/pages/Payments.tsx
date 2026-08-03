@@ -214,6 +214,9 @@ interface AddPaymentModalProps {
 
 function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, allPayments }: AddPaymentModalProps) {
   const presence = useAnimatedPresence(open, animationDurations.base);
+  const dialogRef = React.useRef<HTMLDivElement>(null);
+  const previousFocusRef = React.useRef<HTMLElement | null>(null);
+  const onCloseRef = React.useRef(onClose);
   const [clientError, setClientError] = useState('');
   const [formError, setFormError] = useState('');
   const [form, setForm] = useState({
@@ -229,13 +232,50 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
   });
 
   React.useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  React.useEffect(() => {
     if (!open) return undefined;
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusFrame = window.requestAnimationFrame(() => {
+      const focusTarget = dialogRef.current?.querySelector<HTMLElement>(
+        'select:not([disabled]), input:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      (focusTarget || dialogRef.current)?.focus();
+    });
+    const handleDialogKeys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'select:not([disabled]), input:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      )).filter(element => element.offsetParent !== null);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
-  }, [onClose, open]);
+    window.addEventListener('keydown', handleDialogKeys);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener('keydown', handleDialogKeys);
+      previousFocusRef.current?.focus();
+    };
+  }, [open]);
 
   const set = (k: string, v: string) => {
     setForm(f => {
@@ -300,14 +340,24 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
 
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4 sm:p-6">
-      <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-slate-950/45 backdrop-blur-[3px]" onClick={onClose} />
-      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="relative z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] transition duration-200 ease-out data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0 data-[state=open]:scale-100 data-[state=open]:opacity-100">
+      <div aria-hidden="true" data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-slate-950/45 backdrop-blur-[3px]" onClick={onClose} />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-payment-dialog-title"
+        aria-describedby="new-payment-dialog-description"
+        tabIndex={-1}
+        data-state={presence.dataState}
+        onAnimationEnd={presence.onExitAnimationEnd}
+        className="relative z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] transition duration-200 ease-out data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0 data-[state=open]:scale-100 data-[state=open]:opacity-100"
+      >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 pr-14">
           <div>
-            <h2 className="text-xl font-semibold text-slate-950">Добавить платёж</h2>
-            <p className="mt-1 text-sm text-slate-500">Свяжите оплату с клиентом и, при необходимости, с арендой.</p>
+            <h2 id="new-payment-dialog-title" className="text-xl font-semibold text-slate-950">Новый платёж</h2>
+            <p id="new-payment-dialog-description" className="mt-1 text-sm text-slate-500">Свяжите оплату с клиентом и, при необходимости, с арендой.</p>
           </div>
-          <button onClick={onClose} className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700">
+          <button type="button" aria-label="Закрыть форму нового платежа" onClick={onClose} className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -957,6 +1007,7 @@ export default function Payments() {
   const { data: clientObjects = [] } = useClientObjectsList();
   const { data: clientContracts = [] } = useClientContractsList();
   const [showAddModal, setShowAddModal] = useState(false);
+  const createActionHandledRef = React.useRef(false);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedPaymentId, setSelectedPaymentId] = useState('');
   const { data: documents = [] } = useDocumentsList({
@@ -999,6 +1050,15 @@ export default function Payments() {
   const hasQuickClientContext = hasClientContext(quickActionContext);
   const clientsById = useMemo(() => new Map(clients.map(client => [client.id, client])), [clients]);
   const setPaginationFilters = pagination.setFilters;
+
+  React.useEffect(() => {
+    const shouldOpenCreate = searchParams.get('action') === 'create';
+    if (shouldOpenCreate && !createActionHandledRef.current) {
+      createActionHandledRef.current = true;
+      setShowAddModal(true);
+    }
+    if (!shouldOpenCreate) createActionHandledRef.current = false;
+  }, [searchParams]);
 
   React.useEffect(() => {
     if (!hasQuickClientContext) return;

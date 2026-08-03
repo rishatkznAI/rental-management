@@ -246,7 +246,7 @@ test('dashboard cockpit renders executive KPI grid with fleet and service analyt
     'StatusBars',
     'Утилизация парка',
     'Средняя загрузка за период',
-    'Как считается',
+    'Открыть технику в аренде',
     'Загрузка сервиса',
     'Ожидают запчасти',
     'Готовы к закрытию',
@@ -258,6 +258,7 @@ test('dashboard cockpit renders executive KPI grid with fleet and service analyt
   ]) {
     assert.match(dashboardSource, new RegExp(label));
   }
+  assert.match(dashboardSource, /id: 'executive-fleet-utilization'[\s\S]*href: '\/equipment\?status=rented'/);
   assert.match(dashboardSource, /Donut gauge утилизации парка/);
   assert.match(dashboardSource, /setSelectedKPI\('utilization'\)/);
   assert.match(dashboardSource, /plannerHref: '\/planner'/);

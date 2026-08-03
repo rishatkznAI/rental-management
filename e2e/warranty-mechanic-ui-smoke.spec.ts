@@ -448,19 +448,46 @@ test('smoke-service can use warranty mechanic UI and warranty workflows without 
   await expect(page.getByRole('button', { name: /Удалить заявку/ })).toBeHidden();
   const takeInWork = page.getByRole('button', { name: /Взять в работу/ });
   if (await takeInWork.isVisible().catch(() => false)) {
+    const statusPatch = page.waitForResponse(response => (
+      response.request().method() === 'PATCH'
+      && response.url().endsWith(`/api/service/${seed.ticket.id}`)
+    ));
     await takeInWork.click();
+    expect((await statusPatch).ok(), 'warranty mechanic status PATCH should succeed').toBeTruthy();
     await expect(page.getByText(/В работе|in_progress/).first()).toBeVisible({ timeout: 10_000 });
   }
   const summary = page.getByPlaceholder('Краткий итог работ и состояние техники после ремонта');
   if (await summary.isVisible().catch(() => false)) {
     await summary.fill(`${seed.ticket.reason}-repair summary`);
+    const resultPatch = page.waitForResponse(response => (
+      response.request().method() === 'PATCH'
+      && response.url().endsWith(`/api/service/${seed.ticket.id}`)
+    ));
     await page.getByRole('button', { name: 'Сохранить' }).first().click();
+    expect((await resultPatch).ok(), 'warranty mechanic result PATCH should succeed').toBeTruthy();
   }
-  const mechanicComment = page.getByPlaceholder('Добавить комментарий...');
+  const commentRow = page.locator('[data-service-detail-form-row="comment"]');
+  const mechanicComment = commentRow.getByPlaceholder('Добавить комментарий...');
   if (await mechanicComment.isVisible().catch(() => false)) {
-    await mechanicComment.fill(`${seed.ticket.reason}-comment`);
-    await page.getByRole('button', { name: 'Добавить' }).last().click();
-    await expect(page.getByText(`${seed.ticket.reason}-comment`)).toBeVisible({ timeout: 10_000 });
+    const comment = `${seed.ticket.reason}-comment`;
+    await mechanicComment.fill(comment);
+    const commentPatch = page.waitForResponse(response => (
+      response.request().method() === 'PATCH'
+      && response.url().endsWith(`/api/service/${seed.ticket.id}`)
+    ));
+    await commentRow.getByRole('button', { name: 'Добавить', exact: true }).click();
+    const commentResponse = await commentPatch;
+    expect(commentResponse.ok(), `warranty mechanic comment PATCH should succeed: ${commentResponse.status()}`).toBeTruthy();
+    expect(commentResponse.request().postDataJSON()?.comment).toBe(comment);
+    await expect(page.getByText(comment)).toBeVisible({ timeout: 10_000 });
+    await expect.poll(async () => {
+      const response = await request.get(`http://127.0.0.1:3000/api/service/${seed.ticket.id}`, { headers: authHeaders });
+      if (!response.ok()) return false;
+      const savedTicket = await response.json();
+      return Array.isArray(savedTicket.workLog) && savedTicket.workLog.some((entry: { text?: string }) => entry.text === comment);
+    }, { message: 'warranty mechanic comment should persist through the allowed PATCH' }).toBe(true);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(comment)).toBeVisible({ timeout: 10_000 });
   }
   await expectHealthyScreen(page, action);
 
@@ -506,20 +533,35 @@ test('smoke-service can use warranty mechanic UI and warranty workflows without 
     headers: authHeaders,
     data: {
       status: 'in_progress',
-      clientId: 'SMOKE-WARRANTY-MECH-FORBIDDEN-CLIENT',
-      rentalId: 'SMOKE-WARRANTY-MECH-FORBIDDEN-RENTAL',
-      assignedMechanicId: 'SMOKE-WARRANTY-MECH-FORBIDDEN-MECHANIC',
-      assignedUserId: 'SMOKE-WARRANTY-MECH-FORBIDDEN-USER',
       result: `${seed.ticket.reason}-api-result`,
+      comment: `${seed.ticket.reason}-api-comment`,
+      photos: ['data:image/png;base64,c21va2U='],
     },
   });
   expect(patchCriticalFields.ok(), 'warranty mechanic should update allowed service fields').toBeTruthy();
   const patchedTicket = await request.get(`http://127.0.0.1:3000/api/service/${seed.ticket.id}`, { headers: authHeaders });
   const patchedTicketJson = await patchedTicket.json();
+  expect(patchedTicketJson.status).toBe('in_progress');
+  expect(patchedTicketJson.result).toBe(`${seed.ticket.reason}-api-result`);
+  expect(patchedTicketJson.photos).toEqual(['data:image/png;base64,c21va2U=']);
   expect(patchedTicketJson.assignedMechanicId).toBe(seed.mechanic.id);
-  expect(patchedTicketJson.assignedUserId).not.toBe('SMOKE-WARRANTY-MECH-FORBIDDEN-USER');
-  expect(patchedTicketJson.clientId).not.toBe('SMOKE-WARRANTY-MECH-FORBIDDEN-CLIENT');
-  expect(patchedTicketJson.rentalId).not.toBe('SMOKE-WARRANTY-MECH-FORBIDDEN-RENTAL');
+
+  const forbiddenServicePatch = await request.patch(`http://127.0.0.1:3000/api/service/${seed.ticket.id}`, {
+    headers: authHeaders,
+    data: {
+      clientId: 'SMOKE-WARRANTY-MECH-FORBIDDEN-CLIENT',
+      rentalId: 'SMOKE-WARRANTY-MECH-FORBIDDEN-RENTAL',
+      assignedMechanicId: 'SMOKE-WARRANTY-MECH-FORBIDDEN-MECHANIC',
+      assignedUserId: 'SMOKE-WARRANTY-MECH-FORBIDDEN-USER',
+    },
+  });
+  expect(forbiddenServicePatch.status(), 'warranty mechanic must not update assignment or commercial links').toBe(403);
+  const afterForbiddenPatch = await request.get(`http://127.0.0.1:3000/api/service/${seed.ticket.id}`, { headers: authHeaders });
+  const afterForbiddenPatchJson = await afterForbiddenPatch.json();
+  expect(afterForbiddenPatchJson.assignedMechanicId).toBe(seed.mechanic.id);
+  expect(afterForbiddenPatchJson.assignedUserId).not.toBe('SMOKE-WARRANTY-MECH-FORBIDDEN-USER');
+  expect(afterForbiddenPatchJson.clientId).not.toBe('SMOKE-WARRANTY-MECH-FORBIDDEN-CLIENT');
+  expect(afterForbiddenPatchJson.rentalId).not.toBe('SMOKE-WARRANTY-MECH-FORBIDDEN-RENTAL');
 
   const bulkEquipment = await request.put('http://127.0.0.1:3000/api/equipment', {
     headers: authHeaders,

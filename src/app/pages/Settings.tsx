@@ -1,5 +1,6 @@
 import React from 'react';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -417,6 +418,7 @@ const EMPTY_FORM = {
 // ── Основной компонент ────────────────────────────────────────────────────────
 
 export default function Settings() {
+  const [searchParams] = useSearchParams();
   const { can } = usePermissions();
   const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
@@ -424,6 +426,14 @@ export default function Settings() {
   const [activeTab, setActiveTab] = React.useState<AdminDetailTab>('users');
   const [activeSystemSettingsTab, setActiveSystemSettingsTab] = React.useState<SystemSettingsTab>('general');
   const [users, setUsersState] = React.useState<SystemUser[]>([]);
+
+  React.useEffect(() => {
+    if (searchParams.get('modal') !== 'details') return;
+    const requestedTab = searchParams.get('tab');
+    if (requestedTab !== 'configuration') return;
+    setActiveTab('configuration');
+    setActiveModal('details');
+  }, [searchParams]);
   const { data: usersData = EMPTY_SYSTEM_USERS } = useQuery<SystemUser[]>({
     queryKey: ['users'],
     queryFn: usersService.getAll,

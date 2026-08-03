@@ -509,7 +509,7 @@ test('smoke-office can use permitted office UI without admin access or runtime e
   await expect(page).toHaveURL(/#\/payments$/);
   await expectHealthyScreen(page, action);
   await page.getByRole('button', { name: /Добавить платёж/ }).first().click();
-  await expect(page.getByRole('heading', { name: 'Добавить платёж' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Новый платёж' })).toBeVisible();
   await page.getByRole('button', { name: 'Отмена' }).click();
 
   action = 'delivery create sheet';

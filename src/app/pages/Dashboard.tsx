@@ -4284,8 +4284,8 @@ export default function Dashboard() {
           : 'Нет записей техники для расчёта загрузки',
       icon: Activity,
       tone: utilizationTone,
-      onClick: () => setSelectedKPI('utilization'),
-      cta: 'Как считается',
+      href: '/equipment?status=rented',
+      cta: 'Открыть технику в аренде',
     },
     canViewService && {
       id: 'executive-service-load',

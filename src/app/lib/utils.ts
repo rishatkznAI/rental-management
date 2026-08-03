@@ -1,5 +1,8 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { formatDateValue, parseDateOnly as parseCalendarDateOnly, parseDateValue } from './date.js';
+
+export { isDateOnlyValue, parseDateOnly, parseDateValue } from './date.js';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -14,13 +17,7 @@ export function formatCurrency(amount: number): string {
 }
 
 export function formatDate(date: string): string {
-  const parsed = new Date(date);
-  if (!date || Number.isNaN(parsed.getTime())) return '—';
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  }).format(parsed);
+  return formatDateValue(date);
 }
 
 export function formatDateTime(date: string): string {
@@ -37,13 +34,14 @@ export function formatDateTime(date: string): string {
 
 export function getDaysUntil(date: string): number {
   const now = new Date();
-  const target = new Date(date);
+  const target = parseDateValue(date);
+  if (!target) return 0;
   const diff = target.getTime() - now.getTime();
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
 function parseDateOnly(date: string): Date {
-  return new Date(`${date}T00:00:00`);
+  return parseCalendarDateOnly(date) ?? new Date(Number.NaN);
 }
 
 function toDateOnlyString(date: Date): string {

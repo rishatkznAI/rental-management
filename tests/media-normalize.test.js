@@ -87,6 +87,8 @@ test('authenticated image handles 401 403 404 fallbacks and only opens loaded ph
   assert.match(source, /Ответ не является изображением/);
   assert.match(source, /if \(!visibleUrl \|\| failed\)/);
   assert.match(source, /if \(canOpen && onOpen\) onOpen\(visibleUrl\)/);
+  assert.match(source, /const response = await fetch\(thumbnailUrl/);
+  assert.doesNotMatch(source, /mediaAvailabilityUrl|availabilityResponse/);
 });
 
 test('service photos mark unverified archived upload records as display-only fallbacks', () => {

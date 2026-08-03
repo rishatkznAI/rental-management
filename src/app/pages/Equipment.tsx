@@ -1271,11 +1271,31 @@ export default function Equipment() {
   const [showFilters, setShowFilters] = React.useState(false);
   const [pageSize, setPageSize] = React.useState(DEFAULT_EQUIPMENT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = React.useState(1);
+  const requestedStatusFilter = searchParams.get('status') || '';
   const actionQueueFilterParam = searchParams.get('actionQueueFilter') || searchParams.get('actionQueue');
   const initialActionQueueFilter = React.useMemo(
     () => normalizeActionQueueFilter(actionQueueFilterParam),
     [actionQueueFilterParam],
   );
+
+  React.useEffect(() => {
+    const tabByStatus: Partial<Record<string, EquipmentTab>> = {
+      available: 'available',
+      rented: 'rented',
+      reserved: 'reserved',
+      in_service: 'service',
+      inactive: 'written_off',
+      for_sale: 'for_sale',
+      sold: 'sold',
+    };
+    const nextStatusFilter = requestedStatusFilter !== 'all'
+      && EQUIPMENT_STATUS_FILTER_OPTIONS.some(option => option.value === requestedStatusFilter)
+      ? requestedStatusFilter
+      : 'all';
+    setStatusFilter(nextStatusFilter);
+    setActiveTab(tabByStatus[nextStatusFilter] || 'all');
+    setCurrentPage(1);
+  }, [requestedStatusFilter]);
   const equipmentQuery = useEquipmentList();
   const readinessQuery = useEquipmentReadiness();
   const actionQueueQuery = useManagementActionQueue();

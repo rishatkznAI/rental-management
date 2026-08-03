@@ -13,6 +13,7 @@ const {
   buildSystemControlCenterStatus,
   registerSystemRoutes,
 } = require('../server/routes/system.js');
+const { createAccessControl } = require('../server/lib/access-control.js');
 const { getBuildInfo } = require('../server/lib/build-info.js');
 const { resolveReleaseEnv } = require('../server/scripts/start-with-release-type.cjs');
 
@@ -20,9 +21,10 @@ function createSystemApp(overrides = {}) {
   const app = express();
   const messages = [];
   const auditEntries = [];
+  const readData = overrides.readData || (() => []);
   app.use(express.json());
   registerSystemRoutes(app, {
-    readData: overrides.readData || (() => []),
+    readData,
     writeData: overrides.writeData || (() => {}),
     getSnapshot: overrides.getSnapshot || (() => ({})),
     saveSnapshot: () => {},
@@ -57,6 +59,7 @@ function createSystemApp(overrides = {}) {
       readableCollections: ['equipment', 'rentals'],
       writableCollections: ['equipment'],
     }),
+    accessControl: overrides.accessControl || createAccessControl({ readData }),
     jsonCollections: overrides.jsonCollections || ['equipment', 'clients', 'users'],
     createDatabaseBackup: overrides.createDatabaseBackup,
     dbPath: overrides.dbPath || ':memory:',
@@ -1897,6 +1900,94 @@ function fakeFetchResponse({ status = 200, contentType = 'image/jpeg', body = Bu
     buffer: async () => buffer,
   };
 }
+
+test('archived media fetch enforces entity access and hides missing versus inaccessible files', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'entity-media-route-'));
+  const uploadsDir = path.join(tempDir, 'uploads');
+  const allowedPath = '/uploads/external-photos/service/S-allowed/allowed.png';
+  const missingPath = '/uploads/external-photos/service/S-allowed/missing.png';
+  const deniedPath = '/uploads/external-photos/service/S-denied/denied.png';
+  const unscopedPath = '/uploads/unscoped.png';
+  for (const publicPath of [allowedPath, deniedPath, unscopedPath]) {
+    const absolutePath = path.join(uploadsDir, publicPath.replace(/^\/uploads\//, ''));
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  }
+  const state = {
+    mechanics: [
+      { id: 'M-allowed', userId: 'U-mechanic', name: 'Механик' },
+      { id: 'M-other', userId: 'U-other-mechanic', name: 'Другой механик' },
+    ],
+    service: [
+      {
+        id: 'S-allowed',
+        assignedMechanicId: 'M-allowed',
+        photos: [{ localPath: allowedPath }, { localPath: missingPath }],
+      },
+      {
+        id: 'S-denied',
+        assignedMechanicId: 'M-other',
+        photos: [{ localPath: deniedPath }],
+      },
+    ],
+  };
+  const users = {
+    mechanic: { userId: 'U-mechanic', userName: 'Механик', userRole: 'Механик' },
+    sales: { userId: 'U-sales', userName: 'Продажи', userRole: 'Менеджер по продажам' },
+    carrier: { userId: 'U-carrier', userName: 'Перевозчик', userRole: 'Перевозчик', carrierId: 'CARRIER-1' },
+    ordinary: { userId: 'U-ordinary', userName: 'Сотрудник', userRole: 'Сотрудник' },
+  };
+  const readData = collection => state[collection] || [];
+  const accessControl = createAccessControl({ readData });
+  const { app } = createSystemApp({
+    readData,
+    accessControl,
+    uploadRoot: uploadsDir,
+    requireAuth: (req, res, next) => {
+      const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+      const user = users[token];
+      if (!user) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+      req.user = user;
+      return next();
+    },
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const fetchMedia = async (publicPath, token) => {
+        const response = await fetch(`${baseUrl}${publicPath}`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        const body = await response.text();
+        return { status: response.status, contentType: response.headers.get('content-type') || '', body };
+      };
+
+      const allowed = await fetchMedia(allowedPath, 'mechanic');
+      assert.equal(allowed.status, 200);
+      assert.match(allowed.contentType, /^image\/png/);
+
+      const hiddenResponses = [
+        await fetchMedia(deniedPath, 'sales'),
+        await fetchMedia(deniedPath, 'carrier'),
+        await fetchMedia(deniedPath, 'ordinary'),
+        await fetchMedia(deniedPath, 'mechanic'),
+        await fetchMedia(missingPath, 'mechanic'),
+        await fetchMedia(unscopedPath, 'mechanic'),
+      ];
+      for (const response of hiddenResponses) {
+        assert.equal(response.status, 404);
+        assert.deepEqual(JSON.parse(response.body), { ok: false, error: 'Файл не найден.' });
+      }
+
+      const removedAvailability = await fetch(`${baseUrl}/api/media/availability?path=${encodeURIComponent(deniedPath)}`, {
+        headers: { authorization: 'Bearer sales' },
+      });
+      assert.equal(removedAvailability.status, 404);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
 test('/api/admin/media/archive-external-photos dry-run summarizes external URLs without exposing full URLs', async () => {
   const externalPhotoUrl = 'https://i.oneme.ru/i?r=test-photo-token';

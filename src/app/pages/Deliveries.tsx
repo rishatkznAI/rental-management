@@ -38,6 +38,7 @@ import type {
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import { usePermissions } from '../lib/permissions';
+import { formatDate, formatDateTime } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import { normalizeUserRole } from '../lib/userStorage';
 import { useServerPagination } from '../hooks/useServerPagination';
@@ -177,30 +178,6 @@ function makeEmptyForm(managerName = ''): DeliveryFormState {
     equipmentLabel: '',
     status: 'new',
   };
-}
-
-function formatDate(date: string) {
-  if (!date) return '—';
-  try {
-    return new Date(date).toLocaleDateString('ru-RU');
-  } catch {
-    return date;
-  }
-}
-
-function formatDateTime(date?: string | null) {
-  if (!date) return '—';
-  try {
-    return new Date(date).toLocaleString('ru-RU', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return date;
-  }
 }
 
 function safeText(value: unknown, fallback = '—') {

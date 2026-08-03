@@ -7,7 +7,7 @@
  */
 
 import React, { useMemo, useState, useCallback, useRef } from 'react';
-import { addDays, format, parseISO } from 'date-fns';
+import { addDays, format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import {
   AlertTriangle,
@@ -18,7 +18,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { cn } from '../lib/utils';
+import { cn, parseDateValue } from '../lib/utils';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { usePlannerRows, useUpdatePlannerItem } from '../hooks/usePlanner';
 import { usePermissions } from '../lib/permissions';
@@ -176,7 +176,8 @@ function formatDaysUntil(daysUntil: number): { label: string; className: string 
 
 function formatDate(iso: string): string {
   try {
-    return format(parseISO(iso), 'd MMM', { locale: ru });
+    const parsed = parseDateValue(iso);
+    return parsed ? format(parsed, 'd MMM', { locale: ru }) : iso;
   } catch {
     return iso;
   }
@@ -197,7 +198,9 @@ function matchesDateRange(row: PlannerRow, filters: Filters): boolean {
   if (dateRange === 'all') return true;
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const start = new Date(row.startDate); start.setHours(0,0,0,0);
+  const start = parseDateValue(row.startDate);
+  if (!start) return false;
+  start.setHours(0,0,0,0);
   const diff = Math.round((start.getTime() - today.getTime()) / 86400000);
 
   if (dateRange === 'today')    return diff === 0;
@@ -206,8 +209,10 @@ function matchesDateRange(row: PlannerRow, filters: Filters): boolean {
 
   // custom
   if (dateRange === 'custom') {
-    if (customFrom && start < new Date(customFrom)) return false;
-    if (customTo   && start > new Date(customTo))   return false;
+    const customStart = customFrom ? parseDateValue(customFrom) : null;
+    const customEnd = customTo ? parseDateValue(customTo) : null;
+    if (customStart && start < customStart) return false;
+    if (customEnd && start > customEnd) return false;
     return true;
   }
   return true;

@@ -19,13 +19,22 @@ test('Documents page supports quick action create and client filtering context',
   assert.match(source, /Документы по клиенту не найдены/);
 });
 
-test('Payments page applies quick action client filter without touching Finance page', () => {
+test('Payments page applies quick action filters and opens explicit create flow', () => {
   const source = read('src/app/pages/Payments.tsx');
 
   assert.match(source, /useSearchParams/);
   assert.match(source, /buildQuickActionContext/);
   assert.match(source, /setPaginationFilters\(\{ clientId:/);
+  assert.match(source, /searchParams\.get\('action'\) === 'create'/);
+  assert.match(source, /setShowAddModal\(true\)/);
+  assert.match(source, /nextSearchParams\.delete\('action'\)/);
+  assert.match(source, /setSearchParams\(nextSearchParams, \{ replace: true \}\)/);
+  assert.match(source, /onClose=\{closeAddPaymentModal\}/);
+  assert.match(source, /onSuccess: closeAddPaymentModal/);
   assert.match(source, /Платежи по клиенту не найдены/);
+
+  const rentals = read('src/app/pages/Rentals.tsx');
+  assert.match(rentals, /to="\/payments\?action=create"/);
 });
 
 test('Tasks center applies quick action client filter and client empty state', () => {

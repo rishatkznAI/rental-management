@@ -2661,6 +2661,7 @@ registerSystemRoutes(app, {
   getBuildInfo,
   getAppDisabledConfig: () => appDisabledConfig,
   getRoleAccessSummary: roleAccessSummary,
+  accessControl,
   jsonCollections: JSON_COLLECTIONS,
   createDatabaseBackup: createSqliteBackup,
   uploadRoot: path.join(path.dirname(DB_PATH), 'uploads'),

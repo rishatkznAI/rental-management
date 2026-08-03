@@ -45,7 +45,7 @@ import {
   formatExtensionDate,
   getRentalExtensionValidation,
 } from '../lib/rentalExtension.js';
-import { calculateRentalAmount, formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays } from '../lib/utils';
+import { calculateRentalAmount, formatCurrency, formatDate, formatDateTime, getDaysUntil, getRentalDays, parseDateValue } from '../lib/utils';
 import { getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
 import type { Client, ClientContract, ClientObject, Document, DocumentType, Equipment, Payment, PaymentAllocation, PaymentStatus, Rental, RentalStatus, ServiceTicket } from '../types';
 import type { GanttRentalData } from '../mock-data';
@@ -618,8 +618,8 @@ export default function RentalDetail() {
 
   const conflictingRental = useMemo(() => {
     if (!isEditing || !formState) return null;
-    const newStart = new Date(formState.startDate).getTime();
-    const newEnd = new Date(formState.plannedReturnDate).getTime();
+    const newStart = parseDateValue(formState.startDate)?.getTime() ?? Number.NaN;
+    const newEnd = parseDateValue(formState.plannedReturnDate)?.getTime() ?? Number.NaN;
     if (Number.isNaN(newStart) || Number.isNaN(newEnd) || newStart > newEnd) return null;
 
     return ganttRentals.find(entry => {
@@ -627,8 +627,8 @@ export default function RentalDetail() {
       if (entry.status === 'returned' || entry.status === 'closed') return false;
       const matchesEquipment = safelyMatchesResolvedEquipment(entry);
       if (!matchesEquipment) return false;
-      const entryStart = new Date(entry.startDate).getTime();
-      const entryEnd = new Date(entry.endDate).getTime();
+      const entryStart = parseDateValue(entry.startDate)?.getTime() ?? Number.NaN;
+      const entryEnd = parseDateValue(entry.endDate)?.getTime() ?? Number.NaN;
       return newStart <= entryEnd && newEnd >= entryStart;
     }) || null;
   }, [formState?.plannedReturnDate, formState?.startDate, ganttRentals, isEditing, linkedGanttRental, safelyMatchesResolvedEquipment]);
@@ -646,16 +646,16 @@ export default function RentalDetail() {
   const extensionBlockingValidation = extensionValidation || extensionFinancialValidation;
   const extensionPreviewConflict = useMemo(() => {
     if (!rental || !extensionForm.newPlannedReturnDate) return null;
-    const currentEnd = new Date(`${rental.plannedReturnDate}T00:00:00`).getTime();
-    const newEnd = new Date(`${extensionForm.newPlannedReturnDate}T00:00:00`).getTime();
+    const currentEnd = parseDateValue(rental.plannedReturnDate)?.getTime() ?? Number.NaN;
+    const newEnd = parseDateValue(extensionForm.newPlannedReturnDate)?.getTime() ?? Number.NaN;
     if (Number.isNaN(currentEnd) || Number.isNaN(newEnd) || newEnd <= currentEnd) return null;
     const conflict = ganttRentals.find(entry => {
       if (linkedGanttRental && entry.id === linkedGanttRental.id) return false;
       if (entry.rentalId === rental.id || entry.sourceRentalId === rental.id || entry.originalRentalId === rental.id) return false;
       if (['returned', 'closed', 'cancelled', 'canceled', 'completed'].includes(String(entry.status || '').toLowerCase())) return false;
       if (!safelyMatchesResolvedEquipment(entry)) return false;
-      const entryStart = new Date(`${entry.startDate}T00:00:00`).getTime();
-      const entryEnd = new Date(`${entry.endDate}T00:00:00`).getTime();
+      const entryStart = parseDateValue(entry.startDate)?.getTime() ?? Number.NaN;
+      const entryEnd = parseDateValue(entry.endDate)?.getTime() ?? Number.NaN;
       return !Number.isNaN(entryStart) && !Number.isNaN(entryEnd) && entryStart <= newEnd && entryEnd >= currentEnd;
     });
     return buildExtensionConflictDisplay(conflict ? {
@@ -701,7 +701,9 @@ export default function RentalDetail() {
       setSaveError('Укажите дату начала и окончания аренды.');
       return;
     }
-    if (new Date(formState.startDate).getTime() > new Date(formState.plannedReturnDate).getTime()) {
+    const startDate = parseDateValue(formState.startDate);
+    const plannedReturnDate = parseDateValue(formState.plannedReturnDate);
+    if (!startDate || !plannedReturnDate || startDate.getTime() > plannedReturnDate.getTime()) {
       setSaveError('Дата окончания не может быть раньше даты начала.');
       return;
     }

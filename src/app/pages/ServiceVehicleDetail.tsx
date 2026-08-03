@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle, FileText, History,
   MapPin, User, Calendar, Gauge, Wrench, Ban,
 } from 'lucide-react';
-import { cn, formatDate } from '../lib/utils';
+import { cn, formatDate, parseDateValue } from '../lib/utils';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { Badge } from '../components/ui/badge';
@@ -79,12 +79,15 @@ function statusVariant(s: VehicleStatus): BadgeVariant {
 
 function isExpired(dateStr: string | null): boolean {
   if (!dateStr) return false;
-  return new Date(dateStr).getTime() < Date.now();
+  const date = parseDateValue(dateStr);
+  return Boolean(date && date.getTime() < Date.now());
 }
 
 function isExpiringSoon(dateStr: string | null, daysAhead = 30): boolean {
   if (!dateStr) return false;
-  const diff = (new Date(dateStr).getTime() - Date.now()) / 86400000;
+  const date = parseDateValue(dateStr);
+  if (!date) return false;
+  const diff = (date.getTime() - Date.now()) / 86400000;
   return diff >= 0 && diff <= daysAhead;
 }
 

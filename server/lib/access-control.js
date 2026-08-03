@@ -1845,6 +1845,35 @@ function sanitizeUpdateInput(collection, input, user, existing = null) {
       return acc;
     }, {});
   }
+  if (collection === 'service' && isWarrantyMechanic(user)) {
+    const safe = {};
+    for (const [field, value] of Object.entries(input || {})) {
+      if (!SERVICE_MECHANIC_UPDATE_FIELDS.has(field)) {
+        throw forbidden('Недостаточно прав: это поле сервисной заявки нельзя менять через общий PATCH.');
+      }
+      if (field === 'status' && !SERVICE_NON_ADMIN_STATUSES.has(String(value || '').trim())) {
+        throw forbidden('Недостаточно прав: закрывать или возвращать сервисные заявки нужно через специальный workflow.');
+      }
+      if (field === 'resultData') {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          throw forbidden('Недостаточно прав: resultData должен содержать только разрешённое резюме.');
+        }
+        const nestedFields = Object.keys(value);
+        if (nestedFields.some(nestedField => nestedField !== 'summary') || typeof value.summary !== 'string') {
+          throw forbidden('Недостаточно прав: в resultData разрешено менять только summary.');
+        }
+        safe.resultData = {
+          ...(existing?.resultData && typeof existing.resultData === 'object' && !Array.isArray(existing.resultData)
+            ? existing.resultData
+            : {}),
+          summary: value.summary,
+        };
+        continue;
+      }
+      safe[field] = value;
+    }
+    return safe;
+  }
   if (collection === 'service' && isMechanic(user)) {
     const safe = {};
     for (const [field, value] of Object.entries(input || {})) {

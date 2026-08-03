@@ -47,8 +47,9 @@ export function AuthenticatedImage({
     const load = async () => {
       try {
         const token = getToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
         const response = await fetch(thumbnailUrl, {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          headers,
           credentials: 'include',
           signal: controller.signal,
         });

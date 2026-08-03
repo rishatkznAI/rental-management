@@ -13,7 +13,7 @@ import { Badge } from '../components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { cn } from '../lib/utils';
+import { cn, formatDate } from '../lib/utils';
 
 const KPI_SCHEME_LABELS: Record<string, string> = {
   none: 'Без KPI',
@@ -111,10 +111,7 @@ function formatMoney(value: number | undefined | null): string {
 }
 
 function formatDateTime(value?: string | null): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return formatDate(String(value || ''));
 }
 
 function formatAuditValue(value: unknown): string {

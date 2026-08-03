@@ -210,10 +210,14 @@ interface AddPaymentModalProps {
   rentals: GanttRentalData[];
   clients: Client[];
   allPayments: Payment[];
+  fallbackFocusRef: React.RefObject<HTMLElement | null>;
 }
 
-function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, allPayments }: AddPaymentModalProps) {
+function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, allPayments, fallbackFocusRef }: AddPaymentModalProps) {
   const presence = useAnimatedPresence(open, animationDurations.base);
+  const dialogRef = React.useRef<HTMLDivElement>(null);
+  const previousFocusRef = React.useRef<HTMLElement | null>(null);
+  const onCloseRef = React.useRef(onClose);
   const [clientError, setClientError] = useState('');
   const [formError, setFormError] = useState('');
   const [form, setForm] = useState({
@@ -229,13 +233,54 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
   });
 
   React.useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  React.useEffect(() => {
     if (!open) return undefined;
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusFrame = window.requestAnimationFrame(() => {
+      const focusTarget = dialogRef.current?.querySelector<HTMLElement>(
+        'select:not([disabled]), input:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      (focusTarget || dialogRef.current)?.focus();
+    });
+    const handleDialogKeys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'select:not([disabled]), input:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      )).filter(element => element.offsetParent !== null);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
-  }, [onClose, open]);
+    window.addEventListener('keydown', handleDialogKeys);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener('keydown', handleDialogKeys);
+      if (previousFocusRef.current?.isConnected) {
+        previousFocusRef.current.focus();
+      } else {
+        fallbackFocusRef.current?.focus();
+      }
+    };
+  }, [fallbackFocusRef, open]);
 
   const set = (k: string, v: string) => {
     setForm(f => {
@@ -300,30 +345,41 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
 
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4 sm:p-6">
-      <div data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-slate-950/45 backdrop-blur-[3px]" onClick={onClose} />
-      <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className="relative z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] transition duration-200 ease-out data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0 data-[state=open]:scale-100 data-[state=open]:opacity-100">
+      <div aria-hidden="true" data-state={presence.dataState} className="app-animate-overlay absolute inset-0 bg-slate-950/45 backdrop-blur-[3px]" onClick={onClose} />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-payment-dialog-title"
+        aria-describedby="new-payment-dialog-description"
+        tabIndex={-1}
+        data-state={presence.dataState}
+        onAnimationEnd={presence.onExitAnimationEnd}
+        className="relative z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] transition duration-200 ease-out data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0 data-[state=open]:scale-100 data-[state=open]:opacity-100"
+      >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 pr-14">
           <div>
-            <h2 className="text-xl font-semibold text-slate-950">Добавить платёж</h2>
-            <p className="mt-1 text-sm text-slate-500">Свяжите оплату с клиентом и, при необходимости, с арендой.</p>
+            <h2 id="new-payment-dialog-title" className="text-xl font-semibold text-slate-950">Новый платёж</h2>
+            <p id="new-payment-dialog-description" className="mt-1 text-sm text-slate-500">Свяжите оплату с клиентом и, при необходимости, с арендой.</p>
           </div>
-          <button onClick={onClose} className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700">
+          <button type="button" aria-label="Закрыть форму нового платежа" onClick={onClose} className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700">
             <X className="h-5 w-5" />
           </button>
         </div>
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
           {formError && (
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div id="new-payment-form-error" role="alert" aria-live="assertive" className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {formError}
             </div>
           )}
           {/* Rental link */}
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-700">
+            <label htmlFor="new-payment-rental" className="mb-1.5 block text-sm font-medium text-gray-700">
               Аренда (необязательно)
             </label>
             <select
+              id="new-payment-rental"
               value={form.rentalId}
               onChange={e => set('rentalId', e.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15"
@@ -339,7 +395,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
 
           {/* Client */}
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-700">
+            <label id="new-payment-client-label" className="mb-1.5 block text-sm font-medium text-gray-700">
               Клиент <span className="text-red-500">*</span>
             </label>
             <ClientCombobox
@@ -356,9 +412,13 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
                 setClientError('');
               }}
               placeholder="Выберите клиента из базы"
+              inputId="new-payment-client"
+              ariaLabelledBy="new-payment-client-label"
+              ariaInvalid={Boolean(clientError)}
+              ariaDescribedBy={clientError ? 'new-payment-client-error' : undefined}
             />
             {clientError && (
-              <p className="mt-1 text-xs text-red-600">{clientError}</p>
+              <p id="new-payment-client-error" role="alert" aria-live="assertive" className="mt-1 text-xs text-red-600">{clientError}</p>
             )}
             {/* Debt banner */}
             {clientDebt && clientDebt.currentDebt > 0 && (
@@ -399,29 +459,35 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
           <div className="grid gap-3 sm:grid-cols-2">
             {/* Amount due */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">
+              <label htmlFor="new-payment-amount" className="mb-1.5 block text-sm font-medium text-gray-700">
                 Сумма к оплате <span className="text-red-500">*</span>
               </label>
               <Input
+                id="new-payment-amount"
                 required
                 type="number"
                 min="0"
                 placeholder="0"
                 value={form.amount}
                 onChange={e => set('amount', e.target.value)}
+                aria-invalid={formError.startsWith('Сумма к оплате') || undefined}
+                aria-describedby={formError.startsWith('Сумма к оплате') ? 'new-payment-form-error' : undefined}
               />
             </div>
             {/* Paid amount */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">
+              <label htmlFor="new-payment-paid-amount" className="mb-1.5 block text-sm font-medium text-gray-700">
                 Оплачено
               </label>
               <Input
+                id="new-payment-paid-amount"
                 type="number"
                 min="0"
                 placeholder="= Полная сумма"
                 value={form.paidAmount}
                 onChange={e => set('paidAmount', e.target.value)}
+                aria-invalid={formError.startsWith('Оплачено') || undefined}
+                aria-describedby={formError.startsWith('Оплачено') ? 'new-payment-form-error' : undefined}
               />
             </div>
           </div>
@@ -949,7 +1015,7 @@ function PaymentAllocationPanel({
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function Payments() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { can } = usePermissions();
   const { data: paymentAllocations = [] } = usePaymentAllocationsList();
   const { data: ganttRentals = [] } = useGanttData();
@@ -957,6 +1023,8 @@ export default function Payments() {
   const { data: clientObjects = [] } = useClientObjectsList();
   const { data: clientContracts = [] } = useClientContractsList();
   const [showAddModal, setShowAddModal] = useState(false);
+  const createActionHandledRef = React.useRef(false);
+  const paymentsHeadingRef = React.useRef<HTMLHeadingElement>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedPaymentId, setSelectedPaymentId] = useState('');
   const { data: documents = [] } = useDocumentsList({
@@ -1001,6 +1069,23 @@ export default function Payments() {
   const setPaginationFilters = pagination.setFilters;
 
   React.useEffect(() => {
+    const shouldOpenCreate = searchParams.get('action') === 'create';
+    if (shouldOpenCreate && !createActionHandledRef.current) {
+      createActionHandledRef.current = true;
+      setShowAddModal(true);
+    }
+    if (!shouldOpenCreate) createActionHandledRef.current = false;
+  }, [searchParams]);
+
+  const closeAddPaymentModal = React.useCallback(() => {
+    setShowAddModal(false);
+    if (!searchParams.has('action')) return;
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete('action');
+    setSearchParams(nextSearchParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  React.useEffect(() => {
     if (!hasQuickClientContext) return;
     if (quickActionContext.clientId && clientsById.has(quickActionContext.clientId)) {
       setPaginationFilters({ clientId: quickActionContext.clientId });
@@ -1017,7 +1102,7 @@ export default function Payments() {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id: _id, ...data } = p;
     createPayment.mutate(data as Omit<Payment, 'id'>, {
-      onSuccess: () => setShowAddModal(false),
+      onSuccess: closeAddPaymentModal,
     });
   };
 
@@ -1106,17 +1191,18 @@ export default function Payments() {
     <div data-payments-responsive-root="true" className="min-h-screen max-w-full space-y-6 overflow-x-clip !bg-[#f6f8fb] p-4 !text-slate-950 sm:p-6 md:p-8">
       <AddPaymentModal
         open={showAddModal}
-        onClose={() => setShowAddModal(false)}
+        onClose={closeAddPaymentModal}
         onSave={handleAddPayment}
         existing={allPaymentsForAllocation}
         rentals={ganttRentals as GanttRentalData[]}
         clients={clients}
         allPayments={allPaymentsForAllocation}
+        fallbackFocusRef={paymentsHeadingRef}
       />
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-normal !text-slate-950 sm:text-4xl">Платежи</h1>
+          <h1 ref={paymentsHeadingRef} tabIndex={-1} className="text-3xl font-semibold tracking-normal !text-slate-950 sm:text-4xl">Платежи</h1>
           <p className="mt-2 text-sm !text-slate-500">Управление платежами и задолженностями</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

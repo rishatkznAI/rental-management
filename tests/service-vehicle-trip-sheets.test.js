@@ -50,6 +50,25 @@ test('service vehicle trip sheet calculates distance and fuel consumption', () =
   assert.equal(trip.completedAt, '2026-05-09T09:00:00.000Z');
 });
 
+test('service vehicle trip sheet preserves a date-only value without timezone conversion', () => {
+  const trip = makeTrip({
+    vehicleId: 'SV-1',
+    sheetNumber: 'PL-DATE',
+    date: '2026-08-02',
+    driverName: 'Петров',
+    route: 'Склад — Объект',
+  });
+
+  assert.equal(trip.date, '2026-08-02');
+  assert.throws(() => makeTrip({
+    vehicleId: 'SV-1',
+    sheetNumber: 'PL-BAD-DATE',
+    date: '2026-02-30',
+    driverName: 'Петров',
+    route: 'Склад — Объект',
+  }), /корректную дату/);
+});
+
 test('service vehicle trip sheet validates vehicle, status, odometer and completed mileage', () => {
   assert.throws(() => makeTrip({
     vehicleId: 'missing',

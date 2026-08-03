@@ -1729,6 +1729,24 @@ function registerCrudRoutes(deps) {
 
       try {
         let safePatch = accessControl.sanitizeUpdateInput(collection, req.body, req.user, data[idx]);
+        if (
+          collection === 'service'
+          && Object.prototype.hasOwnProperty.call(safePatch, 'comment')
+          && String(safePatch.comment || '').trim()
+        ) {
+          safePatch = {
+            ...safePatch,
+            workLog: [
+              ...(Array.isArray(data[idx].workLog) ? data[idx].workLog : []),
+              {
+                date: nowIso(),
+                text: String(safePatch.comment).trim(),
+                author: req.user?.userName || 'Оператор',
+                type: 'comment',
+              },
+            ],
+          };
+        }
         if (collection === 'equipment') {
           safePatch = normalizeEquipmentReceiptPatch(data[idx], safePatch, {
             user: req.user,

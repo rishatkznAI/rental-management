@@ -84,7 +84,7 @@ import {
   startOfDay, startOfMonth, startOfQuarter, startOfWeek, startOfYear
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { cn, formatCurrency, getRentalDays } from '../lib/utils';
+import { cn, formatCurrency, getRentalDays, parseDateValue } from '../lib/utils';
 import { animationClasses } from '../lib/animations';
 import { normalizePhotoReference, type NormalizedPhoto } from '../lib/media';
 import {
@@ -778,8 +778,8 @@ function getQuickCountTone(value: number, warningFrom = 1, criticalFrom = 3) {
 
 function safeRentalDateLabel(value?: string) {
   if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
+  const date = parseDateValue(value);
+  if (!date) return '—';
   return format(date, 'd MMM', { locale: ru });
 }
 
@@ -804,8 +804,8 @@ function getRentalUpdBadgeTone(rental: Pick<GanttRentalData, 'updSigned' | 'updD
 
 function safeMovementDateLabel(value?: string) {
   if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const date = parseDateValue(value);
+  if (!date) return value;
   const hasTime = value.includes('T');
   return format(date, hasTime ? 'dd.MM.yyyy HH:mm' : 'dd.MM.yyyy', { locale: ru });
 }
@@ -1129,10 +1129,11 @@ function detectConflicts(rentals: GanttRentalData[]): Set<string> {
     for (let j = i + 1; j < eqRentals.length; j++) {
       const a = eqRentals[i];
       const b = eqRentals[j];
-      const aStart = new Date(a.startDate);
-      const aEnd = new Date(a.endDate);
-      const bStart = new Date(b.startDate);
-      const bEnd = new Date(b.endDate);
+      const aStart = parseDateValue(a.startDate);
+      const aEnd = parseDateValue(a.endDate);
+      const bStart = parseDateValue(b.startDate);
+      const bEnd = parseDateValue(b.endDate);
+      if (!aStart || !aEnd || !bStart || !bEnd) continue;
       if (aStart < bEnd && bStart < aEnd) {
         conflictIds.add(a.id);
         conflictIds.add(b.id);
@@ -1147,22 +1148,24 @@ function rentalIntersectsRange(
   rangeStart: Date,
   rangeEnd: Date,
 ) {
-  const rentalStart = startOfDay(new Date(rental.startDate));
-  const rentalEndExclusive = addDays(startOfDay(new Date(rental.endDate)), 1);
-  return rentalStart < rangeEnd && rentalEndExclusive > rangeStart;
+  const rentalStart = parseDateValue(rental.startDate);
+  const rentalEnd = parseDateValue(rental.endDate);
+  if (!rentalStart || !rentalEnd) return false;
+  const rentalEndExclusive = addDays(startOfDay(rentalEnd), 1);
+  return startOfDay(rentalStart) < rangeEnd && rentalEndExclusive > rangeStart;
 }
 
 function downtimeDisplayEndDate(downtime: DowntimePeriod, viewEnd: Date, today: Date) {
   if (downtime.endDate) return downtime.endDate;
-  const start = startOfDay(new Date(downtime.startDate));
+  const start = startOfDay(parseDateValue(downtime.startDate) ?? new Date(Number.NaN));
   const visibleEnd = dateMin([viewEnd, addDays(dateMax([start, today]), 1)]);
   return format(visibleEnd, 'yyyy-MM-dd');
 }
 
 function downtimeIntersectsRange(downtime: DowntimePeriod, rangeStart: Date, rangeEnd: Date, today: Date) {
   if (!downtime.startDate || downtime.status === 'cancelled') return false;
-  const downtimeStart = startOfDay(new Date(downtime.startDate));
-  const downtimeEndExclusive = addDays(startOfDay(new Date(downtimeDisplayEndDate(downtime, rangeEnd, today))), 1);
+  const downtimeStart = startOfDay(parseDateValue(downtime.startDate) ?? new Date(Number.NaN));
+  const downtimeEndExclusive = addDays(startOfDay(parseDateValue(downtimeDisplayEndDate(downtime, rangeEnd, today)) ?? new Date(Number.NaN)), 1);
   return downtimeStart < rangeEnd && downtimeEndExclusive > rangeStart;
 }
 
@@ -2779,7 +2782,7 @@ export default function Rentals() {
         const dueDate = rental.expectedPaymentDate || rental.endDate;
         const isOverdueDebt = debtAmount > 0 && !!dueDate && dueDate < todayKey;
         const isPartialPayment = debtAmount > 0 && paidAmount > 0;
-        const daysLeft = differenceInDays(startOfDay(new Date(rental.endDate)), today);
+        const daysLeft = differenceInDays(startOfDay(parseDateValue(rental.endDate) ?? new Date(Number.NaN)), today);
         const isActive = rental.status !== 'returned' && rental.status !== 'closed';
         const isReturnToday = rental.endDate === todayKey && isActive;
         const isReturnTomorrow = rental.endDate === tomorrowKey && isActive;
@@ -3299,7 +3302,7 @@ export default function Rentals() {
 
     return filteredEquipment.map(equipment => {
       const rentalsForEquipment = [...getFilteredRentalsForEquipment(equipment)]
-        .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+        .sort((a, b) => (parseDateValue(a.startDate)?.getTime() ?? 0) - (parseDateValue(b.startDate)?.getTime() ?? 0));
       const downtimesForEquipment = mergeDowntimeLists(
         getDowntimesForEquipment(equipment),
         getRentalDowntimesForEquipment(equipment),
@@ -4097,20 +4100,11 @@ export default function Rentals() {
                   </Link>
                 )}
                 {canCreatePayments && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="app-button-outline h-9 rounded-xl px-3"
-                    onClick={() => {
-                      if (selectedRental) {
-                        showToast('Оплату можно добавить в открытой боковой панели аренды');
-                      } else {
-                        showToast('Выберите аренду в таблице и добавьте оплату в боковой панели');
-                      }
-                    }}
-                  >
-                    <CreditCard className="h-4 w-4" />
-                    Добавить оплату
+                  <Button asChild size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3">
+                    <Link to="/payments?action=create">
+                      <CreditCard className="h-4 w-4" />
+                      Добавить оплату
+                    </Link>
                   </Button>
                 )}
                 {canViewApprovals && (
@@ -4189,14 +4183,11 @@ export default function Rentals() {
                   </Link>
                 )}
                 {canCreatePayments && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="app-button-outline h-9 rounded-xl px-3"
-                    onClick={() => showToast('Выберите проблемную аренду и добавьте оплату в боковой панели')}
-                  >
-                    <CreditCard className="h-4 w-4" />
-                    Добавить оплату
+                  <Button asChild size="sm" variant="secondary" className="app-button-outline h-9 rounded-xl px-3">
+                    <Link to="/payments?action=create">
+                      <CreditCard className="h-4 w-4" />
+                      Добавить оплату
+                    </Link>
                   </Button>
                 )}
                 {canViewPayments && (
@@ -6944,7 +6935,9 @@ function EquipmentRow({
         {showReturns && rentals
           .filter(rental => rental.status === 'active' || rental.status === 'created')
           .map((rental, rentalIndex) => {
-            const pos = barPosition(new Date(rental.endDate), addDays(new Date(rental.endDate), 1), viewStart, totalDays, dayWidth);
+            const rentalEnd = parseDateValue(rental.endDate);
+            if (!rentalEnd) return null;
+            const pos = barPosition(rentalEnd, addDays(rentalEnd, 1), viewStart, totalDays, dayWidth);
             if (!pos) return null;
             const isOverdue = rental.status === 'active' && rental.endDate < todayStr;
             return (
@@ -6971,7 +6964,9 @@ function EquipmentRow({
         {showDeliveries && movements.map((entry, movementIndex) => {
           const dateKey = String(entry.date || '').slice(0, 10);
           if (!dateKey) return null;
-          const pos = barPosition(new Date(dateKey), addDays(new Date(dateKey), 1), viewStart, totalDays, dayWidth);
+          const movementDate = parseDateValue(dateKey);
+          if (!movementDate) return null;
+          const pos = barPosition(movementDate, addDays(movementDate, 1), viewStart, totalDays, dayWidth);
           if (!pos) return null;
           const isReceiving = entry.type === 'receiving';
           return (
@@ -6993,7 +6988,10 @@ function EquipmentRow({
 
         {/* Service bars */}
         {servicePeriods.map((sp, serviceIndex) => {
-          const pos = barPosition(new Date(sp.startDate), new Date(sp.endDate), viewStart, totalDays, dayWidth);
+          const serviceStart = parseDateValue(sp.startDate);
+          const serviceEnd = parseDateValue(sp.endDate);
+          if (!serviceStart || !serviceEnd) return null;
+          const pos = barPosition(serviceStart, serviceEnd, viewStart, totalDays, dayWidth);
           if (!pos) return null;
           return (
             <div
@@ -7025,7 +7023,10 @@ function EquipmentRow({
         {/* Downtime bars */}
         {downtimes.map((dt, downtimeIndex) => {
           const displayEndDate = downtimeDisplayEndDate(dt, viewEnd, today);
-          const pos = barPosition(new Date(dt.startDate), new Date(displayEndDate), viewStart, totalDays, dayWidth);
+          const downtimeStart = parseDateValue(dt.startDate);
+          const downtimeEnd = parseDateValue(displayEndDate);
+          if (!downtimeStart || !downtimeEnd) return null;
+          const pos = barPosition(downtimeStart, downtimeEnd, viewStart, totalDays, dayWidth);
           if (!pos) return null;
           const downtimeStatus = dt.status || 'active';
           return (
@@ -7063,7 +7064,10 @@ function EquipmentRow({
 
         {/* Rental bars */}
         {rentals.map((rental, rIdx) => {
-          const pos = barPosition(new Date(rental.startDate), new Date(rental.endDate), viewStart, totalDays, dayWidth);
+          const rentalStart = parseDateValue(rental.startDate);
+          const rentalEnd = parseDateValue(rental.endDate);
+          if (!rentalStart || !rentalEnd) return null;
+          const pos = barPosition(rentalStart, rentalEnd, viewStart, totalDays, dayWidth);
           if (!pos) return null;
           const isConflict = conflictIds.has(rental.id);
           const statusLabel = RENTAL_STATUS_LABEL[rental.status];
@@ -7087,8 +7091,9 @@ function EquipmentRow({
           // Stack bars vertically if there are overlaps (simple: use index-based offset)
           const overlapping = rentals.filter((r2, j) => {
             if (j >= rIdx) return false;
-            const s1 = new Date(rental.startDate), e1 = new Date(rental.endDate);
-            const s2 = new Date(r2.startDate), e2 = new Date(r2.endDate);
+            const s1 = parseDateValue(rental.startDate), e1 = parseDateValue(rental.endDate);
+            const s2 = parseDateValue(r2.startDate), e2 = parseDateValue(r2.endDate);
+            if (!s1 || !e1 || !s2 || !e2) return false;
             return s1 < e2 && s2 < e1;
           });
           const stackIndex = overlapping.length;
@@ -7165,7 +7170,10 @@ function EquipmentRow({
               })}
               {rentalDowntimePeriods.map(period => {
                 const periodEnd = period.endDate || period.startDate;
-                const periodPos = barPosition(new Date(period.startDate), new Date(periodEnd), viewStart, totalDays, dayWidth);
+                const periodStartDate = parseDateValue(period.startDate);
+                const periodEndDate = parseDateValue(periodEnd);
+                if (!periodStartDate || !periodEndDate) return null;
+                const periodPos = barPosition(periodStartDate, periodEndDate, viewStart, totalDays, dayWidth);
                 if (!periodPos) return null;
                 const relativeLeft = Math.max(0, periodPos.left - barLeft);
                 const relativeRight = Math.max(0, (barLeft + barWidth) - (periodPos.left + periodPos.width));

@@ -89,6 +89,8 @@ test('document chain wizard renders type-specific fields and quick actions', () 
   assert.match(source, /openDocumentChainAction\(doc, 'rental_specification'\)/);
   assert.match(source, /openDocumentChainAction\(doc, 'transfer_act_to_client'\)/);
   assert.match(source, /openDocumentChainAction\(doc, 'return_act_from_client'\)/);
+  assert.match(source, /requestAnimationFrame\(\(\) => openDocumentWizard\(initial\)\)/);
+  assert.match(source, /to="\/admin\?modal=details&tab=configuration"/);
 });
 
 test('documents quick action can open rental document wizard with chain context', () => {

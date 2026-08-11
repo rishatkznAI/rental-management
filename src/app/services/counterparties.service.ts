@@ -1,5 +1,13 @@
 import { api } from '../lib/api';
-import type { Counterparty, CounterpartyRole, CounterpartyType } from '../types';
+import type {
+  Client,
+  ContractorProfile,
+  Counterparty,
+  CounterpartyRole,
+  CounterpartyRoleAssignment,
+  CounterpartyType,
+  SupplierProfile,
+} from '../types';
 
 export type CounterpartyCreateInput = Pick<Counterparty, 'type' | 'legalName' | 'roles'> &
   Partial<Pick<Counterparty,
@@ -28,6 +36,12 @@ export interface CounterpartyListParams {
 export interface CounterpartyRolesResponse {
   counterpartyId: string;
   roles: CounterpartyRole[];
+  assignments?: CounterpartyRoleAssignment[];
+  profiles?: {
+    customer: Client | null;
+    supplier: SupplierProfile | null;
+    contractor: ContractorProfile | null;
+  };
 }
 
 export interface CounterpartyRoleMutationResponse {
@@ -62,8 +76,12 @@ export const counterpartiesService = {
   update: (id: string, data: CounterpartyUpdateInput): Promise<Counterparty> =>
     api.patch<Counterparty>(`/api/counterparties/${id}`, data),
 
-  addRole: (id: string, role: CounterpartyRole): Promise<CounterpartyRoleMutationResponse> =>
-    api.post<CounterpartyRoleMutationResponse>(`/api/counterparties/${id}/roles`, { role }),
+  addRole: (
+    id: string,
+    role: CounterpartyRole,
+    metadata?: { reason?: string; source?: string },
+  ): Promise<CounterpartyRoleMutationResponse> =>
+    api.post<CounterpartyRoleMutationResponse>(`/api/counterparties/${id}/roles`, { role, ...metadata }),
 
   removeRole: (id: string, role: CounterpartyRole): Promise<CounterpartyRoleMutationResponse> =>
     api.del<CounterpartyRoleMutationResponse>(`/api/counterparties/${id}/roles/${role}`),

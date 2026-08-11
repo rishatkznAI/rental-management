@@ -1459,6 +1459,9 @@ test('/api/admin/system-data/export returns safe JSON without passwords or secre
     assert.equal(response.body.collections.users[0].tokenVersion, undefined);
     assert.equal(response.body.collections.app_settings.length, 1);
     assert.equal(response.body.collections.app_settings[0].key, 'theme');
+    assert.deepEqual(response.body.collections.counterparty_role_assignments, []);
+    assert.deepEqual(response.body.collections.supplier_profiles, []);
+    assert.deepEqual(response.body.collections.contractor_profiles, []);
     assert.doesNotMatch(JSON.stringify(response.body), /secret|do-not-export/i);
   });
 });
@@ -2647,14 +2650,68 @@ test('/api/admin/system-data/import accepts valid clients payload', async () => 
     });
 
     assert.equal(response.status, 200);
-    assert.deepEqual(response.body.imported, { clients: 2, counterparties: 2 });
-    assert.deepEqual(writes.map(write => write.name), ['counterparties', 'clients']);
+    assert.deepEqual(response.body.imported, {
+      counterparties: 2,
+      clients: 2,
+      counterparty_role_assignments: 2,
+      supplier_profiles: 0,
+      contractor_profiles: 0,
+    });
+    assert.deepEqual(writes.map(write => write.name), [
+      'counterparties',
+      'clients',
+      'counterparty_role_assignments',
+      'supplier_profiles',
+      'contractor_profiles',
+    ]);
     assert.equal(collections.clients.length, 2);
     assert.equal(collections.counterparties.length, 2);
     assert.ok(collections.clients.every(client => collections.counterparties.some(counterparty => (
       counterparty.id === client.counterpartyId
       && counterparty.roles.includes('customer')
     ))));
+  });
+});
+
+test('/api/admin/system-data/import derives role assignments and supplier profiles from stable IDs', async () => {
+  const collections = {};
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => { collections[name] = value; },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        counterparties: [{
+          id: 'CP-import',
+          type: 'legal_entity',
+          legalName: 'ООО Импорт',
+          shortName: 'Импорт',
+          inn: '7707083893',
+          roles: ['customer', 'supplier'],
+          status: 'active',
+        }],
+        clients: [{
+          id: 'C-import',
+          counterpartyId: 'CP-import',
+          company: 'Импорт',
+          inn: '7707083893',
+          status: 'active',
+        }],
+      },
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(collections.counterparties[0].roles, ['customer', 'supplier']);
+    assert.deepEqual(
+      collections.counterparty_role_assignments.map(item => item.roleCode),
+      ['customer', 'supplier'],
+    );
+    assert.equal(collections.supplier_profiles.length, 1);
+    assert.equal(collections.supplier_profiles[0].counterpartyId, 'CP-import');
+    assert.deepEqual(collections.contractor_profiles, []);
   });
 });
 

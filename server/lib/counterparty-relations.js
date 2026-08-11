@@ -2,6 +2,7 @@ const {
   assertCounterpartyId,
   counterpartyError,
 } = require('./counterparty');
+const { hasActiveCounterpartyRole } = require('./counterparty-role-profiles');
 
 const COUNTERPARTY_RELATION_CODES = Object.freeze({
   AMBIGUOUS: 'COUNTERPARTY_RELATION_AMBIGUOUS',
@@ -126,10 +127,7 @@ function resolveCounterpartyForClient(client, data, {
     );
   }
   const counterparty = resolveCounterpartyById(counterpartyId, data, { allowArchived });
-  if (requireCustomerRole && !(
-    Array.isArray(counterparty.roles)
-    && counterparty.roles.includes('customer')
-  )) {
+  if (requireCustomerRole && !hasActiveCounterpartyRole(counterparty, 'customer', data)) {
     throw counterpartyError(
       'COUNTERPARTY_RELATION_CUSTOMER_ROLE_REQUIRED',
       'Counterparty, связанный с Client, должен иметь роль customer.',
@@ -387,7 +385,7 @@ function auditCounterpartyRelations(data) {
       }));
       continue;
     }
-    if (!Array.isArray(counterpartyMatch.item?.roles) || !counterpartyMatch.item.roles.includes('customer')) {
+    if (!hasActiveCounterpartyRole(counterpartyMatch.item, 'customer', data)) {
       broken.push(auditEntry({
         classification: 'B5',
         domain: 'clients',
@@ -539,7 +537,7 @@ function auditCounterpartyRelations(data) {
                 message: 'Активный ClientObject не может ссылаться на архивный Counterparty.',
               }));
             }
-            if (!Array.isArray(clientCounterparty?.roles) || !clientCounterparty.roles.includes('customer')) {
+            if (!hasActiveCounterpartyRole(clientCounterparty, 'customer', data)) {
               objectIssues.push(auditEntry({
                 classification: 'B5',
                 domain: 'client_objects',

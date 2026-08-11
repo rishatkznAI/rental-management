@@ -1265,6 +1265,52 @@ export interface Counterparty {
   warnings?: CounterpartyDuplicateWarning[];
 }
 
+export type CounterpartyRoleAssignmentStatus = 'active' | 'inactive';
+
+export interface CounterpartyRoleAssignment {
+  id: string;
+  counterpartyId: string;
+  roleCode: CounterpartyRole;
+  status: CounterpartyRoleAssignmentStatus;
+  validFrom: string;
+  validTo: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt?: string;
+  reason?: string | null;
+  source?: string | null;
+}
+
+export interface SupplierProfile {
+  id: string;
+  counterpartyId: string;
+  status: 'active' | 'inactive';
+  categories: string[];
+  settlementTerms?: string | null;
+  taxConfiguration?: Record<string, unknown> | null;
+  defaultCommercialConfiguration?: Record<string, unknown> | null;
+  preferredPaymentMethod?: Record<string, unknown> | null;
+  complianceState?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+}
+
+export interface ContractorProfile {
+  id: string;
+  counterpartyId: string;
+  status: 'active' | 'inactive';
+  serviceCategories: string[];
+  geographicScope?: Record<string, unknown> | null;
+  serviceScope?: Record<string, unknown> | null;
+  slaMetadata?: Record<string, unknown> | null;
+  complianceState?: string | null;
+  licenceReferences: string[];
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+}
+
 export interface ClientObject {
   id: string;
   clientId: string;

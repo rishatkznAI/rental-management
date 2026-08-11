@@ -109,6 +109,9 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
 
   const users = readCollection(dbPath, 'users');
   const counterparties = readCollection(dbPath, 'counterparties');
+  const roleAssignments = readCollection(dbPath, 'counterparty_role_assignments');
+  const supplierProfiles = readCollection(dbPath, 'supplier_profiles');
+  const contractorProfiles = readCollection(dbPath, 'contractor_profiles');
   const clients = readCollection(dbPath, 'clients');
   const clientObjects = readCollection(dbPath, 'client_objects');
   const clientContracts = readCollection(dbPath, 'client_contracts');
@@ -123,6 +126,14 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
   assert.equal(equipment.length, 20);
   assert.equal(clients.length, 5);
   assert.equal(counterparties.length, clients.length);
+  assert.equal(roleAssignments.length, counterparties.length);
+  assert.ok(roleAssignments.every(assignment => (
+    assignment.roleCode === 'customer'
+    && assignment.status === 'active'
+    && counterparties.some(counterparty => counterparty.id === assignment.counterpartyId)
+  )));
+  assert.deepEqual(supplierProfiles, []);
+  assert.deepEqual(contractorProfiles, []);
   assert.ok(clients.every(client => counterparties.some(counterparty => (
     counterparty.id === client.counterpartyId
     && counterparty.roles.includes('customer')

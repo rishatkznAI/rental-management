@@ -8,6 +8,7 @@ const {
   deterministicCounterpartyId,
   ensureClientCounterpartyFoundation,
   prepareClientCompatibilityCreate,
+  prepareClientCompatibilityUpdate,
 } = serverRequire('./lib/counterparty');
 const { registerCounterpartyRoutes } = serverRequire('./routes/counterparties');
 
@@ -36,7 +37,7 @@ function createState(overrides = {}) {
   };
 }
 
-function createApp(state = createState()) {
+function createApp(state = createState(), { denyWrite = false } = {}) {
   const app = express();
   app.use(express.json());
   const readData = name => state[name] || [];
@@ -54,7 +55,9 @@ function createApp(state = createState()) {
       next();
     },
     requireRead: () => (_req, _res, next) => next(),
-    requireWrite: () => (_req, _res, next) => next(),
+    requireWrite: () => (_req, res, next) => (
+      denyWrite ? res.status(403).json({ ok: false, code: 'FORBIDDEN' }) : next()
+    ),
     generateId: prefix => `${prefix}-${++sequence}`,
     nowIso: () => '2026-08-10T12:00:00.000Z',
     auditLog: () => {},
@@ -247,6 +250,28 @@ test('role endpoints are idempotent, validate roles and never mutate identity fi
       website: stored.website,
     }, identityBefore);
     assert.deepEqual(stored.roles, ['supplier', 'contractor']);
+  });
+});
+
+test('role mutation remains protected by backend Counterparty write authorization', async () => {
+  const state = createState({
+    counterparties: [{
+      id: 'CP-protected',
+      ...legalEntity({ roles: ['supplier'] }),
+      status: 'active',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      archivedAt: null,
+    }],
+  });
+  const app = createApp(state, { denyWrite: true });
+  await withServer(app, async baseUrl => {
+    const denied = await request(baseUrl, 'POST', '/api/counterparties/CP-protected/roles', {
+      role: 'contractor',
+    });
+    assert.equal(denied.status, 403);
+    assert.deepEqual(state.counterparties[0].roles, ['supplier']);
+    assert.deepEqual(state.counterparty_role_assignments, undefined);
   });
 });
 
@@ -453,6 +478,34 @@ test('explicit Client mapping can add customer role to the same supplier Counter
   assert.deepEqual(prepared.counterparties[0].roles, ['customer', 'supplier']);
 });
 
+test('Client customer notes remain profile-specific and never overwrite Counterparty notes', () => {
+  const created = prepareClientCompatibilityCreate({
+    client: {
+      id: 'C-notes',
+      company: 'ООО Профиль',
+      inn: '1655123456',
+      notes: 'Условия работы только для customer profile',
+    },
+    clients: [],
+    counterparties: [],
+    generateId: () => 'CP-notes',
+    nowIso: () => '2026-08-10T12:00:00.000Z',
+  });
+  assert.equal(created.client.notes, 'Условия работы только для customer profile');
+  assert.equal(created.counterparty.notes, null);
+
+  const updated = prepareClientCompatibilityUpdate({
+    previousClient: created.client,
+    nextClient: { ...created.client, notes: 'Новая customer-specific заметка' },
+    patch: { notes: 'Новая customer-specific заметка' },
+    clients: [created.client],
+    counterparties: created.counterparties,
+    nowIso: () => '2026-08-11T12:00:00.000Z',
+  });
+  assert.equal(updated.client.notes, 'Новая customer-specific заметка');
+  assert.equal(updated.counterparty.notes, null);
+});
+
 test('foundation repairs customer role for an explicitly linked Client without creating another Counterparty', () => {
   const supplier = {
     id: 'CP-explicit',
@@ -494,7 +547,7 @@ test('foundation repairs customer role for an explicitly linked Client without c
   assert.deepEqual(writes, [['counterparties', 'clients']]);
 });
 
-test('customer role cannot be removed while a Client is linked and the last role cannot be removed', async () => {
+test('customer role archives an unreferenced Client profile while the last role cannot be removed', async () => {
   const state = createState({
     counterparties: [{
       id: 'CP-role-guard',
@@ -522,17 +575,47 @@ test('customer role cannot be removed while a Client is linked and the last role
   });
   const app = createApp(state);
   await withServer(app, async baseUrl => {
-    const blockedCustomer = await request(baseUrl, 'DELETE', '/api/counterparties/CP-role-guard/roles/customer');
-    assert.equal(blockedCustomer.status, 409);
-    assert.equal(blockedCustomer.body.code, 'COUNTERPARTY_CLIENT_LINK_CONFLICT');
-    assert.deepEqual(blockedCustomer.body.details.clientIds, ['C-role-guard']);
-    assert.deepEqual(state.counterparties[0].roles, ['customer', 'supplier']);
+    const removedCustomer = await request(baseUrl, 'DELETE', '/api/counterparties/CP-role-guard/roles/customer');
+    assert.equal(removedCustomer.status, 200);
+    assert.equal(removedCustomer.body.changed, true);
+    assert.deepEqual(state.counterparties[0].roles, ['supplier']);
+    assert.equal(state.clients[0].status, 'inactive');
+    assert.equal(state.clients[0].customerRoleStatus, 'inactive');
+    assert.equal(state.counterparty_role_assignments.find(item => item.roleCode === 'customer').status, 'inactive');
 
     const blockedLastRole = await request(baseUrl, 'DELETE', '/api/counterparties/CP-single-role/roles/supplier');
     assert.equal(blockedLastRole.status, 409);
     assert.equal(blockedLastRole.body.code, 'COUNTERPARTY_ROLE_REQUIRED');
     assert.deepEqual(state.counterparties[1].roles, ['supplier']);
   });
+});
+
+test('customer role removal returns stable machine-readable blockers for durable history', async () => {
+  const state = createState({
+    counterparties: [{
+      id: 'CP-history',
+      ...legalEntity({ roles: ['customer', 'supplier'] }),
+      status: 'active',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      archivedAt: null,
+    }],
+    clients: [{ id: 'C-history', counterpartyId: 'CP-history', status: 'active' }],
+    rentals: [{ id: 'R-history', counterpartyId: 'CP-history', clientId: 'C-history', status: 'closed' }],
+    payments: [{ id: 'P-history', counterpartyId: 'CP-history', clientId: 'C-history', amount: 100 }],
+  });
+  const before = structuredClone(state);
+  const app = createApp(state);
+  await withServer(app, async baseUrl => {
+    const blocked = await request(baseUrl, 'DELETE', '/api/counterparties/CP-history/roles/customer');
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.code, 'COUNTERPARTY_ROLE_REMOVAL_BLOCKED');
+    assert.deepEqual(
+      blocked.body.details.blockers.map(item => item.collection),
+      ['rentals', 'payments'],
+    );
+  });
+  assert.deepEqual(state, before, 'blocked removal must not persist partial migration or profile writes');
 });
 
 test('Client creation never attaches by matching name or INN', () => {
@@ -655,5 +738,22 @@ test('Counterparty archive is soft-delete and refuses active Client, Site/Object
     assert.deepEqual(activeList.body, []);
     const allList = await request(baseUrl, 'GET', '/api/counterparties?includeArchived=1');
     assert.equal(allList.body.length, 1);
+  });
+});
+
+test('Counterparty archive deactivates role assignments and profiles without deleting them', async () => {
+  const state = createState();
+  const app = createApp(state);
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/counterparties', legalEntity({ roles: ['supplier'] }));
+    assert.equal(created.status, 201);
+    const profileId = state.supplier_profiles[0].id;
+
+    const archived = await request(baseUrl, 'DELETE', `/api/counterparties/${created.body.id}`);
+    assert.equal(archived.status, 200);
+    assert.equal(state.counterparty_role_assignments[0].status, 'inactive');
+    assert.equal(state.counterparty_role_assignments[0].validTo, '2026-08-10T12:00:00.000Z');
+    assert.equal(state.supplier_profiles[0].id, profileId);
+    assert.equal(state.supplier_profiles[0].status, 'inactive');
   });
 });

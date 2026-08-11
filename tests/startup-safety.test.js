@@ -26,6 +26,10 @@ function createStartupDeps(state, events) {
     migrateJsonFilesToDb: () => recordCall('migrateJsonFilesToDb'),
     ensureClientCounterpartyFoundation: () => recordCall('ensureClientCounterpartyFoundation'),
     ensureClientObjectCounterpartyLinks: () => recordCall('ensureClientObjectCounterpartyLinks'),
+    auditCounterpartyRoleProfiles: () => {
+      recordCall('auditCounterpartyRoleProfiles');
+      return { errors: [], warnings: [], roleRemovalConstraints: [], summary: { errors: 0, warnings: 0, blockedRoleRemovals: 0 } };
+    },
     auditCounterpartyRelations: () => {
       recordCall('auditCounterpartyRelations');
       return { healthy: [], repairable: [], broken: [], summary: { healthy: 0, repairable: 0, broken: 0 } };
@@ -137,6 +141,7 @@ test('server start disables only business maintenance by default', async () => {
   assert.equal(events.calls.includes('migrateJsonFilesToDb'), true);
   assert.equal(events.calls.includes('ensureClientCounterpartyFoundation'), false);
   assert.equal(events.calls.includes('ensureClientObjectCounterpartyLinks'), false);
+  assert.equal(events.calls.includes('auditCounterpartyRoleProfiles'), true);
   assert.equal(events.calls.includes('auditCounterpartyRelations'), true);
   assert.equal(events.calls.includes('cleanupExpiredSessions'), true);
   assert.equal(events.calls.includes('seedDefaultUsers'), true);
@@ -179,6 +184,7 @@ test('STARTUP_BUSINESS_MAINTENANCE=apply does not run Counterparty identity auto
   assert.equal(events.calls.includes('migrateJsonFilesToDb'), true);
   assert.equal(events.calls.includes('ensureClientCounterpartyFoundation'), false);
   assert.equal(events.calls.includes('ensureClientObjectCounterpartyLinks'), false);
+  assert.equal(events.calls.includes('auditCounterpartyRoleProfiles'), true);
   assert.equal(events.calls.includes('auditCounterpartyRelations'), true);
   assert.equal(events.calls.includes('cleanupExpiredSessions'), true);
   assert.equal(events.calls.includes('migrateReferenceCollections'), true);

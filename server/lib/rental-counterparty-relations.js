@@ -4,6 +4,7 @@ const {
   resolveCounterpartyById,
 } = require('./counterparty-relations');
 const { counterpartyError } = require('./counterparty');
+const { hasActiveCounterpartyRole } = require('./counterparty-role-profiles');
 const { isStandalonePlannerRow, linkedRentalIds } = require('./gantt-rental-link-guard');
 
 const RENTAL_RELATION_CLASSIFICATIONS = Object.freeze({
@@ -53,12 +54,8 @@ function readCollection(data, name) {
   return data?.[name] || [];
 }
 
-function hasCustomerRole(counterparty) {
-  return Array.isArray(counterparty?.roles) && counterparty.roles.includes('customer');
-}
-
-function requireCustomerCounterparty(counterparty, context = {}) {
-  if (!hasCustomerRole(counterparty)) {
+function requireCustomerCounterparty(counterparty, data, context = {}) {
+  if (!hasActiveCounterpartyRole(counterparty, 'customer', data)) {
     throw counterpartyError(
       COUNTERPARTY_RELATION_CODES.CUSTOMER_ROLE_REQUIRED,
       'Counterparty арендатора должен иметь роль customer.',
@@ -95,6 +92,7 @@ function resolveRentalCounterpartyRelation(rental, data, {
   if (counterpartyId) {
     const counterparty = requireCustomerCounterparty(
       resolveCounterpartyById(counterpartyId, data, { allowArchived }),
+      data,
       { relation: 'Rental.counterpartyId' },
     );
     return {

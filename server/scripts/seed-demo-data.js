@@ -178,6 +178,21 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
     archivedAt: null,
   }));
 
+  const counterparty_role_assignments = clients.map((client, index) => ({
+    id: `DEMO-ROLE-CUSTOMER-${String(index + 1).padStart(3, '0')}`,
+    counterpartyId: client.counterpartyId,
+    roleCode: 'customer',
+    status: 'active',
+    validFrom: nowIso,
+    validTo: null,
+    createdBy: 'DEMO-USER-ADMIN',
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    reason: 'demo_seed',
+    source: 'demo_seed',
+    fixtureTag: DEMO_PREFIX,
+  }));
+
   const client_objects = clients.map((client, index) => ({
     id: `DEMO-OBJECT-${String(index + 1).padStart(3, '0')}`,
     clientId: client.id,
@@ -588,6 +603,9 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
     client_objects,
     client_contracts,
     equipment,
+    counterparty_role_assignments,
+    supplier_profiles: [],
+    contractor_profiles: [],
     rentals,
     gantt_rentals,
     documents,

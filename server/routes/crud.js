@@ -46,6 +46,12 @@ const {
   prepareClientCompatibilityUpdate,
 } = require('../lib/counterparty');
 const {
+  CONTRACTOR_PROFILES_COLLECTION,
+  ROLE_ASSIGNMENTS_COLLECTION,
+  SUPPLIER_PROFILES_COLLECTION,
+  synchronizeClientRoleBoundary,
+} = require('../lib/counterparty-role-profiles');
+const {
   normalizeEquipmentReceiptPatch,
   shouldCreateReceiptServiceTicket,
 } = require('../lib/equipment-receipt');
@@ -1825,7 +1831,19 @@ function registerCrudRoutes(deps) {
             nowIso,
           });
           newItem = prepared.client;
-          clientCompatibilityWrite = prepared.counterparties;
+          clientCompatibilityWrite = synchronizeClientRoleBoundary({
+            counterparties: prepared.counterparties,
+            clients: [...data, newItem],
+            roleAssignments: readData(ROLE_ASSIGNMENTS_COLLECTION) || [],
+            supplierProfiles: readData(SUPPLIER_PROFILES_COLLECTION) || [],
+            contractorProfiles: readData(CONTRACTOR_PROFILES_COLLECTION) || [],
+            clientIds: [newItem.id],
+            actor: req.user,
+            source: 'client_create',
+            nowIso,
+          });
+          newItem = clientCompatibilityWrite.state.clients
+            .find(client => String(client?.id || '') === String(newItem.id)) || newItem;
         }
         if (collection === 'service' && typeof applyServiceTicketCreationEffects === 'function') {
           const lifecycleResult = applyServiceTicketCreationEffects(newItem, req.user.userName, {
@@ -1834,10 +1852,7 @@ function registerCrudRoutes(deps) {
           });
           if (lifecycleResult?.persisted !== true) writeData(collection, [...data, newItem]);
         } else if (collection === 'clients') {
-          persistDataBatch([
-            { name: 'counterparties', value: clientCompatibilityWrite },
-            { name: 'clients', value: [...data, newItem] },
-          ]);
+          persistDataBatch(clientCompatibilityWrite.entries);
         } else if (idempotencyKey) {
           const idempotencyRecords = readData(INLINE_RELATION_IDEMPOTENCY_COLLECTION) || [];
           persistDataBatch([
@@ -1941,7 +1956,7 @@ function registerCrudRoutes(deps) {
       if (officeManagerCanOnlyCreateRental(req, collection, 'PATCH')) {
         return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });
       }
-      const data = [...(readData(collection) || [])];
+      let data = [...(readData(collection) || [])];
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       try {
@@ -2131,16 +2146,24 @@ function registerCrudRoutes(deps) {
               nowIso,
             });
             data[idx] = prepared.client;
-            clientCompatibilityWrite = prepared.counterparties;
+            clientCompatibilityWrite = synchronizeClientRoleBoundary({
+              counterparties: prepared.counterparties,
+              clients: data,
+              roleAssignments: readData(ROLE_ASSIGNMENTS_COLLECTION) || [],
+              supplierProfiles: readData(SUPPLIER_PROFILES_COLLECTION) || [],
+              contractorProfiles: readData(CONTRACTOR_PROFILES_COLLECTION) || [],
+              clientIds: [data[idx].id],
+              actor: req.user,
+              source: 'client_update',
+              nowIso,
+            });
+            data = clientCompatibilityWrite.state.clients;
           }
         }
         if (collection === 'service' && typeof persistServiceTicketUpdate === 'function') {
           data[idx] = persistServiceTicketUpdate(data[idx], req.user.userName);
         } else if (collection === 'clients') {
-          persistDataBatch([
-            { name: 'counterparties', value: clientCompatibilityWrite },
-            { name: 'clients', value: data },
-          ]);
+          persistDataBatch(clientCompatibilityWrite.entries);
         } else {
           writeData(collection, data);
         }
@@ -2642,7 +2665,18 @@ function registerCrudRoutes(deps) {
             nowIso,
           });
           normalizedList = prepared.clients;
-          clientCompatibilityWrite = prepared.counterparties;
+          clientCompatibilityWrite = synchronizeClientRoleBoundary({
+            counterparties: prepared.counterparties,
+            clients: normalizedList,
+            roleAssignments: readData(ROLE_ASSIGNMENTS_COLLECTION) || [],
+            supplierProfiles: readData(SUPPLIER_PROFILES_COLLECTION) || [],
+            contractorProfiles: readData(CONTRACTOR_PROFILES_COLLECTION) || [],
+            clientIds: normalizedList.map(client => client.id),
+            actor: req.user,
+            source: 'client_bulk_replace',
+            nowIso,
+          });
+          normalizedList = clientCompatibilityWrite.state.clients;
         }
         if (collection === 'equipment') {
           assertProductionSmokeFixtureMutationAllowed({
@@ -2688,10 +2722,7 @@ function registerCrudRoutes(deps) {
           });
         }
       } else if (collection === 'clients') {
-        persistDataBatch([
-          { name: 'counterparties', value: clientCompatibilityWrite || readData('counterparties') || [] },
-          { name: 'clients', value: normalizedList },
-        ]);
+        persistDataBatch(clientCompatibilityWrite.entries);
       } else {
         writeData(collection, normalizedList);
       }

@@ -87,6 +87,9 @@ const {
   auditCounterpartyRelations,
 } = require('./lib/counterparty-relations');
 const {
+  auditCounterpartyRoleProfiles,
+} = require('./lib/counterparty-role-profiles');
+const {
   auditRentalCounterpartyRelations,
   canonicalizeRentalCounterpartyRelation,
   canonicalizeRentalPersistenceEntries,
@@ -2728,6 +2731,7 @@ startServer({
   port: PORT,
   deps: {
     migrateJsonFilesToDb,
+    auditCounterpartyRoleProfiles,
     auditCounterpartyRelations,
     auditRentalCounterpartyRelations,
     writeDataBatch,

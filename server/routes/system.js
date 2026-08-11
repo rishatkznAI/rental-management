@@ -17,6 +17,12 @@ const {
   prepareClientCompatibilityBulkReplace,
 } = require('../lib/counterparty');
 const {
+  CONTRACTOR_PROFILES_COLLECTION,
+  ROLE_ASSIGNMENTS_COLLECTION,
+  SUPPLIER_PROFILES_COLLECTION,
+  prepareCounterpartyRoleProfileFoundation,
+} = require('../lib/counterparty-role-profiles');
+const {
   analyzeRentalEquipmentDiagnostics,
   planRentalEquipmentBackfill,
 } = require('../lib/rental-equipment-diagnostics');
@@ -166,6 +172,9 @@ const SYSTEM_DATA_COLLECTIONS = [
   'equipment',
   'rentals',
   'counterparties',
+  ROLE_ASSIGNMENTS_COLLECTION,
+  SUPPLIER_PROFILES_COLLECTION,
+  CONTRACTOR_PROFILES_COLLECTION,
   'clients',
   'service',
   'documents',
@@ -1055,6 +1064,43 @@ function analyzeSystemDataImport(payload, readData) {
       };
     } catch (error) {
       invalidCollections.push(`clients:${error.message}`);
+    }
+  }
+
+  const boundaryImportRequested = [
+    'counterparties',
+    'clients',
+    ROLE_ASSIGNMENTS_COLLECTION,
+    SUPPLIER_PROFILES_COLLECTION,
+    CONTRACTOR_PROFILES_COLLECTION,
+  ].some(collection => Object.prototype.hasOwnProperty.call(sanitizedCollections, collection));
+  if (boundaryImportRequested) {
+    const stagedData = {
+      readData(name) {
+        if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
+        return readData(name) || [];
+      },
+    };
+    try {
+      const prepared = prepareCounterpartyRoleProfileFoundation({
+        data: stagedData,
+        actor: 'system:import',
+        source: 'system_data_import',
+        nowIso: () => new Date().toISOString(),
+        assignmentsAuthoritative: Object.prototype.hasOwnProperty.call(
+          rawCollections,
+          ROLE_ASSIGNMENTS_COLLECTION,
+        ),
+      });
+      for (const entry of prepared.entries) {
+        sanitizedCollections[entry.name] = entry.value;
+        collections[entry.name] = {
+          incoming: entry.value.length,
+          existing: Array.isArray(readData(entry.name)) ? (readData(entry.name) || []).length : 0,
+        };
+      }
+    } catch (error) {
+      integrityErrors.push(`${error.code || 'COUNTERPARTY_ROLE_PROFILE_MIGRATION_BLOCKED'}: ${error.message}`);
     }
   }
 

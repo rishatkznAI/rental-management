@@ -150,6 +150,27 @@ async function startServer({ app, port, deps, logger = console }) {
   return app.listen(port, async () => {
     const startupBusinessMaintenanceEnabled = isStartupBusinessMaintenanceEnabled();
     migrateJsonFilesToDb();
+    if (typeof deps.auditCounterpartyRoleProfiles === 'function') {
+      try {
+        const result = deps.auditCounterpartyRoleProfiles({ readData: deps.readData });
+        const summary = result?.summary || {};
+        const log = summary.errors > 0 ? logger.warn : logger.log;
+        log?.call(
+          logger,
+          `[counterparty-role-profiles] integrity audit: errors=${summary.errors || 0} `
+          + `warnings=${summary.warnings || 0} blockedRoleRemovals=${summary.blockedRoleRemovals || 0}`,
+        );
+        for (const issue of [...(result?.errors || []), ...(result?.warnings || [])]) {
+          logger.warn?.(
+            `[counterparty-role-profiles] integrity issue: domain=${issue.domain} `
+            + `recordId=${issue.recordId || 'missing'} code=${issue.code} `
+            + `repairability=${issue.repairability}`,
+          );
+        }
+      } catch (error) {
+        logger.warn(`[counterparty-role-profiles] integrity audit failed: ${error?.message || String(error)}`);
+      }
+    }
     if (typeof deps.auditCounterpartyRelations === 'function') {
       try {
         const result = deps.auditCounterpartyRelations({ readData: deps.readData });

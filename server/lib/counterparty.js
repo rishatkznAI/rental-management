@@ -27,7 +27,6 @@ const CLIENT_IDENTITY_FIELDS = new Set([
   'email',
   'phone',
   'website',
-  'notes',
 ]);
 
 function counterpartyError(code, message, status = 400, details = undefined) {
@@ -370,7 +369,6 @@ function counterpartyInputFromClient(client) {
     email: client?.email,
     phone: client?.phone,
     website: client?.website,
-    notes: client?.notes,
     status: 'active',
     roles: ['customer'],
   };
@@ -396,7 +394,7 @@ function projectCounterpartyToClient(client, counterparty) {
     email: counterparty.email || '',
     phone: counterparty.phone || '',
     website: counterparty.website || undefined,
-    notes: counterparty.notes || undefined,
+    notes: client?.notes,
   };
 }
 
@@ -541,7 +539,6 @@ function counterpartyPatchFromClientPatch(previousClient, patch, counterparty) {
   if (fields.includes('email')) next.email = source.email;
   if (fields.includes('phone')) next.phone = source.phone;
   if (fields.includes('website')) next.website = source.website;
-  if (fields.includes('notes')) next.notes = source.notes;
   return next;
 }
 

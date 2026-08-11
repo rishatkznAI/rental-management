@@ -1,7 +1,6 @@
 const {
   COUNTERPARTY_ROLES,
   COUNTERPARTY_TYPES,
-  addCounterpartyRole,
   assertCounterpartyId,
   assertCounterpartyUnique,
   counterpartyError,
@@ -9,8 +8,18 @@ const {
   normalizeCounterpartyRecord,
   normalizedText,
   projectCounterpartyToClient,
-  removeCounterpartyRole,
 } = require('../lib/counterparty');
+const {
+  CONTRACTOR_PROFILES_COLLECTION,
+  ROLE_ASSIGNMENTS_COLLECTION,
+  SUPPLIER_PROFILES_COLLECTION,
+  activateCounterpartyRole,
+  activeRolesForCounterparty,
+  archiveCounterpartyRoleProfiles,
+  boundaryEntries,
+  boundaryState,
+  deactivateCounterpartyRole,
+} = require('../lib/counterparty-role-profiles');
 
 const COUNTERPARTY_WRITE_FIELDS = new Set([
   'type',
@@ -94,15 +103,32 @@ function sanitizeRoleMutationInput(input) {
     throw counterpartyError('COUNTERPARTY_VALIDATION_FAILED', 'Ожидается объект с полем role.', 400);
   }
   const fields = Object.keys(input);
-  if (fields.length !== 1 || fields[0] !== 'role') {
+  const allowedFields = new Set(['role', 'reason', 'source']);
+  const unknownFields = fields.filter(field => !allowedFields.has(field));
+  if (!fields.includes('role') || unknownFields.length > 0) {
     throw counterpartyError(
       'COUNTERPARTY_VALIDATION_FAILED',
-      'Изменение роли принимает только поле role и не может менять реквизиты контрагента.',
+      'Изменение роли принимает role и optional reason/source, но не меняет реквизиты контрагента.',
       400,
-      { fields },
+      { fields, unknownFields },
     );
   }
-  return input.role;
+  for (const [field, maxLength] of [['reason', 500], ['source', 100]]) {
+    if (input[field] === undefined || input[field] === null) continue;
+    if (typeof input[field] !== 'string' || input[field].trim().length > maxLength) {
+      throw counterpartyError(
+        'COUNTERPARTY_VALIDATION_FAILED',
+        `Поле ${field} должно быть строкой не длиннее ${maxLength} символов.`,
+        400,
+        { field, maxLength },
+      );
+    }
+  }
+  return {
+    role: input.role,
+    reason: input.reason,
+    source: input.source,
+  };
 }
 
 function registerCounterpartyRoutes(router, deps) {
@@ -119,6 +145,16 @@ function registerCounterpartyRoutes(router, deps) {
     nowIso = () => new Date().toISOString(),
     auditLog,
   } = deps;
+
+  function readRoleProfileState(overrides = {}) {
+    return boundaryState({
+      counterparties: overrides.counterparties || readData('counterparties') || [],
+      clients: overrides.clients || readData('clients') || [],
+      [ROLE_ASSIGNMENTS_COLLECTION]: readData(ROLE_ASSIGNMENTS_COLLECTION) || [],
+      [SUPPLIER_PROFILES_COLLECTION]: readData(SUPPLIER_PROFILES_COLLECTION) || [],
+      [CONTRACTOR_PROFILES_COLLECTION]: readData(CONTRACTOR_PROFILES_COLLECTION) || [],
+    });
+  }
 
   router.get('/counterparties', requireAuth, requireRead('counterparties'), (req, res) => {
     const includeArchived = String(req.query.includeArchived || '') === '1';
@@ -191,7 +227,23 @@ function registerCounterpartyRoutes(router, deps) {
       if (!item) {
         throw counterpartyError('COUNTERPARTY_NOT_FOUND', 'Контрагент не найден.', 404, { id });
       }
-      return res.json({ counterpartyId: id, roles: item.roles || [] });
+      const state = readRoleProfileState();
+      const assignments = state[ROLE_ASSIGNMENTS_COLLECTION]
+        .filter(assignment => String(assignment?.counterpartyId || '') === id);
+      const assignmentRoles = activeRolesForCounterparty(assignments, id);
+      const roles = assignments.length > 0 ? assignmentRoles : (item.roles || []);
+      return res.json({
+        counterpartyId: id,
+        roles,
+        assignments,
+        profiles: {
+          customer: state.clients.find(profile => String(profile?.counterpartyId || '') === id) || null,
+          supplier: state[SUPPLIER_PROFILES_COLLECTION]
+            .find(profile => String(profile?.counterpartyId || '') === id) || null,
+          contractor: state[CONTRACTOR_PROFILES_COLLECTION]
+            .find(profile => String(profile?.counterpartyId || '') === id) || null,
+        },
+      });
     } catch (error) {
       return sendCounterpartyError(res, error);
     }
@@ -200,17 +252,20 @@ function registerCounterpartyRoutes(router, deps) {
   router.post('/counterparties/:id/roles', requireAuth, requireWrite('counterparties'), (req, res) => {
     try {
       const id = assertCounterpartyId(req.params.id);
-      const role = sanitizeRoleMutationInput(req.body);
-      const counterparties = [...(readData('counterparties') || [])];
-      const index = counterparties.findIndex(item => String(item?.id || '') === id);
-      if (index === -1) {
-        throw counterpartyError('COUNTERPARTY_NOT_FOUND', 'Контрагент не найден.', 404, { id });
-      }
-      const previous = counterparties[index];
-      const result = addCounterpartyRole(previous, role, nowIso);
+      const input = sanitizeRoleMutationInput(req.body);
+      const state = readRoleProfileState();
+      const previous = state.counterparties.find(item => String(item?.id || '') === id);
+      const result = activateCounterpartyRole({
+        state,
+        counterpartyId: id,
+        roleCode: input.role,
+        actor: req.user,
+        reason: input.reason,
+        source: input.source || 'role_api',
+        nowIso,
+      });
       if (result.changed) {
-        counterparties[index] = result.counterparty;
-        writeData('counterparties', counterparties);
+        writeDataBatch(boundaryEntries(result.state));
         auditLog?.(req, {
           action: 'counterparties.role.add',
           entityType: 'counterparties',
@@ -228,19 +283,25 @@ function registerCounterpartyRoutes(router, deps) {
   router.delete('/counterparties/:id/roles/:role', requireAuth, requireWrite('counterparties'), (req, res) => {
     try {
       const id = assertCounterpartyId(req.params.id);
-      const counterparties = [...(readData('counterparties') || [])];
-      const index = counterparties.findIndex(item => String(item?.id || '') === id);
-      if (index === -1) {
-        throw counterpartyError('COUNTERPARTY_NOT_FOUND', 'Контрагент не найден.', 404, { id });
-      }
-      const previous = counterparties[index];
-      const linkedClientIds = (readData('clients') || [])
-        .filter(client => String(client?.counterpartyId || '') === id)
-        .map(client => client.id);
-      const result = removeCounterpartyRole(previous, req.params.role, { linkedClientIds, nowIso });
+      const input = sanitizeRoleMutationInput({
+        role: req.params.role,
+        ...(req.query.reason !== undefined ? { reason: req.query.reason } : {}),
+        ...(req.query.source !== undefined ? { source: req.query.source } : {}),
+      });
+      const state = readRoleProfileState();
+      const previous = state.counterparties.find(item => String(item?.id || '') === id);
+      const result = deactivateCounterpartyRole({
+        state,
+        data: { readData },
+        counterpartyId: id,
+        roleCode: input.role,
+        actor: req.user,
+        reason: input.reason,
+        source: input.source || 'role_api',
+        nowIso,
+      });
       if (result.changed) {
-        counterparties[index] = result.counterparty;
-        writeData('counterparties', counterparties);
+        writeDataBatch(boundaryEntries(result.state));
         auditLog?.(req, {
           action: 'counterparties.role.remove',
           entityType: 'counterparties',
@@ -273,14 +334,28 @@ function registerCounterpartyRoutes(router, deps) {
       });
       assertCounterpartyUnique(counterparties, item);
       const warnings = findPossibleCounterpartyDuplicates(counterparties, item);
-      writeData('counterparties', [...counterparties, item]);
+      const state = readRoleProfileState({ counterparties: [...counterparties, item] });
+      let stored = item;
+      for (const roleCode of item.roles) {
+        const result = activateCounterpartyRole({
+          state,
+          counterpartyId: item.id,
+          roleCode,
+          actor: req.user,
+          source: 'counterparty_create',
+          nowIso,
+          initializeProjection: false,
+        });
+        stored = result.counterparty;
+      }
+      writeDataBatch(boundaryEntries(state));
       auditLog?.(req, {
         action: 'counterparties.create',
         entityType: 'counterparties',
-        entityId: item.id,
-        after: item,
+        entityId: stored.id,
+        after: stored,
       });
-      return res.status(201).json(warnings.length > 0 ? { ...item, warnings } : item);
+      return res.status(201).json(warnings.length > 0 ? { ...stored, warnings } : stored);
     } catch (error) {
       return sendCounterpartyError(res, error);
     }
@@ -423,7 +498,15 @@ function registerCounterpartyRoutes(router, deps) {
         updatedAt: archivedAt,
       };
       counterparties[index] = item;
-      writeData('counterparties', counterparties);
+      const state = readRoleProfileState({ counterparties });
+      archiveCounterpartyRoleProfiles({
+        state,
+        counterpartyId: id,
+        actor: req.user,
+        source: 'counterparty_archive',
+        nowIso: () => archivedAt,
+      });
+      writeDataBatch(boundaryEntries(state));
       auditLog?.(req, {
         action: 'counterparties.archive',
         entityType: 'counterparties',

@@ -70,5 +70,5 @@ test('payment forms and empty state are mobile-safe', () => {
   assert.match(source, /max-h-\[min\(92dvh,calc\(100dvh-2rem\)\)\]/);
   assert.match(source, /overflow-y-auto px-6 py-5/);
   assert.match(source, /Сбросить фильтры/);
-  assert.match(source, /pagination\.setFilters\(\{ clientId: 'all', status: 'all' \}\)/);
+  assert.match(source, /pagination\.setFilters\(\{ counterpartyId: 'all', status: 'all' \}\)/);
 });

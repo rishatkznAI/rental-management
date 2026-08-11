@@ -40,6 +40,11 @@ const {
   normalizeClientObjectRecord,
 } = require('../lib/client-relations');
 const {
+  prepareClientCompatibilityBulkReplace,
+  prepareClientCompatibilityCreate,
+  prepareClientCompatibilityUpdate,
+} = require('../lib/counterparty');
+const {
   normalizeEquipmentReceiptPatch,
   shouldCreateReceiptServiceTicket,
 } = require('../lib/equipment-receipt');
@@ -66,6 +71,10 @@ const {
   isProductionSmokeEquipmentFixture,
 } = require('../lib/protected-fixtures');
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
+const {
+  canonicalizePaymentCounterpartyRelation,
+  decoratePaymentCounterparty,
+} = require('../lib/payment-counterparty-relations');
 
 function registerCrudRoutes(deps) {
   const {
@@ -73,6 +82,9 @@ function registerCrudRoutes(deps) {
     idPrefixes,
     readData,
     writeData,
+    writeDataBatch: persistDataBatch = entries => {
+      for (const entry of entries || []) writeData(entry.name, entry.value);
+    },
     deleteSessionsForUserIds,
     requireAuth,
     requireRead,
@@ -93,7 +105,6 @@ function registerCrudRoutes(deps) {
     auditLog,
     serviceAuditLog,
     normalizeRecordClientLink,
-    normalizeClientLinks,
   } = deps;
 
   const router = express.Router();
@@ -117,7 +128,20 @@ function registerCrudRoutes(deps) {
   }
 
   function sendAccessError(res, error) {
-    return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+    return res.status(error?.status || 403).json({
+      ok: false,
+      ...(error?.code ? { code: error.code } : {}),
+      error: error?.message || 'Forbidden',
+    });
+  }
+
+  function sendCounterpartyCompatibilityError(res, error) {
+    return res.status(error?.status || 400).json({
+      ok: false,
+      code: error?.code || 'COUNTERPARTY_VALIDATION_FAILED',
+      error: error?.message || 'Не удалось сохранить связь Client с контрагентом.',
+      ...(error?.details !== undefined ? { details: error.details } : {}),
+    });
   }
 
   function writeMiddlewares(collection) {
@@ -218,12 +242,14 @@ function registerCrudRoutes(deps) {
       context: `${collection}:${item?.id || item?.rentalId || item?.number || 'new'}`,
       relatedRentalsById: relatedRentalsById(),
       logger: console,
+      allowLegacyRecovery: false,
     });
   }
 
   function normalizeClientDomainRecord(collection, item, existing = null) {
     if (collection === 'clients') {
       const normalized = normalizeClientInnFields(item);
+      if (normalized.counterpartyId && !normalized.inn) return normalized;
       assertClientInnValid(normalized);
       return normalized;
     }
@@ -244,18 +270,12 @@ function registerCrudRoutes(deps) {
         includeContractSnapshot: collection === 'service',
       });
       if (collection === 'payment_allocations') validatePaymentAllocationRecord(normalized, existing);
+      if (collection === 'payments') {
+        return canonicalizePaymentCounterpartyRelation(normalized, { readData });
+      }
       return normalized;
     }
     return item;
-  }
-
-  function normalizeStoredClientLinksAfterClientWrite() {
-    if (typeof normalizeClientLinks !== 'function') return;
-    normalizeClientLinks({
-      readData,
-      writeData,
-      logger: console,
-    });
   }
 
   function normalizeClientName(value) {
@@ -316,21 +336,7 @@ function registerCrudRoutes(deps) {
     if (clientId && rentalClientId) return clientId === rentalClientId;
     if (rentalClientId) return false;
     if (!clientId) return true;
-
-    const client = (readData('clients') || []).find(item => text(item?.id) === clientId);
-    const selectedNames = [
-      record?.client,
-      record?.clientName,
-      client?.company,
-      client?.name,
-    ].map(normalizeClientName).filter(Boolean);
-    const rentalNames = [
-      rental?.client,
-      rental?.clientName,
-      rental?.companyName,
-    ].map(normalizeClientName).filter(Boolean);
-    if (selectedNames.length === 0 || rentalNames.length === 0) return true;
-    return selectedNames.some(name => rentalNames.includes(name));
+    return false;
   }
 
   function validateServiceRelationLinks(record) {
@@ -347,12 +353,7 @@ function registerCrudRoutes(deps) {
   function rentalBelongsToClient(rental, client) {
     const clientId = String(client?.id || '').trim();
     const rentalClientId = String(rental?.clientId || '').trim();
-    if (clientId && rentalClientId) return rentalClientId === clientId;
-    if (rentalClientId) return false;
-
-    const clientName = normalizeClientName(client?.company || client?.name);
-    const rentalClientName = normalizeClientName(rental?.client || rental?.clientName);
-    return Boolean(clientName && rentalClientName && clientName === rentalClientName);
+    return Boolean(clientId && rentalClientId && rentalClientId === clientId);
   }
 
   function rentalDeleteBlockDto(rental, equipmentById) {
@@ -414,7 +415,11 @@ function registerCrudRoutes(deps) {
     return linkSpecs
       .map(spec => {
         const items = readData(spec.collection) || [];
-        const matches = items.filter(item => recordBelongsToClient(item, client, spec.nameFields));
+        const matches = items.filter(item => (
+          spec.collection === 'payments'
+            ? String(item?.clientId || '').trim() === String(client?.id || '').trim()
+            : recordBelongsToClient(item, client, spec.nameFields)
+        ));
         return matches.length > 0
           ? { collection: spec.label, count: matches.length }
           : null;
@@ -853,6 +858,7 @@ function registerCrudRoutes(deps) {
     'status',
     'rentalId',
     'clientId',
+    'counterpartyId',
     'objectId',
     'contractId',
   ]);
@@ -907,9 +913,19 @@ function registerCrudRoutes(deps) {
     if (!payment) throw new Error('Платёж для распределения не найден');
     const rentalId = String(record?.rentalId || '').trim();
     if (rentalId) {
-      const rentalExists = [...(readData('gantt_rentals') || []), ...(readData('rentals') || [])]
-        .some(item => String(item?.id || '').trim() === rentalId);
-      if (!rentalExists) throw new Error('Аренда для распределения не найдена');
+      const rental = [...(readData('gantt_rentals') || []), ...(readData('rentals') || [])]
+        .find(item => String(item?.id || '').trim() === rentalId);
+      if (!rental) throw new Error('Аренда для распределения не найдена');
+      const paymentCounterpartyId = String(payment?.counterpartyId || '').trim();
+      const rentalCounterpartyId = String(rental?.counterpartyId || '').trim();
+      const legacyClientMismatch = !paymentCounterpartyId && !rentalCounterpartyId
+        && String(payment?.clientId || '').trim()
+        && String(rental?.clientId || '').trim()
+        && String(payment.clientId).trim() !== String(rental.clientId).trim();
+      if ((paymentCounterpartyId || rentalCounterpartyId) && paymentCounterpartyId !== rentalCounterpartyId) {
+        throw new Error('Платёж и аренда относятся к разным контрагентам');
+      }
+      if (legacyClientMismatch) throw new Error('Платёж и аренда относятся к разным клиентам');
     }
     const documentId = String(record?.documentId || '').trim();
     if (documentId) {
@@ -930,9 +946,9 @@ function registerCrudRoutes(deps) {
     const paymentsById = new Map((readData('payments') || [])
       .map(item => [String(item?.id || '').trim(), item])
       .filter(([id]) => id));
-    const rentalIds = new Set([...(readData('gantt_rentals') || []), ...(readData('rentals') || [])]
-      .map(item => String(item?.id || '').trim())
-      .filter(Boolean));
+    const rentalsById = new Map([...(readData('gantt_rentals') || []), ...(readData('rentals') || [])]
+      .map(item => [String(item?.id || '').trim(), item])
+      .filter(([id]) => id));
     const documentIds = new Set((readData('documents') || [])
       .map(item => String(item?.id || '').trim())
       .filter(Boolean));
@@ -942,7 +958,21 @@ function registerCrudRoutes(deps) {
       if (!paymentId) throw new Error('Для распределения платежа укажите paymentId');
       if (!paymentsById.has(paymentId)) throw new Error('Платёж для распределения не найден');
       const rentalId = String(record?.rentalId || '').trim();
-      if (rentalId && !rentalIds.has(rentalId)) throw new Error('Аренда для распределения не найдена');
+      if (rentalId && !rentalsById.has(rentalId)) throw new Error('Аренда для распределения не найдена');
+      if (rentalId) {
+        const payment = paymentsById.get(paymentId);
+        const rental = rentalsById.get(rentalId);
+        const paymentCounterpartyId = String(payment?.counterpartyId || '').trim();
+        const rentalCounterpartyId = String(rental?.counterpartyId || '').trim();
+        const legacyClientMismatch = !paymentCounterpartyId && !rentalCounterpartyId
+          && String(payment?.clientId || '').trim()
+          && String(rental?.clientId || '').trim()
+          && String(payment.clientId).trim() !== String(rental.clientId).trim();
+        if ((paymentCounterpartyId || rentalCounterpartyId) && paymentCounterpartyId !== rentalCounterpartyId) {
+          throw new Error('Платёж и аренда относятся к разным контрагентам');
+        }
+        if (legacyClientMismatch) throw new Error('Платёж и аренда относятся к разным клиентам');
+      }
       const documentId = String(record?.documentId || '').trim();
       if (documentId && !documentIds.has(documentId)) throw new Error('Документ для распределения не найден');
       if (String(record?.status || '').trim().toLowerCase() === 'cancelled') continue;
@@ -1204,17 +1234,36 @@ function registerCrudRoutes(deps) {
       },
     },
     payments: {
-      searchFields: ['id', 'invoiceNumber', 'documentNumber', 'documentId', 'client', 'clientName', 'clientId', 'rentalId', 'method', 'status', 'comment', 'purpose'],
+      searchFields: [
+        'id',
+        'invoiceNumber',
+        'documentNumber',
+        'documentId',
+        'client',
+        'clientName',
+        'clientId',
+        'counterpartyId',
+        item => item?.counterparty?.legalName,
+        item => item?.counterparty?.shortName,
+        item => item?.counterparty?.inn,
+        item => item?.counterparty?.phone,
+        'rentalId',
+        'method',
+        'status',
+        'comment',
+        'purpose',
+      ],
       sortFields: {
         date: item => item.date || item.paymentDate || item.createdAt,
         amount: item => Number(item.amount || 0),
-        client: item => item.clientName || item.client,
+        client: item => item?.counterparty?.shortName || item?.counterparty?.legalName || item.clientName || item.client,
         status: item => item.status,
         createdAt: item => item.createdAt,
       },
       defaultSort: { sortBy: 'date', sortDir: 'desc' },
       filters: {
         status: (item, value) => item.status === value,
+        counterpartyId: (item, value) => item.counterpartyId === value,
         clientId: (item, value) => item.clientId === value,
         rentalId: (item, value) => item.rentalId === value,
         managerId: (item, value) => item.managerId === value || item.responsibleManagerId === value,
@@ -1372,6 +1421,9 @@ function registerCrudRoutes(deps) {
         accessControl.filterCollectionByScope(collection, data, req.user),
         req.user,
       );
+      if (collection === 'payments') {
+        data = data.map(item => decoratePaymentCounterparty(item, { readData }));
+      }
       if (wantsPaginatedResponse(req.query)) {
         if (collection === 'clients') {
           data = enrichClientsWithBackendFinancials(data, req.user);
@@ -1482,7 +1534,10 @@ function registerCrudRoutes(deps) {
       if (!accessControl.canAccessEntity(collection, item, req.user)) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
-      return res.json(accessControl.sanitizeEntityForRead(collection, item, req.user));
+      const sanitized = accessControl.sanitizeEntityForRead(collection, item, req.user);
+      return res.json(collection === 'payments'
+        ? decoratePaymentCounterparty(sanitized, { readData })
+        : sanitized);
     });
 
     router.post(`/${collection}`, ...writeMiddlewares(collection), (req, res) => {
@@ -1598,11 +1653,25 @@ function registerCrudRoutes(deps) {
         if (collection === 'clients' || collection === 'equipment') {
           newItem = mergeEntityHistory(collection, null, newItem, req.user.userName);
         }
-        data.push(newItem);
-        writeData(collection, data);
+        let clientCompatibilityWrite = null;
         if (collection === 'clients') {
-          normalizeStoredClientLinksAfterClientWrite();
+          const prepared = prepareClientCompatibilityCreate({
+            client: newItem,
+            clients: data,
+            counterparties: readData('counterparties') || [],
+            generateId,
+            nowIso,
+          });
+          newItem = prepared.client;
+          clientCompatibilityWrite = prepared.counterparties;
+          persistDataBatch([
+            { name: 'counterparties', value: clientCompatibilityWrite },
+            { name: 'clients', value: [...data, newItem] },
+          ]);
+        } else {
+          writeData(collection, [...data, newItem]);
         }
+        data.push(newItem);
         if (isCriticalAuditCollection(collection)) {
           auditLog?.(req, {
             action: `${collection}.create`,
@@ -1646,8 +1715,13 @@ function registerCrudRoutes(deps) {
         if (collection === 'users') {
           return res.status(201).json(sanitizeUser(newItem));
         }
-        return res.status(201).json(newItem);
+        return res.status(201).json(collection === 'payments'
+          ? decoratePaymentCounterparty(newItem, { readData })
+          : newItem);
       } catch (error) {
+        if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
+          return sendCounterpartyCompatibilityError(res, error);
+        }
         if (collection === 'clients' && error?.code === 'CLIENT_INN_DUPLICATE') {
           return sendClientInnError(res, error);
         }
@@ -1755,6 +1829,7 @@ function registerCrudRoutes(deps) {
           safePatch = normalizeEquipmentStoragePatch(safePatch);
         }
         const previousItem = { ...data[idx] };
+        let clientCompatibilityWrite = null;
         if (collection === 'payments') {
           assertAllocatedPaymentPatchSafe(data[idx], safePatch);
           validatePaymentRecord({ ...data[idx], ...safePatch });
@@ -1858,13 +1933,29 @@ function registerCrudRoutes(deps) {
                   userRole: data[idx].userRole,
                 }
               : nextItem);
-        }
-        writeData(collection, data);
-        if (collection === 'equipment') {
-          createReceiptServiceTicket(previousItem, data[idx], req.user.userName);
+          if (collection === 'clients') {
+            const prepared = prepareClientCompatibilityUpdate({
+              previousClient: previousItem,
+              nextClient: data[idx],
+              patch: safePatch,
+              clients: data,
+              counterparties: readData('counterparties') || [],
+              nowIso,
+            });
+            data[idx] = prepared.client;
+            clientCompatibilityWrite = prepared.counterparties;
+          }
         }
         if (collection === 'clients') {
-          normalizeStoredClientLinksAfterClientWrite();
+          persistDataBatch([
+            { name: 'counterparties', value: clientCompatibilityWrite },
+            { name: 'clients', value: data },
+          ]);
+        } else {
+          writeData(collection, data);
+        }
+        if (collection === 'equipment') {
+          createReceiptServiceTicket(previousItem, data[idx], req.user.userName);
         }
         if (isCriticalAuditCollection(collection)) {
           auditLog?.(req, {
@@ -1904,8 +1995,13 @@ function registerCrudRoutes(deps) {
         if (collection === 'users') {
           return res.json(sanitizeUser(data[idx]));
         }
-        return res.json(data[idx]);
+        return res.json(collection === 'payments'
+          ? decoratePaymentCounterparty(data[idx], { readData })
+          : data[idx]);
       } catch (error) {
+        if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
+          return sendCounterpartyCompatibilityError(res, error);
+        }
         if (collection === 'clients' && error?.code === 'CLIENT_INN_DUPLICATE') {
           return sendClientInnError(res, error);
         }
@@ -2312,7 +2408,7 @@ function registerCrudRoutes(deps) {
         }
       }
 
-      const normalizedList = list.map(item => {
+      let normalizedList = list.map(item => {
         const linked = withClientLink(collection, item);
         const normalized = normalizeClientDomainRecord(collection, linked);
         return collection === 'equipment' ? normalizeEquipmentStorageRecord(normalized) : normalized;
@@ -2332,9 +2428,24 @@ function registerCrudRoutes(deps) {
         }
         return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
-      writeData(collection, normalizedList);
       if (collection === 'clients') {
-        normalizeStoredClientLinksAfterClientWrite();
+        try {
+          const prepared = prepareClientCompatibilityBulkReplace({
+            previousClients: readData('clients') || [],
+            nextClients: normalizedList,
+            counterparties: readData('counterparties') || [],
+            nowIso,
+          });
+          normalizedList = prepared.clients;
+          persistDataBatch([
+            { name: 'counterparties', value: prepared.counterparties },
+            { name: 'clients', value: normalizedList },
+          ]);
+        } catch (error) {
+          return sendCounterpartyCompatibilityError(res, error);
+        }
+      } else {
+        writeData(collection, normalizedList);
       }
       auditLog?.(req, {
         action: `${collection}.bulk_replace`,

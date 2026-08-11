@@ -24,6 +24,15 @@ function createStartupDeps(state, events) {
 
   return {
     migrateJsonFilesToDb: () => recordCall('migrateJsonFilesToDb'),
+    ensureClientCounterpartyFoundation: () => recordCall('ensureClientCounterpartyFoundation'),
+    ensureClientObjectCounterpartyLinks: () => recordCall('ensureClientObjectCounterpartyLinks'),
+    auditCounterpartyRelations: () => {
+      recordCall('auditCounterpartyRelations');
+      return { healthy: [], repairable: [], broken: [], summary: { healthy: 0, repairable: 0, broken: 0 } };
+    },
+    writeDataBatch: entries => {
+      for (const entry of entries || []) writeData(entry.name, entry.value);
+    },
     cleanupExpiredSessions: () => recordCall('cleanupExpiredSessions'),
     seedDefaultUsers: () => recordCall('seedDefaultUsers'),
     ensureLegacyDefaultUsers: () => recordCall('ensureLegacyDefaultUsers'),
@@ -126,6 +135,9 @@ test('server start disables only business maintenance by default', async () => {
   assert.deepEqual(state.documents, original.documents);
   assert.deepEqual(state.crm_deals, original.crm_deals);
   assert.equal(events.calls.includes('migrateJsonFilesToDb'), true);
+  assert.equal(events.calls.includes('ensureClientCounterpartyFoundation'), false);
+  assert.equal(events.calls.includes('ensureClientObjectCounterpartyLinks'), false);
+  assert.equal(events.calls.includes('auditCounterpartyRelations'), true);
   assert.equal(events.calls.includes('cleanupExpiredSessions'), true);
   assert.equal(events.calls.includes('seedDefaultUsers'), true);
   assert.equal(events.calls.includes('ensureLegacyDefaultUsers'), true);
@@ -143,7 +155,7 @@ test('server start disables only business maintenance by default', async () => {
   assert.equal(warnings.some(message => message.includes(`${STARTUP_BUSINESS_MAINTENANCE_ENV}=apply`)), true);
 });
 
-test('STARTUP_BUSINESS_MAINTENANCE=apply runs business maintenance after startup essentials', async () => {
+test('STARTUP_BUSINESS_MAINTENANCE=apply does not run Counterparty identity auto-repair', async () => {
   const state = {
     rentals: [{ id: 'R-1', client: 'Legacy Client' }],
     gantt_rentals: [{ id: 'GR-1' }],
@@ -165,12 +177,17 @@ test('STARTUP_BUSINESS_MAINTENANCE=apply runs business maintenance after startup
   });
 
   assert.equal(events.calls.includes('migrateJsonFilesToDb'), true);
+  assert.equal(events.calls.includes('ensureClientCounterpartyFoundation'), false);
+  assert.equal(events.calls.includes('ensureClientObjectCounterpartyLinks'), false);
+  assert.equal(events.calls.includes('auditCounterpartyRelations'), true);
   assert.equal(events.calls.includes('cleanupExpiredSessions'), true);
   assert.equal(events.calls.includes('migrateReferenceCollections'), true);
   assert.equal(events.calls.includes('migrateLegacyRepairFacts'), true);
   assert.equal(events.calls.includes('backfillPaymentAllocations'), true);
-  assert.equal(events.calls.includes('normalizeClientLinks'), true);
-  assert.equal(events.calls.includes('backfillGanttRentalLinks'), true);
+  assert.equal(events.calls.includes('normalizeClientLinks'), false);
+  assert.equal(events.calls.includes('backfillGanttRentalLinks'), false);
+  assert.equal(events.writes.some(event => event.name === 'rentals'), false);
+  assert.equal(events.writes.some(event => event.name === 'gantt_rentals'), false);
   assert.deepEqual(state.crm_deals, []);
   assert.equal(state.app_settings[0].value.status, 'deleted');
 });

@@ -8,6 +8,7 @@ const express = serverRequire('express');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
+const { ensureClientCounterpartyFoundation } = require('../server/lib/counterparty.js');
 const {
   buildClientObjectDebtBreakdown,
   enrichRecordFromRentalLinks,
@@ -15,6 +16,7 @@ const {
 
 function makeCrudApp(initial = {}) {
   const state = {
+    counterparties: [],
     clients: [],
     client_objects: [],
     client_contracts: [],
@@ -34,6 +36,15 @@ function makeCrudApp(initial = {}) {
   const writeData = (name, value) => {
     state[name] = value;
   };
+  const writeDataBatch = entries => {
+    for (const entry of entries || []) writeData(entry.name, entry.value);
+  };
+  ensureClientCounterpartyFoundation({
+    readData,
+    writeDataBatch,
+    logger: { log() {}, warn() {} },
+    nowIso: () => '2026-05-07T12:00:00.000Z',
+  });
   const accessControl = createAccessControl({ readData });
   const requireAuth = (req, _res, next) => {
     req.user = {
@@ -58,6 +69,7 @@ function makeCrudApp(initial = {}) {
     },
     readData,
     writeData,
+    writeDataBatch,
     deleteSessionsForUserIds: () => {},
     requireAuth,
     requireRead: requirePass,
@@ -106,6 +118,110 @@ async function request(baseUrl, method, path, body) {
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
+
+test('client_objects transitional API canonicalizes legacy writes and enforces dual-ID consistency', async () => {
+  const { app, state } = makeCrudApp({
+    clients: [{ id: 'C-1', company: 'Клиент', inn: '7707083893', innNormalized: '7707083893' }],
+  });
+  const counterpartyId = state.clients[0].counterpartyId;
+
+  await withServer(app, async baseUrl => {
+    const legacyCreate = await request(baseUrl, 'POST', '/api/client_objects', {
+      clientId: 'C-1',
+      name: 'Склад',
+      address: 'Казань',
+      status: 'active',
+    });
+    assert.equal(legacyCreate.status, 201);
+    assert.equal(legacyCreate.body.clientId, 'C-1');
+    assert.equal(legacyCreate.body.counterpartyId, counterpartyId);
+
+    const matchingDualCreate = await request(baseUrl, 'POST', '/api/client_objects', {
+      clientId: 'C-1',
+      counterpartyId,
+      name: 'Цех',
+      address: 'Казань',
+      status: 'active',
+    });
+    assert.equal(matchingDualCreate.status, 201);
+    assert.equal(matchingDualCreate.body.counterpartyId, counterpartyId);
+
+    const foreignCounterparty = state.counterparties.find(item => item.id !== counterpartyId) || {
+      ...state.counterparties[0],
+      id: 'CP-FOREIGN',
+      legalName: 'ООО Другая компания',
+      shortName: 'Другая компания',
+      inn: '7707083894',
+    };
+    if (!state.counterparties.some(item => item.id === foreignCounterparty.id)) {
+      state.counterparties.push(foreignCounterparty);
+    }
+    const mismatch = await request(baseUrl, 'POST', '/api/client_objects', {
+      clientId: 'C-1',
+      counterpartyId: foreignCounterparty.id,
+      name: 'Чужой объект',
+      address: 'Москва',
+      status: 'active',
+    });
+    assert.equal(mismatch.status, 409);
+    assert.equal(mismatch.body.code, 'COUNTERPARTY_RELATION_MISMATCH');
+
+    const read = await request(baseUrl, 'GET', `/api/client_objects/${legacyCreate.body.id}`);
+    assert.equal(read.status, 200);
+    assert.equal(read.body.clientId, 'C-1');
+    assert.equal(read.body.counterpartyId, counterpartyId);
+
+    const updated = await request(baseUrl, 'PATCH', `/api/client_objects/${legacyCreate.body.id}`, {
+      name: 'Склад № 2',
+    });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.clientId, 'C-1');
+    assert.equal(updated.body.counterpartyId, counterpartyId);
+
+    const relationChange = await request(baseUrl, 'PATCH', `/api/client_objects/${legacyCreate.body.id}`, {
+      clientId: '',
+    });
+    assert.equal(relationChange.status, 409);
+    assert.equal(relationChange.body.code, 'COUNTERPARTY_RELATION_IMMUTABLE');
+
+    const deleted = await request(baseUrl, 'DELETE', `/api/client_objects/${legacyCreate.body.id}`);
+    assert.equal(deleted.status, 200);
+    assert.equal(deleted.body.ok, true);
+    assert.equal(state.client_objects.some(item => item.id === legacyCreate.body.id), false);
+    assert.equal(state.clients.length, 1);
+    assert.equal(state.counterparties.length, 2);
+  });
+});
+
+test('counterparty-native object accepts supplier-only identity without creating Client or duplicate Counterparty', async () => {
+  const supplier = {
+    id: 'CP-SUPPLIER',
+    type: 'legal_entity',
+    legalName: 'ООО Поставщик',
+    shortName: 'Поставщик',
+    inn: '7707083895',
+    status: 'active',
+    archivedAt: null,
+    roles: ['supplier'],
+  };
+  const { app, state } = makeCrudApp({ counterparties: [supplier] });
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/client_objects', {
+      counterpartyId: supplier.id,
+      name: 'Склад поставщика',
+      address: 'Москва',
+      status: 'active',
+    });
+
+    assert.equal(created.status, 201);
+    assert.equal(created.body.clientId, undefined);
+    assert.equal(created.body.counterpartyId, supplier.id);
+    assert.equal(state.clients.length, 0);
+    assert.equal(state.counterparties.length, 1);
+    assert.equal(state.counterparties[0], supplier);
+  });
+});
 
 test('client INN is required, normalized, length-validated, and unique', async () => {
   const { app, state } = makeCrudApp();

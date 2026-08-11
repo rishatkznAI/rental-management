@@ -1,4 +1,9 @@
-const OBJECT_REQUIRED_ERROR = 'Для объекта клиента укажите клиента, название и адрес';
+const {
+  resolveDomainCounterpartyRelation,
+} = require('./counterparty-relations');
+const { counterpartyError } = require('./counterparty');
+
+const OBJECT_REQUIRED_ERROR = 'Для объекта укажите clientId или counterpartyId, название и адрес';
 const CONTRACT_REQUIRED_ERROR = 'Для договора клиента укажите клиента и номер договора';
 const ORPHAN_CLIENT_ERROR = 'Клиент для записи не найден';
 const ORPHAN_OBJECT_ERROR = 'Объект клиента не найден или не принадлежит клиенту';
@@ -139,16 +144,48 @@ function normalizeClientRelationLinks(payload, clientId, options = {}) {
 
 function normalizeClientObjectRecord(record, existing = null, deps = {}) {
   const nowIso = typeof deps.nowIso === 'function' ? deps.nowIso : () => new Date().toISOString();
-  const clientId = text(record?.clientId || existing?.clientId);
+  const clientId = text(
+    Object.prototype.hasOwnProperty.call(record || {}, 'clientId')
+      ? record.clientId
+      : existing?.clientId,
+  );
+  const counterpartyId = text(
+    Object.prototype.hasOwnProperty.call(record || {}, 'counterpartyId')
+      ? record.counterpartyId
+      : existing?.counterpartyId,
+  );
   const name = text(record?.name);
   const address = text(record?.address);
-  if (!clientId || !name || !address) {
+  const status = normalizeStatus(record?.status ?? existing?.status);
+  if ((!clientId && !counterpartyId) || !name || !address) {
     const error = new Error(OBJECT_REQUIRED_ERROR);
     error.status = 400;
     throw error;
   }
+  let relation = null;
   if (typeof deps.readData === 'function') {
-    assertClientExists(deps.readData, clientId);
+    relation = resolveDomainCounterpartyRelation(
+      { clientId, counterpartyId },
+      { readData: deps.readData },
+      { allowArchived: status === 'archived' },
+    );
+    const existingClientId = text(existing?.clientId);
+    const existingCounterpartyId = text(existing?.counterpartyId);
+    if (
+      (existingClientId && existingClientId !== clientId)
+      || (existingCounterpartyId && existingCounterpartyId !== relation.counterpartyId)
+    ) {
+      throw counterpartyError(
+        'COUNTERPARTY_RELATION_IMMUTABLE',
+        'Связь объекта с Client/Counterparty нельзя менять после создания.',
+        409,
+        {
+          objectId: record?.id || existing?.id || null,
+          clientId: existingClientId || null,
+          counterpartyId: existingCounterpartyId || relation.counterpartyId,
+        },
+      );
+    }
     if (record?.contractId) {
       assertContractObjectConsistency(deps.readData, record.contractId, record.id || existing?.id, clientId);
     }
@@ -156,7 +193,8 @@ function normalizeClientObjectRecord(record, existing = null, deps = {}) {
   return {
     ...existing,
     ...record,
-    clientId,
+    clientId: clientId || undefined,
+    counterpartyId: relation?.counterpartyId || counterpartyId,
     name,
     address,
     contactName: text(record?.contactName),
@@ -164,7 +202,7 @@ function normalizeClientObjectRecord(record, existing = null, deps = {}) {
     contractId: text(record?.contractId) || undefined,
     contractNumber: text(record?.contractNumber) || undefined,
     notes: text(record?.notes) || undefined,
-    status: normalizeStatus(record?.status ?? existing?.status),
+    status,
     createdAt: existing?.createdAt || record?.createdAt || nowIso(),
     updatedAt: nowIso(),
   };
@@ -221,6 +259,7 @@ function enrichRecordFromRentalLinks(record, readData) {
   if (!rental) return record;
   return {
     ...record,
+    counterpartyId: record.counterpartyId || rental.counterpartyId || undefined,
     clientId: record.clientId || rental.clientId || undefined,
     client: record.client || rental.client || undefined,
     clientName: record.clientName || record.client || rental.client || undefined,

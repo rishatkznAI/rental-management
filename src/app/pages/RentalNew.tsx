@@ -151,12 +151,9 @@ export default function RentalNew() {
   useEffect(() => {
     if (clients.length === 0 || clientId) return;
     const requestedClientId = searchParams.get('clientId');
-    const requestedClientName = searchParams.get('client');
     const selected = requestedClientId
       ? clients.find(item => selectId(item.id) === requestedClientId)
-      : requestedClientName
-        ? clients.find(item => item.company === requestedClientName)
-        : null;
+      : null;
     if (selected) {
       setClientId(selectId(selected.id));
       setClient(clientLabel(selected));

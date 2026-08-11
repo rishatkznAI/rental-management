@@ -84,6 +84,14 @@ const {
   normalizeRecordClientLink,
 } = require('./lib/client-links');
 const {
+  auditCounterpartyRelations,
+} = require('./lib/counterparty-relations');
+const {
+  auditRentalCounterpartyRelations,
+  canonicalizeRentalCounterpartyRelation,
+  canonicalizeRentalPersistenceEntries,
+} = require('./lib/rental-counterparty-relations');
+const {
   mergeEntityHistory,
   mergeRentalHistory,
 } = require('./lib/audit-history');
@@ -140,6 +148,7 @@ const {
   shouldProcessWebhookUpdate,
 } = require('./routes/bot');
 const { registerCrudRoutes } = require('./routes/crud');
+const { registerCounterpartyRoutes } = require('./routes/counterparties');
 const { registerCrmActivityRoutes } = require('./routes/crm-activities');
 const { registerDebtCollectionPlanRoutes } = require('./routes/debt-collection-plans');
 const { registerDeliveryRoutes } = require('./routes/deliveries');
@@ -192,6 +201,7 @@ const {
   migrateJsonFilesToDb,
   saveSession,
   setData,
+  setDataBatch,
   JSON_COLLECTIONS,
 } = require('./db');
 
@@ -406,7 +416,15 @@ function readData(name) {
 }
 
 function writeData(name, data) {
-  setData(name, data);
+  const [entry] = canonicalizeRentalPersistenceEntries(
+    [{ name, value: data }],
+    { readData },
+  );
+  setData(entry.name, entry.value);
+}
+
+function writeDataBatch(entries) {
+  setDataBatch(canonicalizeRentalPersistenceEntries(entries, { readData }));
 }
 
 const accessControl = createAccessControl({ readData });
@@ -545,6 +563,7 @@ const WRITE_PERMISSIONS = {
   delivery_carriers: ['Администратор'],
   service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   warranty_claims: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  counterparties: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   clients:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   knowledge_base_modules: ['Администратор', 'Офис-менеджер'],
   knowledge_base_progress: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
@@ -599,6 +618,7 @@ const READ_PERMISSIONS = {
   delivery_carriers: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   warranty_claims: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  counterparties: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   clients:        ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   knowledge_base_modules: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
   knowledge_base_progress: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
@@ -984,6 +1004,7 @@ const ID_PREFIXES = {
   rental_change_requests: 'RCR',
   service:        'S',
   warranty_claims: 'WCL',
+  counterparties: 'CP',
   clients:        'C',
   client_objects: 'CO',
   client_contracts: 'CC',
@@ -1266,6 +1287,18 @@ function migrateLegacyRepairFacts({ dryRun = false } = {}) {
 
 const apiRouter = express.Router();
 
+registerCounterpartyRoutes(apiRouter, {
+  readData,
+  writeData,
+  writeDataBatch,
+  requireAuth,
+  requireRead,
+  requireWrite,
+  generateId,
+  nowIso,
+  auditLog,
+});
+
 const COLLECTIONS = [
   'equipment',
   'equipment_downtimes',
@@ -1399,6 +1432,7 @@ apiRouter.use(registerRentalRoutes({
   accessControl,
   auditLog,
   normalizeRecordClientLink,
+  canonicalizeRentalRelationForWrite: rental => canonicalizeRentalCounterpartyRelation(rental, { readData }),
   normalizeServiceTicketForWrite,
   botNotifications,
 }));
@@ -1561,6 +1595,7 @@ apiRouter.use(registerCrudRoutes({
   idPrefixes: ID_PREFIXES,
   readData,
   writeData,
+  writeDataBatch,
   deleteSessionsForUserIds,
   requireAuth,
   requireRead,
@@ -1581,7 +1616,6 @@ apiRouter.use(registerCrudRoutes({
   auditLog,
   serviceAuditLog,
   normalizeRecordClientLink,
-  normalizeClientLinks,
   normalizeServiceTicketForWrite,
 }));
 
@@ -2644,6 +2678,7 @@ registerBotRoutes(app, {
 registerSystemRoutes(app, {
   readData,
   writeData,
+  writeDataBatch,
   getSnapshot,
   saveSnapshot,
   botToken: BOT_TOKEN,
@@ -2674,6 +2709,9 @@ startServer({
   port: PORT,
   deps: {
     migrateJsonFilesToDb,
+    auditCounterpartyRelations,
+    auditRentalCounterpartyRelations,
+    writeDataBatch,
     cleanupExpiredSessions,
     seedDefaultUsers,
     ensureLegacyDefaultUsers,

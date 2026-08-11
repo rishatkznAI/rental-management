@@ -115,7 +115,6 @@ import { api, API_BASE_URL, ApiError, getToken } from '../lib/api';
 import { frontendBuildInfo } from '../lib/build-info';
 import { isCrmEnabled } from '../lib/features';
 import { buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
-import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import {
   DEFAULT_SIDEBAR_ORDER,
   SIDEBAR_NAV_GROUP_SETTING_KEY,
@@ -5416,12 +5415,10 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
       `"${String(value ?? '').replace(/"/g, '""')}"`;
 
     const rows = ganttRentals.map(item => {
-      const classic = classicRentals.find(entry =>
-        entry.client === item.client &&
-        entry.startDate === item.startDate &&
-        entry.plannedReturnDate === item.endDate &&
-        entry.equipment.includes(item.equipmentInv),
-      );
+      const classicRentalId = item.rentalId || item.sourceRentalId || item.originalRentalId;
+      const classic = classicRentalId
+        ? classicRentals.find(entry => entry.id === classicRentalId)
+        : undefined;
       const eq = equipment.find(entry => entry.id === item.equipmentId)
         || equipment.find(entry => entry.inventoryNumber === item.equipmentInv);
       const note = item.comments?.find(comment => comment.type !== 'system')?.text || classic?.comments || '';
@@ -5441,11 +5438,15 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
         item.paymentStatus,
         item.updSigned ? 'Да' : 'Нет',
         note,
+        classic?.clientId || item.clientId || '',
+        classic?.counterpartyId || item.counterpartyId || '',
+        classic?.objectId || item.objectId || '',
+        classic?.contractId || item.contractId || '',
       ];
     });
 
     const csv = [
-      ['Клиент', 'Контакт', 'Инв. номер', 'Серийный номер', 'ID техники', 'Дата начала', 'Дата окончания', 'Ставка', 'Сумма', 'Менеджер', 'Статус', 'Ожидаемая оплата', 'Статус оплаты', 'УПД подписан', 'Комментарий']
+      ['Клиент', 'Контакт', 'Инв. номер', 'Серийный номер', 'ID техники', 'Дата начала', 'Дата окончания', 'Ставка', 'Сумма', 'Менеджер', 'Статус', 'Ожидаемая оплата', 'Статус оплаты', 'УПД подписан', 'Комментарий', 'ID клиента', 'ID контрагента', 'ID объекта', 'ID договора']
         .map(escapeCSV).join(','),
       ...rows.map(row => row.map(escapeCSV).join(',')),
     ].join('\n');
@@ -5491,22 +5492,57 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           paymentStatusRaw,
           updSignedRaw,
           comment,
+          clientId,
+          counterpartyId,
+          objectId,
+          contractId,
         ] = columns;
 
         const status = GANTT_STATUS_IMPORT_MAP[(statusRaw || '').toLowerCase()] ?? 'created';
         const paymentStatus = PAYMENT_STATUS_IMPORT_MAP[(paymentStatusRaw || '').toLowerCase()] ?? 'unpaid';
         const amount = Number(amountRaw);
 
-        const clientRecord = clients.find(item => item.company === client);
-        if (!client || !clientRecord) {
+        const clientCandidates = clientId
+          ? clients.filter(item => item.id === clientId)
+          : [];
+        if (!clientId || clientCandidates.length !== 1) {
           return {
             line,
             client: client || '—',
             equipmentLabel: inventoryNumber || serialNumber || equipmentId || '—',
             startDate,
             endDate,
+            status: clientCandidates.length > 1 ? 'conflict' : 'error',
+            message: !clientId
+              ? 'Не указан стабильный ID клиента; название клиента не используется для установления связи'
+              : clientCandidates.length > 1
+                ? 'ID клиента неоднозначен'
+                : 'Клиент по стабильному ID не найден',
+          };
+        }
+        const clientRecord = clientCandidates[0];
+        if (counterpartyId && clientRecord.counterpartyId !== counterpartyId) {
+          return {
+            line,
+            client: client || clientRecord.company || '—',
+            equipmentLabel: inventoryNumber || serialNumber || equipmentId || '—',
+            startDate,
+            endDate,
+            status: 'conflict',
+            message: 'ID клиента и ID контрагента указывают на разные canonical relations',
+          };
+        }
+        const clientDisplay = client || clientRecord.company || '';
+
+        if (!objectId || !contractId) {
+          return {
+            line,
+            client: clientDisplay || '—',
+            equipmentLabel: inventoryNumber || serialNumber || equipmentId || '—',
+            startDate,
+            endDate,
             status: 'error',
-            message: 'Клиент не найден в базе',
+            message: 'Не указаны стабильные ID объекта и договора; названия и номера не используются для установления связей',
           };
         }
 
@@ -5593,7 +5629,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
         }
 
         const duplicate = existingQueue.find(item =>
-          item.client === client &&
+          item.clientId === clientRecord.id &&
           item.equipmentId === equipmentCandidates[0].id &&
           item.startDate === startDate &&
           item.endDate === endDate,
@@ -5632,8 +5668,12 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
         }
 
         const ganttPayload: Omit<GanttRentalData, 'id'> = {
-          client,
-          clientShort: client.slice(0, 20),
+          counterpartyId: clientRecord.counterpartyId,
+          clientId: clientRecord.id,
+          objectId,
+          contractId,
+          client: clientDisplay,
+          clientShort: clientDisplay.slice(0, 20),
           equipmentId: equipmentCandidates[0].id,
           equipmentInv: equipmentCandidates[0].inventoryNumber,
           startDate,
@@ -5646,13 +5686,17 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           expectedPaymentDate: expectedPaymentDate || undefined,
           amount,
           comments: [
-            buildRentalCreationHistory({ client, startDate, endDate, status }, user?.name || 'Импорт'),
+            buildRentalCreationHistory({ client: clientDisplay, startDate, endDate, status }, user?.name || 'Импорт'),
             ...(comment ? [createRentalHistoryEntry(user?.name || 'Импорт', comment, 'comment')] : []),
           ],
         };
 
         const classicPayload: Omit<Rental, 'id'> = {
-          client,
+          counterpartyId: clientRecord.counterpartyId,
+          clientId: clientRecord.id,
+          objectId,
+          contractId,
+          client: clientDisplay,
           contact: contact || clientRecord.contact || '',
           startDate,
           plannedReturnDate: endDate,
@@ -5671,7 +5715,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
 
         return {
           line,
-          client,
+          client: clientDisplay,
           equipmentLabel: `${equipmentCandidates[0].inventoryNumber} · ${equipmentCandidates[0].model}`,
           startDate,
           endDate,
@@ -5694,45 +5738,22 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
   }, [clients, equipment, ganttRentals, user?.name]);
 
   const applyRentalImport = React.useCallback(async () => {
-    const validRows = rentalPreview.filter(item => item.status === 'ready' && item.ganttPayload && item.classicPayload);
+    const validRows = rentalPreview.filter(item => item.status === 'ready' && item.classicPayload);
     if (validRows.length === 0) {
       setMessage({ type: 'error', text: 'Нет валидных строк для импорта аренд' });
       setRentalPreviewOpen(false);
       return;
     }
 
-    const nextGanttRentals = [...ganttRentals];
     const nextClassicRentals = [...classicRentals];
-    let nextEquipment = [...equipment];
 
     validRows.forEach((row, index) => {
-      const ganttId = `GR-IMPORT-${Date.now()}-${index}`;
       const rentalId = `R-IMPORT-${Date.now()}-${index}`;
       nextClassicRentals.push({ ...row.classicPayload!, id: rentalId });
-      nextGanttRentals.push({ ...row.ganttPayload!, id: ganttId, rentalId });
-      if (row.equipmentId) {
-        nextEquipment = nextEquipment.map(item => {
-          if (item.id !== row.equipmentId) return item;
-          const nextStatus: EquipmentStatus = row.ganttPayload!.status === 'active' ? 'rented' : 'reserved';
-          return appendAuditHistory(
-            {
-              ...item,
-              status: nextStatus,
-              currentClient: row.ganttPayload!.status === 'active' ? row.client : item.currentClient,
-              returnDate: row.ganttPayload!.status === 'active' ? row.endDate : item.returnDate,
-            },
-            createAuditEntry(user?.name || 'Импорт', `Импорт аренды ${ganttId} из CSV`),
-          );
-        });
-      }
     });
 
     try {
-      await Promise.all([
-        rentalsService.bulkReplaceGantt(nextGanttRentals),
-        rentalsService.bulkReplace(nextClassicRentals),
-        equipmentService.bulkReplace(nextEquipment),
-      ]);
+      await rentalsService.bulkReplace(nextClassicRentals);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
         queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
@@ -5744,7 +5765,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
     } catch (error) {
       setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Не удалось выполнить импорт аренд' });
     }
-  }, [classicRentals, equipment, ganttRentals, queryClient, rentalPreview, user?.name]);
+  }, [classicRentals, queryClient, rentalPreview]);
 
   const handleEquipmentImport = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];

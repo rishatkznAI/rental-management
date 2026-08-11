@@ -5,7 +5,6 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { ClientCombobox } from '../components/ui/ClientCombobox';
 import { Search, Plus, X, DollarSign, AlertTriangle, CheckCircle, Clock, TrendingDown, Wand2, Trash2, Edit2, ListChecks, Download, SlidersHorizontal, MoreVertical, CalendarDays, FileText, WalletCards, Hourglass, Settings2 } from 'lucide-react';
 import { FilterButton, FilterDialog, FilterField } from '../components/ui/filter-dialog';
 import { usePermissions } from '../lib/permissions';
@@ -26,19 +25,19 @@ import { useClientContractsList, useClientObjectsList } from '../hooks/useClient
 import { useDocumentsList, DOCUMENT_KEYS } from '../hooks/useDocuments';
 import type { GanttRentalData } from '../mock-data';
 import { formatDate, formatCurrency } from '../lib/utils';
-import type { Client, ClientContract, ClientObject, Document, Payment, PaymentAllocation, PaymentStatus } from '../types';
+import type { Client, ClientContract, ClientObject, Counterparty, Document, Payment, PaymentAllocation, PaymentStatus } from '../types';
 import { buildClientReceivables, buildRentalDebtRows } from '../lib/finance';
 import { financeService } from '../services/finance.service';
 import {
   buildQuickActionContext,
   contextFilterLabel,
   hasClientContext,
-  normalizeContextName,
 } from '../lib/quickActionContext.js';
 import { animationDurations, useAnimatedPresence } from '../lib/animations';
 import { useServerPagination } from '../hooks/useServerPagination';
 import { PaginationControls } from '../components/common/PaginationControls';
 import { cn } from '../components/ui/utils';
+import { counterpartiesService } from '../services/counterparties.service';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -78,7 +77,13 @@ function paymentNumber(payment: Payment) {
 
 function paymentClientName(payment: Payment) {
   const record = paymentRecord(payment);
-  return safeLabel(record.clientName || payment.client, 'Контрагент не указан');
+  return safeLabel(
+    payment.counterparty?.shortName
+      || payment.counterparty?.legalName
+      || record.clientName
+      || payment.client,
+    'Контрагент не указан',
+  );
 }
 
 function paymentDateLabel(payment: Payment) {
@@ -146,31 +151,6 @@ function paymentCountLabel(value: number) {
   return 'платежей';
 }
 
-function normalizedClientName(value: unknown) {
-  return text(value).toLowerCase();
-}
-
-function resolveClientProfileId({
-  clients,
-  clientsById,
-  clientId,
-  clientName,
-}: {
-  clients: Client[];
-  clientsById: Map<string, Client>;
-  clientId?: unknown;
-  clientName?: unknown;
-}) {
-  const stableClientId = text(clientId);
-  if (stableClientId) return stableClientId;
-
-  const name = normalizedClientName(clientName);
-  if (!name) return '';
-
-  const matches = clients.filter(client => normalizedClientName(client.company) === name);
-  return matches.length === 1 && clientsById.has(matches[0].id) ? matches[0].id : '';
-}
-
 function PaymentKpiCard({
   icon: Icon,
   title,
@@ -209,11 +189,12 @@ interface AddPaymentModalProps {
   existing: Payment[];
   rentals: GanttRentalData[];
   clients: Client[];
+  counterparties: Counterparty[];
   allPayments: Payment[];
   fallbackFocusRef: React.RefObject<HTMLElement | null>;
 }
 
-function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, allPayments, fallbackFocusRef }: AddPaymentModalProps) {
+function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, counterparties, allPayments, fallbackFocusRef }: AddPaymentModalProps) {
   const presence = useAnimatedPresence(open, animationDurations.base);
   const dialogRef = React.useRef<HTMLDivElement>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
@@ -222,6 +203,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
   const [formError, setFormError] = useState('');
   const [form, setForm] = useState({
     rentalId: '',
+    counterpartyId: '',
     clientId: '',
     client: '',
     amount: '',
@@ -289,6 +271,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
       if (k === 'rentalId') {
         const r = rentals.find(r => r.id === v);
         if (r) {
+          next.counterpartyId = r.counterpartyId || '';
           next.clientId = r.clientId || '';
           next.client = r.client;
         }
@@ -311,8 +294,8 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.clientId || !form.client.trim()) {
-      setClientError('Выберите клиента из базы');
+    if (!form.counterpartyId) {
+      setClientError('Выберите контрагента из базы');
       return;
     }
     const amt = Number(form.amount);
@@ -329,7 +312,8 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
       id: genId(),
       invoiceNumber: genInvoice(existing),
       rentalId: form.rentalId || undefined,
-      clientId: form.clientId,
+      counterpartyId: form.counterpartyId,
+      clientId: form.clientId || undefined,
       client: form.client,
       amount: amt,
       paidAmount: paid,
@@ -360,7 +344,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 pr-14">
           <div>
             <h2 id="new-payment-dialog-title" className="text-xl font-semibold text-slate-950">Новый платёж</h2>
-            <p id="new-payment-dialog-description" className="mt-1 text-sm text-slate-500">Свяжите оплату с клиентом и, при необходимости, с арендой.</p>
+            <p id="new-payment-dialog-description" className="mt-1 text-sm text-slate-500">Свяжите оплату с контрагентом и, при необходимости, с арендой.</p>
           </div>
           <button type="button" aria-label="Закрыть форму нового платежа" onClick={onClose} className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700">
             <X className="h-5 w-5" />
@@ -393,30 +377,38 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, al
             </select>
           </div>
 
-          {/* Client */}
+          {/* Counterparty */}
           <div>
             <label id="new-payment-client-label" className="mb-1.5 block text-sm font-medium text-gray-700">
-              Клиент <span className="text-red-500">*</span>
+              Контрагент <span className="text-red-500">*</span>
             </label>
-            <ClientCombobox
-              clients={clients}
-              value={form.client}
-              valueId={form.clientId}
-              onChange={value => set('client', value)}
-              onClientSelect={(client) => {
+            <select
+              id="new-payment-client"
+              aria-labelledby="new-payment-client-label"
+              aria-invalid={Boolean(clientError)}
+              aria-describedby={clientError ? 'new-payment-client-error' : undefined}
+              value={form.counterpartyId}
+              onChange={(event) => {
+                const counterparty = counterparties.find(item => item.id === event.target.value);
+                const client = clients.find(item => item.counterpartyId === counterparty?.id);
                 setForm(current => ({
                   ...current,
+                  counterpartyId: counterparty?.id ?? '',
                   clientId: client?.id ?? '',
-                  client: client?.company ?? '',
+                  client: counterparty?.shortName || counterparty?.legalName || '',
                 }));
                 setClientError('');
               }}
-              placeholder="Выберите клиента из базы"
-              inputId="new-payment-client"
-              ariaLabelledBy="new-payment-client-label"
-              ariaInvalid={Boolean(clientError)}
-              ariaDescribedBy={clientError ? 'new-payment-client-error' : undefined}
-            />
+              className="app-filter-input"
+            >
+              <option value="">— Выбрать контрагента —</option>
+              {counterparties.map(counterparty => (
+                <option key={counterparty.id} value={counterparty.id}>
+                  {counterparty.shortName || counterparty.legalName}
+                  {counterparty.inn ? ` · ИНН ${counterparty.inn}` : ''}
+                </option>
+              ))}
+            </select>
             {clientError && (
               <p id="new-payment-client-error" role="alert" aria-live="assertive" className="mt-1 text-xs text-red-600">{clientError}</p>
             )}
@@ -617,6 +609,7 @@ function PaymentAllocationPanel({
     () => allocations.filter(item => text(item.paymentId) === text(payment.id) && text(item.status) !== 'cancelled'),
     [allocations, payment.id],
   );
+  const paymentCounterpartyId = text(payment.counterpartyId);
   const paymentClientId = text(payment.clientId);
   const paid = allocationCap(payment);
   const allocated = paymentAllocations.reduce((sum, item) => sum + money(item.amount), 0);
@@ -628,7 +621,9 @@ function PaymentAllocationPanel({
     () => buildRentalDebtRows(rentals, allPayments, allocations),
     [allocations, allPayments, rentals],
   );
-  const clientDebtRows = rentalDebtRows.filter(row => !paymentClientId || row.clientId === paymentClientId);
+  const clientDebtRows = rentalDebtRows.filter(row => (
+    paymentCounterpartyId && text(row.counterpartyId) === paymentCounterpartyId
+  ));
   const docsByRental = useMemo(() => {
     const map = new Map<string, Document[]>();
     documents.forEach(doc => {
@@ -645,11 +640,11 @@ function PaymentAllocationPanel({
   const rentalsById = useMemo(() => new Map(rentals.map(item => [item.id, item])), [rentals]);
 
   const filteredRentals = useMemo(() => rentals.filter(rental => {
-    if (paymentClientId && text(rental.clientId) !== paymentClientId) return false;
+    if (!paymentCounterpartyId || text(rental.counterpartyId) !== paymentCounterpartyId) return false;
     if (draft.objectId && text(rental.objectId) !== draft.objectId) return false;
     if (draft.contractId && text(rental.contractId) !== draft.contractId) return false;
     return true;
-  }), [draft.contractId, draft.objectId, paymentClientId, rentals]);
+  }), [draft.contractId, draft.objectId, paymentCounterpartyId, rentals]);
 
   function resetDraft() {
     setDraft(emptyAllocationDraft);
@@ -681,7 +676,7 @@ function PaymentAllocationPanel({
     const nextTotal = allocated - (input.id ? money(paymentAllocations.find(item => item.id === input.id)?.amount) : 0) + amount;
     if (!amount) throw new Error('Укажите сумму распределения больше 0');
     if (nextTotal > paid + 0.000001) throw new Error('Сумма распределений не может превышать сумму платежа');
-    if (rental && paymentClientId && text(rental.clientId) !== paymentClientId) throw new Error('Нельзя выбрать аренду другого клиента');
+    if (rental && text(rental.counterpartyId) !== paymentCounterpartyId) throw new Error('Нельзя выбрать аренду другого контрагента');
     if (input.objectId) {
       const object = objectsById.get(input.objectId);
       if (!object || text(object.clientId) !== paymentClientId) throw new Error('Нельзя выбрать объект другого клиента');
@@ -1020,6 +1015,12 @@ export default function Payments() {
   const { data: paymentAllocations = [] } = usePaymentAllocationsList();
   const { data: ganttRentals = [] } = useGanttData();
   const { data: clients = [] } = useClientsList();
+  const { data: counterparties = [] } = useQuery({
+    queryKey: ['counterparties', 'payments'],
+    queryFn: () => counterpartiesService.getAll(),
+    enabled: can('view', 'payments'),
+    staleTime: 1000 * 60 * 2,
+  });
   const { data: clientObjects = [] } = useClientObjectsList();
   const { data: clientContracts = [] } = useClientContractsList();
   const [showAddModal, setShowAddModal] = useState(false);
@@ -1032,10 +1033,10 @@ export default function Payments() {
   });
   const createPayment = useCreatePayment();
   const updatePayment = useUpdatePayment();
-  const pagination = useServerPagination<{ status: string; clientId: string }>({
+  const pagination = useServerPagination<{ status: string; counterpartyId: string }>({
     initialSortBy: 'date',
     initialSortDir: 'desc',
-    initialFilters: { status: 'all', clientId: 'all' },
+    initialFilters: { status: 'all', counterpartyId: 'all' },
     storageKey: 'payments',
   });
   const paymentsQuery = usePaginatedPayments({
@@ -1088,13 +1089,9 @@ export default function Payments() {
   React.useEffect(() => {
     if (!hasQuickClientContext) return;
     if (quickActionContext.clientId && clientsById.has(quickActionContext.clientId)) {
-      setPaginationFilters({ clientId: quickActionContext.clientId });
-      return;
+      const counterpartyId = clientsById.get(quickActionContext.clientId)?.counterpartyId;
+      if (counterpartyId) setPaginationFilters({ counterpartyId });
     }
-    const wantedName = normalizeContextName(quickActionContext.clientName);
-    if (!wantedName) return;
-    const client = clients.find(item => normalizeContextName(item.company) === wantedName);
-    if (client) setPaginationFilters({ clientId: client.id });
   }, [clients, clientsById, hasQuickClientContext, quickActionContext.clientId, quickActionContext.clientName, setPaginationFilters]);
 
   const handleAddPayment = (p: Payment) => {
@@ -1136,7 +1133,7 @@ export default function Payments() {
   const invoiceDocument = relatedDocuments.find(document => text((document as Document & Record<string, unknown>).fileUrl));
   const activeFilterCount = [
     pagination.search.trim() !== '',
-    pagination.filters.clientId !== 'all' || hasQuickClientContext,
+    pagination.filters.counterpartyId !== 'all' || hasQuickClientContext,
     pagination.filters.status !== 'all',
   ].filter(Boolean).length;
   const tabs = [
@@ -1149,7 +1146,7 @@ export default function Payments() {
 
   function resetFilters() {
     pagination.setSearch('');
-    pagination.setFilters({ clientId: 'all', status: 'all' });
+    pagination.setFilters({ counterpartyId: 'all', status: 'all' });
   }
 
   function exportCurrentPayments() {
@@ -1196,6 +1193,7 @@ export default function Payments() {
         existing={allPaymentsForAllocation}
         rentals={ganttRentals as GanttRentalData[]}
         clients={clients}
+        counterparties={counterparties}
         allPayments={allPaymentsForAllocation}
         fallbackFocusRef={paymentsHeadingRef}
       />
@@ -1302,13 +1300,13 @@ export default function Payments() {
             <option value="overdue">Просрочено</option>
           </select>
           <select
-            value={pagination.filters.clientId}
-            onChange={(event) => pagination.setFilters({ clientId: event.target.value })}
+            value={pagination.filters.counterpartyId}
+            onChange={(event) => pagination.setFilters({ counterpartyId: event.target.value })}
             className="h-11 w-full rounded-lg border border-slate-200 !bg-white px-3 text-sm !text-slate-700 shadow-sm"
           >
             <option value="all">Контрагент: все</option>
-            {clients.map(client => (
-              <option key={client.id} value={client.id}>{client.company}</option>
+            {counterparties.map(counterparty => (
+              <option key={counterparty.id} value={counterparty.id}>{counterparty.shortName || counterparty.legalName}</option>
             ))}
           </select>
           <Button type="button" variant="outline" onClick={() => setShowFilters(true)} className="h-11 rounded-lg">
@@ -1337,7 +1335,7 @@ export default function Payments() {
         description="Поиск по счёту, клиенту, аренде и статусу оплаты."
         onReset={() => {
           pagination.setSearch('');
-          pagination.setFilters({ clientId: 'all', status: 'all' });
+          pagination.setFilters({ counterpartyId: 'all', status: 'all' });
         }}
       >
         <div className="grid gap-4 md:grid-cols-2">
@@ -1352,15 +1350,15 @@ export default function Payments() {
               />
             </div>
           </FilterField>
-          <FilterField label="Клиент">
+          <FilterField label="Контрагент">
             <select
-              value={pagination.filters.clientId}
-              onChange={(e) => pagination.setFilters({ clientId: e.target.value })}
+              value={pagination.filters.counterpartyId}
+              onChange={(e) => pagination.setFilters({ counterpartyId: e.target.value })}
               className="app-filter-input"
             >
-              <option value="all">Все клиенты</option>
-              {clients.map(client => (
-                <option key={client.id} value={client.id}>{client.company}</option>
+              <option value="all">Все контрагенты</option>
+              {counterparties.map(counterparty => (
+                <option key={counterparty.id} value={counterparty.id}>{counterparty.shortName || counterparty.legalName}</option>
               ))}
             </select>
           </FilterField>
@@ -1411,12 +1409,7 @@ export default function Payments() {
         </div>
         <div data-payment-mobile-list="true" className="grid gap-3 p-3 md:hidden">
           {paymentList.map((payment) => {
-            const clientProfileId = resolveClientProfileId({
-              clients,
-              clientsById,
-              clientId: payment.clientId,
-              clientName: paymentClientName(payment),
-            });
+            const clientProfileId = text(payment.clientId);
             return (
               <article
                 key={payment.id}
@@ -1502,12 +1495,7 @@ export default function Payments() {
           </thead>
           <tbody className="divide-y divide-slate-100 !bg-white">
             {paymentList.map((payment) => {
-              const clientProfileId = resolveClientProfileId({
-                clients,
-                clientsById,
-                clientId: payment.clientId,
-                clientName: paymentClientName(payment),
-              });
+              const clientProfileId = text(payment.clientId);
               return (
                 <tr
                   key={payment.id}
@@ -1575,17 +1563,19 @@ export default function Payments() {
             <h3 className="text-base font-semibold !text-slate-950">
               {(paymentsQuery.data?.pagination.total ?? 0) === 0
                 ? 'Платежей ещё нет'
-                : hasQuickClientContext || pagination.filters.clientId !== 'all'
-                  ? 'Платежи по клиенту не найдены'
+                : hasQuickClientContext || pagination.filters.counterpartyId !== 'all'
+                  ? 'Платежи по контрагенту не найдены'
                   : 'Платежи не найдены'}
             </h3>
             <p className="mt-1 text-sm !text-slate-500">
               {(paymentsQuery.data?.pagination.total ?? 0) === 0
                 ? 'Добавьте первый платёж по аренде'
-                : hasQuickClientContext || pagination.filters.clientId !== 'all'
-                  ? `Для ${contextFilterLabel(pagination.filters.clientId !== 'all'
-                    ? { clientId: pagination.filters.clientId, clientName: clientsById.get(pagination.filters.clientId)?.company }
-                    : quickActionContext)} нет платежей по выбранным фильтрам`
+                : hasQuickClientContext || pagination.filters.counterpartyId !== 'all'
+                  ? `Для ${pagination.filters.counterpartyId !== 'all'
+                    ? (counterparties.find(item => item.id === pagination.filters.counterpartyId)?.shortName
+                      || counterparties.find(item => item.id === pagination.filters.counterpartyId)?.legalName
+                      || pagination.filters.counterpartyId)
+                    : contextFilterLabel(quickActionContext)} нет платежей по выбранным фильтрам`
                   : 'Попробуйте изменить параметры поиска или фильтры'}
             </p>
             {(paymentsQuery.data?.pagination.total ?? 0) === 0 && can('create', 'payments') && (
@@ -1601,7 +1591,7 @@ export default function Payments() {
                 className="mt-4"
                 onClick={() => {
                   pagination.setSearch('');
-                  pagination.setFilters({ clientId: 'all', status: 'all' });
+                  pagination.setFilters({ counterpartyId: 'all', status: 'all' });
                 }}
               >
                 Сбросить фильтры

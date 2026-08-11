@@ -22,108 +22,31 @@ function getClientDisplayName(client) {
   return firstNonEmpty(client?.company, client?.name, client?.clientName);
 }
 
-function addClientHistoryNames(byName, client) {
-  const history = Array.isArray(client?.history) ? client.history : [];
-  history.forEach(entry => {
-    const text = String(entry?.text || '');
-    const createdMatch = text.match(/Клиент создан:\s*([^;]+)/iu);
-    if (createdMatch) addLookupValue(byName, createdMatch[1], client);
-
-    const companyChangePattern = /компания:\s*([^;→]+?)\s*→\s*([^;]+)/giu;
-    let match;
-    while ((match = companyChangePattern.exec(text)) !== null) {
-      // IMPORTANT: legacy JSON can have only the old client name. Client rename history is
-      // a guarded recovery source for backfilling clientId without using the current name as FK.
-      addLookupValue(byName, match[1], client);
-      addLookupValue(byName, match[2], client);
-    }
-  });
-}
-
-function addLookupValue(map, key, client) {
-  const normalized = normalizeText(key);
-  if (!normalized) return;
-  const list = map.get(normalized) || [];
-  list.push(client);
-  map.set(normalized, list);
-}
-
-function addInnLookupValue(map, key, client) {
-  const normalized = normalizeInn(key);
-  if (!normalized) return;
-  const list = map.get(normalized) || [];
-  list.push(client);
-  map.set(normalized, list);
-}
-
 function buildClientLookup(clients) {
   const byId = new Map();
-  const byName = new Map();
-  const byInn = new Map();
 
   (clients || []).forEach(client => {
     if (!client?.id) return;
     byId.set(String(client.id), client);
-    addLookupValue(byName, getClientDisplayName(client), client);
-    addLookupValue(byName, client.shortName, client);
-    addLookupValue(byName, client.clientName, client);
-    addClientHistoryNames(byName, client);
-    addInnLookupValue(byInn, client.inn, client);
   });
 
-  return { byId, byName, byInn };
-}
-
-function uniqueClients(list) {
-  const map = new Map();
-  (list || []).forEach(client => {
-    if (client?.id) map.set(String(client.id), client);
-  });
-  return Array.from(map.values());
-}
-
-function warnAmbiguous(logger, context, value, matches) {
-  logger?.warn?.(
-    `[client-links] ${context}: не удалось однозначно сопоставить клиента "${value}". ` +
-    `Кандидаты: ${matches.map(item => `${item.id}:${getClientDisplayName(item)}`).join(', ')}`,
-  );
+  return { byId };
 }
 
 function resolveClientForRecord(record, lookup, { logger = console, context = 'record' } = {}) {
   if (!record || typeof record !== 'object') return null;
+  const clientLookup = Array.isArray(lookup) ? buildClientLookup(lookup) : lookup;
 
   const stableId = getStableClientId(record);
   if (stableId) {
-    return lookup.byId.get(stableId) || null;
+    return clientLookup?.byId?.get(stableId) || null;
   }
-
-  const nameCandidates = [
-    record.client,
-    record.clientName,
-    record.company,
-    record.customer,
-    record.customerName,
-  ].map(normalizeText).filter(Boolean);
-
-  for (const name of nameCandidates) {
-    const matches = uniqueClients(lookup.byName.get(name));
-    if (matches.length === 1) return matches[0];
-    if (matches.length > 1) warnAmbiguous(logger, context, name, matches);
+  if (firstNonEmpty(record.client, record.clientName, record.company, record.customerName)
+    || firstNonEmpty(record.clientInn, record.customerInn, record.companyInn, record.inn)) {
+    logger?.warn?.(
+      `[client-links] ${context}: clientId отсутствует; сопоставление по названию/ИНН запрещено`,
+    );
   }
-
-  const innCandidates = [
-    record.clientInn,
-    record.customerInn,
-    record.companyInn,
-    record.inn,
-  ].map(normalizeInn).filter(Boolean);
-
-  for (const inn of innCandidates) {
-    const matches = uniqueClients(lookup.byInn.get(inn));
-    if (matches.length === 1) return matches[0];
-    if (matches.length > 1) warnAmbiguous(logger, context, inn, matches);
-  }
-
   return null;
 }
 
@@ -131,6 +54,7 @@ function normalizeRecordClientLink(record, clients, {
   logger = console,
   context = 'record',
   relatedRentalsById,
+  allowLegacyRecovery = true,
 } = {}) {
   if (!record || typeof record !== 'object') return record;
   const lookup = Array.isArray(clients) ? buildClientLookup(clients) : clients;
@@ -139,9 +63,22 @@ function normalizeRecordClientLink(record, clients, {
   if (stableId && lookup.byId.has(stableId)) {
     return record.clientId === stableId ? record : { ...record, clientId: stableId };
   }
+  if (stableId) {
+    logger?.warn?.(`[client-links] ${context}: clientId "${stableId}" не найден; автоматическое исправление отключено`);
+    return record;
+  }
+  if (!allowLegacyRecovery) {
+    if (firstNonEmpty(record.client, record.clientName, record.company, record.customerName)
+      || firstNonEmpty(record.clientInn, record.customerInn, record.companyInn, record.inn)) {
+      logger?.warn?.(
+        `[client-links] ${context}: clientId отсутствует; legacy-сопоставление по названию/ИНН в production write отключено`,
+      );
+    }
+    return record;
+  }
 
-  // IMPORTANT: rentalId is the safest recovery path for payments/documents. Name and INN
-  // matching below is only a guarded legacy backfill path for old JSON without clientId.
+  // IMPORTANT: rentalId -> rental.clientId is the only permitted recovery path.
+  // Editable labels and registration identifiers never establish a relation.
   const relatedRentalId = firstNonEmpty(record.rentalId, record.rental);
   const relatedRental = relatedRentalId && relatedRentalsById?.get(relatedRentalId);
   const relatedClientId = getStableClientId(relatedRental);
@@ -149,15 +86,13 @@ function normalizeRecordClientLink(record, clients, {
     return { ...record, clientId: relatedClientId };
   }
 
-  const client = resolveClientForRecord(record, lookup, { logger, context });
-  if (client?.id) {
-    return { ...record, clientId: String(client.id) };
-  }
-
-  if (!stableId && firstNonEmpty(record.client, record.clientName, record.company, record.customerName)) {
+  if (!stableId && (
+    firstNonEmpty(record.client, record.clientName, record.company, record.customerName)
+    || firstNonEmpty(record.clientInn, record.customerInn, record.companyInn, record.inn)
+  )) {
     logger?.warn?.(
       `[client-links] ${context}: запись "${record.id || record.rentalId || record.number || 'без id'}" ` +
-      `имеет клиента по названию, но clientId не найден`,
+      'не имеет clientId; сопоставление по названию/ИНН запрещено',
     );
   }
 

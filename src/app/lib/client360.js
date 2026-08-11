@@ -34,9 +34,16 @@ function getOverdueDays(dueDate, todayKey) {
 
 function sameClient(record, client) {
   if (!record || !client) return false;
-  if (record.clientId && client.id && String(record.clientId) === String(client.id)) return true;
-  if (!record.clientId && client.company && normalizeKey(record.client) === normalizeKey(client.company)) return true;
-  return false;
+  const recordCounterpartyId = normalizeText(record.counterpartyId);
+  const clientCounterpartyId = normalizeText(client.counterpartyId);
+  if (recordCounterpartyId || clientCounterpartyId) {
+    return Boolean(
+      recordCounterpartyId
+      && clientCounterpartyId
+      && recordCounterpartyId === clientCounterpartyId
+    );
+  }
+  return Boolean(record.clientId && client.id && String(record.clientId) === String(client.id));
 }
 
 function isOpenRental(rental) {

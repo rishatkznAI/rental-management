@@ -83,6 +83,7 @@ export interface GanttRentalData {
   rentalId?: string;
   sourceRentalId?: string;
   originalRentalId?: string;
+  counterpartyId?: string;
   clientId?: string;
   objectId?: string;
   contractId?: string;

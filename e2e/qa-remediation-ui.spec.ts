@@ -142,9 +142,7 @@ test('payment create intent is consumed for every completion path and preserves 
 
   await openIntent();
   await dialog.getByLabel('Сумма к оплате').fill('1000');
-  await dialog.getByRole('combobox', { name: /Клиент/ }).click();
-  await dialog.getByPlaceholder('Выберите клиента из базы').fill(client.company);
-  await dialog.locator('[data-client-item]').filter({ hasText: client.company }).click();
+  await dialog.getByRole('combobox', { name: /Контрагент/ }).selectOption(client.counterpartyId);
   await dialog.getByRole('button', { name: 'Сохранить платёж' }).click();
   await expectConsumed();
 
@@ -177,8 +175,8 @@ test('payment dialog uses a safe focus fallback and exposes validation errors', 
   await restoredDialog.getByLabel('Сумма к оплате').fill('1000');
   await restoredDialog.getByRole('button', { name: 'Сохранить платёж' }).click();
   const clientError = restoredDialog.getByRole('alert');
-  await expect(clientError).toHaveText('Выберите клиента из базы');
-  const clientField = restoredDialog.getByRole('combobox', { name: /Клиент/ });
+  await expect(clientError).toHaveText('Выберите контрагента из базы');
+  const clientField = restoredDialog.getByRole('combobox', { name: /Контрагент/ });
   await expect(clientField).toHaveAttribute('aria-invalid', 'true');
   await expect(clientField).toHaveAttribute('aria-describedby', 'new-payment-client-error');
 });

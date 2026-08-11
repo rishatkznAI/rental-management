@@ -108,6 +108,7 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
   assert.doesNotMatch(output, /unit-test-demo-password|h2:scrypt|TOKEN|SECRET|sk-/i);
 
   const users = readCollection(dbPath, 'users');
+  const counterparties = readCollection(dbPath, 'counterparties');
   const clients = readCollection(dbPath, 'clients');
   const equipment = readCollection(dbPath, 'equipment');
   const rentals = readCollection(dbPath, 'rentals');
@@ -119,6 +120,15 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
   assert.ok(users.every(user => String(user.password || '').startsWith('h2:scrypt:')));
   assert.equal(equipment.length, 20);
   assert.equal(clients.length, 5);
+  assert.equal(counterparties.length, clients.length);
+  assert.ok(clients.every(client => counterparties.some(counterparty => (
+    counterparty.id === client.counterpartyId
+    && counterparty.roles.includes('customer')
+  ))));
+  assert.ok(rentals.every(item => clients.some(client => (
+    client.id === item.clientId
+    && client.counterpartyId === item.counterpartyId
+  ))));
   assert.ok(rentals.some(item => item.status === 'active'));
   assert.ok(rentals.some(item => item.status === 'closed'));
   assert.ok(rentals.some(item => item.status === 'created'));
@@ -127,7 +137,7 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
   assert.ok(deliveries.some(item => item.status === 'in_transit'));
   assert.ok(deliveries.some(item => item.status === 'completed'));
 
-  for (const collection of [users, clients, equipment, rentals, service, deliveries]) {
+  for (const collection of [users, counterparties, clients, equipment, rentals, service, deliveries]) {
     assert.ok(collection.every(item => String(item.id || '').startsWith(DEMO_PREFIX)));
     assert.ok(collection.every(item => item.fixtureTag === DEMO_PREFIX));
   }
@@ -186,8 +196,13 @@ test('demo seed is idempotent and does not touch non-demo records', () => withDe
   runSeed(dbPath);
 
   const clients = readCollection(dbPath, 'clients');
+  const counterparties = readCollection(dbPath, 'counterparties');
   const equipment = readCollection(dbPath, 'equipment');
   assert.equal(clients.filter(item => String(item.id).startsWith(DEMO_PREFIX)).length, 5);
+  assert.equal(counterparties.filter(item => String(item.id).startsWith(DEMO_PREFIX)).length, 5);
+  assert.ok(clients
+    .filter(client => String(client.id).startsWith(DEMO_PREFIX))
+    .every(client => counterparties.some(counterparty => counterparty.id === client.counterpartyId)));
   assert.equal(equipment.filter(item => String(item.id).startsWith(DEMO_PREFIX)).length, 20);
   assert.equal(clients.some(item => item.id === 'CLIENT-PROTECTED'), true);
   assert.equal(equipment.some(item => item.id === 'EQ-PROTECTED'), true);

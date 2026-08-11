@@ -11,6 +11,7 @@ const {
 const { getRentalBillingAmount } = require('../lib/rental-billing');
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 const { normalizeDateOnly } = require('../lib/date-only');
+const { decoratePaymentCounterparty } = require('../lib/payment-counterparty-relations');
 
 function registerFinanceRoutes(router, deps) {
   const {
@@ -67,7 +68,8 @@ function registerFinanceRoutes(router, deps) {
     return {
       clients: accessControl.filterCollectionByScope('clients', clients, user),
       rentals: accessControl.filterCollectionByScope('gantt_rentals', rentals, user),
-      payments: accessControl.filterCollectionByScope('payments', payments, user),
+      payments: accessControl.filterCollectionByScope('payments', payments, user)
+        .map(payment => decoratePaymentCounterparty(payment, { readData })),
       paymentAllocations: accessControl.filterCollectionByScope('payment_allocations', paymentAllocations, user),
       clientObjects: accessControl.filterCollectionByScope('client_objects', clientObjects, user),
       leasingContracts: accessControl.filterCollectionByScope('leasing_contracts', leasingContracts, user),

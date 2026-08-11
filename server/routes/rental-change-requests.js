@@ -1,5 +1,6 @@
 const express = require('express');
 const { syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
+const { canonicalizePaymentCounterpartyRelation } = require('../lib/payment-counterparty-relations');
 const {
   RENTAL_CHANGE_REQUEST_STATUS,
   appendRentalHistory,
@@ -197,11 +198,20 @@ function registerRentalChangeRequestRoutes(deps) {
           return { ok: false, status: error?.status || 400, error: error?.message || 'Некорректные поля платежа' };
         }
       }
-      payments[paymentIdx] = {
-        ...payments[paymentIdx],
-        ...safePatch,
-        id: payments[paymentIdx].id,
-      };
+      try {
+        payments[paymentIdx] = canonicalizePaymentCounterpartyRelation({
+          ...payments[paymentIdx],
+          ...safePatch,
+          id: payments[paymentIdx].id,
+        }, { readData });
+      } catch (error) {
+        return {
+          ok: false,
+          status: error?.status || 400,
+          code: error?.code,
+          error: error?.message || 'Некорректная связь платежа с контрагентом',
+        };
+      }
     }
 
     writeData('payments', payments);
@@ -262,7 +272,11 @@ function registerRentalChangeRequestRoutes(deps) {
     const adminName = req.user?.userName || 'Администратор';
     const applied = applyRequest(request, adminName);
     if (!applied.ok) {
-      return res.status(applied.status || 400).json({ ok: false, error: applied.error || 'Не удалось применить заявку' });
+      return res.status(applied.status || 400).json({
+        ok: false,
+        ...(applied.code ? { code: applied.code } : {}),
+        error: applied.error || 'Не удалось применить заявку',
+      });
     }
 
     const decidedAt = new Date().toISOString();

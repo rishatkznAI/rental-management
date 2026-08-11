@@ -1,0 +1,1050 @@
+{
+  "stage": "I-GC",
+  "title": "Counterparty Integration Checkpoint Audit",
+  "completedAt": "2026-08-11",
+  "status": "ready_for_checkpoint",
+  "summary": {
+    "verdict": "READY FOR COUNTERPARTY CHECKPOINT COMMIT",
+    "canonicalIdentity": "Counterparty.id",
+    "productionSurfaces": 37,
+    "nonProductionSurfaces": 8,
+    "surfacesTotal": 45,
+    "violationsFound": 10,
+    "violationsResolved": 10,
+    "violationsRemaining": 0,
+    "unsafeLookupsRemoved": 8,
+    "financeArithmeticChanged": false,
+    "documentsContractsMigrated": false
+  },
+  "invariants": [
+    {
+      "id": "IGC-INV-01",
+      "statement": "Counterparty.id is the only canonical business/legal identity; metadata is display, discovery, validation, or snapshot data.",
+      "status": "verified"
+    },
+    {
+      "id": "IGC-INV-02",
+      "statement": "Client.counterpartyId resolves to exactly one existing customer-role Counterparty.",
+      "status": "verified"
+    },
+    {
+      "id": "IGC-INV-03",
+      "statement": "Rental.counterpartyId is canonical; when Rental.clientId exists, Client.counterpartyId must match it.",
+      "status": "verified"
+    },
+    {
+      "id": "IGC-INV-04",
+      "statement": "Classic Rental is authoritative and Gantt customer relation fields are a stable-ID projection.",
+      "status": "verified"
+    },
+    {
+      "id": "IGC-INV-05",
+      "statement": "Payment.counterpartyId is canonical; Payment.clientId is optional compatibility and supplier/contractor Payments require no Client.",
+      "status": "verified"
+    },
+    {
+      "id": "IGC-INV-06",
+      "statement": "Production writes and access scope never resolve Counterparty, Client, Rental, or Payment identity from name, INN, phone, or address.",
+      "status": "verified_for_migrated_domains"
+    },
+    {
+      "id": "IGC-INV-07",
+      "statement": "Historical records may retain archived Counterparty references, while new active relations to archived Counterparties are rejected.",
+      "status": "verified"
+    },
+    {
+      "id": "IGC-INV-08",
+      "statement": "Audit/repair is deterministic, stable-ID-only, idempotent, dry-run capable, and apply creates a SQLite backup before transactional writes.",
+      "status": "verified"
+    },
+    {
+      "id": "IGC-INV-09",
+      "statement": "Counterparty migration changes identity propagation only and does not change finance arithmetic.",
+      "status": "verified"
+    }
+  ],
+  "surfaces": [
+    {
+      "id": "S01",
+      "domain": "counterparty",
+      "location": "server/lib/counterparty.js",
+      "surface": "normalization, validation, deduplication, Client compatibility projection",
+      "relationFields": ["Counterparty.id", "Counterparty.roles", "Client.counterpartyId"],
+      "classification": "canonical",
+      "access": "read/write",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Stable Counterparty identity; strong metadata collisions diagnose duplicates but never attach relations.",
+      "actualState": "Canonical helpers enforce stable IDs and explicit roles.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S02",
+      "domain": "counterparty",
+      "location": "server/routes/counterparties.js POST/PATCH/roles",
+      "surface": "Counterparty CRUD and role endpoints",
+      "relationFields": ["Counterparty.id", "Counterparty.roles"],
+      "classification": "canonical",
+      "access": "read/write",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Identity writes and role mutations are separate and backend-authorized.",
+      "actualState": "Validated allowlists, immutable ID, explicit role endpoints, uniqueness checks.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S03",
+      "domain": "counterparty",
+      "location": "server/routes/counterparties.js DELETE /api/counterparties/:id",
+      "surface": "archive guard",
+      "relationFields": ["Client.counterpartyId", "ClientObject.counterpartyId", "Rental.counterpartyId"],
+      "classification": "canonical",
+      "access": "write",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Active linked domains block archive; historical records remain readable.",
+      "actualState": "Client, active Object, and active Classic/Gantt Rental links block archive; terminal Rental history does not.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S04",
+      "domain": "counterparty",
+      "location": "src/app/pages/Counterparties.tsx; src/app/services/counterparties.service.ts; src/app/types.ts",
+      "surface": "directory, selectors, DTOs",
+      "relationFields": ["Counterparty.id", "roles"],
+      "classification": "canonical",
+      "access": "read/write",
+      "production": true,
+      "risk": "medium",
+      "expectedInvariant": "Selectors emit stable IDs and metadata remains display/search.",
+      "actualState": "Stable IDs are explicit in service and frontend types.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S05",
+      "domain": "client",
+      "location": "server/lib/counterparty-relations.js",
+      "surface": "Client and ClientObject relation resolver/audit/repair",
+      "relationFields": ["Client.counterpartyId", "ClientObject.counterpartyId", "ClientObject.clientId"],
+      "classification": "canonical_compatibility",
+      "access": "read/write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Exactly one stable target; ambiguity is an error; only deterministic chains are repairable.",
+      "actualState": "Resolver and audit never inspect names or INN for relation recovery.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S06",
+      "domain": "client",
+      "location": "server/routes/crud.js POST/PATCH /api/clients",
+      "surface": "Client create/update compatibility boundary",
+      "relationFields": ["Client.id", "Client.counterpartyId"],
+      "classification": "compatibility",
+      "access": "write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "An explicit Client business action creates/updates its Counterparty atomically and never attaches by metadata.",
+      "actualState": "Atomic Counterparty+Client writes use explicit mapping and strong collision rejection.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S07",
+      "domain": "client",
+      "location": "server/routes/crud.js PUT /api/clients; server/lib/access-control.js",
+      "surface": "Client bulk replacement",
+      "relationFields": ["Client.id", "Client.counterpartyId"],
+      "classification": "compatibility",
+      "access": "write",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Bulk data has unique non-empty stable IDs and valid Counterparty chains.",
+      "actualState": "Duplicate/missing stable IDs are rejected before persistence; compatibility preparation is atomic.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S08",
+      "domain": "client",
+      "location": "server/routes/crud.js DELETE /api/clients/:id",
+      "surface": "Client deletion/history guard",
+      "relationFields": ["clientId", "legacy client snapshots"],
+      "classification": "compatibility_guard",
+      "access": "read/write",
+      "production": true,
+      "risk": "medium",
+      "expectedInvariant": "Rental and Payment identity use IDs; legacy names may only conservatively block deletion in unmigrated domains.",
+      "actualState": "Rental and Payment checks are stable-ID-only; name checks remain a non-authoritative protective guard for Documents/Delivery/Service history.",
+      "actionRequired": "next-stage classification"
+    },
+    {
+      "id": "S09",
+      "domain": "client",
+      "location": "src/app/pages/ClientDetail.tsx; src/app/lib/client360.js; src/app/pages/Dashboard.tsx",
+      "surface": "Client 360 and blocked-client Rental consumers",
+      "relationFields": ["counterpartyId", "clientId"],
+      "classification": "derived",
+      "access": "read",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Rental/Payment association uses Counterparty ID first, then Client ID compatibility, never company name.",
+      "actualState": "Canonical precedence is enforced and legacy name fallback was removed.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S10",
+      "domain": "rental",
+      "location": "server/lib/rental-counterparty-relations.js",
+      "surface": "Rental resolver, audit, repair, Gantt projection",
+      "relationFields": ["Rental.counterpartyId", "Rental.clientId", "Gantt.counterpartyId", "Gantt.clientId"],
+      "classification": "canonical",
+      "access": "read/write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Classic Rental is authoritative; matching dual IDs; customer role required; no metadata fallback.",
+      "actualState": "Canonical resolver and projection enforce the invariant; historical archived relations are audit-readable.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S11",
+      "domain": "rental",
+      "location": "server/routes/rentals.js create/patch/detail",
+      "surface": "Rental API mutation and DTO boundary",
+      "relationFields": ["counterpartyId", "clientId"],
+      "classification": "canonical_compatibility",
+      "access": "read/write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Every create/update canonicalizes stable relations and returns both IDs explicitly.",
+      "actualState": "Backend validation/canonicalization applies before persistence.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S12",
+      "domain": "rental",
+      "location": "server/routes/rentals.js PUT /api/rentals",
+      "surface": "Rental bulk replacement",
+      "relationFields": ["Rental.id", "counterpartyId", "clientId"],
+      "classification": "canonical",
+      "access": "write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Unique stable Rental IDs and canonical relation validation before Classic/Gantt atomic persistence.",
+      "actualState": "Missing/duplicate IDs and mismatched relations are rejected.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S13",
+      "domain": "rental",
+      "location": "server/routes/rentals.js extension/return/downtime/lifecycle endpoints",
+      "surface": "Rental lifecycle mutations",
+      "relationFields": ["Rental.id", "counterpartyId", "clientId", "equipmentId"],
+      "classification": "canonical",
+      "access": "read/write",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Lifecycle updates preserve the canonical relation and do not create identity from snapshots.",
+      "actualState": "Classic Rental remains authoritative; relation fields are preserved/canonicalized through the shared persistence boundary.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S14",
+      "domain": "rental",
+      "location": "server/routes/rental-change-requests.js",
+      "surface": "Rental approval/change request application",
+      "relationFields": ["Rental.counterpartyId", "Rental.clientId"],
+      "classification": "canonical",
+      "access": "write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Approved relation changes pass the same canonical resolver and atomic write path.",
+      "actualState": "Rental requests were already canonical; Payment request bypass was fixed separately.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S15",
+      "domain": "gantt",
+      "location": "server/server.js writeData/writeDataBatch; server/lib/rental-counterparty-relations.js",
+      "surface": "global Classic/Gantt persistence projection",
+      "relationFields": ["sourceRentalId", "rentalId", "counterpartyId", "clientId"],
+      "classification": "derived_projection",
+      "access": "write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Gantt never overrides Classic customer identity.",
+      "actualState": "Every server Rental/Gantt write is canonicalized/projected by stable IDs.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S16",
+      "domain": "gantt",
+      "location": "src/app/pages/Rentals.tsx; src/app/pages/RentalDetail.tsx",
+      "surface": "frontend Classic/Gantt association",
+      "relationFields": ["sourceRentalId", "counterpartyId", "clientId"],
+      "classification": "derived_projection",
+      "access": "read/write navigation",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Direct Rental ID wins; any diagnostic fallback uses matching stable customer IDs and never fuzzy names.",
+      "actualState": "Fuzzy company-name matching was removed; ambiguous/unlinked rows remain visibly broken.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S17",
+      "domain": "rental",
+      "location": "src/app/pages/RentalNew.tsx; src/app/pages/RentalDetail.tsx; src/app/components/gantt/RentalDrawer.tsx",
+      "surface": "Rental forms, route prefill, profile/debt enrichment",
+      "relationFields": ["clientId", "counterpartyId"],
+      "classification": "canonical_compatibility",
+      "access": "read/write",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Prefill and enrichment require explicit stable IDs.",
+      "actualState": "Legacy client-name query and company-name profile/debt fallbacks were removed.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S18",
+      "domain": "rental",
+      "location": "src/app/types.ts; src/app/mock-data.ts; src/app/services/rentals.service.ts",
+      "surface": "frontend Rental/Gantt contracts",
+      "relationFields": ["counterpartyId", "clientId"],
+      "classification": "canonical_compatibility",
+      "access": "read/write",
+      "production": true,
+      "risk": "medium",
+      "expectedInvariant": "Both IDs are explicit and Counterparty identity survives frontend projections.",
+      "actualState": "Types expose both fields; Classic-to-Gantt frontend projections now copy counterpartyId.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S19",
+      "domain": "rental",
+      "location": "src/app/pages/Settings.tsx Rental CSV import",
+      "surface": "Rental import",
+      "relationFields": ["clientId", "counterpartyId"],
+      "classification": "canonical_compatibility",
+      "access": "write",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Import requires stable relation IDs and never resolves client names/INN.",
+      "actualState": "Stable clientId is required and backend derives/verifies Counterparty ID.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S20",
+      "domain": "payment",
+      "location": "server/lib/payment-counterparty-relations.js",
+      "surface": "Payment resolver, audit, repair, read decoration",
+      "relationFields": ["Payment.counterpartyId", "Payment.clientId", "Payment.rentalId"],
+      "classification": "canonical_compatibility",
+      "access": "read/write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Rental authority then explicit stable IDs; no customer-role requirement for direct supplier/contractor Payments.",
+      "actualState": "Canonical resolver ignores all metadata; historical archived relations decorate/audit safely.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S21",
+      "domain": "payment",
+      "location": "server/routes/crud.js GET/POST/PATCH/PUT /api/payments",
+      "surface": "Payment generic CRUD and DTO",
+      "relationFields": ["counterpartyId", "clientId", "rentalId"],
+      "classification": "canonical_compatibility",
+      "access": "read/write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Every write canonicalizes and every read returns stable Counterparty DTO fields.",
+      "actualState": "Create/update/bulk and rental-derived writes share the canonical resolver; allocated-payment guards remain intact.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S22",
+      "domain": "payment",
+      "location": "server/routes/rental-change-requests.js applyPaymentRequest",
+      "surface": "approved Payment correction",
+      "relationFields": ["counterpartyId", "clientId", "rentalId"],
+      "classification": "canonical",
+      "access": "write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Approval cannot bypass Payment relation canonicalization.",
+      "actualState": "Candidate Payment is canonicalized before any write; structured mismatch leaves request pending.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S23",
+      "domain": "payment",
+      "location": "src/app/pages/Payments.tsx; src/app/services/payments.service.ts; src/app/hooks/usePayments.ts",
+      "surface": "Payment form, Counterparty filter, navigation",
+      "relationFields": ["counterpartyId", "clientId"],
+      "classification": "canonical_compatibility",
+      "access": "read/write",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Counterparty selector emits ID; Client is optional; navigation never recovers ID from names.",
+      "actualState": "Supplier/contractor Counterparties work without Client; filters use Counterparty ID; Client links require clientId.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S24",
+      "domain": "payment",
+      "location": "server/routes/crud.js payment_allocations; server/lib/finance-core.js",
+      "surface": "Payment allocations",
+      "relationFields": ["paymentId", "rentalId", "documentId", "clientId"],
+      "classification": "canonical_derived",
+      "access": "read/write",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Allocation uses stable Payment/Rental/Document IDs and never owns Counterparty identity.",
+      "actualState": "Allocation arithmetic and caps are unchanged; Payment carries canonical Counterparty identity.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S25",
+      "domain": "finance",
+      "location": "server/lib/payment-status-sync.js; server/routes/crud.js",
+      "surface": "Rental payment-status synchronization",
+      "relationFields": ["paymentId", "rentalId"],
+      "classification": "derived",
+      "access": "read/write projection",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Payment status joins use stable IDs and identity changes do not alter paid/unpaid arithmetic.",
+      "actualState": "Stable Payment/Rental links drive status; formulas unchanged.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S26",
+      "domain": "finance",
+      "location": "server/lib/finance-core.js; server/lib/receivables-core.js; src/app/lib/finance.ts",
+      "surface": "debt, receivables, client financial snapshots",
+      "relationFields": ["rentalId", "paymentId", "clientId", "counterpartyId"],
+      "classification": "derived_compatibility",
+      "access": "read",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Payment/Rental joins use stable IDs; clientId remains customer-profile grouping only.",
+      "actualState": "Arithmetic is byte-for-byte outside identity pass-through; unlinked display groups never persist relations.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S27",
+      "domain": "finance",
+      "location": "server/lib/cash-flow.js; server/routes/finance.js",
+      "surface": "cash flow",
+      "relationFields": ["Payment.counterpartyId", "Payment.client/clientName snapshots"],
+      "classification": "derived_display",
+      "access": "read",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Amounts/dates/status drive totals; identity fields only label rows.",
+      "actualState": "counterpartyId is passed through; all numeric formulas are unchanged.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S28",
+      "domain": "finance",
+      "location": "server/routes/reports.js; server/lib/manager-report.js; src/app/pages/Reports.tsx; src/app/pages/Dashboard.tsx",
+      "surface": "reports, manager views, dashboards",
+      "relationFields": ["rentalId", "paymentId", "clientId", "counterpartyId"],
+      "classification": "derived_compatibility",
+      "access": "read",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Scoped data and stable IDs drive joins; names are output labels only.",
+      "actualState": "Stable scope is applied before aggregation; blocked-client Rental association now uses Counterparty/Client IDs.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S29",
+      "domain": "finance",
+      "location": "src/app/pages/Finance.tsx; server/routes/finance.js",
+      "surface": "unified finance operation projection",
+      "relationFields": ["counterpartyId", "clientName snapshot"],
+      "classification": "derived_display",
+      "access": "read",
+      "production": true,
+      "risk": "medium",
+      "expectedInvariant": "Payment-derived rows retain Counterparty ID while text remains display/search.",
+      "actualState": "Counterparty ID survives projection; no text-to-ID resolution.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S30",
+      "domain": "finance",
+      "location": "finance_operations.counterparty; company_expenses.counterparty",
+      "surface": "manual finance snapshot fields",
+      "relationFields": ["counterparty text"],
+      "classification": "display_snapshot",
+      "access": "read/write",
+      "production": true,
+      "risk": "medium",
+      "expectedInvariant": "Free text is not reinterpreted as Counterparty relation in I-GC.",
+      "actualState": "Fields remain explicit snapshots; Accounts Payable is not introduced.",
+      "actionRequired": "future domain decision"
+    },
+    {
+      "id": "S31",
+      "domain": "security",
+      "location": "server/lib/access-control.js matchesScopedRental",
+      "surface": "Payment/Document/finance manager scope",
+      "relationFields": ["rentalId", "counterpartyId", "clientId"],
+      "classification": "canonical",
+      "access": "read/write authorization",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Direct Rental ID wins; Counterparty ID takes precedence over compatibility Client ID.",
+      "actualState": "Conflicting dual IDs cannot gain scope through an OR fallback.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S32",
+      "domain": "security",
+      "location": "server/lib/access-control.js mutation allowlists",
+      "surface": "mass assignment and bulk integrity",
+      "relationFields": ["counterpartyId", "clientId", "id"],
+      "classification": "canonical",
+      "access": "write authorization",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Relation fields are allowed only through canonical validation; duplicate stable IDs cannot be persisted by bulk APIs.",
+      "actualState": "Strict Payment/Rental fields remain protected and critical bulk collections reject missing/duplicate IDs.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S33",
+      "domain": "system",
+      "location": "server/routes/system.js system-data import dry-run/apply",
+      "surface": "system import",
+      "relationFields": ["Counterparty.id", "Client.counterpartyId", "Rental.counterpartyId", "Payment.counterpartyId"],
+      "classification": "canonical",
+      "access": "write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Staged collections resolve together, duplicates block, dry-run precedes confirmed atomic apply.",
+      "actualState": "Counterparty/Client ordering and Rental/Payment canonicalizers use staged stable IDs.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S34",
+      "domain": "system",
+      "location": "server/routes/system.js legacy sync",
+      "surface": "legacy full-state synchronization",
+      "relationFields": ["clientId", "counterpartyId", "rentalId"],
+      "classification": "compatibility",
+      "access": "write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Rental lifecycle replacement is disabled; Client/Payment writes are canonical; bulk IDs are unique.",
+      "actualState": "Payment canonicalization and shared bulk validation apply; Rental/Gantt replacement is rejected.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S35",
+      "domain": "persistence",
+      "location": "server/server.js writeData/writeDataBatch; server/db.js",
+      "surface": "SQLite app_data persistence",
+      "relationFields": ["all JSON relation fields"],
+      "classification": "canonical_boundary",
+      "access": "write",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Classic/Gantt relations are canonicalized before transactional app_data writes; old optional fields remain readable.",
+      "actualState": "Rental persistence is globally wrapped; Payment production writers canonicalize at their domain boundaries.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S36",
+      "domain": "startup",
+      "location": "server/lib/startup.js; server/server.js",
+      "surface": "production startup",
+      "relationFields": ["Client.counterpartyId", "ClientObject.counterpartyId", "Rental.counterpartyId"],
+      "classification": "audit_only",
+      "access": "read",
+      "production": true,
+      "risk": "critical",
+      "expectedInvariant": "Startup may audit safe metadata but must not create Counterparties, add roles, or repair relations.",
+      "actualState": "Counterparty and Rental audits are read-only; automatic Counterparty foundation/Object repairs were unwired even when maintenance mode is enabled.",
+      "actionRequired": "fixed"
+    },
+    {
+      "id": "S37",
+      "domain": "migration",
+      "location": "server/scripts/counterparty-relation-integrity.js",
+      "surface": "Counterparty/Client/Object audit and repair CLI",
+      "relationFields": ["Client.counterpartyId", "ClientObject.counterpartyId"],
+      "classification": "operator_tooling",
+      "access": "read/write",
+      "production": false,
+      "risk": "critical",
+      "expectedInvariant": "Stable-ID-only dry-run; apply repairs only provable Object chains after backup in transaction.",
+      "actualState": "Verified by tests and live dry-run; no entity creation or role mutation in repair CLI.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S38",
+      "domain": "migration",
+      "location": "server/scripts/rental-counterparty-relations.js",
+      "surface": "Rental audit and repair CLI",
+      "relationFields": ["Rental.clientId", "Rental.counterpartyId", "Gantt projection"],
+      "classification": "operator_tooling",
+      "access": "read/write",
+      "production": false,
+      "risk": "critical",
+      "expectedInvariant": "Only Client.counterpartyId can backfill Rental.counterpartyId; apply backs up and transacts.",
+      "actualState": "Verified deterministic, idempotent, name-blind, and dry-run safe.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S39",
+      "domain": "migration",
+      "location": "server/scripts/payment-counterparty-relations.js",
+      "surface": "Payment audit and repair CLI",
+      "relationFields": ["Payment.clientId", "Payment.counterpartyId"],
+      "classification": "operator_tooling",
+      "access": "read/write",
+      "production": false,
+      "risk": "critical",
+      "expectedInvariant": "Only explicit Client chain can backfill; supplier/contractor direct IDs stay valid; apply backs up and transacts.",
+      "actualState": "Verified deterministic, idempotent, name-blind, and dry-run safe.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S40",
+      "domain": "bot",
+      "location": "server/lib/bot-commands.js; server/routes/bot.js",
+      "surface": "MAX operational consumers",
+      "relationFields": ["rentalId", "equipmentId", "carrierId"],
+      "classification": "derived",
+      "access": "read/write lifecycle",
+      "production": true,
+      "risk": "high",
+      "expectedInvariant": "Bot operations do not reconstruct Counterparty relation from messages or phone metadata.",
+      "actualState": "Payment summaries join by Rental/Payment IDs; no Counterparty relation writer exists in bot flows.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S41",
+      "domain": "seed",
+      "location": "server/scripts/seed-demo-data.js",
+      "surface": "demo seed",
+      "relationFields": ["Counterparty.id", "Client.counterpartyId"],
+      "classification": "fixture",
+      "access": "write",
+      "production": false,
+      "risk": "medium",
+      "expectedInvariant": "Seeded Clients have explicit Counterparty links and deterministic IDs.",
+      "actualState": "Fixture validation covers the stable chain.",
+      "actionRequired": "none"
+    },
+    {
+      "id": "S42",
+      "domain": "tests",
+      "location": "tests/counterparty*.test.js; tests/rental-counterparty-relations.test.js; tests/payment-counterparty-relations.test.js",
+      "surface": "domain and negative relation tests",
+      "relationFields": ["all canonical relation fields"],
+      "classification": "verification",
+      "access": "read/write test harness",
+      "production": false,
+      "risk": "low",
+      "expectedInvariant": "Mismatches, missing/duplicate IDs, metadata-only inputs, archived writes, and supplier/contractor cases fail/pass explicitly.",
+      "actualState": "Negative coverage is explicit and no test relies on name matching.",
+      "actionRequired": "expanded"
+    },
+    {
+      "id": "S43",
+      "domain": "tests",
+      "location": "tests/api-security-routes.test.js; tests/security-access-control.test.js; tests/startup-safety.test.js",
+      "surface": "API/security/startup regression tests",
+      "relationFields": ["counterpartyId", "clientId", "id"],
+      "classification": "verification",
+      "access": "test harness",
+      "production": false,
+      "risk": "low",
+      "expectedInvariant": "Canonical validation is enforced at bypass-prone and security boundaries.",
+      "actualState": "Change request mismatch, scope precedence, duplicate bulk IDs, archive guard, and safe startup are covered.",
+      "actionRequired": "expanded"
+    },
+    {
+      "id": "S44",
+      "domain": "tests",
+      "location": "e2e/counterparty-roles.spec.ts; e2e/qa-remediation-ui.spec.ts",
+      "surface": "Counterparty UI/API E2E",
+      "relationFields": ["Counterparty.id", "roles", "Payment.counterpartyId"],
+      "classification": "verification",
+      "access": "E2E",
+      "production": false,
+      "risk": "low",
+      "expectedInvariant": "User-visible role and Counterparty selection workflows use stable IDs.",
+      "actualState": "Existing E2E coverage is applicable; full E2E requires a browser/server environment.",
+      "actionRequired": "run targeted when environment permits"
+    },
+    {
+      "id": "S45",
+      "domain": "documentation",
+      "location": "docs/stage-i-b* through docs/stage-i-g*",
+      "surface": "programme contracts and prior inventories",
+      "relationFields": ["Counterparty", "Client", "Rental", "Payment"],
+      "classification": "architecture_baseline",
+      "access": "read",
+      "production": false,
+      "risk": "medium",
+      "expectedInvariant": "Earlier stage claims agree with current code and remaining domains are explicit.",
+      "actualState": "I-GC supersedes stale claims about startup auto-migration and closes missed Rental UI fallbacks.",
+      "actionRequired": "this checkpoint"
+    }
+  ],
+  "violations": [
+    {
+      "id": "V01",
+      "invariant": "Startup must not perform automatic identity repair.",
+      "location": "server/lib/startup.js",
+      "severity": "critical",
+      "rootCause": "I-B/I-D foundation helpers remained wired into every startup and could create Counterparties or add roles.",
+      "resolution": "Removed both identity mutation calls from startup wiring; retained read-only audits.",
+      "status": "resolved"
+    },
+    {
+      "id": "V02",
+      "invariant": "Every Payment mutation must enforce canonical Counterparty relation.",
+      "location": "server/routes/rental-change-requests.js applyPaymentRequest",
+      "severity": "critical",
+      "rootCause": "Approved correction merged a sanitized patch directly into payments without invoking the Stage I-G resolver.",
+      "resolution": "Canonicalize the full candidate before write and return structured relation errors atomically.",
+      "status": "resolved"
+    },
+    {
+      "id": "V03",
+      "invariant": "Canonical Counterparty ID must win in authorization scope.",
+      "location": "server/lib/access-control.js matchesScopedRental",
+      "severity": "critical",
+      "rootCause": "An OR between counterpartyId and clientId could grant access through a conflicting compatibility ID.",
+      "resolution": "Use direct rentalId first, then counterpartyId exclusively when present, otherwise clientId compatibility.",
+      "status": "resolved"
+    },
+    {
+      "id": "V04",
+      "invariant": "Rental route prefill must not turn a display name into a relation ID.",
+      "location": "src/app/pages/RentalNew.tsx",
+      "severity": "high",
+      "rootCause": "Legacy client query text was matched to Client.company/clientLabel.",
+      "resolution": "Only explicit clientId route context is accepted; legacy text is invalid and requires operator selection.",
+      "status": "resolved"
+    },
+    {
+      "id": "V05",
+      "invariant": "Rental consumers must not restore Client identity by display name.",
+      "location": "RentalDetail, RentalDrawer, ClientDetail, client360, Dashboard",
+      "severity": "high",
+      "rootCause": "Legacy UI enrichment grouped profile, debt, and Rental data by company/client snapshot when IDs were absent.",
+      "resolution": "Use Counterparty ID precedence and Client ID compatibility only.",
+      "status": "resolved"
+    },
+    {
+      "id": "V06",
+      "invariant": "Gantt must remain a stable-ID projection of Classic Rental.",
+      "location": "src/app/pages/Rentals.tsx; src/app/pages/RentalDetail.tsx",
+      "severity": "critical",
+      "rootCause": "Fuzzy normalized company-name matching could infer a Classic Rental candidate.",
+      "resolution": "Removed fuzzy matcher; candidate inference requires matching stable Counterparty IDs or, only when neither side has one, matching Client IDs.",
+      "status": "resolved"
+    },
+    {
+      "id": "V07",
+      "invariant": "Counterparty identity must survive Classic-to-Gantt frontend projection.",
+      "location": "src/app/pages/Rentals.tsx",
+      "severity": "high",
+      "rootCause": "Frontend projection copied clientId and display fields but omitted counterpartyId.",
+      "resolution": "Copy canonical counterpartyId in both projection constructors.",
+      "status": "resolved"
+    },
+    {
+      "id": "V08",
+      "invariant": "Critical relation collections cannot persist duplicate stable IDs.",
+      "location": "server/lib/access-control.js bulk validation",
+      "severity": "high",
+      "rootCause": "Generic and Rental bulk APIs validated relations but did not reject duplicate/missing entity IDs.",
+      "resolution": "Reject missing or duplicate IDs for clients, rentals, gantt_rentals, and payments before persistence.",
+      "status": "resolved"
+    },
+    {
+      "id": "V09",
+      "invariant": "Archiving cannot create an invalid active Rental relation.",
+      "location": "server/routes/counterparties.js archive guard",
+      "severity": "high",
+      "rootCause": "Direct Counterparty-only active Rentals were not covered by Client/Object archive guards.",
+      "resolution": "Block archive for active Classic/Gantt Rental references; allow terminal history.",
+      "status": "resolved"
+    },
+    {
+      "id": "V10",
+      "invariant": "Historical archived relations must be distinguishable from forbidden active writes.",
+      "location": "Rental and Payment relation audits",
+      "severity": "medium",
+      "rootCause": "Audits classified every archived target as broken even for terminal Rental and recorded Payment history.",
+      "resolution": "Audit historical Payment and terminal Rental references with allowArchived while keeping mutation resolvers strict.",
+      "status": "resolved"
+    }
+  ],
+  "fixes": [
+    {
+      "id": "F01",
+      "problem": "Automatic Counterparty creation/role repair on startup.",
+      "fix": "Unwired identity mutation helpers from startup.",
+      "whySafe": "No migration data is changed; read-only integrity logs remain.",
+      "tests": ["tests/startup-safety.test.js"]
+    },
+    {
+      "id": "F02",
+      "problem": "Payment approval correction bypassed canonical relation validation.",
+      "fix": "Run canonicalizePaymentCounterpartyRelation before write.",
+      "whySafe": "Only invalid relation patches change behavior; payment arithmetic and approval state remain unchanged.",
+      "tests": ["tests/api-security-routes.test.js"]
+    },
+    {
+      "id": "F03",
+      "problem": "Conflicting clientId could broaden manager finance scope.",
+      "fix": "Canonical Counterparty precedence in matchesScopedRental.",
+      "whySafe": "Direct Rental ID and legacy clientId-only records retain existing scope.",
+      "tests": ["tests/security-access-control.test.js"]
+    },
+    {
+      "id": "F04",
+      "problem": "Rental frontend used name-based Client/Gantt recovery.",
+      "fix": "Removed name/fuzzy fallbacks and propagated counterpartyId.",
+      "whySafe": "Ambiguous legacy rows become explicit diagnostics instead of silently selecting an entity.",
+      "tests": ["tests/rental-counterparty-relations.test.js", "npm run build"]
+    },
+    {
+      "id": "F05",
+      "problem": "Bulk APIs could persist duplicate or missing entity stable IDs.",
+      "fix": "Added critical relation collection stable-ID validation.",
+      "whySafe": "Only structurally ambiguous full replacements are rejected before writes.",
+      "tests": ["tests/security-access-control.test.js", "tests/payment-counterparty-relations.test.js"]
+    },
+    {
+      "id": "F06",
+      "problem": "Archive behavior did not separate active Rental links from history.",
+      "fix": "Guard active Rental links and make audits history-aware without loosening writes.",
+      "whySafe": "Active writes remain rejected; terminal and Payment history stays readable.",
+      "tests": ["tests/counterparty.test.js", "tests/rental-counterparty-relations.test.js", "tests/payment-counterparty-relations.test.js"]
+    }
+  ],
+  "legacyLookups": [
+    {
+      "location": "server/routes/counterparties.js search",
+      "fields": ["legalName", "shortName", "inn", "phone"],
+      "classification": "B_search_discovery",
+      "relationWrite": false,
+      "action": "retain"
+    },
+    {
+      "location": "server/lib/counterparty.js duplicate diagnostics",
+      "fields": ["legalName", "shortName", "inn", "ogrn", "ogrnip"],
+      "classification": "C_validation",
+      "relationWrite": false,
+      "action": "retain"
+    },
+    {
+      "location": "Payment/Rental DTO snapshots",
+      "fields": ["client", "clientName", "counterparty display"],
+      "classification": "E_compatibility_snapshot",
+      "relationWrite": false,
+      "action": "retain"
+    },
+    {
+      "location": "server/lib/finance-core.js; src/app/lib/finance.ts unlinked groups",
+      "fields": ["client", "clientName"],
+      "classification": "D_derived_reporting",
+      "relationWrite": false,
+      "action": "retain as visibly unlinked reporting buckets"
+    },
+    {
+      "location": "finance_operations.counterparty; company_expenses.counterparty",
+      "fields": ["counterparty"],
+      "classification": "A_display_snapshot",
+      "relationWrite": false,
+      "action": "retain pending a separate finance domain decision"
+    },
+    {
+      "location": "server/routes/crud.js Client deletion history guard",
+      "fields": ["client", "clientName", "company"],
+      "classification": "E_compatibility_protective_guard",
+      "relationWrite": false,
+      "action": "retain only for conservative delete blocking in unmigrated domains"
+    },
+    {
+      "location": "src/app/pages/RentalNew.tsx",
+      "fields": ["client query text", "company"],
+      "classification": "F_unsafe_identity_fallback",
+      "relationWrite": true,
+      "action": "removed"
+    },
+    {
+      "location": "src/app/pages/Rentals.tsx; src/app/pages/RentalDetail.tsx",
+      "fields": ["client", "company-normalized name"],
+      "classification": "F_unsafe_identity_fallback",
+      "relationWrite": true,
+      "action": "removed"
+    },
+    {
+      "location": "src/app/components/gantt/RentalDrawer.tsx",
+      "fields": ["client"],
+      "classification": "F_unsafe_identity_fallback",
+      "relationWrite": false,
+      "action": "removed"
+    },
+    {
+      "location": "src/app/pages/ClientDetail.tsx; src/app/lib/client360.js; src/app/pages/Dashboard.tsx",
+      "fields": ["client", "company"],
+      "classification": "F_unsafe_identity_fallback",
+      "relationWrite": false,
+      "action": "removed"
+    },
+    {
+      "location": "src/app/pages/Documents.tsx; src/app/lib/quickActionContext.js",
+      "fields": ["client", "clientName", "company"],
+      "classification": "F_unsafe_unmigrated_domain",
+      "relationWrite": true,
+      "action": "defer to Stage I-H; do not expand I-GC"
+    },
+    {
+      "location": "src/app/pages/Deliveries.tsx",
+      "fields": ["client", "company", "address"],
+      "classification": "F_unsafe_unmigrated_domain",
+      "relationWrite": true,
+      "action": "defer to Delivery Counterparty migration"
+    },
+    {
+      "location": "src/app/pages/ServiceDetail.tsx; service ticket compatibility helpers",
+      "fields": ["client", "company"],
+      "classification": "F_unsafe_unmigrated_domain",
+      "relationWrite": true,
+      "action": "defer to Service Counterparty migration"
+    },
+    {
+      "location": "src/app/lib/gsm.ts",
+      "fields": ["client", "company"],
+      "classification": "F_unsafe_unmigrated_domain",
+      "relationWrite": false,
+      "action": "defer; telemetry must not override contractual links"
+    },
+    {
+      "location": "server/routes/debt-collection-plans.js; ClientDetail debt-plan compatibility",
+      "fields": ["clientName", "company"],
+      "classification": "E_compatibility_unmigrated_domain",
+      "relationWrite": true,
+      "action": "migrate with receivables/customer collection domain, not I-GC"
+    },
+    {
+      "location": "src/app/components/ui/ClientCombobox.tsx",
+      "fields": ["company", "display label"],
+      "classification": "E_compatibility_ui",
+      "relationWrite": "depends_on_consumer",
+      "action": "retain component compatibility; migrated consumers must pass/use valueId"
+    }
+  ],
+  "migrationChecks": [
+    {
+      "domain": "Counterparty/Client/Object",
+      "command": "node server/scripts/counterparty-relation-integrity.js --db server/data/app.sqlite",
+      "mode": "dry-run",
+      "result": {
+        "scanned": { "counterparties": 0, "clients": 0, "clientObjects": 0 },
+        "healthy": 0,
+        "repairable": 0,
+        "broken": 0,
+        "changed": 0,
+        "skipped": 0,
+        "failed": 0,
+        "wrote": false
+      }
+    },
+    {
+      "domain": "Rental",
+      "command": "node server/scripts/rental-counterparty-relations.js --db server/data/app.sqlite",
+      "mode": "dry-run",
+      "result": {
+        "scanned": { "rentals": 0 },
+        "healthy": 0,
+        "repairable": 0,
+        "broken": 0,
+        "changed": 0,
+        "skipped": 0,
+        "failed": 0,
+        "wrote": false
+      }
+    },
+    {
+      "domain": "Payment",
+      "command": "node server/scripts/payment-counterparty-relations.js --db server/data/app.sqlite",
+      "mode": "dry-run",
+      "result": {
+        "scanned": { "payments": 0 },
+        "healthy": 0,
+        "repairable": 0,
+        "broken": 0,
+        "changed": 0,
+        "skipped": 0,
+        "failed": 0,
+        "wrote": false
+      }
+    }
+  ],
+  "remainingCompatibility": [
+    {
+      "domain": "Client",
+      "fields": ["Client.id", "Client.counterpartyId", "customer profile fields"],
+      "reason": "Client remains the persisted customer-role profile and compatibility boundary."
+    },
+    {
+      "domain": "Rental",
+      "fields": ["clientId", "client", "clientName"],
+      "reason": "clientId supports customer workflow; names are display snapshots; counterpartyId is canonical."
+    },
+    {
+      "domain": "Payment",
+      "fields": ["clientId", "client", "clientName"],
+      "reason": "clientId is optional for customer receivables; supplier/contractor Payments may omit it."
+    },
+    {
+      "domain": "Objects/Contracts/Documents",
+      "fields": ["clientId", "client snapshots"],
+      "reason": "Objects/Contracts/Documents remain explicitly outside I-GC migration scope; ClientObject already has Counterparty integrity support."
+    },
+    {
+      "domain": "Receivables/debt",
+      "fields": ["clientId", "unlinked display group keys"],
+      "reason": "Customer-profile grouping remains valid compatibility and does not own Payment identity."
+    },
+    {
+      "domain": "Service/Delivery/GSM",
+      "fields": ["clientId", "client display metadata"],
+      "reason": "These domains require separate bounded migrations; current metadata must not be treated as Counterparty identity."
+    },
+    {
+      "domain": "Finance snapshots",
+      "fields": ["finance_operations.counterparty", "company_expenses.counterparty"],
+      "reason": "They remain text snapshots; Accounts Payable is not designed in I-GC."
+    }
+  ],
+  "nextStageCandidates": [
+    {
+      "priority": 1,
+      "stage": "I-H",
+      "domain": "Documents & Contracts Counterparty Relations",
+      "reason": "This is the nearest remaining domain with persisted name/client compatibility joins adjacent to canonical Rental and Payment IDs."
+    },
+    {
+      "priority": 2,
+      "domain": "Delivery Counterparty Relations",
+      "reason": "Delivery forms still contain company-name recovery and should be migrated separately from Documents."
+    },
+    {
+      "priority": 3,
+      "domain": "Service and GSM consumers",
+      "reason": "Operational consumers still carry Client/name compatibility and need bounded domain decisions."
+    }
+  ]
+}

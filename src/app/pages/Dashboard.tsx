@@ -3987,7 +3987,11 @@ export default function Dashboard() {
   // 7. Клиенты со статусом blocked + активными арендами
   const blockedClientsWithRentals = computedClients.filter(c => c.status === 'blocked');
   blockedClientsWithRentals.forEach(c => {
-    const hasActive = activeRentalsList.some(r => r.clientId === c.id || (!r.clientId && r.client === c.company));
+    const hasActive = activeRentalsList.some(r => (
+      r.counterpartyId || c.counterpartyId
+        ? Boolean(r.counterpartyId && c.counterpartyId && r.counterpartyId === c.counterpartyId)
+        : r.clientId === c.id
+    ));
     if (hasActive) {
       rawAlertItems.push({
         id: `blocked-client-${c.id}`,

@@ -219,6 +219,7 @@ function buildRentalDebtRows(rentals, payments, options) {
           : 'unpaid';
       return {
         rentalId: rental.id,
+        counterpartyId: String(rental.counterpartyId || '').trim(),
         clientId: getStableClientId(rental) || '',
         client: getClientName(rental),
         objectId: rental.objectId || '',

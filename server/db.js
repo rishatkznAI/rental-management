@@ -51,6 +51,7 @@ const JSON_COLLECTIONS = [
   'rental_change_requests',
   'service',
   'warranty_claims',
+  'counterparties',
   'clients',
   'client_objects',
   'client_contracts',
@@ -267,6 +268,22 @@ function setData(name, value) {
   }
 }
 
+function setDataBatch(entries) {
+  const normalizedEntries = Array.isArray(entries)
+    ? entries.map(entry => ({ name: entry?.name, value: entry?.value }))
+    : [];
+  if (normalizedEntries.length === 0) return;
+  for (const entry of normalizedEntries) {
+    if (!entry.name) throw new Error('Collection name is required for batch write');
+  }
+
+  const db = ensureDb();
+  const tx = db.transaction((rows) => {
+    for (const entry of rows) setData(entry.name, entry.value);
+  });
+  tx(normalizedEntries);
+}
+
 function migrateJsonFilesToDb() {
   const db = ensureDb();
   const hasRows = db.prepare('SELECT COUNT(*) AS count FROM app_data').get().count > 0;
@@ -401,4 +418,5 @@ module.exports = {
   resetAppData,
   saveSession,
   syncClientInnIndex,
+  setDataBatch,
 };

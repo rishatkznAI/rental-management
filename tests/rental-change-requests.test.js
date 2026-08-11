@@ -454,12 +454,13 @@ test('resolveRentalForChangeRequest merges request snapshot into existing broken
   assert.equal(result.linkedGanttRentalId, 'GR-1776254974522');
 });
 
-test('resolveRentalForChangeRequest falls back to unique open client rental with previous dates', () => {
+test('resolveRentalForChangeRequest falls back to unique open stable-client rental with previous dates', () => {
   const result = resolveRentalForChangeRequest({
     rentalId: 'GR-1776254974522',
     linkedGanttRentalId: 'GR-1776254974522',
     fallbackGanttRental: {
       id: 'GR-1776254974522',
+      clientId: 'C-032',
       client: 'Стройтрест Алабуга',
       startDate: '2026-04-07',
       endDate: '2026-04-09',
@@ -468,6 +469,7 @@ test('resolveRentalForChangeRequest falls back to unique open client rental with
     },
     rentals: [{
       id: 'R-032',
+      clientId: 'C-032',
       client: 'ООО Стройтрест-Алабуга',
       startDate: '2026-04-10',
       plannedReturnDate: '2026-04-20',
@@ -476,6 +478,7 @@ test('resolveRentalForChangeRequest falls back to unique open client rental with
     }],
     ganttRentals: [{
       id: 'GR-1776254974522',
+      clientId: 'C-032',
       client: 'Стройтрест Алабуга',
       startDate: '2026-04-07',
       endDate: '2026-04-09',
@@ -488,15 +491,16 @@ test('resolveRentalForChangeRequest falls back to unique open client rental with
   assert.equal(result.rentalId, 'R-032');
 });
 
-test('resolveRentalForChangeRequest returns 409 for ambiguous fallback matches', () => {
+test('resolveRentalForChangeRequest returns 409 for ambiguous stable-client fallback matches', () => {
   const result = resolveRentalForChangeRequest({
     rentalId: 'GR-ambiguous',
     rentals: [
-      { ...rental, id: 'R-ambiguous-1' },
-      { ...rental, id: 'R-ambiguous-2' },
+      { ...rental, id: 'R-ambiguous-1', clientId: 'C-ambiguous' },
+      { ...rental, id: 'R-ambiguous-2', clientId: 'C-ambiguous' },
     ],
     ganttRentals: [{
       id: 'GR-ambiguous',
+      clientId: 'C-ambiguous',
       client: rental.client,
       startDate: rental.startDate,
       endDate: rental.plannedReturnDate,
@@ -552,13 +556,14 @@ test('resolveRentalForChangeRequest returns 409 when equipment alias fallback is
 test('backfillGanttRentalLinks links only unambiguous legacy gantt records', () => {
   const state = {
     rentals: [
-      { ...rental, id: 'R-linked' },
-      { ...rental, id: 'R-ambiguous-1', client: 'Дубль' },
-      { ...rental, id: 'R-ambiguous-2', client: 'Дубль' },
+      { ...rental, id: 'R-linked', clientId: 'C-linked' },
+      { ...rental, id: 'R-ambiguous-1', clientId: 'C-duplicate', client: 'Дубль' },
+      { ...rental, id: 'R-ambiguous-2', clientId: 'C-duplicate', client: 'Дубль' },
     ],
     gantt_rentals: [
       {
         id: 'GR-linked',
+        clientId: 'C-linked',
         client: rental.client,
         startDate: rental.startDate,
         endDate: rental.plannedReturnDate,
@@ -566,6 +571,7 @@ test('backfillGanttRentalLinks links only unambiguous legacy gantt records', () 
       },
       {
         id: 'GR-ambiguous',
+        clientId: 'C-duplicate',
         client: 'Дубль',
         startDate: rental.startDate,
         endDate: rental.plannedReturnDate,
@@ -1111,7 +1117,7 @@ test('linked stale gantt equipment does not override rental equipment and approv
     assert.equal(changeRequest.linkedGanttRentalId, 'GR-Y');
     assert.equal(changeRequest.equipmentId, 'EQ-Y');
     assert.equal(changeRequest.equipmentInventoryNumber, 'INV-Y');
-    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-Y').equipmentId, 'EQ-Y');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-Y').equipmentId, 'EQ-X');
 
     const approved = await request(baseUrl, 'POST', `/api/rental_change_requests/${changeRequest.id}/approve`, 'admin-token', {});
 
@@ -1191,7 +1197,7 @@ test('PATCH /api/rentals/:id resolves GR route id through gantt_rentals.rentalId
   });
 });
 
-test('PATCH /api/rentals/:id resolves stale GR route id through request Gantt snapshot', async () => {
+test('PATCH /api/rentals/:id rejects a snapshot-only GR route without a stable Classic link', async () => {
   const { app, state } = createApprovalApp();
 
   await withServer(app, async (baseUrl) => {
@@ -1213,17 +1219,14 @@ test('PATCH /api/rentals/:id resolves stale GR route id through request Gantt sn
       __changeReason: 'Изменение цены из stale Gantt',
     });
 
-    assert.equal(update.status, 200);
-    assert.equal(update.body.id, 'R-1');
-    assert.equal(state.rental_change_requests.length, 1);
-    assert.equal(state.rental_change_requests[0].rentalId, 'R-1');
-    assert.equal(state.rental_change_requests[0].sourceRentalId, 'GR-stale-browser');
-    assert.equal(state.rental_change_requests[0].linkedGanttRentalId, 'GR-stale-browser');
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.equal(state.rental_change_requests.length, 0);
     assert.equal(state.rentals.find(item => item.id === 'R-1').price, 100000);
   });
 });
 
-test('PATCH /api/rentals/:id resolves real stale GR for equipment 03291436 through snapshot aliases', async () => {
+test('PATCH /api/rentals/:id does not resolve a stale GR by equipment aliases', async () => {
   const { app, state } = createApprovalApp();
   state.rentals.find(item => item.id === 'R-032').client = 'ООО Стройтрест-Алабуга';
 
@@ -1247,17 +1250,14 @@ test('PATCH /api/rentals/:id resolves real stale GR for equipment 03291436 throu
       __changeReason: 'Изменение цены из проблемной карточки',
     });
 
-    assert.equal(update.status, 200);
-    assert.equal(update.body.id, 'R-032');
-    assert.equal(state.rental_change_requests.length, 1);
-    assert.equal(state.rental_change_requests[0].rentalId, 'R-032');
-    assert.equal(state.rental_change_requests[0].sourceRentalId, 'GR-1776254974522');
-    assert.equal(state.rental_change_requests[0].linkedGanttRentalId, 'GR-1776254974522');
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.equal(state.rental_change_requests.length, 0);
     assert.equal(state.rentals.find(item => item.id === 'R-032').price, 90000);
   });
 });
 
-test('PATCH /api/rentals/:id creates approval when moving stale 03291436 rental start to 07.04', async () => {
+test('PATCH /api/rentals/:id does not create approval from stale GR equipment/date fallback', async () => {
   const { app, state } = createApprovalApp();
   state.rentals.find(item => item.id === 'R-032').client = 'ООО Стройтрест-Алабуга';
 
@@ -1281,17 +1281,14 @@ test('PATCH /api/rentals/:id creates approval when moving stale 03291436 rental 
       __changeReason: 'Перенос начала аренды 03291436 на 07.04',
     });
 
-    assert.equal(update.status, 200);
-    assert.equal(update.body.id, 'R-032');
-    assert.equal(state.rental_change_requests.length, 1);
-    assert.equal(state.rental_change_requests[0].rentalId, 'R-032');
-    assert.equal(state.rental_change_requests[0].field, 'startDate');
-    assert.equal(state.rental_change_requests[0].newValue, '2026-04-07');
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.equal(state.rental_change_requests.length, 0);
     assert.equal(state.rentals.find(item => item.id === 'R-032').startDate, '2026-04-10');
   });
 });
 
-test('PATCH /api/rentals/:id resolves stale 03291436 by client and equipment when moved dates do not overlap', async () => {
+test('PATCH /api/rentals/:id does not resolve stale GR by client/equipment fallback', async () => {
   const { app, state } = createApprovalApp();
 
   await withServer(app, async (baseUrl) => {
@@ -1318,19 +1315,15 @@ test('PATCH /api/rentals/:id resolves stale 03291436 by client and equipment whe
       __changeReason: 'Перенос аренды 03291436 на 07.04',
     });
 
-    assert.equal(update.status, 200);
-    assert.equal(update.body.id, 'R-032');
-    assert.equal(state.rental_change_requests.length, 2);
-    assert.deepEqual(
-      state.rental_change_requests.map(item => item.field).sort(),
-      ['plannedReturnDate', 'startDate'],
-    );
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.equal(state.rental_change_requests.length, 0);
     assert.equal(state.rentals.find(item => item.id === 'R-032').startDate, '2026-04-10');
     assert.equal(state.rentals.find(item => item.id === 'R-032').plannedReturnDate, '2026-04-20');
   });
 });
 
-test('PATCH /api/rentals/:id resolves stale 03291436 by the only open equipment rental', async () => {
+test('PATCH /api/rentals/:id does not resolve stale GR by open-equipment fallback', async () => {
   const { app, state } = createApprovalApp();
   const currentRental = state.rentals.find(item => item.id === 'R-032');
   currentRental.client = 'Другой snapshot клиента';
@@ -1369,14 +1362,14 @@ test('PATCH /api/rentals/:id resolves stale 03291436 by the only open equipment 
       __changeReason: 'Перенос аренды 03291436 на 07.04',
     });
 
-    assert.equal(update.status, 200);
-    assert.equal(update.body.id, 'R-032');
-    assert.equal(state.rental_change_requests.length, 2);
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.equal(state.rental_change_requests.length, 0);
     assert.equal(state.rentals.find(item => item.id === 'R-032').startDate, '2026-04-10');
   });
 });
 
-test('PATCH /api/rentals/:id resolves stale 03291436 when inventory is only in text labels', async () => {
+test('PATCH /api/rentals/:id does not resolve stale GR from inventory text labels', async () => {
   const { app, state } = createApprovalApp();
   const currentRental = state.rentals.find(item => item.id === 'R-032');
   currentRental.client = 'Другой snapshot клиента';
@@ -1408,14 +1401,14 @@ test('PATCH /api/rentals/:id resolves stale 03291436 when inventory is only in t
       __changeReason: 'Перенос аренды 03291436 на 07.04',
     });
 
-    assert.equal(update.status, 200);
-    assert.equal(update.body.id, 'R-032');
-    assert.equal(state.rental_change_requests.length, 2);
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.equal(state.rental_change_requests.length, 0);
     assert.equal(state.rentals.find(item => item.id === 'R-032').startDate, '2026-04-10');
   });
 });
 
-test('PATCH /api/rentals/:id merges snapshot with existing broken GR record', async () => {
+test('PATCH /api/rentals/:id does not merge request snapshot into a broken GR write', async () => {
   const { app, state } = createApprovalApp();
   const currentRental = state.rentals.find(item => item.id === 'R-032');
   currentRental.client = 'Другой snapshot клиента';
@@ -1455,15 +1448,14 @@ test('PATCH /api/rentals/:id merges snapshot with existing broken GR record', as
       __changeReason: 'Перенос аренды 03291436 на 07.04',
     });
 
-    assert.equal(update.status, 200);
-    assert.equal(update.body.id, 'R-032');
-    assert.equal(state.rental_change_requests.length, 2);
-    assert.equal(state.rental_change_requests[0].linkedGanttRentalId, 'GR-1776254974522');
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.equal(state.rental_change_requests.length, 0);
     assert.equal(state.rentals.find(item => item.id === 'R-032').startDate, '2026-04-10');
   });
 });
 
-test('PATCH /api/rentals/:id resolves broken GR by client and old dates when equipment is missing', async () => {
+test('PATCH /api/rentals/:id does not resolve broken GR by client/date fallback', async () => {
   const { app, state } = createApprovalApp();
   const currentRental = state.rentals.find(item => item.id === 'R-032');
   currentRental.client = 'ООО Стройтрест-Алабуга';
@@ -1502,14 +1494,14 @@ test('PATCH /api/rentals/:id resolves broken GR by client and old dates when equ
       __changeReason: 'Перенос аренды 03291436 на 07.04',
     });
 
-    assert.equal(update.status, 200);
-    assert.equal(update.body.id, 'R-032');
-    assert.equal(state.rental_change_requests.length, 2);
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.equal(state.rental_change_requests.length, 0);
     assert.equal(state.rentals.find(item => item.id === 'R-032').startDate, '2026-04-10');
   });
 });
 
-test('PATCH /api/rentals/:id restores orphan gantt rental before creating approval', async () => {
+test('PATCH /api/rentals/:id reports orphan Gantt and cannot recreate Classic rental', async () => {
   const { app, state } = createApprovalApp();
   state.rentals = state.rentals.filter(item => item.id !== 'R-032');
   state.gantt_rentals.push({
@@ -1524,6 +1516,11 @@ test('PATCH /api/rentals/:id restores orphan gantt rental before creating approv
     status: 'active',
     amount: 90000,
     comments: [],
+  });
+  const before = structuredClone({
+    rentals: state.rentals,
+    ganttRentals: state.gantt_rentals,
+    changeRequests: state.rental_change_requests,
   });
 
   await withServer(app, async (baseUrl) => {
@@ -1549,21 +1546,15 @@ test('PATCH /api/rentals/:id restores orphan gantt rental before creating approv
       __changeReason: 'Перенос аренды 03291436 на 07.04',
     });
 
-    assert.equal(update.status, 200);
-    assert.match(update.body.id, /^R-/);
-    assert.notEqual(update.body.id, 'GR-1776254974522');
-    const restoredRental = state.rentals.find(item => item.id === update.body.id);
-    assert.equal(restoredRental.client, 'Стройтрест Алабуга');
-    assert.equal(restoredRental.startDate, '2026-04-10');
-    assert.equal(restoredRental.plannedReturnDate, '2026-04-20');
-    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1776254974522').rentalId, update.body.id);
-    assert.equal(state.rental_change_requests.length, 2);
-    assert.equal(state.rental_change_requests[0].rentalId, update.body.id);
-    assert.equal(state.rental_change_requests[0].linkedGanttRentalId, 'GR-1776254974522');
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.deepEqual(state.rentals, before.rentals);
+    assert.deepEqual(state.gantt_rentals, before.ganttRentals);
+    assert.deepEqual(state.rental_change_requests, before.changeRequests);
   });
 });
 
-test('PATCH /api/rentals/:id saves downtime for orphan gantt rental with stale placeholder inventory', async () => {
+test('PATCH /api/rentals/:id rejects downtime for orphan Gantt without repair side effects', async () => {
   const { app, state } = createApprovalApp();
   state.rentals = state.rentals.filter(item => item.id !== 'R-032');
   state.gantt_rentals.push({
@@ -1580,6 +1571,11 @@ test('PATCH /api/rentals/:id saves downtime for orphan gantt rental with stale p
     status: 'active',
     amount: 180000,
     comments: [],
+  });
+  const before = structuredClone({
+    rentals: state.rentals,
+    ganttRentals: state.gantt_rentals,
+    changeRequests: state.rental_change_requests,
   });
 
   await withServer(app, async (baseUrl) => {
@@ -1624,36 +1620,15 @@ test('PATCH /api/rentals/:id saves downtime for orphan gantt rental with stale p
       __changeReason: 'Простой техники SN-032: 2026-04-10 → 2026-04-11. Ожидание клиента',
     });
 
-    assert.equal(update.status, 200);
-    assert.match(update.body.id, /^R-/);
-    assert.equal(update.body.downtimeDays, 2);
-    assert.equal(update.body.downtimeReason, 'Ожидание клиента (период 2026-04-10 → 2026-04-11)');
-    assert.equal(update.body.downtimeStartDate, '2026-04-10');
-    assert.equal(update.body.downtimeEndDate, '2026-04-11');
-    assert.equal(update.body.downtimeComment, 'Акт от клиента');
-    assert.equal(update.body.downtimeStatus, 'active');
-    assert.equal(update.body.equipmentId, 'EQ-032');
-    assert.equal(update.body.equipmentInv, '03291436');
-    assert.deepEqual(update.body.equipment, ['03291436']);
-
-    const repairedGantt = state.gantt_rentals.find(item => item.id === 'GR-1776324984409');
-    assert.equal(repairedGantt.rentalId, update.body.id);
-    assert.equal(repairedGantt.sourceRentalId, update.body.id);
-    assert.equal(repairedGantt.equipmentId, 'EQ-032');
-    assert.equal(repairedGantt.equipmentInv, '03291436');
-    assert.equal(repairedGantt.inventoryNumber, '03291436');
-    assert.equal(repairedGantt.serialNumber, 'SN-032');
-    assert.equal(repairedGantt.downtimeDays, 2);
-    assert.equal(repairedGantt.downtimeReason, 'Ожидание клиента (период 2026-04-10 → 2026-04-11)');
-    assert.equal(repairedGantt.downtimeStartDate, '2026-04-10');
-    assert.equal(repairedGantt.downtimeEndDate, '2026-04-11');
-    assert.equal(repairedGantt.downtimeComment, 'Акт от клиента');
-    assert.equal(repairedGantt.downtimeStatus, 'active');
-    assert.equal(state.rental_change_requests.length, 0);
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.deepEqual(state.rentals, before.rentals);
+    assert.deepEqual(state.gantt_rentals, before.ganttRentals);
+    assert.deepEqual(state.rental_change_requests, before.changeRequests);
   });
 });
 
-test('PATCH /api/rentals/:id saves downtime for subrental equipment without inventory number', async () => {
+test('PATCH /api/rentals/:id rejects orphan subrental Gantt without creating Classic rental', async () => {
   const { app, state } = createApprovalApp();
   state.equipment.push({
     id: 'EQ-subrent',
@@ -1675,6 +1650,11 @@ test('PATCH /api/rentals/:id saves downtime for subrental equipment without inve
     status: 'active',
     amount: 180000,
     comments: [],
+  });
+  const before = structuredClone({
+    rentals: state.rentals,
+    ganttRentals: state.gantt_rentals,
+    changeRequests: state.rental_change_requests,
   });
 
   await withServer(app, async (baseUrl) => {
@@ -1719,30 +1699,11 @@ test('PATCH /api/rentals/:id saves downtime for subrental equipment without inve
       __changeReason: 'Простой техники SN-SUBRENT-1',
     });
 
-    assert.equal(update.status, 200);
-    assert.equal(update.body.equipmentId, 'EQ-subrent');
-    assert.equal(update.body.equipmentInv, '');
-    assert.equal(update.body.inventoryNumber, '');
-    assert.equal(update.body.serialNumber, 'SN-SUBRENT-1');
-    assert.deepEqual(update.body.equipment, ['SN-SUBRENT-1']);
-    assert.equal(update.body.downtimeDays, 1);
-    assert.equal(update.body.downtimeStartDate, '2026-04-10');
-    assert.equal(update.body.downtimeEndDate, '2026-04-10');
-    assert.equal(update.body.downtimeComment, 'Субарендная техника');
-    assert.equal(update.body.downtimeStatus, 'active');
-
-    const repairedGantt = state.gantt_rentals.find(item => item.id === 'GR-subrent-orphan');
-    assert.equal(repairedGantt.rentalId, update.body.id);
-    assert.equal(repairedGantt.equipmentId, 'EQ-subrent');
-    assert.equal(repairedGantt.equipmentInv, '');
-    assert.equal(repairedGantt.inventoryNumber, '');
-    assert.equal(repairedGantt.serialNumber, 'SN-SUBRENT-1');
-    assert.deepEqual(repairedGantt.equipment, ['SN-SUBRENT-1']);
-    assert.equal(repairedGantt.downtimeDays, 1);
-    assert.equal(repairedGantt.downtimeStartDate, '2026-04-10');
-    assert.equal(repairedGantt.downtimeEndDate, '2026-04-10');
-    assert.equal(repairedGantt.downtimeComment, 'Субарендная техника');
-    assert.equal(repairedGantt.downtimeStatus, 'active');
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.deepEqual(state.rentals, before.rentals);
+    assert.deepEqual(state.gantt_rentals, before.ganttRentals);
+    assert.deepEqual(state.rental_change_requests, before.changeRequests);
   });
 });
 
@@ -2140,7 +2101,7 @@ test('gantt create restores rentalId from one exact classic rental match', async
   });
 });
 
-test('rentals patch repairs old gantt entry without rentalId when exactly one rental matches', async () => {
+test('rentals patch does not repair an old Gantt entry without rentalId', async () => {
   const { app, state } = createApprovalApp();
   const gantt = state.gantt_rentals.find(item => item.id === 'GR-1');
   delete gantt.rentalId;
@@ -2158,10 +2119,10 @@ test('rentals patch repairs old gantt entry without rentalId when exactly one re
       __changeReason: 'legacy gantt repair',
     });
 
-    assert.equal(update.status, 200);
-    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').rentalId, 'R-1');
-    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').sourceRentalId, 'R-1');
-    assert.equal(state.rental_change_requests[0].rentalId, 'R-1');
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').rentalId, undefined);
+    assert.equal(state.rental_change_requests.length, 0);
   });
 });
 
@@ -2209,7 +2170,8 @@ test('rentals patch returns clear error when legacy gantt has no rental match', 
       changes: [{ field: 'price', oldValue: 100000, newValue: 123000 }],
       __changeReason: 'missing legacy gantt repair',
     });
-    assert.equal(update.status, 404);
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
   });
 });
 
@@ -2304,7 +2266,7 @@ test('ensureGanttRentalLink repairs legacy equipment fields from canonical renta
   assert.deepEqual(linked.equipment, ['INV-Y']);
 });
 
-test('rentals patch repairs wrong legacy gantt equipment from matched rental', async () => {
+test('rentals patch does not repair wrong legacy Gantt equipment by matching labels', async () => {
   const { app, state } = createApprovalApp();
   const gantt = state.gantt_rentals.find(item => item.id === 'GR-1');
   delete gantt.rentalId;
@@ -2324,16 +2286,13 @@ test('rentals patch repairs wrong legacy gantt equipment from matched rental', a
       __changeReason: 'legacy gantt equipment repair',
     });
 
-    assert.equal(update.status, 200);
-    const repaired = state.gantt_rentals.find(item => item.id === 'GR-1');
-    assert.equal(repaired.rentalId, 'R-1');
-    assert.equal(repaired.equipmentId, 'EQ-1');
-    assert.equal(repaired.equipmentInv, '083');
-
-    const listed = await request(baseUrl, 'GET', '/api/gantt_rentals', 'manager-token');
-    const dto = listed.body.find(item => item.id === 'GR-1');
-    assert.equal(dto.equipmentId, 'EQ-1');
-    assert.equal(dto.equipmentInv, '083');
+    assert.equal(update.status, 409);
+    assert.equal(update.body.code, 'ORPHAN_GANTT_PROJECTION');
+    const unchanged = state.gantt_rentals.find(item => item.id === 'GR-1');
+    assert.equal(unchanged.rentalId, undefined);
+    assert.equal(unchanged.equipmentId, 'EQ-032');
+    assert.equal(unchanged.equipmentInv, '03291436');
+    assert.equal(state.rental_change_requests.length, 0);
   });
 });
 

@@ -449,9 +449,12 @@ export default function ClientDetail() {
   const { data: debtPlanResponse } = useDebtCollectionPlans();
   const { data: crmActivities = [] } = useCrmActivities(client ? { clientId: client.id } : undefined, Boolean(isCrmEnabled && client && can('view', 'crm')));
   const debtCollectionPlans = debtPlanResponse?.plans ?? [];
-  const clientNameKey = normalizeClientName(client?.company);
   const clientRentals = ganttRentals.filter(r =>
-    client && (r.clientId === client.id || (!r.clientId && clientNameKey && normalizeClientName(r.client) === clientNameKey)),
+    client && (
+      r.counterpartyId || client.counterpartyId
+        ? Boolean(r.counterpartyId && client.counterpartyId && r.counterpartyId === client.counterpartyId)
+        : r.clientId === client.id
+    ),
   );
   const activeRentals = clientRentals.filter(r => r.status === 'active' || r.status === 'created');
 

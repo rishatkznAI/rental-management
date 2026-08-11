@@ -26,8 +26,9 @@ function createSystemApp(overrides = {}) {
   registerSystemRoutes(app, {
     readData,
     writeData: overrides.writeData || (() => {}),
+    writeDataBatch: overrides.writeDataBatch,
     getSnapshot: overrides.getSnapshot || (() => ({})),
-    saveSnapshot: () => {},
+    saveSnapshot: overrides.saveSnapshot || (() => {}),
     botToken: 'token-present',
     getBotUsers: () => ({}),
     sendMessage: async (target, text) => {
@@ -2264,6 +2265,37 @@ test('/api/admin/system-data/import requires confirmation and preserves existing
   });
 });
 
+test('/api/admin/system-data/import batch failure leaves every collection unchanged', async () => {
+  const collections = {
+    equipment: [{ id: 'EQ-1', serialNumber: 'OLD' }],
+    users: [{ id: 'U-1', email: 'admin@example.test', password: 'existing-password', tokenVersion: 3 }],
+  };
+  const before = structuredClone(collections);
+  let legacyWriteCount = 0;
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: () => { legacyWriteCount += 1; },
+    writeDataBatch: () => {
+      throw new Error('Injected system import batch failure');
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        equipment: [{ id: 'EQ-2', serialNumber: 'NEW' }],
+        users: [{ id: 'U-1', email: 'restored@example.test' }],
+      },
+    });
+
+    assert.equal(response.status, 500);
+    assert.equal(response.body.code, 'SYSTEM_IMPORT_PERSISTENCE_FAILED');
+    assert.equal(legacyWriteCount, 0);
+    assert.deepEqual(collections, before);
+  });
+});
+
 test('/api/admin/system-data/import protects production smoke equipment fixture', async () => {
   const fixture = {
     id: 'EQ-smoke',
@@ -2340,6 +2372,55 @@ test('/api/admin/system-data/import rejects dangerous fields before writing', as
   });
 });
 
+test('/api/admin/system-data/import canonicalizes Payment identity and rejects metadata-only links atomically', async () => {
+  const collections = {
+    counterparties: [
+      { id: 'CP-customer', legalName: 'ООО Клиент', shortName: 'Клиент', status: 'active', roles: ['customer'] },
+      { id: 'CP-supplier', legalName: 'ООО Поставщик', shortName: 'Поставщик', status: 'active', roles: ['supplier'] },
+    ],
+    clients: [{ id: 'C-1', counterpartyId: 'CP-customer', company: 'ООО Клиент' }],
+    payments: [],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const imported = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        payments: [
+          { id: 'P-legacy', clientId: 'C-1', client: 'Снимок имени', amount: 1000 },
+          { id: 'P-supplier', counterpartyId: 'CP-supplier', amount: 2000 },
+        ],
+      },
+    });
+    assert.equal(imported.status, 200);
+    assert.equal(collections.payments[0].counterpartyId, 'CP-customer');
+    assert.equal(collections.payments[0].clientId, 'C-1');
+    assert.equal(collections.payments[1].counterpartyId, 'CP-supplier');
+    assert.equal(collections.payments[1].clientId, undefined);
+
+    const before = structuredClone(collections.payments);
+    const writeCount = writes.length;
+    const rejected = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        payments: [{ id: 'P-name-only', client: 'ООО Клиент', amount: 3000 }],
+      },
+    });
+    assert.equal(rejected.status, 400);
+    assert.match(JSON.stringify(rejected.body.errors), /COUNTERPARTY_RELATION_ID_REQUIRED/);
+    assert.deepEqual(collections.payments, before);
+    assert.equal(writes.length, writeCount);
+  });
+});
+
 test('/api/admin/system-data/import rejects duplicate client INNs before writing any collection', async () => {
   const collections = {
     equipment: [{ id: 'EQ-old', serialNumber: 'OLD' }],
@@ -2405,9 +2486,14 @@ test('/api/admin/system-data/import accepts valid clients payload', async () => 
     });
 
     assert.equal(response.status, 200);
-    assert.deepEqual(response.body.imported, { clients: 2 });
-    assert.deepEqual(writes.map(write => write.name), ['clients']);
+    assert.deepEqual(response.body.imported, { clients: 2, counterparties: 2 });
+    assert.deepEqual(writes.map(write => write.name), ['counterparties', 'clients']);
     assert.equal(collections.clients.length, 2);
+    assert.equal(collections.counterparties.length, 2);
+    assert.ok(collections.clients.every(client => collections.counterparties.some(counterparty => (
+      counterparty.id === client.counterpartyId
+      && counterparty.roles.includes('customer')
+    ))));
   });
 });
 
@@ -2478,6 +2564,56 @@ test('/api/sync rejects missing and duplicate normalized client INN', async () =
       assert.equal(duplicate.status, 409);
       assert.match(duplicate.body.error, /Клиент с таким ИНН уже существует/);
       assert.deepEqual(writes, []);
+    });
+  } finally {
+    if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;
+    else process.env.ENABLE_LEGACY_SYNC = previousEnabled;
+  }
+});
+
+test('/api/sync canonicalizes Payment relations and never resolves metadata-only identity', async () => {
+  const previousEnabled = process.env.ENABLE_LEGACY_SYNC;
+  process.env.ENABLE_LEGACY_SYNC = '1';
+  const collections = {
+    counterparties: [
+      { id: 'CP-customer', legalName: 'ООО Клиент', shortName: 'Клиент', status: 'active', roles: ['customer'] },
+      { id: 'CP-contractor', legalName: 'ИП Подрядчик', shortName: 'Подрядчик', status: 'active', roles: ['contractor'] },
+    ],
+    clients: [{ id: 'C-1', counterpartyId: 'CP-customer', company: 'ООО Клиент' }],
+    payments: [],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    getSnapshot: () => structuredClone(collections),
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const synced = await postJson(baseUrl, '/api/sync', {
+        payments: [
+          { id: 'P-legacy', clientId: 'C-1', client: 'Снимок', amount: 1000 },
+          { id: 'P-contractor', counterpartyId: 'CP-contractor', amount: 2000 },
+        ],
+      });
+      assert.equal(synced.status, 200);
+      assert.equal(collections.payments[0].counterpartyId, 'CP-customer');
+      assert.equal(collections.payments[1].counterpartyId, 'CP-contractor');
+      assert.equal(collections.payments[1].clientId, undefined);
+
+      const before = structuredClone(collections.payments);
+      const writeCount = writes.length;
+      const rejected = await postJson(baseUrl, '/api/sync', {
+        payments: [{ id: 'P-name-only', client: 'ООО Клиент', amount: 3000 }],
+      });
+      assert.equal(rejected.status, 400);
+      assert.equal(rejected.body.code, 'COUNTERPARTY_RELATION_ID_REQUIRED');
+      assert.deepEqual(collections.payments, before);
+      assert.equal(writes.length, writeCount);
     });
   } finally {
     if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;

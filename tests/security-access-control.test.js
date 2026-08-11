@@ -28,6 +28,44 @@ test('rental manager can read and mutate only own rentals', () => {
   assert.equal(access.canMutateEntity('rentals', state.rentals[1], user), false);
 });
 
+test('canonical counterpartyId takes precedence over compatibility clientId in scoped finance access', () => {
+  const state = {
+    rentals: [
+      { id: 'R-own', managerId: 'U-manager', counterpartyId: 'CP-own', clientId: 'C-own' },
+      { id: 'R-other', managerId: 'U-other', counterpartyId: 'CP-other', clientId: 'C-own' },
+    ],
+    gantt_rentals: [],
+  };
+  const access = createAccess(state);
+  const user = { userId: 'U-manager', userName: 'Руслан', userRole: 'Менеджер по аренде' };
+  const records = [
+    { id: 'P-canonical-conflict', counterpartyId: 'CP-other', clientId: 'C-own' },
+    { id: 'P-canonical-own', counterpartyId: 'CP-own', clientId: 'C-other' },
+    { id: 'P-legacy-client', clientId: 'C-own' },
+  ];
+
+  assert.deepEqual(
+    access.filterCollectionByScope('payments', records, user).map(item => item.id),
+    ['P-canonical-own', 'P-legacy-client'],
+  );
+});
+
+test('Counterparty relation bulk input rejects missing and duplicate stable IDs', () => {
+  const access = createAccess({});
+
+  assert.throws(
+    () => access.assertSafeAdminBulkReplaceInput('payments', [
+      { id: 'P-1', counterpartyId: 'CP-1' },
+      { id: 'P-1', counterpartyId: 'CP-2' },
+    ]),
+    error => error.status === 409 && error.code === 'COUNTERPARTY_RELATION_AMBIGUOUS',
+  );
+  assert.throws(
+    () => access.assertSafeAdminBulkReplaceInput('clients', [{ counterpartyId: 'CP-1' }]),
+    error => error.status === 409 && error.code === 'COUNTERPARTY_RELATION_ID_REQUIRED',
+  );
+});
+
 test('rental manager can view service vehicles but cannot mutate them', () => {
   const state = {
     service_vehicles: [{ id: 'SV-1', plateNumber: 'A001AA' }],

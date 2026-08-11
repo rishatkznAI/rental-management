@@ -93,7 +93,7 @@ function buildCashFlow(payload = {}, options = {}) {
           direction: 'incoming',
           amount: paidAmount,
           status: payment.status || 'paid',
-          clientName: payment.client || payment.clientName || '',
+          clientName: payment.counterparty?.shortName || payment.counterparty?.legalName || payment.client || payment.clientName || '',
           description: payment.invoiceNumber ? `Оплата ${payment.invoiceNumber}` : 'Оплата клиента',
           link: payment.rentalId ? `/rentals/${payment.rentalId}` : '',
         }, settings, includeVat));

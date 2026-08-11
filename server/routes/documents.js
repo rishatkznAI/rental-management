@@ -282,6 +282,7 @@ function registerDocumentRoutes(router, deps) {
           context: `documents:${item?.id || item?.rentalId || item?.number || 'new'}`,
           relatedRentalsById: relatedRentalsById(),
           logger: console,
+          allowLegacyRecovery: false,
         })
       : item;
     const enriched = enrichRecordFromRentalLinks(linked, readData);

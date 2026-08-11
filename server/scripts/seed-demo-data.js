@@ -137,6 +137,7 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
     ['005', 'Монтаж Демо Групп', 'DEMO-INN-0000000005', 'Нина Контурова', 'client-005@example.test', 250000],
   ].map(([suffix, company, inn, contactPerson, email, creditLimit], index) => ({
     id: `DEMO-CLIENT-${suffix}`,
+    counterpartyId: `DEMO-COUNTERPARTY-${suffix}`,
     name: company,
     company,
     inn,
@@ -152,6 +153,29 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
     riskLevel: index === 0 ? 'Средний' : 'Низкий',
     fixtureTag: DEMO_PREFIX,
     createdAt: nowIso,
+  }));
+
+  const counterparties = clients.map(client => ({
+    id: client.counterpartyId,
+    type: 'legal_entity',
+    legalName: client.company,
+    shortName: client.company,
+    inn: String(client.inn || '').replace(/\D+/g, ''),
+    kpp: null,
+    ogrn: null,
+    ogrnip: null,
+    legalAddress: null,
+    actualAddress: null,
+    email: client.email,
+    phone: client.phone,
+    website: null,
+    notes: null,
+    status: 'active',
+    roles: ['customer'],
+    fixtureTag: DEMO_PREFIX,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    archivedAt: null,
   }));
 
   const equipmentSpecs = [
@@ -213,6 +237,7 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
       rentalId: `DEMO-RENTAL-${suffix}`,
       number: `DEMO-R-${suffix}`,
       clientId: client.id,
+      counterpartyId: client.counterpartyId,
       clientName: client.company,
       client: client.company,
       contact: client.contactPerson,
@@ -308,6 +333,7 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
   const payments = rentals.slice(0, 5).map((rental, index) => ({
     id: `DEMO-PAYMENT-${String(index + 1).padStart(3, '0')}`,
     invoice: `DEMO-PAY-${String(index + 1).padStart(3, '0')}`,
+    counterpartyId: rental.counterpartyId,
     clientId: rental.clientId,
     clientName: rental.clientName,
     rentalId: rental.id,
@@ -522,6 +548,7 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
 
   return {
     users,
+    counterparties,
     clients,
     equipment,
     rentals,

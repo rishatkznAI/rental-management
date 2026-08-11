@@ -707,6 +707,7 @@ export interface RentalDowntimePeriod {
 
 export interface Rental {
   id: string;
+  counterpartyId?: string;
   clientId?: string;
   objectId?: string;
   contractId?: string;
@@ -1166,16 +1167,19 @@ export interface ClientContactPerson {
 
 export interface Client {
   id: string;
+  counterpartyId?: string;
   company: string;
   inn: string;
   innNormalized?: string;
   kpp?: string;
   ogrn?: string;
+  ogrnip?: string;
   clientType?: 'legal' | 'individual_entrepreneur' | 'individual' | string;
   verified?: boolean;
   contact: string;
   phone: string;
   email: string;
+  website?: string;
   contacts?: ClientContactPerson[];
   address?: string;
   legalAddress?: string;
@@ -1200,9 +1204,44 @@ export interface Client {
   history?: AuditEntry[];
 }
 
+export type CounterpartyType = 'legal_entity' | 'individual_entrepreneur' | 'individual';
+export type CounterpartyRole = 'customer' | 'supplier' | 'contractor';
+export type CounterpartyStatus = 'active' | 'inactive' | 'archived';
+
+export interface CounterpartyDuplicateWarning {
+  code: 'COUNTERPARTY_POSSIBLE_DUPLICATE';
+  counterpartyId?: string;
+  legalName: string;
+  matchedBy: 'normalized_name';
+}
+
+export interface Counterparty {
+  id: string;
+  type: CounterpartyType;
+  legalName: string;
+  shortName: string;
+  inn: string | null;
+  kpp: string | null;
+  ogrn: string | null;
+  ogrnip: string | null;
+  legalAddress: string | null;
+  actualAddress: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  notes: string | null;
+  status: CounterpartyStatus;
+  roles: CounterpartyRole[];
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+  warnings?: CounterpartyDuplicateWarning[];
+}
+
 export interface ClientObject {
   id: string;
   clientId: string;
+  counterpartyId?: string;
   name: string;
   address: string;
   contactName?: string;
@@ -1433,10 +1472,12 @@ export interface Payment {
   id: string;
   invoiceNumber: string;
   rentalId?: string;       // link to GanttRental id
+  counterpartyId?: string | null;
   clientId?: string;
   objectId?: string;
   contractId?: string;
-  client: string;
+  client?: string;
+  counterparty?: Pick<Counterparty, 'id' | 'legalName' | 'shortName' | 'roles' | 'status' | 'inn' | 'phone'> | null;
   amount: number;          // total amount due
   paidAmount?: number;     // amount actually paid (for partial)
   dueDate: string;

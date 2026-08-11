@@ -57,6 +57,7 @@ const RENTAL_AUDIT_FIELD_LABELS = {
   id: 'ID',
   client: 'Клиент',
   clientId: 'ID клиента',
+  counterpartyId: 'ID контрагента',
   rental: 'Аренда',
   rentalId: 'ID аренды',
   equipment: 'Техника',
@@ -346,6 +347,7 @@ function registerRentalRoutes(deps) {
     idPrefixes,
     accessControl,
     auditLog,
+    canonicalizeRentalRelationForWrite = item => item,
     botNotifications = null,
   } = deps;
 
@@ -392,18 +394,23 @@ function registerRentalRoutes(deps) {
       return normalizeRecordClientLink(item, readData('clients') || [], {
         context: context || `${collection}:${item?.id || 'new'}`,
         logger: console,
+        allowLegacyRecovery: false,
       });
     }
 
     function normalizeRentalRelationLinks(item, existing = null) {
       const clientId = item?.clientId || existing?.clientId;
-      if (!clientId && !item?.objectId && !item?.contractId) return item;
-      return normalizeClientRelationLinks(item, clientId, {
-        readData,
-        requireRentalRelations: collection === 'rentals' && !existing,
-        requireActiveObject: !existing || String(item?.objectId || '') !== String(existing?.objectId || ''),
-        allowArchivedObjectId: existing?.objectId,
-      });
+      const normalized = (!clientId && !item?.objectId && !item?.contractId)
+        ? item
+        : normalizeClientRelationLinks(item, clientId, {
+          readData,
+          requireRentalRelations: collection === 'rentals' && !existing,
+          requireActiveObject: !existing || String(item?.objectId || '') !== String(existing?.objectId || ''),
+          allowArchivedObjectId: existing?.objectId,
+        });
+      return collection === 'rentals'
+        ? canonicalizeRentalRelationForWrite(normalized)
+        : normalized;
     }
 
     function buildLinkedGanttRentalUpdate(linkedGanttRentalId, previousRental, nextRental, author) {
@@ -568,28 +575,13 @@ function registerRentalRoutes(deps) {
       return (equipmentList || []).find(equipment => rentalMatchesEquipment(rental, equipment, equipmentList)) || null;
     }
 
-    function findLinkedGanttRental(classicRental, routeId) {
+    function findLinkedGanttRental(classicRental) {
       const ganttRentals = readData('gantt_rentals') || [];
-      const normalizedRouteId = String(routeId || '');
       const classicId = String(classicRental?.id || '');
-      return ganttRentals.find(item => String(item.id || '') === normalizedRouteId)
-        || ganttRentals.find(item =>
+      return ganttRentals.find(item =>
           classicId &&
           [item.rentalId, item.sourceRentalId, item.originalRentalId].some(id => String(id || '') === classicId)
         )
-        || ganttRentals.find(item => {
-          if (!classicRental) return false;
-          const sameClient = item.clientId && classicRental.clientId
-            ? item.clientId === classicRental.clientId
-            : item.client === classicRental.client;
-          if (!sameClient) return false;
-          const sameDates = item.startDate === classicRental.startDate
-            && item.endDate === classicRental.plannedReturnDate;
-          if (!sameDates) return false;
-          const equipmentList = readData('equipment') || [];
-          const equipment = findEquipmentForRental(classicRental, equipmentList);
-          return equipment ? rentalMatchesEquipment(item, equipment, equipmentList) : false;
-        })
         || null;
     }
 
@@ -609,10 +601,10 @@ function registerRentalRoutes(deps) {
             ganttRentals,
             equipment: readData('equipment') || [],
             context: `findClassicRentalForRoute:${routeId}`,
+            allowLegacyFallback: false,
           });
           if (resolution.ok) {
             classicRental = resolution.rental;
-            repairGanttRentalLinkIfResolved(ganttRental, resolution);
             ganttRental = ensureGanttRentalLink(ganttRental, classicRental, readData('equipment') || []);
           } else {
             return { classicRental: null, ganttRental, resolution };
@@ -620,7 +612,7 @@ function registerRentalRoutes(deps) {
         }
       }
       if (!ganttRental && classicRental) {
-        ganttRental = findLinkedGanttRental(classicRental, routeId);
+        ganttRental = findLinkedGanttRental(classicRental);
       }
       return { classicRental, ganttRental };
     }
@@ -1513,7 +1505,11 @@ function registerRentalRoutes(deps) {
       try {
         newItem = normalizeRentalRelationLinks(newItem);
       } catch (error) {
-        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        return res.status(error?.status || 400).json({
+          ok: false,
+          ...(error?.code ? { code: error.code } : {}),
+          error: error.message,
+        });
       }
       const validation = validateRentalPayload(collection, newItem, data, equipment, '', {
         skipConflictCheck: collection === 'gantt_rentals' && Boolean(newItem.rentalId),
@@ -1616,8 +1612,8 @@ function registerRentalRoutes(deps) {
                 rawMeta.ganttSnapshot.previousEndDate,
             }
           : rawMeta.ganttSnapshot;
-        let ganttRentalsForResolution = readData('gantt_rentals') || [];
-        let resolution = resolveRentalForChangeRequest({
+        const ganttRentalsForResolution = readData('gantt_rentals') || [];
+        const resolution = resolveRentalForChangeRequest({
           rentalId: safeRentalId || safeSourceRentalId || req.params.id,
           linkedGanttRentalId,
           fallbackGanttRental,
@@ -1625,32 +1621,14 @@ function registerRentalRoutes(deps) {
           ganttRentals: ganttRentalsForResolution,
           equipment: readData('equipment') || [],
           context: `${req.method} ${req.originalUrl || req.url}`,
+          allowLegacyFallback: false,
         });
-        if (!resolution.ok) {
-          const repaired = restoreOrphanGanttRentalIfSafe(req, data, rawMeta, fallbackGanttRental, resolution);
-          if (repaired) {
-            ganttRentalsForResolution = repaired.ganttRentals;
-            resolution = resolveRentalForChangeRequest({
-              rentalId: repaired.restoredRental.id,
-              linkedGanttRentalId,
-              fallbackGanttRental: {
-                ...fallbackGanttRental,
-                rentalId: repaired.restoredRental.id,
-                sourceRentalId: repaired.restoredRental.id,
-                originalRentalId: repaired.restoredRental.id,
-              },
-              rentals: data,
-              ganttRentals: ganttRentalsForResolution,
-              equipment: readData('equipment') || [],
-              context: `${req.method} ${req.originalUrl || req.url}`,
-            });
-          }
-        }
         if (!resolution.ok) {
           const debug = buildRentalResolutionDebug(req, resolution, rawMeta);
           logRentalResolutionFailure(req, resolution, rawMeta);
           return res.status(resolution.status).json({
             ok: false,
+            code: resolution.code,
             error: resolution.error,
             details: {
               ...resolution.details,
@@ -1662,9 +1640,6 @@ function registerRentalRoutes(deps) {
           findLinkedGanttRental(resolution.rental, linkedGanttRentalId) ||
           null;
         const isRestorePatch = isRestoringReturnedClassicRental(resolution.rental, { ...resolution.rental, ...patch });
-        if (!isRestorePatch) {
-          repairGanttRentalLinkIfResolved(resolvedLinkedGanttRental, resolution);
-        }
         idx = resolution.rentalIndex;
         const linkedGanttRental = resolvedLinkedGanttRental;
         const linkedGanttMatchesRental = [
@@ -1737,7 +1712,11 @@ function registerRentalRoutes(deps) {
             normalizedImmediatePatch = Object.fromEntries(Object.keys(immediatePatch).map(field => [field, normalizedItem[field]]));
           }
         } catch (error) {
-          return res.status(error?.status || 400).json({ ok: false, error: error.message });
+          return res.status(error?.status || 400).json({
+            ok: false,
+            ...(error?.code ? { code: error.code } : {}),
+            error: error.message,
+          });
         }
         const immediateValidation = validateImmediateRentalPatch(previousRental, normalizedImmediatePatch, data, approvalChanges, meta, req.user.userName);
         if (!immediateValidation.ok) {
@@ -1816,7 +1795,11 @@ function registerRentalRoutes(deps) {
       try {
         nextItem = normalizeRentalRelationLinks(nextItem, data[idx]);
       } catch (error) {
-        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        return res.status(error?.status || 400).json({
+          ok: false,
+          ...(error?.code ? { code: error.code } : {}),
+          error: error.message,
+        });
       }
       const validation = validateRentalPayload(collection, nextItem, data, readData('equipment') || [], data[idx].id);
       if (!validation.ok) {
@@ -1846,7 +1829,11 @@ function registerRentalRoutes(deps) {
         if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
           return sendSystemFixtureProtectedError(req, res, auditLog, error);
         }
-        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        return res.status(error?.status || 400).json({
+          ok: false,
+          ...(error?.code ? { code: error.code } : {}),
+          error: error.message,
+        });
       }
 
       if (collection === 'gantt_rentals') {
@@ -1896,37 +1883,16 @@ function registerRentalRoutes(deps) {
           ganttRentals,
           equipment: readData('equipment') || [],
           context: `rentals:downtimes:${routeId}`,
+          allowLegacyFallback: false,
         });
         if (!resolution.ok) {
-          const restored = restoreOrphanGanttRentalIfSafe(req, rentals, {
-            ...body,
-            linkedGanttRentalId,
-            ganttRentalId: linkedGanttRentalId,
-          }, fallbackGanttRental, resolution);
-          if (restored?.restoredRental) {
-            const repairedRentals = readData('rentals') || [];
-            const repairedGanttRentals = readData('gantt_rentals') || [];
-            const repairedResolution = resolveRentalForChangeRequest({
-              rentalId: restored.restoredRental.id,
-              linkedGanttRentalId: restored.ganttRental?.id || linkedGanttRentalId,
-              fallbackGanttRental: restored.ganttRental || fallbackGanttRental,
-              rentals: repairedRentals,
-              ganttRentals: repairedGanttRentals,
-              equipment: readData('equipment') || [],
-              context: `rentals:downtimes:restored:${routeId}`,
-            });
-            if (repairedResolution.ok) {
-              return {
-                ok: true,
-                rentals: repairedRentals,
-                rental: repairedResolution.rental,
-                rentalIndex: repairedResolution.rentalIndex,
-                ganttRental: repairedResolution.linkedGanttRental || restored.ganttRental || null,
-                linkedGanttRentalId: restored.ganttRental?.id || linkedGanttRentalId,
-              };
-            }
-          }
-          return { ok: false, status: resolution.status || 404, error: resolution.error || 'Аренда для простоя не найдена.' };
+          return {
+            ok: false,
+            status: resolution.status || 404,
+            code: resolution.code,
+            error: resolution.error || 'Аренда для простоя не найдена.',
+            details: resolution.details,
+          };
         }
         return {
           ok: true,
@@ -1989,7 +1955,12 @@ function registerRentalRoutes(deps) {
       }
 
       async function persistRentalDowntimeMutation(req, res, target, result, actionLabel) {
-        if (!result.ok) return res.status(result.status || 400).json({ ok: false, error: result.error });
+        if (!result.ok) return res.status(result.status || 400).json({
+          ok: false,
+          ...(result.code ? { code: result.code } : {}),
+          error: result.error,
+          ...(result.details ? { details: result.details } : {}),
+        });
         const previousRental = target.rental;
         const nextRental = appendRentalHistory(
           result.rental,

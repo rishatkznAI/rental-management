@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { buildClient360Summary } from '../src/app/lib/client360.js';
 
 test('client 360 summary links rentals payments documents and service defensively', () => {
-  const client = { id: 'C-1', company: 'ООО 360', debt: 1000 };
+  const client = { id: 'C-1', counterpartyId: 'CP-1', company: 'ООО 360', debt: 1000 };
   const summary = buildClient360Summary({
     client,
     today: '2026-05-02',
     rentals: [
-      { id: 'R-1', clientId: 'C-1', client: 'ООО 360', equipmentId: 'E-1', equipmentInv: 'INV-1', startDate: '2026-04-01', endDate: '2026-05-01', status: 'active', manager: 'Ринат', amount: 50000 },
-      { id: 'R-2', client: 'ООО 360', equipmentInv: 'INV-2', startDate: '2026-03-01', endDate: '2026-03-15', status: 'closed', manager: 'Ринат', amount: 30000 },
+      { id: 'R-1', counterpartyId: 'CP-1', clientId: 'C-1', client: 'ООО 360', equipmentId: 'E-1', equipmentInv: 'INV-1', startDate: '2026-04-01', endDate: '2026-05-01', status: 'active', manager: 'Ринат', amount: 50000 },
+      { id: 'R-2', counterpartyId: 'CP-1', client: 'ООО 360', equipmentInv: 'INV-2', startDate: '2026-03-01', endDate: '2026-03-15', status: 'closed', manager: 'Ринат', amount: 30000 },
+      { id: 'R-name-only', client: 'ООО 360', equipmentInv: 'INV-3', startDate: '2026-02-01', endDate: '2026-02-15', status: 'closed', amount: 1 },
     ],
     rentalDebtRows: [
       { rentalId: 'R-1', clientId: 'C-1', client: 'ООО 360', endDate: '2026-02-20', expectedPaymentDate: '2026-02-20', outstanding: 70000 },

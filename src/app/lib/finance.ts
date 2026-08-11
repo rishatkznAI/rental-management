@@ -252,6 +252,7 @@ export function buildRentalDebtRows(
           : 'unpaid';
       return {
         rentalId: rental.id,
+        counterpartyId: String(rental.counterpartyId || '').trim() || undefined,
         clientId: stableClientId(rental) || undefined,
         client: getClientName(rental),
         objectId: rental.objectId || undefined,

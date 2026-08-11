@@ -1,0 +1,382 @@
+{
+  "stage": "I-G",
+  "title": "Finance / Payments Counterparty Relations Inventory",
+  "completedAt": "2026-08-11",
+  "status": "completed_before_model_changes",
+  "scope": {
+    "canonicalTarget": "Payment.counterpartyId -> Counterparty.id",
+    "compatibilityTarget": "Payment.clientId -> Client.id when a customer profile exists",
+    "excludedDomains": [
+      "Payment Approval workflow",
+      "full Documents migration",
+      "full Reports migration",
+      "canonical-receivables SQL redesign"
+    ]
+  },
+  "method": {
+    "roots": ["server", "src", "tests", "e2e", "docs"],
+    "terms": [
+      "payment",
+      "payments",
+      "payment_allocations",
+      "clientId",
+      "client",
+      "clientName",
+      "company",
+      "customer",
+      "inn",
+      "counterpartyId",
+      "Counterparty",
+      "rental",
+      "contract",
+      "invoice",
+      "document",
+      "receivable",
+      "debt",
+      "cash-flow"
+    ],
+    "notes": "Entries group repeated tests and consumers by one relation contract; locations identify every production family and every non-production family that consumes that contract."
+  },
+  "entries": [
+    {
+      "surface": "Payment JSON persistence",
+      "locations": ["server/db.js", "server/server.js"],
+      "relation": "payments records are schemaless app_data JSON; Payment.clientId is the only stored business identity field before Stage I-G",
+      "production": true,
+      "classification": "compatibility",
+      "readPath": "getData('payments') through generic CRUD and finance/report routes",
+      "writePath": "setData/setDataBatch('payments')",
+      "requiredAction": "add optional counterpartyId without a destructive schema rewrite; preserve clientId"
+    },
+    {
+      "surface": "Payment generic CRUD create/update/bulk/delete",
+      "locations": ["server/routes/crud.js"],
+      "relation": "withClientLink and normalizeClientRelationLinks validate/enrich clientId; rental enrichment copies clientId and display client text; no Counterparty resolver is applied",
+      "production": true,
+      "classification": "unsafe",
+      "readPath": "GET /api/payments and GET /api/payments/:id return raw records",
+      "writePath": "POST/PATCH/PUT /api/payments",
+      "requiredAction": "canonicalize every Payment write with deterministic ID-only resolver and decorate API reads with Counterparty identity"
+    },
+    {
+      "surface": "Payment mass-assignment and mutation allowlists",
+      "locations": ["server/lib/access-control.js"],
+      "relation": "strict Payment fields allow clientId/client but reject counterpartyId",
+      "production": true,
+      "classification": "unsafe",
+      "readPath": "sanitizeEntityForRead preserves stored fields",
+      "writePath": "sanitizeStrictPaymentMutationInput and admin bulk validation",
+      "requiredAction": "allow counterpartyId as a stable relation field while keeping system-field protections"
+    },
+    {
+      "surface": "Payment authorization and manager scoping",
+      "locations": ["server/lib/access-control.js", "server/server.js"],
+      "relation": "write roles are admin/office; manager reads use rentalId first and stable counterpartyId/clientId scoped-rental fallback",
+      "production": true,
+      "classification": "canonical",
+      "readPath": "filterCollectionByScope('payments') and matchesScopedRental",
+      "writePath": "assertCanCreateCollection/assertCanUpdateEntity",
+      "requiredAction": "retain permissions; add regression coverage for Counterparty-only payments and ensure no label scoping"
+    },
+    {
+      "surface": "Rental to Payment derivation",
+      "locations": ["server/lib/client-relations.js", "server/routes/crud.js", "src/app/pages/Payments.tsx"],
+      "relation": "rentalId enriches Payment.clientId/objectId/contractId and client snapshot, but does not copy Rental.counterpartyId; the UI also copies only rental.clientId/client",
+      "production": true,
+      "classification": "unsafe",
+      "readPath": "selected rental pre-fills the payment form",
+      "writePath": "enrichRecordFromRentalLinks before Payment persistence",
+      "requiredAction": "make Rental.counterpartyId authoritative and copy both stable IDs without deriving identity from snapshots"
+    },
+    {
+      "surface": "Payment API search, sort, and filtering",
+      "locations": ["server/routes/crud.js", "server/lib/pagination.js"],
+      "relation": "search reads client/clientName/clientId text; filter uses exact clientId; no counterpartyId filter or Counterparty metadata discovery",
+      "production": true,
+      "classification": "compatibility",
+      "readPath": "GET /api/payments?search=&clientId=",
+      "writePath": "none",
+      "requiredAction": "add exact counterpartyId filtering and Counterparty metadata search functions; keep names discovery-only"
+    },
+    {
+      "surface": "Payments page creation UI",
+      "locations": ["src/app/pages/Payments.tsx", "src/app/components/ui/ClientCombobox.tsx"],
+      "relation": "new Payment requires a Client profile and emits clientId/client; supplier-only and contractor-only Counterparties cannot be selected",
+      "production": true,
+      "classification": "unsafe",
+      "readPath": "clients list and rental list populate the form",
+      "writePath": "paymentsService.create",
+      "requiredAction": "select an active Counterparty by stable ID, optionally retain the corresponding Client ID, and never create a fake Client"
+    },
+    {
+      "surface": "Payments page navigation and display",
+      "locations": ["src/app/pages/Payments.tsx"],
+      "relation": "display uses payment.client/clientName; missing clientId is recovered by unique client company-name matching to build a /clients/:id link",
+      "production": true,
+      "classification": "unsafe",
+      "readPath": "paymentClientName and resolveClientProfileId",
+      "writePath": "none",
+      "requiredAction": "remove name-based identifier recovery; use Payment.counterpartyId and Payment.clientId only"
+    },
+    {
+      "surface": "Payments page filtering and CSV export",
+      "locations": ["src/app/pages/Payments.tsx"],
+      "relation": "clientId drives filters; display labels are exported; quick-action clientName can discover a Client and then sets clientId",
+      "production": true,
+      "classification": "compatibility",
+      "readPath": "paginated Payment API and current-page export",
+      "writePath": "URL/query filter state only",
+      "requiredAction": "use counterpartyId for Payment filtering; retain clientId quick-action compatibility only when an explicit Client ID exists; labels remain display/export snapshots"
+    },
+    {
+      "surface": "Payment frontend contract and service",
+      "locations": ["src/app/types.ts", "src/app/services/payments.service.ts", "src/app/hooks/usePayments.ts"],
+      "relation": "Payment type exposes clientId/client but not counterpartyId or Counterparty DTO",
+      "production": true,
+      "classification": "unsafe",
+      "readPath": "GET /api/payments typed as Payment",
+      "writePath": "create/update/bulkReplace",
+      "requiredAction": "add counterpartyId and Counterparty summary to the type and mutation payload contract"
+    },
+    {
+      "surface": "Counterparty discovery API",
+      "locations": ["server/routes/counterparties.js", "src/app/services/counterparties.service.ts"],
+      "relation": "search supports stable ID, legalName, shortName, INN, KPP, email, phone and returns Counterparty.id",
+      "production": true,
+      "classification": "canonical",
+      "readPath": "GET /api/counterparties?search=",
+      "writePath": "separate Counterparty CRUD/role endpoints",
+      "requiredAction": "reuse for discovery only; do not use search results as an implicit resolver"
+    },
+    {
+      "surface": "Payment allocations",
+      "locations": ["server/routes/crud.js", "server/lib/finance-core.js", "src/app/pages/Payments.tsx", "src/app/types.ts"],
+      "relation": "paymentId is canonical to Payment; rentalId/documentId/objectId/contractId are stable; clientId limits customer allocation candidates",
+      "production": true,
+      "classification": "compatibility",
+      "readPath": "allocation preview, debt allocation and Payment detail",
+      "writePath": "POST/PATCH/PUT /api/payment_allocations",
+      "requiredAction": "leave clientId compatibility for customer receivables; ensure Payment.counterpartyId changes are allocation-guarded"
+    },
+    {
+      "surface": "Rental payment status synchronization",
+      "locations": ["server/lib/payment-status-sync.js", "server/routes/crud.js", "server/routes/finance.js"],
+      "relation": "Payment joins Rental through rentalId/payment allocations; identity labels are not used",
+      "production": true,
+      "classification": "canonical",
+      "readPath": "payments and payment_allocations",
+      "writePath": "updates gantt_rentals.paymentStatus",
+      "requiredAction": "no identity migration; add counterpartyId to protected allocated-Payment relation fields"
+    },
+    {
+      "surface": "Debt and receivables calculations",
+      "locations": ["server/lib/finance-core.js", "server/lib/receivables-core.js", "src/app/lib/finance.ts"],
+      "relation": "cash application joins by paymentId/rentalId; debt grouping remains customer-specific through Rental.clientId; unlinked fallback keys may contain display text but do not persist relations",
+      "production": true,
+      "classification": "compatibility",
+      "readPath": "buildRentalDebtRows/buildClientReceivables/buildReceivables",
+      "writePath": "none except customer collection actions/plans",
+      "requiredAction": "preserve calculations; document clientId grouping as customer-profile compatibility and prohibit it from resolving Payment identity"
+    },
+    {
+      "surface": "Cash-flow calculations",
+      "locations": ["server/lib/cash-flow.js", "server/routes/finance.js"],
+      "relation": "Payment amount/date/status drive cash-in; client/clientName is copied only as a display label",
+      "production": true,
+      "classification": "snapshot",
+      "readPath": "GET /api/finance/cash-flow",
+      "writePath": "none",
+      "requiredAction": "preserve numeric behavior; prefer canonical Counterparty display when available"
+    },
+    {
+      "surface": "Finance report and dashboard aggregates",
+      "locations": ["server/routes/finance.js", "server/routes/reports.js", "server/lib/finance-core.js", "src/app/pages/Dashboard.tsx", "src/app/pages/Reports.tsx"],
+      "relation": "payments are scoped first; rental/allocation IDs drive totals; clientId drives customer debt views",
+      "production": true,
+      "classification": "compatibility",
+      "readPath": "finance/report, aging, dashboard and reports endpoints",
+      "writePath": "none",
+      "requiredAction": "keep Finance-specific aggregates unchanged; allow compatibility clientId reads after Payment canonicalization"
+    },
+    {
+      "surface": "Manager and investor reporting",
+      "locations": ["server/lib/manager-report.js", "server/routes/reports.js", "server/lib/access-control.js"],
+      "relation": "payments join by paymentId/rentalId; manager scope is stable rental/manager IDs; investor cannot read Payments collection",
+      "production": true,
+      "classification": "canonical",
+      "readPath": "manager report and scoped report endpoints",
+      "writePath": "none",
+      "requiredAction": "regression test only; do not broaden investor permissions"
+    },
+    {
+      "surface": "Finance operations and recurring expenses",
+      "locations": ["server/routes/finance.js", "server/lib/access-control.js", "src/app/pages/Finance.tsx", "src/app/types.ts"],
+      "relation": "finance_operations.counterparty and company_expenses.counterparty are free-text display fields, not stable relations",
+      "production": true,
+      "classification": "snapshot",
+      "readPath": "Finance operations/expense tables and filters",
+      "writePath": "manual finance operation and expense forms",
+      "requiredAction": "do not reinterpret text as identity in Stage I-G; Payment-derived Finance rows must use Payment.counterpartyId; a later subtype-specific migration can add canonical relations to expense entities"
+    },
+    {
+      "surface": "Finance page unified operation view",
+      "locations": ["src/app/pages/Finance.tsx"],
+      "relation": "Payment.client is projected into an operation counterparty display string; text filtering is discovery/display only",
+      "production": true,
+      "classification": "snapshot",
+      "readPath": "payments, expenses, leasing, finance_operations",
+      "writePath": "manual operation CRUD remains separate",
+      "requiredAction": "prefer Payment.counterparty DTO for display and retain stable Payment.counterpartyId on projected rows"
+    },
+    {
+      "surface": "Documents, contracts and invoices adjacent to Payments",
+      "locations": ["server/lib/finance-core.js", "server/routes/finance.js", "server/routes/documents.js", "src/app/pages/Payments.tsx"],
+      "relation": "documentId/contractId/rentalId are stable; clientId remains a customer compatibility link; document labels/numbers are snapshots",
+      "production": true,
+      "classification": "compatibility",
+      "readPath": "allocation backfill, Payment allocation editor, receivable documents",
+      "writePath": "payment allocations and receivable-document creation",
+      "requiredAction": "preserve stable adjacent IDs; do not expand into a full Documents/Contracts migration"
+    },
+    {
+      "surface": "MAX bot manager summary",
+      "locations": ["server/lib/bot-commands.js"],
+      "relation": "Payment amounts join to Rental by rentalId; no Payment/client name relation writes",
+      "production": true,
+      "classification": "canonical",
+      "readPath": "manager summary reads payments",
+      "writePath": "none",
+      "requiredAction": "no change; numeric regression coverage through existing suite"
+    },
+    {
+      "surface": "Legacy startup client-link normalization",
+      "locations": ["server/lib/client-links.js", "server/lib/startup.js"],
+      "relation": "Payment.clientId can be recovered only from stable rentalId; names/INN are logged and rejected",
+      "production": true,
+      "classification": "compatibility",
+      "readPath": "startup app_data scan",
+      "writePath": "may write normalized clientId",
+      "requiredAction": "retain stable rental recovery but ensure canonical Payment.counterpartyId is handled only by the dedicated Stage I-G migration/write resolver"
+    },
+    {
+      "surface": "Client deletion history guard",
+      "locations": ["server/routes/crud.js"],
+      "relation": "checks Payment.clientId first, then falls back to exact client display-name equality for legacy rows",
+      "production": true,
+      "classification": "unsafe",
+      "readPath": "DELETE /api/clients/:id guard",
+      "writePath": "none",
+      "requiredAction": "remove Payment display-name fallback; use stable Payment.clientId/counterpartyId only"
+    },
+    {
+      "surface": "Demo seed and local mock persistence",
+      "locations": ["server/scripts/seed-demo-data.js", "src/app/mock-data.ts"],
+      "relation": "seeded Payments contain clientId/client but no counterpartyId; local storage bulk sync uses the Payment type",
+      "production": false,
+      "classification": "unsafe",
+      "readPath": "demo reset and optional local storage",
+      "writePath": "seed app_data / PUT payments",
+      "requiredAction": "emit canonical counterpartyId in demo Payments and rely on canonical bulk-write validation"
+    },
+    {
+      "surface": "Settings export/import and destructive demo cleanup",
+      "locations": ["src/app/pages/Settings.tsx"],
+      "relation": "Payments are counted/read and can be bulk-cleared; no dedicated Payment CSV import exists; Rental CSV exports/imports stable counterpartyId",
+      "production": true,
+      "classification": "compatibility",
+      "readPath": "paymentsService.getAll and data diagnostics",
+      "writePath": "paymentsService.bulkReplace([])",
+      "requiredAction": "allow empty canonical bulk replace; do not invent name/INN Payment import recovery"
+    },
+    {
+      "surface": "Admin system-data Payment export/import",
+      "locations": ["server/routes/system.js"],
+      "relation": "system-data export preserves Payment snapshots; system-data import bulk-restores payments outside generic CRUD and previously accepted client-only or metadata-only identity",
+      "production": true,
+      "classification": "unsafe",
+      "readPath": "GET /api/admin/system-data/export",
+      "writePath": "POST /api/admin/system-data/import/dry-run and POST /api/admin/system-data/import",
+      "requiredAction": "canonicalize imported Payments against staged Counterparty/Client/Rental collections with the ID-only resolver; reject ambiguous, missing, mismatched, archived, or metadata-only links"
+    },
+    {
+      "surface": "Disabled-by-default legacy Payment sync",
+      "locations": ["server/routes/system.js"],
+      "relation": "ENABLE_LEGACY_SYNC=1 allows an admin bulk Payment replacement outside generic CRUD; before Stage I-G it accepted client-only and metadata-only relations",
+      "production": true,
+      "classification": "unsafe",
+      "readPath": "getSnapshot/readData for sync notifications",
+      "writePath": "POST /api/sync payments payload",
+      "requiredAction": "canonicalize the full Payment batch before any write using staged imported Client/Counterparty IDs; retain the endpoint's disabled-by-default policy"
+    },
+    {
+      "surface": "Canonical receivables SQL foundation",
+      "locations": [
+        "server/lib/canonical-receivables-schema.js",
+        "server/lib/canonical-receivables-settlement-schema.js",
+        "server/lib/canonical-receivables-settlement-repository.js",
+        "server/lib/forecast-receivables-planning-schema.js",
+        "server/lib/canonical-actual-posting-schema.js"
+      ],
+      "relation": "separate companyId/branchId/clientId SQL model with its own canonical payment prototypes; safety tests explicitly isolate it from legacy payments/payment_allocations app_data",
+      "production": false,
+      "classification": "compatibility",
+      "readPath": "feature-gated canonical receivables APIs and foundation repositories",
+      "writePath": "isolated SQL tables only",
+      "requiredAction": "do not couple Stage I-G legacy Payment migration to this track; record future Counterparty alignment risk"
+    },
+    {
+      "surface": "Backend Finance/Payment tests",
+      "locations": [
+        "tests/finance-core.test.js",
+        "tests/finance-economics.test.js",
+        "tests/finance-operations-api.test.js",
+        "tests/payment-status-sync.test.js",
+        "tests/receivables-core.test.js",
+        "tests/receivables-api.test.js",
+        "tests/receivables-legal-workflow.test.js",
+        "tests/manager-report.test.js",
+        "tests/cash-flow.test.js",
+        "tests/api-security-routes.test.js",
+        "tests/security-access-control.test.js"
+      ],
+      "relation": "fixtures primarily model clientId/customer payments and stable rental/payment allocation joins",
+      "production": false,
+      "classification": "compatibility",
+      "readPath": "test fixtures and API assertions",
+      "writePath": "in-memory stores",
+      "requiredAction": "add Stage I-G focused resolver/migration/API/filter/auth tests and retain existing calculation assertions"
+    },
+    {
+      "surface": "Frontend static and UI tests",
+      "locations": [
+        "tests/payment-allocations-ui.test.js",
+        "tests/payments-responsive-ui.test.js",
+        "tests/finance-ui.test.js",
+        "tests/finance-overview-frontend.test.js",
+        "tests/quick-action-routing.test.js"
+      ],
+      "relation": "source assertions expect clientId filters and client-based Payment selection",
+      "production": false,
+      "classification": "compatibility",
+      "readPath": "source inspection",
+      "writePath": "none",
+      "requiredAction": "update assertions for stable counterpartyId while preserving customer allocation compatibility"
+    },
+    {
+      "surface": "Playwright Finance and Payments coverage",
+      "locations": [
+        "e2e/finance-production-smoke.spec.ts",
+        "e2e/production-dashboard-visual-smoke.spec.ts",
+        "e2e/quick-actions.spec.ts",
+        "e2e/first-wave-pagination.spec.ts",
+        "e2e/reports-pagination-smoke.spec.ts"
+      ],
+      "relation": "exercises Finance API authorization, pagination, display and dashboards; no supplier-only Payment scenario exists",
+      "production": false,
+      "classification": "compatibility",
+      "readPath": "browser/API test reads",
+      "writePath": "test fixtures and Payment UI actions",
+      "requiredAction": "add or extend a relevant Payment Counterparty scenario; classify unrelated pre-existing browser failures separately"
+    }
+  ]
+}

@@ -136,8 +136,6 @@ async function startServer({ app, port, deps, logger = console }) {
     migrateLegacyRepairFacts,
     backfillPaymentAllocations,
     backfillServiceTicketCreatedAt,
-    normalizeClientLinks,
-    backfillGanttRentalLinks,
     logGanttRentalLinkDiagnostics,
     applyAdminResetFromEnv,
     registerWebhook,
@@ -152,6 +150,47 @@ async function startServer({ app, port, deps, logger = console }) {
   return app.listen(port, async () => {
     const startupBusinessMaintenanceEnabled = isStartupBusinessMaintenanceEnabled();
     migrateJsonFilesToDb();
+    if (typeof deps.auditCounterpartyRelations === 'function') {
+      try {
+        const result = deps.auditCounterpartyRelations({ readData: deps.readData });
+        const summary = result?.summary || {};
+        const log = summary.broken > 0 || summary.repairable > 0 ? logger.warn : logger.log;
+        log?.call(
+          logger,
+          `[counterparty-relations] integrity audit: healthy=${summary.healthy || 0} `
+          + `repairable=${summary.repairable || 0} broken=${summary.broken || 0}`,
+        );
+        for (const issue of [...(result?.repairable || []), ...(result?.broken || [])]) {
+          logger.warn?.(
+            `[counterparty-relations] integrity issue: domain=${issue.domain} `
+            + `recordId=${issue.recordId || 'missing'} code=${issue.code} `
+            + `repairability=${issue.repairability}`,
+          );
+        }
+      } catch (error) {
+        logger.warn(`[counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
+      }
+    }
+    if (typeof deps.auditRentalCounterpartyRelations === 'function') {
+      try {
+        const result = deps.auditRentalCounterpartyRelations({ readData: deps.readData });
+        const summary = result?.summary || {};
+        const log = summary.broken > 0 || summary.repairable > 0 ? logger.warn : logger.log;
+        log?.call(
+          logger,
+          `[rental-counterparty-relations] integrity audit: healthy=${summary.healthy || 0} `
+          + `repairable=${summary.repairable || 0} broken=${summary.broken || 0}`,
+        );
+        for (const issue of [...(result?.repairable || []), ...(result?.broken || [])]) {
+          logger.warn?.(
+            `[rental-counterparty-relations] integrity issue: rentalId=${issue.recordId || 'missing'} `
+            + `code=${issue.code} repairability=${issue.repairability}`,
+          );
+        }
+      } catch (error) {
+        logger.warn(`[rental-counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
+      }
+    }
     cleanupExpiredSessions();
     seedDefaultUsers();
     ensureLegacyDefaultUsers();
@@ -196,24 +235,6 @@ async function startServer({ app, port, deps, logger = console }) {
         }
       } catch (error) {
         logger.warn(`[payments] payment_allocations backfill skipped: ${error?.message || String(error)}`);
-      }
-    }
-    if (startupBusinessMaintenanceEnabled && typeof normalizeClientLinks === 'function') {
-      normalizeClientLinks({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        logger,
-      });
-    }
-    if (startupBusinessMaintenanceEnabled && typeof backfillGanttRentalLinks === 'function') {
-      try {
-        backfillGanttRentalLinks({
-          readData: deps.readData,
-          writeData: deps.writeData,
-          logger,
-        });
-      } catch (error) {
-        logger.warn(`[rental-links] Gantt rental backfill skipped: ${error?.message || String(error)}`);
       }
     }
     if (typeof logGanttRentalLinkDiagnostics === 'function') {

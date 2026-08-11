@@ -399,10 +399,8 @@ export function RentalDrawer({
   const overdueDays = isReturnOverdue
     ? Math.max(1, Math.ceil((new Date(todayKey).getTime() - new Date(rental.endDate).getTime()) / 86400000))
     : 0;
-  const clientProfile = clients.find(item => item.id === rental.clientId)
-    ?? clients.find(item => !rental.clientId && item.company === rental.client);
-  const clientDebt = clientReceivables.find(item => item.clientId === rental.clientId)
-    ?? clientReceivables.find(item => !rental.clientId && item.client === rental.client);
+  const clientProfile = clients.find(item => item.id === rental.clientId);
+  const clientDebt = clientReceivables.find(item => item.clientId === rental.clientId);
   const serviceAlert = buildRentalServiceAlert(rental, currentEquipment, serviceTickets, todayKey);
   const serviceAlertStyle = serviceAlert ? serviceAlertStyles[serviceAlert.severity] : null;
   const daysLeft = Math.ceil((new Date(rental.endDate).getTime() - new Date(todayKey).getTime()) / 86400000);

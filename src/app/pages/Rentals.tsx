@@ -161,23 +161,19 @@ function normalizeMatchRef(value: unknown): string {
   return String(value ?? '').trim();
 }
 
-function normalizedClientKey(value: unknown): string {
-  const words = String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/ё/g, 'е')
-    .match(/[a-zа-я0-9]+/g) || [];
-  const legalForms = new Set(['ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'llc', 'ooo']);
-  return words.filter(word => !legalForms.has(word)).join('');
-}
-
-function clientNamesCompatible(left: unknown, right: unknown): boolean {
-  const leftKey = normalizedClientKey(left);
-  const rightKey = normalizedClientKey(right);
-  if (!leftKey || !rightKey) return false;
-  if (leftKey === rightKey) return true;
-  const minLength = Math.min(leftKey.length, rightKey.length);
-  return minLength >= 8 && (leftKey.includes(rightKey) || rightKey.includes(leftKey));
+function matchesCanonicalCustomer(ganttRental: GanttRentalData, rental: Rental): boolean {
+  const ganttCounterpartyId = normalizeMatchRef(ganttRental.counterpartyId);
+  const rentalCounterpartyId = normalizeMatchRef(rental.counterpartyId);
+  if (ganttCounterpartyId || rentalCounterpartyId) {
+    return Boolean(
+      ganttCounterpartyId
+      && rentalCounterpartyId
+      && ganttCounterpartyId === rentalCounterpartyId
+    );
+  }
+  const ganttClientId = normalizeMatchRef(ganttRental.clientId);
+  const rentalClientId = normalizeMatchRef(rental.clientId);
+  return Boolean(ganttClientId && rentalClientId && ganttClientId === rentalClientId);
 }
 
 type EquipmentAliasRecord = Partial<GanttRentalData> & Partial<Rental> & {
@@ -276,9 +272,7 @@ function matchesClassicRentalForGantt(ganttRental: GanttRentalData, rental: Rent
   const linkedRentalId = getGanttRentalSourceId(ganttRental);
   if (linkedRentalId) return String(rental.id) === linkedRentalId;
 
-  const sameClient = ganttRental.clientId && rental.clientId
-    ? ganttRental.clientId === rental.clientId
-    : clientNamesCompatible(ganttRental.client, rental.client);
+  const sameClient = matchesCanonicalCustomer(ganttRental, rental);
   const rentalEndDate = rental.plannedReturnDate || (rental as Rental & { endDate?: string }).endDate || '';
   const exactDates = rental.startDate === ganttRental.startDate && rentalEndDate === ganttRental.endDate;
   const overlappingDates = dateRangesOverlap(rental.startDate, rentalEndDate, ganttRental.startDate, ganttRental.endDate);
@@ -298,9 +292,7 @@ function matchesClassicRentalForGanttByShape(ganttRental: GanttRentalData, renta
 function matchesClassicRentalForGanttByClientEquipment(ganttRental: GanttRentalData, rental: Rental, equipmentList: Equipment[] = []): boolean {
   const linkedRentalId = getGanttRentalSourceId(ganttRental);
   if (linkedRentalId) return String(rental.id) === linkedRentalId;
-  const sameClient = ganttRental.clientId && rental.clientId
-    ? ganttRental.clientId === rental.clientId
-    : clientNamesCompatible(ganttRental.client, rental.client);
+  const sameClient = matchesCanonicalCustomer(ganttRental, rental);
   return sameClient && hasEquipmentAliasOverlap(ganttRental, rental, equipmentList);
 }
 
@@ -319,9 +311,7 @@ function matchesOpenClassicRentalForGanttByClient(ganttRental: GanttRentalData, 
   const linkedRentalId = getGanttRentalSourceId(ganttRental);
   if (linkedRentalId) return String(rental.id) === linkedRentalId;
   if (['closed', 'returned', 'completed', 'cancelled', 'canceled'].includes(String(rental.status || '')) || rental.actualReturnDate) return false;
-  const sameClient = ganttRental.clientId && rental.clientId
-    ? ganttRental.clientId === rental.clientId
-    : clientNamesCompatible(ganttRental.client, rental.client);
+  const sameClient = matchesCanonicalCustomer(ganttRental, rental);
   if (!sameClient) return false;
   if (!requireDateMatch) return true;
   const endDate = rentalEndDate(rental);
@@ -382,6 +372,7 @@ function canonicalizeGanttRentalFromClassic(
     rentalId: rental.id,
     sourceRentalId: rental.id,
     originalRentalId: ganttRental.originalRentalId || rental.id,
+    counterpartyId: rental.counterpartyId || ganttRental.counterpartyId,
     clientId: rental.clientId || ganttRental.clientId,
     client: rental.client || ganttRental.client,
     clientShort: (rental.client || ganttRental.client || '').substring(0, 20),
@@ -415,6 +406,7 @@ function ganttRentalFromClassicRental(rental: Rental, equipmentList: Equipment[]
     rentalId: rental.id,
     sourceRentalId: rental.id,
     originalRentalId: rental.id,
+    counterpartyId: rental.counterpartyId || '',
     clientId: rental.clientId || '',
     client: rental.client || (rental as Rental & { clientName?: string }).clientName || '',
     clientShort: (rental.client || (rental as Rental & { clientName?: string }).clientName || '').substring(0, 20),

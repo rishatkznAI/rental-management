@@ -20,6 +20,7 @@ const ROLES = {
 };
 
 const REPAIR_ITEMS_ADMIN_MESSAGE = 'Недостаточно прав. Работы и запчасти может изменять только администратор';
+const COUNTERPARTY_RELATION_BULK_COLLECTIONS = new Set(['clients', 'rentals', 'gantt_rentals', 'payments']);
 
 const SYSTEM_FIELD_PATTERN = /^(?:__|_)/;
 
@@ -174,6 +175,7 @@ const NON_ADMIN_BULK_ALLOWED_COLLECTIONS = new Set([
 
 const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'app_settings',
+  'counterparties',
   'clients',
   'client_objects',
   'client_contracts',
@@ -335,6 +337,7 @@ const STRICT_USER_MUTATION_FIELDS = new Set([
 
 const STRICT_CLIENT_MUTATION_FIELDS = new Set([
   'id',
+  'counterpartyId',
   'name',
   'company',
   'companyName',
@@ -344,6 +347,7 @@ const STRICT_CLIENT_MUTATION_FIELDS = new Set([
   'innNormalized',
   'kpp',
   'ogrn',
+  'ogrnip',
   'clientType',
   'verified',
   'contact',
@@ -354,6 +358,7 @@ const STRICT_CLIENT_MUTATION_FIELDS = new Set([
   'address',
   'legalAddress',
   'actualAddress',
+  'website',
   'postalAddress',
   'mailingAddress',
   'paymentTerms',
@@ -432,6 +437,7 @@ const WARRANTY_CLAIM_MUTATION_FIELDS = new Set([
 
 const STRICT_PAYMENT_ORDINARY_MUTATION_FIELDS = new Set([
   'rentalId',
+  'counterpartyId',
   'clientId',
   'client',
   'objectId',
@@ -458,9 +464,11 @@ const STRICT_PAYMENT_BULK_REPLACE_FIELDS = new Set([
 
 const NON_ADMIN_UPDATE_FIELDS = {
   clients: new Set([
+    'counterpartyId',
     'company',
     'inn',
     'email',
+    'website',
     'address',
     'contact',
     'phone',
@@ -473,7 +481,7 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'partnerCardUploadedAt',
     'partnerCardUploadedBy',
   ]),
-  client_objects: new Set(['clientId', 'name', 'address', 'contactName', 'contactPhone', 'contractId', 'contractNumber', 'notes', 'status']),
+  client_objects: new Set(['clientId', 'counterpartyId', 'name', 'address', 'contactName', 'contactPhone', 'contractId', 'contractNumber', 'notes', 'status']),
   client_contracts: new Set(['clientId', 'objectId', 'objectIds', 'number', 'date', 'title', 'status', 'notes']),
   payment_allocations: new Set(['paymentId', 'clientId', 'objectId', 'contractId', 'rentalId', 'documentId', 'managerId', 'periodStart', 'periodEnd', 'amount', 'status', 'source', 'comment']),
   documents: new Set([
@@ -749,6 +757,7 @@ const NON_ADMIN_UPDATE_FIELDS = {
   ]),
   payments: new Set([
     'rentalId',
+    'counterpartyId',
     'client',
     'clientId',
     'objectId',
@@ -1354,14 +1363,13 @@ function matchesScopedRental(entity, user, readData) {
   const ids = entityRentalIds(entity);
   if (ids.length > 0 && ids.some(id => scopedIds.some(scopedId => sameId(id, scopedId)))) return true;
 
-  // IMPORTANT: ID links above are authoritative. Client-name fallback exists only for
-  // legacy unlinked records and must not be reused for finance or durable relationships.
-  const clientKeys = compact([entity?.clientId, entity?.client, entity?.company]);
-  if (clientKeys.length === 0) return false;
-  return scopedRentals.some(rental => {
-    const rentalClientKeys = compact([rental?.clientId, rental?.client, rental?.company]);
-    return clientKeys.some(left => rentalClientKeys.some(right => sameText(left, right)));
-  });
+  const counterpartyId = String(entity?.counterpartyId || '').trim();
+  const clientId = String(entity?.clientId || '').trim();
+  if (!counterpartyId && !clientId) return false;
+  if (counterpartyId) {
+    return scopedRentals.some(rental => String(rental?.counterpartyId || '').trim() === counterpartyId);
+  }
+  return scopedRentals.some(rental => String(rental?.clientId || '').trim() === clientId);
 }
 
 function isCarrierDelivery(delivery, user) {
@@ -1406,6 +1414,7 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'owners':
       if (isInvestor(user)) return isEquipmentOwnedBy(entity, user) || getOwnerKeys(user).some(key => sameText(key, entity.id) || sameText(key, entity.name));
       return false;
+    case 'counterparties':
     case 'clients':
     case 'client_objects':
     case 'client_contracts':
@@ -2005,6 +2014,25 @@ function assertCanBulkReplace(collection, user) {
 }
 
 function assertSafeAdminBulkReplaceInput(collection, list, context = 'массовое обновление') {
+  if (COUNTERPARTY_RELATION_BULK_COLLECTIONS.has(collection)) {
+    const stableIds = new Set();
+    for (const item of Array.isArray(list) ? list : []) {
+      const id = String(item?.id || '').trim();
+      if (!id) {
+        const error = new Error(`Stable ID обязателен для ${collection} при массовом обновлении.`);
+        error.status = 409;
+        error.code = 'COUNTERPARTY_RELATION_ID_REQUIRED';
+        throw error;
+      }
+      if (stableIds.has(id)) {
+        const error = new Error(`Stable ID ${id} неоднозначен в ${collection}.`);
+        error.status = 409;
+        error.code = 'COUNTERPARTY_RELATION_AMBIGUOUS';
+        throw error;
+      }
+      stableIds.add(id);
+    }
+  }
   for (const item of Array.isArray(list) ? list : []) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const strictPaymentInput = sanitizeStrictPaymentMutationInput(collection, item, { mode: 'bulk' });

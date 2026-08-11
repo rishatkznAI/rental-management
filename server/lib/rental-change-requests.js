@@ -170,23 +170,19 @@ function getEffectivePaidAmount(payment) {
   return 0;
 }
 
-function normalizedClientKey(value) {
-  const words = String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/ё/g, 'е')
-    .match(/[a-zа-я0-9]+/g) || [];
-  const legalForms = new Set(['ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'llc', 'ooo']);
-  return words.filter(word => !legalForms.has(word)).join('');
-}
-
-function clientNamesCompatible(left, right) {
-  const leftKey = normalizedClientKey(left);
-  const rightKey = normalizedClientKey(right);
-  if (!leftKey || !rightKey) return false;
-  if (leftKey === rightKey) return true;
-  const minLength = Math.min(leftKey.length, rightKey.length);
-  return minLength >= 8 && (leftKey.includes(rightKey) || rightKey.includes(leftKey));
+function stableCustomerRelationsCompatible(left, right) {
+  const leftCounterpartyId = normalizeRentalIdentifier(left?.counterpartyId);
+  const rightCounterpartyId = normalizeRentalIdentifier(right?.counterpartyId);
+  if (leftCounterpartyId || rightCounterpartyId) {
+    return Boolean(
+      leftCounterpartyId
+      && rightCounterpartyId
+      && leftCounterpartyId === rightCounterpartyId
+    );
+  }
+  const leftClientId = normalizeRentalIdentifier(left?.clientId);
+  const rightClientId = normalizeRentalIdentifier(right?.clientId);
+  return Boolean(leftClientId && rightClientId && leftClientId === rightClientId);
 }
 
 function setHasIntersection(left, right) {
@@ -427,11 +423,7 @@ function ganttMatchesClassicRental(ganttRental, rental, options = {}) {
     if (linkedIds.some(id => sameRentalIdentifier(id, rental.id))) return true;
   }
 
-  const ganttClientId = normalizeRentalIdentifier(ganttRental.clientId);
-  const rentalClientId = normalizeRentalIdentifier(rental.clientId);
-  const sameClient = ganttClientId && rentalClientId
-    ? ganttClientId === rentalClientId
-    : clientNamesCompatible(ganttRental.client, rental.client);
+  const sameClient = stableCustomerRelationsCompatible(ganttRental, rental);
 
   const classicRange = rentalDateRange(rental, 'classic');
   const ganttRange = rentalDateRange(ganttRental, 'gantt');
@@ -453,11 +445,7 @@ function ganttMatchesClassicRental(ganttRental, rental, options = {}) {
 function ganttMatchesClassicRentalByClientEquipment(ganttRental, rental, options = {}) {
   if (!ganttRental || !rental) return false;
 
-  const ganttClientId = normalizeRentalIdentifier(ganttRental.clientId);
-  const rentalClientId = normalizeRentalIdentifier(rental.clientId);
-  const sameClient = ganttClientId && rentalClientId
-    ? ganttClientId === rentalClientId
-    : clientNamesCompatible(ganttRental.client, rental.client);
+  const sameClient = stableCustomerRelationsCompatible(ganttRental, rental);
   if (!sameClient) return false;
 
   return equipmentAliasesOverlap(ganttRental, rental, options.equipmentList || []);
@@ -498,11 +486,7 @@ function dateRangesCompatibleWithRental(ganttRental, rental) {
 
 function ganttMatchesOpenClassicRentalByClient(ganttRental, rental, options = {}) {
   if (!isOpenClassicRental(rental)) return false;
-  const ganttClientId = normalizeRentalIdentifier(ganttRental?.clientId);
-  const rentalClientId = normalizeRentalIdentifier(rental?.clientId);
-  const sameClient = ganttClientId && rentalClientId
-    ? ganttClientId === rentalClientId
-    : clientNamesCompatible(ganttRental?.client, rental?.client);
+  const sameClient = stableCustomerRelationsCompatible(ganttRental, rental);
   if (!sameClient) return false;
   if (options.requireDateMatch && !dateRangesCompatibleWithRental(ganttRental, rental)) return false;
   return true;
@@ -531,9 +515,11 @@ function compactResolutionIds(items, selector) {
 }
 
 function buildRentalResolutionFailure(status, message, searchedIds, diagnostics = {}) {
+  const { code, ...details } = diagnostics;
   return {
     ok: false,
     status,
+    ...(code ? { code } : {}),
     error: message,
     details: {
       searchedIds: uniqueIdentifiers(searchedIds),
@@ -544,7 +530,7 @@ function buildRentalResolutionFailure(status, message, searchedIds, diagnostics 
         'gantt_rentals.sourceRentalId',
         'gantt_rentals.originalRentalId',
       ],
-      ...diagnostics,
+      ...details,
     },
   };
 }
@@ -570,6 +556,7 @@ function resolveRentalForChangeRequest({
   ganttRentals = [],
   equipment = [],
   context = '',
+  allowLegacyFallback = true,
 } = {}) {
   const requestedRentalId = normalizeRentalIdentifier(rentalId);
   const requestedGanttId = normalizeRentalIdentifier(linkedGanttRentalId);
@@ -669,6 +656,22 @@ function resolveRentalForChangeRequest({
         ...diagnosticsBase,
         linkedIds,
         rentalCandidateIds: compactResolutionIds(explicitMatches, match => match.rental?.id),
+      },
+    );
+  }
+  if (!allowLegacyFallback) {
+    return buildRentalResolutionFailure(
+      ganttCandidates.length > 0 ? 409 : 404,
+      ganttCandidates.length > 0
+        ? `Проекция Gantt "${requestedGanttId || requestedRentalId}" не содержит действующей ссылки на Classic Rental.`
+        : `Classic Rental "${requestedRentalId || requestedGanttId}" не найдена.`,
+      [...searchedIds, ...linkedIds],
+      {
+        ...diagnosticsBase,
+        code: ganttCandidates.length > 0 ? 'ORPHAN_GANTT_PROJECTION' : 'RENTAL_NOT_FOUND',
+        linkedIds,
+        fallbackCandidateCount: 0,
+        fallbackCandidateIds: [],
       },
     );
   }
@@ -1354,6 +1357,7 @@ function buildRentalChangeRequest({
     rentalId: rental.id,
     sourceRentalId: sourceRentalId || '',
     linkedGanttRentalId: linkedGanttRentalId || '',
+    counterpartyId: rental.counterpartyId || '',
     clientId: rental.clientId || '',
     client: rental.client,
     equipment: Array.isArray(rental.equipment) ? rental.equipment : [],
@@ -1450,6 +1454,7 @@ function ensureGanttRentalLink(ganttRental, rental, equipmentList = []) {
     sourceRentalId: rentalId,
     originalRentalId: normalizeRentalIdentifier(ganttRental.originalRentalId) || rentalId,
   };
+  if (rental.counterpartyId !== undefined) next.counterpartyId = rental.counterpartyId || '';
   if (rental.clientId !== undefined) next.clientId = rental.clientId || '';
   if (rental.client !== undefined) {
     next.client = rental.client || '';
@@ -1492,7 +1497,14 @@ function ensureGanttRentalLink(ganttRental, rental, equipmentList = []) {
   };
 }
 
-function resolveGanttRentalLink({ ganttRental, rentals = [], ganttRentals = [], equipment = [], context = '' } = {}) {
+function resolveGanttRentalLink({
+  ganttRental,
+  rentals = [],
+  ganttRentals = [],
+  equipment = [],
+  context = '',
+  allowLegacyFallback = true,
+} = {}) {
   if (!ganttRental) {
     return buildRentalResolutionFailure(400, 'Gantt rental is required.', [], { context });
   }
@@ -1506,6 +1518,7 @@ function resolveGanttRentalLink({ ganttRental, rentals = [], ganttRentals = [], 
       ganttRentals,
       equipment,
       context,
+      allowLegacyFallback,
     });
   }
   return resolveRentalForChangeRequest({
@@ -1516,6 +1529,7 @@ function resolveGanttRentalLink({ ganttRental, rentals = [], ganttRentals = [], 
     ganttRentals,
     equipment,
     context,
+    allowLegacyFallback,
   });
 }
 
@@ -1560,6 +1574,7 @@ function rentalStatusToGanttStatus(status) {
 
 function applyRentalFieldToGantt(ganttRental, field, value) {
   if (!ganttRental) return ganttRental;
+  if (field === 'counterpartyId') return { ...ganttRental, counterpartyId: value };
   if (field === 'clientId') return { ...ganttRental, clientId: value };
   if (field === 'client') {
     return { ...ganttRental, client: value, clientShort: String(value || '').substring(0, 20) };

@@ -115,6 +115,7 @@ type ExpenseFormState = {
 
 type FinanceOperationRow = {
   id: string;
+  counterpartyId?: string;
   date: string;
   type: FinanceOperationType;
   category: string;
@@ -402,14 +403,21 @@ function buildPaymentOperations(payments: Payment[], from: string, to: string): 
   return payments
     .map(payment => ({
       id: `payment-${payment.id}`,
+      counterpartyId: payment.counterpartyId,
       date: getPaymentDate(payment),
       type: 'income' as const,
       category: 'Оплата клиента',
       description: payment.invoiceNumber || 'Платёж',
-      counterparty: payment.client || '—',
+      counterparty: payment.counterparty?.shortName || payment.counterparty?.legalName || payment.client || '—',
       amount: getPaymentIncome(payment),
       account: '—',
-      relatedEntity: payment.rentalId ? `Аренда ${payment.rentalId}` : payment.clientId ? `Клиент ${payment.clientId}` : '—',
+      relatedEntity: payment.rentalId
+        ? `Аренда ${payment.rentalId}`
+        : payment.counterpartyId
+          ? `Контрагент ${payment.counterpartyId}`
+          : payment.clientId
+            ? `Клиент ${payment.clientId}`
+            : '—',
       status: payment.status === 'paid' ? 'Оплачено' : payment.status === 'partial' ? 'Частично' : payment.status === 'overdue' ? 'Просрочено' : 'Ожидает',
       source: 'payments' as const,
     }))

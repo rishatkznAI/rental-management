@@ -90,12 +90,12 @@ function createState() {
       { id: 'U-investor', name: 'Инвестор', email: 'investor@example.test', role: 'Инвестор', status: 'Активен', password: 'investor', tokenVersion: 0, ownerId: 'OW-1' },
     ],
     rentals: [
-      { id: 'R-own', manager: 'Руслан', managerId: 'U-manager', client: 'ООО Свой', equipmentId: 'EQ-own', price: 100000, discount: 5000, rate: '5000/день', documents: ['D-1'] },
-      { id: 'R-other', manager: 'Анна', managerId: 'U-other', client: 'ООО Чужой', equipmentId: 'EQ-other', price: 120000, discount: 0, rate: '6000/день', documents: ['D-2'] },
+      { id: 'R-own', counterpartyId: 'CP-own', manager: 'Руслан', managerId: 'U-manager', client: 'ООО Свой', equipmentId: 'EQ-own', price: 100000, discount: 5000, rate: '5000/день', documents: ['D-1'] },
+      { id: 'R-other', counterpartyId: 'CP-other', manager: 'Анна', managerId: 'U-other', client: 'ООО Чужой', equipmentId: 'EQ-other', price: 120000, discount: 0, rate: '6000/день', documents: ['D-2'] },
     ],
     gantt_rentals: [
-      { id: 'GR-own', manager: 'Руслан', managerId: 'U-manager', client: 'ООО Свой', equipmentId: 'EQ-own', amount: 100000, paymentStatus: 'unpaid', debt: 100000, documents: ['D-1'] },
-      { id: 'GR-other', manager: 'Анна', managerId: 'U-other', client: 'ООО Чужой', equipmentId: 'EQ-other', amount: 120000, paymentStatus: 'partial', debt: 60000, documents: ['D-2'] },
+      { id: 'GR-own', counterpartyId: 'CP-own', manager: 'Руслан', managerId: 'U-manager', client: 'ООО Свой', equipmentId: 'EQ-own', amount: 100000, paymentStatus: 'unpaid', debt: 100000, documents: ['D-1'] },
+      { id: 'GR-other', counterpartyId: 'CP-other', manager: 'Анна', managerId: 'U-other', client: 'ООО Чужой', equipmentId: 'EQ-other', amount: 120000, paymentStatus: 'partial', debt: 60000, documents: ['D-2'] },
     ],
     equipment: [
       { id: 'EQ-own', inventoryNumber: '100', ownerId: 'OW-1', notes: 'own', salePrice1: 1000000, salePrice2: 1100000, salePrice3: 1200000, subleasePrice: 10000, plannedMonthlyRevenue: 300000 },
@@ -115,7 +115,7 @@ function createState() {
     service_audit_log: [],
     service_vehicles: [{ id: 'SV-1', make: 'Lada', model: 'Largus', plateNumber: 'A001AA', status: 'active' }],
     vehicle_trips: [{ id: 'VT-1', vehicleId: 'SV-1', driver: 'Петров', route: 'Склад — объект', date: '2026-05-01' }],
-    payments: [{ id: 'P-1', rentalId: 'R-own', amount: 1000, status: 'new' }],
+    payments: [{ id: 'P-1', rentalId: 'R-own', counterpartyId: 'CP-own', amount: 1000, status: 'new' }],
     payment_allocations: [],
     rental_change_requests: [],
     crm_deals: [{
@@ -131,6 +131,10 @@ function createState() {
       budget: 100000,
       probability: 25,
     }],
+    counterparties: [
+      { id: 'CP-own', legalName: 'ООО Свой', shortName: 'ООО Свой', roles: ['customer'], status: 'active', archivedAt: null },
+      { id: 'CP-other', legalName: 'ООО Чужой', shortName: 'ООО Чужой', roles: ['customer'], status: 'active', archivedAt: null },
+    ],
     clients: [],
     client_objects: [],
     client_contracts: [],
@@ -494,6 +498,7 @@ test('generic CRUD refuses to register without access-control', () => {
 
 test('/api/clients creates clients with normalized INN and rejects duplicate INN', async () => {
   const { app, state } = createSecurityApp();
+  const initialCounterpartyCount = state.counterparties.length;
 
   await withServer(app, async (baseUrl) => {
     const created = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
@@ -502,6 +507,11 @@ test('/api/clients creates clients with normalized INN and rejects duplicate INN
     }));
     assert.equal(created.status, 201);
     assert.equal(created.body.innNormalized, '1655123456');
+    assert.ok(created.body.counterpartyId);
+    assert.equal(state.counterparties.length, initialCounterpartyCount + 1);
+    const createdCounterparty = state.counterparties.find(item => item.id === created.body.counterpartyId);
+    assert.ok(createdCounterparty);
+    assert.deepEqual(createdCounterparty.roles, ['customer']);
 
     const duplicate = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
       company: 'ООО Бета',
@@ -515,6 +525,7 @@ test('/api/clients creates clients with normalized INN and rejects duplicate INN
   });
 
   assert.equal(state.clients.length, 1);
+  assert.equal(state.counterparties.length, initialCounterpartyCount + 1);
 });
 
 test('/api/clients allows editing own INN and rejects changing to another client INN', async () => {
@@ -539,6 +550,60 @@ test('/api/clients allows editing own INN and rejects changing to another client
     assert.equal(duplicate.body.error, 'Клиент с таким ИНН уже существует');
     assert.equal(duplicate.body.conflictClient.id, 'C-2');
   });
+});
+
+test('/api/clients update does not backfill or rewrite unrelated domain records', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    clientPayload({ id: 'C-1', company: 'ООО До переименования', inn: '1655123456' }),
+  ];
+  state.rentals = [
+    { id: 'R-stable', clientId: 'C-1', client: 'Исторический снимок', status: 'closed' },
+    { id: 'R-unlinked', client: 'ООО До переименования', clientInn: '7700654321', status: 'closed' },
+  ];
+  state.gantt_rentals = [
+    { id: 'GR-unlinked', client: 'ООО До переименования', clientInn: '7700654321', status: 'closed' },
+  ];
+  state.payments = [
+    { id: 'P-unlinked', rentalId: 'R-stable', client: 'ООО До переименования', amount: 1000 },
+  ];
+  state.documents = [
+    { id: 'D-unlinked', rental: 'R-stable', client: 'ООО До переименования' },
+  ];
+  state.service = [
+    { id: 'S-unlinked', client: 'ООО До переименования', clientInn: '7700654321', status: 'closed' },
+  ];
+  state.crm_deals = [
+    { id: 'CRM-unlinked', company: 'ООО До переименования', inn: '7700654321' },
+  ];
+  const before = structuredClone({
+    rentals: state.rentals,
+    ganttRentals: state.gantt_rentals,
+    payments: state.payments,
+    documents: state.documents,
+    service: state.service,
+    crmDeals: state.crm_deals,
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/clients/C-1', 'admin-token', {
+      company: 'ООО После переименования',
+      inn: '7700654321',
+    });
+
+    assert.equal(update.status, 200);
+    assert.equal(update.body.company, 'ООО После переименования');
+    assert.equal(update.body.innNormalized, '7700654321');
+  });
+
+  assert.deepEqual(state.rentals, before.rentals);
+  assert.equal(state.rentals[0].clientId, 'C-1');
+  assert.equal(state.rentals[1].clientId, undefined);
+  assert.deepEqual(state.gantt_rentals, before.ganttRentals);
+  assert.deepEqual(state.payments, before.payments);
+  assert.deepEqual(state.documents, before.documents);
+  assert.deepEqual(state.service, before.service);
+  assert.deepEqual(state.crm_deals, before.crmDeals);
 });
 
 test('/api/clients allows office manager to save client rail contacts and partner card fields', async () => {
@@ -897,7 +962,7 @@ test('/api/clients delete rejects clients linked to rentals by clientId', async 
   assert.equal(state.clients.length, 1);
 });
 
-test('/api/clients delete rejects legacy rentals linked by client name without clientId', async () => {
+test('/api/clients delete does not infer a Rental relation from display metadata', async () => {
   const { app, state } = createSecurityApp();
   state.clients = [
     clientPayload({ id: 'C-1', company: 'ООО Альфа', inn: '1655123456', email: 'alpha@example.test' }),
@@ -909,13 +974,12 @@ test('/api/clients delete rejects legacy rentals linked by client name without c
 
   await withServer(app, async (baseUrl) => {
     const deleted = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'admin-token');
-    assert.equal(deleted.status, 409);
-    assert.equal(deleted.body.error, 'CLIENT_HAS_RENTALS');
-    assert.equal(deleted.body.rentals[0].id, 'GR-1');
-    assert.equal(deleted.body.rentals[0].equipmentInv, '700');
+    assert.equal(deleted.status, 200);
   });
 
-  assert.equal(state.clients.length, 1);
+  assert.equal(state.clients.length, 0);
+  assert.equal(state.gantt_rentals.length, 1);
+  assert.equal(state.gantt_rentals[0].client, ' ООО Альфа ');
 });
 
 test('/api/clients delete rejects clients with historical non-rental links', async () => {
@@ -2275,7 +2339,9 @@ test('payments API accepts explicit zero paidAmount', async () => {
 
 test('payments API accepts ordinary create fields and rejects unknown, id, documentId, and derived fields', async () => {
   const { app, state } = createSecurityApp();
-  state.clients = [{ id: 'C-1', company: 'ООО Свой', inn: '1655000000' }];
+  state.counterparties.push({ id: 'CP-1', legalName: 'ООО Свой', shortName: 'ООО Свой', roles: ['customer'], status: 'active', archivedAt: null });
+  state.clients = [{ id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Свой', inn: '1655000000' }];
+  Object.assign(state.rentals.find(item => item.id === 'R-own'), { clientId: 'C-1', counterpartyId: 'CP-1' });
   state.client_objects = [{ id: 'OBJ-1', clientId: 'C-1', name: 'Объект 1', status: 'active' }];
   state.client_contracts = [{ id: 'CTR-1', clientId: 'C-1', objectId: 'OBJ-1', number: 'Д-1', status: 'active' }];
 
@@ -2332,6 +2398,7 @@ test('payments API rejects dangerous patch fields without mutating existing paym
       paidAmount: 1000,
       status: 'partial',
       rentalId: 'R-other',
+      counterpartyId: 'CP-other',
       comment: 'admin correction',
     });
     assert.equal(valid.status, 200);
@@ -2369,13 +2436,15 @@ test('payments API rejects dangerous patch fields without mutating existing paym
 
 test('payments API blocks high-risk direct edits when payment has allocations', async () => {
   const { app, state } = createSecurityApp();
-  state.clients = [{ id: 'C-1', company: 'ООО Свой' }];
+  state.counterparties.push({ id: 'CP-1', legalName: 'ООО Свой', shortName: 'ООО Свой', roles: ['customer'], status: 'active', archivedAt: null });
+  state.clients = [{ id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Свой' }];
   state.client_objects = [{ id: 'OBJ-1', clientId: 'C-1', name: 'Объект 1', status: 'active' }];
   state.client_contracts = [{ id: 'CTR-1', clientId: 'C-1', objectId: 'OBJ-1', number: 'Д-1', status: 'active' }];
-  state.gantt_rentals = [{ id: 'GR-own', clientId: 'C-1', objectId: 'OBJ-1', contractId: 'CTR-1', amount: 1000 }];
+  state.gantt_rentals = [{ id: 'GR-own', counterpartyId: 'CP-1', clientId: 'C-1', objectId: 'OBJ-1', contractId: 'CTR-1', amount: 1000 }];
   state.payments = [{
     id: 'P-allocated',
     rentalId: 'GR-own',
+    counterpartyId: 'CP-1',
     clientId: 'C-1',
     objectId: 'OBJ-1',
     contractId: 'CTR-1',
@@ -2510,6 +2579,9 @@ test('payment allocations API validates existence cap and syncs rental payment s
 
 test('payments API bulk replace permits legacy import fields and rejects unsafe fields atomically', async () => {
   const { app, state } = createSecurityApp();
+  state.counterparties.push({ id: 'CP-1', legalName: 'ООО Свой', shortName: 'ООО Свой', roles: ['customer'], status: 'active', archivedAt: null });
+  state.clients = [{ id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Свой' }];
+  Object.assign(state.rentals.find(item => item.id === 'R-own'), { clientId: 'C-1', counterpartyId: 'CP-1' });
 
   await withServer(app, async (baseUrl) => {
     const valid = await request(baseUrl, 'PUT', '/api/payments', 'admin-token', [
@@ -2612,6 +2684,39 @@ test('rental change request payment approval sanitizes ordinary payment patches'
     assert.equal(state.payments[0].amount, 2000);
     assert.equal(state.payments[0].comment, 'approved correction');
     assert.equal(state.rental_change_requests[0].status, 'approved');
+  });
+});
+
+test('rental change request payment approval rejects a Counterparty relation mismatch', async () => {
+  const { app, state } = createSecurityApp();
+  state.rental_change_requests = [{
+    id: 'RCR-payment-relation-mismatch',
+    entityType: 'payment',
+    entityId: 'P-1',
+    paymentId: 'P-1',
+    rentalId: 'R-own',
+    operation: 'update',
+    type: 'Удаление или корректировка платежей',
+    status: 'pending',
+    newValue: {
+      counterpartyId: 'CP-other',
+      amount: 2000,
+    },
+  }];
+
+  await withServer(app, async (baseUrl) => {
+    const before = JSON.stringify(state.payments);
+    const response = await request(
+      baseUrl,
+      'POST',
+      '/api/rental_change_requests/RCR-payment-relation-mismatch/approve',
+      'admin-token',
+      {},
+    );
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'COUNTERPARTY_RELATION_MISMATCH');
+    assert.equal(JSON.stringify(state.payments), before);
+    assert.equal(state.rental_change_requests[0].status, 'pending');
   });
 });
 

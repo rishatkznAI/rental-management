@@ -12,6 +12,13 @@ const {
   normalizeClientInnFields,
 } = require('../lib/client-inn');
 const {
+  assertCounterpartyUnique,
+  normalizeCounterpartyRecord,
+  prepareClientCompatibilityBulkReplace,
+} = require('../lib/counterparty');
+const { canonicalizeRentalCounterpartyRelation } = require('../lib/rental-counterparty-relations');
+const { canonicalizePaymentCounterpartyRelation } = require('../lib/payment-counterparty-relations');
+const {
   analyzeRentalEquipmentDiagnostics,
   planRentalEquipmentBackfill,
 } = require('../lib/rental-equipment-diagnostics');
@@ -155,6 +162,7 @@ function mediaProxyAgent(parsedUrl) {
 const SYSTEM_DATA_COLLECTIONS = [
   'equipment',
   'rentals',
+  'counterparties',
   'clients',
   'service',
   'documents',
@@ -927,6 +935,7 @@ function analyzeSystemDataImport(payload, readData) {
   const collections = {};
   const duplicates = {};
   const clientInnDuplicates = [];
+  const integrityErrors = [];
   const conflicts = {};
   const invalidCollections = [];
   const forbiddenFields = {};
@@ -976,6 +985,24 @@ function analyzeSystemDataImport(payload, readData) {
         invalidCollections.push(`clients:${error.message}`);
       }
     }
+    if (collection === 'counterparties') {
+      try {
+        const normalizedCounterparties = [];
+        for (const item of sanitized) {
+          const normalized = normalizeCounterpartyRecord(item, {
+            id: item?.id,
+            nowIso: () => item?.updatedAt || new Date().toISOString(),
+            createdAt: item?.createdAt,
+            allowArchived: true,
+          });
+          assertCounterpartyUnique(normalizedCounterparties, normalized);
+          normalizedCounterparties.push(normalized);
+        }
+        sanitizedCollections[collection] = normalizedCounterparties;
+      } catch (error) {
+        invalidCollections.push(`counterparties:${error.message}`);
+      }
+    }
 
     const existingById = new Map((readData(collection) || [])
       .filter(item => item?.id)
@@ -987,13 +1014,60 @@ function analyzeSystemDataImport(payload, readData) {
     if (conflictIds.length > 0) conflicts[collection] = conflictIds.slice(0, 50);
   }
 
+  if (Array.isArray(sanitizedCollections.clients)) {
+    try {
+      const prepared = prepareClientCompatibilityBulkReplace({
+        previousClients: readData('clients') || [],
+        nextClients: sanitizedCollections.clients,
+        counterparties: Array.isArray(sanitizedCollections.counterparties)
+          ? sanitizedCollections.counterparties
+          : (readData('counterparties') || []),
+        nowIso: () => new Date().toISOString(),
+      });
+      sanitizedCollections.clients = prepared.clients;
+      sanitizedCollections.counterparties = prepared.counterparties;
+      collections.counterparties = {
+        incoming: prepared.counterparties.length,
+        existing: Array.isArray(readData('counterparties')) ? (readData('counterparties') || []).length : 0,
+      };
+    } catch (error) {
+      invalidCollections.push(`clients:${error.message}`);
+    }
+  }
+
+  const stagedData = {
+    readData(name) {
+      if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
+      return readData(name) || [];
+    },
+  };
+  if (Array.isArray(sanitizedCollections.rentals)) {
+    try {
+      sanitizedCollections.rentals = sanitizedCollections.rentals
+        .map(rental => canonicalizeRentalCounterpartyRelation(rental, stagedData));
+    } catch (error) {
+      integrityErrors.push(`${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
+    }
+  }
+  if (Array.isArray(sanitizedCollections.payments)) {
+    try {
+      sanitizedCollections.payments = sanitizedCollections.payments
+        .map(payment => canonicalizePaymentCounterpartyRelation(payment, stagedData));
+    } catch (error) {
+      integrityErrors.push(`${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
+    }
+  }
+
   const blockingErrors = [
     ...unknownCollections.map(name => `Неизвестная коллекция: ${name}`),
-    ...invalidCollections.map(name => name.startsWith('clients:')
-      ? name.slice('clients:'.length)
-      : `Коллекция ${name} должна быть массивом`),
+    ...invalidCollections.map(name => {
+      if (name.startsWith('clients:')) return name.slice('clients:'.length);
+      if (name.startsWith('counterparties:')) return name.slice('counterparties:'.length);
+      return `Коллекция ${name} должна быть массивом`;
+    }),
     ...Object.entries(forbiddenFields).map(([name, fields]) => `Запрещённые поля в ${name}: ${fields.join(', ')}`),
     ...Object.entries(duplicates).map(([name, ids]) => `Дубликаты id в ${name}: ${ids.join(', ')}`),
+    ...integrityErrors,
     ...(clientInnDuplicates.length > 0 ? ['SYSTEM_IMPORT_CLIENT_INN_DUPLICATES: импорт содержит клиентов с одинаковым ИНН'] : []),
   ];
 
@@ -1096,6 +1170,9 @@ function registerSystemRoutes(app, deps) {
   const {
     readData,
     writeData,
+    writeDataBatch: persistDataBatch = entries => {
+      for (const entry of entries || []) writeData(entry.name, entry.value);
+    },
     getSnapshot,
     saveSnapshot,
     botToken,
@@ -1226,9 +1303,30 @@ function registerSystemRoutes(app, deps) {
       } = req.body;
       const prev = getSnapshot();
       const now = Date.now();
-      const normalizedClients = Array.isArray(clients) ? clients.map(normalizeClientInnFields) : clients;
+      let normalizedClients = Array.isArray(clients) ? clients.map(normalizeClientInnFields) : clients;
+      let normalizedCounterparties = null;
       if (Array.isArray(normalizedClients)) {
         assertClientInnWriteAllowed(prev.clients || [], normalizedClients);
+        const prepared = prepareClientCompatibilityBulkReplace({
+          previousClients: readData('clients') || [],
+          nextClients: normalizedClients,
+          counterparties: readData('counterparties') || [],
+          nowIso: () => new Date().toISOString(),
+        });
+        normalizedClients = prepared.clients;
+        normalizedCounterparties = prepared.counterparties;
+      }
+      let normalizedPayments = payments;
+      if (Array.isArray(payments)) {
+        const stagedData = {
+          readData(name) {
+            if (name === 'clients' && Array.isArray(normalizedClients)) return normalizedClients;
+            if (name === 'counterparties' && Array.isArray(normalizedCounterparties)) return normalizedCounterparties;
+            return readData(name) || [];
+          },
+        };
+        normalizedPayments = payments
+          .map(payment => canonicalizePaymentCounterpartyRelation(payment, stagedData));
       }
       if (Array.isArray(equipment)) {
         assertProductionSmokeFixtureMutationAllowed({
@@ -1244,7 +1342,7 @@ function registerSystemRoutes(app, deps) {
         service,
         warranty_claims,
         clients: normalizedClients,
-        payments,
+        payments: normalizedPayments,
         company_expenses,
         users,
         documents,
@@ -1257,12 +1355,17 @@ function registerSystemRoutes(app, deps) {
         }
       }
       if (equipment) writeData('equipment', equipment);
+      if (clients) {
+        persistDataBatch([
+          { name: 'counterparties', value: normalizedCounterparties },
+          { name: 'clients', value: normalizedClients },
+        ]);
+      }
       if (rentals) writeData('rentals', rentals);
       if (gantt_rentals) writeData('gantt_rentals', gantt_rentals);
       if (service) writeData('service', service);
       if (warranty_claims) writeData('warranty_claims', warranty_claims);
-      if (clients) writeData('clients', normalizedClients);
-      if (payments) writeData('payments', payments);
+      if (normalizedPayments) writeData('payments', normalizedPayments);
       if (company_expenses) writeData('company_expenses', company_expenses);
       if (users) writeData('users', users);
       if (documents) writeData('documents', documents);
@@ -1311,7 +1414,13 @@ function registerSystemRoutes(app, deps) {
         }
       }
 
-      saveSnapshot({ ...req.body, lastOverdueCheck: prev.lastOverdueCheck || 0 });
+      saveSnapshot({
+        ...req.body,
+        ...(normalizedCounterparties ? { counterparties: normalizedCounterparties } : {}),
+        ...(normalizedClients ? { clients: normalizedClients } : {}),
+        ...(normalizedPayments ? { payments: normalizedPayments } : {}),
+        lastOverdueCheck: prev.lastOverdueCheck || 0,
+      });
 
       if (notifications.length && botToken) {
         const botUsers = getBotUsers();
@@ -1340,7 +1449,11 @@ function registerSystemRoutes(app, deps) {
         return sendSystemFixtureProtectedError(req, res, auditLog, err);
       }
       console.error('[SYNC] Ошибка:', err.message);
-      res.status(err?.status || 500).json({ ok: false, error: err.message });
+      res.status(err?.status || 500).json({
+        ok: false,
+        ...(err?.code ? { code: err.code } : {}),
+        error: err.message,
+      });
     }
   });
 
@@ -1772,7 +1885,13 @@ function registerSystemRoutes(app, deps) {
     }
 
     const imported = {};
-    for (const [collection, list] of Object.entries(analysis.sanitizedCollections)) {
+    const writes = [];
+    const importEntries = Object.entries(analysis.sanitizedCollections).sort(([left], [right]) => {
+      if (left === 'counterparties' && right === 'clients') return -1;
+      if (left === 'clients' && right === 'counterparties') return 1;
+      return 0;
+    });
+    for (const [collection, list] of importEntries) {
       const nextList = collection === 'users'
         ? mergeImportedUsers(list, readData('users') || [])
         : list;
@@ -1790,8 +1909,19 @@ function registerSystemRoutes(app, deps) {
           return res.status(error?.status || 400).json({ ok: false, error: error.message });
         }
       }
-      writeData(collection, nextList);
+      writes.push({ name: collection, value: nextList });
       imported[collection] = nextList.length;
+    }
+
+    try {
+      persistDataBatch(writes);
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        code: 'SYSTEM_IMPORT_PERSISTENCE_FAILED',
+        errorCode: 'SYSTEM_IMPORT_PERSISTENCE_FAILED',
+        error: error?.message || 'System data import failed atomically.',
+      });
     }
 
     auditLog?.(req, {

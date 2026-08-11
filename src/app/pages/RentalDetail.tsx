@@ -371,8 +371,7 @@ export default function RentalDetail() {
     });
   }, [inventoryCounts, resolvedRentalEquipment]);
 
-  const selectedClient = clients.find(c => c.id === ((isEditing ? formState?.clientId : rental?.clientId) || ''))
-    ?? clients.find(c => c.company === ((isEditing ? formState?.client : rental?.client) || ''));
+  const selectedClient = clients.find(c => c.id === ((isEditing ? formState?.clientId : rental?.clientId) || ''));
   const currentObjectId = (isEditing ? formState?.objectId : rental?.objectId) || '';
   const currentContractId = (isEditing ? formState?.contractId : rental?.contractId) || '';
   const activeClientObjects = clientObjects.filter(object => object.clientId === selectedClient?.id && object.status !== 'archived');
@@ -450,10 +449,12 @@ export default function RentalDetail() {
       if (!rental) return false;
       const sourceRentalId = getGanttRentalSourceId(entry);
       if (sourceRentalId) return sourceRentalId === rental.id;
-      const sameClient = entry.clientId && rental.clientId
-        ? entry.clientId === rental.clientId
-        : entry.client === rental.client;
-      if (!sameClient) return false;
+      const entryCounterpartyId = String(entry.counterpartyId || '').trim();
+      const rentalCounterpartyId = String(rental.counterpartyId || '').trim();
+      const sameCanonicalCustomer = entryCounterpartyId || rentalCounterpartyId
+        ? Boolean(entryCounterpartyId && rentalCounterpartyId && entryCounterpartyId === rentalCounterpartyId)
+        : Boolean(entry.clientId && rental.clientId && entry.clientId === rental.clientId);
+      if (!sameCanonicalCustomer) return false;
       if (entry.startDate !== rental.startDate || entry.endDate !== rental.plannedReturnDate) return false;
       return safelyMatchesResolvedEquipment(entry);
     });

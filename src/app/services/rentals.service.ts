@@ -48,6 +48,27 @@ export type RentalDowntimeResponse = {
   };
 };
 
+export type RentalCreditRiskSnapshot = {
+  clientId: string;
+  currentDebt: number;
+  creditLimit: number;
+  unpaidRentals: number;
+  overdueRentals: number;
+  exceededLimit: boolean;
+  requiresAcknowledgement: boolean;
+};
+
+export type RentalAvailabilityConflict = {
+  rentalId: string;
+  clientId: string;
+  client: string;
+  equipmentId: string;
+  equipmentInv: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+};
+
 export type RentalsSummary = {
   total: number;
   active: number;
@@ -133,8 +154,10 @@ export const rentalsService = {
   getRentalDowntimes: (id: string): Promise<{ ok: boolean; rentalId: string; downtimes: DowntimePeriod[] }> =>
     api.get(`/api/rentals/${id}/downtimes`),
 
-  create: (data: Omit<Rental, 'id'>): Promise<Rental> =>
-    api.post<Rental>('/api/rentals', data),
+  create: (data: Omit<Rental, 'id'>, idempotencyKey?: string): Promise<Rental> =>
+    api.post<Rental>('/api/rentals', data, idempotencyKey ? {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    } : undefined),
 
   update: (id: string, data: Partial<Rental>): Promise<Rental> =>
     api.patch<Rental>(`/api/rentals/${id}`, data),

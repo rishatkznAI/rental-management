@@ -86,7 +86,10 @@ export interface GanttRentalData {
   counterpartyId?: string;
   clientId?: string;
   objectId?: string;
+  objectName?: string;
+  objectAddress?: string;
   contractId?: string;
+  contractNumber?: string;
   client: string;
   clientShort: string;
   equipmentId?: string;
@@ -94,6 +97,7 @@ export interface GanttRentalData {
   serialNumber?: string;
   startDate: string;
   endDate: string;
+  managerId?: string;
   manager: string;
   managerInitials: string;
   status: 'created' | 'active' | 'returned' | 'closed';

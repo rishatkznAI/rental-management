@@ -11,6 +11,12 @@ type UiIssue = {
   text?: string;
 };
 
+function dateOffset(days: number) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function installMovementGuards(page: Page, issues: UiIssue[]) {
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
@@ -36,6 +42,8 @@ test('rentals movement tab resolves equipment links and shows diagnostic fallbac
   installMovementGuards(page, issues);
 
   const suffix = `movement-${Date.now()}`;
+  const startDate = dateOffset(1);
+  const endDate = dateOffset(3);
   const seed = await withAdminApi(async (api) => {
     const client = await createClient(api, suffix);
     const equipment = await createEquipment(api, suffix);
@@ -43,8 +51,8 @@ test('rentals movement tab resolves equipment links and shows diagnostic fallbac
       client: client.company,
       clientId: client.id,
       equipment,
-      startDate: '2026-05-18',
-      endDate: '2026-05-20',
+      startDate,
+      endDate,
       status: 'active',
       ganttStatus: 'active',
     });
@@ -53,9 +61,9 @@ test('rentals movement tab resolves equipment links and shows diagnostic fallbac
       data: {
         type: 'shipping',
         status: 'completed',
-        transportDate: '2026-05-18',
+        transportDate: startDate,
         pickupTime: '10:00',
-        neededBy: '2026-05-18',
+        neededBy: startDate,
         origin: 'Склад',
         destination: 'Объект',
         cargo: `${equipment.manufacturer} ${equipment.model}`,
@@ -79,7 +87,7 @@ test('rentals movement tab resolves equipment links and shows diagnostic fallbac
         id: `SP-${suffix}-direct`,
         equipmentId: equipment.id,
         type: 'shipping',
-        date: '2026-05-18T08:00:00.000Z',
+        date: `${startDate}T08:00:00.000Z`,
         uploadedBy: 'E2E',
         photos: [TINY_PNG],
         source: 'manual',
@@ -88,7 +96,7 @@ test('rentals movement tab resolves equipment links and shows diagnostic fallbac
         id: `SP-${suffix}-rental`,
         rentalId: rental.id,
         type: 'receiving',
-        date: '2026-05-18T09:00:00.000Z',
+        date: `${startDate}T09:00:00.000Z`,
         uploadedBy: 'E2E',
         photos: [TINY_PNG],
         source: 'manual',
@@ -97,7 +105,7 @@ test('rentals movement tab resolves equipment links and shows diagnostic fallbac
         id: `SP-${suffix}-delivery`,
         deliveryId: delivery.id,
         type: 'shipping',
-        date: '2026-05-18T10:00:00.000Z',
+        date: `${startDate}T10:00:00.000Z`,
         uploadedBy: 'E2E',
         photos: [TINY_PNG],
         source: 'manual',
@@ -107,7 +115,7 @@ test('rentals movement tab resolves equipment links and shows diagnostic fallbac
         serialNumber: equipment.serialNumber,
         inventoryNumber: equipment.inventoryNumber,
         type: 'shipping',
-        date: '2026-05-18T11:00:00.000Z',
+        date: `${startDate}T11:00:00.000Z`,
         uploadedBy: 'E2E',
         photos: [TINY_PNG],
         source: 'manual',
@@ -115,7 +123,7 @@ test('rentals movement tab resolves equipment links and shows diagnostic fallbac
       {
         id: `SP-${suffix}-broken`,
         type: 'receiving',
-        date: '2026-05-18T12:00:00.000Z',
+        date: `${startDate}T12:00:00.000Z`,
         uploadedBy: 'E2E',
         photos: [TINY_PNG],
         source: 'manual',
@@ -170,6 +178,8 @@ test('rentals movement sheet handles legacy movement entries without photos', as
   installMovementGuards(page, issues);
 
   const suffix = `movement-empty-photos-${Date.now()}`;
+  const startDate = dateOffset(1);
+  const endDate = dateOffset(2);
   const seed = await withAdminApi(async (api) => {
     const client = await createClient(api, suffix);
     const equipment = await createEquipment(api, suffix);
@@ -177,8 +187,8 @@ test('rentals movement sheet handles legacy movement entries without photos', as
       client: client.company,
       clientId: client.id,
       equipment,
-      startDate: '2026-05-21',
-      endDate: '2026-05-22',
+      startDate,
+      endDate,
       status: 'active',
       ganttStatus: 'active',
     });
@@ -190,7 +200,7 @@ test('rentals movement sheet handles legacy movement entries without photos', as
         rentalId: rental.id,
         equipmentId: equipment.id,
         type: 'shipping',
-        date: '2026-05-21T08:00:00.000Z',
+        date: `${startDate}T08:00:00.000Z`,
         uploadedBy: 'E2E',
         comment,
         source: 'manual',

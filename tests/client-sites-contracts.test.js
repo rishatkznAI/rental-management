@@ -109,15 +109,62 @@ async function withServer(app, fn) {
   }
 }
 
-async function request(baseUrl, method, path, body) {
+async function request(baseUrl, method, path, body, headers = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
+
+test('inline client relation creation is idempotent across concurrent and unknown-outcome retries', async () => {
+  const { app, state } = makeCrudApp({
+    clients: [{ id: 'C-1', company: 'Клиент', inn: '7707083893', innNormalized: '7707083893' }],
+  });
+
+  await withServer(app, async baseUrl => {
+    const objectPayload = {
+      clientId: 'C-1',
+      name: 'Склад',
+      address: 'Казань',
+      status: 'active',
+    };
+    const objectHeaders = { 'Idempotency-Key': 'object-retry-0001' };
+    const [first, doubleClick] = await Promise.all([
+      request(baseUrl, 'POST', '/api/client_objects', objectPayload, objectHeaders),
+      request(baseUrl, 'POST', '/api/client_objects', objectPayload, objectHeaders),
+    ]);
+
+    assert.deepEqual([first.status, doubleClick.status].sort(), [200, 201]);
+    assert.equal(first.body.id, doubleClick.body.id);
+    assert.equal(first.body.counterpartyId, state.clients[0].counterpartyId);
+    assert.equal(state.client_objects.length, 1);
+    assert.equal(state.inline_relation_idempotency.length, 1);
+
+    const contractPayload = {
+      clientId: 'C-1',
+      objectId: first.body.id,
+      number: 'Д-1',
+      status: 'active',
+    };
+    const contractHeaders = { 'Idempotency-Key': 'contract-retry-0001' };
+    const createdContract = await request(baseUrl, 'POST', '/api/client_contracts', contractPayload, contractHeaders);
+    const replayedContract = await request(baseUrl, 'POST', '/api/client_contracts', contractPayload, contractHeaders);
+    const mismatchedRetry = await request(baseUrl, 'POST', '/api/client_contracts', {
+      ...contractPayload,
+      number: 'Д-2',
+    }, contractHeaders);
+
+    assert.equal(createdContract.status, 201);
+    assert.equal(replayedContract.status, 200);
+    assert.equal(replayedContract.body.id, createdContract.body.id);
+    assert.equal(mismatchedRetry.status, 409);
+    assert.equal(mismatchedRetry.body.code, 'IDEMPOTENCY_KEY_REUSED');
+    assert.equal(state.client_contracts.length, 1);
+  });
+});
 
 test('client_objects transitional API canonicalizes legacy writes and enforces dual-ID consistency', async () => {
   const { app, state } = makeCrudApp({

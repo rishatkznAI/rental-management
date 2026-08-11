@@ -131,13 +131,13 @@ function normalizeClientRelationLinks(payload, clientId, options = {}) {
     objectId: objectId || undefined,
     contractId: contractId || undefined,
     ...(object && options.includeObjectSnapshot ? {
-      objectName: payload.objectName || object.name || null,
-      objectAddress: payload.objectAddress || object.address || null,
-      objectContactName: payload.objectContactName || object.contactName || null,
-      objectContactPhone: payload.objectContactPhone || object.contactPhone || null,
+      objectName: object.name || null,
+      objectAddress: object.address || null,
+      objectContactName: object.contactName || null,
+      objectContactPhone: object.contactPhone || null,
     } : {}),
     ...(contract && options.includeContractSnapshot ? {
-      contractNumber: payload.contractNumber || contract.number || null,
+      contractNumber: contract.number || null,
     } : {}),
   };
 }

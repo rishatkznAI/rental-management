@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { loginAsAdmin, navigateInApp } from './helpers/auth';
-import { createClient, createRentalPair, findRentalByClient, getAnyRentableEquipment, withAdminApi } from './helpers/api';
+import { createClient, createClientRentalRelations, createRentalPair, findRentalByClient, getAnyRentableEquipment, withAdminApi } from './helpers/api';
+
+function dateOffset(days: number) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
 
 async function selectEquipment(page: import('@playwright/test').Page, query: string) {
   await page.getByText('Введите модель, INV или серийный номер…').click();
@@ -11,24 +17,29 @@ async function selectEquipment(page: import('@playwright/test').Page, query: str
 
 test('admin can create rental from the rental form', async ({ page }) => {
   const suffix = `rent-${Date.now()}`;
-  const { client, equipment } = await withAdminApi(async (api) => ({
-    client: await createClient(api, suffix),
-    equipment: await getAnyRentableEquipment(api),
-  }));
+  const { client, equipment, relations } = await withAdminApi(async (api) => {
+    const client = await createClient(api, suffix);
+    return {
+      client,
+      equipment: await getAnyRentableEquipment(api),
+      relations: await createClientRentalRelations(api, client.id, suffix),
+    };
+  });
 
   await loginAsAdmin(page);
   await navigateInApp(page, '/rentals/new');
 
   await expect(page.getByRole('heading', { name: 'Новая аренда' })).toBeVisible();
 
-  await page.locator('[role="combobox"]').first().click();
-  await page.getByRole('option', { name: client.company }).click();
+  await page.locator('main select').first().selectOption({ label: client.company });
+  await page.locator('main select').nth(1).selectOption(relations.object.id);
+  await page.locator('main select').nth(2).selectOption(relations.contract.id);
   await selectEquipment(page, equipment.serialNumber || equipment.inventoryNumber);
   await page.locator('input[type="number"]').first().fill('1000');
-  await page.getByRole('button', { name: 'Создать договор' }).click();
+  await page.getByRole('button', { name: 'Создать аренду' }).click();
 
   await navigateInApp(page, '/rentals');
-  await expect(page.getByRole('heading', { name: 'Аренды', exact: true })).toBeVisible();
+  await expect(page.locator('main').getByRole('heading', { name: 'Аренды', exact: true }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Список аренд' })).toBeVisible();
 
   const createdRental = await withAdminApi((api) => findRentalByClient(api, client.company));
@@ -43,8 +54,8 @@ test('admin can open rental detail page for an existing rental', async ({ page }
     return createRentalPair(api, {
       client: client.company,
       equipment,
-      startDate: '2026-04-18',
-      endDate: '2026-04-20',
+      startDate: dateOffset(1),
+      endDate: dateOffset(3),
     });
   });
 
@@ -66,8 +77,8 @@ test('admin can open rental extension modal without changing data', async ({ pag
     return createRentalPair(api, {
       client: client.company,
       equipment,
-      startDate: '2026-05-01',
-      endDate: '2026-06-10',
+      startDate: dateOffset(1),
+      endDate: dateOffset(31),
       status: 'active',
       ganttStatus: 'active',
     });
@@ -76,7 +87,7 @@ test('admin can open rental extension modal without changing data', async ({ pag
   await loginAsAdmin(page);
   await navigateInApp(page, `/rentals/${rental.id}`);
 
-  await page.getByRole('button', { name: 'Продлить аренду' }).click();
+  await page.getByRole('button', { name: 'Продлить аренду' }).first().click();
   await expect(page.getByRole('dialog').getByRole('heading', { name: 'Продлить аренду' })).toBeVisible();
   await expect(page.getByText('Текущая дата окончания')).toBeVisible();
   await expect(page.getByText('Новая дата окончания')).toBeVisible();

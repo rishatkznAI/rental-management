@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const {
   appendRentalHistory,
   buildRentalChangeRequest,
@@ -14,7 +15,24 @@ const {
   syncGanttRentalFields,
 } = require('../lib/rental-change-requests');
 const { normalizeClientRelationLinks } = require('../lib/client-relations');
+const {
+  RENTAL_MUTATION_PROTECTED_FIELDS,
+  canonicalizeRentalCreatePayload,
+  canonicalizeRentalPatch,
+  rentalServerOwnedAuditFields,
+  rentalMutationProtectedFields,
+  strictRentalDate,
+  stripRentalServerOwnedAuditFields,
+} = require('../lib/rental-data-integrity');
+const { buildClientFinancialSnapshots } = require('../lib/finance-core');
 const { rentalMatchesEquipment } = require('../lib/rental-validation');
+const {
+  affectedEquipmentIdsForRentals,
+  findEquipmentForRental: findLifecycleEquipmentForRental,
+  reconcileEquipmentRentalProjection,
+  validateRentalLifecycleAvailability,
+  validateTerminalRentalTransition,
+} = require('../lib/rental-lifecycle');
 const { LEGACY_AUDIT_COLLECTION, redactAuditValue } = require('../lib/security-audit');
 const {
   cancelRentalDowntime,
@@ -41,8 +59,34 @@ const {
 } = require('../lib/protected-fixtures');
 
 const AUDIT_COLLECTION = 'audit_logs';
+const RENTAL_CREATE_IDEMPOTENCY_COLLECTION = 'rental_create_idempotency';
 const RENTAL_AUDIT_LIMIT = 20;
 const CLOSED_RENTAL_STATUSES = new Set(['closed', 'returned', 'cancelled', 'canceled', 'completed']);
+const RENTAL_PLANNER_SYNC_FIELDS = new Set([
+  ...RENTAL_MUTATION_PROTECTED_FIELDS,
+  'counterpartyId',
+  'clientId',
+  'client',
+  'objectId',
+  'objectName',
+  'objectAddress',
+  'objectContactName',
+  'objectContactPhone',
+  'contractId',
+  'contractNumber',
+  'equipmentId',
+  'equipmentInv',
+  'inventoryNumber',
+  'serialNumber',
+  'equipment',
+  'managerId',
+  'manager',
+  'status',
+  'paymentStatus',
+  'updSigned',
+  'updDate',
+  'comments',
+]);
 const RENTAL_AUDIT_FINANCE_FIELDS = new Set([
   'amount',
   'paidAmount',
@@ -82,6 +126,35 @@ const RENTAL_AUDIT_FIELD_LABELS = {
   equipmentStatus: 'Статус техники',
 };
 
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .filter(key => value[key] !== undefined)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function rentalCreateFingerprint(input) {
+  return crypto.createHash('sha256').update(stableJson(input)).digest('hex');
+}
+
+function readRentalCreateIdempotencyKey(req, collection) {
+  if (collection !== 'rentals') return '';
+  const key = String(req.get('Idempotency-Key') || '').trim();
+  if (!key) return '';
+  if (!/^[A-Za-z0-9._:-]{8,128}$/.test(key)) {
+    const error = new Error('Idempotency-Key должен содержать от 8 до 128 безопасных символов.');
+    error.status = 400;
+    error.code = 'INVALID_IDEMPOTENCY_KEY';
+    throw error;
+  }
+  return key;
+}
+
 function sendSystemFixtureProtectedError(req, res, auditLog, error) {
   auditLog?.(req, {
     action: `equipment.${error?.action || 'mutation'}.blocked`,
@@ -101,6 +174,26 @@ function sendSystemFixtureProtectedError(req, res, auditLog, error) {
     error: SYSTEM_FIXTURE_PROTECTED_MESSAGE,
     attemptedFields: Array.isArray(error?.attemptedFields) ? error.attemptedFields : [],
     violations: Array.isArray(error?.violations) ? error.violations : [],
+  });
+}
+
+function sendRentalPayloadValidationError(res, error) {
+  return res.status(error?.status || 400).json({
+    ok: false,
+    code: error?.code || 'RENTAL_PAYLOAD_VALIDATION_FAILED',
+    error: error?.message || 'Некорректные данные аренды.',
+    field: error?.field,
+    fieldErrors: error?.fieldErrors,
+  });
+}
+
+function sendRentalLifecycleError(res, validation) {
+  return res.status(validation?.status || 409).json({
+    ok: false,
+    code: validation?.code || 'RENTAL_LIFECYCLE_CONFLICT',
+    error: validation?.error || 'Конфликт жизненного цикла аренды.',
+    field: validation?.field,
+    fieldErrors: validation?.fieldErrors,
   });
 }
 
@@ -250,11 +343,6 @@ function normalizeEquipmentRef(value) {
   return normalized;
 }
 
-function isWeakEquipmentRef(value) {
-  const normalized = normalizeEquipmentRef(value).toLowerCase();
-  return !normalized || normalized === '0' || normalized === '-' || normalized === '—' || normalized === 'n/a' || normalized === 'unknown';
-}
-
 function parseDateKey(value) {
   const key = normalizeDateKey(value);
   if (!key) return null;
@@ -342,13 +430,18 @@ function registerRentalRoutes(deps) {
     normalizeGanttRentalList,
     normalizeGanttRentalStatus,
     normalizeRecordClientLink,
+    canonicalizeRentalRelationForWrite = item => item,
     normalizeServiceTicketForWrite,
     generateId,
     idPrefixes,
     accessControl,
     auditLog,
-    canonicalizeRentalRelationForWrite = item => item,
     botNotifications = null,
+    reconcileEquipmentRentalProjection: reconcileEquipmentRentalProjectionForWrite = reconcileEquipmentRentalProjection,
+    writeDataBatch: persistDataBatch = entries => {
+      for (const entry of entries || []) writeData(entry.name, entry.value);
+    },
+    nowIso = () => new Date().toISOString(),
   } = deps;
 
   const router = express.Router();
@@ -383,6 +476,16 @@ function registerRentalRoutes(deps) {
     return null;
   }
 
+  function rejectDirectGanttProjectionMutation(res, collection) {
+    if (collection !== 'gantt_rentals') return false;
+    res.status(409).json({
+      ok: false,
+      code: 'GANTT_PROJECTION_READ_ONLY',
+      error: 'gantt_rentals является read-only проекцией Classic Rental. Измените карточку аренды через canonical Rental workflow; самостоятельные события создавайте в planner_items.',
+    });
+    return true;
+  }
+
   function registerRentalCollection(collection) {
     const prefix = idPrefixes[collection] || collection;
     const requestPrefix = idPrefixes.rental_change_requests || 'RCR';
@@ -398,19 +501,275 @@ function registerRentalRoutes(deps) {
       });
     }
 
-    function normalizeRentalRelationLinks(item, existing = null) {
-      const clientId = item?.clientId || existing?.clientId;
-      const normalized = (!clientId && !item?.objectId && !item?.contractId)
-        ? item
-        : normalizeClientRelationLinks(item, clientId, {
+    function normalizeRentalRelationLinks(item, existing = null, mutationInput = null) {
+      let relationInput = item;
+      if (
+        existing
+        && mutationInput
+        && Object.prototype.hasOwnProperty.call(mutationInput, 'clientId')
+        && !Object.prototype.hasOwnProperty.call(mutationInput, 'counterpartyId')
+        && String(item?.clientId || '') !== String(existing?.clientId || '')
+      ) {
+        relationInput = { ...item };
+        delete relationInput.counterpartyId;
+      }
+      const clientId = relationInput?.clientId || existing?.clientId;
+      const normalized = (!clientId && !relationInput?.objectId && !relationInput?.contractId)
+        ? relationInput
+        : normalizeClientRelationLinks(relationInput, clientId, {
           readData,
           requireRentalRelations: collection === 'rentals' && !existing,
           requireActiveObject: !existing || String(item?.objectId || '') !== String(existing?.objectId || ''),
           allowArchivedObjectId: existing?.objectId,
+          includeObjectSnapshot: true,
+          includeContractSnapshot: true,
         });
       return collection === 'rentals'
         ? canonicalizeRentalRelationForWrite(normalized)
         : normalized;
+    }
+
+    function managerDisplayName(user) {
+      return String(user?.name || user?.userName || user?.fullName || user?.email || '').trim();
+    }
+
+    function canonicalizeRentalEquipment(item, existing = null, { equipmentFieldsTouched = false } = {}) {
+      if (!item || !['rentals', 'gantt_rentals'].includes(collection)) return item;
+      const equipmentId = String(item.equipmentId || '').trim();
+      if (!equipmentId) return item;
+      const equipment = (readData('equipment') || []).find(entry => String(entry?.id || '').trim() === equipmentId);
+      if (!equipment) {
+        if (!equipmentFieldsTouched && existing && String(existing.equipmentId || '').trim() === equipmentId) return item;
+        const error = new Error(`Техника с ID ${equipmentId} не найдена.`);
+        error.status = 400;
+        error.code = 'RENTAL_EQUIPMENT_NOT_FOUND';
+        error.field = 'equipmentId';
+        error.fieldErrors = { equipmentId: error.message };
+        throw error;
+      }
+      const inventoryNumber = equipment.inventoryNumber || equipment.equipmentInv || '';
+      const serialNumber = equipment.serialNumber || '';
+      return {
+        ...item,
+        equipmentId: String(equipment.id),
+        equipmentInv: inventoryNumber,
+        inventoryNumber,
+        serialNumber,
+        equipment: inventoryNumber ? [inventoryNumber] : (serialNumber ? [serialNumber] : []),
+      };
+    }
+
+    function canonicalizeRentalManager(item, existing = null, { managerFieldsTouched = false } = {}) {
+      if (!item || !['rentals', 'gantt_rentals'].includes(collection)) return item;
+      const managerId = String(item.managerId || '').trim();
+      const manager = String(item.manager || '').trim();
+      const users = readData('users') || [];
+      if (managerId) {
+        const user = users.find(entry => String(entry?.id || '').trim() === managerId);
+        if (!user) {
+          if (!managerFieldsTouched && existing && String(existing.managerId || '').trim() === managerId) return item;
+          const error = new Error(`Менеджер с ID ${managerId} не найден.`);
+          error.status = 400;
+          error.code = 'RENTAL_MANAGER_NOT_FOUND';
+          error.field = 'managerId';
+          error.fieldErrors = { managerId: error.message };
+          throw error;
+        }
+        return {
+          ...item,
+          managerId,
+          manager: managerDisplayName(user),
+        };
+      }
+      if (!manager) return item;
+      const normalizedManager = manager.toLowerCase().replace(/ё/g, 'е');
+      const matches = users.filter(user => (
+        managerDisplayName(user).toLowerCase().replace(/ё/g, 'е') === normalizedManager
+      ));
+      if (matches.length === 1) {
+        return {
+          ...item,
+          managerId: String(matches[0].id || '').trim() || undefined,
+          manager: managerDisplayName(matches[0]),
+        };
+      }
+      if (matches.length > 1 && managerFieldsTouched) {
+        const error = new Error('Имя менеджера неоднозначно. Выберите менеджера по ID.');
+        error.status = 409;
+        error.code = 'RENTAL_MANAGER_AMBIGUOUS';
+        error.field = 'manager';
+        error.fieldErrors = { manager: error.message };
+        throw error;
+      }
+      // Legacy rows without managerId remain readable and can be updated in unrelated fields.
+      return item;
+    }
+
+    function validateLifecycleCandidate(rental) {
+      return validateRentalLifecycleAvailability({
+        rental,
+        equipmentList: readData('equipment') || [],
+        serviceTickets: readData('service') || [],
+        equipmentDowntimes: readData('equipment_downtimes') || [],
+      });
+    }
+
+    function rentalLifecycleFieldsTouched(input) {
+      return [
+        'equipmentId',
+        'equipmentInv',
+        'inventoryNumber',
+        'serialNumber',
+        'equipment',
+        'startDate',
+        'plannedReturnDate',
+        'endDate',
+        'status',
+      ].some(field => Object.prototype.hasOwnProperty.call(input || {}, field));
+    }
+
+    function validateLinkedGanttAuthority(previous, next) {
+      if (collection !== 'gantt_rentals' || isStandalonePlannerRow(next)) return { ok: true };
+      const linkedId = linkedRentalIds(next).find(id => (readData('rentals') || []).some(rental => String(rental?.id || '') === String(id || '')));
+      if (!linkedId) return { ok: true };
+      const classicRental = (readData('rentals') || []).find(rental => String(rental?.id || '') === String(linkedId || ''));
+      const canonical = ensureGanttRentalLink({ ...next }, classicRental, readData('equipment') || []);
+      const authoritativeFields = [
+        'counterpartyId', 'clientId', 'client', 'objectId', 'contractId', 'equipmentId', 'equipmentInv',
+        'inventoryNumber', 'serialNumber', 'startDate', 'endDate', 'managerId', 'manager',
+        'status', 'amount', 'paymentStatus',
+      ];
+      const contradictoryFields = authoritativeFields.filter(field => (
+        JSON.stringify(previous?.[field] ?? null) !== JSON.stringify(next?.[field] ?? null)
+        && JSON.stringify(next?.[field] ?? null) !== JSON.stringify(canonical?.[field] ?? null)
+      ));
+      if (contradictoryFields.length === 0) return { ok: true };
+      return {
+        ok: false,
+        status: 409,
+        code: 'LINKED_GANTT_CLASSIC_RENTAL_CONFLICT',
+        error: 'Связанную строку планировщика нельзя изменять в обход карточки аренды.',
+        field: contradictoryFields[0],
+        fieldErrors: Object.fromEntries(contradictoryFields.map(field => [field, 'Измените поле через карточку аренды.'])),
+      };
+    }
+
+    function reconcileRentalEquipment({
+      rentals,
+      ganttRentals,
+      equipmentList = readData('equipment') || [],
+      affectedRentals = [],
+      serviceTickets = readData('service') || [],
+      author,
+      reason,
+    }) {
+      const affectedEquipmentIds = affectedEquipmentIdsForRentals(affectedRentals, equipmentList);
+      return reconcileEquipmentRentalProjectionForWrite({
+        equipmentList,
+        rentals,
+        ganttRentals,
+        serviceTickets,
+        affectedEquipmentIds,
+        nowIso,
+        author: author || 'Система',
+        reason,
+      });
+    }
+
+    function rentalEquipmentReadSnapshot(equipment) {
+      if (!equipment) return undefined;
+      return {
+        id: equipment.id,
+        inventoryNumber: equipment.inventoryNumber,
+        serialNumber: equipment.serialNumber,
+        manufacturer: equipment.manufacturer,
+        model: equipment.model,
+        status: equipment.status,
+        category: equipment.category,
+        activeInFleet: equipment.activeInFleet,
+        type: equipment.type,
+        drive: equipment.drive,
+        owner: equipment.owner,
+        ownerId: equipment.ownerId,
+        ownerName: equipment.ownerName,
+      };
+    }
+
+    function buildRentalReadContext() {
+      const rentals = readData('rentals') || [];
+      return {
+        equipmentList: readData('equipment') || [],
+        usersById: new Map((readData('users') || []).map(entry => [String(entry?.id || ''), entry])),
+        objectsById: new Map((readData('client_objects') || []).map(entry => [String(entry?.id || ''), entry])),
+        contractsById: new Map((readData('client_contracts') || []).map(entry => [String(entry?.id || ''), entry])),
+        rentalsById: new Map(rentals.map(entry => [String(entry?.id || ''), entry])),
+      };
+    }
+
+    function enrichRentalForRead(item, context = null, itemCollection = collection) {
+      if (!item) return item;
+      const readContext = context || buildRentalReadContext();
+      const linkedClassicRental = itemCollection === 'gantt_rentals'
+        ? [item.rentalId, item.sourceRentalId, item.originalRentalId]
+            .map(id => readContext.rentalsById.get(String(id || '')))
+            .find(Boolean) || null
+        : item;
+      const equipment = findEquipmentForRental(item, readContext.equipmentList);
+      const objectId = item.objectId || linkedClassicRental?.objectId;
+      const contractId = item.contractId || linkedClassicRental?.contractId;
+      const object = readContext.objectsById.get(String(objectId || ''));
+      const contract = readContext.contractsById.get(String(contractId || ''));
+      const storedContractNumber = item.contractNumber || linkedClassicRental?.contractNumber;
+      const managerId = item.managerId || linkedClassicRental?.managerId;
+      const managerUser = readContext.usersById.get(String(managerId || ''));
+      return {
+        ...item,
+        ...(managerId ? { managerId } : {}),
+        ...(managerUser ? { manager: managerDisplayName(managerUser) } : {}),
+        ...(objectId && !item.objectId ? { objectId } : {}),
+        ...(contractId && !item.contractId ? { contractId } : {}),
+        ...(equipment ? {
+          equipmentId: item.equipmentId || equipment.id,
+          equipmentInv: item.equipmentInv || equipment.inventoryNumber,
+          inventoryNumber: item.inventoryNumber || equipment.inventoryNumber,
+          serialNumber: item.serialNumber || equipment.serialNumber,
+          equipmentDetails: rentalEquipmentReadSnapshot(equipment),
+        } : {}),
+        ...(object ? {
+          objectName: object.name || item.objectName || linkedClassicRental?.objectName,
+          objectAddress: object.address || item.objectAddress || linkedClassicRental?.objectAddress,
+        } : linkedClassicRental && linkedClassicRental !== item ? {
+          objectName: item.objectName || linkedClassicRental.objectName,
+          objectAddress: item.objectAddress || linkedClassicRental.objectAddress,
+        } : {}),
+        ...((contract?.number || storedContractNumber) ? {
+          contractNumber: contract?.number || storedContractNumber,
+        } : {}),
+      };
+    }
+
+    function buildRentalClientCreditRisk(clientId) {
+      const normalizedClientId = String(clientId || '').trim();
+      const client = (readData('clients') || [])
+        .find(entry => String(entry?.id || '') === normalizedClientId);
+      if (!client) return null;
+      const snapshot = buildClientFinancialSnapshots(
+        [client],
+        readData('gantt_rentals') || [],
+        readData('payments') || [],
+        String(nowIso() || '').slice(0, 10),
+        { paymentAllocations: readData('payment_allocations') || [] },
+      )[0];
+      if (!snapshot) return null;
+      return {
+        clientId: normalizedClientId,
+        currentDebt: Number(snapshot.currentDebt || 0),
+        creditLimit: Number(snapshot.creditLimit || 0),
+        unpaidRentals: Number(snapshot.unpaidRentals || 0),
+        overdueRentals: Number(snapshot.overdueRentals || 0),
+        exceededLimit: snapshot.exceededLimit === true,
+        requiresAcknowledgement: snapshot.exceededLimit === true || Number(snapshot.overdueRentals || 0) > 0,
+      };
     }
 
     function buildLinkedGanttRentalUpdate(linkedGanttRentalId, previousRental, nextRental, author) {
@@ -434,37 +793,8 @@ function registerRentalRoutes(deps) {
         update.ganttRentals,
         readData('equipment') || [],
         update.nextGanttRental.id,
+        { skipConflictCheck: true },
       );
-    }
-
-    function syncLinkedGanttRental(linkedGanttRentalId, previousRental, nextRental, author) {
-      const update = buildLinkedGanttRentalUpdate(linkedGanttRentalId, previousRental, nextRental, author);
-      if (!update) return;
-      const { ganttRentals, ganttIdx, nextGanttRental } = update;
-      ganttRentals[ganttIdx] = ensureGanttRentalLink(nextGanttRental, nextRental || previousRental, readData('equipment') || []);
-      writeData('gantt_rentals', ganttRentals);
-    }
-
-    function repairGanttRentalLinkIfResolved(ganttRental, resolution) {
-      if (collection !== 'rentals' || !ganttRental?.id || !resolution?.ok || !resolution.rentalId) return;
-      const ganttRentals = readData('gantt_rentals') || [];
-      const idx = ganttRentals.findIndex(item => String(item?.id || '') === String(ganttRental.id || ''));
-      if (idx === -1) return;
-      const equipment = readData('equipment') || [];
-      const repaired = ensureGanttRentalLink(ganttRentals[idx], resolution.rental || { id: resolution.rentalId }, equipment);
-      if (
-        repaired.rentalId === ganttRentals[idx].rentalId &&
-        repaired.sourceRentalId === ganttRentals[idx].sourceRentalId &&
-        repaired.originalRentalId === ganttRentals[idx].originalRentalId &&
-        repaired.equipmentId === ganttRentals[idx].equipmentId &&
-        repaired.equipmentInv === ganttRentals[idx].equipmentInv &&
-        repaired.clientId === ganttRentals[idx].clientId &&
-        repaired.client === ganttRentals[idx].client &&
-        repaired.startDate === ganttRentals[idx].startDate &&
-        repaired.endDate === ganttRentals[idx].endDate
-      ) return;
-      ganttRentals[idx] = repaired;
-      writeData('gantt_rentals', ganttRentals);
     }
 
     function duplicateGanttRentalLink(ganttRental, list, excludeId = '') {
@@ -515,49 +845,6 @@ function registerRentalRoutes(deps) {
       };
     }
 
-    function mergeGanttRentalForRepair(primary, fallback) {
-      if (!fallback) return primary;
-      if (!primary) return fallback;
-      const primaryHasEquipmentRef = Boolean(
-        primary.equipmentId ||
-        primary.equipmentInv ||
-        primary.inventoryNumber ||
-        primary.serialNumber ||
-        primary.equipmentName ||
-        primary.equipmentLabel ||
-        primary.equipmentRef ||
-        primary.equipmentTitle ||
-        primary.title ||
-        primary.name ||
-        primary.label ||
-        primary.entity ||
-        primary.unit,
-      );
-      return {
-        ...fallback,
-        ...primary,
-        clientId: primary.clientId || fallback.clientId,
-        client: primary.client || fallback.client,
-        clientShort: primary.clientShort || fallback.clientShort,
-        equipmentId: primary.equipmentId || (primaryHasEquipmentRef ? '' : fallback.equipmentId),
-        equipmentInv: primary.equipmentInv || (primaryHasEquipmentRef ? '' : fallback.equipmentInv || fallback.inventoryNumber),
-        startDate: primary.startDate || fallback.startDate,
-        endDate: primary.endDate || primary.plannedReturnDate || fallback.endDate || fallback.plannedReturnDate,
-        manager: primary.manager || fallback.manager,
-        managerId: primary.managerId || fallback.managerId,
-        amount: primary.amount ?? fallback.amount,
-      };
-    }
-
-    function generateUniqueRentalId(existingRentals) {
-      const existingIds = new Set((existingRentals || []).map(item => String(item?.id || '')));
-      let id = generateId(prefix);
-      for (let attempt = 0; attempt < 5 && existingIds.has(id); attempt += 1) {
-        id = generateId(prefix);
-      }
-      return id;
-    }
-
     async function emitRentalNotification(previousRental, nextRental) {
       if (!botNotifications?.notifyRentalChanged || !previousRental || !nextRental) return;
       try {
@@ -568,20 +855,112 @@ function registerRentalRoutes(deps) {
     }
 
     function openServiceStatuses() {
-      return ['new', 'in_progress', 'waiting_parts', 'needs_revision', 'ready'];
+      return ['new', 'in_progress', 'waiting_parts', 'needs_revision'];
     }
 
     function findEquipmentForRental(rental, equipmentList) {
       return (equipmentList || []).find(equipment => rentalMatchesEquipment(rental, equipment, equipmentList)) || null;
     }
 
+    function currentDateKey() {
+      return String(nowIso() || '').slice(0, 10);
+    }
+
+    function normalizeClassicRentalLifecycleForCreate(rental) {
+      if (!rental || isTerminalRentalStatus(rental.status) || rental.actualReturnDate) return rental;
+      const today = currentDateKey();
+      const startDate = normalizeDateKey(rental.startDate);
+      const endDate = normalizeDateKey(rental.plannedReturnDate || rental.endDate);
+      if (endDate && endDate < today) {
+        const error = new Error('Историческая аренда должна иметь завершённый статус.');
+        error.status = 400;
+        throw error;
+      }
+      return {
+        ...rental,
+        status: startDate && startDate > today ? 'created' : 'active',
+      };
+    }
+
+    function isRentalCurrentOnDate(rental, dateKey) {
+      if (!rental || isTerminalRentalStatus(rental.status) || rental.actualReturnDate) return false;
+      const startDate = normalizeDateKey(rental.startDate);
+      const endDate = normalizeDateKey(rental.plannedReturnDate || rental.endDate);
+      return Boolean(startDate && endDate && startDate <= dateKey && endDate >= dateKey);
+    }
+
+    function isRentalFutureAfterDate(rental, dateKey) {
+      if (!rental || isTerminalRentalStatus(rental.status) || rental.actualReturnDate) return false;
+      const startDate = normalizeDateKey(rental.startDate);
+      return Boolean(startDate && startDate > dateKey);
+    }
+
+    function buildEquipmentLifecycleForRentalCreate(rental, rentals, equipmentList, author) {
+      if (!rental || isTerminalRentalStatus(rental.status) || rental.actualReturnDate) {
+        return { nextEquipment: equipmentList, changed: false, equipment: null };
+      }
+      const equipment = findEquipmentForRental(rental, equipmentList);
+      if (!equipment) {
+        const error = new Error('Не удалось однозначно определить технику для аренды.');
+        error.status = 409;
+        throw error;
+      }
+      const openServiceTicket = findOpenServiceTicketForEquipment(equipment);
+      if (openServiceTicket || equipment.status === 'in_service') {
+        const error = new Error(openServiceTicket
+          ? `Нельзя создать аренду: есть активная сервисная заявка ${openServiceTicket.id}.`
+          : 'Нельзя создать аренду: техника находится в сервисе.');
+        error.status = 409;
+        throw error;
+      }
+      if (equipment.status === 'inactive') {
+        const error = new Error('Нельзя создать аренду: техника списана или неактивна.');
+        error.status = 409;
+        throw error;
+      }
+
+      const today = currentDateKey();
+      const candidates = [...(rentals || []), rental]
+        .filter(item => rentalMatchesEquipment(item, equipment, equipmentList));
+      const lifecycleRental = candidates
+        .filter(item => isRentalCurrentOnDate(item, today))
+        .sort((left, right) => String(left.startDate || '').localeCompare(String(right.startDate || '')))[0]
+        || candidates
+          .filter(item => isRentalFutureAfterDate(item, today))
+          .sort((left, right) => String(left.startDate || '').localeCompare(String(right.startDate || '')))[0]
+        || rental;
+      const nextStatus = isRentalCurrentOnDate(lifecycleRental, today) ? 'rented' : 'reserved';
+      const timestamp = nowIso();
+      const nextEquipment = equipmentList.map(item => {
+        if (String(item?.id || '') !== String(equipment.id || '')) return item;
+        return {
+          ...item,
+          status: nextStatus,
+          currentClient: lifecycleRental.client || lifecycleRental.clientName || '',
+          returnDate: lifecycleRental.plannedReturnDate || lifecycleRental.endDate || '',
+          history: [
+            ...(Array.isArray(item.history) ? item.history : []),
+            {
+              date: timestamp,
+              text: nextStatus === 'rented'
+                ? `Аренда ${rental.id} создана: техника переведена в аренду`
+                : `Аренда ${rental.id} создана: техника зарезервирована`,
+              author,
+              type: 'system',
+            },
+          ],
+        };
+      });
+      return { nextEquipment, changed: true, equipment };
+    }
+
     function findLinkedGanttRental(classicRental) {
       const ganttRentals = readData('gantt_rentals') || [];
       const classicId = String(classicRental?.id || '');
       return ganttRentals.find(item =>
-          classicId &&
-          [item.rentalId, item.sourceRentalId, item.originalRentalId].some(id => String(id || '') === classicId)
-        )
+        classicId &&
+        [item.rentalId, item.sourceRentalId, item.originalRentalId].some(id => String(id || '') === classicId)
+      )
         || null;
     }
 
@@ -648,22 +1027,16 @@ function registerRentalRoutes(deps) {
       };
     }
 
-    function findExtensionConflict({ classicRental, ganttRental, newPlannedReturnDate, equipmentList, rentals, ganttRentals }) {
+    function findExtensionConflict({ classicRental, ganttRental, newPlannedReturnDate, equipmentList, rentals }) {
       const currentEnd = normalizeDateKey(classicRental?.plannedReturnDate || ganttRental?.endDate);
       const extensionEnd = normalizeDateKey(newPlannedReturnDate);
       const equipment = findEquipmentForRental(classicRental || ganttRental, equipmentList);
       if (!equipment || !currentEnd || !extensionEnd) return null;
       const currentId = String(classicRental?.id || '');
-      const linkedGanttId = String(ganttRental?.id || '');
-      const candidates = [
-        ...(ganttRentals || []).map(item => ({ ...item, __collection: 'gantt_rentals' })),
-        ...(rentals || []).map(item => ({ ...item, __collection: 'rentals' })),
-      ];
+      const candidates = rentals || [];
       return candidates.find(item => {
         if (!item) return false;
-        if (item.__collection === 'rentals' && String(item.id || '') === currentId) return false;
-        if (item.__collection === 'gantt_rentals' && String(item.id || '') === linkedGanttId) return false;
-        if (currentId && [item.rentalId, item.sourceRentalId, item.originalRentalId].some(id => String(id || '') === currentId)) return false;
+        if (String(item.id || '') === currentId) return false;
         if (isClosedRentalStatus(item.status)) return false;
         if (!rentalMatchesEquipment(item, equipment, equipmentList)) return false;
         const { startDate, endDate } = rentalDateRange(item);
@@ -778,7 +1151,7 @@ function registerRentalRoutes(deps) {
     function calculateExtensionFinancials({ rental, currentEnd, newEndDate, payments, ganttRental }) {
       const extensionDays = getRentalDays(addDaysKey(currentEnd, 1), newEndDate);
       const { dailyRate, source } = inferDailyRateForExtension(rental, currentEnd);
-      const additionalAmount = Math.round(Math.max(0, dailyRate) * extensionDays);
+      const additionalAmount = Math.round(Math.max(0, dailyRate) * extensionDays * 100) / 100;
       const currentPrice = Math.max(0, Number(rental?.price ?? rental?.amount ?? ganttRental?.amount) || 0);
       const nextPrice = currentPrice + additionalAmount;
       const linkedIds = new Set([
@@ -818,10 +1191,6 @@ function registerRentalRoutes(deps) {
 
     function isReturnedClassicRental(rental) {
       return Boolean(rental?.actualReturnDate) || rental?.status === 'closed' || rental?.status === 'returned';
-    }
-
-    function isReturnedGanttRental(rental) {
-      return rental?.status === 'returned' || rental?.status === 'closed';
     }
 
     function isRestoringReturnedClassicRental(previousRental, nextRental) {
@@ -977,60 +1346,6 @@ function registerRentalRoutes(deps) {
         : ticket;
     }
 
-    function buildClassicRentalFromGantt(ganttRental, rawMeta, author, existingRentals) {
-      const equipmentList = readData('equipment') || [];
-      const equipmentById = equipmentList.find(item => item.id === ganttRental.equipmentId);
-      const equipmentInv = ganttRental.equipmentInv || ganttRental.inventoryNumber || equipmentById?.inventoryNumber || '';
-      const serialNumber = ganttRental.serialNumber || equipmentById?.serialNumber || '';
-      const equipmentRef = equipmentInv || serialNumber || ganttRental.equipmentId || '';
-      const oldValues = rawMeta.oldValues || {};
-      const restored = withClientLink({
-        id: generateUniqueRentalId(existingRentals),
-        clientId: ganttRental.clientId || oldValues.clientId || '',
-        objectId: ganttRental.objectId || oldValues.objectId || undefined,
-        contractId: ganttRental.contractId || oldValues.contractId || undefined,
-        client: ganttRental.client || oldValues.client || '',
-        contact: ganttRental.contact || '',
-        startDate: oldValues.startDate || ganttRental.startDate || '',
-        plannedReturnDate: oldValues.plannedReturnDate || oldValues.endDate || ganttRental.endDate || ganttRental.plannedReturnDate || '',
-        equipmentId: ganttRental.equipmentId || '',
-        equipmentInv,
-        inventoryNumber: equipmentInv,
-        serialNumber,
-        equipment: equipmentRef ? [equipmentRef] : [],
-        rate: ganttRental.rate || '',
-        price: Number(ganttRental.amount ?? ganttRental.price) || 0,
-        discount: Number(ganttRental.discount) || 0,
-        deliveryAddress: ganttRental.deliveryAddress || '',
-        deliveryTime: ganttRental.deliveryTime || '',
-        manager: ganttRental.manager || '',
-        managerId: ganttRental.managerId || '',
-        status: ganttRental.status === 'closed' || ganttRental.status === 'returned' ? ganttRental.status : 'active',
-        expectedPaymentDate: ganttRental.expectedPaymentDate || '',
-        paymentStatus: ganttRental.paymentStatus || '',
-        downtimeDays: ganttRental.downtimeDays,
-        downtimeReason: ganttRental.downtimeReason,
-        downtimeStartDate: ganttRental.downtimeStartDate,
-        downtimeEndDate: ganttRental.downtimeEndDate,
-        downtimeComment: ganttRental.downtimeComment,
-        downtimeStatus: ganttRental.downtimeStatus,
-        downtimeAffectsBilling: ganttRental.downtimeAffectsBilling,
-        downtimeBillableDays: ganttRental.downtimeBillableDays,
-        billableDays: ganttRental.billableDays,
-        activeRentalDays: ganttRental.activeRentalDays,
-        downtimePeriods: Array.isArray(ganttRental.downtimePeriods) ? ganttRental.downtimePeriods : undefined,
-        documents: Array.isArray(ganttRental.documents) ? ganttRental.documents : [],
-        comments: '',
-        history: [{
-          date: new Date().toISOString(),
-          text: `Карточка аренды восстановлена из записи планировщика ${ganttRental.id}`,
-          author: author || 'Система',
-          type: 'system',
-        }],
-      }, `rentals:repair-from-gantt:${ganttRental.id}`);
-      return restored;
-    }
-
     function buildLinkedGanttRentalFromClassic(classicRental) {
       if (collection !== 'rentals' || !classicRental?.id) return null;
       const base = {
@@ -1055,13 +1370,15 @@ function registerRentalRoutes(deps) {
       return normalizeGanttRentalStatus(ensureGanttRentalLink(base, classicRental, readData('equipment') || []));
     }
 
-    function createLinkedGanttRentalIfMissing(classicRental, author) {
-      if (collection !== 'rentals' || !classicRental?.id) return null;
+    function buildLinkedGanttRentalIfMissing(classicRental, author) {
+      if (collection !== 'rentals' || !classicRental?.id) {
+        return { linkedGanttRental: null, nextGanttRentals: readData('gantt_rentals') || [] };
+      }
       const ganttRentals = readData('gantt_rentals') || [];
       const existing = ganttRentals.find(item =>
         [item.rentalId, item.sourceRentalId, item.originalRentalId].some(id => String(id || '') === String(classicRental.id || ''))
       );
-      if (existing) return existing;
+      if (existing) return { linkedGanttRental: existing, nextGanttRentals: ganttRentals };
 
       const linkedGanttRental = mergeRentalHistory(null, buildLinkedGanttRentalFromClassic(classicRental), author);
       const validation = validateRentalPayload(
@@ -1070,111 +1387,15 @@ function registerRentalRoutes(deps) {
         ganttRentals,
         readData('equipment') || [],
         '',
+        { skipConflictCheck: true },
       );
       if (!validation.ok) {
         throw Object.assign(new Error(validation.error), { status: validation.status });
       }
-      writeData('gantt_rentals', [...ganttRentals, linkedGanttRental]);
-      return linkedGanttRental;
-    }
-
-    function restoreOrphanGanttRentalIfSafe(req, data, rawMeta, fallbackGanttRental, resolution) {
-      if (collection !== 'rentals') return null;
-      if (resolution?.status !== 404) return null;
-      const requestedIds = [
-        req.params.id,
-        rawMeta.linkedGanttRentalId,
-        rawMeta.ganttRentalId,
-        fallbackGanttRental?.id,
-      ].map(value => String(value || '').trim()).filter(Boolean);
-      if (!requestedIds.some(value => /^GR-/i.test(value))) return null;
-
-      const ganttRentals = readData('gantt_rentals') || [];
-      const ganttIdx = ganttRentals.findIndex(item => requestedIds.some(id => String(item?.id || '') === id));
-      if (ganttIdx === -1) return null;
-      const exactGanttRental = ganttRentals[ganttIdx];
-      if (exactGanttRental.rentalId || exactGanttRental.sourceRentalId || exactGanttRental.originalRentalId) return null;
-
-      try {
-        accessControl.assertCanUpdateEntity('gantt_rentals', exactGanttRental, req.user);
-      } catch {
-        return null;
-      }
-
-      let repairSource = mergeGanttRentalForRepair(fallbackGanttRental, exactGanttRental);
-      const equipmentList = readData('equipment') || [];
-      const repairEquipmentId = normalizeEquipmentRef(repairSource?.equipmentId);
-      const repairInventory = normalizeEquipmentRef(repairSource?.equipmentInv || repairSource?.inventoryNumber);
-      const repairSerial = normalizeEquipmentRef(repairSource?.serialNumber);
-      const repairEquipment = repairEquipmentId
-        ? equipmentList.find(item => normalizeEquipmentRef(item?.id) === repairEquipmentId) || null
-        : null;
-      if (repairEquipment) {
-        const canonicalEquipmentRefs = [
-          repairEquipment.id,
-          repairEquipment.inventoryNumber,
-          repairEquipment.equipmentInv,
-          repairEquipment.inv,
-          repairEquipment.serialNumber,
-        ].map(normalizeEquipmentRef).filter(Boolean);
-        const inventoryMatches = !repairInventory || canonicalEquipmentRefs.includes(repairInventory);
-        const serialMatches = !repairSerial || canonicalEquipmentRefs.includes(repairSerial);
-        if ((!inventoryMatches && !isWeakEquipmentRef(repairInventory)) || !serialMatches) {
-          return null;
-        }
-        const canonicalInventory = normalizeEquipmentRef(
-          repairEquipment.inventoryNumber ||
-          repairEquipment.equipmentInv ||
-          repairEquipment.inv ||
-          (isWeakEquipmentRef(repairInventory) ? '' : repairInventory),
-        );
-        const canonicalSerial = normalizeEquipmentRef(repairEquipment.serialNumber || repairSerial);
-        repairSource = {
-          ...repairSource,
-          equipmentId: normalizeEquipmentRef(repairEquipment.id) || repairEquipmentId,
-          equipmentInv: canonicalInventory,
-          inventoryNumber: canonicalInventory,
-          serialNumber: canonicalSerial || repairSource.serialNumber,
-          equipment: canonicalInventory
-            ? [canonicalInventory]
-            : canonicalSerial
-              ? [canonicalSerial]
-              : repairSource.equipment,
-        };
-      }
-      const restoredRental = buildClassicRentalFromGantt(repairSource, rawMeta, req.user?.userName, data);
-      const validation = validateRentalPayload('rentals', restoredRental, data, equipmentList, '', { skipConflictCheck: false });
-      if (!validation.ok) {
-        console.warn('[rental-approval] orphan gantt repair skipped', JSON.stringify({
-          ganttRentalId: exactGanttRental.id,
-          status: validation.status,
-          error: validation.error,
-        }));
-        return null;
-      }
-
-      data.push(restoredRental);
-      writeData('rentals', data);
-      const repairedGanttRental = ensureGanttRentalLink({
-        ...exactGanttRental,
-        equipmentId: repairSource.equipmentId || exactGanttRental.equipmentId,
-        equipmentInv: repairSource.equipmentInv || exactGanttRental.equipmentInv,
-        inventoryNumber: repairSource.inventoryNumber || exactGanttRental.inventoryNumber,
-        serialNumber: repairSource.serialNumber || exactGanttRental.serialNumber,
-        equipment: repairSource.equipment || exactGanttRental.equipment,
-        rentalId: restoredRental.id,
-        sourceRentalId: restoredRental.id,
-        originalRentalId: exactGanttRental.originalRentalId || restoredRental.id,
-      }, restoredRental, equipmentList);
-      ganttRentals[ganttIdx] = repairedGanttRental;
-      writeData('gantt_rentals', ganttRentals);
-      auditLog?.(req, {
-        action: 'rentals.repair_from_gantt',
-        entityType: 'rentals',
-        entityId: restoredRental.id,
-        after: { rentalId: restoredRental.id, ganttRentalId: repairedGanttRental.id },
-      });
-      return { restoredRental, ganttRentals };
+      return {
+        linkedGanttRental,
+        nextGanttRentals: [...ganttRentals, linkedGanttRental],
+      };
     }
 
     function logRentalResolutionFailure(req, resolution, rawMeta) {
@@ -1255,7 +1476,7 @@ function registerRentalRoutes(deps) {
       };
     }
 
-    function createApprovalRequests(previousRental, changes, meta, req) {
+    function createApprovalRequests(previousRental, changes, meta, req, options = {}) {
       if (!changes.length) return [];
       const requests = readData('rental_change_requests') || [];
       const equipment = readData('equipment') || [];
@@ -1271,7 +1492,9 @@ function registerRentalRoutes(deps) {
         comment: meta.comment,
         attachments: meta.attachments,
       }));
-      writeData('rental_change_requests', [...requests, ...created]);
+      if (options.persist !== false) {
+        writeData('rental_change_requests', [...requests, ...created]);
+      }
       return created;
     }
 
@@ -1281,7 +1504,21 @@ function registerRentalRoutes(deps) {
       }
 
       let nextPatch = { ...patch };
-      let nextItem = withClientLink({ ...previousRental, ...nextPatch, id: previousRental.id }, `${collection}:approval:${previousRental.id}`);
+      let nextItem;
+      try {
+        const canonical = canonicalizeRentalPatch(previousRental, nextPatch);
+        nextPatch = canonical.patch;
+        nextItem = withClientLink(canonical.rental, `${collection}:approval:${previousRental.id}`);
+      } catch (error) {
+        return {
+          ok: false,
+          status: error?.status || 400,
+          code: error?.code,
+          error: error.message,
+          field: error?.field,
+          fieldErrors: error?.fieldErrors,
+        };
+      }
       let validation = validateRentalPayload(collection, nextItem, data, readData('equipment') || [], previousRental.id);
       if (validation.ok) {
         validation = validateLinkedGanttRental(meta.linkedGanttRentalId, previousRental, nextItem, author);
@@ -1297,7 +1534,20 @@ function registerRentalRoutes(deps) {
           reason: validation.error || 'Продление конфликтует с будущей арендой и требует решения администратора.',
         });
         delete nextPatch.plannedReturnDate;
-        nextItem = withClientLink({ ...previousRental, ...nextPatch, id: previousRental.id }, `${collection}:approval:${previousRental.id}`);
+        try {
+          const canonical = canonicalizeRentalPatch(previousRental, nextPatch);
+          nextPatch = canonical.patch;
+          nextItem = withClientLink(canonical.rental, `${collection}:approval:${previousRental.id}`);
+        } catch (error) {
+          return {
+            ok: false,
+            status: error?.status || 400,
+            code: error?.code,
+            error: error.message,
+            field: error?.field,
+            fieldErrors: error?.fieldErrors,
+          };
+        }
         if (Object.keys(nextPatch).length > 0) {
           validation = validateRentalPayload(collection, nextItem, data, readData('equipment') || [], previousRental.id);
           if (validation.ok) {
@@ -1314,9 +1564,13 @@ function registerRentalRoutes(deps) {
 
     router.get(`/${collection}`, requireAuth, requireRead(collection), (req, res) => {
       const data = readData(collection) || [];
+      const readContext = buildRentalReadContext();
+      const readable = accessControl
+        .filterCollectionByScope(collection, data, req.user)
+        .map(item => enrichRentalForRead(item, readContext));
       const scoped = accessControl.sanitizeCollectionForRead(
         collection,
-        accessControl.filterCollectionByScope(collection, data, req.user),
+        readable,
         req.user,
       );
       if (wantsPaginatedResponse(req.query)) {
@@ -1402,8 +1656,12 @@ function registerRentalRoutes(deps) {
         const serviceTickets = scopedRelated('service', item => equipmentRefs.has(normalizeAuditText(item?.equipmentId)) || equipmentRefs.has(normalizeAuditText(item?.inventoryNumber)));
 
         return res.json({
-          rental: rental ? accessControl.sanitizeEntityForRead('rentals', rental, req.user) : null,
-          ganttRentals: accessControl.sanitizeCollectionForRead('gantt_rentals', linkedGanttRentals, req.user),
+          rental: rental ? accessControl.sanitizeEntityForRead('rentals', enrichRentalForRead(rental), req.user) : null,
+          ganttRentals: accessControl.sanitizeCollectionForRead(
+            'gantt_rentals',
+            linkedGanttRentals.map(item => enrichRentalForRead(item, null, 'gantt_rentals')),
+            req.user,
+          ),
           equipment: accessControl.sanitizeCollectionForRead('equipment', equipment, req.user),
           clients: accessControl.sanitizeCollectionForRead('clients', clients, req.user),
           payments,
@@ -1421,7 +1679,7 @@ function registerRentalRoutes(deps) {
       if (!accessControl.canAccessEntity(collection, item, req.user)) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
-      return res.json(accessControl.sanitizeEntityForRead(collection, item, req.user));
+      return res.json(accessControl.sanitizeEntityForRead(collection, enrichRentalForRead(item), req.user));
     });
 
     if (collection === 'rentals') {
@@ -1439,7 +1697,7 @@ function registerRentalRoutes(deps) {
             : null;
         }
         if (!ganttRental && classicRental) {
-          ganttRental = findLinkedGanttRental(classicRental, routeId);
+          ganttRental = findLinkedGanttRental(classicRental);
         }
         if (!classicRental && !ganttRental) {
           return res.status(404).json({ ok: false, error: 'Аренда не найдена.' });
@@ -1483,6 +1741,7 @@ function registerRentalRoutes(deps) {
     }
 
     router.post(`/${collection}`, requireAuth, (req, res) => {
+      if (rejectDirectGanttProjectionMutation(res, collection)) return;
       const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'POST');
       if (forbiddenReason) {
         return res.status(403).json({ ok: false, error: forbiddenReason });
@@ -1490,11 +1749,77 @@ function registerRentalRoutes(deps) {
 
       const data = readData(collection) || [];
       const equipment = readData('equipment') || [];
-      let newId = req.body.id || generateId(prefix);
+      let createInput = ['rentals', 'gantt_rentals'].includes(collection)
+        ? stripRentalServerOwnedAuditFields(req.body)
+        : (req.body || {});
+      const creditRiskAcknowledged = req.body?.creditRiskAcknowledged;
+      if (collection === 'rentals') {
+        try {
+          createInput = canonicalizeRentalCreatePayload(createInput);
+        } catch (error) {
+          return res.status(error?.status || 400).json({
+            ok: false,
+            code: error?.code || 'RENTAL_PAYLOAD_VALIDATION_FAILED',
+            error: error.message,
+            field: error?.field,
+            fieldErrors: error?.fieldErrors,
+          });
+        }
+      }
+      let idempotencyKey = '';
+      try {
+        idempotencyKey = readRentalCreateIdempotencyKey(req, collection);
+      } catch (error) {
+        return res.status(error?.status || 400).json({
+          ok: false,
+          code: error?.code,
+          error: error.message,
+        });
+      }
+      const idempotencyFingerprint = idempotencyKey
+        ? rentalCreateFingerprint({
+          ...createInput,
+          creditRiskAcknowledged,
+        })
+        : '';
+      const actorUserId = String(req.user?.userId || '');
+      const idempotencyRecords = idempotencyKey
+        ? readData(RENTAL_CREATE_IDEMPOTENCY_COLLECTION) || []
+        : [];
+      const previousAttempt = idempotencyKey
+        ? idempotencyRecords.find(item => item?.key === idempotencyKey)
+        : null;
+      if (previousAttempt) {
+        if (
+          previousAttempt.fingerprint !== idempotencyFingerprint
+          || String(previousAttempt.actorUserId || '') !== actorUserId
+        ) {
+          return res.status(409).json({
+            ok: false,
+            code: 'IDEMPOTENCY_KEY_REUSED',
+            error: 'Idempotency-Key уже использован с другим содержимым запроса или пользователем.',
+          });
+        }
+        const existing = data.find(item => String(item?.id || '') === String(previousAttempt.rentalId || ''));
+        if (!existing) {
+          return res.status(409).json({
+            ok: false,
+            code: 'IDEMPOTENCY_RESULT_UNAVAILABLE',
+            error: 'Результат предыдущего создания аренды больше недоступен.',
+          });
+        }
+        if (!accessControl.canAccessEntity(collection, existing, req.user)) {
+          return res.status(403).json({ ok: false, error: 'Forbidden' });
+        }
+        res.setHeader('Idempotency-Replayed', 'true');
+        return res.status(200).json(enrichRentalForRead(existing));
+      }
+      let newId = req.body?.id || generateId(prefix);
       while ((data || []).some(item => String(item?.id || '') === String(newId || ''))) {
         newId = generateId(prefix);
       }
-      let newItem = withClientLink({ ...req.body, id: newId }, `${collection}:create`);
+      const requestBody = createInput;
+      let newItem = withClientLink({ ...requestBody, id: newId }, `${collection}:create`);
       if (collection === 'gantt_rentals') {
         const linked = linkGanttRentalForWrite(newItem, data, `${collection}:create`, newItem.id);
         if (!linked.ok) {
@@ -1504,18 +1829,45 @@ function registerRentalRoutes(deps) {
       }
       try {
         newItem = normalizeRentalRelationLinks(newItem);
-      } catch (error) {
-        return res.status(error?.status || 400).json({
-          ok: false,
-          ...(error?.code ? { code: error.code } : {}),
-          error: error.message,
+        newItem = canonicalizeRentalEquipment(newItem, null, {
+          equipmentFieldsTouched: Boolean(newItem.equipmentId || newItem.equipmentInv || newItem.inventoryNumber),
         });
+        newItem = canonicalizeRentalManager(newItem, null, {
+          managerFieldsTouched: Boolean(newItem.managerId || newItem.manager),
+        });
+      } catch (error) {
+        return sendRentalPayloadValidationError(res, error);
       }
       const validation = validateRentalPayload(collection, newItem, data, equipment, '', {
         skipConflictCheck: collection === 'gantt_rentals' && Boolean(newItem.rentalId),
       });
       if (!validation.ok) {
-        return res.status(validation.status).json({ ok: false, error: validation.error });
+        const { status, ...body } = validation;
+        return res.status(status).json(body);
+      }
+      if (collection === 'rentals') {
+        const lifecycleValidation = validateLifecycleCandidate(newItem);
+        if (!lifecycleValidation.ok) return sendRentalLifecycleError(res, lifecycleValidation);
+      }
+      if (collection === 'rentals') {
+        const creditRisk = buildRentalClientCreditRisk(newItem.clientId);
+        if (creditRisk?.requiresAcknowledgement && creditRiskAcknowledged !== true) {
+          return res.status(409).json({
+            ok: false,
+            code: 'CLIENT_CREDIT_RISK_ACKNOWLEDGEMENT_REQUIRED',
+            error: 'Подтвердите создание аренды при просроченной задолженности или превышенном кредитном лимите.',
+            risk: creditRisk,
+          });
+        }
+        if (creditRisk?.requiresAcknowledgement) {
+          newItem = {
+            ...newItem,
+            creditRiskAcknowledgedAt: nowIso(),
+            creditRiskAcknowledgedByUserId: req.user?.userId || '',
+            creditRiskAcknowledgedBy: req.user?.userName || '',
+            creditRiskSnapshot: creditRisk,
+          };
+        }
       }
       try {
         assertRentalDoesNotTargetProductionSmokeFixture(newItem, `${collection}.create`);
@@ -1523,6 +1875,11 @@ function registerRentalRoutes(deps) {
         if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
           return sendSystemFixtureProtectedError(req, res, auditLog, error);
         }
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+      }
+      try {
+        if (collection === 'rentals') newItem = normalizeClassicRentalLifecycleForCreate(newItem);
+      } catch (error) {
         return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
 
@@ -1533,13 +1890,40 @@ function registerRentalRoutes(deps) {
       let linkedGanttRental = null;
       try {
         if (collection === 'rentals') {
-          linkedGanttRental = createLinkedGanttRentalIfMissing(newItem, req.user.userName);
+          const linked = buildLinkedGanttRentalIfMissing(newItem, req.user.userName);
+          linkedGanttRental = linked.linkedGanttRental;
+          const lifecycle = reconcileRentalEquipment({
+            rentals: [...data, newItem],
+            ganttRentals: linked.nextGanttRentals,
+            equipmentList: equipment,
+            affectedRentals: [newItem],
+            author: req.user.userName,
+            reason: `Создание аренды ${newItem.id}`,
+          });
+          const writes = [
+            { name: 'rentals', value: [...data, newItem] },
+            { name: 'gantt_rentals', value: linked.nextGanttRentals },
+          ];
+          if (lifecycle.changed) writes.push({ name: 'equipment', value: lifecycle.nextEquipment });
+          if (idempotencyKey) {
+            writes.push({
+              name: RENTAL_CREATE_IDEMPOTENCY_COLLECTION,
+              value: [...idempotencyRecords, {
+                key: idempotencyKey,
+                fingerprint: idempotencyFingerprint,
+                rentalId: newItem.id,
+                actorUserId,
+                createdAt: nowIso(),
+              }],
+            });
+          }
+          persistDataBatch(writes);
+        } else {
+          writeData(collection, [...data, newItem]);
         }
       } catch (error) {
-        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        return res.status(error?.status || 500).json({ ok: false, error: error.message || 'Не удалось сохранить аренду.' });
       }
-      data.push(newItem);
-      writeData(collection, data);
       auditLog?.(req, {
         action: `${collection}.create`,
         entityType: collection,
@@ -1554,10 +1938,11 @@ function registerRentalRoutes(deps) {
           after: linkedGanttRental,
         });
       }
-      return res.status(201).json(newItem);
+      return res.status(201).json(enrichRentalForRead(newItem));
     });
 
     router.patch(`/${collection}/:id`, requireAuth, async (req, res) => {
+      if (rejectDirectGanttProjectionMutation(res, collection)) return;
       const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
       if (forbiddenReason) {
         return res.status(403).json({ ok: false, error: forbiddenReason });
@@ -1566,11 +1951,21 @@ function registerRentalRoutes(deps) {
       const { patch: rawPatch, meta: rawMeta } = stripRentalPatchMeta(req.body);
       let patch = rawPatch;
       let meta = rawMeta;
+      if (['rentals', 'gantt_rentals'].includes(collection)) {
+        const forgedAuditFields = rentalServerOwnedAuditFields(patch);
+        if (forgedAuditFields.length > 0) {
+          return res.status(403).json({
+            ok: false,
+            code: 'RENTAL_AUDIT_FIELDS_IMMUTABLE',
+            error: `Audit-поля аренды нельзя менять через общий PATCH: ${forgedAuditFields.join(', ')}.`,
+          });
+        }
+      }
       const earlyDirectWorkflowError = directRentalWorkflowPatchError(patch);
       if (earlyDirectWorkflowError) {
         return res.status(403).json({ ok: false, error: earlyDirectWorkflowError });
       }
-      const data = readData(collection) || [];
+      const data = [...(readData(collection) || [])];
       let idx = data.findIndex(entry => String(entry.id) === String(req.params.id));
       if (collection === 'gantt_rentals' && idx !== -1) {
         const linkFieldPatch = ['rentalId', 'sourceRentalId', 'originalRentalId']
@@ -1637,9 +2032,8 @@ function registerRentalRoutes(deps) {
           });
         }
         const resolvedLinkedGanttRental = resolution.linkedGanttRental ||
-          findLinkedGanttRental(resolution.rental, linkedGanttRentalId) ||
+          findLinkedGanttRental(resolution.rental) ||
           null;
-        const isRestorePatch = isRestoringReturnedClassicRental(resolution.rental, { ...resolution.rental, ...patch });
         idx = resolution.rentalIndex;
         const linkedGanttRental = resolvedLinkedGanttRental;
         const linkedGanttMatchesRental = [
@@ -1708,19 +2102,38 @@ function registerRentalRoutes(deps) {
         let normalizedImmediatePatch = immediatePatch;
         try {
           if (Object.keys(immediatePatch || {}).length > 0) {
-            const normalizedItem = normalizeRentalRelationLinks({ ...previousRental, ...immediatePatch, id: previousRental.id }, previousRental);
-            normalizedImmediatePatch = Object.fromEntries(Object.keys(immediatePatch).map(field => [field, normalizedItem[field]]));
+            let normalizedItem = normalizeRentalRelationLinks(
+              { ...previousRental, ...immediatePatch, id: previousRental.id },
+              previousRental,
+              immediatePatch,
+            );
+            normalizedItem = canonicalizeRentalEquipment(normalizedItem, previousRental, {
+              equipmentFieldsTouched: rentalLifecycleFieldsTouched(immediatePatch),
+            });
+            normalizedItem = canonicalizeRentalManager(normalizedItem, previousRental, {
+              managerFieldsTouched: Object.prototype.hasOwnProperty.call(immediatePatch, 'manager')
+                || Object.prototype.hasOwnProperty.call(immediatePatch, 'managerId'),
+            });
+            const normalizedFields = new Set(Object.keys(immediatePatch));
+            if (normalizedFields.has('manager') || normalizedFields.has('managerId')) {
+              normalizedFields.add('manager');
+              normalizedFields.add('managerId');
+            }
+            normalizedImmediatePatch = Object.fromEntries([...normalizedFields].map(field => [field, normalizedItem[field]]));
           }
         } catch (error) {
-          return res.status(error?.status || 400).json({
-            ok: false,
-            ...(error?.code ? { code: error.code } : {}),
-            error: error.message,
-          });
+          return sendRentalPayloadValidationError(res, error);
         }
         const immediateValidation = validateImmediateRentalPatch(previousRental, normalizedImmediatePatch, data, approvalChanges, meta, req.user.userName);
         if (!immediateValidation.ok) {
-          return res.status(immediateValidation.status).json({ ok: false, error: immediateValidation.error });
+          const { status, ...body } = immediateValidation;
+          return res.status(status).json(body);
+        }
+        const terminalValidation = validateTerminalRentalTransition(previousRental, immediateValidation.nextItem);
+        if (!terminalValidation.ok) return sendRentalLifecycleError(res, terminalValidation);
+        if (rentalLifecycleFieldsTouched(normalizedImmediatePatch)) {
+          const lifecycleValidation = validateLifecycleCandidate(immediateValidation.nextItem);
+          if (!lifecycleValidation.ok) return sendRentalLifecycleError(res, lifecycleValidation);
         }
 
         if (approvalChanges.some(change => ['startDate', 'plannedReturnDate', 'actualReturnDate'].includes(change.field)) && !meta.canonicalRentalIdVerified) {
@@ -1730,7 +2143,10 @@ function registerRentalRoutes(deps) {
           });
         }
 
-        const createdRequests = createApprovalRequests(previousRental, approvalChanges, meta, req);
+        const createdRequests = createApprovalRequests(previousRental, approvalChanges, meta, req, { persist: false });
+        const nextRequests = createdRequests.length > 0
+          ? [...(readData('rental_change_requests') || []), ...createdRequests]
+          : null;
         let nextItem = immediateValidation.nextItem;
         try {
           assertRentalDoesNotTargetProductionSmokeFixture(nextItem, 'rentals.update');
@@ -1751,7 +2167,39 @@ function registerRentalRoutes(deps) {
             ],
           );
           data[idx] = nextItem;
-          writeData(collection, data);
+          const linkedGanttUpdate = buildLinkedGanttRentalUpdate(
+            meta.linkedGanttRentalId,
+            previousRental,
+            nextItem,
+            req.user.userName,
+          );
+          let nextGanttRentals = readData('gantt_rentals') || [];
+          if (linkedGanttUpdate) {
+            nextGanttRentals = [...linkedGanttUpdate.ganttRentals];
+            nextGanttRentals[linkedGanttUpdate.ganttIdx] = ensureGanttRentalLink(
+              linkedGanttUpdate.nextGanttRental,
+              nextItem,
+              readData('equipment') || [],
+            );
+          }
+          const lifecycle = reconcileRentalEquipment({
+            rentals: data,
+            ganttRentals: nextGanttRentals,
+            affectedRentals: [previousRental, nextItem],
+            author: req.user.userName,
+            reason: `Изменение аренды ${nextItem.id}`,
+          });
+          const writes = [
+            { name: collection, value: data },
+            ...(linkedGanttUpdate ? [{ name: 'gantt_rentals', value: nextGanttRentals }] : []),
+            ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
+            ...(nextRequests ? [{ name: 'rental_change_requests', value: nextRequests }] : []),
+          ];
+          try {
+            persistDataBatch(writes);
+          } catch (error) {
+            return res.status(500).json({ ok: false, error: error.message || 'Не удалось атомарно обновить аренду.' });
+          }
           auditLog?.(req, {
             action: 'rentals.update',
             entityType: 'rentals',
@@ -1759,11 +2207,17 @@ function registerRentalRoutes(deps) {
             before: previousRental,
             after: nextItem,
           });
-          syncLinkedGanttRental(meta.linkedGanttRentalId, previousRental, nextItem, req.user.userName);
           await emitRentalNotification(previousRental, nextItem);
         } else if (createdRequests.length > 0) {
           data[idx] = appendRentalHistory(previousRental, pendingHistoryEntries);
-          writeData(collection, data);
+          try {
+            persistDataBatch([
+              { name: collection, value: data },
+              { name: 'rental_change_requests', value: nextRequests },
+            ]);
+          } catch (error) {
+            return res.status(500).json({ ok: false, error: error.message || 'Не удалось атомарно создать согласование.' });
+          }
           auditLog?.(req, {
             action: 'rentals.change_request',
             entityType: 'rentals',
@@ -1783,8 +2237,23 @@ function registerRentalRoutes(deps) {
         });
       }
 
-      let nextItem = withClientLink({ ...data[idx], ...patch, id: data[idx].id }, `${collection}:update:${data[idx].id}`);
+      let canonicalRentalCandidate = null;
+      if (collection === 'rentals') {
+        try {
+          const canonical = canonicalizeRentalPatch(data[idx], patch);
+          patch = canonical.patch;
+          canonicalRentalCandidate = canonical.rental;
+        } catch (error) {
+          return sendRentalPayloadValidationError(res, error);
+        }
+      }
+      let nextItem = withClientLink(
+        canonicalRentalCandidate || { ...data[idx], ...patch, id: data[idx].id },
+        `${collection}:update:${data[idx].id}`,
+      );
       if (collection === 'gantt_rentals') {
+        const directAuthority = validateLinkedGanttAuthority(data[idx], nextItem);
+        if (!directAuthority.ok) return sendRentalLifecycleError(res, directAuthority);
         const linked = linkGanttRentalForWrite(nextItem, data, `${collection}:update:${data[idx].id}`, data[idx].id);
         if (!linked.ok) {
           return res.status(linked.status || 400).json({ ok: false, error: linked.code || linked.error, message: linked.error });
@@ -1793,18 +2262,32 @@ function registerRentalRoutes(deps) {
         nextItem = normalizeGanttRentalStatus(nextItem);
       }
       try {
-        nextItem = normalizeRentalRelationLinks(nextItem, data[idx]);
-      } catch (error) {
-        return res.status(error?.status || 400).json({
-          ok: false,
-          ...(error?.code ? { code: error.code } : {}),
-          error: error.message,
+        nextItem = normalizeRentalRelationLinks(nextItem, data[idx], patch);
+        nextItem = canonicalizeRentalEquipment(nextItem, data[idx], {
+          equipmentFieldsTouched: rentalLifecycleFieldsTouched(patch),
         });
+        nextItem = canonicalizeRentalManager(nextItem, data[idx], {
+          managerFieldsTouched: Object.prototype.hasOwnProperty.call(patch, 'manager')
+            || Object.prototype.hasOwnProperty.call(patch, 'managerId'),
+        });
+      } catch (error) {
+        return sendRentalPayloadValidationError(res, error);
+      }
+      if (collection === 'rentals') {
+        const terminalValidation = validateTerminalRentalTransition(data[idx], nextItem);
+        if (!terminalValidation.ok) return sendRentalLifecycleError(res, terminalValidation);
+      }
+      if (collection === 'rentals' && rentalLifecycleFieldsTouched(patch)) {
+        const lifecycleValidation = validateLifecycleCandidate(nextItem);
+        if (!lifecycleValidation.ok) return sendRentalLifecycleError(res, lifecycleValidation);
       }
       const validation = validateRentalPayload(collection, nextItem, data, readData('equipment') || [], data[idx].id);
       if (!validation.ok) {
-        return res.status(validation.status).json({ ok: false, error: validation.error });
+        const { status, ...validationBody } = validation;
+        return res.status(status).json(validationBody);
       }
+      const ganttAuthority = validateLinkedGanttAuthority(data[idx], nextItem);
+      if (!ganttAuthority.ok) return sendRentalLifecycleError(res, ganttAuthority);
       if (collection === 'rentals') {
         const linkedValidation = validateLinkedGanttRental(meta.linkedGanttRentalId, data[idx], nextItem, req.user.userName);
         if (!linkedValidation.ok) {
@@ -1829,11 +2312,7 @@ function registerRentalRoutes(deps) {
         if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
           return sendSystemFixtureProtectedError(req, res, auditLog, error);
         }
-        return res.status(error?.status || 400).json({
-          ok: false,
-          ...(error?.code ? { code: error.code } : {}),
-          error: error.message,
-        });
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
 
       if (collection === 'gantt_rentals') {
@@ -1846,7 +2325,41 @@ function registerRentalRoutes(deps) {
       }
       const previousRental = data[idx];
       data[idx] = nextItem;
-      writeData(collection, data);
+      let linkedGanttUpdate = null;
+      if (collection === 'rentals') {
+        linkedGanttUpdate = buildLinkedGanttRentalUpdate(
+          meta.linkedGanttRentalId,
+          previousRental,
+          nextItem,
+          req.user.userName,
+        );
+      }
+      let nextGanttRentals = collection === 'gantt_rentals' ? data : (readData('gantt_rentals') || []);
+      if (linkedGanttUpdate) {
+        nextGanttRentals = [...linkedGanttUpdate.ganttRentals];
+        nextGanttRentals[linkedGanttUpdate.ganttIdx] = ensureGanttRentalLink(
+          linkedGanttUpdate.nextGanttRental,
+          nextItem,
+          readData('equipment') || [],
+        );
+      }
+      const lifecycleRentals = collection === 'rentals' ? data : (readData('rentals') || []);
+      const lifecycle = reconcileRentalEquipment({
+        rentals: lifecycleRentals,
+        ganttRentals: nextGanttRentals,
+        affectedRentals: [previousRental, nextItem],
+        author: req.user.userName,
+        reason: `Изменение ${collection} ${nextItem.id}`,
+      });
+      try {
+        persistDataBatch([
+          { name: collection, value: data },
+          ...(linkedGanttUpdate ? [{ name: 'gantt_rentals', value: nextGanttRentals }] : []),
+          ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
+        ]);
+      } catch (error) {
+        return res.status(500).json({ ok: false, error: error.message || 'Не удалось атомарно обновить аренду.' });
+      }
       auditLog?.(req, {
         action: `${collection}.update`,
         entityType: collection,
@@ -1854,10 +2367,6 @@ function registerRentalRoutes(deps) {
         before: previousRental,
         after: nextItem,
       });
-      if (collection === 'rentals') {
-        syncLinkedGanttRental(meta.linkedGanttRentalId, previousRental, nextItem, req.user.userName);
-        syncEquipmentForRestoredRental(previousRental, nextItem, req.user.userName);
-      }
       await emitRentalNotification(previousRental, nextItem);
       return res.json(data[idx]);
     });
@@ -1899,7 +2408,7 @@ function registerRentalRoutes(deps) {
           rentals,
           rental: resolution.rental,
           rentalIndex: resolution.rentalIndex,
-          ganttRental: resolution.linkedGanttRental || findLinkedGanttRental(resolution.rental, linkedGanttRentalId || routeId),
+          ganttRental: resolution.linkedGanttRental || findLinkedGanttRental(resolution.rental),
           linkedGanttRentalId: linkedGanttRentalId || resolution.linkedGanttRentalId || resolution.linkedGanttRental?.id || '',
         };
       }
@@ -1932,10 +2441,17 @@ function registerRentalRoutes(deps) {
           sourceRentalId: previousRental.id,
           rentalId: previousRental.id,
           reason: change.reason,
-        }, req);
+        }, req, { persist: false });
         const nextWithHistory = appendRentalHistory(previousRental, buildRentalPendingApprovalHistoryEntries(createdRequests, req.user.userName));
-        target.rentals[target.rentalIndex] = nextWithHistory;
-        writeData('rentals', target.rentals);
+        const nextRentals = [...target.rentals];
+        nextRentals[target.rentalIndex] = nextWithHistory;
+        persistDataBatch([
+          { name: 'rentals', value: nextRentals },
+          {
+            name: 'rental_change_requests',
+            value: [...(readData('rental_change_requests') || []), ...createdRequests],
+          },
+        ]);
         auditLog?.(req, {
           action: 'rentals.change_request',
           entityType: 'rentals',
@@ -1955,12 +2471,7 @@ function registerRentalRoutes(deps) {
       }
 
       async function persistRentalDowntimeMutation(req, res, target, result, actionLabel) {
-        if (!result.ok) return res.status(result.status || 400).json({
-          ok: false,
-          ...(result.code ? { code: result.code } : {}),
-          error: result.error,
-          ...(result.details ? { details: result.details } : {}),
-        });
+        if (!result.ok) return res.status(result.status || 400).json({ ok: false, error: result.error });
         const previousRental = target.rental;
         const nextRental = appendRentalHistory(
           result.rental,
@@ -1968,7 +2479,15 @@ function registerRentalRoutes(deps) {
         );
 
         if (req.user?.userRole === 'Менеджер по аренде') {
-          return res.status(202).json(applyRentalDowntimeApproval(req, target, previousRental, nextRental, result.downtime, actionLabel));
+          try {
+            return res.status(202).json(applyRentalDowntimeApproval(req, target, previousRental, nextRental, result.downtime, actionLabel));
+          } catch (error) {
+            return res.status(500).json({
+              ok: false,
+              code: 'RENTAL_DOWNTIME_APPROVAL_PERSISTENCE_FAILED',
+              error: error?.message || 'Не удалось атомарно создать согласование простоя.',
+            });
+          }
         }
 
         const validation = validateRentalPayload('rentals', nextRental, target.rentals, readData('equipment') || [], previousRental.id);
@@ -1976,9 +2495,44 @@ function registerRentalRoutes(deps) {
         const linkedValidation = validateLinkedGanttRental(target.linkedGanttRentalId || target.ganttRental?.id || '', previousRental, nextRental, req.user.userName);
         if (!linkedValidation.ok) return res.status(linkedValidation.status).json({ ok: false, error: linkedValidation.error });
 
-        target.rentals[target.rentalIndex] = nextRental;
-        writeData('rentals', target.rentals);
-        syncLinkedGanttRental(target.linkedGanttRentalId || target.ganttRental?.id || '', previousRental, nextRental, req.user.userName);
+        const linkedGanttId = target.linkedGanttRentalId || target.ganttRental?.id || '';
+        let nextGanttRentals = readData('gantt_rentals') || [];
+        try {
+          const linkedGanttUpdate = buildLinkedGanttRentalUpdate(
+            linkedGanttId,
+            previousRental,
+            nextRental,
+            req.user.userName,
+          );
+          if (linkedGanttUpdate) {
+            nextGanttRentals = [...linkedGanttUpdate.ganttRentals];
+            nextGanttRentals[linkedGanttUpdate.ganttIdx] = ensureGanttRentalLink(
+              linkedGanttUpdate.nextGanttRental,
+              nextRental,
+              readData('equipment') || [],
+            );
+          }
+          const nextRentals = [...target.rentals];
+          nextRentals[target.rentalIndex] = nextRental;
+          const lifecycle = reconcileRentalEquipment({
+            rentals: nextRentals,
+            ganttRentals: nextGanttRentals,
+            affectedRentals: [previousRental, nextRental],
+            author: req.user.userName,
+            reason: `${actionLabel} для аренды ${nextRental.id}`,
+          });
+          persistDataBatch([
+            { name: 'rentals', value: nextRentals },
+            ...(linkedGanttUpdate ? [{ name: 'gantt_rentals', value: nextGanttRentals }] : []),
+            ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
+          ]);
+        } catch (error) {
+          return res.status(500).json({
+            ok: false,
+            code: 'RENTAL_DOWNTIME_PERSISTENCE_FAILED',
+            error: error?.message || 'Не удалось атомарно сохранить простой аренды.',
+          });
+        }
         auditLog?.(req, {
           action: 'rentals.downtime',
           entityType: 'rentals',
@@ -1989,14 +2543,14 @@ function registerRentalRoutes(deps) {
         });
         await emitRentalNotification(previousRental, nextRental);
         const updatedGantt = (readData('gantt_rentals') || []).find(item =>
-          String(item.id || '') === String(target.linkedGanttRentalId || target.ganttRental?.id || '')
+          String(item.id || '') === String(linkedGanttId)
         ) || null;
         return res.json({ ok: true, applied: true, downtime: result.downtime, rental: nextRental, ganttRental: updatedGantt });
       }
 
       router.get(`/${collection}/:id/downtimes`, requireAuth, (req, res) => {
         const target = resolveRentalDowntimeRouteTarget(req);
-        if (!target.ok) return res.status(target.status || 404).json({ ok: false, error: target.error });
+        if (!target.ok) return res.status(target.status || 404).json({ ok: false, code: target.code, error: target.error, details: target.details });
         try {
           accessControl.assertCanUpdateEntity(collection, target.rental, req.user);
         } catch (error) {
@@ -2011,7 +2565,7 @@ function registerRentalRoutes(deps) {
         const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
         if (forbiddenReason) return res.status(403).json({ ok: false, error: forbiddenReason });
         const target = resolveRentalDowntimeRouteTarget(req, req.body || {});
-        if (!target.ok) return res.status(target.status || 404).json({ ok: false, error: target.error });
+        if (!target.ok) return res.status(target.status || 404).json({ ok: false, code: target.code, error: target.error, details: target.details });
         try {
           accessControl.assertCanUpdateEntity(collection, target.rental, req.user);
         } catch (error) {
@@ -2028,7 +2582,7 @@ function registerRentalRoutes(deps) {
         const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
         if (forbiddenReason) return res.status(403).json({ ok: false, error: forbiddenReason });
         const target = resolveRentalDowntimeRouteTarget(req, req.body || {});
-        if (!target.ok) return res.status(target.status || 404).json({ ok: false, error: target.error });
+        if (!target.ok) return res.status(target.status || 404).json({ ok: false, code: target.code, error: target.error, details: target.details });
         try {
           accessControl.assertCanUpdateEntity(collection, target.rental, req.user);
         } catch (error) {
@@ -2042,7 +2596,7 @@ function registerRentalRoutes(deps) {
         const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
         if (forbiddenReason) return res.status(403).json({ ok: false, error: forbiddenReason });
         const target = resolveRentalDowntimeRouteTarget(req, req.body || {});
-        if (!target.ok) return res.status(target.status || 404).json({ ok: false, error: target.error });
+        if (!target.ok) return res.status(target.status || 404).json({ ok: false, code: target.code, error: target.error, details: target.details });
         try {
           accessControl.assertCanUpdateEntity(collection, target.rental, req.user);
         } catch (error) {
@@ -2058,12 +2612,22 @@ function registerRentalRoutes(deps) {
           return res.status(403).json({ ok: false, error: forbiddenReason });
         }
 
-        const rentals = readData(collection) || [];
-        const ganttRentals = readData('gantt_rentals') || [];
+        const rentals = [...(readData(collection) || [])];
+        const ganttRentals = [...(readData('gantt_rentals') || [])];
         const equipmentList = readData('equipment') || [];
         const payments = readData('payments') || [];
         const routeId = String(req.params.id || '');
-        const newPlannedReturnDate = normalizeDateKey(req.body?.newEndDate || req.body?.newPlannedReturnDate);
+        const requestedEndDate = req.body?.newEndDate ?? req.body?.newPlannedReturnDate;
+        let newPlannedReturnDate = '';
+        try {
+          newPlannedReturnDate = strictRentalDate(
+            requestedEndDate,
+            'plannedReturnDate',
+            'Дата окончания аренды',
+          ).key;
+        } catch (error) {
+          return sendRentalPayloadValidationError(res, error);
+        }
         const reason = String(req.body?.reason || '').trim();
         const comment = String(req.body?.comment || '').trim();
         const confirmedByClient = req.body?.confirmedByClient === true;
@@ -2074,7 +2638,12 @@ function registerRentalRoutes(deps) {
           return res.status(404).json({ ok: false, error: 'Аренда для продления не найдена.' });
         }
         if (!classicRental && routeResolution && !routeResolution.ok) {
-          return res.status(routeResolution.status || 409).json({ ok: false, error: routeResolution.error });
+          return res.status(routeResolution.status || 409).json({
+            ok: false,
+            error: routeResolution.error,
+            code: routeResolution.code,
+            details: routeResolution.details,
+          });
         }
         const rentalForAccess = classicRental || ganttRental;
         try {
@@ -2085,13 +2654,10 @@ function registerRentalRoutes(deps) {
 
         const currentEnd = normalizeDateKey(classicRental?.plannedReturnDate || ganttRental?.endDate || ganttRental?.plannedReturnDate);
         if (!confirmedByClient) return res.status(400).json({ ok: false, error: 'Подтвердите, что клиент согласовал продление.' });
-        if (!newPlannedReturnDate || !parseDateKey(newPlannedReturnDate)) {
-          return res.status(400).json({ ok: false, error: 'Укажите новую дату окончания аренды.' });
-        }
         if (!currentEnd || !parseDateKey(currentEnd)) {
           return res.status(400).json({ ok: false, error: 'В аренде не указана текущая дата окончания.' });
         }
-        if (isClosedRentalStatus(classicRental?.status) || isClosedRentalStatus(ganttRental?.status)) {
+        if (isClosedRentalStatus(classicRental?.status)) {
           return res.status(409).json({ ok: false, error: 'Нельзя продлить закрытую или отменённую аренду.' });
         }
         if (compareDateKeys(newPlannedReturnDate, currentEnd) <= 0) {
@@ -2127,7 +2693,6 @@ function registerRentalRoutes(deps) {
           newPlannedReturnDate,
           equipmentList,
           rentals,
-          ganttRentals,
         });
         if (conflict) {
           const createdRequests = classicRental
@@ -2169,9 +2734,8 @@ function registerRentalRoutes(deps) {
         const author = req.user?.userName || 'Система';
         const classicIdx = classicRental ? rentals.findIndex(item => item.id === classicRental.id) : -1;
         const ganttIdx = ganttRental ? ganttRentals.findIndex(item => item.id === ganttRental.id) : -1;
-        const nextClassic = classicRental
-          ? appendRentalHistory(
-              {
+        let nextClassic = classicRental
+          ? {
                 ...classicRental,
                 plannedReturnDate: newPlannedReturnDate,
                 endDate: newPlannedReturnDate,
@@ -2184,7 +2748,20 @@ function registerRentalRoutes(deps) {
                   ...(classicRental.extensionFinancials || {}),
                   last: financials,
                 },
-              },
+            }
+          : null;
+        if (nextClassic) {
+          try {
+            nextClassic = canonicalizeRentalPatch(nextClassic, {
+              plannedReturnDate: newPlannedReturnDate,
+              price: financials.nextAmount,
+              amount: financials.nextAmount,
+            }).rental;
+          } catch (error) {
+            return sendRentalPayloadValidationError(res, error);
+          }
+          nextClassic = appendRentalHistory(
+              nextClassic,
               [buildExtensionHistoryEntry(
                 currentEnd,
                 newPlannedReturnDate,
@@ -2198,9 +2775,9 @@ function registerRentalRoutes(deps) {
                 ].filter(Boolean).join('; '),
                 author,
               )],
-            )
-          : null;
-        const nextGantt = ganttRental
+            );
+        }
+        let nextGantt = ganttRental
           ? ensureGanttRentalLink(mergeRentalHistory(ganttRental, {
               ...ganttRental,
               endDate: newPlannedReturnDate,
@@ -2211,23 +2788,54 @@ function registerRentalRoutes(deps) {
               extensionInvoiceSentToClient: invoiceSentToClient,
             }, author), nextClassic || classicRental, equipmentList)
           : null;
+        if (nextGantt && nextClassic && classicRental) {
+          nextGantt = ensureGanttRentalLink(
+            syncGanttRentalFields(nextGantt, classicRental, nextClassic, author, equipmentList),
+            nextClassic,
+            equipmentList,
+          );
+        }
 
         if (nextClassic) {
           const validation = validateRentalPayload('rentals', nextClassic, rentals, equipmentList, classicRental.id);
           if (!validation.ok) return res.status(validation.status).json({ ok: false, error: validation.error });
+          const lifecycleValidation = validateLifecycleCandidate(nextClassic);
+          if (!lifecycleValidation.ok) return sendRentalLifecycleError(res, lifecycleValidation);
         }
         if (nextGantt) {
-          const validation = validateRentalPayload('gantt_rentals', nextGantt, ganttRentals, equipmentList, ganttRental.id);
+          const validation = validateRentalPayload(
+            'gantt_rentals',
+            nextGantt,
+            ganttRentals,
+            equipmentList,
+            ganttRental.id,
+            { skipConflictCheck: true },
+          );
           if (!validation.ok) return res.status(validation.status).json({ ok: false, error: validation.error });
         }
 
+        const extensionWrites = [];
         if (classicIdx !== -1 && nextClassic) {
           rentals[classicIdx] = nextClassic;
-          writeData(collection, rentals);
+          extensionWrites.push({ name: collection, value: rentals });
         }
         if (ganttIdx !== -1 && nextGantt) {
           ganttRentals[ganttIdx] = nextGantt;
-          writeData('gantt_rentals', ganttRentals);
+          extensionWrites.push({ name: 'gantt_rentals', value: ganttRentals });
+        }
+        const lifecycle = reconcileRentalEquipment({
+          rentals,
+          ganttRentals,
+          equipmentList,
+          affectedRentals: [classicRental, nextClassic, ganttRental, nextGantt].filter(Boolean),
+          author,
+          reason: `Продление аренды ${nextClassic?.id || classicRental?.id || ganttRental?.id}`,
+        });
+        if (lifecycle.changed) extensionWrites.push({ name: 'equipment', value: lifecycle.nextEquipment });
+        try {
+          persistDataBatch(extensionWrites);
+        } catch (error) {
+          return res.status(500).json({ ok: false, error: error.message || 'Не удалось атомарно продлить аренду.' });
         }
 
         const auditMetadata = {
@@ -2302,7 +2910,12 @@ function registerRentalRoutes(deps) {
         const ganttRental = routeLookup.ganttRental;
         const routeResolution = routeLookup.resolution;
         if (!classicRental && routeResolution && !routeResolution.ok) {
-          return res.status(routeResolution.status || 409).json({ ok: false, error: routeResolution.error });
+          return res.status(routeResolution.status || 409).json({
+            ok: false,
+            error: routeResolution.error,
+            code: routeResolution.code,
+            details: routeResolution.details,
+          });
         }
         if (!classicRental && !ganttRental) {
           return res.status(404).json({ ok: false, error: 'Аренда для возврата не найдена.' });
@@ -2315,7 +2928,7 @@ function registerRentalRoutes(deps) {
           return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
         }
 
-        if (isReturnedClassicRental(classicRental) || isReturnedGanttRental(ganttRental)) {
+        if (isReturnedClassicRental(classicRental)) {
           return res.status(409).json({ ok: false, error: 'Возврат уже оформлен для этой аренды.' });
         }
 
@@ -2379,44 +2992,25 @@ function registerRentalRoutes(deps) {
           };
         });
 
-        const otherBlockingRental = findOtherBlockingRental(nextGanttRentals, ganttRental?.id, equipment);
-        const nextService = readData('service') || [];
+        const nextService = [...(readData('service') || [])];
         let createdServiceTicket = null;
-        let resultingEquipmentStatus = equipment.status;
         if (hasDamage) {
-          resultingEquipmentStatus = 'in_service';
           if (!openServiceTicket) {
             createdServiceTicket = buildReturnServiceTicket(classicRental || ganttRental, equipment, returnDate, damageDescription, author);
             nextService.push(createdServiceTicket);
           }
-        } else if (otherBlockingRental) {
-          resultingEquipmentStatus = otherBlockingRental.status === 'active' ? 'rented' : 'reserved';
-        } else {
-          resultingEquipmentStatus = 'available';
         }
-
-        const nextEquipment = equipmentList.map(item => {
-          if (item.id !== equipment.id) return item;
-          return {
-            ...item,
-            status: resultingEquipmentStatus,
-            currentClient: otherBlockingRental ? otherBlockingRental.client : undefined,
-            returnDate: otherBlockingRental ? (otherBlockingRental.endDate || otherBlockingRental.plannedReturnDate) : undefined,
-            history: [
-              ...(Array.isArray(item.history) ? item.history : []),
-              {
-                date: new Date().toISOString(),
-                text: hasDamage
-                  ? 'Возврат из аренды: техника переведена в сервис'
-                  : otherBlockingRental
-                    ? 'Возврат из аренды: техника осталась занята другой активной арендой'
-                    : 'Возврат из аренды: техника доступна',
-                author,
-                type: 'system',
-              },
-            ],
-          };
+        const lifecycle = reconcileRentalEquipment({
+          rentals: nextRentals,
+          ganttRentals: nextGanttRentals,
+          equipmentList,
+          affectedRentals: [classicRental, ganttRental].filter(Boolean),
+          serviceTickets: nextService,
+          author,
+          reason: `Возврат аренды ${classicRental?.id || ganttRental?.id}`,
         });
+        const nextEquipment = lifecycle.nextEquipment;
+        const resultingEquipmentStatus = nextEquipment.find(item => item.id === equipment.id)?.status || equipment.status;
         try {
           assertProductionSmokeFixtureMutationAllowed({
             action: 'rental_return',
@@ -2430,10 +3024,20 @@ function registerRentalRoutes(deps) {
           return res.status(error?.status || 400).json({ ok: false, error: error.message });
         }
 
-        writeData(collection, nextRentals);
-        writeData('gantt_rentals', nextGanttRentals);
-        writeData('equipment', nextEquipment);
-        if (createdServiceTicket) writeData('service', nextService);
+        try {
+          persistDataBatch([
+            { name: collection, value: nextRentals },
+            { name: 'gantt_rentals', value: nextGanttRentals },
+            ...(lifecycle.changed ? [{ name: 'equipment', value: nextEquipment }] : []),
+            ...(createdServiceTicket ? [{ name: 'service', value: nextService }] : []),
+          ]);
+        } catch (error) {
+          return res.status(500).json({
+            ok: false,
+            code: 'RENTAL_RETURN_PERSISTENCE_FAILED',
+            error: error?.message || 'Не удалось атомарно оформить возврат.',
+          });
+        }
 
         const returnedRental = classicRental
           ? nextRentals.find(item => item.id === classicRental.id)
@@ -2463,7 +3067,34 @@ function registerRentalRoutes(deps) {
       });
     }
 
+    function rentalDeleteBlocker(rentalId) {
+      const pendingRequest = (readData('rental_change_requests') || []).find(request => (
+        String(request?.rentalId || '') === String(rentalId || '')
+        && String(request?.status || 'pending') === 'pending'
+      ));
+      if (pendingRequest) {
+        return {
+          code: 'RENTAL_DELETE_PENDING_CHANGE_REQUEST',
+          error: `Нельзя удалить аренду: заявка ${pendingRequest.id} ожидает согласования.`,
+          dependentId: pendingRequest.id,
+        };
+      }
+      const activeDelivery = (readData('deliveries') || []).find(delivery => (
+        [delivery?.rentalId, delivery?.classicRentalId].some(id => String(id || '') === String(rentalId || ''))
+        && !['completed', 'cancelled', 'canceled'].includes(String(delivery?.status || '').toLowerCase())
+      ));
+      if (activeDelivery) {
+        return {
+          code: 'RENTAL_DELETE_ACTIVE_DELIVERY',
+          error: `Нельзя удалить аренду: доставка ${activeDelivery.id} ещё активна.`,
+          dependentId: activeDelivery.id,
+        };
+      }
+      return null;
+    }
+
     router.delete(`/${collection}/:id`, requireAuth, (req, res) => {
+      if (rejectDirectGanttProjectionMutation(res, collection)) return;
       const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'DELETE');
       if (forbiddenReason) {
         return res.status(403).json({ ok: false, error: forbiddenReason });
@@ -2473,26 +3104,93 @@ function registerRentalRoutes(deps) {
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
 
-      data.splice(idx, 1);
-      writeData(collection, data);
+      const removed = data[idx];
+      const equipmentList = readData('equipment') || [];
+      let nextRentals = collection === 'rentals' ? data.filter((_, index) => index !== idx) : (readData('rentals') || []);
+      let nextGanttRentals = collection === 'gantt_rentals' ? data.filter((_, index) => index !== idx) : (readData('gantt_rentals') || []);
+      let affectedRentals = [removed];
+      let cascadedGanttCount = 0;
+
+      if (collection === 'rentals') {
+        const blocker = rentalDeleteBlocker(removed.id);
+        if (blocker) {
+          return res.status(409).json({ ok: false, ...blocker });
+        }
+        const linkedGantt = nextGanttRentals.filter(item => linkedRentalIds(item).some(id => String(id || '') === String(removed.id || '')));
+        cascadedGanttCount = linkedGantt.length;
+        affectedRentals = [...affectedRentals, ...linkedGantt];
+        nextGanttRentals = nextGanttRentals.filter(item => !linkedRentalIds(item).some(id => String(id || '') === String(removed.id || '')));
+      } else if (!isStandalonePlannerRow(removed)) {
+        const linkedClassic = linkedRentalIds(removed).find(id => nextRentals.some(rental => String(rental?.id || '') === String(id || '')));
+        if (linkedClassic) {
+          return res.status(409).json({
+            ok: false,
+            code: 'LINKED_GANTT_DELETE_REQUIRES_RENTAL_DELETE',
+            error: 'Связанную строку планировщика нельзя удалить отдельно от карточки аренды.',
+            field: 'rentalId',
+          });
+        }
+      }
+
+      const lifecycle = reconcileRentalEquipment({
+        rentals: nextRentals,
+        ganttRentals: nextGanttRentals,
+        equipmentList,
+        affectedRentals,
+        author: req.user.userName,
+        reason: `Удаление ${collection} ${removed.id}`,
+      });
+      try {
+        persistDataBatch([
+          { name: collection, value: collection === 'rentals' ? nextRentals : nextGanttRentals },
+          ...(collection === 'rentals' ? [{ name: 'gantt_rentals', value: nextGanttRentals }] : []),
+          ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
+        ]);
+      } catch (error) {
+        return res.status(500).json({
+          ok: false,
+          code: 'RENTAL_DELETE_PERSISTENCE_FAILED',
+          error: error?.message || 'Не удалось атомарно удалить аренду.',
+        });
+      }
       auditLog?.(req, {
         action: `${collection}.delete`,
         entityType: collection,
         entityId: req.params.id,
       });
-      return res.json({ ok: true });
+      return res.json({
+        ok: true,
+        cascadedGanttCount,
+        retainedHistory: collection === 'rentals' ? {
+          payments: (readData('payments') || []).filter(item => String(item?.rentalId || '') === String(removed.id || '')).length,
+          documents: (readData('documents') || []).filter(item => String(item?.rentalId || item?.rental || '') === String(removed.id || '')).length,
+          service: (readData('service') || []).filter(item => String(item?.rentalId || '') === String(removed.id || '')).length,
+          deliveries: (readData('deliveries') || []).filter(item => [item?.rentalId, item?.classicRentalId].some(id => String(id || '') === String(removed.id || ''))).length,
+        } : undefined,
+      });
     });
 
     router.put(`/${collection}`, requireAuth, (req, res) => {
+      if (rejectDirectGanttProjectionMutation(res, collection)) return;
       const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PUT');
       if (forbiddenReason) {
         return res.status(403).json({ ok: false, error: forbiddenReason });
       }
 
       const body = req.body;
-      const list = Array.isArray(body) ? body : body.data;
+      let list = Array.isArray(body) ? body : body.data;
       if (!Array.isArray(list)) {
         return res.status(400).json({ ok: false, error: 'Expected array' });
+      }
+      if (['rentals', 'gantt_rentals'].includes(collection)) {
+        const forgedAuditFields = [...new Set(list.flatMap(item => rentalServerOwnedAuditFields(item)))];
+        if (forgedAuditFields.length > 0) {
+          return res.status(403).json({
+            ok: false,
+            code: 'RENTAL_AUDIT_FIELDS_IMMUTABLE',
+            error: `Audit-поля аренды нельзя менять через bulk replace: ${forgedAuditFields.join(', ')}.`,
+          });
+        }
       }
       try {
         for (const item of list) {
@@ -2507,7 +3205,64 @@ function registerRentalRoutes(deps) {
       try {
         accessControl.assertSafeAdminBulkReplaceInput(collection, list);
       } catch (error) {
-        return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+        return res.status(error?.status || 403).json({
+          ok: false,
+          ...(error?.code ? { code: error.code } : {}),
+          error: error?.message || 'Forbidden',
+        });
+      }
+
+      const existingList = readData(collection) || [];
+      const incomingIds = new Set(list.map(item => String(item?.id || '')).filter(Boolean));
+      const removedItems = existingList.filter(item => !incomingIds.has(String(item?.id || '')));
+      if (collection === 'rentals') {
+        for (const removed of removedItems) {
+          const blocker = rentalDeleteBlocker(removed.id);
+          if (blocker) return res.status(409).json({ ok: false, ...blocker });
+        }
+      } else {
+        const classicIds = new Set((readData('rentals') || []).map(item => String(item?.id || '')));
+        const forbiddenRemoval = removedItems.find(item => (
+          !isStandalonePlannerRow(item)
+          && linkedRentalIds(item).some(id => classicIds.has(String(id || '')))
+        ));
+        if (forbiddenRemoval) {
+          return res.status(409).json({
+            ok: false,
+            code: 'LINKED_GANTT_DELETE_REQUIRES_RENTAL_DELETE',
+            error: `Строку планировщика ${forbiddenRemoval.id} нельзя удалить отдельно от карточки аренды.`,
+          });
+        }
+      }
+
+      const plannerSyncRentalIds = new Set();
+      if (collection === 'rentals') {
+        const existingById = new Map((readData('rentals') || []).map(item => [String(item?.id || ''), item]));
+        try {
+          list = list.map(item => {
+            const existing = existingById.get(String(item?.id || '')) || null;
+            if (!existing) {
+              plannerSyncRentalIds.add(String(item?.id || ''));
+              return canonicalizeRentalCreatePayload(item);
+            }
+            const changedPlannerFields = [...RENTAL_PLANNER_SYNC_FIELDS].filter(field =>
+              Object.prototype.hasOwnProperty.call(existing, field) !== Object.prototype.hasOwnProperty.call(item, field)
+              || JSON.stringify(existing[field] ?? null) !== JSON.stringify(item[field] ?? null)
+            );
+            if (changedPlannerFields.length > 0) plannerSyncRentalIds.add(String(item.id || ''));
+            const changedProtectedFields = [...new Set([
+              ...rentalMutationProtectedFields(existing),
+              ...rentalMutationProtectedFields(item),
+            ])].filter(field =>
+              Object.prototype.hasOwnProperty.call(existing, field) !== Object.prototype.hasOwnProperty.call(item, field)
+              || JSON.stringify(existing[field] ?? null) !== JSON.stringify(item[field] ?? null)
+            );
+            if (changedProtectedFields.length === 0) return item;
+            return canonicalizeRentalCreatePayload(item);
+          });
+        } catch (error) {
+          return sendRentalPayloadValidationError(res, error);
+        }
       }
 
       const equipment = readData('equipment') || [];
@@ -2541,7 +3296,26 @@ function registerRentalRoutes(deps) {
       }
       try {
         const existingById = new Map((readData(collection) || []).map(item => [String(item?.id || ''), item]));
-        nextList = nextList.map(item => normalizeRentalRelationLinks(item, existingById.get(String(item?.id || '')) || null));
+        nextList = nextList.map(item => {
+          const existing = existingById.get(String(item?.id || '')) || null;
+          let normalized = normalizeRentalRelationLinks(item, existing);
+          normalized = canonicalizeRentalEquipment(normalized, existing, {
+            equipmentFieldsTouched: !existing || rentalLifecycleFieldsTouched(item),
+          });
+          normalized = canonicalizeRentalManager(normalized, existing, {
+            managerFieldsTouched: !existing
+              || JSON.stringify(existing?.managerId ?? null) !== JSON.stringify(item?.managerId ?? null)
+              || JSON.stringify(existing?.manager ?? null) !== JSON.stringify(item?.manager ?? null),
+          });
+          return normalized;
+        });
+        if (collection === 'rentals') {
+          for (const rental of nextList) {
+            const existing = existingById.get(String(rental?.id || '')) || null;
+            const terminalValidation = validateTerminalRentalTransition(existing, rental);
+            if (!terminalValidation.ok) return sendRentalLifecycleError(res, terminalValidation);
+          }
+        }
         for (const item of nextList) {
           assertRentalDoesNotTargetProductionSmokeFixture(item, `${collection}.bulk_replace`);
         }
@@ -2549,10 +3323,87 @@ function registerRentalRoutes(deps) {
         if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
           return sendSystemFixtureProtectedError(req, res, auditLog, error);
         }
-        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        return sendRentalPayloadValidationError(res, error);
       }
 
-      writeData(collection, nextList);
+      let nextRentals = collection === 'rentals' ? nextList : (readData('rentals') || []);
+      let nextGanttRentals = collection === 'gantt_rentals' ? nextList : (readData('gantt_rentals') || []);
+      if (collection === 'rentals') {
+        const removedRentalIds = new Set(removedItems.map(item => String(item?.id || '')));
+        const nextRentalById = new Map(nextRentals.map(item => [String(item?.id || ''), item]));
+        nextGanttRentals = nextGanttRentals
+          .filter(item => !linkedRentalIds(item).some(id => removedRentalIds.has(String(id || ''))))
+          .map(item => {
+            const linkedRentalId = linkedRentalIds(item).find(id => nextRentalById.has(String(id || '')));
+            const nextRental = linkedRentalId ? nextRentalById.get(String(linkedRentalId)) : null;
+            if (!nextRental || !plannerSyncRentalIds.has(String(linkedRentalId || ''))) return item;
+            return ensureGanttRentalLink(
+              syncGanttRentalFields(item, null, nextRental, req.user.userName, equipment),
+              nextRental,
+              equipment,
+            );
+          });
+        const linkedClassicIds = new Set(nextGanttRentals.flatMap(item => linkedRentalIds(item).map(String)));
+        for (const rental of nextRentals) {
+          if (linkedClassicIds.has(String(rental.id || ''))) continue;
+          const createdGantt = mergeRentalHistory(null, buildLinkedGanttRentalFromClassic(rental), req.user.userName);
+          nextGanttRentals.push(createdGantt);
+          linkedClassicIds.add(String(rental.id || ''));
+        }
+        const existingById = new Map(existingList.map(item => [String(item?.id || ''), item]));
+        for (const rental of nextRentals) {
+          const existing = existingById.get(String(rental?.id || '')) || null;
+          if (!existing || rentalLifecycleFieldsTouched(Object.fromEntries(
+            Object.keys(rental).filter(field => JSON.stringify(existing?.[field] ?? null) !== JSON.stringify(rental?.[field] ?? null)).map(field => [field, rental[field]]),
+          ))) {
+            const lifecycleValidation = validateLifecycleCandidate(rental);
+            if (!lifecycleValidation.ok) return sendRentalLifecycleError(res, lifecycleValidation);
+          }
+        }
+      } else {
+        const existingById = new Map(existingList.map(item => [String(item?.id || ''), item]));
+        for (const ganttRental of nextGanttRentals) {
+          const existing = existingById.get(String(ganttRental?.id || '')) || {};
+          const authority = validateLinkedGanttAuthority(existing, ganttRental);
+          if (!authority.ok) return sendRentalLifecycleError(res, authority);
+        }
+      }
+
+      for (const ganttRental of nextGanttRentals) {
+        const validation = validateRentalPayload(
+          'gantt_rentals',
+          ganttRental,
+          nextGanttRentals,
+          equipment,
+          ganttRental.id,
+          { skipConflictCheck: Boolean(linkedRentalIds(ganttRental).length) },
+        );
+        if (!validation.ok) {
+          const { status, ...validationBody } = validation;
+          return res.status(status).json(validationBody);
+        }
+      }
+      const lifecycle = reconcileRentalEquipment({
+        rentals: nextRentals,
+        ganttRentals: nextGanttRentals,
+        equipmentList: equipment,
+        affectedRentals: [...removedItems, ...nextList],
+        author: req.user.userName,
+        reason: `Массовая замена ${collection}`,
+      });
+      try {
+        persistDataBatch([
+          { name: collection, value: nextList },
+          ...(collection === 'rentals' ? [{ name: 'gantt_rentals', value: nextGanttRentals }] : []),
+          ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
+        ]);
+      } catch (error) {
+        return res.status(500).json({
+          ok: false,
+          code: 'RENTAL_BULK_REPLACE_PERSISTENCE_FAILED',
+          error: error.message || 'Не удалось атомарно заменить аренды.',
+        });
+      }
       auditLog?.(req, {
         action: `${collection}.bulk_replace`,
         entityType: collection,

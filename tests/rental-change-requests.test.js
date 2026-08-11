@@ -17,6 +17,7 @@ const { createAccessControl } = require('../server/lib/access-control.js');
 const { registerRentalRoutes } = require('../server/routes/rentals.js');
 const { registerRentalChangeRequestRoutes } = require('../server/routes/rental-change-requests.js');
 const { validateRentalPayload } = require('../server/lib/rental-validation.js');
+const { reconcileEquipmentRentalProjection } = require('../server/lib/rental-lifecycle.js');
 
 const rental = {
   id: 'R-1',
@@ -649,7 +650,8 @@ test('analyzeGanttRentalLinks reports missing rentalId, broken links and target 
   assert.equal(diagnostics.target.fallbackCandidates[0].id, 'R-linked');
 });
 
-function createApprovalApp() {
+function createApprovalApp(options = {}) {
+  const events = { writes: [], batches: [] };
   const state = {
     users: [
       { id: 'U-admin', name: 'Админ', role: 'Администратор' },
@@ -736,7 +738,23 @@ function createApprovalApp() {
   app.use(express.json());
   const readData = (name) => state[name] || [];
   const writeData = (name, value) => {
+    events.writes.push(name);
     state[name] = value;
+  };
+  const writeDataBatch = (entries) => {
+    if (options.failBatch) throw new Error('injected atomic batch failure');
+    events.batches.push((entries || []).map(entry => entry.name));
+    for (const entry of entries || []) state[entry.name] = entry.value;
+  };
+  const reconcileEquipmentRentalProjectionForWrite = (input) => {
+    if (options.failEquipmentReconciliation) throw new Error('injected equipment reconciliation failure');
+    return reconcileEquipmentRentalProjection(input);
+  };
+  const validateRentalPayloadForWrite = (collection, ...args) => {
+    if (options.failGanttProjectionPreparation && collection === 'gantt_rentals') {
+      return { ok: false, status: 500, error: 'injected Gantt projection preparation failure' };
+    }
+    return validateRentalPayload(collection, ...args);
   };
   const accessControl = createAccessControl({ readData });
   let requestCounter = 0;
@@ -769,7 +787,7 @@ function createApprovalApp() {
     writeData,
     requireAuth,
     requireRead,
-    validateRentalPayload,
+    validateRentalPayload: validateRentalPayloadForWrite,
     mergeRentalHistory: (_previous, next) => next,
     normalizeGanttRentalList: list => list,
     normalizeGanttRentalStatus: item => item,
@@ -777,17 +795,22 @@ function createApprovalApp() {
     idPrefixes: { rentals: 'R', gantt_rentals: 'GR', rental_change_requests: 'RCR' },
     accessControl,
     auditLog: () => {},
+    writeDataBatch,
+    reconcileEquipmentRentalProjection: reconcileEquipmentRentalProjectionForWrite,
+    canonicalizeRentalRelationForWrite: options.canonicalizeRentalRelationForWrite,
   }));
   apiRouter.use(registerRentalChangeRequestRoutes({
     readData,
     writeData,
     requireAuth,
-    validateRentalPayload,
+    validateRentalPayload: validateRentalPayloadForWrite,
     generateId: prefix => `${prefix}-${++requestCounter}`,
     idPrefixes: { rental_change_requests: 'RCR' },
+    writeDataBatch,
+    canonicalizeRentalRelationForWrite: options.canonicalizeRentalRelationForWrite,
   }));
   app.use('/api', apiRouter);
-  return { app, state };
+  return { app, state, events };
 }
 
 async function withServer(app, fn) {
@@ -958,11 +981,36 @@ test('approved conflicting rental extension is rechecked and rejected while conf
 });
 
 test('admin can replace rental client and synchronize linked gantt rental', async () => {
-  const { app, state } = createApprovalApp();
+  const { app, state } = createApprovalApp({
+    canonicalizeRentalRelationForWrite: item => {
+      const expectedCounterpartyId = item.clientId === 'C-new' ? 'CP-new' : 'CP-old';
+      if (item.counterpartyId && item.counterpartyId !== expectedCounterpartyId) {
+        const error = new Error('Rental clientId/counterpartyId mismatch');
+        error.code = 'COUNTERPARTY_RELATION_MISMATCH';
+        error.status = 409;
+        throw error;
+      }
+      return { ...item, counterpartyId: expectedCounterpartyId };
+    },
+  });
   state.rentals[0].clientId = 'C-old';
+  state.rentals[0].counterpartyId = 'CP-old';
   state.gantt_rentals[0].clientId = 'C-old';
+  state.gantt_rentals[0].counterpartyId = 'CP-old';
 
   await withServer(app, async (baseUrl) => {
+    const mismatch = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'admin-token', {
+      clientId: 'C-new',
+      counterpartyId: 'CP-forged',
+      client: 'Новый клиент',
+      rentalId: 'R-1',
+      __linkedGanttRentalId: 'GR-1',
+    });
+    assert.equal(mismatch.status, 409);
+    assert.equal(mismatch.body.code, 'COUNTERPARTY_RELATION_MISMATCH');
+    assert.equal(state.rentals[0].clientId, 'C-old');
+    assert.equal(state.rentals[0].counterpartyId, 'CP-old');
+
     const update = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'admin-token', {
       clientId: 'C-new',
       client: 'Новый клиент',
@@ -974,10 +1022,57 @@ test('admin can replace rental client and synchronize linked gantt rental', asyn
     assert.equal(update.body.clientId, 'C-new');
     assert.equal(update.body.client, 'Новый клиент');
     assert.equal(state.rentals[0].clientId, 'C-new');
+    assert.equal(state.rentals[0].counterpartyId, 'CP-new');
     assert.equal(state.rentals[0].client, 'Новый клиент');
     assert.equal(state.gantt_rentals[0].clientId, 'C-new');
+    assert.equal(state.gantt_rentals[0].counterpartyId, 'CP-new');
     assert.equal(state.gantt_rentals[0].client, 'Новый клиент');
     assert.equal(state.gantt_rentals[0].clientShort, 'Новый клиент');
+  });
+});
+
+test('approved clientId change derives Counterparty through the canonical relation writer', async () => {
+  const { app, state } = createApprovalApp({
+    canonicalizeRentalRelationForWrite: item => {
+      const expectedCounterpartyId = item.clientId === 'C-new' ? 'CP-new' : 'CP-old';
+      if (item.counterpartyId && item.counterpartyId !== expectedCounterpartyId) {
+        const error = new Error('Rental clientId/counterpartyId mismatch');
+        error.code = 'COUNTERPARTY_RELATION_MISMATCH';
+        error.status = 409;
+        throw error;
+      }
+      return { ...item, counterpartyId: expectedCounterpartyId };
+    },
+  });
+  state.rentals[0].clientId = 'C-old';
+  state.rentals[0].counterpartyId = 'CP-old';
+  state.gantt_rentals[0].clientId = 'C-old';
+  state.gantt_rentals[0].counterpartyId = 'CP-old';
+
+  await withServer(app, async (baseUrl) => {
+    const update = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'manager-token', {
+      clientId: 'C-new',
+      client: 'Новый клиент',
+      rentalId: 'R-1',
+      __linkedGanttRentalId: 'GR-1',
+      __changeReason: 'Коррекция контрагента',
+    });
+    assert.equal(update.status, 200);
+
+    const clientRequest = state.rental_change_requests.find(item => item.field === 'clientId');
+    const approved = await request(
+      baseUrl,
+      'POST',
+      `/api/rental_change_requests/${clientRequest.id}/approve`,
+      'admin-token',
+      {},
+    );
+
+    assert.equal(approved.status, 200);
+    assert.equal(state.rentals[0].clientId, 'C-new');
+    assert.equal(state.rentals[0].counterpartyId, 'CP-new');
+    assert.equal(state.gantt_rentals[0].clientId, 'C-new');
+    assert.equal(state.gantt_rentals[0].counterpartyId, 'CP-new');
   });
 });
 
@@ -1502,7 +1597,7 @@ test('PATCH /api/rentals/:id does not resolve broken GR by client/date fallback'
 });
 
 test('PATCH /api/rentals/:id reports orphan Gantt and cannot recreate Classic rental', async () => {
-  const { app, state } = createApprovalApp();
+  const { app, state, events } = createApprovalApp();
   state.rentals = state.rentals.filter(item => item.id !== 'R-032');
   state.gantt_rentals.push({
     id: 'GR-1776254974522',
@@ -1551,6 +1646,8 @@ test('PATCH /api/rentals/:id reports orphan Gantt and cannot recreate Classic re
     assert.deepEqual(state.rentals, before.rentals);
     assert.deepEqual(state.gantt_rentals, before.ganttRentals);
     assert.deepEqual(state.rental_change_requests, before.changeRequests);
+    assert.equal(events.writes.includes('rentals'), false);
+    assert.equal(events.batches.some(names => names.includes('rentals')), false);
   });
 });
 
@@ -1735,6 +1832,14 @@ test('POST /api/rentals/:id/downtimes creates multiple rental downtime periods a
     assert.equal(second.body.rental.billableDays, 8);
     assert.equal(state.rentals.find(item => item.id === 'R-1').downtimePeriods.length, 2);
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').downtimePeriods.length, 2);
+    assert.deepEqual(
+      state.gantt_rentals.find(item => item.id === 'GR-1').downtimePeriods,
+      state.rentals.find(item => item.id === 'R-1').downtimePeriods,
+    );
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').downtimeDays, 5);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').downtimeBillableDays, 3);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').billableDays, 8);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').amount, 100000);
   });
 });
 
@@ -1789,6 +1894,118 @@ test('POST /api/rentals/:id/downtimes rejects overlapping downtime periods', asy
     assert.equal(first.status, 200);
     assert.equal(overlap.status, 409);
     assert.match(overlap.body.error, /пересекается/);
+  });
+});
+
+test('downtime leaves Classic Rental unchanged when Gantt projection preparation fails', async () => {
+  const options = { failGanttProjectionPreparation: true };
+  const { app, state } = createApprovalApp(options);
+  const before = structuredClone({
+    rentals: state.rentals,
+    ganttRentals: state.gantt_rentals,
+    equipment: state.equipment,
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'admin-token', {
+      ganttRentalId: 'GR-1',
+      startDate: '2026-04-10',
+      endDate: '2026-04-11',
+      reason: 'Failure injection',
+    });
+
+    assert.equal(response.status, 500);
+    assert.match(response.body.error, /Gantt projection preparation failure/);
+  });
+
+  assert.deepEqual(state.rentals, before.rentals);
+  assert.deepEqual(state.gantt_rentals, before.ganttRentals);
+  assert.deepEqual(state.equipment, before.equipment);
+});
+
+test('downtime leaves Rental and Gantt unchanged when Equipment reconciliation fails', async () => {
+  const options = { failEquipmentReconciliation: true };
+  const { app, state } = createApprovalApp(options);
+  const before = structuredClone({
+    rentals: state.rentals,
+    ganttRentals: state.gantt_rentals,
+    equipment: state.equipment,
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'admin-token', {
+      ganttRentalId: 'GR-1',
+      startDate: '2026-04-10',
+      endDate: '2026-04-11',
+      reason: 'Failure injection',
+    });
+
+    assert.equal(response.status, 500);
+    assert.equal(response.body.code, 'RENTAL_DOWNTIME_PERSISTENCE_FAILED');
+    assert.match(response.body.error, /equipment reconciliation failure/);
+  });
+
+  assert.deepEqual(state.rentals, before.rentals);
+  assert.deepEqual(state.gantt_rentals, before.ganttRentals);
+  assert.deepEqual(state.equipment, before.equipment);
+});
+
+test('retrying the same downtime does not create a duplicate period', async () => {
+  const { app, state } = createApprovalApp();
+  const payload = {
+    ganttRentalId: 'GR-1',
+    startDate: '2026-04-10',
+    endDate: '2026-04-11',
+    reason: 'Ожидание клиента',
+    affectsBilling: true,
+  };
+
+  await withServer(app, async (baseUrl) => {
+    const first = await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'admin-token', payload);
+    const retry = await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'admin-token', payload);
+
+    assert.equal(first.status, 200);
+    assert.equal(retry.status, 409);
+  });
+
+  const rental = state.rentals.find(item => item.id === 'R-1');
+  const gantt = state.gantt_rentals.find(item => item.id === 'GR-1');
+  assert.equal(rental.downtimePeriods.length, 1);
+  assert.equal(gantt.downtimePeriods.length, 1);
+  assert.deepEqual(gantt.downtimePeriods, rental.downtimePeriods);
+});
+
+test('manager downtime approval rollback leaves Rental, Gantt, Equipment and request pending', async () => {
+  const options = {};
+  const { app, state } = createApprovalApp(options);
+
+  await withServer(app, async (baseUrl) => {
+    const requested = await request(baseUrl, 'POST', '/api/rentals/R-1/downtimes', 'manager-token', {
+      ganttRentalId: 'GR-1',
+      startDate: '2026-04-10',
+      endDate: '2026-04-11',
+      reason: 'Ожидание клиента',
+      affectsBilling: true,
+    });
+    assert.equal(requested.status, 202);
+    const requestId = requested.body.approval.requestIds[0];
+    const beforeApproval = structuredClone({
+      rentals: state.rentals,
+      ganttRentals: state.gantt_rentals,
+      equipment: state.equipment,
+      requests: state.rental_change_requests,
+    });
+    options.failBatch = true;
+
+    const approval = await request(baseUrl, 'POST', `/api/rental_change_requests/${requestId}/approve`, 'admin-token', {});
+
+    assert.equal(approval.status, 500);
+    assert.match(approval.body.error, /injected atomic batch failure/);
+    assert.deepEqual(state.rentals, beforeApproval.rentals);
+    assert.deepEqual(state.gantt_rentals, beforeApproval.ganttRentals);
+    assert.deepEqual(state.equipment, beforeApproval.equipment);
+    assert.deepEqual(state.rental_change_requests, beforeApproval.requests);
+    assert.equal(state.rental_change_requests.find(item => item.id === requestId).status, 'pending');
   });
 });
 
@@ -2074,10 +2291,51 @@ test('approve detects stale old values and does not overwrite newer rental dates
   });
 });
 
-test('gantt create restores rentalId from one exact classic rental match', async () => {
+test('approve cannot resurrect a terminal Classic rental from a stale pending request', async () => {
+  const { app, state, events } = createApprovalApp();
+  const rental = state.rentals.find(item => item.id === 'R-1');
+  rental.status = 'closed';
+  rental.actualReturnDate = '2026-04-18';
+  state.rental_change_requests.push({
+    id: 'RCR-terminal-resurrection',
+    entityType: 'rental',
+    entityId: rental.id,
+    rentalId: rental.id,
+    linkedGanttRentalId: 'GR-1',
+    status: 'pending',
+    field: 'status',
+    fieldLabel: 'Статус',
+    oldValue: 'closed',
+    newValue: 'active',
+    createdAt: '2026-04-17T10:00:00.000Z',
+    requestedById: 'U-manager',
+    requestedByName: 'Руслан',
+  });
+  const before = structuredClone(state);
+
+  await withServer(app, async (baseUrl) => {
+    const approved = await request(
+      baseUrl,
+      'POST',
+      '/api/rental_change_requests/RCR-terminal-resurrection/approve',
+      'admin-token',
+      {},
+    );
+
+    assert.equal(approved.status, 409);
+    assert.equal(approved.body.code, 'RENTAL_TERMINAL_RESURRECTION_FORBIDDEN');
+    assert.deepEqual(state.rentals, before.rentals);
+    assert.deepEqual(state.gantt_rentals, before.gantt_rentals);
+    assert.deepEqual(state.rental_change_requests, before.rental_change_requests);
+    assert.deepEqual(events.batches, []);
+  });
+});
+
+test('direct Gantt create cannot restore a missing projection for a Classic rental', async () => {
   const { app, state } = createApprovalApp();
   const classicRental = state.rentals.find(item => item.id === 'R-1');
   state.gantt_rentals = state.gantt_rentals.filter(item => item.rentalId !== 'R-1');
+  const before = structuredClone(state.gantt_rentals);
 
   await withServer(app, async (baseUrl) => {
     const created = await request(baseUrl, 'POST', '/api/gantt_rentals', 'admin-token', {
@@ -2094,10 +2352,9 @@ test('gantt create restores rentalId from one exact classic rental match', async
       comments: [],
     });
 
-    assert.equal(created.status, 201);
-    assert.equal(created.body.rentalId, 'R-1');
-    assert.equal(created.body.sourceRentalId, 'R-1');
-    assert.equal(state.gantt_rentals.at(-1).rentalId, 'R-1');
+    assert.equal(created.status, 409);
+    assert.equal(created.body.code, 'GANTT_PROJECTION_READ_ONLY');
+    assert.deepEqual(state.gantt_rentals, before);
   });
 });
 
@@ -2175,10 +2432,11 @@ test('rentals patch returns clear error when legacy gantt has no rental match', 
   });
 });
 
-test('gantt create canonicalizes wrong equipment from the matched rental', async () => {
+test('direct Gantt create cannot canonicalize or create a projection', async () => {
   const { app, state } = createApprovalApp();
   const classicRental = state.rentals.find(item => item.id === 'R-1');
   state.gantt_rentals = state.gantt_rentals.filter(item => item.rentalId !== 'R-1');
+  const before = structuredClone(state.gantt_rentals);
 
   await withServer(app, async (baseUrl) => {
     const created = await request(baseUrl, 'POST', '/api/gantt_rentals', 'admin-token', {
@@ -2196,11 +2454,9 @@ test('gantt create canonicalizes wrong equipment from the matched rental', async
       comments: [],
     });
 
-    assert.equal(created.status, 201);
-    assert.equal(created.body.rentalId, 'R-1');
-    assert.equal(created.body.equipmentId, 'EQ-1');
-    assert.equal(created.body.equipmentInv, '083');
-    assert.equal(state.gantt_rentals.at(-1).equipmentId, 'EQ-1');
+    assert.equal(created.status, 409);
+    assert.equal(created.body.code, 'GANTT_PROJECTION_READ_ONLY');
+    assert.deepEqual(state.gantt_rentals, before);
   });
 });
 

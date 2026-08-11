@@ -108,6 +108,7 @@ import { EquipmentStatusTabs } from './equipment/EquipmentStatusTabs';
 import { findEquipmentTypeLabel, mergeEquipmentTypesWithExistingEquipment, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { photoSource } from '../lib/media';
 import { buildEquipmentQuickActions } from '../lib/quickActions.js';
+import { buildRentalNewRoute } from '../lib/rental-new-route.js';
 import { formatCurrency } from '../lib/utils';
 import type {
   Document,
@@ -1164,7 +1165,7 @@ function buildEquipmentPreviewQuickActions({
         id: 'create-rental',
         label: 'Создать аренду',
         icon: CalendarPlus,
-        to: createRentalAction.to || buildEquipmentContextPath('/rentals/new', equipment),
+        to: createRentalAction.to || buildRentalNewRoute({ equipmentId: equipment.id }),
         disabled: Boolean(createRentalAction.disabled),
         reason: createRentalAction.reason,
         tone: 'primary',

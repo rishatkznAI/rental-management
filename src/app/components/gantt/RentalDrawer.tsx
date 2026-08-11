@@ -68,7 +68,7 @@ interface RentalDrawerProps {
   onStatusChange: (rental: GanttRentalData) => void;
   onRestore: (rental: GanttRentalData) => void;
   onDelete: (rental: GanttRentalData) => void;
-  onUpdate: (rental: GanttRentalData, data: Partial<GanttRentalData>) => void;
+  onUpdate: (rental: GanttRentalData, data: Partial<GanttRentalData>) => void | Promise<void>;
   onAddComment: (rental: GanttRentalData, text: string) => void;
   onAddPayment: (rentalId: string, amount: number, paidDate: string, comment: string) => void;
   onEarlyReturn: (rental: GanttRentalData, actualReturnDate: string) => void;
@@ -465,7 +465,7 @@ export function RentalDrawer({
     : isReturnOverdue
       ? 'text-red-600 dark:text-red-400'
       : 'text-green-700 dark:text-green-300';
-  const contractLabel = rental.contractId || rentalDetailId || 'Не привязан';
+  const contractLabel = rental.contractNumber || (rental.contractId ? 'Привязан' : 'Не привязан');
   const equipmentLabel = [
     currentEquipment?.manufacturer,
     currentEquipment?.model,
@@ -635,7 +635,7 @@ export function RentalDrawer({
     setEarlyReturnConfirm(false);
   };
 
-  const handleEditSave = () => {
+  const handleEditSave = async () => {
     if (!canEditRentals) return;
     if (!editClientId || !editClient.trim()) {
       setEditError('Выберите клиента из базы');
@@ -658,12 +658,22 @@ export function RentalDrawer({
       setEditError('Сумма должна быть числом не меньше 0');
       return;
     }
+    const selectedManager = activeManagers.find(item => item.name === editManager.trim());
+    if (editManager.trim() !== rental.manager && !selectedManager) {
+      setEditError('Выберите активного менеджера из списка');
+      return;
+    }
+    const otherRentals = allRentals.filter(item => ![
+      item.id,
+      item.rentalId,
+      item.sourceRentalId,
+      item.originalRentalId,
+    ].some(value => rentalPaymentIds.has(String(value || '').trim())));
     const conflict = findConflictingRental(
       { id: rental.equipmentId || rental.equipmentInv, inventoryNumber: rental.equipmentInv },
       editStartDate,
       editEndDate,
-      allRentals,
-      rental.id,
+      otherRentals,
     );
     if (conflict && !dateConflictsRequireApproval) {
       setEditError(`Конфликт: техника занята ${formatDate(conflict.startDate)} — ${formatDate(conflict.endDate)} (${conflict.client})`);
@@ -671,20 +681,25 @@ export function RentalDrawer({
     }
 
     setEditError('');
-    onUpdate(rental, {
-      clientId: editClientId,
-      client: editClient.trim(),
-      clientShort: editClient.trim().substring(0, 20),
-      manager: editManager.trim(),
-      managerInitials: editManager.trim()
-        ? editManager.trim().split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase()
-        : rental.managerInitials,
-      startDate: editStartDate,
-      endDate: editEndDate,
-      amount,
-      expectedPaymentDate: editExpectedPaymentDate || undefined,
-    });
-    setShowEdit(false);
+    try {
+      await onUpdate(rental, {
+        clientId: editClientId,
+        client: editClient.trim(),
+        clientShort: editClient.trim().substring(0, 20),
+        manager: editManager.trim(),
+        managerId: selectedManager?.id,
+        managerInitials: editManager.trim()
+          ? editManager.trim().split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase()
+          : rental.managerInitials,
+        startDate: editStartDate,
+        endDate: editEndDate,
+        amount,
+        expectedPaymentDate: editExpectedPaymentDate || undefined,
+      });
+      setShowEdit(false);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : 'Не удалось сохранить аренду');
+    }
   };
 
   const handleCommentSave = () => {
@@ -707,8 +722,10 @@ export function RentalDrawer({
       setEditManager(rental.manager);
       return;
     }
+    const selectedManager = activeManagers.find(item => item.name === nextManager);
     onUpdate(rental, {
       manager: nextManager,
+      managerId: selectedManager?.id,
       managerInitials: nextManager
         .split(/\s+/)
         .map(word => word[0] || '')
@@ -1004,12 +1021,19 @@ export function RentalDrawer({
                     </div>
                     <div>
                       <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Менеджер</label>
-                      <input
-                        type="text"
+                      <select
                         value={editManager}
                         onChange={e => setEditManager(e.target.value)}
+                        disabled={!canReassignManager}
                         className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                      />
+                      >
+                        {!activeManagers.some(item => item.name === editManager) && editManager && (
+                          <option value={editManager}>{editManager} (legacy)</option>
+                        )}
+                        {activeManagers.map(manager => (
+                          <option key={manager.id} value={manager.name}>{manager.name}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Сумма (₽)</label>
@@ -1024,6 +1048,7 @@ export function RentalDrawer({
                     <div>
                       <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Дата начала *</label>
                       <input
+                        data-testid="rental-drawer-start-date"
                         type="date"
                         value={editStartDate}
                         onChange={e => setEditStartDate(e.target.value)}
@@ -1034,6 +1059,7 @@ export function RentalDrawer({
                     <div>
                       <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Дата окончания *</label>
                       <input
+                        data-testid="rental-drawer-end-date"
                         type="date"
                         value={editEndDate}
                         onChange={e => setEditEndDate(e.target.value)}
@@ -1058,7 +1084,7 @@ export function RentalDrawer({
                   )}
                   {editError && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{editError}</p>}
                   <div className="mt-3 flex gap-2">
-                    <Button size="sm" onClick={handleEditSave}>Сохранить</Button>
+                    <Button data-testid="rental-drawer-save" size="sm" onClick={() => void handleEditSave()}>Сохранить</Button>
                     <Button size="sm" variant="ghost" onClick={() => { setShowEdit(false); setEditError(''); }}>
                       Отмена
                     </Button>

@@ -1237,7 +1237,9 @@ export default function RentalDetail() {
                       </Select>
                     ) : (
                       <p className="mt-0.5 font-medium text-gray-900 dark:text-white">
-                        {selectedRentalObject ? `${selectedRentalObject.name} · ${selectedRentalObject.address}` : 'Без объекта'}
+                        {selectedRentalObject
+                          ? `${selectedRentalObject.name} · ${selectedRentalObject.address}`
+                          : rental.objectName || rental.objectAddress || (rental.objectId ? 'Объект привязан' : 'Без объекта')}
                       </p>
                     )}
                   </div>
@@ -1260,7 +1262,7 @@ export default function RentalDetail() {
                       </Select>
                     ) : (
                       <p className="mt-0.5 font-medium text-gray-900 dark:text-white">
-                        {selectedRentalContract?.number || rental.contractId || 'Без договора'}
+                        {selectedRentalContract?.number || rental.contractNumber || (rental.contractId ? 'Договор привязан' : 'Без договора')}
                       </p>
                     )}
                   </div>

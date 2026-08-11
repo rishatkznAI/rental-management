@@ -710,18 +710,43 @@ export interface Rental {
   counterpartyId?: string;
   clientId?: string;
   objectId?: string;
+  objectName?: string;
+  objectAddress?: string;
   contractId?: string;
+  contractNumber?: string;
+  equipmentId?: string;
+  equipmentInv?: string;
+  inventoryNumber?: string;
+  serialNumber?: string;
+  equipmentDetails?: Partial<Equipment>;
   client: string;
   contact: string;
   startDate: string;
   plannedReturnDate: string;
   actualReturnDate?: string;
   equipment: string[];
+  pricingMode?: 'daily_rate' | 'manual_total';
+  dailyRate?: number;
   rate: string;
   price: number;
   discount: number;
+  deposit?: number;
+  creditRiskAcknowledged?: boolean;
+  creditRiskAcknowledgedAt?: string;
+  creditRiskAcknowledgedByUserId?: string;
+  creditRiskAcknowledgedBy?: string;
+  creditRiskSnapshot?: {
+    clientId: string;
+    currentDebt: number;
+    creditLimit: number;
+    unpaidRentals: number;
+    overdueRentals: number;
+    exceededLimit: boolean;
+    requiresAcknowledgement: boolean;
+  };
   deliveryAddress: string;
   deliveryTime?: string;
+  managerId?: string;
   manager: string;
   status: RentalStatus;
   risk?: string;
@@ -738,6 +763,8 @@ export interface Rental {
   downtimePeriods?: RentalDowntimePeriod[];
   documents?: string[];
   comments?: string;
+  updSigned?: boolean;
+  updDate?: string;
   history?: AuditEntry[];
 }
 

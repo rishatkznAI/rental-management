@@ -128,6 +128,39 @@ test('formatConflictError returns readable period and client', () => {
   assert.equal(message, 'Техника уже занята в период 2026-04-10 — 2026-04-20 (ЭМ-СТРОЙ)');
 });
 
+test('availability validation returns a structured recovery payload', () => {
+  const validation = validateRentalPayload('rentals', {
+    equipmentId: 'eq-1',
+    equipmentInv: '083',
+    startDate: '2026-04-15',
+    plannedReturnDate: '2026-04-25',
+    price: 1000,
+  }, [{
+    id: 'R-existing',
+    clientId: 'C-existing',
+    client: 'ЭМ-СТРОЙ',
+    equipmentId: 'eq-1',
+    equipmentInv: '083',
+    startDate: '2026-04-10',
+    plannedReturnDate: '2026-04-20',
+    status: 'active',
+  }], rentableEquipment);
+
+  assert.equal(validation.ok, false);
+  assert.equal(validation.status, 409);
+  assert.equal(validation.code, 'EQUIPMENT_AVAILABILITY_CONFLICT');
+  assert.deepEqual(validation.conflict, {
+    rentalId: 'R-existing',
+    clientId: 'C-existing',
+    client: 'ЭМ-СТРОЙ',
+    equipmentId: 'eq-1',
+    equipmentInv: '083',
+    startDate: '2026-04-10',
+    endDate: '2026-04-20',
+    status: 'active',
+  });
+});
+
 test('validateRentalPayload rejects negative rental amount', () => {
   const validation = validateRentalPayload('gantt_rentals', {
     equipmentId: 'eq-1',
@@ -164,12 +197,39 @@ test('validateRentalPayload rejects Infinity rental amount', () => {
   assert.equal(validation.status, 400);
 });
 
+test('validateRentalPayload rejects a negative deposit', () => {
+  const validation = validateRentalPayload('rentals', {
+    equipmentId: 'eq-1',
+    startDate: '2026-04-10',
+    plannedReturnDate: '2026-04-10',
+    price: 10000,
+    deposit: -1,
+  }, [], rentableEquipment);
+
+  assert.equal(validation.ok, false);
+  assert.equal(validation.status, 400);
+  assert.match(validation.error, /Залог/);
+});
+
 test('validateRentalPayload rejects non-numeric rental rate', () => {
   const validation = validateRentalPayload('gantt_rentals', {
     equipmentId: 'eq-1',
     startDate: '2026-04-10',
     endDate: '2026-04-10',
     rate: 'abc',
+  }, [], rentableEquipment);
+
+  assert.equal(validation.ok, false);
+  assert.equal(validation.status, 400);
+});
+
+test('validateRentalPayload rejects a numeric rate hidden inside malformed text', () => {
+  const validation = validateRentalPayload('rentals', {
+    equipmentId: 'eq-1',
+    startDate: '2026-04-10',
+    plannedReturnDate: '2026-04-10',
+    price: 10000,
+    rate: 'garbage 1000/day',
   }, [], rentableEquipment);
 
   assert.equal(validation.ok, false);

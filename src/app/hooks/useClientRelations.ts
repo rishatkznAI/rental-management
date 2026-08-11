@@ -3,6 +3,8 @@ import { clientObjectsService } from '../services/client-objects.service';
 import { clientContractsService } from '../services/client-contracts.service';
 import type { ClientContract, ClientObject } from '../types';
 
+type IdempotentCreateInput<T> = Omit<T, 'id'> & { idempotencyKey?: string };
+
 export const CLIENT_OBJECT_KEYS = {
   all: ['client_objects'] as const,
 };
@@ -26,8 +28,14 @@ export function useClientObjectsList(options: QueryOptions = {}) {
 export function useCreateClientObject() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: Omit<ClientObject, 'id'>) => clientObjectsService.create(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: CLIENT_OBJECT_KEYS.all }),
+    mutationFn: ({ idempotencyKey, ...data }: IdempotentCreateInput<ClientObject>) =>
+      clientObjectsService.create(data, idempotencyKey),
+    onSuccess: (created) => {
+      qc.setQueryData<ClientObject[]>(CLIENT_OBJECT_KEYS.all, current => [
+        ...(current || []).filter(item => item.id !== created.id),
+        created,
+      ]);
+    },
   });
 }
 
@@ -51,7 +59,21 @@ export function useClientContractsList(options: QueryOptions = {}) {
 export function useCreateClientContract() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: Omit<ClientContract, 'id'>) => clientContractsService.create(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: CLIENT_CONTRACT_KEYS.all }),
+    mutationFn: ({ idempotencyKey, ...data }: IdempotentCreateInput<ClientContract>) =>
+      clientContractsService.create(data, idempotencyKey),
+    onSuccess: (created) => {
+      qc.setQueryData<ClientContract[]>(CLIENT_CONTRACT_KEYS.all, current => [
+        ...(current || []).filter(item => item.id !== created.id),
+        created,
+      ]);
+    },
   });
+}
+
+export async function refreshClientRelationCache(
+  qc: ReturnType<typeof useQueryClient>,
+  queryKey: typeof CLIENT_OBJECT_KEYS.all | typeof CLIENT_CONTRACT_KEYS.all,
+) {
+  await qc.invalidateQueries({ queryKey, refetchType: 'none' });
+  await qc.refetchQueries({ queryKey, type: 'active' }, { throwOnError: true });
 }

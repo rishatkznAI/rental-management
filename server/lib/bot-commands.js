@@ -32,6 +32,7 @@ function createBotHandlers(deps) {
   const {
     readData,
     writeData,
+    writeDataBatch,
     verifyPassword,
     getBotUsers,
     saveBotUsers,
@@ -50,6 +51,7 @@ function createBotHandlers(deps) {
     appendServiceLog,
     getMechanicReferenceByUser,
     syncEquipmentStatusForService,
+    applyServiceTicketCreationEffects,
     updateServiceTicketStatus,
     returnServiceTicketForRevision,
     resolveServiceTicketRevision,
@@ -1701,6 +1703,7 @@ function createBotHandlers(deps) {
   } = createBotOperations({
     readData,
     writeData,
+    writeDataBatch,
     generateId,
     idPrefixes,
     nowIso,
@@ -1709,6 +1712,7 @@ function createBotHandlers(deps) {
     appendServiceLog,
     getMechanicReferenceByUser,
     syncEquipmentStatusForService,
+    applyServiceTicketCreationEffects,
     getOpenTicketByEquipment,
     formatEquipmentForBot,
     serviceStatusLabel,

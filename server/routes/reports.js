@@ -165,6 +165,16 @@ function registerReportRoutes(deps) {
     );
   }
 
+  function canonicalizeRentalManagers(rentals) {
+    const usersById = new Map((readData('users') || []).map(item => [String(item?.id || ''), item]));
+    return (rentals || []).map((rental) => {
+      const manager = usersById.get(String(rental?.managerId || ''));
+      if (!manager) return rental;
+      const display = String(manager.name || manager.userName || manager.fullName || manager.email || '').trim();
+      return display ? { ...rental, manager: display } : rental;
+    });
+  }
+
   function parseDate(value) {
     const text = String(value || '').slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
@@ -233,7 +243,7 @@ function registerReportRoutes(deps) {
 
   function buildFinance(user, period) {
     const clients = scoped('clients', user);
-    const rentals = scoped('gantt_rentals', user).filter(row => rowDateInRange(row, period));
+    const rentals = canonicalizeRentalManagers(scoped('gantt_rentals', user)).filter(row => rowDateInRange(row, period));
     const payments = scoped('payments', user).filter(row => rowDateInRange(row, period));
     const scopedRentalIds = new Set(rentals.map(item => String(item.id || '')).filter(Boolean));
     const scopedPaymentIds = new Set(payments.map(item => String(item.id || '')).filter(Boolean));
@@ -265,7 +275,7 @@ function registerReportRoutes(deps) {
 
   function buildManagers(user, period, query = {}) {
     assertFinanceReportAccess(user);
-    const rentals = scoped('gantt_rentals', user);
+    const rentals = canonicalizeRentalManagers(scoped('gantt_rentals', user));
     const equipment = scoped('equipment', user);
     const payments = scoped('payments', user);
     const scopedRentalIds = new Set(rentals.map(item => String(item.id || '')).filter(Boolean));

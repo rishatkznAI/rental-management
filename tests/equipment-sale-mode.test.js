@@ -911,9 +911,9 @@ test('equipment quick view actions are status-aware and backed by routes or disa
   assert.match(serviceNewSource, /initialEquipmentId=\{initialEquipmentId\}/);
   assert.match(serviceNewSource, /submitLabel=\{isSalesPdi \? 'Создать PDI' : undefined\}/);
 
-  assert.match(rentalNewSource, /searchParams\.get\('equipmentId'\)/);
-  assert.match(rentalNewSource, /searchParams\.get\('equipmentInv'\)/);
-  assert.match(rentalNewSource, /setEquipmentId\(selected\.id\)/);
+  assert.match(rentalNewSource, /parseRentalNewRoute/);
+  assert.match(rentalNewSource, /routeRequest\.equipment\.kind === 'id'/);
+  assert.match(rentalNewSource, /setEquipmentId\(nextEquipmentId\)/);
 
   assert.match(detailSource, /const routeSearchParams = new URLSearchParams\(location\.search\)/);
   assert.match(detailSource, /const openEditFromRoute = routeSearchParams\.get\('action'\) === 'edit'/);

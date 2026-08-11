@@ -119,7 +119,7 @@ function replaceDemoRecords(collectionName, fixtures, predicate = demoRecordId) 
   };
 }
 
-function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = process.env } = {}) {
+function buildDemoData({ now = new Date(), env = process.env } = {}) {
   const nowIso = now.toISOString();
   const passwordHash = hashPassword(demoPassword(env));
   const users = [
@@ -178,6 +178,33 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
     archivedAt: null,
   }));
 
+  const client_objects = clients.map((client, index) => ({
+    id: `DEMO-OBJECT-${String(index + 1).padStart(3, '0')}`,
+    clientId: client.id,
+    counterpartyId: client.counterpartyId,
+    name: `Демо-объект ${index + 1}`,
+    address: `Казань, тестовая площадка ${index + 1}`,
+    contactName: client.contactPerson,
+    contactPhone: client.phone,
+    status: 'active',
+    fixtureTag: DEMO_PREFIX,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  }));
+
+  const client_contracts = clients.map((client, index) => ({
+    id: `DEMO-CONTRACT-${String(index + 1).padStart(3, '0')}`,
+    clientId: client.id,
+    objectId: client_objects[index].id,
+    number: `DEMO-АР-${now.getUTCFullYear()}-${String(index + 1).padStart(3, '0')}`,
+    date: dateOnly(addDays(now, -30 - index)),
+    title: `Договор аренды для ${client_objects[index].name}`,
+    status: 'active',
+    fixtureTag: DEMO_PREFIX,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  }));
+
   const equipmentSpecs = [
     ['001', 'Dingli JCPT1212DC', 'Dingli', 'scissor', 'electric', 'available', 2023, 11.8, 320],
     ['002', 'Genie GS-3246', 'Genie', 'scissor', 'electric', 'rented', 2021, 11.8, 318],
@@ -232,6 +259,9 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
   const rentalBase = (suffix, clientSuffix, equipmentSuffix, status, startOffset, endOffset, amount, paidAmount, extra = {}) => {
     const client = clients.find(item => item.id === `DEMO-CLIENT-${clientSuffix}`);
     const eq = equipment.find(item => item.id === `DEMO-EQ-${equipmentSuffix}`);
+    const clientIndex = clients.findIndex(item => item.id === client.id);
+    const clientObject = client_objects[clientIndex];
+    const clientContract = client_contracts[clientIndex];
     return {
       id: `DEMO-RENTAL-${suffix}`,
       rentalId: `DEMO-RENTAL-${suffix}`,
@@ -240,6 +270,11 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
       counterpartyId: client.counterpartyId,
       clientName: client.company,
       client: client.company,
+      objectId: clientObject.id,
+      objectName: clientObject.name,
+      objectAddress: clientObject.address,
+      contractId: clientContract.id,
+      contractNumber: clientContract.number,
       contact: client.contactPerson,
       equipmentId: eq.id,
       equipment: [eq.id],
@@ -260,7 +295,7 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
       paidAmount,
       debt: Math.max(0, amount - paidAmount),
       rate: `${Math.round(amount / Math.max(1, endOffset - startOffset + 1)).toLocaleString('ru-RU')} ₽ / день`,
-      deliveryAddress: `Казань, демо-объект ${suffix}`,
+      deliveryAddress: clientObject.address,
       updSigned: status === 'closed',
       history: [{ id: `DEMO-HISTORY-${suffix}`, createdAt: nowIso, userName: 'Demo Admin', action: 'demo.seed', description: 'Демо-аренда создана seed-скриптом' }],
       fixtureTag: DEMO_PREFIX,
@@ -550,6 +585,8 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
     users,
     counterparties,
     clients,
+    client_objects,
+    client_contracts,
     equipment,
     rentals,
     gantt_rentals,
@@ -585,7 +622,7 @@ function buildDemoData({ now = new Date('2026-05-23T09:00:00.000Z'), env = proce
   };
 }
 
-function seedDemoData({ logger = console, env = process.env, now = new Date('2026-05-23T09:00:00.000Z') } = {}) {
+function seedDemoData({ logger = console, env = process.env, now = new Date() } = {}) {
   const { DB_PATH } = require('../db');
   assertDemoSeedAllowed({ env, dbPath: DB_PATH });
 

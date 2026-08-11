@@ -489,6 +489,72 @@ test('/api/sync rejects dangerous fields when legacy sync is explicitly enabled'
   }
 });
 
+test('/api/sync rejects Classic Rental replacement when legacy sync is explicitly enabled', async () => {
+  const previousEnabled = process.env.ENABLE_LEGACY_SYNC;
+  process.env.ENABLE_LEGACY_SYNC = '1';
+  const collections = {
+    rentals: [{ id: 'R-1', clientId: 'C-1', creditRiskSnapshot: { currentDebt: 75000 } }],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    getSnapshot: () => ({ rentals: collections.rentals }),
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/sync', {
+        rentals: [{ id: 'R-1', clientId: 'C-1', creditRiskSnapshot: { currentDebt: 0, forged: true } }],
+      });
+
+      assert.equal(response.status, 409);
+      assert.equal(response.body.code, 'RENTAL_LIFECYCLE_SYNC_DISABLED');
+      assert.deepEqual(collections.rentals[0].creditRiskSnapshot, { currentDebt: 75000 });
+      assert.equal(writes.length, 0);
+    });
+  } finally {
+    if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;
+    else process.env.ENABLE_LEGACY_SYNC = previousEnabled;
+  }
+});
+
+test('/api/sync rejects independent Gantt projection replacement when legacy sync is explicitly enabled', async () => {
+  const previousEnabled = process.env.ENABLE_LEGACY_SYNC;
+  process.env.ENABLE_LEGACY_SYNC = '1';
+  const collections = {
+    gantt_rentals: [{ id: 'GR-1', rentalId: 'R-1', status: 'active' }],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    getSnapshot: () => ({ gantt_rentals: collections.gantt_rentals }),
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/sync', {
+        gantt_rentals: [{ id: 'GR-1', rentalId: 'R-1', status: 'returned' }],
+      });
+
+      assert.equal(response.status, 409);
+      assert.equal(response.body.code, 'RENTAL_LIFECYCLE_SYNC_DISABLED');
+      assert.equal(collections.gantt_rentals[0].status, 'active');
+      assert.equal(writes.length, 0);
+    });
+  } finally {
+    if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;
+    else process.env.ENABLE_LEGACY_SYNC = previousEnabled;
+  }
+});
+
 test('/api/sync protects production smoke equipment fixture when legacy sync is explicitly enabled', async () => {
   const previousEnabled = process.env.ENABLE_LEGACY_SYNC;
   process.env.ENABLE_LEGACY_SYNC = '1';
@@ -1008,7 +1074,7 @@ test('/api/admin/diagnostics/gantt-rentals-repair returns read-only sanitized re
   });
 });
 
-test('/api/admin/diagnostics/gantt-rentals-repair dry-run and apply repair only high-confidence rows', async () => {
+test('/api/admin/diagnostics/gantt-rentals-repair remains dry-run and rejects production apply', async () => {
   const collections = {
     equipment: [{ id: 'EQ-1', inventoryNumber: 'INV-1', serialNumber: 'SN-1', model: 'Genie S-65' }],
     rentals: [
@@ -1046,7 +1112,8 @@ test('/api/admin/diagnostics/gantt-rentals-repair dry-run and apply repair only 
     assert.equal(JSON.stringify(collections), before);
 
     const rejected = await postJson(baseUrl, '/api/admin/diagnostics/gantt-rentals-repair', { ids: ['GR-high'], apply: true });
-    assert.equal(rejected.status, 400);
+    assert.equal(rejected.status, 409);
+    assert.equal(rejected.body.code, 'PRODUCTION_AUTO_REPAIR_DISABLED');
     assert.equal(rejected.body.productionDataChanged, false);
     assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-high').rentalId, undefined);
 
@@ -1056,13 +1123,14 @@ test('/api/admin/diagnostics/gantt-rentals-repair dry-run and apply repair only 
       backupVerified: true,
       confirm: 'APPLY_GANTT_REPAIR',
     });
-    assert.equal(applied.status, 200);
-    assert.equal(applied.body.applied, true);
-    assert.equal(applied.body.productionDataChanged, true);
-    assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-high').rentalId, 'R-candidate');
+    assert.equal(applied.status, 409);
+    assert.equal(applied.body.code, 'PRODUCTION_AUTO_REPAIR_DISABLED');
+    assert.equal(applied.body.applied, false);
+    assert.equal(applied.body.productionDataChanged, false);
+    assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-high').rentalId, undefined);
     assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-low').rentalId, undefined);
-    assert.equal(writeCount, 1);
-    assert.equal(auditEntries.some(entry => entry.action === 'gantt_rentals.repair_links'), true);
+    assert.equal(writeCount, 0);
+    assert.equal(auditEntries.some(entry => entry.action === 'gantt_rentals.repair_links'), false);
   });
 });
 
@@ -1179,7 +1247,7 @@ test('/api/admin/diagnostics/gantt-rentals-cleanup-preview classifies read-only 
   });
 });
 
-test('/api/admin/rental-equipment-diagnostics/backfill dry-run does not write and confirm applies repairs', async () => {
+test('/api/admin/rental-equipment-diagnostics/backfill is diagnostic-only in production', async () => {
   const collections = {
     equipment: [
       { id: 'EQ-1', inventoryNumber: 'INV-1', serialNumber: 'SN-1' },
@@ -1213,17 +1281,16 @@ test('/api/admin/rental-equipment-diagnostics/backfill dry-run does not write an
     assert.equal(auditEntries.some(entry => entry.action === 'rental_equipment.backfill'), false);
 
     const applied = await postJson(baseUrl, '/api/admin/rental-equipment-diagnostics/backfill', { confirm: true });
-    assert.equal(applied.status, 200);
-    assert.equal(applied.body.dryRun, false);
-    assert.equal(collections.rentals.find(item => item.id === 'R-2').equipmentId, 'EQ-1');
-    assert.equal(collections.rentals.find(item => item.id === 'R-1').equipmentInv, 'INV-2');
-    assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-1').equipmentId, 'EQ-2');
-    assert.equal(applied.body.after.summary.rentalsWithoutEquipmentId, 0);
-    assert.equal(auditEntries.some(entry => entry.action === 'rental_equipment.backfill'), true);
+    assert.equal(applied.status, 409);
+    assert.equal(applied.body.code, 'PRODUCTION_AUTO_REPAIR_DISABLED');
+    assert.equal(collections.rentals.find(item => item.id === 'R-2').equipmentId, undefined);
+    assert.equal(collections.rentals.find(item => item.id === 'R-1').equipmentInv, 'INV-1');
+    assert.equal(collections.gantt_rentals.find(item => item.id === 'GR-1').equipmentId, 'EQ-1');
+    assert.equal(auditEntries.some(entry => entry.action === 'rental_equipment.backfill'), false);
   });
 });
 
-test('/api/admin/rental-link-diagnostics/backfill defaults to dry-run and requires confirm to write', async () => {
+test('/api/admin/rental-link-diagnostics/backfill is diagnostic-only in production', async () => {
   const collections = {
     rentals: [{ id: 'R-1' }],
     gantt_rentals: [{ id: 'GR-1' }],
@@ -1274,12 +1341,12 @@ test('/api/admin/rental-link-diagnostics/backfill defaults to dry-run and requir
     assert.equal(auditEntries.some(entry => entry.action === 'rental_links.backfill'), false);
 
     const applied = await postJson(baseUrl, '/api/admin/rental-link-diagnostics/backfill', { confirm: true });
-    assert.equal(applied.status, 200);
-    assert.equal(applied.body.backfill.dryRun, false);
-    assert.equal(collections.gantt_rentals[0].rentalId, 'R-1');
-    assert.equal(writeCount, 1);
-    assert.deepEqual(dryRunValues, [true, true, false]);
-    assert.equal(auditEntries.some(entry => entry.action === 'rental_links.backfill' && entry.after.dryRun === false), true);
+    assert.equal(applied.status, 409);
+    assert.equal(applied.body.code, 'PRODUCTION_AUTO_REPAIR_DISABLED');
+    assert.equal(collections.gantt_rentals[0].rentalId, undefined);
+    assert.equal(writeCount, 0);
+    assert.deepEqual(dryRunValues, [true, true]);
+    assert.equal(auditEntries.some(entry => entry.action === 'rental_links.backfill'), false);
   });
 });
 
@@ -2368,6 +2435,100 @@ test('/api/admin/system-data/import rejects dangerous fields before writing', as
     });
     assert.equal(imported.status, 400);
     assert.equal(collections.equipment[0].serialNumber, 'OLD');
+    assert.equal(writes.length, 0);
+  });
+});
+
+test('/api/admin/system-data/import rejects forged rental audit fields and canonicalizes relation snapshots', async () => {
+  const collections = {
+    rentals: [{ id: 'R-1', clientId: 'C-1', counterpartyId: 'CP-1', creditRiskSnapshot: { currentDebt: 75000 } }],
+    counterparties: [{ id: 'CP-1', legalName: 'ООО Клиент', shortName: 'ООО Клиент', status: 'active', roles: ['customer'] }],
+    clients: [{ id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Клиент' }],
+    client_objects: [{ id: 'CO-1', clientId: 'C-1', counterpartyId: 'CP-1', name: 'Канонический объект', address: 'Канонический адрес', status: 'active' }],
+    client_contracts: [{ id: 'CC-1', clientId: 'C-1', objectId: 'CO-1', number: 'BUS-2026/15', status: 'active' }],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const forgedAudit = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        rentals: [{ id: 'R-1', clientId: 'C-1', creditRiskSnapshot: { currentDebt: 0, forged: true } }],
+      },
+    });
+    assert.equal(forgedAudit.status, 400);
+    assert.deepEqual(forgedAudit.body.forbiddenFields.rentals, ['creditRiskSnapshot']);
+    assert.deepEqual(collections.rentals[0].creditRiskSnapshot, { currentDebt: 75000 });
+    assert.equal(writes.length, 0);
+
+    const canonical = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        rentals: [{
+          id: 'R-new',
+          clientId: 'C-1',
+          objectId: 'CO-1',
+          contractId: 'CC-1',
+          objectName: 'Поддельный объект',
+          objectAddress: 'Поддельный адрес',
+          contractNumber: 'CC-FORGED',
+        }],
+      },
+    });
+    assert.equal(canonical.status, 200);
+    assert.equal(collections.rentals[0].objectName, 'Канонический объект');
+    assert.equal(collections.rentals[0].objectAddress, 'Канонический адрес');
+    assert.equal(collections.rentals[0].contractNumber, 'BUS-2026/15');
+    assert.equal(collections.rentals[0].counterpartyId, 'CP-1');
+  });
+});
+
+test('/api/admin/system-data/import cannot resurrect an existing terminal Classic rental', async () => {
+  const collections = {
+    rentals: [{
+      id: 'R-closed',
+      clientId: 'C-1',
+      counterpartyId: 'CP-1',
+      status: 'closed',
+      actualReturnDate: '2026-04-20',
+    }],
+    counterparties: [{ id: 'CP-1', legalName: 'ООО Клиент', shortName: 'ООО Клиент', status: 'active', roles: ['customer'] }],
+    clients: [{ id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Клиент' }],
+  };
+  const before = structuredClone(collections.rentals);
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        rentals: [{
+          id: 'R-closed',
+          clientId: 'C-1',
+          counterpartyId: 'CP-1',
+          status: 'active',
+          actualReturnDate: '2026-04-20',
+        }],
+      },
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.errors.join('\n'), /RENTAL_TERMINAL_RESURRECTION_FORBIDDEN/);
+    assert.deepEqual(collections.rentals, before);
     assert.equal(writes.length, 0);
   });
 });

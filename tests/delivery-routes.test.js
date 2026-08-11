@@ -488,6 +488,95 @@ test('creating a delivery from rental copies object and contract context without
   });
 });
 
+test('delivery cannot mutate an orphan Gantt projection without Classic Rental authority', async () => {
+  const { app, state, messages } = createDeliveryApp();
+  state.deliveries = [];
+  state.gantt_rentals = [{
+    id: 'GR-orphan',
+    rentalId: 'R-missing',
+    clientId: 'C-1',
+    client: 'ИНЖИНИРИНГ',
+    equipmentId: 'EQ-1',
+    equipmentInv: '083',
+    startDate: '2026-04-29',
+    endDate: '2026-05-10',
+    status: 'active',
+  }];
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      ganttRentalId: 'GR-orphan',
+      transportDate: '2026-04-29',
+      origin: 'Новая база',
+      destination: 'Казань',
+      cargo: 'LGMG AS1413',
+      contactName: 'Ильдар',
+      contactPhone: '+7 900 111-22-33',
+      client: 'ИНЖИНИРИНГ',
+      manager: 'Администратор',
+    });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'ORPHAN_GANTT_PROJECTION');
+    assert.equal(state.deliveries.length, 0);
+    assert.equal(state.gantt_rentals[0].status, 'active');
+    assert.equal(messages.length, 0);
+  });
+});
+
+test('delivery cannot resurrect a terminal Classic rental through a stale active Gantt projection', async () => {
+  const { app, state, messages } = createDeliveryApp();
+  state.deliveries = [];
+  state.equipment = [{ id: 'EQ-1', inventoryNumber: '083', serialNumber: 'SN-083', status: 'available' }];
+  state.rentals = [{
+    id: 'R-closed',
+    clientId: 'C-1',
+    client: 'ИНЖИНИРИНГ',
+    equipmentId: 'EQ-1',
+    equipment: ['083'],
+    startDate: '2026-04-01',
+    plannedReturnDate: '2026-04-20',
+    actualReturnDate: '2026-04-20',
+    status: 'returned',
+  }];
+  state.gantt_rentals = [{
+    id: 'GR-stale',
+    rentalId: 'R-closed',
+    clientId: 'C-1',
+    client: 'ИНЖИНИРИНГ',
+    equipmentId: 'EQ-1',
+    equipmentInv: '083',
+    startDate: '2026-04-01',
+    endDate: '2026-04-20',
+    status: 'active',
+  }];
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      rentalId: 'R-closed',
+      ganttRentalId: 'GR-stale',
+      transportDate: '2026-04-10',
+      origin: 'Новая база',
+      destination: 'Казань',
+      cargo: 'LGMG AS1413',
+      contactName: 'Ильдар',
+      contactPhone: '+7 900 111-22-33',
+      client: 'ИНЖИНИРИНГ',
+      manager: 'Администратор',
+    });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'RENTAL_TERMINAL_RESURRECTION_FORBIDDEN');
+    assert.equal(state.rentals[0].status, 'returned');
+    assert.equal(state.rentals[0].actualReturnDate, '2026-04-20');
+    assert.equal(state.gantt_rentals[0].status, 'active');
+    assert.equal(state.deliveries.length, 0);
+    assert.equal(messages.length, 0);
+  });
+});
+
 test('delivery rejects foreign object and contract links before object snapshot', async () => {
   const { app, state } = createDeliveryApp();
   state.deliveries = [];

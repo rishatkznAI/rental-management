@@ -22,7 +22,6 @@ import { RENTAL_KEYS } from '../hooks/useRentals';
 import { SERVICE_TICKET_KEYS, useServiceTicketById, useUpdateServiceTicket } from '../hooks/useServiceTickets';
 import type {
   Equipment,
-  EquipmentStatus,
   Mechanic,
   RepairPartItem,
   RepairWorkItem,
@@ -455,7 +454,6 @@ export default function ServiceDetail({
   const isWarrantyMechanic = isWarrantyMechanicRole(currentUserRole);
   const canEdit = can('edit', 'service');
   const canDeleteService = isAdmin && can('delete', 'service');
-  const canEditEquipment = can('edit', 'equipment');
   const canViewDocuments = can('view', 'documents');
   const canViewRentals = can('view', 'rentals');
   const canViewClients = can('view', 'clients');
@@ -745,76 +743,6 @@ export default function ServiceDetail({
       ],
     };
     persist(updated, { status: newStatus });
-
-    if ((!ticket.equipmentId && !ticket.inventoryNumber) || !canEditEquipment) return;
-
-    try {
-      const [allTickets, allEquipment, allGanttRentals] = await Promise.all([
-        serviceTicketsService.getAll?.() ?? Promise.resolve([]),
-        equipmentService.getAll(),
-        canViewRentals ? rentalsService.getGanttData() : Promise.resolve([]),
-      ]);
-
-      const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'needs_revision'];
-      const ticketInventoryIsUnique = ticket.inventoryNumber
-        ? allEquipment.filter(item => item.inventoryNumber === ticket.inventoryNumber).length === 1
-        : false;
-
-      const remainingOpen = allTickets.some(existing =>
-        existing.id !== ticket.id
-        && openStatuses.includes(existing.status)
-        && (
-          (ticket.equipmentId && existing.equipmentId === ticket.equipmentId)
-          || (ticket.serialNumber && existing.serialNumber === ticket.serialNumber)
-          || (ticket.inventoryNumber && ticketInventoryIsUnique && existing.inventoryNumber === ticket.inventoryNumber)
-        ),
-      );
-
-      const hasActiveRental = allGanttRentals.some(rental =>
-        (
-          (ticket.equipmentId && rental.equipmentId === ticket.equipmentId)
-          || (!rental.equipmentId && ticket.inventoryNumber && ticketInventoryIsUnique && rental.equipmentInv === ticket.inventoryNumber)
-        )
-        && rental.status !== 'returned'
-        && rental.status !== 'closed',
-      );
-
-      const updatedEquipment = allEquipment.map(item => {
-        const matches =
-          (ticket.equipmentId && item.id === ticket.equipmentId)
-          || (ticket.serialNumber && item.serialNumber === ticket.serialNumber)
-          || (ticket.inventoryNumber && ticketInventoryIsUnique && item.inventoryNumber === ticket.inventoryNumber);
-        if (!matches) return item;
-
-        let nextStatus = item.status;
-        if (openStatuses.includes(newStatus)) {
-          nextStatus = 'in_service';
-        } else if (!remainingOpen) {
-          nextStatus = hasActiveRental ? 'rented' : 'available';
-        }
-
-        const base = { ...item, status: nextStatus as EquipmentStatus };
-        if (newStatus === 'closed' && item.id === ticket.equipmentId) {
-          if (ticket.serviceKind === 'chto') {
-            return { ...base, maintenanceCHTO: now.slice(0, 10) };
-          }
-          if (ticket.serviceKind === 'pto') {
-            return { ...base, maintenancePTO: now.slice(0, 10) };
-          }
-        }
-        return base;
-      });
-
-      await equipmentService.bulkReplace(updatedEquipment);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
-        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.detail(ticket.id) }),
-        queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
-        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
-      ]);
-    } catch {
-      // Тихо оставляем optimistic update, даже если связанная синхронизация сорвалась
-    }
   };
 
   const addComment = () => {
@@ -953,63 +881,6 @@ export default function ServiceDetail({
     try {
       await serviceTicketsService.delete(deletedTicket.id);
 
-      if (canEditEquipment && (deletedTicket.equipmentId || deletedTicket.inventoryNumber || deletedTicket.serialNumber)) {
-        const [allTickets, allEquipment, allGanttRentals] = await Promise.all([
-          serviceTicketsService.getAll(),
-          equipmentService.getAll(),
-          canViewRentals ? rentalsService.getGanttData() : Promise.resolve([]),
-        ]);
-
-        const openStatuses: ServiceStatus[] = ['new', 'in_progress', 'waiting_parts', 'needs_revision'];
-        const inventoryIsUnique = deletedTicket.inventoryNumber
-          ? allEquipment.filter(item => item.inventoryNumber === deletedTicket.inventoryNumber).length === 1
-          : false;
-
-        const updatedEquipment = allEquipment.map(item => {
-          const matches =
-            (deletedTicket.equipmentId && item.id === deletedTicket.equipmentId)
-            || (deletedTicket.serialNumber && item.serialNumber === deletedTicket.serialNumber)
-            || (deletedTicket.inventoryNumber && inventoryIsUnique && item.inventoryNumber === deletedTicket.inventoryNumber);
-
-          if (!matches) return item;
-
-          const hasRemainingOpen = allTickets.some(existing =>
-            openStatuses.includes(existing.status)
-            && (
-              (deletedTicket.equipmentId && existing.equipmentId === deletedTicket.equipmentId)
-              || (deletedTicket.serialNumber && existing.serialNumber === deletedTicket.serialNumber)
-              || (deletedTicket.inventoryNumber && inventoryIsUnique && existing.inventoryNumber === deletedTicket.inventoryNumber)
-            ),
-          );
-
-          const activeRental = allGanttRentals
-            .filter(rental =>
-              (
-                (deletedTicket.equipmentId && rental.equipmentId === deletedTicket.equipmentId)
-                || (!rental.equipmentId && deletedTicket.inventoryNumber && inventoryIsUnique && rental.equipmentInv === deletedTicket.inventoryNumber)
-              )
-              && rental.status !== 'returned'
-              && rental.status !== 'closed',
-            )
-            .sort((a, b) => a.startDate.localeCompare(b.startDate))[0];
-
-          const nextStatus: EquipmentStatus = hasRemainingOpen
-            ? 'in_service'
-            : activeRental
-              ? (activeRental.status === 'active' ? 'rented' : 'reserved')
-              : 'available';
-
-          return {
-            ...item,
-            status: nextStatus,
-            currentClient: activeRental?.client,
-            returnDate: activeRental?.endDate,
-          };
-        });
-
-        await equipmentService.bulkReplace(updatedEquipment);
-      }
-
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
         queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
@@ -1025,7 +896,7 @@ export default function ServiceDetail({
       setDeleteError('Не удалось удалить сервисную заявку. Попробуйте ещё раз.');
       setConfirmDelete(false);
     }
-  }, [canDeleteService, canEditEquipment, canViewRentals, navigate, onClose, queryClient, ticket]);
+  }, [canDeleteService, navigate, onClose, queryClient, ticket]);
 
   const addWorkPerformed = async () => {
     if (!ticket || !canAddRepairItems || !selectedWorkId) return;

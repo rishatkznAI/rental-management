@@ -16,8 +16,6 @@ const {
   normalizeCounterpartyRecord,
   prepareClientCompatibilityBulkReplace,
 } = require('../lib/counterparty');
-const { canonicalizeRentalCounterpartyRelation } = require('../lib/rental-counterparty-relations');
-const { canonicalizePaymentCounterpartyRelation } = require('../lib/payment-counterparty-relations');
 const {
   analyzeRentalEquipmentDiagnostics,
   planRentalEquipmentBackfill,
@@ -31,6 +29,11 @@ const {
 const { buildRentalLinkDiagnostics } = require('../lib/rental-link-diagnostics');
 const { buildDataIntegrityDiagnostics } = require('../lib/data-integrity-diagnostics');
 const { buildServiceRepairQualityView } = require('../lib/service-repeat-breakdowns');
+const { normalizeClientRelationLinks } = require('../lib/client-relations');
+const { rentalServerOwnedAuditFields } = require('../lib/rental-data-integrity');
+const { validateTerminalRentalTransition } = require('../lib/rental-lifecycle');
+const { canonicalizeRentalCounterpartyRelation } = require('../lib/rental-counterparty-relations');
+const { canonicalizePaymentCounterpartyRelation } = require('../lib/payment-counterparty-relations');
 const {
   SYSTEM_FIXTURE_PROTECTED_CODE,
   SYSTEM_FIXTURE_PROTECTED_MESSAGE,
@@ -949,17 +952,37 @@ function analyzeSystemDataImport(payload, readData) {
       continue;
     }
 
-    const sanitized = rawValue
+    let sanitized = rawValue
       .map(item => sanitizeSystemRecord(collection, item, stats))
       .filter(item => item !== null);
-    sanitizedCollections[collection] = sanitized;
     const blocked = new Set();
     for (const item of sanitized) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
       for (const field of Object.keys(item)) {
         if (isAdminBulkReplaceBlockedField(collection, field)) blocked.add(field);
       }
+      if (collection === 'rentals') {
+        for (const field of rentalServerOwnedAuditFields(item)) blocked.add(field);
+      }
     }
+    if (collection === 'rentals' && blocked.size === 0) {
+      const existingById = new Map((readData('rentals') || []).map(item => [String(item?.id || ''), item]));
+      try {
+        sanitized = sanitized.map(item => {
+          const existing = existingById.get(String(item?.id || '')) || null;
+          return normalizeClientRelationLinks(item, item?.clientId || existing?.clientId, {
+            readData,
+            requireActiveObject: Boolean(item?.objectId) && String(item.objectId) !== String(existing?.objectId || ''),
+            allowArchivedObjectId: existing?.objectId,
+            includeObjectSnapshot: true,
+            includeContractSnapshot: true,
+          });
+        });
+      } catch (error) {
+        integrityErrors.push(`Некорректные связи аренды: ${error.message}`);
+      }
+    }
+    sanitizedCollections[collection] = sanitized;
     if (blocked.size > 0) forbiddenFields[collection] = Array.from(blocked).sort();
     collections[collection] = {
       incoming: sanitized.length,
@@ -1035,21 +1058,38 @@ function analyzeSystemDataImport(payload, readData) {
     }
   }
 
-  const stagedData = {
-    readData(name) {
-      if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
-      return readData(name) || [];
-    },
-  };
   if (Array.isArray(sanitizedCollections.rentals)) {
+    const stagedData = {
+      readData(name) {
+        if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
+        return readData(name) || [];
+      },
+    };
     try {
       sanitizedCollections.rentals = sanitizedCollections.rentals
         .map(rental => canonicalizeRentalCounterpartyRelation(rental, stagedData));
+      const existingById = new Map((readData('rentals') || []).map(rental => [String(rental?.id || ''), rental]));
+      for (const rental of sanitizedCollections.rentals) {
+        const terminalValidation = validateTerminalRentalTransition(
+          existingById.get(String(rental?.id || '')) || null,
+          rental,
+        );
+        if (!terminalValidation.ok) {
+          integrityErrors.push(`${terminalValidation.code}: ${terminalValidation.error}`);
+        }
+      }
     } catch (error) {
       integrityErrors.push(`${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
     }
   }
+
   if (Array.isArray(sanitizedCollections.payments)) {
+    const stagedData = {
+      readData(name) {
+        if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
+        return readData(name) || [];
+      },
+    };
     try {
       sanitizedCollections.payments = sanitizedCollections.payments
         .map(payment => canonicalizePaymentCounterpartyRelation(payment, stagedData));
@@ -1301,6 +1341,13 @@ function registerSystemRoutes(app, deps) {
         mechanic_documents,
         shipping_photos,
       } = req.body;
+      if (Array.isArray(rentals) || Array.isArray(gantt_rentals)) {
+        return res.status(409).json({
+          ok: false,
+          code: 'RENTAL_LIFECYCLE_SYNC_DISABLED',
+          error: 'Legacy sync не может заменять rentals или gantt_rentals. Используйте canonical Rental lifecycle API.',
+        });
+      }
       const prev = getSnapshot();
       const now = Date.now();
       let normalizedClients = Array.isArray(clients) ? clients.map(normalizeClientInnFields) : clients;
@@ -1335,10 +1382,34 @@ function registerSystemRoutes(app, deps) {
           nextList: equipment,
         });
       }
+      let normalizedRentals = rentals;
+      let normalizedGanttRentals = gantt_rentals;
+      for (const [collection, value] of [['rentals', rentals], ['gantt_rentals', gantt_rentals]]) {
+        if (!Array.isArray(value)) continue;
+        const forgedAuditFields = [...new Set(value.flatMap(item => rentalServerOwnedAuditFields(item)))];
+        if (forgedAuditFields.length > 0) {
+          const error = new Error(`Audit-поля аренды нельзя менять через legacy sync: ${forgedAuditFields.join(', ')}.`);
+          error.status = 403;
+          throw error;
+        }
+        const existingById = new Map((prev[collection] || []).map(item => [String(item?.id || ''), item]));
+        const normalized = value.map(item => {
+          const existing = existingById.get(String(item?.id || '')) || null;
+          return normalizeClientRelationLinks(item, item?.clientId || existing?.clientId, {
+            readData,
+            requireActiveObject: Boolean(item?.objectId) && String(item.objectId) !== String(existing?.objectId || ''),
+            allowArchivedObjectId: existing?.objectId,
+            includeObjectSnapshot: true,
+            includeContractSnapshot: true,
+          });
+        });
+        if (collection === 'rentals') normalizedRentals = normalized;
+        else normalizedGanttRentals = normalized;
+      }
       const syncPayload = {
         equipment,
-        rentals,
-        gantt_rentals,
+        rentals: normalizedRentals,
+        gantt_rentals: normalizedGanttRentals,
         service,
         warranty_claims,
         clients: normalizedClients,
@@ -1355,16 +1426,16 @@ function registerSystemRoutes(app, deps) {
         }
       }
       if (equipment) writeData('equipment', equipment);
+      if (normalizedRentals) writeData('rentals', normalizedRentals);
+      if (normalizedGanttRentals) writeData('gantt_rentals', normalizedGanttRentals);
+      if (service) writeData('service', service);
+      if (warranty_claims) writeData('warranty_claims', warranty_claims);
       if (clients) {
         persistDataBatch([
           { name: 'counterparties', value: normalizedCounterparties },
           { name: 'clients', value: normalizedClients },
         ]);
       }
-      if (rentals) writeData('rentals', rentals);
-      if (gantt_rentals) writeData('gantt_rentals', gantt_rentals);
-      if (service) writeData('service', service);
-      if (warranty_claims) writeData('warranty_claims', warranty_claims);
       if (normalizedPayments) writeData('payments', normalizedPayments);
       if (company_expenses) writeData('company_expenses', company_expenses);
       if (users) writeData('users', users);
@@ -1374,10 +1445,10 @@ function registerSystemRoutes(app, deps) {
 
       const notifications = [];
 
-      if (rentals && prev.rentals) {
+      if (normalizedRentals && prev.rentals) {
         const prevIds = new Set((prev.rentals || []).map(item => item.id));
 
-        const newRentals = rentals.filter(item => !prevIds.has(item.id));
+        const newRentals = normalizedRentals.filter(item => !prevIds.has(item.id));
         for (const rental of newRentals) {
           notifications.push({
             role: 'all',
@@ -1400,7 +1471,7 @@ function registerSystemRoutes(app, deps) {
         const lastOverdueCheck = prev.lastOverdueCheck || 0;
         if (now - lastOverdueCheck > 3600_000) {
           const today = new Date().toISOString().slice(0, 10);
-          const overdue = rentals.filter(item =>
+          const overdue = normalizedRentals.filter(item =>
             item.status === 'active' && item.endDate && item.endDate < today
           );
           for (const rental of overdue) {
@@ -1418,6 +1489,8 @@ function registerSystemRoutes(app, deps) {
         ...req.body,
         ...(normalizedCounterparties ? { counterparties: normalizedCounterparties } : {}),
         ...(normalizedClients ? { clients: normalizedClients } : {}),
+        ...(normalizedRentals ? { rentals: normalizedRentals } : {}),
+        ...(normalizedGanttRentals ? { gantt_rentals: normalizedGanttRentals } : {}),
         ...(normalizedPayments ? { payments: normalizedPayments } : {}),
         lastOverdueCheck: prev.lastOverdueCheck || 0,
       });
@@ -2027,14 +2100,22 @@ function registerSystemRoutes(app, deps) {
       service: readData('service') || [],
     };
     const plan = buildBrokenGanttRentalsRepairPlan(collections);
-    const apply = req.body?.apply === true;
+    if (req.body?.apply === true) {
+      return res.status(409).json({
+        ok: false,
+        code: 'PRODUCTION_AUTO_REPAIR_DISABLED',
+        applied: false,
+        productionDataChanged: false,
+        error: 'Production Gantt repair отключён. Используйте read-only diagnostics и отдельный offline repair workflow.',
+      });
+    }
     let result;
     try {
       result = applyRepairPlan(collections, plan, {
-        apply,
+        apply: false,
         ids: Array.isArray(req.body?.ids) ? req.body.ids : null,
-        backupVerified: req.body?.backupVerified === true,
-        confirm: req.body?.confirm === 'APPLY_GANTT_REPAIR',
+        backupVerified: false,
+        confirm: false,
       });
     } catch (error) {
       return res.status(400).json({
@@ -2045,29 +2126,25 @@ function registerSystemRoutes(app, deps) {
       });
     }
 
-    if (apply && result.applied) {
-      writeData('gantt_rentals', result.collections.gantt_rentals);
-      auditLog?.(req, {
-        action: 'gantt_rentals.repair_links',
-        entityType: 'gantt_rentals',
-        description: `Восстановлены связи gantt_rentals: ${result.operations.operations.length}`,
-        after: {
-          ids: result.operations.operations.map(operation => operation.id),
-          count: result.operations.operations.length,
-        },
-      });
-    }
-
     return res.json({
       ok: true,
       ...result.operations,
-      applied: Boolean(apply && result.applied),
-      productionDataChanged: Boolean(apply && result.applied),
+      applied: false,
+      productionDataChanged: false,
     });
   });
 
   app.post('/api/admin/rental-equipment-diagnostics/backfill', requireAuth, requireAdmin, (req, res) => {
-    const dryRun = req.body?.confirm !== true || req.body?.dryRun === true || req.query.dryRun === '1';
+    const applyRequested = req.body?.confirm === true && req.body?.dryRun !== true && req.query.dryRun !== '1';
+    if (applyRequested) {
+      return res.status(409).json({
+        ok: false,
+        code: 'PRODUCTION_AUTO_REPAIR_DISABLED',
+        dryRun: true,
+        error: 'Production rental equipment backfill отключён. Используйте отдельный offline repair workflow.',
+      });
+    }
+    const dryRun = true;
     const before = analyzeRentalEquipmentDiagnostics({
       equipment: readData('equipment') || [],
       rentals: readData('rentals') || [],
@@ -2080,39 +2157,13 @@ function registerSystemRoutes(app, deps) {
       maxChanges: Math.min(500, Math.max(1, Number(req.body?.limit || 200) || 200)),
     });
 
-    if (!dryRun) {
-      writeData('rentals', plan.nextRentals);
-      writeData('gantt_rentals', plan.nextGanttRentals);
-    }
-
-    const after = dryRun
-      ? before
-      : analyzeRentalEquipmentDiagnostics({
-        equipment: readData('equipment') || [],
-        rentals: readData('rentals') || [],
-        ganttRentals: readData('gantt_rentals') || [],
-      });
-
-    if (!dryRun) {
-      auditLog?.(req, {
-        action: 'rental_equipment.backfill',
-        entityType: 'rental_equipment',
-        after: {
-          dryRun,
-          rentalsUpdated: plan.summary.rentalsUpdated,
-          ganttUpdated: plan.summary.ganttUpdated,
-          skipped: plan.summary.skipped,
-        },
-      });
-    }
-
     const { nextRentals, nextGanttRentals, ...publicPlan } = plan;
     return res.json({
       ok: true,
       dryRun,
       before,
       backfill: publicPlan,
-      after,
+      after: before,
     });
   });
 
@@ -2120,7 +2171,15 @@ function registerSystemRoutes(app, deps) {
     if (typeof backfillGanttRentalLinks !== 'function' || typeof analyzeGanttRentalLinks !== 'function') {
       return res.status(500).json({ ok: false, error: 'Rental link backfill unavailable' });
     }
-    const dryRun = req.body?.confirm !== true || req.body?.dryRun === true || req.query.dryRun === '1';
+    const applyRequested = req.body?.confirm === true && req.body?.dryRun !== true && req.query.dryRun !== '1';
+    if (applyRequested) {
+      return res.status(409).json({
+        ok: false,
+        code: 'PRODUCTION_AUTO_REPAIR_DISABLED',
+        error: 'Production rental link backfill отключён. Используйте отдельный offline repair workflow.',
+      });
+    }
+    const dryRun = true;
     const before = analyzeGanttRentalLinks({
       rentals: readData('rentals') || [],
       ganttRentals: readData('gantt_rentals') || [],
@@ -2141,19 +2200,6 @@ function registerSystemRoutes(app, deps) {
       targetId: req.body?.id || req.query.id || '',
       limit: req.body?.limit || req.query.limit || 100,
     });
-    if (!dryRun) {
-      auditLog?.(req, {
-        action: 'rental_links.backfill',
-        entityType: 'rental_links',
-        after: {
-          dryRun: backfill.dryRun,
-          linked: backfill.linked,
-          missingLink: backfill.missingLink,
-          ambiguous: backfill.ambiguous.length,
-          unresolved: backfill.unresolved.length,
-        },
-      });
-    }
     return res.json({ ok: true, before, backfill, after });
   });
 

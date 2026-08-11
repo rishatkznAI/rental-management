@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const { getEffectivePaidAmount, syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
 const { normalizeRole } = require('../lib/role-groups');
 const {
@@ -71,10 +72,46 @@ const {
   isProductionSmokeEquipmentFixture,
 } = require('../lib/protected-fixtures');
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
+const { equipmentProjectionForState, reconcileEquipmentRentalProjection } = require('../lib/rental-lifecycle');
 const {
   canonicalizePaymentCounterpartyRelation,
   decoratePaymentCounterparty,
 } = require('../lib/payment-counterparty-relations');
+
+const INLINE_RELATION_IDEMPOTENCY_COLLECTION = 'inline_relation_idempotency';
+const INLINE_RELATION_IDEMPOTENCY_SCOPES = new Set(['client_objects', 'client_contracts']);
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .filter(key => value[key] !== undefined)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function inlineRelationFingerprint(collection, input) {
+  return crypto
+    .createHash('sha256')
+    .update(stableJson({ collection, input }))
+    .digest('hex');
+}
+
+function readInlineRelationIdempotencyKey(req, collection) {
+  if (!INLINE_RELATION_IDEMPOTENCY_SCOPES.has(collection)) return '';
+  const key = String(req.get('Idempotency-Key') || '').trim();
+  if (!key) return '';
+  if (!/^[A-Za-z0-9._:-]{8,128}$/.test(key)) {
+    const error = new Error('Idempotency-Key должен содержать от 8 до 128 безопасных символов.');
+    error.status = 400;
+    error.code = 'INVALID_IDEMPOTENCY_KEY';
+    throw error;
+  }
+  return key;
+}
 
 function registerCrudRoutes(deps) {
   const {
@@ -101,6 +138,9 @@ function registerCrudRoutes(deps) {
     generateId,
     nowIso,
     applyServiceTicketCreationEffects,
+    persistServiceTicketUpdate,
+    persistServiceTicketDeletion,
+    persistServiceTicketBulkReplace,
     accessControl,
     auditLog,
     serviceAuditLog,
@@ -216,8 +256,15 @@ function registerCrudRoutes(deps) {
       isCreate: true,
       nowIso,
     });
-    writeData('service', [...service, ticket]);
-    applyServiceTicketCreationEffects?.(ticket, authorName || 'Система');
+    if (typeof applyServiceTicketCreationEffects === 'function') {
+      const lifecycleResult = applyServiceTicketCreationEffects(ticket, authorName || 'Система', {
+        persistService: true,
+        serviceTickets: [...service, ticket],
+      });
+      if (lifecycleResult?.persisted !== true) writeData('service', [...service, ticket]);
+    } else {
+      writeData('service', [...service, ticket]);
+    }
   }
 
   function relatedRentalsById() {
@@ -503,12 +550,87 @@ function registerCrudRoutes(deps) {
     }
   }
 
+  function assertEquipmentLifecycleProjection(nextEquipmentList, equipmentIds) {
+    const affectedEquipmentIds = new Set((equipmentIds || []).map(value => String(value || '')).filter(Boolean));
+    if (affectedEquipmentIds.size === 0) return;
+    const today = nowIso().slice(0, 10);
+    for (const item of nextEquipmentList) {
+      if (!affectedEquipmentIds.has(String(item?.id || ''))) continue;
+      const activeProjection = equipmentProjectionForState({
+        equipment: { ...item, activeInFleet: true, status: 'available' },
+        equipmentList: nextEquipmentList,
+        rentals: readData('rentals') || [],
+        ganttRentals: readData('gantt_rentals') || [],
+        serviceTickets: readData('service') || [],
+        today,
+      });
+      if (
+        ['rental', 'service'].includes(activeProjection.source)
+        && (item.activeInFleet === false || String(item.status || '').toLowerCase() === 'inactive')
+      ) {
+        const error = new Error('Нельзя деактивировать технику с активной арендой или сервисной заявкой.');
+        error.status = 409;
+        error.code = 'EQUIPMENT_LIFECYCLE_PROJECTION_CONFLICT';
+        error.field = item.activeInFleet === false ? 'activeInFleet' : 'status';
+        error.equipmentId = item.id;
+        throw error;
+      }
+    }
+    const lifecycle = reconcileEquipmentRentalProjection({
+      equipmentList: nextEquipmentList,
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      serviceTickets: readData('service') || [],
+      affectedEquipmentIds,
+      nowIso,
+      author: 'Система',
+      reason: 'Проверка прямого изменения техники',
+    });
+    const projectedById = new Map(lifecycle.nextEquipment.map(item => [String(item?.id || ''), item]));
+    const contradiction = nextEquipmentList.find(item => {
+      if (!affectedEquipmentIds.has(String(item?.id || ''))) return false;
+      const projected = projectedById.get(String(item?.id || ''));
+      return String(item?.status || '') !== String(projected?.status || '')
+        || String(item?.currentClient || '') !== String(projected?.currentClient || '')
+        || String(item?.returnDate || '').slice(0, 10) !== String(projected?.returnDate || '').slice(0, 10);
+    });
+    if (!contradiction) return;
+    const error = new Error('Статус, клиент и дата возврата техники управляются lifecycle-операциями аренды и сервиса.');
+    error.status = 409;
+    error.code = 'EQUIPMENT_LIFECYCLE_PROJECTION_CONFLICT';
+    error.field = 'status';
+    error.equipmentId = contradiction.id;
+    throw error;
+  }
+
+  function equipmentReferenceBlocker(equipment) {
+    const refs = new Set([
+      String(equipment?.id || ''),
+      String(equipment?.inventoryNumber || ''),
+      String(equipment?.serialNumber || ''),
+    ].filter(Boolean));
+    const matches = record => [
+      record?.equipmentId,
+      record?.equipmentInv,
+      record?.inventoryNumber,
+      record?.serialNumber,
+      ...(Array.isArray(record?.equipment) ? record.equipment : []),
+    ].some(value => refs.has(String(value || '')));
+    for (const collectionName of ['rentals', 'gantt_rentals', 'service', 'deliveries', 'documents']) {
+      const dependent = (readData(collectionName) || []).find(matches);
+      if (dependent) return { collection: collectionName, id: dependent.id };
+    }
+    return null;
+  }
+
   function sendEquipmentValidationError(res, error) {
     return res.status(error?.status || 400).json({
       ok: false,
       error: error?.message || 'Некорректные данные техники',
       code: error?.code,
       field: error?.field,
+      fieldErrors: error?.fieldErrors,
+      equipmentId: error?.equipmentId,
       conflictEquipment: error?.conflictEquipment,
     });
   }
@@ -1571,6 +1693,46 @@ function registerCrudRoutes(deps) {
       try {
         accessControl.assertCanCreateCollection(collection, req.user, req.body);
         let input = accessControl.sanitizeCreateInput(collection, req.body, req.user);
+        const idempotencyKey = readInlineRelationIdempotencyKey(req, collection);
+        const idempotencyFingerprint = idempotencyKey
+          ? inlineRelationFingerprint(collection, input)
+          : '';
+        if (idempotencyKey) {
+          const actorUserId = String(req.user?.userId || '');
+          const idempotencyRecords = readData(INLINE_RELATION_IDEMPOTENCY_COLLECTION) || [];
+          const previousAttempt = idempotencyRecords.find(item =>
+            item?.collection === collection && item?.key === idempotencyKey
+          );
+          if (previousAttempt) {
+            if (
+              previousAttempt.fingerprint !== idempotencyFingerprint
+              || String(previousAttempt.actorUserId || '') !== actorUserId
+            ) {
+              return res.status(409).json({
+                ok: false,
+                code: 'IDEMPOTENCY_KEY_REUSED',
+                error: 'Idempotency-Key уже использован с другим содержимым запроса.',
+              });
+            }
+            const existing = (readData(collection) || [])
+              .find(item => String(item?.id || '') === String(previousAttempt.entityId || ''));
+            if (!existing) {
+              return res.status(409).json({
+                ok: false,
+                code: 'IDEMPOTENCY_RESULT_UNAVAILABLE',
+                error: 'Результат предыдущего запроса больше недоступен. Обновите список перед повтором.',
+              });
+            }
+            if (!accessControl.canAccessEntity(collection, existing, req.user)) {
+              return res.status(403).json({ ok: false, error: 'Forbidden' });
+            }
+            res.setHeader('Idempotency-Replayed', 'true');
+            const replayed = accessControl.sanitizeEntityForRead(collection, existing, req.user);
+            return res.status(200).json(collection === 'payments'
+              ? decoratePaymentCounterparty(replayed, { readData })
+              : replayed);
+          }
+        }
         if (collection === 'equipment') {
           input = normalizeEquipmentReceiptPatch({}, input, {
             user: req.user,
@@ -1664,14 +1826,37 @@ function registerCrudRoutes(deps) {
           });
           newItem = prepared.client;
           clientCompatibilityWrite = prepared.counterparties;
+        }
+        if (collection === 'service' && typeof applyServiceTicketCreationEffects === 'function') {
+          const lifecycleResult = applyServiceTicketCreationEffects(newItem, req.user.userName, {
+            persistService: true,
+            serviceTickets: [...data, newItem],
+          });
+          if (lifecycleResult?.persisted !== true) writeData(collection, [...data, newItem]);
+        } else if (collection === 'clients') {
           persistDataBatch([
             { name: 'counterparties', value: clientCompatibilityWrite },
             { name: 'clients', value: [...data, newItem] },
           ]);
+        } else if (idempotencyKey) {
+          const idempotencyRecords = readData(INLINE_RELATION_IDEMPOTENCY_COLLECTION) || [];
+          persistDataBatch([
+            { name: collection, value: [...data, newItem] },
+            {
+              name: INLINE_RELATION_IDEMPOTENCY_COLLECTION,
+              value: [...idempotencyRecords, {
+                collection,
+                key: idempotencyKey,
+                fingerprint: idempotencyFingerprint,
+                entityId: newItem.id,
+                actorUserId: String(req.user?.userId || ''),
+                createdAt: nowIso(),
+              }],
+            },
+          ]);
         } else {
           writeData(collection, [...data, newItem]);
         }
-        data.push(newItem);
         if (isCriticalAuditCollection(collection)) {
           auditLog?.(req, {
             action: `${collection}.create`,
@@ -1708,9 +1893,6 @@ function registerCrudRoutes(deps) {
         }
         if (collection === 'payment_allocations') {
           syncPaymentStatusesAfterPaymentWrite(readData('payments') || []);
-        }
-        if (collection === 'service') {
-          applyServiceTicketCreationEffects?.(newItem, req.user.userName);
         }
         if (collection === 'users') {
           return res.status(201).json(sanitizeUser(newItem));
@@ -1759,7 +1941,7 @@ function registerCrudRoutes(deps) {
       if (officeManagerCanOnlyCreateRental(req, collection, 'PATCH')) {
         return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });
       }
-      const data = readData(collection) || [];
+      const data = [...(readData(collection) || [])];
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       try {
@@ -1802,6 +1984,7 @@ function registerCrudRoutes(deps) {
       }
 
       try {
+        let clientCompatibilityWrite = null;
         let safePatch = accessControl.sanitizeUpdateInput(collection, req.body, req.user, data[idx]);
         if (
           collection === 'service'
@@ -1829,7 +2012,6 @@ function registerCrudRoutes(deps) {
           safePatch = normalizeEquipmentStoragePatch(safePatch);
         }
         const previousItem = { ...data[idx] };
-        let clientCompatibilityWrite = null;
         if (collection === 'payments') {
           assertAllocatedPaymentPatchSafe(data[idx], safePatch);
           validatePaymentRecord({ ...data[idx], ...safePatch });
@@ -1922,6 +2104,12 @@ function registerCrudRoutes(deps) {
               previous: data[idx],
               next: nextItem,
             });
+            if (['status', 'currentClient', 'returnDate', 'activeInFleet'].some(field => Object.prototype.hasOwnProperty.call(safePatch, field))) {
+              assertEquipmentLifecycleProjection(
+                data.map((item, itemIndex) => itemIndex === idx ? nextItem : item),
+                [nextItem.id],
+              );
+            }
           }
           data[idx] = collection === 'clients' || collection === 'equipment'
             ? mergeEntityHistory(collection, data[idx], nextItem, req.user.userName)
@@ -1946,7 +2134,9 @@ function registerCrudRoutes(deps) {
             clientCompatibilityWrite = prepared.counterparties;
           }
         }
-        if (collection === 'clients') {
+        if (collection === 'service' && typeof persistServiceTicketUpdate === 'function') {
+          data[idx] = persistServiceTicketUpdate(data[idx], req.user.userName);
+        } else if (collection === 'clients') {
           persistDataBatch([
             { name: 'counterparties', value: clientCompatibilityWrite },
             { name: 'clients', value: data },
@@ -2042,7 +2232,7 @@ function registerCrudRoutes(deps) {
       if (officeManagerCanOnlyCreateRental(req, collection, 'DELETE')) {
         return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });
       }
-      const data = readData(collection) || [];
+      const data = [...(readData(collection) || [])];
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       try {
@@ -2069,6 +2259,9 @@ function registerCrudRoutes(deps) {
         if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
           return sendSystemFixtureProtectedError(req, res, error);
         }
+        if (String(error?.code || '').startsWith('EQUIPMENT_')) {
+          return sendEquipmentValidationError(res, error);
+        }
         return res.status(error?.status || 400).json({ ok: false, error: error.message });
       }
       if (collection === 'clients') {
@@ -2079,6 +2272,16 @@ function registerCrudRoutes(deps) {
         const historyLinks = findClientHistoryLinks(removedItem);
         if (historyLinks.length > 0) {
           return sendClientHasHistoryError(res, historyLinks);
+        }
+      }
+      if (collection === 'equipment') {
+        const blocker = equipmentReferenceBlocker(removedItem);
+        if (blocker) {
+          return res.status(409).json({
+            ok: false,
+            code: 'EQUIPMENT_DELETE_HAS_LIFECYCLE_REFERENCES',
+            error: `Технику нельзя удалить: есть связанная запись ${blocker.collection} ${blocker.id}. Деактивируйте карточку вместо удаления.`,
+          });
         }
       }
       if (collection === 'payments' && req.user?.userRole !== 'Администратор') {
@@ -2135,6 +2338,7 @@ function registerCrudRoutes(deps) {
           return res.status(error?.status || 400).json({ ok: false, error: error.message });
         }
       }
+      let serviceDeleteEntries = [];
       if (collection === 'service') {
         const repairId = removedItem.id;
         for (const workItem of (readData('repair_work_items') || []).filter(item => item.repairId === repairId)) {
@@ -2157,8 +2361,10 @@ function registerCrudRoutes(deps) {
             source: inferServiceAuditSource(req, 'api'),
           });
         }
-        writeData('repair_work_items', (readData('repair_work_items') || []).filter(item => item.repairId !== repairId));
-        writeData('repair_part_items', (readData('repair_part_items') || []).filter(item => item.repairId !== repairId));
+        serviceDeleteEntries = [
+          { name: 'repair_work_items', value: (readData('repair_work_items') || []).filter(item => item.repairId !== repairId) },
+          { name: 'repair_part_items', value: (readData('repair_part_items') || []).filter(item => item.repairId !== repairId) },
+        ];
       }
       if (collection === 'repair_work_items') {
         serviceAuditLog?.(req, {
@@ -2181,7 +2387,20 @@ function registerCrudRoutes(deps) {
         });
       }
       data.splice(idx, 1);
-      writeData(collection, data);
+      if (collection === 'service' && typeof persistServiceTicketDeletion === 'function') {
+        try {
+          persistServiceTicketDeletion(removedItem, req.user.userName, { extraEntries: serviceDeleteEntries });
+        } catch (error) {
+          return res.status(500).json({
+            ok: false,
+            code: 'SERVICE_DELETE_PERSISTENCE_FAILED',
+            error: error?.message || 'Не удалось атомарно удалить сервисную заявку.',
+          });
+        }
+      } else {
+        for (const entry of serviceDeleteEntries) writeData(entry.name, entry.value);
+        writeData(collection, data);
+      }
       if (isCriticalAuditCollection(collection)) {
         auditLog?.(req, {
           action: `${collection}.delete`,
@@ -2413,23 +2632,9 @@ function registerCrudRoutes(deps) {
         const normalized = normalizeClientDomainRecord(collection, linked);
         return collection === 'equipment' ? normalizeEquipmentStorageRecord(normalized) : normalized;
       });
+      let clientCompatibilityWrite = null;
       try {
-        if (collection === 'equipment') {
-          assertProductionSmokeFixtureMutationAllowed({
-            action: 'bulk_replace',
-            existingList: readData('equipment') || [],
-            nextList: normalizedList,
-            buildPaginatedCollectionResponse,
-          });
-        }
-      } catch (error) {
-        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
-          return sendSystemFixtureProtectedError(req, res, error);
-        }
-        return res.status(error?.status || 400).json({ ok: false, error: error.message });
-      }
-      if (collection === 'clients') {
-        try {
+        if (collection === 'clients') {
           const prepared = prepareClientCompatibilityBulkReplace({
             previousClients: readData('clients') || [],
             nextClients: normalizedList,
@@ -2437,13 +2642,56 @@ function registerCrudRoutes(deps) {
             nowIso,
           });
           normalizedList = prepared.clients;
-          persistDataBatch([
-            { name: 'counterparties', value: prepared.counterparties },
-            { name: 'clients', value: normalizedList },
-          ]);
-        } catch (error) {
+          clientCompatibilityWrite = prepared.counterparties;
+        }
+        if (collection === 'equipment') {
+          assertProductionSmokeFixtureMutationAllowed({
+            action: 'bulk_replace',
+            existingList: readData('equipment') || [],
+            nextList: normalizedList,
+            buildPaginatedCollectionResponse,
+          });
+          const existingById = new Map((readData('equipment') || []).map(item => [String(item?.id || ''), item]));
+          const lifecycleChangedIds = normalizedList
+            .filter((item, itemIndex) => {
+              const previous = existingById.get(String(item?.id || ''));
+              const rawItem = list[itemIndex] || {};
+              return !previous
+                || ['status', 'currentClient', 'returnDate'].some(field => (
+                  String(previous?.[field] || '') !== String(item?.[field] || '')
+                ))
+                || (
+                  Object.prototype.hasOwnProperty.call(rawItem, 'activeInFleet')
+                  && Boolean(previous?.activeInFleet) !== Boolean(item?.activeInFleet)
+                );
+            })
+            .map(item => item.id);
+          assertEquipmentLifecycleProjection(normalizedList, lifecycleChangedIds);
+        }
+      } catch (error) {
+        if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
           return sendCounterpartyCompatibilityError(res, error);
         }
+        if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+          return sendSystemFixtureProtectedError(req, res, error);
+        }
+        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+      }
+      if (collection === 'service' && typeof persistServiceTicketBulkReplace === 'function') {
+        try {
+          persistServiceTicketBulkReplace(normalizedList, req.user.userName);
+        } catch (error) {
+          return res.status(500).json({
+            ok: false,
+            code: 'SERVICE_BULK_REPLACE_PERSISTENCE_FAILED',
+            error: error?.message || 'Не удалось атомарно заменить сервисные заявки.',
+          });
+        }
+      } else if (collection === 'clients') {
+        persistDataBatch([
+          { name: 'counterparties', value: clientCompatibilityWrite || readData('counterparties') || [] },
+          { name: 'clients', value: normalizedList },
+        ]);
       } else {
         writeData(collection, normalizedList);
       }

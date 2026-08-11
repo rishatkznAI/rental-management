@@ -4,23 +4,51 @@ const { canonicalizePaymentCounterpartyRelation } = require('../lib/payment-coun
 const {
   RENTAL_CHANGE_REQUEST_STATUS,
   appendRentalHistory,
-  applyApprovedRentalChangeToGantt,
   buildRequestDecisionNotificationStatus,
   displayValue,
   resolveRentalForChangeRequest,
+  syncGanttRentalFields,
 } = require('../lib/rental-change-requests');
 const { createRentalHistoryEntry } = require('../lib/audit-history');
+const { normalizeClientRelationLinks } = require('../lib/client-relations');
+const {
+  canonicalizeRentalPatch,
+  rentalServerOwnedAuditFields,
+} = require('../lib/rental-data-integrity');
+const {
+  affectedEquipmentIdsForRentals,
+  reconcileEquipmentRentalProjection,
+  validateRentalLifecycleAvailability,
+  validateTerminalRentalTransition,
+} = require('../lib/rental-lifecycle');
+
+const RENTAL_RELATION_AND_SNAPSHOT_FIELDS = new Set([
+  'counterpartyId',
+  'clientId',
+  'objectId',
+  'objectName',
+  'objectAddress',
+  'objectContactName',
+  'objectContactPhone',
+  'contractId',
+  'contractNumber',
+]);
 
 function registerRentalChangeRequestRoutes(deps) {
   const {
     readData,
     writeData,
+    writeDataBatch: persistDataBatch = entries => {
+      for (const entry of entries || []) writeData(entry.name, entry.value);
+    },
     requireAuth,
     requireRead = () => (_req, _res, next) => next(),
     validateRentalPayload,
     generateId,
     idPrefixes,
     accessControl,
+    nowIso = () => new Date().toISOString(),
+    canonicalizeRentalRelationForWrite = rental => rental,
   } = deps;
 
   const router = express.Router();
@@ -45,7 +73,7 @@ function registerRentalChangeRequestRoutes(deps) {
   }
 
   function findRequestOr404(id) {
-    const requests = readRequests();
+    const requests = [...readRequests()];
     const idx = requests.findIndex(item => item.id === id);
     return { requests, idx, request: idx === -1 ? null : requests[idx] };
   }
@@ -92,9 +120,56 @@ function registerRentalChangeRequestRoutes(deps) {
     return { ok: true };
   }
 
+  function managerDisplayName(user) {
+    return String(user?.name || user?.userName || user?.fullName || user?.email || '').trim();
+  }
+
+  function canonicalizeManagerPair(rental, field) {
+    if (!['manager', 'managerId'].includes(field)) return { rental };
+    const users = readData('users') || [];
+    const managerId = String(rental?.managerId || '').trim();
+    const manager = String(rental?.manager || '').trim();
+    const user = managerId
+      ? users.find(item => String(item?.id || '').trim() === managerId)
+      : users.find(item => managerDisplayName(item).toLowerCase().replace(/ё/g, 'е') === manager.toLowerCase().replace(/ё/g, 'е'));
+    if (!user) {
+      return {
+        error: {
+          ok: false,
+          status: 400,
+          code: 'RENTAL_MANAGER_NOT_FOUND',
+          error: 'Менеджер для согласования не найден.',
+          field: managerId ? 'managerId' : 'manager',
+        },
+      };
+    }
+    return {
+      rental: {
+        ...rental,
+        managerId: String(user.id || ''),
+        manager: managerDisplayName(user),
+      },
+    };
+  }
+
+  function canonicalizeEquipmentSnapshot(rental, field) {
+    if (!['equipmentId', 'equipmentInv', 'inventoryNumber', 'serialNumber', 'equipment'].includes(field)) return rental;
+    const equipment = (readData('equipment') || []).find(item => String(item?.id || '') === String(rental?.equipmentId || ''));
+    if (!equipment) return rental;
+    const inventoryNumber = equipment.inventoryNumber || equipment.equipmentInv || '';
+    return {
+      ...rental,
+      equipmentId: equipment.id,
+      equipmentInv: inventoryNumber,
+      inventoryNumber,
+      serialNumber: equipment.serialNumber || '',
+      equipment: inventoryNumber ? [inventoryNumber] : (equipment.serialNumber ? [equipment.serialNumber] : []),
+    };
+  }
+
   function appendRelatedRentalHistory(rentalId, entry) {
     if (!rentalId || !entry) return;
-    const rentals = readData('rentals') || [];
+    const rentals = [...(readData('rentals') || [])];
     const resolution = resolveRentalForChangeRequest({
       rentalId,
       rentals,
@@ -110,8 +185,16 @@ function registerRentalChangeRequestRoutes(deps) {
     if (!request.rentalId) {
       return { ok: false, status: 400, error: 'В заявке отсутствует rentalId. Согласование заблокировано.' };
     }
+    const forbiddenAuditFields = rentalServerOwnedAuditFields({ [request.field]: request.newValue });
+    if (forbiddenAuditFields.length > 0) {
+      return {
+        ok: false,
+        status: 403,
+        error: `Audit-поля аренды нельзя менять через согласование: ${forbiddenAuditFields.join(', ')}.`,
+      };
+    }
 
-    const rentals = readData('rentals') || [];
+    const rentals = [...(readData('rentals') || [])];
     const rentalIdx = rentals.findIndex(item => sameId(item?.id, request.rentalId));
     if (rentalIdx === -1) {
       return { ok: false, status: 404, error: 'Аренда не найдена. Согласование заблокировано.' };
@@ -121,11 +204,53 @@ function registerRentalChangeRequestRoutes(deps) {
     const oldValueValidation = validateExpectedOldValue(request, previousRental);
     if (!oldValueValidation.ok) return oldValueValidation;
 
-    const nextRental = {
-      ...previousRental,
-      [request.field]: request.newValue,
-      id: previousRental.id,
-    };
+    let nextRental;
+    try {
+      nextRental = canonicalizeRentalPatch(previousRental, {
+        [request.field]: request.newValue,
+      }).rental;
+    } catch (error) {
+      return {
+        ok: false,
+        status: error?.status || 400,
+        code: error?.code,
+        error: error.message,
+        field: error?.field,
+        fieldErrors: error?.fieldErrors,
+      };
+    }
+    const managerCanonicalization = canonicalizeManagerPair(nextRental, request.field);
+    if (managerCanonicalization.error) return managerCanonicalization.error;
+    nextRental = canonicalizeEquipmentSnapshot(managerCanonicalization.rental, request.field);
+    if (RENTAL_RELATION_AND_SNAPSHOT_FIELDS.has(request.field)) {
+      try {
+        if (
+          request.field === 'clientId'
+          && String(nextRental.clientId || '') !== String(previousRental.clientId || '')
+        ) {
+          nextRental = { ...nextRental };
+          delete nextRental.counterpartyId;
+        }
+        nextRental = normalizeClientRelationLinks(nextRental, nextRental.clientId, {
+          readData,
+          requireActiveObject: String(nextRental.objectId || '') !== String(previousRental.objectId || ''),
+          allowArchivedObjectId: previousRental.objectId,
+          includeObjectSnapshot: true,
+          includeContractSnapshot: true,
+        });
+        nextRental = canonicalizeRentalRelationForWrite(nextRental);
+      } catch (error) {
+        return {
+          ok: false,
+          status: error?.status || 400,
+          code: error?.code,
+          error: error.message,
+          field: error?.field,
+        };
+      }
+    }
+    const terminalValidation = validateTerminalRentalTransition(previousRental, nextRental);
+    if (!terminalValidation.ok) return terminalValidation;
     const validation = validateRentalPayload(
       'rentals',
       nextRental,
@@ -134,8 +259,17 @@ function registerRentalChangeRequestRoutes(deps) {
       previousRental.id,
     );
     if (!validation.ok) return validation;
+    if (['equipmentId', 'equipmentInv', 'inventoryNumber', 'serialNumber', 'equipment', 'startDate', 'plannedReturnDate', 'endDate', 'status'].includes(request.field)) {
+      const lifecycleValidation = validateRentalLifecycleAvailability({
+        rental: nextRental,
+        equipmentList: readData('equipment') || [],
+        serviceTickets: readData('service') || [],
+        equipmentDowntimes: readData('equipment_downtimes') || [],
+      });
+      if (!lifecycleValidation.ok) return lifecycleValidation;
+    }
 
-    const ganttRentals = readData('gantt_rentals') || [];
+    const ganttRentals = [...(readData('gantt_rentals') || [])];
     const ganttIndexesToUpdate = new Set();
     if (request.linkedGanttRentalId) {
       const linkedIdx = ganttRentals.findIndex(item => sameId(item?.id, request.linkedGanttRentalId));
@@ -148,9 +282,15 @@ function registerRentalChangeRequestRoutes(deps) {
     });
 
     const equipment = readData('equipment') || [];
-    const requestWithRentalContext = { ...request, rental: nextRental, equipment };
+    const nextGanttByIndex = new Map();
     for (const ganttIdx of ganttIndexesToUpdate) {
-      const nextGanttRental = applyApprovedRentalChangeToGantt(ganttRentals[ganttIdx], requestWithRentalContext, adminName);
+      const nextGanttRental = syncGanttRentalFields(
+        ganttRentals[ganttIdx],
+        previousRental,
+        nextRental,
+        adminName,
+        equipment,
+      );
       const ganttValidation = validateRentalPayload(
         'gantt_rentals',
         nextGanttRental,
@@ -159,6 +299,7 @@ function registerRentalChangeRequestRoutes(deps) {
         nextGanttRental.id,
       );
       if (!ganttValidation.ok) return ganttValidation;
+      nextGanttByIndex.set(ganttIdx, nextGanttRental);
     }
 
     rentals[rentalIdx] = Array.isArray(nextRental.history) && nextRental.history.length > 0 ? nextRental : appendRentalHistory(nextRental, [
@@ -167,16 +308,30 @@ function registerRentalChangeRequestRoutes(deps) {
         `Согласовано и применено: ${request.fieldLabel || request.field}: ${displayValue(request.oldValue)} → ${displayValue(request.newValue)}`,
       ),
     ]);
-    writeData('rentals', rentals);
-
-    if (ganttIndexesToUpdate.size > 0) {
-      for (const ganttIdx of ganttIndexesToUpdate) {
-        ganttRentals[ganttIdx] = applyApprovedRentalChangeToGantt(ganttRentals[ganttIdx], requestWithRentalContext, adminName);
-      }
-      writeData('gantt_rentals', ganttRentals);
+    for (const [ganttIdx, nextGanttRental] of nextGanttByIndex) {
+      ganttRentals[ganttIdx] = nextGanttRental;
     }
 
-    return { ok: true };
+    const equipmentList = readData('equipment') || [];
+    const lifecycle = reconcileEquipmentRentalProjection({
+      equipmentList,
+      rentals,
+      ganttRentals,
+      serviceTickets: readData('service') || [],
+      affectedEquipmentIds: affectedEquipmentIdsForRentals([previousRental, nextRental], equipmentList),
+      nowIso,
+      author: adminName,
+      reason: `Согласование изменения аренды ${nextRental.id}`,
+    });
+
+    return {
+      ok: true,
+      writes: [
+        { name: 'rentals', value: rentals },
+        ...(ganttIndexesToUpdate.size > 0 ? [{ name: 'gantt_rentals', value: ganttRentals }] : []),
+        ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
+      ],
+    };
   }
   function applyPaymentRequest(request, adminName) {
     const payments = readData('payments') || [];
@@ -274,8 +429,10 @@ function registerRentalChangeRequestRoutes(deps) {
     if (!applied.ok) {
       return res.status(applied.status || 400).json({
         ok: false,
-        ...(applied.code ? { code: applied.code } : {}),
+        code: applied.code,
         error: applied.error || 'Не удалось применить заявку',
+        field: applied.field,
+        fieldErrors: applied.fieldErrors,
       });
     }
 
@@ -290,7 +447,18 @@ function registerRentalChangeRequestRoutes(deps) {
       decidedByName: adminName,
       adminComment: String(req.body?.comment || '').trim(),
     };
-    writeRequests(requests);
+    if (Array.isArray(applied.writes)) {
+      try {
+        persistDataBatch([
+          ...applied.writes,
+          { name: collection, value: requests },
+        ]);
+      } catch (error) {
+        return res.status(500).json({ ok: false, error: error.message || 'Не удалось атомарно применить согласование.' });
+      }
+    } else {
+      writeRequests(requests);
+    }
     return res.json(requests[idx]);
   });
 

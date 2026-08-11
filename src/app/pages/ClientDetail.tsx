@@ -41,6 +41,7 @@ import { getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
 import { buildClient360Summary } from '../lib/client360.js';
 import { buildClientQuickActions } from '../lib/quickActions.js';
 import { resolveRentalNavigationId } from '../lib/rentalNavigation.js';
+import { buildRentalNewRoute } from '../lib/rental-new-route.js';
 import {
   debtCollectionActionLabel,
   debtCollectionPriorityLabel,
@@ -1095,7 +1096,7 @@ export default function ClientDetail() {
                 </Button>
               )}
               {canCreateRentals && (
-                <Link to={`/rentals/new?clientId=${encodeURIComponent(client.id)}`}>
+                <Link to={buildRentalNewRoute({ clientId: client.id })}>
                   <Button>
                     <Plus className="h-4 w-4" />
                     Новая аренда

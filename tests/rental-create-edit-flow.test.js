@@ -8,6 +8,7 @@ const rentalsPageSource = fs.readFileSync(new URL('../src/app/pages/Rentals.tsx'
 const dashboardSource = fs.readFileSync(new URL('../src/app/pages/Dashboard.tsx', import.meta.url), 'utf8');
 const ganttModalsSource = fs.readFileSync(new URL('../src/app/components/gantt/GanttModals.tsx', import.meta.url), 'utf8');
 const equipmentComboboxSource = fs.readFileSync(new URL('../src/app/components/ui/EquipmentCombobox.tsx', import.meta.url), 'utf8');
+const clientRelationsHooksSource = fs.readFileSync(new URL('../src/app/hooks/useClientRelations.ts', import.meta.url), 'utf8');
 
 function extract(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -17,18 +18,16 @@ function extract(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-test('rental creation pages rely on backend linked planner row instead of creating a duplicate gantt row', () => {
+test('all rental creation entry points use the canonical standalone form', () => {
   const rentalNewSubmit = extract(rentalNewSource, 'const handleSubmit = async', 'return (');
-  const rentalsModalConfirm = extract(rentalsPageSource, 'onConfirm={async (data) => {', '<RentalApprovalHistorySheet');
-  const dashboardQuickCreate = extract(dashboardSource, 'onConfirm={(formData) => {', 'setShowRentalModal(false);');
+  const rentalsCreateNavigation = extract(rentalsPageSource, 'const handleOpenNewRental =', 'const rentalPresetOptions');
 
   assert.match(rentalNewSubmit, /rentalsService\.create\(/);
   assert.doesNotMatch(rentalNewSubmit, /createGanttEntry/);
-  assert.match(rentalsModalConfirm, /rentalsService\.create\(/);
-  assert.match(rentalsModalConfirm, /rentalsService\.getGanttData\(\)/);
-  assert.doesNotMatch(rentalsModalConfirm, /createGanttEntry/);
-  assert.match(dashboardQuickCreate, /rentalsService\.create\(/);
-  assert.doesNotMatch(dashboardQuickCreate, /createGanttEntry/);
+  assert.match(rentalsCreateNavigation, /navigate\(buildRentalNewRoute\(\{ equipmentId \}\)\)/);
+  assert.doesNotMatch(rentalsPageSource, /<NewRentalModal/);
+  assert.doesNotMatch(dashboardSource, /<NewRentalModal/);
+  assert.match(dashboardSource, /id: 'new-rental', label: 'Новая аренда', href: buildRentalNewRoute\(\)/);
 });
 
 test('rental detail does not directly update linked planner rows', () => {
@@ -40,7 +39,8 @@ test('rental detail does not directly update linked planner rows', () => {
 });
 
 test('rental creation keeps stable equipment and manager links in the classic rental payload', () => {
-  const rentalNewSubmit = extract(rentalNewSource, 'await rentalsService.create({', '});');
+  const handleSubmit = extract(rentalNewSource, 'const handleSubmit = async', 'return (');
+  const rentalNewSubmit = extract(handleSubmit, 'const payload = {', 'const attempt = idempotencyKeyForAttempt(');
 
   assert.match(rentalNewSubmit, /equipmentId: selectedEquipment\.id/);
   assert.match(rentalNewSubmit, /equipmentInv: selectedEquipment\.inventoryNumber/);
@@ -50,6 +50,10 @@ test('rental creation keeps stable equipment and manager links in the classic re
   assert.match(rentalNewSubmit, /managerId: managerId \|\| undefined/);
   assert.match(rentalNewSubmit, /status: initialStatus/);
   assert.match(rentalNewSubmit, /paymentStatus: 'unpaid'/);
+  assert.match(rentalNewSubmit, /pricingMode: 'daily_rate'/);
+  assert.match(rentalNewSubmit, /dailyRate: parsedDailyRate\.value/);
+  assert.match(rentalNewSubmit, /deposit: parsedDeposit\.value/);
+  assert.match(rentalNewSource, /rentalsService\.create\(payload, attempt\.key\)/);
 });
 
 test('standalone rental creation does not patch equipment status through the generic equipment API', () => {
@@ -103,7 +107,7 @@ test('standalone rental creation keeps selected manager label visible from stabl
 test('standalone rental creation submit button creates a rental, not a contract', () => {
   const submitActions = extract(rentalNewSource, '<div className="flex gap-3 pt-4">', '</div>');
 
-  assert.match(submitActions, /<Button type="submit"/);
+  assert.match(submitActions, /<Button[^>]*type="submit"/);
   assert.match(submitActions, /'Создать аренду'/);
   assert.doesNotMatch(submitActions, /Создать договор/);
 });
@@ -111,27 +115,54 @@ test('standalone rental creation submit button creates a rental, not a contract'
 test('rental creation UI makes client object and contract requirements explicit', () => {
   assert.match(rentalNewSource, /Объект клиента <span className="text-red-500">\*<\/span>/);
   assert.match(rentalNewSource, /Договор <span className="text-red-500">\*<\/span>/);
-  assert.match(rentalNewSource, /Для создания аренды сначала добавьте объект/);
+  assert.match(rentalNewSource, /Добавьте первый объект прямо здесь/);
   assert.match(rentalNewSource, /disabled=\{isSubmitting \|\| !client \|\| !objectId \|\| !contractId/);
-  assert.match(ganttModalsSource, /clientObjectsService\.getAll/);
-  assert.match(ganttModalsSource, /clientContractsService\.getAll/);
-  assert.match(ganttModalsSource, /objectId,/);
-  assert.match(ganttModalsSource, /contractId,/);
-  assert.match(rentalsPageSource, /objectId: data\.objectId \|\| undefined/);
-  assert.match(rentalsPageSource, /contractId: data\.contractId \|\| undefined/);
+  assert.match(rentalNewSource, /createClientObject\.mutateAsync/);
+  assert.match(rentalNewSource, /createClientContract\.mutateAsync/);
+  assert.match(rentalNewSource, /refreshClientRelationCache\(qc, CLIENT_OBJECT_KEYS\.all\)/);
+  assert.match(rentalNewSource, /refreshClientRelationCache\(qc, CLIENT_CONTRACT_KEYS\.all\)/);
+  assert.match(rentalNewSource, /setLocallyCreatedObjects/);
+  assert.match(rentalNewSource, /setLocallyCreatedContracts/);
+  assert.match(rentalNewSource, /Сохранить объект/);
+  assert.match(rentalNewSource, /Сохранить договор/);
+  assert.match(clientRelationsHooksSource, /setQueryData<ClientObject\[]>/);
+  assert.match(clientRelationsHooksSource, /setQueryData<ClientContract\[]>/);
+});
+
+test('rental creation delegates URL parsing and canonicalization to the shared route contract', () => {
+  assert.match(rentalNewSource, /useLocation/);
+  assert.match(rentalNewSource, /parseRentalNewRoute/);
+  assert.match(rentalNewSource, /browserSearch: typeof window === 'undefined' \? '' : window\.location\.search/);
+  assert.match(rentalNewSource, /buildRentalNewRoute/);
+  assert.match(rentalNewSource, /stripRentalNewOuterQuery/);
+});
+
+test('rental creation requires explicit acknowledgement for credit risk', () => {
+  assert.match(rentalNewSource, /const requiresCreditRiskAcknowledgement = Boolean/);
+  assert.match(rentalNewSource, /Подтверждаю создание аренды при просроченной задолженности/);
+  assert.match(rentalNewSource, /creditRiskAcknowledged,/);
+  assert.match(rentalNewSource, /requiresCreditRiskAcknowledgement && !creditRiskAcknowledged/);
+});
+
+test('rental lists show the business contract number instead of an internal contract id', () => {
+  assert.match(rentalsPageSource, /const contractNumber = String\(rental\?\.contractNumber \|\| ''\)\.trim\(\)/);
+  assert.match(rentalsPageSource, /return `Договор \$\{contractNumber\}`/);
+  assert.doesNotMatch(rentalsPageSource, /`Договор \$\{row\.classicRental\.contractId\}`/);
 });
 
 test('standalone rental creation keeps object and contract selects controlled by stable string ids', () => {
   assert.match(rentalNewSource, /const selectId = \(value: unknown\) => \(value === undefined \|\| value === null \? '' : String\(value\)\)/);
   assert.match(rentalNewSource, /id: selectId\(object\.id\),\s*label: clientObjectLabel\(object\)/);
   assert.match(rentalNewSource, /id: selectId\(contract\.id\),\s*label: clientContractLabel\(contract\)/);
-  assert.match(rentalNewSource, /setObjectId\(value === 'none' \? '' : value\);\s*setContractId\(''\);/);
-  assert.match(rentalNewSource, /setClient\(selected \? clientLabel\(selected\) : ''\);\s*setObjectId\(''\);\s*setContractId\(''\);/);
+  assert.match(rentalNewSource, /value=\{objectId\}[\s\S]*setObjectId\(event\.target\.value\);\s*setContractId\(''\);/);
+  assert.match(rentalNewSource, /const resetClientDependencies = \(\) => \{\s*setObjectId\(''\);\s*setContractId\(''\);/);
+  assert.match(rentalNewSource, /if \(clientId !== nextClientId\) resetClientDependencies\(\)/);
   assert.doesNotMatch(rentalNewSource, /useEffect\(\(\) => \{\s*setObjectId\(''\);\s*setContractId\(''\);\s*\}, \[clientId\]\)/);
-  assert.match(rentalNewSource, /<span data-slot="select-value" className="truncate">\{selectedObjectOption\.label\}<\/span>/);
-  assert.match(rentalNewSource, /<SelectValue placeholder="Выберите объект" \/>/);
-  assert.match(rentalNewSource, /<span data-slot="select-value" className="truncate">\{selectedContractOption\.label\}<\/span>/);
-  assert.match(rentalNewSource, /<SelectValue placeholder="Выберите договор" \/>/);
+  assert.match(rentalNewSource, /<select[^>]*data-testid="rental-object-select"[^>]*value=\{objectId\}/);
+  assert.match(rentalNewSource, /<option value="">Без объекта<\/option>/);
+  assert.match(rentalNewSource, /<option key=\{option\.id\} value=\{option\.id\}>\{option\.label\}<\/option>/);
+  assert.match(rentalNewSource, /<select[^>]*data-testid="rental-contract-select"[^>]*value=\{contractId\}/);
+  assert.match(rentalNewSource, /<option value="">Выберите договор<\/option>/);
   assert.match(rentalNewSource, /return name \|\| address \|\| 'Объект без названия'/);
   assert.match(rentalNewSource, /return number \|\| title \|\| date \|\| 'Договор без номера'/);
   assert.match(rentalNewSource, /Для выбранного клиента и объекта нет активных договоров/);
@@ -139,14 +170,15 @@ test('standalone rental creation keeps object and contract selects controlled by
 
 test('standalone rental creation keeps selected client label visible from stable client id', () => {
   assert.match(rentalNewSource, /import \{ clientLabel \} from '\.\.\/components\/ui\/ClientCombobox'/);
-  assert.match(rentalNewSource, /const selectedClient = clients\.find\(item => selectId\(item\.id\) === clientId\) \?\? clients\.find\(item => clientLabel\(item\) === client\)/);
-  assert.match(rentalNewSource, /const selectedClientName = selectedClient \? clientLabel\(selectedClient\) : client/);
+  assert.match(rentalNewSource, /const selectedClient = clients\.find\(item => selectId\(item\.id\) === clientId\)/);
   assert.match(rentalNewSource, /setClient\(selected \? clientLabel\(selected\) : ''\)/);
-  assert.match(rentalNewSource, /<SelectItem key=\{c\.id\} value=\{selectId\(c\.id\)\}>\{c\.company\}<\/SelectItem>/);
-  assert.match(rentalNewSource, /<SelectValue placeholder="Выберите клиента">\s*\{selectedClient \? selectedClientName : undefined\}\s*<\/SelectValue>/);
+  assert.match(rentalNewSource, /<select[^>]*data-testid="rental-client-select"[^>]*value=\{clientId\}/);
+  assert.match(rentalNewSource, /<option value="">Выберите клиента<\/option>/);
+  assert.match(rentalNewSource, /<option key=\{c\.id\} value=\{selectId\(c\.id\)\}>\{c\.company\}<\/option>/);
   assert.match(rentalNewSource, /\{selectedClient && \(/);
   assert.match(rentalNewSource, /Внимание: у клиента есть просроченная задолженность/);
-  assert.match(rentalNewSource, /selectedClientReceivable\?\.currentDebt \?\? selectedClient\.debt \?\? 0/);
+  assert.match(rentalNewSource, /data-testid="financial-current-debt"/);
+  assert.match(rentalNewSource, /\{formatCurrency\(currentDebt\)\}/);
 });
 
 test('equipment combobox search tolerates legacy equipment with missing labels', () => {

@@ -1,14 +1,20 @@
 const { createAuditEntry } = require('./audit-history');
-const { isUniqueInventoryNumber } = require('./equipment-matching');
 const { resolveCurrentUserAsMechanic } = require('./service-assignment');
 const { isPdiServiceTicket } = require('./service-ticket-kind');
-const { normalizeServiceTicketForWrite, serviceCreatedAtValue } = require('./service-dto');
+const { normalizeServiceTicketForWrite } = require('./service-dto');
 const { assertProductionSmokeFixtureMutationAllowed } = require('./protected-fixtures');
+const { linkedRentalIds } = require('./gantt-rental-link-guard');
+const {
+  reconcileEquipmentRentalProjection,
+} = require('./rental-lifecycle');
 
 function createServiceCore(deps) {
   const {
     readData,
     writeData,
+    writeDataBatch: persistDataBatch = entries => {
+      for (const entry of entries || []) writeData(entry.name, entry.value);
+    },
     nowIso,
     equipmentMatchesServiceTicket,
   } = deps;
@@ -42,17 +48,7 @@ function createServiceCore(deps) {
   }
 
   function writeServiceTickets(tickets) {
-    const previousById = new Map(readServiceTickets().map(ticket => [String(ticket?.id || ''), ticket]));
-    const normalized = (Array.isArray(tickets) ? tickets : []).map(ticket => {
-      const previous = previousById.get(String(ticket?.id || '')) || null;
-      if (previous && ticket === previous && serviceCreatedAtValue(previous)) return previous;
-      return normalizeServiceTicketForWrite(ticket, {
-        previous,
-        isCreate: !previous,
-        nowIso,
-      });
-    }).filter(Boolean);
-    writeData('service', normalized);
+    return persistServiceTicketBulkReplace(tickets, 'Система');
   }
 
   function findServiceTicketById(ticketId) {
@@ -61,52 +57,59 @@ function createServiceCore(deps) {
   }
 
   function saveServiceTicket(updatedTicket) {
-    const tickets = readServiceTickets();
-    const previous = tickets.find(ticket => ticket.id === updatedTicket.id) || null;
-    const normalized = normalizeServiceTicketForWrite(updatedTicket, {
-      previous,
-      isCreate: !previous,
-      nowIso,
-    });
-    const nextTickets = tickets.map(ticket => ticket.id === updatedTicket.id ? normalized : ticket);
-    writeServiceTickets(nextTickets);
+    return persistServiceTicketUpdate(updatedTicket, 'Система');
   }
 
-  function applyServiceTicketCreationEffects(ticket, author = 'Система') {
+  function applyServiceTicketCreationEffects(ticket, author = 'Система', options = {}) {
     if (!ticket) return;
-    if (isPdiServiceTicket(ticket)) return;
+    if (isPdiServiceTicket(ticket)) {
+      if (options.persistService && Array.isArray(options.serviceTickets)) {
+        persistDataBatch([{ name: 'service', value: options.serviceTickets }]);
+        return { persisted: true };
+      }
+      return { persisted: false };
+    }
 
     const equipmentList = readData('equipment') || [];
     const ganttRentals = readData('gantt_rentals') || [];
+    const classicRentals = readData('rentals') || [];
+    const storedServiceTickets = Array.isArray(options.serviceTickets)
+      ? options.serviceTickets
+      : readServiceTickets();
+    const serviceTickets = storedServiceTickets.some(item => String(item?.id || '') === String(ticket.id || ''))
+      ? storedServiceTickets
+      : [...storedServiceTickets, ticket];
     const todayStr = nowIso().slice(0, 10);
     const auditText = `Техника переведена в сервис по заявке ${ticket.id}: ${ticket.reason || 'Без причины'}`;
 
-    const nextEquipment = equipmentList.map(item => {
-      if (!equipmentMatchesServiceTicket(ticket, item, equipmentList)) return item;
+    const nextClassicRentals = classicRentals.map(rental => {
+      const matchesActiveRental = equipmentList.some(equipment => (
+        equipmentMatchesServiceTicket(ticket, equipment, equipmentList)
+        && (
+          String(rental?.equipmentId || '') === String(equipment?.id || '')
+          || (Array.isArray(rental?.equipment) ? rental.equipment : [rental?.equipment])
+            .some(reference => [equipment?.inventoryNumber, equipment?.serialNumber].includes(reference))
+        )
+        && rental.status === 'active'
+        && rental.startDate <= todayStr
+        && (rental.plannedReturnDate || rental.endDate) >= todayStr
+      ));
+      if (!matchesActiveRental) return rental;
       return {
-        ...item,
-        status: 'in_service',
-        currentClient: undefined,
-        returnDate: undefined,
+        ...rental,
+        actualReturnDate: todayStr,
+        status: 'closed',
         history: [
-          ...(Array.isArray(item.history) ? item.history : []),
-          createAuditEntry(author, auditText),
+          ...(Array.isArray(rental.history) ? rental.history : []),
+          createAuditEntry(author, `Аренда остановлена из-за сервисной заявки ${ticket.id}`),
         ],
       };
     });
-
+    const stoppedClassicIds = new Set(nextClassicRentals.flatMap((rental, index) => (
+      rental !== classicRentals[index] ? [String(rental?.id || '')] : []
+    )).filter(Boolean));
     const nextRentals = ganttRentals.map(rental => {
-      const matchesEquipment =
-        (ticket.equipmentId && rental.equipmentId === ticket.equipmentId)
-        || (!rental.equipmentId && ticket.inventoryNumber && rental.equipmentInv === ticket.inventoryNumber);
-
-      const isActiveToday =
-        rental.status === 'active'
-        && rental.startDate <= todayStr
-        && rental.endDate >= todayStr;
-
-      if (!matchesEquipment || !isActiveToday) return rental;
-
+      if (!linkedRentalIds(rental).some(id => stoppedClassicIds.has(String(id || '')))) return rental;
       return {
         ...rental,
         endDate: todayStr,
@@ -122,13 +125,33 @@ function createServiceCore(deps) {
       };
     });
 
+    const matchedEquipmentIds = new Set(equipmentList
+      .filter(item => equipmentMatchesServiceTicket(ticket, item, equipmentList))
+      .map(item => String(item.id || '')));
+    const lifecycle = reconcileEquipmentRentalProjection({
+      equipmentList,
+      rentals: nextClassicRentals,
+      ganttRentals: nextRentals,
+      serviceTickets,
+      affectedEquipmentIds: matchedEquipmentIds,
+      nowIso,
+      author,
+      reason: auditText,
+    });
+    const nextEquipment = lifecycle.nextEquipment;
+
     assertProductionSmokeFixtureMutationAllowed({
       action: 'service_create',
       existingList: equipmentList,
       nextList: nextEquipment,
     });
-    writeData('equipment', nextEquipment);
-    writeData('gantt_rentals', nextRentals);
+    persistDataBatch([
+      ...(options.persistService ? [{ name: 'service', value: serviceTickets }] : []),
+      ...(nextClassicRentals.some((item, index) => item !== classicRentals[index]) ? [{ name: 'rentals', value: nextClassicRentals }] : []),
+      ...(nextRentals.some((item, index) => item !== ganttRentals[index]) ? [{ name: 'gantt_rentals', value: nextRentals }] : []),
+      ...(lifecycle.changed ? [{ name: 'equipment', value: nextEquipment }] : []),
+    ]);
+    return { persisted: Boolean(options.persistService) };
   }
 
   function appendServiceLog(ticket, text, author, type = 'comment') {
@@ -168,56 +191,122 @@ function createServiceCore(deps) {
     if (!ticket?.equipmentId && !ticket?.inventoryNumber) return;
 
     const equipmentList = readData('equipment') || [];
-    const ganttRentals = readData('gantt_rentals') || [];
-    const tickets = readServiceTickets();
-    const openStatuses = openServiceStatuses();
-    const ticketInventoryIsUnique = ticket.inventoryNumber
-      ? isUniqueInventoryNumber(ticket.inventoryNumber, equipmentList)
-      : false;
-
-    const remainingOpen = tickets.some(existing =>
-      existing.id !== ticket.id &&
-      openStatuses.includes(existing.status) &&
-      (
-        (ticket.equipmentId && existing.equipmentId === ticket.equipmentId) ||
-        (ticket.serialNumber && existing.serialNumber === ticket.serialNumber) ||
-        (ticket.inventoryNumber && ticketInventoryIsUnique && existing.inventoryNumber === ticket.inventoryNumber)
-      )
-    );
-
-    const hasActiveRental = ganttRentals.some(rental =>
-      (
-        (ticket.equipmentId && rental.equipmentId === ticket.equipmentId) ||
-        (!rental.equipmentId && ticket.inventoryNumber && ticketInventoryIsUnique && rental.equipmentInv === ticket.inventoryNumber)
-      ) &&
-      rental.status !== 'returned' &&
-      rental.status !== 'closed'
-    );
-
-    // IMPORTANT: equipment status is derived from the service/rental state. Closing one
-    // ticket must not mark equipment available while another open ticket or rental blocks it.
-    const nextEquipment = equipmentList.map(item => {
-      const matches =
-        (ticket.equipmentId && item.id === ticket.equipmentId) ||
-        (ticket.serialNumber && item.serialNumber === ticket.serialNumber) ||
-        (ticket.inventoryNumber && ticketInventoryIsUnique && item.inventoryNumber === ticket.inventoryNumber);
-      if (!matches) return item;
-
-      let nextStatus = item.status;
-      if (openStatuses.includes(newStatus)) {
-        nextStatus = 'in_service';
-      } else if (!remainingOpen) {
-        nextStatus = hasActiveRental ? 'rented' : 'available';
-      }
-      return { ...item, status: nextStatus };
+    const matchedEquipmentIds = new Set(equipmentList
+      .filter(item => equipmentMatchesServiceTicket(ticket, item, equipmentList))
+      .map(item => String(item.id || '')));
+    const lifecycle = reconcileEquipmentRentalProjection({
+      equipmentList,
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      serviceTickets: readServiceTickets(),
+      affectedEquipmentIds: matchedEquipmentIds,
+      nowIso,
+      author: 'Система',
+      reason: `Статус сервисной заявки ${ticket.id}: ${newStatus}`,
     });
+    const nextEquipment = lifecycle.nextEquipment;
 
     assertProductionSmokeFixtureMutationAllowed({
       action: 'service_update',
       existingList: equipmentList,
       nextList: nextEquipment,
     });
-    writeData('equipment', nextEquipment);
+    if (lifecycle.changed) writeData('equipment', nextEquipment);
+  }
+
+  function persistServiceTicketUpdate(updatedTicket, author = 'Система') {
+    const tickets = readServiceTickets();
+    const previous = tickets.find(ticket => ticket.id === updatedTicket.id) || null;
+    const normalized = normalizeServiceTicketForWrite(updatedTicket, {
+      previous,
+      isCreate: !previous,
+      nowIso,
+    });
+    const nextTickets = tickets.map(ticket => ticket.id === normalized.id ? normalized : ticket);
+    const equipmentList = readData('equipment') || [];
+    const matchedEquipmentIds = new Set(equipmentList
+      .filter(item => equipmentMatchesServiceTicket(normalized, item, equipmentList))
+      .map(item => String(item.id || '')));
+    const lifecycle = reconcileEquipmentRentalProjection({
+      equipmentList,
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      serviceTickets: nextTickets,
+      affectedEquipmentIds: matchedEquipmentIds,
+      nowIso,
+      author,
+      reason: `Изменение сервисной заявки ${normalized.id}`,
+    });
+    const maintenanceField = normalized.status === 'closed'
+      ? ({ chto: 'maintenanceCHTO', pto: 'maintenancePTO' })[normalized.serviceKind]
+      : null;
+    const maintenanceDate = nowIso().slice(0, 10);
+    const nextEquipment = maintenanceField
+      ? lifecycle.nextEquipment.map(item => (
+          matchedEquipmentIds.has(String(item?.id || ''))
+            ? { ...item, [maintenanceField]: maintenanceDate }
+            : item
+        ))
+      : lifecycle.nextEquipment;
+    const equipmentChanged = lifecycle.changed || nextEquipment.some((item, index) => item !== lifecycle.nextEquipment[index]);
+    persistDataBatch([
+      { name: 'service', value: nextTickets },
+      ...(equipmentChanged ? [{ name: 'equipment', value: nextEquipment }] : []),
+    ]);
+    return normalized;
+  }
+
+  function persistServiceTicketDeletion(ticket, author = 'Система', options = {}) {
+    const nextTickets = readServiceTickets().filter(item => item.id !== ticket?.id);
+    const equipmentList = readData('equipment') || [];
+    const matchedEquipmentIds = new Set(equipmentList
+      .filter(item => equipmentMatchesServiceTicket(ticket, item, equipmentList))
+      .map(item => String(item.id || '')));
+    const lifecycle = reconcileEquipmentRentalProjection({
+      equipmentList,
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      serviceTickets: nextTickets,
+      affectedEquipmentIds: matchedEquipmentIds,
+      nowIso,
+      author,
+      reason: `Удаление сервисной заявки ${ticket?.id || ''}`,
+    });
+    persistDataBatch([
+      ...(Array.isArray(options.extraEntries) ? options.extraEntries : []),
+      { name: 'service', value: nextTickets },
+      ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
+    ]);
+  }
+
+  function persistServiceTicketBulkReplace(tickets, author = 'Система') {
+    const previousTickets = readServiceTickets();
+    const previousById = new Map(previousTickets.map(ticket => [String(ticket?.id || ''), ticket]));
+    const nextTickets = (Array.isArray(tickets) ? tickets : []).map(ticket => normalizeServiceTicketForWrite(ticket, {
+      previous: previousById.get(String(ticket?.id || '')) || null,
+      isCreate: !previousById.has(String(ticket?.id || '')),
+      nowIso,
+    })).filter(Boolean);
+    const equipmentList = readData('equipment') || [];
+    const changedTickets = [...previousTickets, ...nextTickets];
+    const affectedEquipmentIds = new Set(equipmentList
+      .filter(item => changedTickets.some(ticket => equipmentMatchesServiceTicket(ticket, item, equipmentList)))
+      .map(item => String(item.id || '')));
+    const lifecycle = reconcileEquipmentRentalProjection({
+      equipmentList,
+      rentals: readData('rentals') || [],
+      ganttRentals: readData('gantt_rentals') || [],
+      serviceTickets: nextTickets,
+      affectedEquipmentIds,
+      nowIso,
+      author,
+      reason: 'Массовая замена сервисных заявок',
+    });
+    persistDataBatch([
+      { name: 'service', value: nextTickets },
+      ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
+    ]);
+    return nextTickets;
   }
 
   function updateServiceTicketStatus(ticket, newStatus, author, text) {
@@ -226,9 +315,7 @@ function createServiceCore(deps) {
       status: newStatus,
       closedAt: (newStatus === 'closed' || newStatus === 'ready') ? new Date().toISOString() : ticket.closedAt,
     }, text, author, 'status_change');
-    saveServiceTicket(updated);
-    syncEquipmentStatusForService(updated, newStatus);
-    return updated;
+    return persistServiceTicketUpdate(updated, author);
   }
 
   function latestOpenRevision(ticket) {
@@ -294,9 +381,7 @@ function createServiceCore(deps) {
         revision,
       ],
     }, `Заявка возвращена механику на доработку: ${reason}${checklistText}${detailText}`, revision.createdByName, 'status_change');
-    saveServiceTicket(updated);
-    syncEquipmentStatusForService(updated, 'needs_revision');
-    return updated;
+    return persistServiceTicketUpdate(updated, revision.createdByName);
   }
 
   function resolveServiceTicketRevision(ticket, payload = {}, actor = {}) {
@@ -340,9 +425,7 @@ function createServiceCore(deps) {
       revisionHistory: nextHistory,
       closedAt: now,
     }, `Заявка повторно отправлена после доработки${comment ? `: ${comment}` : ''}`, actor.userName || actor.name || 'Механик', 'status_change');
-    saveServiceTicket(updated);
-    syncEquipmentStatusForService(updated, 'ready');
-    return updated;
+    return persistServiceTicketUpdate(updated, actor.userName || actor.name || 'Механик');
   }
 
   function generateRevisionId() {
@@ -370,6 +453,9 @@ function createServiceCore(deps) {
     getMechanicReferenceByUser,
     applyServiceTicketCreationEffects,
     syncEquipmentStatusForService,
+    persistServiceTicketUpdate,
+    persistServiceTicketDeletion,
+    persistServiceTicketBulkReplace,
     updateServiceTicketStatus,
     returnServiceTicketForRevision,
     resolveServiceTicketRevision,

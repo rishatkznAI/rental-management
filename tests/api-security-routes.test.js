@@ -1747,6 +1747,36 @@ test('generic equipment PATCH rejects direct status workflow fields', async () =
   });
 });
 
+test('generic equipment PATCH cannot deactivate equipment with an active rental projection', async () => {
+  const { app, state } = createSecurityApp();
+  const equipment = state.equipment.find(item => item.id === 'EQ-own');
+  Object.assign(equipment, {
+    model: 'SJ3219',
+    status: 'rented',
+    activeInFleet: true,
+    currentClient: 'ООО Свой',
+    returnDate: '2026-05-30',
+  });
+  Object.assign(state.rentals.find(item => item.id === 'R-own'), {
+    clientId: 'C-own',
+    startDate: '2026-04-01',
+    plannedReturnDate: '2026-05-30',
+    status: 'active',
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'PATCH', '/api/equipment/EQ-own', 'admin-token', {
+      activeInFleet: false,
+    });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'EQUIPMENT_LIFECYCLE_PROJECTION_CONFLICT');
+    assert.equal(response.body.field, 'activeInFleet');
+    assert.equal(response.body.equipmentId, 'EQ-own');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-own').activeInFleet, true);
+  });
+});
+
 test('admin generic service writes reject embedded repair and audit fields', async () => {
   const { app, state, auditEntries } = createSecurityApp();
 
@@ -1895,6 +1925,13 @@ test('direct rental PATCH rejects terminal states and return fields', async () =
     assert.match(adminClosed.body.error, /closed|workflow|общий PATCH/);
     assert.equal(JSON.stringify(state.rentals), beforeRentals);
 
+    const adminCancelled = await request(baseUrl, 'PATCH', '/api/rentals/R-own', 'admin-token', {
+      status: 'cancelled',
+    });
+    assert.equal(adminCancelled.status, 403);
+    assert.match(adminCancelled.body.error, /cancelled|workflow|общий PATCH/);
+    assert.equal(JSON.stringify(state.rentals), beforeRentals);
+
     const officeReturned = await request(baseUrl, 'PATCH', '/api/rentals/R-own', 'office-token', {
       actualReturnDate: '2026-05-25',
     });
@@ -1905,8 +1942,8 @@ test('direct rental PATCH rejects terminal states and return fields', async () =
     const ganttReturned = await request(baseUrl, 'PATCH', '/api/gantt_rentals/GR-own', 'admin-token', {
       status: 'returned',
     });
-    assert.equal(ganttReturned.status, 403);
-    assert.match(ganttReturned.body.error, /returned|workflow|общий PATCH/);
+    assert.equal(ganttReturned.status, 409);
+    assert.equal(ganttReturned.body.code, 'GANTT_PROJECTION_READ_ONLY');
     assert.equal(JSON.stringify(state.gantt_rentals), beforeGantt);
 
     const allowed = await request(baseUrl, 'PATCH', '/api/rentals/R-own', 'admin-token', {
@@ -3357,7 +3394,8 @@ test('production smoke equipment fixture is protected from service and rental wo
         status: 'active',
       },
     ]);
-    assertSystemFixtureProtected(ganttBulk);
+    assert.equal(ganttBulk.status, 409);
+    assert.equal(ganttBulk.body.code, 'GANTT_PROJECTION_READ_ONLY');
     assert.equal(state.gantt_rentals.some(item => item.id === 'GR-smoke'), false);
   });
 });

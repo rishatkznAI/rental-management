@@ -4,6 +4,10 @@ const {
   rentalMatchesEquipment,
 } = require('./equipment-matching');
 const { normalizeEquipmentStorageRecord } = require('./equipment-classification');
+const {
+  canonicalRentalMoney,
+  canonicalRentalRate,
+} = require('./rental-data-integrity');
 
 function normalizeEquipmentRecord(equipment) {
   if (!equipment) return equipment;
@@ -60,13 +64,18 @@ function parseRentalDateMs(value) {
 }
 
 function parseOptionalNonNegativeNumber(value, fieldLabel) {
-  if (value === undefined || value === null || value === '') return { ok: true };
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric < 0) {
+  try {
+    canonicalRentalMoney(value, {
+      field: 'numeric',
+      label: fieldLabel,
+      defaultValue: undefined,
+    });
+  } catch (error) {
     return {
       ok: false,
-      status: 400,
-      error: `${fieldLabel} должно быть числом не меньше 0`,
+      status: error?.status || 400,
+      code: error?.code,
+      error: error.message,
     };
   }
   return { ok: true };
@@ -77,6 +86,7 @@ function validateRentalNumericFields(payload) {
     ['amount', 'Сумма аренды'],
     ['price', 'Цена аренды'],
     ['discount', 'Скидка'],
+    ['deposit', 'Залог'],
     ['dailyRate', 'Дневная ставка'],
     ['monthlyRate', 'Месячная ставка'],
   ];
@@ -87,21 +97,15 @@ function validateRentalNumericFields(payload) {
   }
 
   if (payload && Object.prototype.hasOwnProperty.call(payload, 'rate')) {
-    const rate = payload.rate;
-    const normalizedRate = typeof rate === 'string' ? rate.trim().replace(/\s+/g, '') : rate;
-    const rateValue = typeof normalizedRate === 'string'
-      ? normalizedRate.match(/-?\d+(?:[.,]\d+)?/)?.[0]
-      : normalizedRate;
-    if (normalizedRate !== undefined && normalizedRate !== null && normalizedRate !== '' && rateValue === undefined) {
+    try {
+      canonicalRentalRate(payload.rate);
+    } catch (error) {
       return {
         ok: false,
-        status: 400,
-        error: 'Ставка аренды должно быть числом не меньше 0',
+        status: error?.status || 400,
+        code: error?.code,
+        error: error.message,
       };
-    }
-    if (rateValue !== undefined && rateValue !== null && rateValue !== '') {
-      const validation = parseOptionalNonNegativeNumber(String(rateValue).replace(',', '.'), 'Ставка аренды');
-      if (!validation.ok) return validation;
     }
   }
 
@@ -109,7 +113,8 @@ function validateRentalNumericFields(payload) {
 }
 
 function isBlockingRental(rental) {
-  return rental?.status !== 'returned' && rental?.status !== 'closed';
+  return !['returned', 'closed', 'cancelled', 'canceled', 'completed']
+    .includes(String(rental?.status || '').trim().toLowerCase());
 }
 
 function findConflictingRental(collection, payload, rentals, equipmentList, excludeRentalId = '') {
@@ -134,6 +139,21 @@ function formatConflictError(conflict, collection) {
   const { startDate, endDate } = getRentalDateRange(collection, conflict);
   const client = conflict.client || 'без клиента';
   return `Техника уже занята в период ${startDate} — ${endDate} (${client})`;
+}
+
+function buildAvailabilityConflictPayload(conflict, collection, equipment) {
+  if (!conflict) return null;
+  const { startDate, endDate } = getRentalDateRange(collection, conflict);
+  return {
+    rentalId: String(conflict.id || conflict.rentalId || ''),
+    clientId: String(conflict.clientId || ''),
+    client: String(conflict.client || conflict.clientName || ''),
+    equipmentId: String(equipment?.id || conflict.equipmentId || ''),
+    equipmentInv: String(equipment?.inventoryNumber || conflict.equipmentInv || conflict.inventoryNumber || ''),
+    startDate,
+    endDate,
+    status: String(conflict.status || ''),
+  };
 }
 
 function validateRentalPayload(collection, payload, rentals = [], equipment = [], excludeRentalId = '', options = {}) {
@@ -185,7 +205,13 @@ function validateRentalPayload(collection, payload, rentals = [], equipment = []
   if (!options.skipConflictCheck) {
     const conflict = findConflictingRental(collection, payload, rentals, equipmentList, excludeRentalId);
     if (conflict) {
-      return { ok: false, status: 409, error: formatConflictError(conflict, collection) };
+      return {
+        ok: false,
+        status: 409,
+        code: 'EQUIPMENT_AVAILABILITY_CONFLICT',
+        error: formatConflictError(conflict, collection),
+        conflict: buildAvailabilityConflictPayload(conflict, collection, matchedEquipment),
+      };
     }
   }
 
@@ -203,5 +229,6 @@ module.exports = {
   rentalMatchesEquipment,
   findConflictingRental,
   formatConflictError,
+  buildAvailabilityConflictPayload,
   validateRentalPayload,
 };

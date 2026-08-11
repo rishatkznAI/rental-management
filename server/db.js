@@ -55,6 +55,8 @@ const JSON_COLLECTIONS = [
   'clients',
   'client_objects',
   'client_contracts',
+  'inline_relation_idempotency',
+  'rental_create_idempotency',
   'knowledge_base_modules',
   'knowledge_base_progress',
   'app_settings',
@@ -254,18 +256,25 @@ function setData(name, value) {
         db.prepare('DELETE FROM client_inn_index').run();
       }
     }
+    if (shouldSyncShadowIndex) {
+      try {
+        const result = syncSqlShadowIndexForCollection(db, name, nextValue);
+        const errors = result?.errors || [];
+        for (const entry of errors) {
+          console.error(`[sql-shadow] failed to sync ${name} id=${entry.id || '(missing)'}: ${entry.error}`);
+        }
+        if (name === 'gantt_rentals' && errors.length > 0) {
+          const error = new Error(`Gantt SQL shadow sync failed: ${errors[0].error}`);
+          error.code = 'GANTT_SQL_SHADOW_SYNC_FAILED';
+          throw error;
+        }
+      } catch (error) {
+        if (name === 'gantt_rentals') throw error;
+        console.error(`[sql-shadow] failed to sync ${name}: ${error?.message || error}`);
+      }
+    }
   });
   tx();
-  if (shouldSyncShadowIndex) {
-    try {
-      const result = syncSqlShadowIndexForCollection(db, name, nextValue);
-      for (const entry of result?.errors || []) {
-        console.error(`[sql-shadow] failed to sync ${name} id=${entry.id || '(missing)'}: ${entry.error}`);
-      }
-    } catch (error) {
-      console.error(`[sql-shadow] failed to sync ${name}: ${error?.message || error}`);
-    }
-  }
 }
 
 function setDataBatch(entries) {

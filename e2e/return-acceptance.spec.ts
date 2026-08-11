@@ -10,6 +10,12 @@ import {
   withAdminApi,
 } from './helpers/api';
 
+function dateOffset(days: number) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 test.setTimeout(60_000);
 
 test('admin can return equipment into service from the rentals planner', async ({ page }) => {
@@ -20,23 +26,25 @@ test('admin can return equipment into service from the rentals planner', async (
     const pair = await createRentalPair(api, {
       client: client.company,
       equipment,
-      startDate: '2026-04-18',
-      endDate: '2026-04-20',
+      startDate: dateOffset(0),
+      endDate: dateOffset(2),
       amount: 12000,
       manager: 'E2E',
+      status: 'active',
+      ganttStatus: 'active',
     });
     return { equipment, rental: pair.rental, ganttId: pair.ganttId };
   });
 
   await loginAsAdmin(page);
   await navigateInApp(page, '/rentals');
-
-  await expect(page.getByRole('heading', { name: 'Планировщик аренды' })).toBeVisible();
-  await page.getByRole('button', { name: 'Возврат техники' }).click();
+  await page.locator('main').getByRole('button', { name: 'Возвраты' }).click();
+  await expect(page.getByRole('heading', { name: 'Возвраты — рабочий список' })).toBeVisible();
+  await page.getByRole('button', { name: 'Подтвердить возврат', exact: true }).click();
 
   const returnModal = page
     .getByRole('heading', { name: 'Возврат техники' })
-    .locator('xpath=ancestor::div[contains(@class,"rounded-xl")]');
+    .locator('xpath=ancestor::div[contains(@class,"max-w-md")]');
 
   await expect(returnModal).toBeVisible();
   await returnModal.locator('select').first().selectOption(ganttId);

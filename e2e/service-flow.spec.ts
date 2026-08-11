@@ -28,7 +28,7 @@ test('admin can create a service ticket from the service form', async ({ page })
   await page.getByRole('button', { name: 'Создать заявку' }).click();
 
   await expect(page).toHaveURL(/#\/service\/.+/);
-  await expect(page.getByText(reason)).toBeVisible();
+  await expect(page.getByText(reason).first()).toBeVisible();
 
   const createdTicket = await withAdminApi((api) => findServiceTicketByReason(api, reason));
   expect(createdTicket.id).toBeTruthy();

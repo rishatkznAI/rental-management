@@ -4,6 +4,8 @@ import fs from 'node:fs';
 
 const drawerSource = fs.readFileSync(new URL('../src/app/components/gantt/RentalDrawer.tsx', import.meta.url), 'utf8');
 const rentalsSource = fs.readFileSync(new URL('../src/app/pages/Rentals.tsx', import.meta.url), 'utf8');
+const dashboardSource = fs.readFileSync(new URL('../src/app/pages/Dashboard.tsx', import.meta.url), 'utf8');
+const equipmentDetailSource = fs.readFileSync(new URL('../src/app/pages/EquipmentDetail.tsx', import.meta.url), 'utf8');
 const documentsSource = fs.readFileSync(new URL('../src/app/pages/Documents.tsx', import.meta.url), 'utf8');
 
 function extract(source, startMarker, endMarker) {
@@ -18,7 +20,7 @@ test('rental drawer opens and acts through the canonical rental while retaining 
   const buildBlock = extract(
     rentalsSource,
     'const buildRentalDrawerRental = useCallback',
-    'const handleRepairGanttLink = useCallback',
+    'const handleRentalExtended = useCallback',
   );
 
   assert.match(buildBlock, /id: resolvedClassicRental\.id/);
@@ -34,6 +36,9 @@ test('drawer actions resolve canonical rental back to the working gantt row', ()
   assert.match(rentalsSource, /if \(ganttId\) return item\.id === ganttId/);
   assert.match(rentalsSource, /if \(String\(rental\.id \|\| ''\)\.startsWith\('GR-'\)\) return false/);
   assert.match(rentalsSource, /getGanttRentalSourceId\(item\) === canonicalRentalId/);
+  assert.match(drawerSource, /const otherRentals = allRentals\.filter/);
+  assert.match(drawerSource, /rentalPaymentIds\.has/);
+  assert.match(drawerSource, /findConflictingRental\([\s\S]*otherRentals/);
 });
 
 test('adding a payment from drawer stores stable rental id and updates matching gantt row', () => {
@@ -50,6 +55,19 @@ test('adding a payment from drawer stores stable rental id and updates matching 
   assert.match(paymentBlock, /matchesDrawerGanttRental\(r, drawerMatchRental\)/);
   assert.match(paymentBlock, /setGanttRentals\(updatedRentals\)/);
   assert.doesNotMatch(paymentBlock, /persistGanttRentals\(updatedRentals\)/);
+});
+
+test('frontend rental lifecycle actions never write the read-only Gantt projection directly', () => {
+  for (const [name, source] of [
+    ['Rentals', rentalsSource],
+    ['Dashboard', dashboardSource],
+    ['EquipmentDetail', equipmentDetailSource],
+  ]) {
+    assert.doesNotMatch(source, /rentalsService\.(?:createGanttEntry|updateGanttEntry|deleteGanttEntry|bulkReplaceGantt)\(/, name);
+  }
+  assert.match(rentalsSource, /rentalsService\.update\(canonicalRentalId, \{\s*comments: nextComments/);
+  assert.match(dashboardSource, /rentalsService\.update\(canonicalRentalId, \{\s*updSigned: nextSigned/);
+  assert.match(equipmentDetailSource, /rentalsService\.returnRental\(canonicalRentalId/);
 });
 
 test('payment tab has no stale undefined handler and includes legacy gantt-linked payments', () => {

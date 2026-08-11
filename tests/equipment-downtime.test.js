@@ -52,7 +52,7 @@ test('equipment downtime validation blocks missing equipment and invalid dates',
   assert.match(reversedDates.error, /не может быть раньше/);
 });
 
-test('equipment downtime validation blocks active rental overlaps', () => {
+test('equipment downtime validation blocks active Classic rental overlaps', () => {
   const result = validateEquipmentDowntimePayload({
     equipmentId: 'EQ-1',
     equipmentInv: 'INV-1',
@@ -61,8 +61,33 @@ test('equipment downtime validation blocks active rental overlaps', () => {
     reason: 'Ожидание клиента',
   }, {
     equipment,
+    rentals: [{
+      id: 'R-1',
+      equipmentId: 'EQ-1',
+      equipmentInv: 'INV-1',
+      startDate: '2026-05-10',
+      plannedReturnDate: '2026-05-15',
+      status: 'active',
+    }],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 409);
+  assert.match(result.error, /активной арендой R-1/);
+});
+
+test('equipment downtime validation ignores orphan Gantt projections', () => {
+  const result = validateEquipmentDowntimePayload({
+    equipmentId: 'EQ-1',
+    equipmentInv: 'INV-1',
+    startDate: '2026-05-11',
+    endDate: '2026-05-12',
+    reason: 'Нет спроса',
+  }, {
+    equipment,
+    rentals: [],
     ganttRentals: [{
-      id: 'GR-1',
+      id: 'GR-orphan',
       equipmentId: 'EQ-1',
       equipmentInv: 'INV-1',
       startDate: '2026-05-10',
@@ -71,9 +96,7 @@ test('equipment downtime validation blocks active rental overlaps', () => {
     }],
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.status, 409);
-  assert.match(result.error, /активной арендой GR-1/);
+  assert.equal(result.ok, true);
 });
 
 test('equipment downtime validation prefers equipment id over placeholder inventory matches', () => {

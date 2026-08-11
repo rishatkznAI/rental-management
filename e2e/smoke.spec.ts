@@ -14,6 +14,12 @@ import {
 
 const sidebar = (page: Page) => page.locator('aside');
 
+function dateKeyFromToday(offsetDays: number) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  return date.toISOString().slice(0, 10);
+}
+
 function collectCriticalConsoleErrors(page: Page) {
   const errors: string[] = [];
   page.on('console', (message) => {
@@ -88,6 +94,7 @@ test.describe('production smoke', () => {
   });
 
   test('admin can create client, equipment, rental and service ticket', async ({ page }) => {
+    const consoleErrors = collectCriticalConsoleErrors(page);
     const suffix = String(Date.now());
     const company = `SMOKE-UI-Клиент-${suffix}`;
     const serialNumber = `SMOKE-UI-SN-${suffix}`;
@@ -131,8 +138,8 @@ test.describe('production smoke', () => {
       client: company,
       clientId: client.id,
       equipment,
-      startDate: '2026-06-01',
-      endDate: '2026-06-08',
+      startDate: dateKeyFromToday(0),
+      endDate: dateKeyFromToday(7),
       amount: 12000,
       manager: 'SMOKE-UI',
     }));
@@ -158,6 +165,7 @@ test.describe('production smoke', () => {
 
     const ticket = await withAdminApi((api) => findServiceTicketByReason(api, serviceReason));
     expect(ticket.id).toBeTruthy();
+    expect(consoleErrors).toEqual([]);
   });
 
   test('rental manager cannot see or open admin panel', async ({ page }) => {

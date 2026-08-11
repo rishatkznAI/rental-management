@@ -67,8 +67,7 @@ test('client quick actions pass client context to daily work sections without la
   const urls = Object.fromEntries(actions.map(action => [action.id, action.to || '']));
 
   assert.equal(new Set(labels).size, labels.length);
-  assert.match(urls['client-create-rental'], /clientId=client-1/);
-  assert.match(urls['client-create-rental'], /clientName=/);
+  assert.equal(urls['client-create-rental'], '/rentals/new?clientId=client-1');
   assert.match(urls['client-documents'], /clientId=client-1/);
   assert.match(urls['client-payments'], /clientId=client-1/);
   assert.match(urls['client-tasks'], /clientId=client-1/);
@@ -109,6 +108,7 @@ test('equipment in service does not offer unsafe active rental action', () => {
   const rentalAction = actions.find(action => action.id === 'equipment-create-rental');
 
   assert.ok(rentalAction);
+  assert.equal(rentalAction.to, '/rentals/new?equipmentId=eq-1');
   assert.equal(rentalAction.disabled, true);
   assert.match(rentalAction.reason, /сервисе/);
 });

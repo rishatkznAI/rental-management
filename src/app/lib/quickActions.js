@@ -1,4 +1,5 @@
 import { saleStatusKind } from './equipmentSaleMode.js';
+import { buildRentalNewRoute } from './rental-new-route.js';
 
 const MANAGE_ACTIONS = ['create', 'edit'];
 
@@ -42,7 +43,7 @@ export function buildClientQuickActions({ client, can, role } = {}) {
       id: 'client-create-rental',
       label: 'Создать аренду',
       kind: 'primary',
-      to: withQuery('/rentals/new', context),
+      to: buildRentalNewRoute({ clientId }),
     });
   }
   if (canDo(can, 'view', 'documents') && canAny(can, MANAGE_ACTIONS, 'documents')) {
@@ -146,7 +147,7 @@ export function buildEquipmentQuickActions({ equipment, can, currentRental, crmD
     actions.push({
       id: 'equipment-create-rental',
       label: 'Создать аренду',
-      to: withQuery('/rentals/new', context),
+      to: buildRentalNewRoute({ equipmentId }),
       disabled: rentalBlocked,
       reason: status === 'inactive'
         ? 'Техника списана'

@@ -54,6 +54,7 @@ import { buildEquipmentMovementEvents } from '../lib/equipmentMovementEvents.js'
 import { findEquipmentTypeLabel, useEquipmentTypeCatalog } from '../lib/equipmentTypes';
 import { buildEquipment360Summary } from '../lib/equipment360.js';
 import { buildEquipmentQuickActions } from '../lib/quickActions.js';
+import { buildRentalNewRoute } from '../lib/rental-new-route.js';
 import {
   isSaleModeEquipment,
   saleConditionKind,
@@ -1201,18 +1202,6 @@ export default function EquipmentDetail() {
     await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
   }, [queryClient]);
 
-  const persistShippingPhotos = React.useCallback(async (list: ShippingPhoto[]) => {
-    setAllShippingPhotos(list);
-    await equipmentService.bulkReplaceShippingPhotos(list);
-    await queryClient.invalidateQueries({ queryKey: ['shippingPhotos'] });
-  }, [queryClient]);
-
-  const persistGanttRentals = React.useCallback(async (list: GanttRentalData[]) => {
-    setAllGanttRentals(list);
-    await rentalsService.bulkReplaceGantt(list);
-    await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
-  }, [queryClient]);
-
   // ── Photo upload state ──
   const [showUploadPhotoForm, setShowUploadPhotoForm] = useState(false);
   const [uploadEventType, setUploadEventType] = useState<'shipping' | 'receiving'>('shipping');
@@ -1560,15 +1549,22 @@ export default function EquipmentDetail() {
     const todayStr = new Date().toISOString().split('T')[0];
     const nowIso = new Date().toISOString();
     const flatPhotos = Object.values(uploadPhotoCategories).flat();
-    const newEvent: ShippingPhoto = {
-      id: `sp-${Date.now()}`,
+    const canonicalRentalId = activeOrCreatedRental?.rentalId
+      || activeOrCreatedRental?.sourceRentalId
+      || activeOrCreatedRental?.originalRentalId
+      || '';
+    if (!canonicalRentalId) {
+      toast.error('Для акта отправки или приёмки требуется связанная карточка аренды.');
+      return;
+    }
+    const newEvent: Omit<ShippingPhoto, 'id'> = {
       equipmentId: equipment.id,
       date: todayStr,
       type: uploadEventType,
       uploadedBy: authorName,
       photos: flatPhotos,
       comment: uploadComment || undefined,
-      rentalId: activeOrCreatedRental?.id,
+      rentalId: canonicalRentalId,
       source: 'manual',
       checklist: uploadChecklist,
       photoCategories: uploadPhotoCategories,
@@ -1578,136 +1574,31 @@ export default function EquipmentDetail() {
       signedAt: nowIso,
       signatureDataUrl: uploadSignatureDataUrl,
     };
-
-    const updatedPhotos = [...allShippingPhotos, newEvent];
-
-    const updatedEquipment = allEquipment.map(eq => {
-      if (eq.id !== equipment.id) return eq;
-
-      if (uploadEventType === 'shipping') {
-        return appendAuditHistory(
-          {
-            ...eq,
-            status: 'rented' as const,
-            currentClient: activeOrCreatedRental?.client || eq.currentClient,
-            returnDate: activeOrCreatedRental?.endDate || eq.returnDate,
-            hours: parsedHours,
-          },
-          createAuditEntry(
-            authorName,
-            `Техника отгружена в аренду${activeOrCreatedRental?.client ? ` клиенту ${activeOrCreatedRental.client}` : ''}. Добавлен акт отправки (${flatPhotos.length} фото, ${parsedHours} м/ч)`,
-          ),
-        );
-      }
-
-      return appendAuditHistory(
-        {
-          ...eq,
-          status: 'in_service' as const,
-          currentClient: undefined,
-          returnDate: undefined,
-          hours: parsedHours,
-        },
-        createAuditEntry(
-          authorName,
-          `Техника принята с аренды и переведена в сервис. Добавлен акт приёмки (${flatPhotos.length} фото, ${parsedHours} м/ч${uploadDamageDescription.trim() ? ', повреждения зафиксированы' : ''})`,
-        ),
-      );
-    });
-
-    const updatedGantt = allGanttRentals.map(rental => {
-      if (rental.equipmentId !== equipment.id || rental.id !== activeOrCreatedRental?.id) return rental;
-
-      if (uploadEventType === 'shipping' && rental.status === 'created') {
-        return {
-          ...rental,
-          status: 'active' as const,
-          comments: [
-            ...(rental.comments ?? []),
-            { date: nowIso, text: 'Техника отгружена клиенту, добавлен фотоотчёт отправки', author: authorName },
-          ],
-        };
-      }
-
-      if (uploadEventType === 'receiving' && (rental.status === 'active' || rental.status === 'created')) {
-        return {
-          ...rental,
-          status: 'returned' as const,
-          endDate: todayStr,
-          comments: [
-            ...(rental.comments ?? []),
-            { date: nowIso, text: 'Техника принята с аренды, добавлен фотоотчёт приёмки', author: authorName },
-          ],
-        };
-      }
-
-      return rental;
-    });
-
-    await persistShippingPhotos(updatedPhotos);
-    await persistEquipment(updatedEquipment);
-    await persistGanttRentals(updatedGantt);
-
-    if (uploadEventType === 'receiving') {
-      const hasOpenTicket = serviceHistory.some(ticket => ticket.status !== 'closed');
-      if (!hasOpenTicket) {
-        await serviceTicketsService.create({
-          equipmentId: equipment.id,
-          equipment: `${equipment.manufacturer} ${equipment.model} (INV: ${equipment.inventoryNumber})`,
-          inventoryNumber: equipment.inventoryNumber,
-          serialNumber: equipment.serialNumber,
-          equipmentType: equipment.type,
-          equipmentTypeLabel: findEquipmentTypeLabel(equipment.type, equipmentTypeCatalog),
-          location: equipment.location,
-          reason: 'Приёмка с аренды',
-          description: uploadComment?.trim()
-            ? `Техника принята с аренды. Комментарий механика: ${uploadComment.trim()}${uploadDamageDescription.trim() ? ` Повреждения: ${uploadDamageDescription.trim()}` : ''}`
-            : `Техника принята с аренды, требуется осмотр и дефектовка после возврата.${uploadDamageDescription.trim() ? ` Повреждения: ${uploadDamageDescription.trim()}` : ''}`,
-          priority: 'medium',
-          sla: '24 ч',
-          assignedTo: undefined,
-          assignedMechanicId: undefined,
-          assignedMechanicName: undefined,
-          createdBy: authorName,
-          createdByUserId: user?.id,
-          createdByUserName: authorName,
-          reporterContact: activeOrCreatedRental?.client || authorName,
-          source: 'system',
-          status: 'new',
-          result: undefined,
-          resultData: {
-            summary: '',
-            partsUsed: [],
-            worksPerformed: [],
-          },
-          workLog: [
-            {
-              date: nowIso,
-              text: 'Заявка автоматически создана после приёмки техники с аренды',
-              author: authorName,
-              type: 'status_change',
-            },
-          ],
-          parts: [],
-          createdAt: nowIso,
-          photos: flatPhotos,
+    try {
+      if (uploadEventType === 'receiving') {
+        await rentalsService.returnRental(canonicalRentalId, {
+          returnDate: todayStr,
+          result: 'service',
+          hasDamage: true,
+          damageDescription: uploadDamageDescription.trim(),
         });
-        await queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all });
-        await queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.byEquipment(equipment.id) });
-
-        const equipmentWithServiceHistory = updatedEquipment.map(eq =>
-          eq.id === equipment.id
-            ? appendAuditHistory(
-                eq,
-                createAuditEntry(
-                  authorName,
-                  'Автоматически создана сервисная заявка после приёмки с аренды',
-                ),
-              )
-            : eq,
-        );
-        await persistEquipment(equipmentWithServiceHistory);
+      } else if (activeOrCreatedRental.status === 'created') {
+        await rentalsService.update(canonicalRentalId, { status: 'active' });
       }
+      await equipmentService.update(equipment.id, { hours: parsedHours });
+      const savedEvent = await equipmentService.createShippingPhoto(newEvent);
+      setAllShippingPhotos(current => [...current.filter(item => item.id !== savedEvent.id), savedEvent]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['shippingPhotos'] }),
+        queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: SERVICE_TICKET_KEYS.byEquipment(equipment.id) }),
+      ]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось сохранить акт отправки или приёмки.');
+      return;
     }
 
     setUploadPhotoCategories(createEmptyPhotoCategories(uploadEventType === 'receiving'));
@@ -2403,7 +2294,7 @@ export default function EquipmentDetail() {
                   Создать аренду
                 </Button>
               ) : (
-                <Link to={assetCreateRentalAction.to || '/rentals/new'}>
+                <Link to={assetCreateRentalAction.to || buildRentalNewRoute({ equipmentId: equipment.id })}>
                   <Button size="sm" className="app-button-primary rounded-xl px-4">
                     <Plus className="h-3.5 w-3.5" />
                     Создать аренду
@@ -5268,18 +5159,7 @@ export default function EquipmentDetail() {
                   onCancel={() => setShowCreateServiceModal(false)}
                   onCreated={(ticket) => {
                     setAllServiceTickets(prev => [ticket, ...prev.filter(item => item.id !== ticket.id)]);
-                    const nextEquipment = allEquipment.map(item =>
-                      item.id === equipment.id
-                        ? appendAuditHistory(
-                            { ...item, status: 'in_service', currentClient: undefined, returnDate: undefined },
-                            createAuditEntry(
-                              user?.name || 'Система',
-                              `Создана сервисная заявка ${ticket.id}: ${ticket.reason}`,
-                            ),
-                          )
-                        : item,
-                    );
-                    void persistEquipment(nextEquipment);
+                    void queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
                     setShowCreateServiceModal(false);
                   }}
                 />

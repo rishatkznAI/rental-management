@@ -182,11 +182,15 @@ function createReturnState() {
   };
 }
 
-function createReturnApp(state = createReturnState()) {
+function createReturnApp(state = createReturnState(), options = {}) {
   const app = express();
   app.use(express.json());
   const readData = name => state[name] || [];
   const writeData = (name, value) => { state[name] = value; };
+  const writeDataBatch = entries => {
+    if (options.failBatch) throw new Error('Injected return batch failure');
+    for (const entry of entries || []) state[entry.name] = entry.value;
+  };
   const accessControl = createAccessControl({ readData });
   let idCounter = 0;
 
@@ -205,6 +209,7 @@ function createReturnApp(state = createReturnState()) {
   apiRouter.use(registerRentalRoutes({
     readData,
     writeData,
+    writeDataBatch,
     requireAuth,
     requireRead,
     validateRentalPayload,
@@ -266,6 +271,18 @@ test('return without damage closes rental, returns gantt entry and makes equipme
 
 test('return before a future reservation keeps equipment reserved, not rented', async () => {
   const { app, state } = createReturnApp();
+  state.rentals.push({
+    id: 'R-future',
+    clientId: 'C-future',
+    client: 'ООО Будущая бронь',
+    equipmentId: 'EQ-1',
+    equipmentInv: 'INV-1',
+    equipment: ['INV-1'],
+    startDate: '2026-04-30',
+    plannedReturnDate: '2026-05-03',
+    manager: 'Админ',
+    status: 'created',
+  });
   state.gantt_rentals.push({
     id: 'GR-future',
     rentalId: 'R-future',
@@ -320,6 +337,33 @@ test('return with damage creates service ticket and keeps equipment in service',
     assert.equal(ticket.rentalId, 'R-2');
     assert.equal(ticket.objectId, 'CO-2');
     assert.equal(ticket.contractId, 'CC-2');
+  });
+});
+
+test('Stage H return batch failure leaves rental, planner, equipment and service unchanged', async () => {
+  const state = createReturnState();
+  const { app } = createReturnApp(state, { failBatch: true });
+  const before = structuredClone({
+    rentals: state.rentals,
+    gantt: state.gantt_rentals,
+    equipment: state.equipment,
+    service: state.service,
+  });
+
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/rentals/GR-2/return', {
+      returnDate: '2026-04-25',
+      result: 'service',
+      hasDamage: true,
+      damageDescription: 'Проверка rollback',
+    });
+
+    assert.equal(response.status, 500);
+    assert.equal(response.body.code, 'RENTAL_RETURN_PERSISTENCE_FAILED');
+    assert.deepEqual(state.rentals, before.rentals);
+    assert.deepEqual(state.gantt_rentals, before.gantt);
+    assert.deepEqual(state.equipment, before.equipment);
+    assert.deepEqual(state.service, before.service);
   });
 });
 
@@ -412,6 +456,33 @@ test('direct rental patch cannot restore returned rental workflow fields', async
   });
 });
 
+test('direct status-only patch cannot resurrect a returned Classic rental', async () => {
+  const { app, state } = createReturnApp();
+
+  await withServer(app, async baseUrl => {
+    assert.equal((await request(baseUrl, 'POST', '/api/rentals/GR-1/return', {
+      returnDate: '2026-04-25',
+      result: 'available',
+    })).status, 200);
+
+    const before = structuredClone({
+      rental: state.rentals.find(item => item.id === 'R-1'),
+      gantt: state.gantt_rentals.find(item => item.id === 'GR-1'),
+      equipment: state.equipment.find(item => item.id === 'EQ-1'),
+    });
+    const response = await request(baseUrl, 'PATCH', '/api/rentals/R-1', {
+      status: 'active',
+      ganttRentalId: 'GR-1',
+    });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'RENTAL_TERMINAL_RESURRECTION_FORBIDDEN');
+    assert.deepEqual(state.rentals.find(item => item.id === 'R-1'), before.rental);
+    assert.deepEqual(state.gantt_rentals.find(item => item.id === 'GR-1'), before.gantt);
+    assert.deepEqual(state.equipment.find(item => item.id === 'EQ-1'), before.equipment);
+  });
+});
+
 test('direct rental patch restore attempt is forbidden before service conflict checks mutate data', async () => {
   const { app, state } = createReturnApp();
   state.rentals.find(item => item.id === 'R-1').status = 'closed';
@@ -485,8 +556,8 @@ test('direct gantt rental patch cannot set returned workflow status or return fi
       returnDate: '2026-04-25',
     });
 
-    assert.equal(response.status, 403);
-    assert.match(response.body.error, /returnDate|status|workflow|общий PATCH/i);
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'GANTT_PROJECTION_READ_ONLY');
     assert.equal(JSON.stringify(state.gantt_rentals.find(item => item.id === 'GR-1')), beforeGantt);
     assert.equal(JSON.stringify(state.rentals.find(item => item.id === 'R-1')), beforeRental);
     assert.equal(JSON.stringify(state.equipment.find(item => item.id === 'EQ-1')), beforeEquipment);

@@ -275,7 +275,7 @@ test('different rental ids in one period stay an explicit downtime conflict', ()
   assert.match(target.message, /несколько разных аренд/);
 });
 
-test('standalone equipment downtime still rejects active rental overlap', () => {
+test('standalone equipment downtime rejects active Classic rental overlap', () => {
   const result = validateEquipmentDowntimePayload({
     equipmentId: 'EQ-1',
     equipmentInv: '083',
@@ -284,7 +284,11 @@ test('standalone equipment downtime still rejects active rental overlap', () => 
     reason: 'Нет спроса',
   }, {
     equipment: [{ id: 'EQ-1', inventoryNumber: '083' }],
-    ganttRentals: [activeRental],
+    rentals: [{
+      ...activeRental,
+      id: 'R-1',
+      plannedReturnDate: activeRental.endDate,
+    }],
     downtimes: [],
   });
 

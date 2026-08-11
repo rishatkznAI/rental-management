@@ -3,11 +3,19 @@ const { calculateWorkAmount, normalizePayType } = require('./mechanic-workload')
 const { linkedRentalIds } = require('./gantt-rental-link-guard');
 const { normalizeServiceTicketForWrite } = require('./service-dto');
 const { assertProductionSmokeFixtureMutationAllowed } = require('./protected-fixtures');
+const { rentalMatchesEquipment } = require('./equipment-matching');
+const {
+  isTerminalRental,
+  reconcileEquipmentRentalProjection,
+} = require('./rental-lifecycle');
 
 function createBotOperations(deps) {
   const {
     readData,
     writeData,
+    writeDataBatch: persistDataBatch = entries => {
+      for (const entry of entries || []) writeData(entry.name, entry.value);
+    },
     generateId,
     idPrefixes,
     nowIso,
@@ -16,6 +24,7 @@ function createBotOperations(deps) {
     appendServiceLog,
     getMechanicReferenceByUser,
     syncEquipmentStatusForService,
+    applyServiceTicketCreationEffects,
     getOpenTicketByEquipment,
     formatEquipmentForBot,
     serviceStatusLabel,
@@ -599,8 +608,16 @@ function createBotOperations(deps) {
       createdAt: now,
     }, { actor: authUser, isCreate: true, nowIso: () => now });
 
-    writeServiceTickets([...readServiceTickets(), newTicket]);
-    syncEquipmentStatusForService(newTicket, 'in_progress');
+    const nextServiceTickets = [...readServiceTickets(), newTicket];
+    if (typeof applyServiceTicketCreationEffects === 'function') {
+      applyServiceTicketCreationEffects(newTicket, authUser.userName, {
+        persistService: true,
+        serviceTickets: nextServiceTickets,
+      });
+    } else {
+      writeServiceTickets(nextServiceTickets);
+      syncEquipmentStatusForService(newTicket, 'in_progress');
+    }
     return newTicket;
   }
 
@@ -689,8 +706,6 @@ function createBotOperations(deps) {
       closedAt: now,
     }, { actor: authUser, isCreate: true, nowIso: () => now });
 
-    writeServiceTickets([...readServiceTickets(), ticket]);
-
     const equipmentList = readData('equipment') || [];
     const nextEquipment = equipmentList.map(item => {
       if (item.id !== equipment.id) return item;
@@ -706,12 +721,20 @@ function createBotOperations(deps) {
         ...(maintenanceKind === 'pto' ? { maintenancePTO: today } : {}),
       };
     });
-    writeData('equipment', nextEquipment);
+    assertProductionSmokeFixtureMutationAllowed({
+      action: 'bot_maintenance',
+      existingList: equipmentList,
+      nextList: nextEquipment,
+    });
+    persistDataBatch([
+      { name: 'service', value: [...readServiceTickets(), ticket] },
+      { name: 'equipment', value: nextEquipment },
+    ]);
 
     return ticket;
   }
 
-  function createReturnInspectionTicketFromBot(equipment, authUser, activeRental, photoUrls, comment = '') {
+  function createReturnInspectionTicketFromBot(equipment, authUser, activeRental, photoUrls, comment = '', options = {}) {
     const now = nowIso();
     const openExisting = getOpenTicketByEquipment(equipment);
     if (openExisting) return openExisting;
@@ -743,6 +766,12 @@ function createBotOperations(deps) {
       createdByUserId: authUser.userId,
       createdByUserName: authUser.userName,
       reporterContact: activeRental?.client || authUser.userName,
+      rentalId: options.rentalId || linkedRentalIds(activeRental || {})[0] || activeRental?.id || undefined,
+      ganttRentalId: options.ganttRentalId
+        || (linkedRentalIds(activeRental || {}).length > 0 ? activeRental?.id : undefined),
+      clientId: activeRental?.clientId || undefined,
+      objectId: activeRental?.objectId || undefined,
+      contractId: activeRental?.contractId || undefined,
       source: 'bot',
       status: 'new',
       result: '',
@@ -766,8 +795,18 @@ function createBotOperations(deps) {
       photos: photoUrls,
     }, { actor: authUser, isCreate: true, nowIso: () => now });
 
-    writeServiceTickets([...readServiceTickets(), newTicket]);
-    syncEquipmentStatusForService(newTicket, 'new');
+    if (options.persist !== false) {
+      const nextServiceTickets = [...readServiceTickets(), newTicket];
+      if (typeof applyServiceTicketCreationEffects === 'function') {
+        applyServiceTicketCreationEffects(newTicket, authUser.userName, {
+          persistService: true,
+          serviceTickets: nextServiceTickets,
+        });
+      } else {
+        writeServiceTickets(nextServiceTickets);
+        syncEquipmentStatusForService(newTicket, 'new');
+      }
+    }
     return newTicket;
   }
 
@@ -788,16 +827,30 @@ function createBotOperations(deps) {
       throw new Error('Техника для операции не найдена');
     }
 
-    const classicRentalIds = new Set((readData('rentals') || []).map(item => String(item?.id || '').trim()).filter(Boolean));
-    const rentals = (readData('gantt_rentals') || []).filter(item =>
+    const classicRentals = readData('rentals') || [];
+    const classicRentalIds = new Set(classicRentals
+      .filter(item => !isTerminalRental(item))
+      .map(item => String(item?.id || '').trim())
+      .filter(Boolean));
+    const ganttRentals = readData('gantt_rentals') || [];
+    const linkedGanttRentals = ganttRentals.filter(item =>
       linkedRentalIds(item).some(id => classicRentalIds.has(id))
     );
-    const todayStr = new Date().toISOString().slice(0, 10);
     const now = nowIso();
-    const activeRental = rentals.find(r =>
+    const todayStr = now.slice(0, 10);
+    const activeRental = linkedGanttRentals.find(r =>
       r.equipmentId === equipment.id &&
       (r.status === 'active' || r.status === 'created')
     ) || null;
+    const activeClassicRental = classicRentals.find(rental => (
+      !isTerminalRental(rental)
+      && ['active', 'created'].includes(String(rental?.status || ''))
+      && rentalMatchesEquipment(rental, equipment, equipmentList)
+    )) || null;
+    const activeClassicId = linkedRentalIds(activeRental || {}).find(id => classicRentalIds.has(id))
+      || activeClassicRental?.id
+      || '';
+    const operationRentalContext = activeRental || activeClassicRental;
 
     // IMPORTANT: MAX shipping/receiving is a state-changing business flow. Keep equipment,
     // rental status, photos, and post-return service inspection in sync in this operation.
@@ -815,7 +868,8 @@ function createBotOperations(deps) {
       uploadedBy: authUser.userName,
       photos: flattenedPhotos,
       comment,
-      rentalId: activeRental?.id,
+      rentalId: activeClassicId || activeRental?.id,
+      ganttRentalId: activeRental?.id,
       source: 'bot',
       photoCategories: operation.photos,
       checklist: operation.checklist,
@@ -823,7 +877,6 @@ function createBotOperations(deps) {
       damageDescription: operation.type === 'receiving' ? operation.damageDescription : undefined,
       operationSessionId: operation.id,
     };
-    writeData('shipping_photos', [...events, newEvent]);
 
     const operationSummary = operation.type === 'receiving'
       ? `Выполнена приёмка с аренды через MAX. Моточасы: ${operation.hoursValue}. Повреждения: ${operation.damageDescription}`
@@ -843,8 +896,8 @@ function createBotOperations(deps) {
           ...base,
           hours: operation.hoursValue,
           status: 'rented',
-          currentClient: activeRental?.client || item.currentClient,
-          returnDate: activeRental?.endDate || item.returnDate,
+          currentClient: operationRentalContext?.client || item.currentClient,
+          returnDate: operationRentalContext?.endDate || operationRentalContext?.plannedReturnDate || item.returnDate,
         };
       }
 
@@ -861,9 +914,7 @@ function createBotOperations(deps) {
       existingList: equipmentList,
       nextList: nextEquipment,
     });
-    writeData('equipment', nextEquipment);
-
-    const nextRentals = rentals.map(rental => {
+    const nextRentals = ganttRentals.map(rental => {
       if (rental.id !== activeRental?.id) return rental;
       if (operation.type === 'shipping' && rental.status === 'created') {
         return {
@@ -888,46 +939,102 @@ function createBotOperations(deps) {
       }
       return rental;
     });
-    writeData('gantt_rentals', nextRentals);
-
     const createdServiceTicket = operation.type === 'receiving'
       ? createReturnInspectionTicketFromBot(
         equipment,
         authUser,
-        activeRental,
+        operationRentalContext,
         flattenedPhotos,
         operation.damageDescription,
+        { persist: false, rentalId: activeClassicId || undefined, ganttRentalId: activeRental?.id },
       )
       : null;
+    const nextClassicRentals = classicRentals.map(rental => {
+      if (String(rental?.id || '') !== String(activeClassicId || '')) return rental;
+      if (operation.type === 'shipping') {
+        return { ...rental, status: 'active' };
+      }
+      return {
+        ...rental,
+        actualReturnDate: todayStr,
+        status: 'closed',
+      };
+    });
+    const serviceTickets = readServiceTickets();
+    const nextServiceTickets = createdServiceTicket && !serviceTickets.some(ticket => ticket.id === createdServiceTicket.id)
+      ? [...serviceTickets, createdServiceTicket]
+      : serviceTickets;
+    const lifecycle = reconcileEquipmentRentalProjection({
+      equipmentList: nextEquipment,
+      rentals: nextClassicRentals,
+      ganttRentals: nextRentals,
+      serviceTickets: nextServiceTickets,
+      affectedEquipmentIds: new Set([String(equipment.id || '')]),
+      nowIso,
+      author: authUser.userName,
+      reason: operation.type === 'receiving' ? 'Приёмка техники через MAX' : 'Отгрузка техники через MAX',
+    });
+    assertProductionSmokeFixtureMutationAllowed({
+      action: `bot_${operation.type}`,
+      existingList: equipmentList,
+      nextList: lifecycle.nextEquipment,
+    });
 
-    const completedOperation = saveOperationSession({
+    const completedOperation = {
       ...operation,
       status: 'completed',
       completedAt: now,
       currentStep: 'review',
       updatedAt: now,
-    });
+    };
+    const sessions = getOperationSessions();
+    const nextSessions = sessions.some(item => item.id === completedOperation.id)
+      ? sessions.map(item => item.id === completedOperation.id ? completedOperation : item)
+      : [...sessions, completedOperation];
+    persistDataBatch([
+      { name: 'shipping_photos', value: [...events, newEvent] },
+      { name: 'equipment', value: lifecycle.nextEquipment },
+      { name: 'gantt_rentals', value: nextRentals },
+      ...(activeClassicId ? [{ name: 'rentals', value: nextClassicRentals }] : []),
+      ...(createdServiceTicket ? [{ name: 'service', value: nextServiceTickets }] : []),
+      { name: 'equipment_operation_sessions', value: nextSessions },
+    ]);
 
     return {
       operation: completedOperation,
       event: newEvent,
       activeRental,
+      activeClassicRental,
       createdServiceTicket,
     };
   }
 
   function saveBotShippingPhotoEvent(equipment, authUser, type, photoUrls, comment = '') {
     const events = readData('shipping_photos') || [];
-    const classicRentalIds = new Set((readData('rentals') || []).map(item => String(item?.id || '').trim()).filter(Boolean));
-    const rentals = (readData('gantt_rentals') || []).filter(item =>
+    const classicRentals = readData('rentals') || [];
+    const classicRentalIds = new Set(classicRentals
+      .filter(item => !isTerminalRental(item))
+      .map(item => String(item?.id || '').trim())
+      .filter(Boolean));
+    const ganttRentals = readData('gantt_rentals') || [];
+    const linkedGanttRentals = ganttRentals.filter(item =>
       linkedRentalIds(item).some(id => classicRentalIds.has(id))
     );
-    const todayStr = new Date().toISOString().slice(0, 10);
     const now = nowIso();
-    const activeRental = rentals.find(r =>
+    const todayStr = now.slice(0, 10);
+    const activeRental = linkedGanttRentals.find(r =>
       r.equipmentId === equipment.id &&
       (r.status === 'active' || r.status === 'created')
     ) || null;
+    const activeClassicRental = classicRentals.find(rental => (
+      !isTerminalRental(rental)
+      && ['active', 'created'].includes(String(rental?.status || ''))
+      && rentalMatchesEquipment(rental, equipment, readData('equipment') || [])
+    )) || null;
+    const activeClassicId = linkedRentalIds(activeRental || {}).find(id => classicRentalIds.has(id))
+      || activeClassicRental?.id
+      || '';
+    const operationRentalContext = activeRental || activeClassicRental;
 
     // IMPORTANT: legacy photo commands still update rental/equipment state. Keep this
     // path consistent with the full operation-session flow above.
@@ -939,10 +1046,10 @@ function createBotOperations(deps) {
       uploadedBy: authUser.userName,
       photos: photoUrls,
       comment: comment || undefined,
-      rentalId: activeRental?.id,
+      rentalId: activeClassicId || activeRental?.id,
+      ganttRentalId: activeRental?.id,
       source: 'bot',
     };
-    writeData('shipping_photos', [...events, newEvent]);
 
     const equipmentList = readData('equipment') || [];
     const nextEquipment = equipmentList.map(item => {
@@ -951,8 +1058,8 @@ function createBotOperations(deps) {
         return {
           ...item,
           status: 'rented',
-          currentClient: activeRental?.client || item.currentClient,
-          returnDate: activeRental?.endDate || item.returnDate,
+          currentClient: operationRentalContext?.client || item.currentClient,
+          returnDate: operationRentalContext?.endDate || operationRentalContext?.plannedReturnDate || item.returnDate,
         };
       }
       return {
@@ -967,9 +1074,7 @@ function createBotOperations(deps) {
       existingList: equipmentList,
       nextList: nextEquipment,
     });
-    writeData('equipment', nextEquipment);
-
-    const nextRentals = rentals.map(rental => {
+    const nextRentals = ganttRentals.map(rental => {
       if (rental.id !== activeRental?.id) return rental;
       if (type === 'shipping' && rental.status === 'created') {
         return {
@@ -994,15 +1099,50 @@ function createBotOperations(deps) {
       }
       return rental;
     });
-    writeData('gantt_rentals', nextRentals);
-
     const createdServiceTicket = type === 'receiving'
-      ? createReturnInspectionTicketFromBot(equipment, authUser, activeRental, photoUrls, comment)
+      ? createReturnInspectionTicketFromBot(equipment, authUser, operationRentalContext, photoUrls, comment, {
+          persist: false,
+          rentalId: activeClassicId || undefined,
+          ganttRentalId: activeRental?.id,
+        })
       : null;
+
+    const nextClassicRentals = classicRentals.map(rental => {
+      if (String(rental?.id || '') !== String(activeClassicId || '')) return rental;
+      if (type === 'shipping') return { ...rental, status: 'active' };
+      return { ...rental, actualReturnDate: todayStr, status: 'closed' };
+    });
+    const serviceTickets = readServiceTickets();
+    const nextServiceTickets = createdServiceTicket && !serviceTickets.some(ticket => ticket.id === createdServiceTicket.id)
+      ? [...serviceTickets, createdServiceTicket]
+      : serviceTickets;
+    const lifecycle = reconcileEquipmentRentalProjection({
+      equipmentList: nextEquipment,
+      rentals: nextClassicRentals,
+      ganttRentals: nextRentals,
+      serviceTickets: nextServiceTickets,
+      affectedEquipmentIds: new Set([String(equipment.id || '')]),
+      nowIso,
+      author: authUser.userName,
+      reason: type === 'receiving' ? 'Приёмка техники через MAX' : 'Отгрузка техники через MAX',
+    });
+    assertProductionSmokeFixtureMutationAllowed({
+      action: `bot_${type}`,
+      existingList: equipmentList,
+      nextList: lifecycle.nextEquipment,
+    });
+    persistDataBatch([
+      { name: 'shipping_photos', value: [...events, newEvent] },
+      { name: 'equipment', value: lifecycle.nextEquipment },
+      { name: 'gantt_rentals', value: nextRentals },
+      ...(activeClassicId ? [{ name: 'rentals', value: nextClassicRentals }] : []),
+      ...(createdServiceTicket ? [{ name: 'service', value: nextServiceTickets }] : []),
+    ]);
 
     return {
       event: newEvent,
       activeRental,
+      activeClassicRental,
       createdServiceTicket,
     };
   }

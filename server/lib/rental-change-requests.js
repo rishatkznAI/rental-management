@@ -23,6 +23,8 @@ const RENTAL_CHANGE_FIELD_LABELS = {
   deliveryAddress: 'Адрес доставки',
   deliveryTime: 'Время доставки',
   status: 'Статус аренды',
+  updSigned: 'Подписание УПД',
+  updDate: 'Дата подписания УПД',
   comments: 'Комментарий',
   documents: 'Документы',
   internalNotes: 'Внутренние заметки',
@@ -1470,7 +1472,12 @@ function ensureGanttRentalLink(ganttRental, rental, equipmentList = []) {
   }
   if (rental.managerId !== undefined) next.managerId = rental.managerId || '';
   if (rental.objectId !== undefined) next.objectId = rental.objectId || undefined;
+  if (rental.objectName !== undefined) next.objectName = rental.objectName || undefined;
+  if (rental.objectAddress !== undefined) next.objectAddress = rental.objectAddress || undefined;
+  if (rental.objectContactName !== undefined) next.objectContactName = rental.objectContactName || undefined;
+  if (rental.objectContactPhone !== undefined) next.objectContactPhone = rental.objectContactPhone || undefined;
   if (rental.contractId !== undefined) next.contractId = rental.contractId || undefined;
+  if (rental.contractNumber !== undefined) next.contractNumber = rental.contractNumber || undefined;
   if (rental.status !== undefined) next.status = rentalStatusToGanttStatus(rental.status);
   if (rental.price !== undefined) next.amount = Number(rental.price) || 0;
   if (rental.paymentStatus !== undefined) next.paymentStatus = rental.paymentStatus || next.paymentStatus;
@@ -1567,7 +1574,7 @@ function managerInitials(name = '') {
 }
 
 function rentalStatusToGanttStatus(status) {
-  if (status === 'closed') return 'closed';
+  if (['closed', 'returned', 'cancelled', 'canceled', 'completed'].includes(String(status || '').trim().toLowerCase())) return 'closed';
   if (status === 'active') return 'active';
   return 'created';
 }
@@ -1587,6 +1594,8 @@ function applyRentalFieldToGantt(ganttRental, field, value) {
   }
   if (field === 'manager') return { ...ganttRental, manager: value, managerInitials: managerInitials(value) };
   if (field === 'status') return { ...ganttRental, status: rentalStatusToGanttStatus(value) };
+  if (field === 'updSigned') return { ...ganttRental, updSigned: Boolean(value) };
+  if (field === 'updDate') return { ...ganttRental, updDate: value || undefined };
   if (field === 'price') return { ...ganttRental, amount: Number(value) || 0 };
   if (field === 'downtimeDays') return { ...ganttRental, downtimeDays: value };
   if (field === 'downtimeReason') return { ...ganttRental, downtimeReason: value };
@@ -1607,6 +1616,15 @@ function syncGanttRentalFields(ganttRental, previousRental, nextRental, author, 
   let nextGantt = ensureGanttRentalLink({ ...ganttRental }, nextRental || previousRental, equipmentList);
   const entries = [];
   for (const field of getChangedFields(previousRental, nextRental)) {
+    if (field === 'comments') {
+      const previousComment = String(previousRental?.comments || '').trim();
+      const nextComment = String(nextRental?.comments || '').trim();
+      const appendedComment = nextComment.startsWith(previousComment)
+        ? nextComment.slice(previousComment.length).trim()
+        : nextComment;
+      if (appendedComment) entries.push(createRentalHistoryEntry(author, appendedComment, 'comment'));
+      continue;
+    }
     const beforeGantt = nextGantt;
     nextGantt = applyRentalFieldToGantt(nextGantt, field, nextRental?.[field]);
     if (beforeGantt !== nextGantt) {

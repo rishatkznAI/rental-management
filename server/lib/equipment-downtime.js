@@ -170,11 +170,8 @@ function validateEquipmentDowntimePayload(input, context = {}) {
     return { ok: true, downtime };
   }
 
-  const allRentals = [
-    ...(Array.isArray(context.rentals) ? context.rentals : []),
-    ...(Array.isArray(context.ganttRentals) ? context.ganttRentals : []),
-  ];
-  const rentalConflict = findRentalConflict(downtime, allRentals, equipment);
+  const authoritativeRentals = Array.isArray(context.rentals) ? context.rentals : [];
+  const rentalConflict = findRentalConflict(downtime, authoritativeRentals, equipment);
   if (rentalConflict) {
     return {
       ok: false,

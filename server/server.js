@@ -1421,6 +1421,7 @@ apiRouter.use(registerCrmActivityRoutes({
 apiRouter.use(registerRentalRoutes({
   readData,
   writeData,
+  writeDataBatch,
   requireAuth,
   requireRead,
   validateRentalPayload,
@@ -1435,17 +1436,21 @@ apiRouter.use(registerRentalRoutes({
   canonicalizeRentalRelationForWrite: rental => canonicalizeRentalCounterpartyRelation(rental, { readData }),
   normalizeServiceTicketForWrite,
   botNotifications,
+  nowIso,
 }));
 
 apiRouter.use(registerRentalChangeRequestRoutes({
   readData,
   writeData,
+  writeDataBatch,
   requireAuth,
   requireRead,
   validateRentalPayload,
   generateId,
   idPrefixes: ID_PREFIXES,
   accessControl,
+  nowIso,
+  canonicalizeRentalRelationForWrite: rental => canonicalizeRentalCounterpartyRelation(rental, { readData }),
 }));
 
 registerFinanceRoutes(apiRouter, {
@@ -1510,6 +1515,7 @@ registerGsmRoutes(apiRouter, {
 registerDeliveryRoutes(apiRouter, {
   readData,
   writeData,
+  writeDataBatch,
   requireAuth,
   requireRead,
   requireWrite,
@@ -1529,6 +1535,7 @@ registerDeliveryRoutes(apiRouter, {
 const serviceCore = createServiceCore({
   readData,
   writeData,
+  writeDataBatch,
   nowIso,
   equipmentMatchesServiceTicket,
 });
@@ -1543,6 +1550,9 @@ const {
   findServiceTicketOr404,
   getMechanicReferenceByUser,
   applyServiceTicketCreationEffects,
+  persistServiceTicketUpdate,
+  persistServiceTicketDeletion,
+  persistServiceTicketBulkReplace,
   syncEquipmentStatusForService,
   updateServiceTicketStatus,
   returnServiceTicketForRevision,
@@ -1612,6 +1622,9 @@ apiRouter.use(registerCrudRoutes({
   generateId,
   nowIso,
   applyServiceTicketCreationEffects,
+  persistServiceTicketUpdate,
+  persistServiceTicketDeletion,
+  persistServiceTicketBulkReplace,
   accessControl,
   auditLog,
   serviceAuditLog,
@@ -1694,6 +1707,7 @@ const {
 } = createBotHandlers({
   readData,
   writeData,
+  writeDataBatch,
   verifyPassword,
   getBotUsers,
   saveBotUsers,
@@ -1712,6 +1726,7 @@ const {
   appendServiceLog,
   getMechanicReferenceByUser,
   syncEquipmentStatusForService,
+  applyServiceTicketCreationEffects,
   updateServiceTicketStatus,
   returnServiceTicketForRevision,
   resolveServiceTicketRevision,
@@ -1726,6 +1741,7 @@ const {
 const managerBotHandlers = createBotHandlers({
   readData,
   writeData,
+  writeDataBatch,
   verifyPassword,
   getBotUsers,
   saveBotUsers,
@@ -1744,6 +1760,7 @@ const managerBotHandlers = createBotHandlers({
   appendServiceLog,
   getMechanicReferenceByUser,
   syncEquipmentStatusForService,
+  applyServiceTicketCreationEffects,
   updateServiceTicketStatus,
   returnServiceTicketForRevision,
   resolveServiceTicketRevision,
@@ -1758,6 +1775,7 @@ const managerBotHandlers = createBotHandlers({
 const deliveryBotHandlers = createBotHandlers({
   readData,
   writeData,
+  writeDataBatch,
   verifyPassword,
   getBotUsers,
   saveBotUsers,
@@ -1776,6 +1794,7 @@ const deliveryBotHandlers = createBotHandlers({
   appendServiceLog,
   getMechanicReferenceByUser,
   syncEquipmentStatusForService,
+  applyServiceTicketCreationEffects,
   updateServiceTicketStatus,
   returnServiceTicketForRevision,
   resolveServiceTicketRevision,

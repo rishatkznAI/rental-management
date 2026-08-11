@@ -20,6 +20,7 @@ import { AppErrorState } from '../ui/AppErrorState';
 import { LiftLogo } from './LiftLogo';
 import { animatedPageClassName, isDemoPresentationMotionEnabled } from '../../lib/animations';
 import { APP_BRAND_NAME } from '../../lib/appBrand';
+import { buildRentalNewRoute } from '../../lib/rental-new-route.js';
 
 const SIDEBAR_STATE_STORAGE_KEY = 'rental-management:desktop-sidebar-state';
 
@@ -86,7 +87,7 @@ export function Layout() {
     requiredAction && !can(requiredAction.action, requiredAction.section),
   );
   const primaryCreatePath = useMemo(() => {
-    if (can('create', 'rentals')) return '/rentals/new';
+    if (can('create', 'rentals')) return buildRentalNewRoute();
     if (can('create', 'service')) return '/service/new';
     if (can('create', 'equipment')) return '/equipment/new';
     if (can('create', 'clients')) return '/clients/new';

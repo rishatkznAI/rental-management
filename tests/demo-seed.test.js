@@ -110,6 +110,8 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
   const users = readCollection(dbPath, 'users');
   const counterparties = readCollection(dbPath, 'counterparties');
   const clients = readCollection(dbPath, 'clients');
+  const clientObjects = readCollection(dbPath, 'client_objects');
+  const clientContracts = readCollection(dbPath, 'client_contracts');
   const equipment = readCollection(dbPath, 'equipment');
   const rentals = readCollection(dbPath, 'rentals');
   const service = readCollection(dbPath, 'service');
@@ -125,10 +127,15 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
     counterparty.id === client.counterpartyId
     && counterparty.roles.includes('customer')
   ))));
-  assert.ok(rentals.every(item => clients.some(client => (
-    client.id === item.clientId
-    && client.counterpartyId === item.counterpartyId
-  ))));
+  assert.equal(clientObjects.length, clients.length);
+  assert.ok(clientObjects.every(object => (
+    object.counterpartyId
+    && clients.some(client => client.id === object.clientId && client.counterpartyId === object.counterpartyId)
+  )));
+  assert.equal(clientContracts.length, clients.length);
+  assert.ok(rentals.every(item => clientObjects.some(object => object.id === item.objectId && object.clientId === item.clientId)));
+  assert.ok(rentals.every(item => clientContracts.some(contract => contract.id === item.contractId && contract.clientId === item.clientId)));
+  assert.ok(rentals.every(item => item.contractNumber === clientContracts.find(contract => contract.id === item.contractId)?.number));
   assert.ok(rentals.some(item => item.status === 'active'));
   assert.ok(rentals.some(item => item.status === 'closed'));
   assert.ok(rentals.some(item => item.status === 'created'));
@@ -180,6 +187,18 @@ test('demo seed produces presentation-grade dashboard KPI source data', () => {
   assert.equal(openServiceTickets.filter(ticket => ticket.status === 'waiting_parts').length, 14);
   assert.equal(unassignedDiagnostics.length, 11);
   assert.equal(openServiceTickets.filter(ticket => ticket.status === 'ready').length, 10);
+});
+
+test('demo rental dates stay relative to the supplied current date', () => {
+  const now = new Date('2031-02-14T09:00:00.000Z');
+  const data = buildDemoData({ now, env: { DEMO_DEFAULT_PASSWORD: 'unit-test-demo-password' } });
+  const activeRental = data.rentals.find(item => item.id === 'DEMO-RENTAL-001');
+  const futureRental = data.rentals.find(item => item.id === 'DEMO-RENTAL-004');
+
+  assert.equal(activeRental.startDate, '2031-02-08');
+  assert.equal(activeRental.plannedReturnDate, '2031-02-22');
+  assert.equal(futureRental.startDate, '2031-02-18');
+  assert.ok(data.client_contracts.every(contract => contract.number.includes('2031')));
 });
 
 test('demo seed is idempotent and does not touch non-demo records', () => withDemoDb((dbPath) => {

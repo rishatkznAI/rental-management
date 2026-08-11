@@ -5339,6 +5339,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
   const { data: classicRentals = [] } = useQuery({ queryKey: RENTAL_KEYS.all, queryFn: rentalsService.getAll });
   const { data: ganttRentals = [] } = useQuery({ queryKey: RENTAL_KEYS.gantt, queryFn: rentalsService.getGanttData });
   const { data: clients = [] } = useQuery({ queryKey: ['clients'], queryFn: clientsService.getAll });
+  const { data: users = [] } = useQuery<SystemUser[]>({ queryKey: ['users'], queryFn: usersService.getAll });
   const { data: serviceTickets = [] } = useQuery({ queryKey: SERVICE_TICKET_KEYS.all, queryFn: serviceTicketsService.getAll });
   const [message, setMessage] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isImporting, setIsImporting] = React.useState(false);
@@ -5501,6 +5502,9 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
         const status = GANTT_STATUS_IMPORT_MAP[(statusRaw || '').toLowerCase()] ?? 'created';
         const paymentStatus = PAYMENT_STATUS_IMPORT_MAP[(paymentStatusRaw || '').toLowerCase()] ?? 'unpaid';
         const amount = Number(amountRaw);
+        const managerCandidates = manager
+          ? users.filter(item => item.name.trim() === manager.trim())
+          : [];
 
         const clientCandidates = clientId
           ? clients.filter(item => item.id === clientId)
@@ -5543,6 +5547,20 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
             endDate,
             status: 'error',
             message: 'Не указаны стабильные ID объекта и договора; названия и номера не используются для установления связей',
+          };
+        }
+
+        if (manager && managerCandidates.length !== 1) {
+          return {
+            line,
+            client,
+            equipmentLabel: inventoryNumber || serialNumber || equipmentId || '—',
+            startDate,
+            endDate,
+            status: managerCandidates.length > 1 ? 'conflict' : 'error',
+            message: managerCandidates.length > 1
+              ? 'ФИО менеджера неоднозначно, исправьте пользователей или CSV'
+              : 'Менеджер не найден в справочнике пользователей',
           };
         }
 
@@ -5678,6 +5696,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           equipmentInv: equipmentCandidates[0].inventoryNumber,
           startDate,
           endDate,
+          managerId: managerCandidates[0]?.id,
           manager: manager || '',
           managerInitials: (manager || '').split(/\s+/).map(part => part[0] || '').join('').slice(0, 2).toUpperCase(),
           status,
@@ -5702,10 +5721,15 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           plannedReturnDate: endDate,
           actualReturnDate: undefined,
           equipment: [equipmentCandidates[0].inventoryNumber],
+          equipmentId: equipmentCandidates[0].id,
+          equipmentInv: equipmentCandidates[0].inventoryNumber,
+          inventoryNumber: equipmentCandidates[0].inventoryNumber,
+          serialNumber: equipmentCandidates[0].serialNumber,
           rate: rate || `${amount} ₽`,
           price: amount,
           discount: 0,
           deliveryAddress: '',
+          managerId: managerCandidates[0]?.id,
           manager: manager || '',
           status: RENTAL_STATUS_FROM_GANTT[status],
           comments: comment || undefined,
@@ -5735,7 +5759,7 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
     } finally {
       setIsImporting(false);
     }
-  }, [clients, equipment, ganttRentals, user?.name]);
+  }, [clients, equipment, ganttRentals, user?.name, users]);
 
   const applyRentalImport = React.useCallback(async () => {
     const validRows = rentalPreview.filter(item => item.status === 'ready' && item.classicPayload);
@@ -6482,7 +6506,6 @@ function DataResetSection() {
     try {
       await Promise.all([
         rentalsService.bulkReplace([]),
-        rentalsService.bulkReplaceGantt([]),
         Promise.all(deliveries.map(item => deliveriesService.delete(item.id))),
         serviceTicketsService.bulkReplace([]),
         clientsService.bulkReplace([]),

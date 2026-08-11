@@ -15,6 +15,7 @@ type AuthResponse = {
 
 type ClientRecord = {
   id: string;
+  counterpartyId: string;
   company: string;
   inn: string;
   contact: string;
@@ -44,6 +45,7 @@ type EquipmentRecord = {
 type RentalRecord = {
   id: string;
   client: string;
+  status: string;
 };
 
 type ServiceTicketRecord = {
@@ -82,6 +84,12 @@ type GanttRentalRecord = {
   equipmentInv: string;
   status: string;
 };
+
+function ganttProjectionStatusForCreatedRental(classicStatus: string) {
+  const normalized = String(classicStatus || '').trim().toLowerCase();
+  if (['closed', 'returned', 'cancelled', 'canceled', 'completed'].includes(normalized)) return 'closed';
+  return normalized === 'active' ? 'active' : 'created';
+}
 
 const API_BASE_URL = 'http://127.0.0.1:3000';
 
@@ -303,7 +311,6 @@ export async function createRentalPair(
   const amount = options.amount ?? 10000;
   const manager = options.manager ?? 'E2E';
   const status = options.status ?? 'new';
-  const ganttStatus = options.ganttStatus ?? status;
   const client = options.clientId ? { id: options.clientId } : await findClientByCompany(api, options.client);
   const relations = options.objectId && options.contractId
     ? { object: { id: options.objectId }, contract: { id: options.contractId } }
@@ -330,7 +337,15 @@ export async function createRentalPair(
     },
   });
   expect(rentalRes.ok(), await rentalRes.text()).toBeTruthy();
-  const rental = (await rentalRes.json()) as RentalRecord;
+  let rental = (await rentalRes.json()) as RentalRecord;
+
+  if (!['new', 'created'].includes(status) && rental.status !== status) {
+    const activationRes = await api.patch(`/api/rentals/${rental.id}`, {
+      data: { status },
+    });
+    expect(activationRes.ok(), await activationRes.text()).toBeTruthy();
+    rental = (await activationRes.json()) as RentalRecord;
+  }
 
   const ganttRes = await api.get('/api/gantt_rentals');
   expect(ganttRes.ok(), await ganttRes.text()).toBeTruthy();
@@ -340,12 +355,14 @@ export async function createRentalPair(
   );
   expect(gantt, `Expected linked gantt rental for rental ${rental.id}`).toBeTruthy();
 
-  if (ganttStatus !== status && gantt?.status !== ganttStatus) {
-    const patchRes = await api.patch(`/api/gantt_rentals/${gantt!.id}`, {
-      data: { status: ganttStatus },
-    });
-    expect(patchRes.ok(), await patchRes.text()).toBeTruthy();
+  const expectedProjectionStatus = ganttProjectionStatusForCreatedRental(rental.status);
+  if (options.ganttStatus !== undefined) {
+    expect(
+      options.ganttStatus,
+      `Explicit Gantt expectation must match canonical Classic status ${rental.status}`,
+    ).toBe(expectedProjectionStatus);
   }
+  expect(gantt?.status, `Expected canonical Gantt projection status for rental ${rental.id}`).toBe(expectedProjectionStatus);
 
   return { rental, ganttId: gantt!.id };
 }

@@ -11,6 +11,17 @@ const {
   normalizeClientRelationLinks,
 } = require('../lib/client-relations');
 const { normalizeRole } = require('../lib/role-groups');
+const {
+  syncGanttRentalFields,
+} = require('../lib/rental-change-requests');
+const { canonicalizeRentalPatch } = require('../lib/rental-data-integrity');
+const { validateRentalPayload } = require('../lib/rental-validation');
+const {
+  affectedEquipmentIdsForRentals,
+  reconcileEquipmentRentalProjection,
+  validateRentalLifecycleAvailability,
+  validateTerminalRentalTransition,
+} = require('../lib/rental-lifecycle');
 
 const {
   buildPaginatedResponse,
@@ -22,6 +33,9 @@ function registerDeliveryRoutes(router, deps) {
   const {
     readData,
     writeData,
+    writeDataBatch: persistDataBatch = entries => {
+      for (const entry of entries || []) writeData(entry.name, entry.value);
+    },
     requireAuth,
     requireRead,
     requireWrite,
@@ -423,6 +437,12 @@ function registerDeliveryRoutes(router, deps) {
 
   function normalizeDeliveryRentalLinks(delivery) {
     const { classicRental, ganttRental } = findLinkedRentalContext(delivery);
+    if (ganttRental && !classicRental) {
+      const error = new Error(`Gantt projection ${ganttRental.id} has no linked Classic Rental.`);
+      error.status = 409;
+      error.code = 'ORPHAN_GANTT_PROJECTION';
+      throw error;
+    }
     if (!classicRental && !ganttRental) return delivery;
     const source = classicRental || ganttRental;
     const equipment = source?.equipmentId
@@ -553,47 +573,16 @@ function registerDeliveryRoutes(router, deps) {
     }
   }
 
-  function syncLinkedRentals(delivery, author) {
+  function buildLinkedRentalSync(delivery, author) {
     const ganttRentals = readData('gantt_rentals') || [];
     const classicRentals = readData('rentals') || [];
+    const equipment = readData('equipment') || [];
     const today = new Date().toISOString().slice(0, 10);
 
     let ganttChanged = false;
     let classicChanged = false;
-
-    const nextGantt = ganttRentals.map((rental) => {
-      if (!delivery.ganttRentalId || rental.id !== delivery.ganttRentalId) return rental;
-
-      if (delivery.type === 'shipping') {
-        if (rental.startDate === delivery.transportDate) return rental;
-        ganttChanged = true;
-        const nextStatus = rental.status === 'returned' || rental.status === 'closed'
-          ? rental.status
-          : (delivery.transportDate <= today ? 'active' : 'created');
-        return appendGanttHistoryEntry(
-          {
-            ...rental,
-            startDate: delivery.transportDate,
-            manager: delivery.manager || rental.manager,
-            status: nextStatus,
-          },
-          `Назначена доставка на отгрузку: ${delivery.transportDate} (${delivery.origin} → ${delivery.destination})`,
-          author,
-        );
-      }
-
-      if (rental.endDate === delivery.transportDate) return rental;
-      ganttChanged = true;
-      return appendGanttHistoryEntry(
-        {
-          ...rental,
-          endDate: delivery.transportDate,
-          manager: delivery.manager || rental.manager,
-        },
-        `Назначена приёмка/возврат: ${delivery.transportDate} (${delivery.origin} → ${delivery.destination})`,
-        author,
-      );
-    });
+    const protectedClassicIds = new Set();
+    const protectedGanttIds = new Set();
 
     const nextClassic = classicRentals.map((rental) => {
       const deliveryClassicRentalId = delivery.classicRentalId || delivery.rentalId;
@@ -602,9 +591,13 @@ function registerDeliveryRoutes(router, deps) {
       if (delivery.type === 'shipping') {
         if (rental.startDate === delivery.transportDate && rental.deliveryAddress === delivery.destination) return rental;
         classicChanged = true;
+        const startDateChanged = rental.startDate !== delivery.transportDate;
+        if (startDateChanged) protectedClassicIds.add(String(rental.id || ''));
+        const canonical = startDateChanged
+          ? canonicalizeRentalPatch(rental, { startDate: delivery.transportDate }).rental
+          : rental;
         return {
-          ...rental,
-          startDate: delivery.transportDate,
+          ...canonical,
           deliveryAddress: delivery.destination || rental.deliveryAddress,
           manager: delivery.manager || rental.manager,
           status: rental.status === 'closed' ? rental.status : 'delivery',
@@ -617,9 +610,10 @@ function registerDeliveryRoutes(router, deps) {
 
       if (rental.plannedReturnDate === delivery.transportDate) return rental;
       classicChanged = true;
+      protectedClassicIds.add(String(rental.id || ''));
+      const canonical = canonicalizeRentalPatch(rental, { plannedReturnDate: delivery.transportDate }).rental;
       return {
-        ...rental,
-        plannedReturnDate: delivery.transportDate,
+        ...canonical,
         manager: delivery.manager || rental.manager,
         status: rental.status === 'closed' ? rental.status : 'return_planned',
         comments: appendClassicRentalComment(
@@ -629,8 +623,133 @@ function registerDeliveryRoutes(router, deps) {
       };
     });
 
-    if (ganttChanged) writeData('gantt_rentals', nextGantt);
-    if (classicChanged) writeData('rentals', nextClassic);
+    const previousClassicById = new Map(classicRentals.map(item => [String(item?.id || ''), item]));
+    const nextClassicById = new Map(nextClassic.map(item => [String(item?.id || ''), item]));
+    for (const rental of nextClassic) {
+      const previousRental = previousClassicById.get(String(rental?.id || '')) || null;
+      const terminalValidation = validateTerminalRentalTransition(previousRental, rental);
+      if (!terminalValidation.ok) {
+        const error = new Error(terminalValidation.error);
+        Object.assign(error, terminalValidation, { status: terminalValidation.status || 409 });
+        throw error;
+      }
+    }
+    const deliveryClassicRentalId = String(delivery.classicRentalId || delivery.rentalId || '');
+    const nextGantt = ganttRentals.map((rental) => {
+      const linkedIds = [rental.rentalId, rental.sourceRentalId, rental.originalRentalId]
+        .map(value => String(value || ''));
+      const isDeliveryGantt = Boolean(delivery.ganttRentalId && rental.id === delivery.ganttRentalId);
+      const isLinkedClassic = Boolean(deliveryClassicRentalId && linkedIds.includes(deliveryClassicRentalId));
+      if (!isDeliveryGantt && !isLinkedClassic) return rental;
+
+      const linkedClassicId = linkedIds.find(id => nextClassicById.has(id)) || deliveryClassicRentalId;
+      const previousClassic = previousClassicById.get(linkedClassicId) || null;
+      const updatedClassic = nextClassicById.get(linkedClassicId) || null;
+      if (previousClassic && updatedClassic) {
+        const rentalForPlanner = { ...updatedClassic, status: previousClassic.status };
+        let synced = syncGanttRentalFields(rental, previousClassic, rentalForPlanner, author, equipment);
+        if (delivery.type === 'shipping') {
+          const nextStatus = rental.status === 'returned' || rental.status === 'closed'
+            ? rental.status
+            : (delivery.transportDate <= today ? 'active' : 'created');
+          synced = { ...synced, status: nextStatus };
+        } else {
+          synced = { ...synced, status: rental.status };
+        }
+        const linked = synced;
+        if (JSON.stringify(linked) !== JSON.stringify(rental)) ganttChanged = true;
+        if (protectedClassicIds.has(String(updatedClassic.id || ''))) {
+          protectedGanttIds.add(String(rental.id || ''));
+        }
+        return linked;
+      }
+
+      if (delivery.type === 'shipping') {
+        if (rental.startDate === delivery.transportDate) return rental;
+        ganttChanged = true;
+        protectedGanttIds.add(String(rental.id || ''));
+        const nextStatus = rental.status === 'returned' || rental.status === 'closed'
+          ? rental.status
+          : (delivery.transportDate <= today ? 'active' : 'created');
+        return appendGanttHistoryEntry(
+          { ...rental, startDate: delivery.transportDate, manager: delivery.manager || rental.manager, status: nextStatus },
+          `Назначена доставка на отгрузку: ${delivery.transportDate} (${delivery.origin} → ${delivery.destination})`,
+          author,
+        );
+      }
+      if (rental.endDate === delivery.transportDate) return rental;
+      ganttChanged = true;
+      protectedGanttIds.add(String(rental.id || ''));
+      return appendGanttHistoryEntry(
+        { ...rental, endDate: delivery.transportDate, manager: delivery.manager || rental.manager },
+        `Назначена приёмка/возврат: ${delivery.transportDate} (${delivery.origin} → ${delivery.destination})`,
+        author,
+      );
+    });
+
+    for (const [index, rental] of nextClassic.entries()) {
+      if (rental === classicRentals[index] || !protectedClassicIds.has(String(rental.id || ''))) continue;
+      const validation = validateRentalPayload('rentals', rental, nextClassic, equipment, rental.id);
+      if (!validation.ok) {
+        const error = new Error(validation.error);
+        Object.assign(error, validation, { status: validation.status || 400 });
+        throw error;
+      }
+      const lifecycleValidation = validateRentalLifecycleAvailability({
+        rental,
+        equipmentList: equipment,
+        serviceTickets: readData('service') || [],
+        equipmentDowntimes: readData('equipment_downtimes') || [],
+      });
+      if (!lifecycleValidation.ok) {
+        const error = new Error(lifecycleValidation.error);
+        Object.assign(error, lifecycleValidation, { status: lifecycleValidation.status || 409 });
+        throw error;
+      }
+    }
+    for (const [index, rental] of nextGantt.entries()) {
+      if (rental === ganttRentals[index] || !protectedGanttIds.has(String(rental.id || ''))) continue;
+      const validation = validateRentalPayload('gantt_rentals', rental, nextGantt, equipment, rental.id);
+      if (!validation.ok) {
+        const error = new Error(validation.error);
+        Object.assign(error, validation, { status: validation.status || 400 });
+        throw error;
+      }
+    }
+
+    const affectedRentals = [
+      ...classicRentals.filter((item, index) => item !== nextClassic[index]),
+      ...nextClassic.filter((item, index) => item !== classicRentals[index]),
+    ];
+    const lifecycle = reconcileEquipmentRentalProjection({
+      equipmentList: equipment,
+      rentals: nextClassic,
+      ganttRentals: nextGantt,
+      serviceTickets: readData('service') || [],
+      affectedEquipmentIds: affectedEquipmentIdsForRentals(affectedRentals, equipment),
+      nowIso,
+      author,
+      reason: `Изменение дат аренды доставкой ${delivery.id}`,
+    });
+
+    return {
+      classicChanged,
+      ganttChanged,
+      nextClassic,
+      nextGantt,
+      equipmentChanged: lifecycle.changed,
+      nextEquipment: lifecycle.nextEquipment,
+    };
+  }
+
+  function persistDeliveryBatch(entries) {
+    try {
+      persistDataBatch(entries);
+    } catch (error) {
+      const persistenceError = new Error(error?.message || 'Не удалось сохранить доставку и связанную аренду');
+      Object.assign(persistenceError, error, { status: 500 });
+      throw persistenceError;
+    }
   }
 
   function listRawCarrierConnections() {
@@ -1068,12 +1187,17 @@ function registerDeliveryRoutes(router, deps) {
         };
       }
 
-      syncLinkedRentals(delivery, author);
+      const linkedRentalSync = buildLinkedRentalSync(delivery, author);
       delivery = await trySendToCarrier(delivery);
 
-      const deliveries = readData('deliveries') || [];
+      const deliveries = [...(readData('deliveries') || [])];
       deliveries.push(delivery);
-      writeData('deliveries', deliveries);
+      persistDeliveryBatch([
+        ...(linkedRentalSync.classicChanged ? [{ name: 'rentals', value: linkedRentalSync.nextClassic }] : []),
+        ...(linkedRentalSync.ganttChanged ? [{ name: 'gantt_rentals', value: linkedRentalSync.nextGantt }] : []),
+        ...(linkedRentalSync.equipmentChanged ? [{ name: 'equipment', value: linkedRentalSync.nextEquipment }] : []),
+        { name: 'deliveries', value: deliveries },
+      ]);
       auditLog?.(req, {
         action: 'deliveries.create',
         entityType: 'deliveries',
@@ -1085,13 +1209,19 @@ function registerDeliveryRoutes(router, deps) {
       );
       return res.status(201).json(delivery);
     } catch (error) {
-      return res.status(400).json({ ok: false, error: error.message });
+      return res.status(error?.status || 400).json({
+        ok: false,
+        code: error?.code,
+        error: error.message,
+        field: error?.field,
+        fieldErrors: error?.fieldErrors,
+      });
     }
   });
 
   router.patch('/deliveries/:id', requireAuth, requireWrite('deliveries'), async (req, res) => {
     try {
-      const deliveries = readData('deliveries') || [];
+      const deliveries = [...(readData('deliveries') || [])];
       const idx = deliveries.findIndex((item) => item.id === req.params.id);
       if (idx === -1) {
         return res.status(404).json({ ok: false, error: 'Доставка не найдена' });
@@ -1149,12 +1279,17 @@ function registerDeliveryRoutes(router, deps) {
         delivery.clientPaymentVerifiedAt = null;
       }
 
-      syncLinkedRentals(delivery, author);
+      const linkedRentalSync = buildLinkedRentalSync(delivery, author);
       if (shouldSendAfterDeliveryUpdate(current, delivery, safeBody)) {
         delivery = await trySendToCarrier(delivery);
       }
       deliveries[idx] = delivery;
-      writeData('deliveries', deliveries);
+      persistDeliveryBatch([
+        ...(linkedRentalSync.classicChanged ? [{ name: 'rentals', value: linkedRentalSync.nextClassic }] : []),
+        ...(linkedRentalSync.ganttChanged ? [{ name: 'gantt_rentals', value: linkedRentalSync.nextGantt }] : []),
+        ...(linkedRentalSync.equipmentChanged ? [{ name: 'equipment', value: linkedRentalSync.nextEquipment }] : []),
+        { name: 'deliveries', value: deliveries },
+      ]);
       auditLog?.(req, {
         action: 'deliveries.update',
         entityType: 'deliveries',
@@ -1167,7 +1302,13 @@ function registerDeliveryRoutes(router, deps) {
       );
       return res.json(delivery);
     } catch (error) {
-      return res.status(400).json({ ok: false, error: error.message });
+      return res.status(error?.status || 400).json({
+        ok: false,
+        code: error?.code,
+        error: error.message,
+        field: error?.field,
+        fieldErrors: error?.fieldErrors,
+      });
     }
   });
 

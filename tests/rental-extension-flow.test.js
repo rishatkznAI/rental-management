@@ -235,6 +235,27 @@ test('rental extension without conflict applies and synchronizes classic and gan
   });
 });
 
+test('rental extension uses Classic authority over stale and orphan Gantt rows', async () => {
+  const { app, state } = createApp();
+  state.rentals = state.rentals.filter(item => item.id !== 'R-conflict');
+  state.gantt_rentals.find(item => item.id === 'GR-1').status = 'closed';
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'admin-token', {
+      newPlannedReturnDate: DATES.extensionEnd,
+      reason: 'Classic rental remains active',
+      confirmedByClient: true,
+      invoiceSentToClient: true,
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.rental.status, 'active');
+    assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, DATES.extensionEnd);
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').status, 'active');
+    assert.equal(state.gantt_rentals.find(item => item.id === 'GR-conflict').rentalId, 'R-conflict');
+  });
+});
+
 test('rental extension requires invoice sent confirmation before applying dates', async () => {
   const { app, state } = createApp();
   state.rentals = state.rentals.filter(item => item.id !== 'R-conflict');
@@ -389,9 +410,9 @@ test('rental date extension is rejected through generic patch endpoints', async 
       headers: { 'content-type': 'application/json', authorization: 'Bearer admin-token' },
       body: JSON.stringify({ endDate: DATES.extensionEnd }),
     });
-    assert.equal(ganttPatch.status, 400);
+    assert.equal(ganttPatch.status, 409);
     const ganttBody = await ganttPatch.json();
-    assert.match(ganttBody.error, /\/extend/);
+    assert.equal(ganttBody.code, 'GANTT_PROJECTION_READ_ONLY');
 
     assert.equal(state.rentals.find(item => item.id === 'R-1').plannedReturnDate, DATES.rentalEnd);
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').endDate, DATES.rentalEnd);

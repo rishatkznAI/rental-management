@@ -61,12 +61,16 @@ function createState() {
   };
 }
 
-function createApp(state = createState()) {
+function createApp(state = createState(), options = {}) {
   const app = express();
   app.use(express.json());
   const apiRouter = express.Router();
   const readData = name => state[name] || [];
   const writeData = (name, value) => { state[name] = value; };
+  const writeDataBatch = entries => {
+    if (options.failBatch) throw new Error('Injected delivery batch failure');
+    for (const entry of entries || []) state[entry.name] = entry.value;
+  };
   const accessControl = createAccessControl({ readData });
   let idCounter = 0;
 
@@ -80,6 +84,7 @@ function createApp(state = createState()) {
   const deps = {
     readData,
     writeData,
+    writeDataBatch,
     requireAuth,
     requireRead: () => (_req, _res, next) => next(),
     requireWrite: () => (_req, _res, next) => next(),
@@ -116,17 +121,18 @@ async function withServer(app, fn) {
   }
 }
 
-async function request(baseUrl, method, path, body) {
+async function request(baseUrl, method, path, body, extraHeaders = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       authorization: 'Bearer admin-token',
       'content-type': 'application/json',
+      ...extraHeaders,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
-  return { status: response.status, body: text ? JSON.parse(text) : null };
+  return { status: response.status, body: text ? JSON.parse(text) : null, headers: response.headers };
 }
 
 function rentalPayload(overrides = {}) {
@@ -160,6 +166,10 @@ test('creating a client rental creates a linked planner row with stable ids', as
     assert.equal(response.status, 201);
     assert.equal(response.body.clientId, 'C-1');
     assert.equal(response.body.equipmentId, 'EQ-1');
+    assert.equal(response.body.equipmentDetails.inventoryNumber, 'INV-1');
+    assert.equal(response.body.equipmentDetails.serialNumber, 'SN-1');
+    assert.equal(response.body.objectName, 'Склад');
+    assert.equal(response.body.contractNumber, 'Д-1');
     assert.equal(state.gantt_rentals.length, 1);
     assert.equal(state.gantt_rentals[0].rentalId, response.body.id);
     assert.equal(state.gantt_rentals[0].clientId, 'C-1');
@@ -168,16 +178,101 @@ test('creating a client rental creates a linked planner row with stable ids', as
   });
 });
 
-test('created rental blocks overlapping rental without mutating equipment through generic patch', async () => {
+test('concurrent exact rental creates replay one idempotent result without duplicating lifecycle state', async () => {
+  const { app, state } = createApp();
+  const headers = { 'Idempotency-Key': 'rental-retry-0001' };
+
+  await withServer(app, async baseUrl => {
+    const responses = await Promise.all([
+      request(baseUrl, 'POST', '/api/rentals', rentalPayload(), headers),
+      request(baseUrl, 'POST', '/api/rentals', rentalPayload(), headers),
+    ]);
+    const first = responses.find(response => response.status === 201);
+    const replay = responses.find(response => response.status === 200);
+
+    assert.ok(first);
+    assert.ok(replay);
+    assert.equal(replay.body.id, first.body.id);
+    assert.equal(replay.headers.get('idempotency-replayed'), 'true');
+    assert.equal(state.rentals.length, 1);
+    assert.equal(state.gantt_rentals.length, 1);
+    assert.equal(state.equipment[0].history.length, 1);
+    assert.equal(state.rental_create_idempotency.length, 1);
+    assert.equal(state.rental_create_idempotency[0].rentalId, first.body.id);
+  });
+});
+
+test('rental create rejects a changed payload under the same idempotency key', async () => {
+  const { app, state } = createApp();
+  const headers = { 'Idempotency-Key': 'rental-retry-0002' };
+
+  await withServer(app, async baseUrl => {
+    const first = await request(baseUrl, 'POST', '/api/rentals', rentalPayload(), headers);
+    const mismatched = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({
+      comments: 'changed logical payload',
+    }), headers);
+
+    assert.equal(first.status, 201);
+    assert.equal(mismatched.status, 409);
+    assert.equal(mismatched.body.code, 'IDEMPOTENCY_KEY_REUSED');
+    assert.equal(state.rentals.length, 1);
+    assert.equal(state.gantt_rentals.length, 1);
+    assert.equal(state.rental_create_idempotency.length, 1);
+  });
+});
+
+test('paginated rentals include stable equipment and relation display snapshots', async () => {
+  const { app } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(created.status, 201);
+
+    const page = await request(baseUrl, 'GET', '/api/rentals?paginated=true&page=1&pageSize=25');
+    assert.equal(page.status, 200);
+    assert.equal(page.body.items.length, 1);
+    assert.equal(page.body.items[0].equipmentId, 'EQ-1');
+    assert.equal(page.body.items[0].equipmentDetails.model, 'Lift 1');
+    assert.equal(page.body.items[0].objectName, 'Склад');
+    assert.equal(page.body.items[0].contractNumber, 'Д-1');
+  });
+});
+
+test('rental creation requires and records acknowledgement for client credit risk', async () => {
+  const state = createState();
+  state.clients[0].creditLimit = 50000;
+  state.clients[0].debt = 75000;
+  const { app } = createApp(state);
+
+  await withServer(app, async baseUrl => {
+    const blocked = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.code, 'CLIENT_CREDIT_RISK_ACKNOWLEDGEMENT_REQUIRED');
+    assert.equal(blocked.body.risk.exceededLimit, true);
+    assert.equal(state.rentals.length, 0);
+
+    const confirmed = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({
+      creditRiskAcknowledged: true,
+    }));
+    assert.equal(confirmed.status, 201);
+    assert.equal(confirmed.body.creditRiskSnapshot.exceededLimit, true);
+    assert.equal(confirmed.body.creditRiskAcknowledgedByUserId, 'U-admin');
+    assert.ok(confirmed.body.creditRiskAcknowledgedAt);
+    assert.equal(state.rentals[0].creditRiskAcknowledged, undefined);
+  });
+});
+
+test('created future rental atomically reserves equipment and blocks overlap', async () => {
   const { app, state } = createApp();
 
   await withServer(app, async baseUrl => {
     const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
 
     assert.equal(created.status, 201);
-    assert.equal(state.equipment.find(item => item.id === 'EQ-1').status, 'available');
-    assert.equal(state.equipment.find(item => item.id === 'EQ-1').currentClient, undefined);
-    assert.equal(state.equipment.find(item => item.id === 'EQ-1').returnDate, undefined);
+    assert.equal(created.body.status, 'created');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-1').status, 'reserved');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-1').currentClient, 'ООО Ромашка');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-1').returnDate, '2026-05-20');
 
     const plannerRows = await request(baseUrl, 'GET', '/api/gantt_rentals');
     assert.equal(plannerRows.status, 200);
@@ -191,13 +286,37 @@ test('created rental blocks overlapping rental without mutating equipment throug
     }));
 
     assert.equal(overlapping.status, 409);
+    assert.equal(overlapping.body.code, 'EQUIPMENT_AVAILABILITY_CONFLICT');
+    assert.equal(overlapping.body.conflict.rentalId, created.body.id);
+    assert.equal(overlapping.body.conflict.equipmentId, 'EQ-1');
+    assert.equal(overlapping.body.conflict.endDate, '2026-05-20');
     assert.match(overlapping.body.error, /Техника уже занята/);
     assert.equal(state.rentals.length, 1);
     assert.equal(state.gantt_rentals.length, 1);
   });
 });
 
-test('cannot create rental-type gantt row without an existing rental link', async () => {
+test('two concurrent rental creators produce one booking and one recoverable conflict', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const [first, second] = await Promise.all([
+      request(baseUrl, 'POST', '/api/rentals', rentalPayload({ client: 'Первый оператор' })),
+      request(baseUrl, 'POST', '/api/rentals', rentalPayload({ client: 'Второй оператор' })),
+    ]);
+    const created = [first, second].find(result => result.status === 201);
+    const conflicted = [first, second].find(result => result.status === 409);
+
+    assert.ok(created);
+    assert.ok(conflicted);
+    assert.equal(conflicted.body.code, 'EQUIPMENT_AVAILABILITY_CONFLICT');
+    assert.equal(conflicted.body.conflict.rentalId, created.body.id);
+    assert.equal(state.rentals.length, 1);
+    assert.equal(state.gantt_rentals.length, 1);
+  });
+});
+
+test('direct Gantt projection creation is read-only regardless of rental link', async () => {
   const { app } = createApp();
 
   await withServer(app, async baseUrl => {
@@ -210,8 +329,8 @@ test('cannot create rental-type gantt row without an existing rental link', asyn
       endDate: '2026-05-20',
       status: 'active',
     });
-    assert.equal(missingLink.status, 400);
-    assert.equal(missingLink.body.error, 'GANTT_RENTAL_WITHOUT_RENTAL');
+    assert.equal(missingLink.status, 409);
+    assert.equal(missingLink.body.code, 'GANTT_PROJECTION_READ_ONLY');
 
     const brokenLink = await request(baseUrl, 'POST', '/api/gantt_rentals', {
       rentalId: 'R-missing',
@@ -223,12 +342,12 @@ test('cannot create rental-type gantt row without an existing rental link', asyn
       endDate: '2026-05-20',
       status: 'active',
     });
-    assert.equal(brokenLink.status, 400);
-    assert.equal(brokenLink.body.error, 'GANTT_RENTAL_WITHOUT_RENTAL');
+    assert.equal(brokenLink.status, 409);
+    assert.equal(brokenLink.body.code, 'GANTT_PROJECTION_READ_ONLY');
   });
 });
 
-test('cannot create duplicate linked gantt row for the same rental', async () => {
+test('cannot create a linked Gantt projection outside the Rental lifecycle operation', async () => {
   const { app, state } = createApp();
 
   await withServer(app, async baseUrl => {
@@ -248,12 +367,12 @@ test('cannot create duplicate linked gantt row for the same rental', async () =>
     });
 
     assert.equal(duplicate.status, 409);
-    assert.equal(duplicate.body.error, 'DUPLICATE_GANTT_RENTAL_LINK');
+    assert.equal(duplicate.body.code, 'GANTT_PROJECTION_READ_ONLY');
     assert.equal(state.gantt_rentals.length, 1);
   });
 });
 
-test('cannot update or bulk sync gantt rows into rental-type orphans', async () => {
+test('direct Gantt projection patch and bulk sync are read-only', async () => {
   const { app, state } = createApp();
 
   await withServer(app, async baseUrl => {
@@ -267,8 +386,8 @@ test('cannot update or bulk sync gantt rows into rental-type orphans', async () 
       sourceRentalId: '',
       originalRentalId: '',
     });
-    assert.equal(orphanPatch.status, 400);
-    assert.equal(orphanPatch.body.error, 'GANTT_RENTAL_WITHOUT_RENTAL');
+    assert.equal(orphanPatch.status, 409);
+    assert.equal(orphanPatch.body.code, 'GANTT_PROJECTION_READ_ONLY');
 
     const bulk = await request(baseUrl, 'PUT', '/api/gantt_rentals', [
       {
@@ -278,12 +397,35 @@ test('cannot update or bulk sync gantt rows into rental-type orphans', async () 
         originalRentalId: '',
       },
     ]);
-    assert.equal(bulk.status, 400);
-    assert.equal(bulk.body.error, 'GANTT_RENTAL_WITHOUT_RENTAL');
+    assert.equal(bulk.status, 409);
+    assert.equal(bulk.body.code, 'GANTT_PROJECTION_READ_ONLY');
   });
 });
 
-test('standalone planner rows require explicit non-rental type and do not need rental link', async () => {
+test('linked Gantt contractual fields cannot bypass the classic rental authority', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(created.status, 201);
+    const gantt = state.gantt_rentals[0];
+    const before = structuredClone({ rental: state.rentals[0], gantt, equipment: state.equipment });
+
+    const response = await request(baseUrl, 'PATCH', `/api/gantt_rentals/${gantt.id}`, {
+      equipmentId: 'EQ-2',
+      startDate: '2026-05-11',
+      endDate: '2026-05-19',
+    });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'GANTT_PROJECTION_READ_ONLY');
+    assert.deepEqual(state.rentals[0], before.rental);
+    assert.deepEqual(state.gantt_rentals[0], before.gantt);
+    assert.deepEqual(state.equipment, before.equipment);
+  });
+});
+
+test('standalone planning rows cannot share the gantt_rentals projection record type', async () => {
   const { app } = createApp();
 
   await withServer(app, async baseUrl => {
@@ -297,8 +439,9 @@ test('standalone planner rows require explicit non-rental type and do not need r
       endDate: '2026-05-10',
       status: 'maintenance',
     });
-    assert.equal(response.status, 201);
-    assert.equal(response.body.sourceType, 'maintenance');
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'GANTT_PROJECTION_READ_ONLY');
+    assert.match(response.body.error, /planner_items/);
   });
 });
 
@@ -385,7 +528,12 @@ test('same-client rentals keep their own equipment links', async () => {
 
   await withServer(app, async baseUrl => {
     const first = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({ equipmentId: 'EQ-1', equipmentInv: 'INV-1', equipment: ['INV-1'] }));
-    const second = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({ equipmentId: 'EQ-2', equipmentInv: 'INV-2', equipment: ['INV-2'] }));
+    const second = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({
+      equipmentId: 'EQ-2',
+      equipmentInv: 'INV-2',
+      equipment: ['INV-2'],
+      creditRiskAcknowledged: true,
+    }));
 
     assert.equal(first.status, 201);
     assert.equal(second.status, 201);
@@ -417,6 +565,232 @@ test('editing rental dates and equipment updates linked planner row', async () =
   });
 });
 
+test('Stage H patch reconciles old and new equipment projections and canonical snapshots', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(created.status, 201);
+
+    const reassigned = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
+      equipmentId: 'EQ-2',
+      equipmentInv: 'FORGED-INV',
+      inventoryNumber: 'FORGED-INV',
+      serialNumber: 'FORGED-SERIAL',
+      equipment: ['FORGED-INV'],
+    });
+
+    assert.equal(reassigned.status, 200);
+    assert.equal(reassigned.body.equipmentId, 'EQ-2');
+    assert.equal(reassigned.body.equipmentInv, 'INV-2');
+    assert.equal(reassigned.body.serialNumber, 'SN-2');
+    assert.deepEqual(reassigned.body.equipment, ['INV-2']);
+    assert.equal(state.gantt_rentals[0].equipmentId, 'EQ-2');
+    assert.equal(state.gantt_rentals[0].equipmentInv, 'INV-2');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-1').status, 'available');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-1').currentClient, undefined);
+    assert.equal(state.equipment.find(item => item.id === 'EQ-2').status, 'reserved');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-2').currentClient, 'ООО Ромашка');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-2').returnDate, '2026-05-20');
+
+    const shortened = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
+      plannedReturnDate: '2026-05-18',
+    });
+    assert.equal(shortened.status, 200);
+    assert.equal(state.gantt_rentals[0].endDate, '2026-05-18');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-2').returnDate, '2026-05-18');
+
+    const extended = await request(baseUrl, 'POST', `/api/rentals/${created.body.id}/extend`, {
+      newEndDate: '2026-08-24',
+      reason: 'Клиент продлил работы',
+      confirmedByClient: true,
+      invoiceSentToClient: true,
+    });
+    assert.equal(extended.status, 200, JSON.stringify(extended.body));
+    assert.equal(state.gantt_rentals[0].endDate, '2026-08-24');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-2').returnDate, '2026-08-24');
+  });
+});
+
+test('Stage H reassignment rejects service, downtime and inactive targets without partial writes', async () => {
+  for (const scenario of ['service', 'downtime', 'inactive']) {
+    const state = createState();
+    const { app } = createApp(state);
+
+    await withServer(app, async baseUrl => {
+      const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+      assert.equal(created.status, 201);
+      if (scenario === 'service') {
+        state.service.push({ id: 'S-block', equipmentId: 'EQ-2', status: 'in_progress' });
+      } else if (scenario === 'downtime') {
+        state.equipment_downtimes = [{
+          id: 'DT-block',
+          equipmentId: 'EQ-2',
+          startDate: '2026-05-12',
+          endDate: '2026-05-14',
+          status: 'active',
+        }];
+      } else {
+        state.equipment[1] = { ...state.equipment[1], status: 'inactive', activeInFleet: false };
+      }
+      const before = structuredClone({
+        rentals: state.rentals,
+        gantt: state.gantt_rentals,
+        equipment: state.equipment,
+      });
+
+      const response = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
+        equipmentId: 'EQ-2',
+      });
+
+      assert.equal(response.status, 409, scenario);
+      assert.match(response.body.code, /RENTAL_EQUIPMENT_(IN_SERVICE|DOWNTIME_CONFLICT|INACTIVE)/);
+      assert.deepEqual(state.rentals, before.rentals);
+      assert.deepEqual(state.gantt_rentals, before.gantt);
+      assert.deepEqual(state.equipment, before.equipment);
+    });
+  }
+});
+
+test('Stage H rental patch batch failure rolls back classic, planner and both equipment rows', async () => {
+  const options = { failBatch: false };
+  const { app, state } = createApp(createState(), options);
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(created.status, 201);
+    const before = structuredClone({
+      rentals: state.rentals,
+      gantt: state.gantt_rentals,
+      equipment: state.equipment,
+    });
+    options.failBatch = true;
+
+    const response = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
+      equipmentId: 'EQ-2',
+      plannedReturnDate: '2026-05-18',
+    });
+
+    assert.equal(response.status, 500);
+    assert.deepEqual(state.rentals, before.rentals);
+    assert.deepEqual(state.gantt_rentals, before.gantt);
+    assert.deepEqual(state.equipment, before.equipment);
+  });
+});
+
+test('Stage H delete cascades planner row, retains history and frees equipment atomically', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(created.status, 201);
+    state.payments.push({ id: 'P-history', rentalId: created.body.id, amount: 1000 });
+    state.documents.push({ id: 'D-history', rentalId: created.body.id, type: 'act' });
+
+    const linkedGanttDelete = await request(baseUrl, 'DELETE', `/api/gantt_rentals/${state.gantt_rentals[0].id}`);
+    assert.equal(linkedGanttDelete.status, 409);
+    assert.equal(linkedGanttDelete.body.code, 'GANTT_PROJECTION_READ_ONLY');
+
+    const deleted = await request(baseUrl, 'DELETE', `/api/rentals/${created.body.id}`);
+    assert.equal(deleted.status, 200);
+    assert.equal(deleted.body.cascadedGanttCount, 1);
+    assert.deepEqual(deleted.body.retainedHistory, { payments: 1, documents: 1, service: 0, deliveries: 0 });
+    assert.equal(state.rentals.length, 0);
+    assert.equal(state.gantt_rentals.length, 0);
+    assert.equal(state.equipment[0].status, 'available');
+    assert.equal(state.equipment[0].currentClient, undefined);
+    assert.equal(state.payments.length, 1);
+    assert.equal(state.documents.length, 1);
+
+    const repeated = await request(baseUrl, 'DELETE', `/api/rentals/${created.body.id}`);
+    assert.equal(repeated.status, 404);
+  });
+});
+
+test('Stage H delete and bulk removal honor dependency blockers and rollback', async () => {
+  const options = { failBatch: false };
+  const { app, state } = createApp(createState(), options);
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(created.status, 201);
+    state.deliveries.push({ id: 'DL-active', rentalId: created.body.id, status: 'planned' });
+    const blocked = await request(baseUrl, 'DELETE', `/api/rentals/${created.body.id}`);
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.code, 'RENTAL_DELETE_ACTIVE_DELIVERY');
+    assert.equal(state.rentals.length, 1);
+
+    state.deliveries[0].status = 'completed';
+    const before = structuredClone({
+      rentals: state.rentals,
+      gantt: state.gantt_rentals,
+      equipment: state.equipment,
+    });
+    options.failBatch = true;
+    const failedDelete = await request(baseUrl, 'DELETE', `/api/rentals/${created.body.id}`);
+    assert.equal(failedDelete.status, 500);
+    assert.equal(failedDelete.body.code, 'RENTAL_DELETE_PERSISTENCE_FAILED');
+    assert.deepEqual(state.rentals, before.rentals);
+    assert.deepEqual(state.gantt_rentals, before.gantt);
+    assert.deepEqual(state.equipment, before.equipment);
+
+    const failedBulk = await request(baseUrl, 'PUT', '/api/rentals', []);
+    assert.equal(failedBulk.status, 500);
+    assert.equal(failedBulk.body.code, 'RENTAL_BULK_REPLACE_PERSISTENCE_FAILED');
+    assert.deepEqual(state.rentals, before.rentals);
+    assert.deepEqual(state.gantt_rentals, before.gantt);
+    assert.deepEqual(state.equipment, before.equipment);
+
+    options.failBatch = false;
+    const bulkRemoved = await request(baseUrl, 'PUT', '/api/rentals', []);
+    assert.equal(bulkRemoved.status, 200);
+    assert.equal(state.rentals.length, 0);
+    assert.equal(state.gantt_rentals.length, 0);
+    assert.equal(state.equipment[0].status, 'available');
+  });
+});
+
+test('Stage H managerId is authoritative while unrelated legacy edits remain compatible', async () => {
+  const { app, state } = createApp();
+  state.users.push({ id: 'U-manager', name: 'Мария Менеджер', role: 'Менеджер по аренде', status: 'Активен' });
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({
+      managerId: 'U-manager',
+      manager: 'Подменённое имя',
+    }));
+    assert.equal(created.status, 201);
+    assert.equal(created.body.managerId, 'U-manager');
+    assert.equal(created.body.manager, 'Мария Менеджер');
+    assert.equal(state.gantt_rentals[0].managerId, 'U-manager');
+    assert.equal(state.gantt_rentals[0].manager, 'Мария Менеджер');
+
+    state.users.find(item => item.id === 'U-manager').name = 'Мария После Переименования';
+    const currentRead = await request(baseUrl, 'GET', `/api/rentals/${created.body.id}`);
+    const currentPlannerRead = await request(baseUrl, 'GET', '/api/gantt_rentals');
+    assert.equal(currentRead.body.manager, 'Мария После Переименования');
+    assert.equal(currentPlannerRead.body[0].manager, 'Мария После Переименования');
+    state.users.find(item => item.id === 'U-manager').name = 'Мария Менеджер';
+
+    const missing = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
+      managerId: 'U-missing',
+      manager: 'Мария Менеджер',
+    });
+    assert.equal(missing.status, 400);
+    assert.equal(missing.body.field, 'managerId');
+
+    state.rentals[0] = { ...state.rentals[0], managerId: undefined, manager: 'Legacy Manager' };
+    state.gantt_rentals[0] = { ...state.gantt_rentals[0], managerId: undefined, manager: 'Legacy Manager' };
+    const legacyEdit = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
+      plannedReturnDate: '2026-05-19',
+    });
+    assert.equal(legacyEdit.status, 200);
+    assert.equal(legacyEdit.body.managerId, undefined);
+    assert.equal(legacyEdit.body.manager, 'Legacy Manager');
+    assert.equal(state.gantt_rentals[0].manager, 'Legacy Manager');
+  });
+});
+
 test('delivery created from rental stores rentalId equipmentId and clientId from rental', async () => {
   const { app } = createApp();
 
@@ -439,6 +813,129 @@ test('delivery created from rental stores rentalId equipmentId and clientId from
     assert.equal(delivery.body.clientId, 'C-1');
     assert.equal(delivery.body.equipmentId, 'EQ-1');
     assert.equal(delivery.body.equipmentInv, 'INV-1');
+  });
+});
+
+test('shipping delivery date change recalculates daily pricing and keeps classic and planner rows in sync', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const rental = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({
+      startDate: '2026-05-10',
+      plannedReturnDate: '2026-05-12',
+      pricingMode: 'daily_rate',
+      rate: '1000',
+      dailyRate: 1000,
+      price: 3000,
+    }));
+    assert.equal(rental.status, 201);
+
+    const delivery = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      rentalId: rental.body.id,
+      transportDate: '2026-05-11',
+      origin: 'Склад',
+      destination: 'Объект',
+      cargo: 'Подъемник',
+      contactName: 'Иван',
+      contactPhone: '+7 900 000-00-00',
+    });
+
+    assert.equal(delivery.status, 201);
+    const classic = state.rentals.find(item => item.id === rental.body.id);
+    const planner = state.gantt_rentals.find(item => item.rentalId === rental.body.id);
+    assert.equal(classic.startDate, '2026-05-11');
+    assert.equal(classic.price, 2000);
+    assert.equal(planner.startDate, '2026-05-11');
+    assert.equal(planner.amount, 2000);
+    assert.equal(state.deliveries.length, 1);
+  });
+});
+
+test('receiving delivery cannot create an invalid rental range and leaves all linked collections unchanged', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const rental = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({
+      startDate: '2026-05-10',
+      plannedReturnDate: '2026-05-12',
+      pricingMode: 'daily_rate',
+      rate: '1000',
+      dailyRate: 1000,
+      price: 3000,
+    }));
+    assert.equal(rental.status, 201);
+    const beforeRentals = structuredClone(state.rentals);
+    const beforeGantt = structuredClone(state.gantt_rentals);
+
+    const delivery = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'receiving',
+      rentalId: rental.body.id,
+      transportDate: '2026-05-09',
+      origin: 'Объект',
+      destination: 'Склад',
+      cargo: 'Подъемник',
+      contactName: 'Иван',
+      contactPhone: '+7 900 000-00-00',
+    });
+
+    assert.equal(delivery.status, 400);
+    assert.equal(delivery.body.code, 'RENTAL_PAYLOAD_VALIDATION_FAILED');
+    assert.equal(delivery.body.field, 'plannedReturnDate');
+    assert.deepEqual(state.rentals, beforeRentals);
+    assert.deepEqual(state.gantt_rentals, beforeGantt);
+    assert.deepEqual(state.deliveries, []);
+  });
+});
+
+test('delivery batch failure leaves rental, planner and delivery collections unchanged', async () => {
+  const state = createState();
+  const { app } = createApp(state, { failBatch: true });
+  state.rentals = [{
+    id: 'R-existing',
+    ...rentalPayload({
+      startDate: '2026-05-10',
+      plannedReturnDate: '2026-05-12',
+      pricingMode: 'daily_rate',
+      rate: '1000 ₽/день',
+      dailyRate: 1000,
+      price: 3000,
+    }),
+  }];
+  state.gantt_rentals = [{
+    id: 'GR-existing',
+    rentalId: 'R-existing',
+    sourceRentalId: 'R-existing',
+    originalRentalId: 'R-existing',
+    clientId: 'C-1',
+    client: 'ООО Ромашка',
+    equipmentId: 'EQ-1',
+    equipmentInv: 'INV-1',
+    startDate: '2026-05-10',
+    endDate: '2026-05-12',
+    amount: 3000,
+    status: 'created',
+  }];
+  const beforeRentals = structuredClone(state.rentals);
+  const beforeGantt = structuredClone(state.gantt_rentals);
+
+  await withServer(app, async baseUrl => {
+    const delivery = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      rentalId: 'R-existing',
+      transportDate: '2026-05-11',
+      origin: 'Склад',
+      destination: 'Объект',
+      cargo: 'Подъемник',
+      contactName: 'Иван',
+      contactPhone: '+7 900 000-00-00',
+    });
+
+    assert.equal(delivery.status, 500);
+    assert.match(delivery.body.error, /Injected delivery batch failure/);
+    assert.deepEqual(state.rentals, beforeRentals);
+    assert.deepEqual(state.gantt_rentals, beforeGantt);
+    assert.deepEqual(state.deliveries, []);
   });
 });
 

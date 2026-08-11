@@ -44,10 +44,10 @@ import { formatCurrency, formatDate, getRentalDays } from '../lib/utils';
 import { assessServiceRisk } from '../lib/serviceRisk';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useEquipmentList, useManagementActionAttention } from '../hooks/useEquipment';
 import { useRentalsList, useGanttData } from '../hooks/useRentals';
 import { rentalsService } from '../services/rentals.service';
-import { equipmentService } from '../services/equipment.service';
 import { financeService } from '../services/finance.service';
 import { managerMyPlanService, type ManagerActivityInput, type ManagerActivityItem, type ManagerMyPlanResponse } from '../services/manager-my-plan.service';
 import { reportsService, type MechanicsWorkloadReport } from '../services/reports.service';
@@ -61,12 +61,9 @@ import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
 import { KPIDetailModal } from '../components/modals/KPIDetailModal';
 import { ServiceRequestModal } from '../components/modals/ServiceRequestModal';
 import { NewClientModal } from '../components/modals/NewClientModal';
-import { NewRentalModal } from '../components/gantt/GanttModals';
 import { useAuth } from '../contexts/AuthContext';
 import { isMechanicRole } from '../lib/userStorage';
 import { usePermissions } from '../lib/permissions';
-import { appendRentalHistory, buildRentalCreationHistory, createRentalHistoryEntry } from '../lib/rental-history';
-import { appendAuditHistory, createAuditEntry } from '../lib/entity-history';
 import { isCrmEnabled } from '../lib/features';
 import type {
   Equipment,
@@ -76,7 +73,6 @@ import type {
   Payment,
   PaymentAllocation,
   Document,
-  EquipmentStatus,
   ManagerBreakdownResponse,
   Delivery,
   ManagementActionAttentionItem,
@@ -98,6 +94,7 @@ import {
   isActiveRentalFleetEquipment,
 } from '../lib/fleetUtilization';
 import { APP_BRAND_NAME } from '../lib/appBrand';
+import { buildRentalNewRoute } from '../lib/rental-new-route.js';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -2072,7 +2069,6 @@ export default function Dashboard() {
   const [showServiceModal, setShowServiceModal] = useState(false);
   const [showAllAlerts, setShowAllAlerts] = useState(false);
   const [showClientModal, setShowClientModal] = useState(false);
-  const [showRentalModal, setShowRentalModal] = useState(false);
   const [showOfficeUpdModal, setShowOfficeUpdModal] = useState(false);
   const [activeDashboardTab, setActiveDashboardTab] = useState<DashboardTabId>('overview');
   const [officeUpdUpdatingId, setOfficeUpdUpdatingId] = useState<string | null>(null);
@@ -2775,31 +2771,30 @@ export default function Dashboard() {
   const handleOfficeUpdToggle = useCallback(async (rental: GanttRentalData, nextSigned: boolean) => {
     setOfficeUpdUpdatingId(rental.id);
     const signedDate = nextSigned ? new Date().toISOString().slice(0, 10) : undefined;
-    const updatedRentals = ganttRentals.map(item =>
-      item.id === rental.id
-        ? appendRentalHistory(
-            {
-              ...item,
-              updSigned: nextSigned,
-              updDate: nextSigned ? (signedDate || item.updDate) : undefined,
-            },
-            createRentalHistoryEntry(
-              user?.name || 'Система',
-              nextSigned
-                ? `УПД отмечен из офисного дашборда${signedDate ? ` (${signedDate})` : ''}`
-                : 'Отметка УПД снята из офисного дашборда',
-            ),
-          )
-        : item,
-    );
+    const canonicalRentalId = rental.rentalId
+      || rental.sourceRentalId
+      || rental.originalRentalId
+      || (rentals.some(item => item.id === rental.id) ? rental.id : '');
 
     try {
-      await rentalsService.bulkReplaceGantt(updatedRentals);
-      await qc.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
+      if (!canonicalRentalId) {
+        toast.error('Для изменения УПД требуется связанная карточка аренды.');
+        return;
+      }
+      await rentalsService.update(canonicalRentalId, {
+        updSigned: nextSigned,
+        updDate: nextSigned ? signedDate : undefined,
+      });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+        qc.invalidateQueries({ queryKey: RENTAL_KEYS.all }),
+      ]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось изменить статус УПД.');
     } finally {
       setOfficeUpdUpdatingId(null);
     }
-  }, [ganttRentals, qc, user?.name]);
+  }, [qc, rentals]);
 
   const hasManagerData = myRentals.length > 0;
   const adminManagerRows = useMemo(() => {
@@ -3224,7 +3219,7 @@ export default function Dashboard() {
   }>;
 
   const quickActions = [
-    can('create', 'rentals') && { id: 'new-rental', label: 'Новая аренда', href: '/rentals/new', icon: Calendar },
+    can('create', 'rentals') && { id: 'new-rental', label: 'Новая аренда', href: buildRentalNewRoute(), icon: Calendar },
     can('create', 'service') && { id: 'new-service', label: 'Новая заявка', href: '/service/new', icon: Wrench },
     can('create', 'deliveries') && { id: 'new-delivery', label: 'Новая доставка', href: '/deliveries/new', icon: Truck },
     can('create', 'clients') && { id: 'new-client', label: 'Новый клиент', href: '/clients/new', icon: User },
@@ -7660,97 +7655,6 @@ export default function Dashboard() {
           </div>
         </DialogContent>
       </Dialog>
-      <NewRentalModal
-        open={showRentalModal}
-        ganttRentals={ganttRentals}
-        equipmentList={equipmentList}
-        onClose={() => setShowRentalModal(false)}
-        onConfirm={(formData) => {
-          const todayStr = new Date().toISOString().split('T')[0];
-          const initialStatus: GanttRentalData['status'] =
-            (formData.startDate || '') <= todayStr ? 'active' : 'created';
-
-          const newRental: Omit<GanttRentalData, 'id'> = {
-            clientId: formData.clientId,
-            client: formData.client || '',
-            clientShort: (formData.client || '').substring(0, 20),
-            equipmentId: formData.equipmentId || '',
-            equipmentInv: formData.equipmentInv || '',
-            startDate: formData.startDate || '',
-            endDate: formData.endDate || '',
-            manager: formData.manager || '',
-            managerInitials: (formData.manager || '')
-              .split(' ')
-              .map((w: string) => w[0] ?? '')
-              .join('')
-              .toUpperCase(),
-            status: initialStatus,
-            paymentStatus: 'unpaid',
-            updSigned: false,
-            amount: Number(formData.amount) || 0,
-            comments: [
-              buildRentalCreationHistory(
-                {
-                  client: formData.client || '',
-                  startDate: formData.startDate || '',
-                  endDate: formData.endDate || '',
-                  status: initialStatus,
-                },
-                user?.name || 'Система',
-              ),
-            ],
-          };
-
-          // Persist via API then invalidate queries to refresh all panels
-          rentalsService.create({
-            clientId: formData.clientId,
-            client: formData.client || '',
-            contact: '',
-            startDate: formData.startDate || '',
-            plannedReturnDate: formData.endDate || '',
-            equipmentId: formData.equipmentId || '',
-            equipmentInv: formData.equipmentInv || '',
-            equipment: [formData.equipmentInv || ''],
-            rate: formData.amount && formData.startDate && formData.endDate
-              ? `${Math.round(Number(formData.amount) / Math.max(1, getRentalDays(formData.startDate, formData.endDate)))} ₽/день`
-              : '0 ₽/день',
-            price: Number(formData.amount) || 0,
-            discount: 0,
-            deliveryAddress: '',
-            manager: formData.manager || '',
-            status: 'new',
-            comments: '',
-          }).then(() => {
-            if (formData.equipmentId) {
-              const eqStatus: EquipmentStatus = initialStatus === 'active' ? 'rented' : 'reserved';
-              const eq = equipmentList.find(e => e.id === formData.equipmentId);
-              if (eq) {
-                const equipmentWithHistory = appendAuditHistory(
-                  {
-                    ...eq,
-                    status: eqStatus,
-                    currentClient: initialStatus === 'active' ? newRental.client : eq.currentClient,
-                    returnDate: initialStatus === 'active' ? newRental.endDate : eq.returnDate,
-                  },
-                  createAuditEntry(
-                    user?.name || 'Система',
-                    initialStatus === 'active'
-                      ? `Создана аренда и техника выдана клиенту ${newRental.client}`
-                      : `Создана бронь под клиента ${newRental.client}`,
-                  ),
-                );
-                const { id: _equipmentId, ...equipmentUpdateData } = equipmentWithHistory;
-                equipmentService.update(eq.id, {
-                  ...equipmentUpdateData,
-                });
-              }
-            }
-            qc.invalidateQueries();
-          }).catch(console.error);
-
-          setShowRentalModal(false);
-        }}
-      />
     </div>
   );
 }

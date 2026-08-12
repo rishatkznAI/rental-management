@@ -21,6 +21,7 @@ const {
   ROLE_ASSIGNMENTS_COLLECTION,
   SUPPLIER_PROFILES_COLLECTION,
   prepareCounterpartyRoleProfileFoundation,
+  synchronizeClientRoleBoundary,
 } = require('../lib/counterparty-role-profiles');
 const {
   analyzeRentalEquipmentDiagnostics,
@@ -1398,6 +1399,7 @@ function registerSystemRoutes(app, deps) {
       const now = Date.now();
       let normalizedClients = Array.isArray(clients) ? clients.map(normalizeClientInnFields) : clients;
       let normalizedCounterparties = null;
+      let clientRoleBoundaryEntries = null;
       if (Array.isArray(normalizedClients)) {
         assertClientInnWriteAllowed(prev.clients || [], normalizedClients);
         const prepared = prepareClientCompatibilityBulkReplace({
@@ -1408,6 +1410,20 @@ function registerSystemRoutes(app, deps) {
         });
         normalizedClients = prepared.clients;
         normalizedCounterparties = prepared.counterparties;
+        const roleBoundary = synchronizeClientRoleBoundary({
+          counterparties: normalizedCounterparties,
+          clients: normalizedClients,
+          roleAssignments: readData(ROLE_ASSIGNMENTS_COLLECTION) || [],
+          supplierProfiles: readData(SUPPLIER_PROFILES_COLLECTION) || [],
+          contractorProfiles: readData(CONTRACTOR_PROFILES_COLLECTION) || [],
+          clientIds: normalizedClients.map(client => client.id),
+          actor: req.user,
+          source: 'legacy_sync',
+          nowIso: () => new Date().toISOString(),
+        });
+        normalizedClients = roleBoundary.state.clients;
+        normalizedCounterparties = roleBoundary.state.counterparties;
+        clientRoleBoundaryEntries = roleBoundary.entries;
       }
       let normalizedPayments = payments;
       if (Array.isArray(payments)) {
@@ -1477,7 +1493,7 @@ function registerSystemRoutes(app, deps) {
       if (service) writeData('service', service);
       if (warranty_claims) writeData('warranty_claims', warranty_claims);
       if (clients) {
-        persistDataBatch([
+        persistDataBatch(clientRoleBoundaryEntries || [
           { name: 'counterparties', value: normalizedCounterparties },
           { name: 'clients', value: normalizedClients },
         ]);

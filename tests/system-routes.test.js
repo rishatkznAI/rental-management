@@ -14,6 +14,10 @@ const {
   registerSystemRoutes,
 } = require('../server/routes/system.js');
 const { createAccessControl } = require('../server/lib/access-control.js');
+const {
+  deterministicRoleAssignmentId,
+  deterministicRoleProfileId,
+} = require('../server/lib/counterparty-role-profiles.js');
 const { getBuildInfo } = require('../server/lib/build-info.js');
 const { resolveReleaseEnv } = require('../server/scripts/start-with-release-type.cjs');
 
@@ -153,6 +157,80 @@ async function postJson(baseUrl, path, body) {
   });
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
+}
+
+async function withLegacySyncEnabled(fn) {
+  const previousEnabled = process.env.ENABLE_LEGACY_SYNC;
+  process.env.ENABLE_LEGACY_SYNC = '1';
+  try {
+    return await fn();
+  } finally {
+    if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;
+    else process.env.ENABLE_LEGACY_SYNC = previousEnabled;
+  }
+}
+
+function createLegacySyncStore(initialCollections) {
+  const collections = structuredClone(initialCollections);
+  const batches = [];
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    getSnapshot: () => structuredClone(collections),
+    writeData: (name, value) => {
+      writes.push({ name, value: structuredClone(value) });
+      collections[name] = value;
+    },
+    writeDataBatch: entries => {
+      batches.push(structuredClone(entries));
+      for (const entry of entries) collections[entry.name] = entry.value;
+    },
+  });
+  return { app, batches, collections, writes };
+}
+
+function legacySyncCounterparty(roles) {
+  return {
+    id: 'CP-sync',
+    type: 'legal_entity',
+    legalName: 'ООО Синхронизация',
+    shortName: 'Синхронизация',
+    inn: '7707083893',
+    status: 'active',
+    roles,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    archivedAt: null,
+  };
+}
+
+function legacySyncClient(overrides = {}) {
+  return {
+    id: 'C-sync',
+    counterpartyId: 'CP-sync',
+    company: 'Синхронизация',
+    legalName: 'ООО Синхронизация',
+    inn: '7707083893',
+    status: 'active',
+    manager: 'Исходный менеджер',
+    ...overrides,
+  };
+}
+
+function legacySyncAssignment(roleCode, overrides = {}) {
+  return {
+    id: `RA-${roleCode}`,
+    counterpartyId: 'CP-sync',
+    roleCode,
+    status: 'active',
+    validFrom: '2026-01-01T00:00:00.000Z',
+    validTo: null,
+    createdBy: 'U-original',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    source: 'original',
+    ...overrides,
+  };
 }
 
 async function requestRaw(baseUrl, path, method) {
@@ -2787,6 +2865,238 @@ test('/api/sync rejects missing and duplicate normalized client INN', async () =
     if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;
     else process.env.ENABLE_LEGACY_SYNC = previousEnabled;
   }
+});
+
+test('/api/sync cannot resurrect stale supplier projection over an inactive assignment', async () => {
+  await withLegacySyncEnabled(async () => {
+    const supplierValidTo = '2026-02-10T09:30:00.000Z';
+    const supplierAssignment = legacySyncAssignment('supplier', {
+      status: 'inactive',
+      validTo: supplierValidTo,
+      reason: 'supplier_disabled',
+    });
+    const supplierProfile = {
+      id: 'SUPP-existing',
+      counterpartyId: 'CP-sync',
+      status: 'inactive',
+      archivedAt: supplierValidTo,
+      updatedAt: supplierValidTo,
+      categories: ['archived-category'],
+    };
+    const store = createLegacySyncStore({
+      counterparties: [legacySyncCounterparty(['customer', 'supplier'])],
+      clients: [legacySyncClient()],
+      counterparty_role_assignments: [legacySyncAssignment('customer'), supplierAssignment],
+      supplier_profiles: [supplierProfile],
+      contractor_profiles: [],
+    });
+
+    await withServer(store.app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/sync', {
+        clients: [legacySyncClient({ manager: 'Новый менеджер' })],
+      });
+
+      assert.equal(response.status, 200);
+      const storedSupplier = store.collections.counterparty_role_assignments
+        .find(item => item.roleCode === 'supplier');
+      assert.deepEqual(storedSupplier, supplierAssignment);
+      assert.equal(storedSupplier.validTo, supplierValidTo);
+      assert.deepEqual(store.collections.supplier_profiles[0], supplierProfile);
+      assert.deepEqual(store.collections.counterparties[0].roles, ['customer']);
+      assert.equal(store.batches.length, 1);
+      assert.deepEqual(store.batches[0].map(entry => entry.name), [
+        'counterparties',
+        'clients',
+        'counterparty_role_assignments',
+        'supplier_profiles',
+        'contractor_profiles',
+      ]);
+    });
+  });
+});
+
+test('/api/sync deterministically bootstraps a genuine legacy role with no assignment', async () => {
+  await withLegacySyncEnabled(async () => {
+    const customerAssignment = legacySyncAssignment('customer');
+    const store = createLegacySyncStore({
+      counterparties: [legacySyncCounterparty(['customer', 'supplier'])],
+      clients: [legacySyncClient()],
+      counterparty_role_assignments: [customerAssignment],
+      supplier_profiles: [],
+      contractor_profiles: [],
+    });
+
+    await withServer(store.app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/sync', {
+        clients: [legacySyncClient()],
+      });
+
+      assert.equal(response.status, 200);
+      const supplierAssignment = store.collections.counterparty_role_assignments
+        .find(item => item.roleCode === 'supplier');
+      assert.equal(
+        supplierAssignment.id,
+        deterministicRoleAssignmentId('CP-sync', 'supplier'),
+      );
+      assert.equal(supplierAssignment.status, 'active');
+      assert.equal(supplierAssignment.validTo, null);
+      assert.deepEqual(
+        store.collections.counterparty_role_assignments.find(item => item.roleCode === 'customer'),
+        customerAssignment,
+      );
+      assert.equal(
+        store.collections.supplier_profiles[0].id,
+        deterministicRoleProfileId('supplier', 'CP-sync'),
+      );
+      assert.equal(store.collections.supplier_profiles[0].status, 'active');
+      assert.deepEqual(store.collections.counterparties[0].roles, ['customer', 'supplier']);
+    });
+  });
+});
+
+test('/api/sync activates Client customer compatibility through RoleAssignment authority', async () => {
+  await withLegacySyncEnabled(async () => {
+    const customerAssignment = legacySyncAssignment('customer', {
+      status: 'inactive',
+      validTo: '2026-03-01T00:00:00.000Z',
+      reason: 'legacy_customer_disabled',
+    });
+    const supplierAssignment = legacySyncAssignment('supplier');
+    const store = createLegacySyncStore({
+      counterparties: [legacySyncCounterparty(['supplier'])],
+      clients: [legacySyncClient()],
+      counterparty_role_assignments: [customerAssignment, supplierAssignment],
+      supplier_profiles: [{
+        id: 'SUPP-active',
+        counterpartyId: 'CP-sync',
+        status: 'active',
+        archivedAt: null,
+      }],
+      contractor_profiles: [],
+    });
+
+    await withServer(store.app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/sync', {
+        clients: [legacySyncClient()],
+      });
+
+      assert.equal(response.status, 200);
+      const storedCustomer = store.collections.counterparty_role_assignments
+        .find(item => item.roleCode === 'customer');
+      assert.equal(storedCustomer.id, customerAssignment.id);
+      assert.equal(storedCustomer.status, 'active');
+      assert.equal(storedCustomer.validTo, null);
+      assert.equal(storedCustomer.source, 'legacy_sync');
+      assert.deepEqual(
+        store.collections.counterparty_role_assignments.find(item => item.roleCode === 'supplier'),
+        supplierAssignment,
+      );
+      assert.deepEqual(store.collections.counterparties[0].roles, ['customer', 'supplier']);
+    });
+  });
+});
+
+test('/api/sync preserves unrelated inactive supplier and contractor state during Client updates', async () => {
+  await withLegacySyncEnabled(async () => {
+    const supplierAssignment = legacySyncAssignment('supplier', {
+      status: 'inactive',
+      validTo: '2026-04-01T00:00:00.000Z',
+    });
+    const contractorAssignment = legacySyncAssignment('contractor', {
+      status: 'inactive',
+      validTo: '2026-04-02T00:00:00.000Z',
+    });
+    const supplierProfile = {
+      id: 'SUPP-inactive',
+      counterpartyId: 'CP-sync',
+      status: 'inactive',
+      archivedAt: '2026-04-01T00:00:00.000Z',
+    };
+    const contractorProfile = {
+      id: 'CONT-inactive',
+      counterpartyId: 'CP-sync',
+      status: 'inactive',
+      archivedAt: '2026-04-02T00:00:00.000Z',
+    };
+    const store = createLegacySyncStore({
+      counterparties: [legacySyncCounterparty(['customer', 'supplier', 'contractor'])],
+      clients: [legacySyncClient()],
+      counterparty_role_assignments: [
+        legacySyncAssignment('customer'),
+        supplierAssignment,
+        contractorAssignment,
+      ],
+      supplier_profiles: [supplierProfile],
+      contractor_profiles: [contractorProfile],
+    });
+
+    await withServer(store.app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/sync', {
+        clients: [legacySyncClient({ manager: 'Изменённый менеджер' })],
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(store.collections.clients[0].manager, 'Изменённый менеджер');
+      assert.deepEqual(
+        store.collections.counterparty_role_assignments.find(item => item.roleCode === 'supplier'),
+        supplierAssignment,
+      );
+      assert.deepEqual(
+        store.collections.counterparty_role_assignments.find(item => item.roleCode === 'contractor'),
+        contractorAssignment,
+      );
+      assert.deepEqual(store.collections.supplier_profiles[0], supplierProfile);
+      assert.deepEqual(store.collections.contractor_profiles[0], contractorProfile);
+      assert.deepEqual(store.collections.counterparties[0].roles, ['customer']);
+    });
+  });
+});
+
+test('/api/sync leaves existing active role assignments and profiles unchanged', async () => {
+  await withLegacySyncEnabled(async () => {
+    const assignments = [
+      legacySyncAssignment('customer'),
+      legacySyncAssignment('supplier'),
+      legacySyncAssignment('contractor'),
+    ];
+    const supplierProfile = {
+      id: 'SUPP-active',
+      counterpartyId: 'CP-sync',
+      status: 'active',
+      archivedAt: null,
+      categories: ['lifting'],
+    };
+    const contractorProfile = {
+      id: 'CONT-active',
+      counterpartyId: 'CP-sync',
+      status: 'active',
+      archivedAt: null,
+      serviceCategories: ['delivery'],
+    };
+    const store = createLegacySyncStore({
+      counterparties: [legacySyncCounterparty(['customer', 'supplier', 'contractor'])],
+      clients: [legacySyncClient()],
+      counterparty_role_assignments: assignments,
+      supplier_profiles: [supplierProfile],
+      contractor_profiles: [contractorProfile],
+    });
+
+    await withServer(store.app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/sync', {
+        clients: [legacySyncClient({ manager: 'Только Client' })],
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(store.collections.clients[0].manager, 'Только Client');
+      assert.deepEqual(store.collections.counterparty_role_assignments, assignments);
+      assert.deepEqual(store.collections.supplier_profiles, [supplierProfile]);
+      assert.deepEqual(store.collections.contractor_profiles, [contractorProfile]);
+      assert.deepEqual(
+        store.collections.counterparties[0].roles,
+        ['customer', 'supplier', 'contractor'],
+      );
+    });
+  });
 });
 
 test('/api/sync canonicalizes Payment relations and never resolves metadata-only identity', async () => {

@@ -991,7 +991,10 @@ test('/api/clients delete rejects clients with historical non-rental links', asy
   state.gantt_rentals = [];
   state.documents = [{ id: 'D-1', clientId: 'C-1', client: 'Старый снимок', rental: 'R-archived' }];
   state.payments = [{ id: 'P-1', clientId: 'C-1', client: 'ООО История', amount: 1000 }];
-  state.deliveries = [{ id: 'DL-1', client: ' ООО История ' }];
+  state.deliveries = [
+    { id: 'DL-1', clientId: 'C-1', client: 'Устаревший снимок' },
+    { id: 'DL-name-only', client: ' ООО История ' },
+  ];
 
   await withServer(app, async (baseUrl) => {
     const deleted = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'admin-token');
@@ -1001,6 +1004,7 @@ test('/api/clients delete rejects clients with historical non-rental links', asy
     assert.equal(deleted.body.links.find(item => item.collection === 'payments').count, 1);
     assert.equal(deleted.body.links.find(item => item.collection === 'deliveries').count, 1);
     assert.equal(JSON.stringify(deleted.body).includes('Старый снимок'), false);
+    assert.equal(JSON.stringify(deleted.body).includes('DL-name-only'), false);
   });
 
   assert.equal(state.clients.length, 1);

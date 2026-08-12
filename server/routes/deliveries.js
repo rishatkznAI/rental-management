@@ -8,8 +8,13 @@ const {
 } = require('../lib/carrier-delivery-dto');
 const {
   getClientObjectById,
-  normalizeClientRelationLinks,
 } = require('../lib/client-relations');
+const {
+  canonicalizeDeliveryCarrierCounterpartyRelation,
+  canonicalizeDeliveryCounterpartyRelations,
+  isHistoricalDeliveryCarrierRelation,
+  isHistoricalDeliveryRelation,
+} = require('../lib/delivery-counterparty-relations');
 const { normalizeRole } = require('../lib/role-groups');
 const {
   syncGanttRentalFields,
@@ -122,6 +127,7 @@ function registerDeliveryRoutes(router, deps) {
       name: String(record.name || '').trim(),
       company: record.company ? String(record.company).trim() : undefined,
       inn: record.inn ? String(record.inn).trim() : undefined,
+      counterpartyId: record.counterpartyId ? String(record.counterpartyId).trim() : null,
       phone: record.phone ? String(record.phone).trim() : undefined,
       notes: record.notes ? String(record.notes).trim() : undefined,
       status: record.status === 'inactive' ? 'inactive' : 'active',
@@ -270,7 +276,6 @@ function registerDeliveryRoutes(router, deps) {
     if (!existing || existingContactPhone || contactPhone) {
       ensureNonEmpty(contactPhone, 'Контактный номер');
     }
-    ensureNonEmpty(body.client, 'Клиент');
     ensureNonEmpty(body.manager || existing?.manager || author, 'Ответственный менеджер');
 
     const existingCreatorName = String(existing?.createdByName || existing?.createdBy || '').trim().toLowerCase();
@@ -292,6 +297,7 @@ function registerDeliveryRoutes(router, deps) {
       comment: String(body.comment || '').trim(),
       client: String(body.client || '').trim(),
       clientId: body.clientId ? String(body.clientId) : (existing?.clientId || null),
+      counterpartyId: body.counterpartyId ? String(body.counterpartyId) : (existing?.counterpartyId || null),
       objectId: body.objectId ? String(body.objectId) : (existing?.objectId || null),
       contractId: body.contractId ? String(body.contractId) : (existing?.contractId || null),
       objectName: body.objectName ? String(body.objectName).trim() : (existing?.objectName || null),
@@ -301,6 +307,9 @@ function registerDeliveryRoutes(router, deps) {
       manager: String(body.manager || existing?.manager || author).trim(),
       carrierId: body.carrierId ? String(body.carrierId) : (body.carrierKey ? String(body.carrierKey) : (existing?.carrierId || null)),
       carrierKey: body.carrierKey ? String(body.carrierKey) : (body.carrierId ? String(body.carrierId) : (existing?.carrierKey || null)),
+      carrierCounterpartyId: body.carrierCounterpartyId
+        ? String(body.carrierCounterpartyId)
+        : (existing?.carrierCounterpartyId || null),
       carrierName: body.carrierName ? String(body.carrierName) : (existing?.carrierName || null),
       carrierPhone: body.carrierPhone ? String(body.carrierPhone) : (existing?.carrierPhone || null),
       carrierChatId: body.carrierChatId ?? existing?.carrierChatId ?? null,
@@ -355,6 +364,7 @@ function registerDeliveryRoutes(router, deps) {
       'comment',
       'client',
       'clientId',
+      'counterpartyId',
       'objectId',
       'contractId',
       'objectName',
@@ -363,6 +373,7 @@ function registerDeliveryRoutes(router, deps) {
       'objectContactPhone',
       'carrierId',
       'carrierKey',
+      'carrierCounterpartyId',
       'rentalId',
       'ganttRentalId',
       'classicRentalId',
@@ -425,13 +436,13 @@ function registerDeliveryRoutes(router, deps) {
     };
   }
 
-  function normalizeDeliveryRelationLinks(delivery, existing = null) {
-    const clientId = delivery?.clientId || existing?.clientId;
-    if (!clientId && !delivery?.objectId && !delivery?.contractId) return delivery;
-    return normalizeClientRelationLinks(delivery, clientId, {
-      readData,
-      requireActiveObject: !existing || String(delivery?.objectId || '') !== String(existing?.objectId || ''),
-      allowArchivedObjectId: existing?.objectId,
+  function normalizeDeliveryCounterpartyLinks(delivery, existing = null) {
+    const historical = Boolean(existing) && isHistoricalDeliveryRelation(existing);
+    return canonicalizeDeliveryCounterpartyRelations(delivery, { readData }, {
+      existing,
+      allowArchived: historical,
+      requireActiveObject: !historical,
+      requireActiveCarrier: !historical,
     });
   }
 
@@ -463,6 +474,7 @@ function registerDeliveryRoutes(router, deps) {
       rentalId: classicRental?.id || delivery.rentalId || null,
       classicRentalId: classicRental?.id || delivery.classicRentalId || null,
       ganttRentalId: ganttRental?.id || delivery.ganttRentalId || null,
+      counterpartyId: source?.counterpartyId || delivery.counterpartyId || null,
       clientId: source?.clientId || delivery.clientId || null,
       client: source?.client || delivery.client,
       objectId: source?.objectId || delivery.objectId || null,
@@ -502,6 +514,7 @@ function registerDeliveryRoutes(router, deps) {
       rentalId: classicRental?.id || body?.rentalId,
       classicRentalId: classicRental?.id || body?.classicRentalId,
       ganttRentalId: ganttRental?.id || body?.ganttRentalId,
+      counterpartyId: source?.counterpartyId || body?.counterpartyId,
       clientId: source?.clientId || body?.clientId,
       client: source?.client || body?.client,
       objectId: source?.objectId || body?.objectId,
@@ -775,51 +788,24 @@ function registerDeliveryRoutes(router, deps) {
     const users = readData('users') || [];
     const carrierUsers = users.filter((user) => user?.role === 'Перевозчик' && user?.status !== 'Неактивен');
     const carrierUsersById = new Map(carrierUsers.map((user) => [String(user.id), user]));
-    const directory = (readData('delivery_carriers') || []).map(normalizeCarrierRecord);
+    const directory = (readData('delivery_carriers') || [])
+      .map((record) => {
+        try {
+          return normalizeCarrierRecord(canonicalizeDeliveryCarrierCounterpartyRelation(
+            record,
+            { readData },
+            { allowArchived: isHistoricalDeliveryCarrierRelation(record) },
+          ));
+        } catch (_error) {
+          return null;
+        }
+      })
+      .filter(Boolean);
 
-    if (directory.length === 0) {
-      const connectionCarriers = rawConnections.map((item) => ({
-        id: item.key,
-        key: item.key,
-        name: item.name,
-        phone: item.phone,
-        notes: undefined,
-        status: 'active',
-        maxCarrierKey: item.key,
-        maxUserName: item.name,
-        email: item.email,
-        role: item.role,
-        maxConnected: true,
-        chatId: item.chatId ?? null,
-        userId: item.userId ?? null,
-      }));
-      const existingIds = new Set(connectionCarriers.map((item) => String(item.id)));
-      const userCarriers = carrierUsers
-        .filter((user) => !existingIds.has(String(user.carrierId || user.id)))
-        .map((user) => {
-          const linked = rawBySystemUserId.get(String(user.id));
-          const id = String(user.carrierId || user.id);
-          return {
-            id,
-            key: id,
-            name: user.name || user.email || 'Перевозчик',
-            phone: user.phone,
-            notes: undefined,
-            status: 'active',
-            systemUserId: user.id,
-            systemUserName: user.name || null,
-            systemUserEmail: user.email || null,
-            maxCarrierKey: linked?.key || (user.maxUserId ? String(user.maxUserId) : null),
-            maxUserName: linked?.name || null,
-            email: linked?.email || user.email || undefined,
-            role: linked?.role || user.role,
-            maxConnected: Boolean(linked || user.maxUserId),
-            chatId: linked?.chatId ?? null,
-            userId: linked?.userId ?? null,
-          };
-        });
-      return [...connectionCarriers, ...userCarriers].sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-    }
+    // Carrier bot/user connections are operational identities, not legal/business
+    // identities. They must be attached to an explicit persisted DeliveryCarrier
+    // whose counterpartyId resolves to a contractor Counterparty.
+    if (directory.length === 0) return [];
 
     const directoryCarriers = directory
       .map((item) => {
@@ -850,34 +836,7 @@ function registerDeliveryRoutes(router, deps) {
         if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
         return a.name.localeCompare(b.name, 'ru');
       });
-    const knownCarrierIds = new Set(directoryCarriers.map((item) => String(item.id)));
-    const knownSystemUserIds = new Set(directoryCarriers.map((item) => String(item.systemUserId || '')).filter(Boolean));
-    const virtualUserCarriers = carrierUsers
-      .filter((user) => !knownSystemUserIds.has(String(user.id)) && !knownCarrierIds.has(String(user.carrierId || user.id)))
-      .map((user) => {
-        const linked = rawBySystemUserId.get(String(user.id));
-        const id = String(user.carrierId || user.id);
-        return {
-          id,
-          key: id,
-          name: user.name || user.email || 'Перевозчик',
-          phone: user.phone,
-          notes: undefined,
-          status: 'active',
-          systemUserId: user.id,
-          systemUserName: user.name || null,
-          systemUserEmail: user.email || null,
-          maxCarrierKey: linked?.key || (user.maxUserId ? String(user.maxUserId) : null),
-          maxUserName: linked?.name || null,
-          email: linked?.email || user.email || undefined,
-          role: linked?.role || user.role,
-          maxConnected: Boolean(linked || user.maxUserId),
-          chatId: linked?.chatId ?? null,
-          userId: linked?.userId ?? null,
-        };
-      });
-
-    return [...directoryCarriers, ...virtualUserCarriers].sort((a, b) => {
+    return directoryCarriers.sort((a, b) => {
       if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
       return a.name.localeCompare(b.name, 'ru');
     });
@@ -901,6 +860,7 @@ function registerDeliveryRoutes(router, deps) {
       name: item.name,
       company: item.company,
       inn: item.inn,
+      counterpartyId: item.counterpartyId,
       phone: item.phone,
       notes: item.notes,
       status: item.status,
@@ -1163,7 +1123,7 @@ function registerDeliveryRoutes(router, deps) {
       const safeBody = sanitizeDeliveryBody(req.body, null, req);
       let delivery = normalizeDeliveryPayload(enrichDeliveryBodyFromRentalContext(safeBody), null, author, buildDeliveryCreator(req));
       delivery = normalizeDeliveryRentalLinks(delivery);
-      delivery = withDeliveryObjectSnapshot(normalizeDeliveryRelationLinks(delivery));
+      delivery = withDeliveryObjectSnapshot(normalizeDeliveryCounterpartyLinks(delivery));
       const carrier = resolveCarrierSelection(resolveDeliveryCarrierId(delivery));
       if (carrier) {
         delivery = {
@@ -1242,7 +1202,7 @@ function registerDeliveryRoutes(router, deps) {
         buildDeliveryCreator(req),
       );
       delivery = normalizeDeliveryRentalLinks(delivery);
-      delivery = withDeliveryObjectSnapshot(normalizeDeliveryRelationLinks(delivery, current));
+      delivery = withDeliveryObjectSnapshot(normalizeDeliveryCounterpartyLinks(delivery, current));
       const carrier = resolveCarrierSelection(resolveDeliveryCarrierId(delivery));
       if (carrier) {
         delivery = {

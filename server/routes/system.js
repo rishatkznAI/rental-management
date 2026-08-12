@@ -46,6 +46,12 @@ const { validateTerminalRentalTransition } = require('../lib/rental-lifecycle');
 const { canonicalizeRentalCounterpartyRelation } = require('../lib/rental-counterparty-relations');
 const { canonicalizePaymentCounterpartyRelation } = require('../lib/payment-counterparty-relations');
 const {
+  canonicalizeDeliveryCarrierCounterpartyRelation,
+  canonicalizeDeliveryCounterpartyRelations,
+  isHistoricalDeliveryCarrierRelation,
+  isHistoricalDeliveryRelation,
+} = require('../lib/delivery-counterparty-relations');
+const {
   SYSTEM_FIXTURE_PROTECTED_CODE,
   SYSTEM_FIXTURE_PROTECTED_MESSAGE,
   assertProductionSmokeFixtureMutationAllowed,
@@ -176,11 +182,13 @@ function mediaProxyAgent(parsedUrl) {
 const SYSTEM_DATA_COLLECTIONS = [
   'equipment',
   'rentals',
+  'gantt_rentals',
   'counterparties',
   ROLE_ASSIGNMENTS_COLLECTION,
   SUPPLIER_PROFILES_COLLECTION,
   CONTRACTOR_PROFILES_COLLECTION,
   'clients',
+  'client_objects',
   'client_contracts',
   'service',
   'documents',
@@ -1110,7 +1118,8 @@ function analyzeSystemDataImport(payload, readData) {
     }
   }
 
-  if (Array.isArray(sanitizedCollections.rentals)) {
+  for (const collection of ['rentals', 'gantt_rentals']) {
+    if (!Array.isArray(sanitizedCollections[collection])) continue;
     const stagedData = {
       readData(name) {
         if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
@@ -1118,10 +1127,10 @@ function analyzeSystemDataImport(payload, readData) {
       },
     };
     try {
-      sanitizedCollections.rentals = sanitizedCollections.rentals
+      sanitizedCollections[collection] = sanitizedCollections[collection]
         .map(rental => canonicalizeRentalCounterpartyRelation(rental, stagedData));
-      const existingById = new Map((readData('rentals') || []).map(rental => [String(rental?.id || ''), rental]));
-      for (const rental of sanitizedCollections.rentals) {
+      const existingById = new Map((readData(collection) || []).map(rental => [String(rental?.id || ''), rental]));
+      for (const rental of sanitizedCollections[collection]) {
         const terminalValidation = validateTerminalRentalTransition(
           existingById.get(String(rental?.id || '')) || null,
           rental,
@@ -1131,7 +1140,7 @@ function analyzeSystemDataImport(payload, readData) {
         }
       }
     } catch (error) {
-      integrityErrors.push(`${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
+      integrityErrors.push(`${collection}:${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
     }
   }
 
@@ -1184,6 +1193,48 @@ function analyzeSystemDataImport(payload, readData) {
         .map(payment => canonicalizePaymentCounterpartyRelation(payment, stagedData));
     } catch (error) {
       integrityErrors.push(`${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
+    }
+  }
+
+  if (Array.isArray(sanitizedCollections.delivery_carriers)) {
+    const stagedData = {
+      readData(name) {
+        if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
+        return readData(name) || [];
+      },
+    };
+    const existingById = new Map((readData('delivery_carriers') || [])
+      .map(carrier => [String(carrier?.id || ''), carrier]));
+    try {
+      sanitizedCollections.delivery_carriers = sanitizedCollections.delivery_carriers
+        .map(carrier => canonicalizeDeliveryCarrierCounterpartyRelation(carrier, stagedData, {
+          existing: existingById.get(String(carrier?.id || '')) || null,
+          allowArchived: isHistoricalDeliveryCarrierRelation(carrier),
+        }));
+    } catch (error) {
+      integrityErrors.push(`${error.code || 'DELIVERY_COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
+    }
+  }
+
+  if (Array.isArray(sanitizedCollections.deliveries)) {
+    const stagedData = {
+      readData(name) {
+        if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
+        return readData(name) || [];
+      },
+    };
+    const existingById = new Map((readData('deliveries') || [])
+      .map(delivery => [String(delivery?.id || ''), delivery]));
+    try {
+      sanitizedCollections.deliveries = sanitizedCollections.deliveries
+        .map(delivery => canonicalizeDeliveryCounterpartyRelations(delivery, stagedData, {
+          existing: existingById.get(String(delivery?.id || '')) || null,
+          allowArchived: isHistoricalDeliveryRelation(delivery),
+          requireActiveObject: !isHistoricalDeliveryRelation(delivery),
+          requireActiveCarrier: !isHistoricalDeliveryRelation(delivery),
+        }));
+    } catch (error) {
+      integrityErrors.push(`${error.code || 'DELIVERY_COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
     }
   }
 
@@ -1420,6 +1471,8 @@ function registerSystemRoutes(app, deps) {
         equipment,
         rentals,
         gantt_rentals,
+        deliveries,
+        delivery_carriers,
         service,
         warranty_claims,
         clients,
@@ -1436,6 +1489,13 @@ function registerSystemRoutes(app, deps) {
           ok: false,
           code: 'RENTAL_LIFECYCLE_SYNC_DISABLED',
           error: 'Legacy sync не может заменять rentals или gantt_rentals. Используйте canonical Rental lifecycle API.',
+        });
+      }
+      if (Array.isArray(deliveries) || Array.isArray(delivery_carriers)) {
+        return res.status(409).json({
+          ok: false,
+          code: 'DELIVERY_COUNTERPARTY_SYNC_DISABLED',
+          error: 'Legacy sync не может заменять deliveries или delivery_carriers. Используйте canonical Delivery API или System Data import.',
         });
       }
       const prev = getSnapshot();

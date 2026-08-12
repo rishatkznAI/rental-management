@@ -25,7 +25,8 @@ function makeDelivery(overrides = {}) {
     cost: 18000,
     comment: '',
     client: 'ИНЖИНИРИНГ',
-    clientId: null,
+    counterpartyId: 'CP-C-1',
+    clientId: 'C-1',
     manager: 'Хабибрахманов Ришат Ринатович',
     carrierId: null,
     carrierKey: null,
@@ -78,13 +79,24 @@ function createDeliveryApp(deliveryOverrides = {}) {
       botOnly: false,
       allowFrontendLogin: true,
     }],
+    counterparties: [
+      { id: 'CP-C-1', legalName: 'ИНЖИНИРИНГ', shortName: 'ИНЖИНИРИНГ', status: 'active', roles: ['customer'] },
+      { id: 'CP-C-2', legalName: 'ДРУГОЙ', shortName: 'ДРУГОЙ', status: 'active', roles: ['customer'] },
+      { id: 'CP-K-1', legalName: 'ИП Сабитов Алмаз', shortName: 'ИП Сабитов Алмаз', status: 'active', roles: ['contractor'] },
+    ],
+    counterparty_role_assignments: [
+      { id: 'A-C-1', counterpartyId: 'CP-C-1', roleCode: 'customer', status: 'active', validTo: null },
+      { id: 'A-C-2', counterpartyId: 'CP-C-2', roleCode: 'customer', status: 'active', validTo: null },
+      { id: 'A-K-1', counterpartyId: 'CP-K-1', roleCode: 'contractor', status: 'active', validTo: null },
+    ],
     clients: [
-      { id: 'C-1', company: 'ИНЖИНИРИНГ' },
-      { id: 'C-2', company: 'ДРУГОЙ' },
+      { id: 'C-1', counterpartyId: 'CP-C-1', company: 'ИНЖИНИРИНГ' },
+      { id: 'C-2', counterpartyId: 'CP-C-2', company: 'ДРУГОЙ' },
     ],
     deliveries: [makeDelivery(deliveryOverrides)],
     delivery_carriers: [{
       id: 'carrier-1',
+      counterpartyId: 'CP-K-1',
       name: 'ИП Сабитов Алмаз',
       phone: '+7 900 000-00-00',
       status: 'active',
@@ -649,6 +661,7 @@ test('creating a delivery stores creator contact fields and sends them to carrie
       contactName: 'Олег',
       contactPhone: '+7 927 407-07-23',
       client: 'ИНЖИНИРИНГ',
+      counterpartyId: 'CP-C-1',
       manager: 'Администратор',
       carrierKey: 'carrier-1',
     });
@@ -818,6 +831,7 @@ test('creating a delivery treats empty delivery cost as zero', async () => {
       contactName: 'Олег',
       contactPhone: '+7 927 407-07-23',
       client: 'ИНЖИНИРИНГ',
+      counterpartyId: 'CP-C-1',
       manager: 'Администратор',
       cost: '',
     });

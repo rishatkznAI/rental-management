@@ -17,9 +17,17 @@ const { buildFinanceReport } = require('../server/lib/finance-core.js');
 function createState() {
   return {
     users: [{ id: 'U-admin', name: 'Админ', role: 'Администратор', status: 'Активен' }],
+    counterparties: [
+      { id: 'CP-C-1', legalName: 'ООО Ромашка', shortName: 'ООО Ромашка', status: 'active', roles: ['customer'] },
+      { id: 'CP-C-2', legalName: 'ООО Ромашка Плюс', shortName: 'ООО Ромашка Плюс', status: 'active', roles: ['customer'] },
+    ],
+    counterparty_role_assignments: [
+      { id: 'CPRA-C-1', counterpartyId: 'CP-C-1', roleCode: 'customer', status: 'active', validTo: null },
+      { id: 'CPRA-C-2', counterpartyId: 'CP-C-2', roleCode: 'customer', status: 'active', validTo: null },
+    ],
     clients: [
-      { id: 'C-1', company: 'ООО Ромашка', manager: 'Админ' },
-      { id: 'C-2', company: 'ООО Ромашка Плюс', manager: 'Админ' },
+      { id: 'C-1', counterpartyId: 'CP-C-1', company: 'ООО Ромашка', manager: 'Админ' },
+      { id: 'C-2', counterpartyId: 'CP-C-2', company: 'ООО Ромашка Плюс', manager: 'Админ' },
     ],
     client_objects: [
       { id: 'CO-1', clientId: 'C-1', name: 'Склад', address: 'Казань', status: 'active' },

@@ -43,12 +43,22 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
     delivery_carriers: [
       {
         id: 'carrier-1',
+        counterpartyId: 'CP-K-1',
         name: 'Быстрая доставка',
         status: 'active',
         maxCarrierKey: '100',
       },
     ],
     users: [],
+    counterparties: [
+      { id: 'CP-C-1', legalName: 'ООО Клиент', shortName: 'ООО Клиент', status: 'active', roles: ['customer'] },
+      { id: 'CP-K-1', legalName: 'Быстрая доставка', shortName: 'Быстрая доставка', status: 'active', roles: ['contractor'] },
+    ],
+    counterparty_role_assignments: [
+      { id: 'A-C-1', counterpartyId: 'CP-C-1', roleCode: 'customer', status: 'active', validTo: null },
+      { id: 'A-K-1', counterpartyId: 'CP-K-1', roleCode: 'contractor', status: 'active', validTo: null },
+    ],
+    clients: [{ id: 'C-1', counterpartyId: 'CP-C-1', company: 'ООО Клиент' }],
     deliveries: [],
     equipment: [],
     gantt_rentals: [],
@@ -373,8 +383,8 @@ test('start command returns menu for an authorized manager', async () => {
 test('rental manager creates delivery with selected carrier in MAX bot', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.delivery_carriers = [
-    { id: 'carrier-1', key: 'carrier-1', name: 'Быстрая доставка', phone: '+7 900 000-00-00', status: 'active', maxCarrierKey: '200' },
-    { id: 'carrier-2', key: 'carrier-2', name: 'Неактивный перевозчик', status: 'inactive', maxCarrierKey: '300' },
+    { id: 'carrier-1', key: 'carrier-1', counterpartyId: 'CP-K-1', name: 'Быстрая доставка', phone: '+7 900 000-00-00', status: 'active', maxCarrierKey: '200' },
+    { id: 'carrier-2', key: 'carrier-2', counterpartyId: 'CP-K-1', name: 'Неактивный перевозчик', status: 'inactive', maxCarrierKey: '300' },
   ];
   state.bot_users['200'] = {
     userId: 'carrier-1',
@@ -391,7 +401,8 @@ test('rental manager creates delivery with selected carrier in MAX bot', async (
   await handlers.handleCallback({ user_id: 100 }, '100', 'deliverycreate:type:shipping');
   await handlers.handleCommand({ user_id: 100 }, '100', '2026-05-20');
   await handlers.handleCommand({ user_id: 100 }, '100', 'Mantall XE120W');
-  await handlers.handleCommand({ user_id: 100 }, '100', 'ООО Клиент');
+  assert.equal(state.bot_sessions['100'].pendingAction, 'manager_delivery_customer');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'deliverycreate:customer:CP-C-1');
   await handlers.handleCommand({ user_id: 100 }, '100', 'Склад');
   await handlers.handleCommand({ user_id: 100 }, '100', 'Объект клиента');
   await handlers.handleCommand({ user_id: 100 }, '100', 'Иван');
@@ -417,6 +428,8 @@ test('rental manager creates delivery with selected carrier in MAX bot', async (
   assert.equal(state.deliveries[0].carrierId, 'carrier-1');
   assert.equal(state.deliveries[0].carrierKey, 'carrier-1');
   assert.equal(state.deliveries[0].carrierName, 'Быстрая доставка');
+  assert.equal(state.deliveries[0].counterpartyId, 'CP-C-1');
+  assert.equal(state.deliveries[0].carrierCounterpartyId, 'CP-K-1');
   assert.equal(state.deliveries[0].carrierPhone, '+7 900 000-00-00');
   assert.equal(state.deliveries[0].status, 'sent');
   assert.equal(state.bot_sessions['100'].pendingAction, null);
@@ -442,7 +455,7 @@ test('rental manager cannot create MAX delivery when no active carriers exist', 
   await handlers.handleCallback({ user_id: 100 }, '100', 'deliverycreate:type:receiving');
   await handlers.handleCommand({ user_id: 100 }, '100', '2026-05-21');
   await handlers.handleCommand({ user_id: 100 }, '100', 'JLG 1930ES');
-  await handlers.handleCommand({ user_id: 100 }, '100', 'ООО Клиент');
+  await handlers.handleCallback({ user_id: 100 }, '100', 'deliverycreate:customer:CP-C-1');
   await handlers.handleCommand({ user_id: 100 }, '100', 'Объект клиента');
   await handlers.handleCommand({ user_id: 100 }, '100', 'Склад');
   await handlers.handleCommand({ user_id: 100 }, '100', 'Петр');
@@ -458,8 +471,8 @@ test('rental manager cannot create MAX delivery when no active carriers exist', 
 test('rental manager stale carrier callback asks to choose carrier again', async () => {
   const { state, messages, handlers } = createMemoryBot(false);
   state.delivery_carriers = [
-    { id: 'carrier-1', key: 'carrier-1', name: 'Быстрая доставка', status: 'active', maxCarrierKey: '200' },
-    { id: 'carrier-2', key: 'carrier-2', name: 'Новый перевозчик', status: 'active', maxCarrierKey: '201' },
+    { id: 'carrier-1', key: 'carrier-1', counterpartyId: 'CP-K-1', name: 'Быстрая доставка', status: 'active', maxCarrierKey: '200' },
+    { id: 'carrier-2', key: 'carrier-2', counterpartyId: 'CP-K-1', name: 'Новый перевозчик', status: 'active', maxCarrierKey: '201' },
   ];
   state.bot_sessions['100'] = {
     pendingAction: 'manager_delivery_carrier',
@@ -469,6 +482,7 @@ test('rental manager stale carrier callback asks to choose carrier again', async
         transportDate: '2026-05-22',
         cargo: 'Подъёмник',
         client: 'ООО Клиент',
+        counterpartyId: 'CP-C-1',
         origin: 'Склад',
         destination: 'Объект',
         contactName: 'Иван',
@@ -1043,7 +1057,7 @@ test('carrier system user login links MAX user to delivery carrier', async () =>
   assert.match(messages.at(-1).text, /Перевозчик/);
 });
 
-test('carrier system user login creates missing carrier record', async () => {
+test('carrier system user login cannot manufacture a missing business carrier record', async () => {
   const { state, messages, handlers } = createMemoryBot(true, {
     verifyPassword: (plain, stored) => plain === stored,
   });
@@ -1062,15 +1076,10 @@ test('carrier system user login creates missing carrier record', async () => {
   await handlers.handleCommand({ user_id: 777 }, '777', '123@yandex.ru');
   await handlers.handleCommand({ user_id: 777 }, '777', 'qweqwe');
 
-  assert.equal(state.bot_users['777'].userRole, 'Перевозчик');
-  assert.equal(state.bot_users['777'].carrierId, 'U-carrier-missing');
-  assert.equal(state.delivery_carriers.length, 1);
-  assert.equal(state.delivery_carriers[0].id, 'U-carrier-missing');
-  assert.equal(state.delivery_carriers[0].systemUserId, 'U-carrier-missing');
-  assert.equal(state.delivery_carriers[0].maxCarrierKey, '777');
-  assert.equal(state.users[0].botOnly, true);
-  assert.equal(state.users[0].carrierId, 'U-carrier-missing');
-  assert.match(messages.at(-1).text, /Перевозчик/);
+  assert.equal(state.bot_users['777'], undefined);
+  assert.equal(state.delivery_carriers.length, 0);
+  assert.equal(state.users[0].botOnly, undefined);
+  assert.match(messages.at(-1).text, /Неверный логин или пароль/);
 });
 
 test('dedicated delivery bot does not reuse an existing mechanic menu', async () => {

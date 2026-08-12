@@ -119,21 +119,23 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
   const rentals = readCollection(dbPath, 'rentals');
   const service = readCollection(dbPath, 'service');
   const deliveries = readCollection(dbPath, 'deliveries');
+  const deliveryCarriers = readCollection(dbPath, 'delivery_carriers');
 
   assert.deepEqual(users.map(user => user.email).sort(), [...DEMO_USER_EMAILS].sort());
   assert.ok(users.every(user => String(user.id).startsWith(DEMO_PREFIX)));
   assert.ok(users.every(user => String(user.password || '').startsWith('h2:scrypt:')));
   assert.equal(equipment.length, 20);
   assert.equal(clients.length, 5);
-  assert.equal(counterparties.length, clients.length);
+  assert.equal(counterparties.length, clients.length + 1);
   assert.equal(roleAssignments.length, counterparties.length);
   assert.ok(roleAssignments.every(assignment => (
-    assignment.roleCode === 'customer'
+    ['customer', 'contractor'].includes(assignment.roleCode)
     && assignment.status === 'active'
     && counterparties.some(counterparty => counterparty.id === assignment.counterpartyId)
   )));
   assert.deepEqual(supplierProfiles, []);
-  assert.deepEqual(contractorProfiles, []);
+  assert.equal(contractorProfiles.length, 1);
+  assert.equal(contractorProfiles[0].counterpartyId, 'DEMO-CP-CONTRACTOR-001');
   assert.ok(clients.every(client => counterparties.some(counterparty => (
     counterparty.id === client.counterpartyId
     && counterparty.roles.includes('customer')
@@ -154,6 +156,8 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
   assert.ok(deliveries.some(item => item.status === 'new'));
   assert.ok(deliveries.some(item => item.status === 'in_transit'));
   assert.ok(deliveries.some(item => item.status === 'completed'));
+  assert.ok(deliveries.every(item => item.counterpartyId && item.carrierCounterpartyId));
+  assert.equal(deliveryCarriers[0].counterpartyId, 'DEMO-CP-CONTRACTOR-001');
 
   for (const collection of [users, counterparties, clients, equipment, rentals, service, deliveries]) {
     assert.ok(collection.every(item => String(item.id || '').startsWith(DEMO_PREFIX)));
@@ -229,7 +233,7 @@ test('demo seed is idempotent and does not touch non-demo records', () => withDe
   const counterparties = readCollection(dbPath, 'counterparties');
   const equipment = readCollection(dbPath, 'equipment');
   assert.equal(clients.filter(item => String(item.id).startsWith(DEMO_PREFIX)).length, 5);
-  assert.equal(counterparties.filter(item => String(item.id).startsWith(DEMO_PREFIX)).length, 5);
+  assert.equal(counterparties.filter(item => String(item.id).startsWith(DEMO_PREFIX)).length, 6);
   assert.ok(clients
     .filter(client => String(client.id).startsWith(DEMO_PREFIX))
     .every(client => counterparties.some(counterparty => counterparty.id === client.counterpartyId)));

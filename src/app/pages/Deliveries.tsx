@@ -27,8 +27,11 @@ import { usePaginatedDeliveries } from '../hooks/useDeliveries';
 import { rentalsService } from '../services/rentals.service';
 import { equipmentService } from '../services/equipment.service';
 import { clientsService } from '../services/clients.service';
+import { counterpartiesService } from '../services/counterparties.service';
+import { CustomerCounterpartyCombobox } from '../components/ui/CustomerCounterpartyCombobox';
 import type {
   Client,
+  Counterparty,
   Delivery,
   DeliveryCarrier,
   DeliveryStatus,
@@ -108,6 +111,7 @@ type DeliveryFormState = {
   cost: string;
   comment: string;
   client: string;
+  counterpartyId: string;
   clientId: string;
   manager: string;
   carrierKey: string;
@@ -123,6 +127,7 @@ type RentalOption = {
   ganttRentalId: string;
   classicRentalId: string;
   client: string;
+  counterpartyId: string;
   clientId: string;
   manager: string;
   equipmentId: string;
@@ -168,6 +173,7 @@ function makeEmptyForm(managerName = ''): DeliveryFormState {
     cost: '',
     comment: '',
     client: '',
+    counterpartyId: '',
     clientId: '',
     manager: managerName,
     carrierKey: '',
@@ -205,6 +211,7 @@ function buildFormFromDelivery(delivery: Delivery): DeliveryFormState {
     cost: delivery.cost ? String(delivery.cost) : '',
     comment: delivery.comment || '',
     client: delivery.client || '',
+    counterpartyId: delivery.counterpartyId || '',
     clientId: delivery.clientId || '',
     manager: delivery.manager || '',
     carrierKey: delivery.carrierKey || '',
@@ -230,6 +237,7 @@ function DeliveryDialog({
   rentalOptions,
   carriers,
   clients,
+  counterparties,
   isSaving,
   onClose,
   onSubmit,
@@ -242,6 +250,7 @@ function DeliveryDialog({
   rentalOptions: RentalOption[];
   carriers: DeliveryCarrier[];
   clients: Client[];
+  counterparties: Counterparty[];
   isSaving: boolean;
   onClose: () => void;
   onSubmit: () => void;
@@ -255,6 +264,7 @@ function DeliveryDialog({
     setForm((prev) => ({
       ...prev,
       client: selectedRental.client,
+      counterpartyId: selectedRental.counterpartyId,
       clientId: selectedRental.clientId,
       manager: selectedRental.manager || prev.manager,
       classicRentalId: selectedRental.classicRentalId,
@@ -372,27 +382,28 @@ function DeliveryDialog({
 
           <div>
             <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Клиент</label>
-            <select
-              value={form.clientId || form.client}
-              onChange={(e) => {
-                const selected = clients.find((item) => item.id === e.target.value || item.company === e.target.value);
-                setForm((prev) => ({
-                  ...prev,
-                  client: selected?.company || e.target.value,
-                  clientId: selected?.id || '',
-                  contactName: prev.contactName || selected?.contact || '',
-                  contactPhone: prev.contactPhone || selected?.phone || '',
-                }));
-              }}
-              className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-            >
-              <option value="">Выберите клиента</option>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.company}
-                </option>
-              ))}
-            </select>
+            <CustomerCounterpartyCombobox
+              counterparties={counterparties}
+              clients={clients}
+              counterpartyId={form.counterpartyId}
+              clientId={form.clientId}
+              value={form.client}
+              onChange={(value) => setForm((prev) => ({
+                ...prev,
+                client: value,
+                counterpartyId: '',
+                clientId: '',
+              }))}
+              onSelect={(selection) => setForm((prev) => ({
+                ...prev,
+                client: selection?.label || '',
+                counterpartyId: selection?.counterpartyId || '',
+                clientId: selection?.clientId || '',
+                contactName: prev.contactName || selection?.client?.contact || '',
+                contactPhone: prev.contactPhone || selection?.counterparty.phone || selection?.client?.phone || '',
+              }))}
+              placeholder="Выберите customer Counterparty"
+            />
           </div>
 
           <div>
@@ -562,6 +573,11 @@ export default function Deliveries() {
     queryFn: clientsService.getAll,
     enabled: canManageDeliveries,
   });
+  const { data: customerCounterparties = [] } = useQuery({
+    queryKey: ['counterparties', 'deliveries', 'customer'],
+    queryFn: () => counterpartiesService.getAll({ role: 'customer' }),
+    enabled: canManageDeliveries,
+  });
 
   const [viewMode, setViewMode] = useState<DeliveryViewMode>('list');
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -589,12 +605,7 @@ export default function Deliveries() {
 
     for (const gantt of ganttRentals as GanttRentalData[]) {
       const sourceId = getGanttRentalSourceId(gantt);
-      const classic = (sourceId && classicById.get(sourceId)) || (classicRentals as Rental[]).find((item) =>
-        item.client === gantt.client &&
-        Array.isArray(item.equipment) &&
-        item.equipment.includes(gantt.equipmentInv) &&
-        item.startDate === gantt.startDate,
-      );
+      const classic = sourceId ? classicById.get(sourceId) : undefined;
       if (classic) classicMatchByGantt.set(gantt.id, classic);
     }
 
@@ -613,14 +624,17 @@ export default function Deliveries() {
       .filter((item) => item.status !== 'closed')
       .map((item) => {
         const classic = classicMatchByGantt.get(item.id);
-        const client = (clients as Client[]).find((entry) => entry.company === item.client);
+        const stableClientId = item.clientId || classic?.clientId || '';
+        const client = (clients as Client[]).find((entry) => entry.id === stableClientId);
+        const counterpartyId = item.counterpartyId || classic?.counterpartyId || client?.counterpartyId || '';
         const eq = equipmentById.get(item.equipmentId || '') || (equipment as Equipment[]).find((entry) => entry.inventoryNumber === item.equipmentInv);
         const equipmentLabel = eq ? `${eq.manufacturer} ${eq.model}` : item.equipmentInv;
         return {
           ganttRentalId: item.id,
           classicRentalId: getGanttRentalSourceId(item) || classic?.id || '',
           client: item.client || classic?.client || '',
-          clientId: item.clientId || classic?.clientId || client?.id || '',
+          counterpartyId,
+          clientId: stableClientId,
           manager: item.manager || classic?.manager || '',
           equipmentId: eq?.id || item.equipmentId || '',
           equipmentInv: item.equipmentInv || eq?.inventoryNumber || '',
@@ -643,14 +657,15 @@ export default function Deliveries() {
   }, [carriers]);
 
   const clientsById = useMemo(() => new Map((clients as Client[]).map((item) => [item.id, item])), [clients]);
-  const clientsByName = useMemo(() => {
-    const map = new Map<string, Client>();
-    for (const client of clients as Client[]) {
-      const key = client.company?.trim().toLowerCase();
-      if (key && !map.has(key)) map.set(key, client);
-    }
-    return map;
-  }, [clients]);
+  const clientsByCounterpartyId = useMemo(() => new Map(
+    (clients as Client[])
+      .filter(item => item.counterpartyId)
+      .map(item => [String(item.counterpartyId), item]),
+  ), [clients]);
+  const counterpartiesById = useMemo(
+    () => new Map(customerCounterparties.map(item => [item.id, item])),
+    [customerCounterparties],
+  );
 
   const filtered = deliveries;
 
@@ -732,6 +747,7 @@ export default function Deliveries() {
       ganttRentalId: matchedRental?.ganttRentalId || requestedGanttRentalId,
       classicRentalId: matchedRental?.classicRentalId || requestedRentalId,
       client: matchedRental?.client || '',
+      counterpartyId: matchedRental?.counterpartyId || '',
       clientId: matchedRental?.clientId || '',
       manager: matchedRental?.manager || user?.name || '',
       equipmentId: matchedRental?.equipmentId || '',
@@ -779,6 +795,7 @@ export default function Deliveries() {
         cost: Number(form.cost) || 0,
         comment: form.comment,
         client: form.client,
+        counterpartyId: form.counterpartyId || null,
         clientId: form.clientId || null,
         manager: form.manager,
         carrierKey: form.carrierKey || null,
@@ -884,8 +901,9 @@ export default function Deliveries() {
 
   function renderDeliveryPanel(delivery: Delivery, mode: 'aside' | 'sheet') {
     const statusMeta = getDeliveryStatusMeta(delivery, todayKey);
-    const client = clientsById.get(delivery.clientId || '') || clientsByName.get(delivery.client?.trim().toLowerCase());
-    const clientInn = client?.inn || client?.innNormalized || '';
+    const counterparty = counterpartiesById.get(delivery.counterpartyId || '');
+    const client = clientsById.get(delivery.clientId || '') || clientsByCounterpartyId.get(delivery.counterpartyId || '');
+    const clientInn = counterparty?.inn || client?.inn || client?.innNormalized || '';
     const contractLabel = delivery.contractId || delivery.classicRentalId || delivery.ganttRentalId || '';
     const equipmentName = delivery.equipmentLabel || delivery.cargo;
     const inventoryNumber = delivery.equipmentInv || '';
@@ -1573,8 +1591,9 @@ export default function Deliveries() {
                   const statusMeta = getDeliveryStatusMeta(delivery, todayKey);
                   const isSelected = selectedDeliveryId === delivery.id;
                   const isOverdue = isDeliveryOverdue(delivery, todayKey);
-                  const client = clientsById.get(delivery.clientId || '') || clientsByName.get(delivery.client?.trim().toLowerCase());
-                  const clientInn = client?.inn || client?.innNormalized || '';
+                  const counterparty = counterpartiesById.get(delivery.counterpartyId || '');
+                  const client = clientsById.get(delivery.clientId || '') || clientsByCounterpartyId.get(delivery.counterpartyId || '');
+                  const clientInn = counterparty?.inn || client?.inn || client?.innNormalized || '';
                   const equipmentName = delivery.equipmentLabel || delivery.cargo;
                   const inventoryNumber = delivery.equipmentInv || '';
                   const hasCarrier = Boolean(delivery.carrierName || delivery.carrierPhone);
@@ -1807,6 +1826,7 @@ export default function Deliveries() {
         rentalOptions={rentalOptions}
         carriers={carriers}
         clients={clients}
+        counterparties={customerCounterparties}
         isSaving={isSaving}
         onClose={() => setDialogOpen(false)}
         onSubmit={handleSubmit}

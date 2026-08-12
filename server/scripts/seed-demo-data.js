@@ -177,6 +177,29 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
     updatedAt: nowIso,
     archivedAt: null,
   }));
+  const contractorCounterparty = {
+    id: 'DEMO-CP-CONTRACTOR-001',
+    type: 'legal_entity',
+    legalName: 'ООО «Демо Карьер»',
+    shortName: 'Demo Carrier',
+    inn: '1655000001',
+    kpp: null,
+    ogrn: null,
+    ogrnip: null,
+    legalAddress: null,
+    actualAddress: null,
+    email: 'carrier@demo.local',
+    phone: '+7 900 200-00-00',
+    website: null,
+    notes: 'DEMO DATA: логистический подрядчик.',
+    status: 'active',
+    roles: ['contractor'],
+    fixtureTag: DEMO_PREFIX,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    archivedAt: null,
+  };
+  counterparties.push(contractorCounterparty);
 
   const counterparty_role_assignments = clients.map((client, index) => ({
     id: `DEMO-ROLE-CUSTOMER-${String(index + 1).padStart(3, '0')}`,
@@ -192,6 +215,20 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
     source: 'demo_seed',
     fixtureTag: DEMO_PREFIX,
   }));
+  counterparty_role_assignments.push({
+    id: 'DEMO-ROLE-CONTRACTOR-001',
+    counterpartyId: contractorCounterparty.id,
+    roleCode: 'contractor',
+    status: 'active',
+    validFrom: nowIso,
+    validTo: null,
+    createdBy: 'DEMO-USER-ADMIN',
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    reason: 'demo_seed',
+    source: 'demo_seed',
+    fixtureTag: DEMO_PREFIX,
+  });
 
   const client_objects = clients.map((client, index) => ({
     id: `DEMO-OBJECT-${String(index + 1).padStart(3, '0')}`,
@@ -523,7 +560,9 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
     return {
       id: `DEMO-DELIVERY-${suffix}`,
       number: `DEMO-DELIVERY-${suffix}`,
+      counterpartyId: rental.counterpartyId,
       clientId: rental.clientId,
+      client: rental.clientName,
       clientName: rental.clientName,
       rentalId: rental.id,
       equipmentId: rental.equipmentId,
@@ -531,6 +570,7 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
       pickupAddress: 'Казань, демо-склад',
       deliveryAddress: rental.deliveryAddress,
       carrierId: 'DEMO-CARRIER-001',
+      carrierCounterpartyId: contractorCounterparty.id,
       carrier: 'Demo Carrier',
       status,
       scheduledDate: dateOnly(addDays(now, Number(offset))),
@@ -605,7 +645,21 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
     equipment,
     counterparty_role_assignments,
     supplier_profiles: [],
-    contractor_profiles: [],
+    contractor_profiles: [{
+      id: 'DEMO-CONT-001',
+      counterpartyId: contractorCounterparty.id,
+      status: 'active',
+      serviceCategories: ['delivery'],
+      geographicScope: null,
+      serviceScope: 'equipment_delivery',
+      slaMetadata: null,
+      complianceState: null,
+      licenceReferences: [],
+      fixtureTag: DEMO_PREFIX,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      archivedAt: null,
+    }],
     rentals,
     gantt_rentals,
     documents,
@@ -621,7 +675,7 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
       { id: 'DEMO-SETTING-001', key: 'demoMode', value: { enabled: true, label: 'DEMO' }, fixtureTag: DEMO_PREFIX, updatedAt: nowIso },
     ],
     delivery_carriers: [
-      { id: 'DEMO-CARRIER-001', name: 'Demo Carrier', phone: '+7 900 200-00-00', status: 'active', fixtureTag: DEMO_PREFIX },
+      { id: 'DEMO-CARRIER-001', key: 'DEMO-CARRIER-001', counterpartyId: contractorCounterparty.id, name: 'Demo Carrier', company: 'Demo Carrier', inn: contractorCounterparty.inn, phone: '+7 900 200-00-00', status: 'active', fixtureTag: DEMO_PREFIX },
     ],
     owners: [
       { id: 'DEMO-OWNER-001', name: 'Demo Fleet', type: 'company', status: 'active', fixtureTag: DEMO_PREFIX },

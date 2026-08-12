@@ -490,6 +490,40 @@ function registerCounterpartyRoutes(router, deps) {
           { counterpartyId: id, rentalIds: [...new Set(linkedActiveRentalIds)] },
         );
       }
+      const terminalDeliveryStatuses = new Set(['completed', 'cancelled', 'canceled']);
+      const linkedActiveDeliveryIds = (readData('deliveries') || [])
+        .filter(delivery => (
+          (
+            String(delivery?.counterpartyId || '') === id
+            || String(delivery?.carrierCounterpartyId || delivery?.contractorCounterpartyId || '') === id
+          )
+          && !terminalDeliveryStatuses.has(String(delivery?.status || '').trim().toLowerCase())
+        ))
+        .map(delivery => delivery.id)
+        .filter(Boolean);
+      if (linkedActiveDeliveryIds.length > 0) {
+        throw counterpartyError(
+          'COUNTERPARTY_DOMAIN_LINK_CONFLICT',
+          'Нельзя архивировать контрагента, пока существуют связанные активные доставки.',
+          409,
+          { counterpartyId: id, deliveryIds: [...new Set(linkedActiveDeliveryIds)] },
+        );
+      }
+      const linkedActiveCarrierIds = (readData('delivery_carriers') || [])
+        .filter(carrier => (
+          String(carrier?.counterpartyId || carrier?.contractorCounterpartyId || '') === id
+          && String(carrier?.status || 'active').trim().toLowerCase() !== 'inactive'
+        ))
+        .map(carrier => carrier.id)
+        .filter(Boolean);
+      if (linkedActiveCarrierIds.length > 0) {
+        throw counterpartyError(
+          'COUNTERPARTY_DOMAIN_LINK_CONFLICT',
+          'Нельзя архивировать contractor Counterparty, пока активна запись перевозчика.',
+          409,
+          { counterpartyId: id, deliveryCarrierIds: [...new Set(linkedActiveCarrierIds)] },
+        );
+      }
       const previous = counterparties[index];
       if (previous.archivedAt || previous.status === 'archived') {
         return res.json({ ok: true, counterparty: previous });

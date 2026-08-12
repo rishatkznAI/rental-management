@@ -38,8 +38,8 @@ test('admin creates rental contract draft with selected client in document wizar
       client: client.company,
       clientId: client.id,
       equipment,
-      startDate: '2026-05-10',
-      endDate: '2026-05-12',
+      startDate: '2026-09-10',
+      endDate: '2026-09-12',
       amount: 30000,
       status: 'active',
       ganttStatus: 'active',
@@ -58,7 +58,7 @@ test('admin creates rental contract draft with selected client in document wizar
   await loginAsAdmin(page);
   apiRequests.length = 0;
   await navigateInApp(page, '/documents');
-  await expect(page.getByRole('heading', { name: 'Документы' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Документы', exact: true })).toBeVisible();
   expect(apiRequests.filter(url => /\/api\/gantt_rentals(?:$|\?)/.test(url))).toHaveLength(0);
   const ganttReferencesResponse = page.waitForResponse(response => response.url().includes('/api/documents/gantt-references'));
   await page.getByRole('button', { name: /^Создать документ$/ }).first().click();
@@ -70,8 +70,8 @@ test('admin creates rental contract draft with selected client in document wizar
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: /Договор аренды/ }).click();
 
-  await dialog.getByText('Выберите клиента из базы').click();
-  await page.getByPlaceholder('Выберите клиента из базы').fill(seed.client.company);
+  await dialog.getByText('Выберите клиента-контрагента').click();
+  await page.getByPlaceholder('Выберите клиента-контрагента').fill(seed.client.company);
   await page.getByText(seed.client.company).click();
   await expect(dialog.getByText(seed.client.company)).toBeVisible();
   await expect(dialog.getByText(/^Аренда$/)).toHaveCount(0);
@@ -98,6 +98,7 @@ test('admin creates rental contract draft with selected client in document wizar
   const response = await generateResponse;
   expect(response.status()).toBe(201);
   const document = await response.json();
+  expect(document.counterpartyId).toBe(seed.client.counterpartyId);
   expect(document.clientId).toBe(seed.client.id);
   expect(document.rentalId).toBeFalsy();
   expect(document.type).toBe('rental_contract');
@@ -107,6 +108,12 @@ test('admin creates rental contract draft with selected client in document wizar
   await expect(page.getByRole('heading', { name: new RegExp(document.number) })).toBeVisible();
 
   const chain = await withAdminApi(async (api) => {
+    const duplicateRes = await api.post(`/api/documents/${document.id}/duplicate`, {});
+    expect(duplicateRes.ok(), await duplicateRes.text()).toBeTruthy();
+    const duplicate = await duplicateRes.json();
+    expect(duplicate.counterpartyId).toBe(document.counterpartyId);
+    expect(duplicate.clientId).toBe(document.clientId);
+
     const specRes = await api.post('/api/documents/generate', {
       data: {
         type: 'rental_specification',
@@ -116,7 +123,7 @@ test('admin creates rental contract draft with selected client in document wizar
         equipmentId: seed.equipment.id,
         dailyRate: '1000 ₽/день',
         amount: 30000,
-        date: '2026-05-10',
+        date: '2026-09-10',
       },
     });
     expect(specRes.ok(), await specRes.text()).toBeTruthy();
@@ -130,7 +137,7 @@ test('admin creates rental contract draft with selected client in document wizar
         clientId: seed.client.id,
         rentalId: seed.rental.id,
         equipmentId: seed.equipment.id,
-        transferDate: '2026-05-10',
+        transferDate: '2026-09-10',
         equipmentCondition: 'Исправна',
       },
     });
@@ -145,7 +152,7 @@ test('admin creates rental contract draft with selected client in document wizar
         clientId: seed.client.id,
         rentalId: seed.rental.id,
         equipmentId: seed.equipment.id,
-        returnDate: '2026-05-12',
+        returnDate: '2026-09-12',
         returnCondition: 'Рабочее',
         damages: 'Нет',
         missingItems: 'Нет',
@@ -166,18 +173,20 @@ test('admin creates rental contract draft with selected client in document wizar
       }
     }
 
-    return { spec, transfer, returnAct };
+    return { duplicate, spec, transfer, returnAct };
   });
 
   await navigateInApp(page, '/documents');
   await page.getByRole('button', { name: 'Фильтры' }).click();
   await page.getByPlaceholder('Поиск по номеру, клиенту, технике, аренде, сервисной заявке...').fill(document.number);
-  await expect(page.getByText(document.number).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Готово' }).click();
+  await expect(page.locator('p:visible').filter({ hasText: document.number }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Фильтры' }).click();
   await page.getByPlaceholder('Поиск по номеру, клиенту, технике, аренде, сервисной заявке...').fill(seed.client.company);
-  await expect(page.getByText(chain.spec.number).first()).toBeVisible();
-  await expect(page.getByText(chain.transfer.number).first()).toBeVisible();
-  await expect(page.getByText(chain.returnAct.number).first()).toBeVisible();
-  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Готово' }).click();
+  await expect(page.locator('p:visible').filter({ hasText: chain.spec.number }).first()).toBeVisible();
+  await expect(page.locator('p:visible').filter({ hasText: chain.transfer.number }).first()).toBeVisible();
+  await expect(page.locator('p:visible').filter({ hasText: chain.returnAct.number }).first()).toBeVisible();
 
   await page.getByRole('button', { name: /Контроль/ }).click();
   await expect(page.getByRole('heading', { name: 'Контроль документов' })).toBeVisible();

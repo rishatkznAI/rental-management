@@ -1538,6 +1538,7 @@ test('/api/admin/system-data/export returns safe JSON without passwords or secre
     assert.equal(response.body.collections.app_settings.length, 1);
     assert.equal(response.body.collections.app_settings[0].key, 'theme');
     assert.deepEqual(response.body.collections.counterparty_role_assignments, []);
+    assert.deepEqual(response.body.collections.client_contracts, []);
     assert.deepEqual(response.body.collections.supplier_profiles, []);
     assert.deepEqual(response.body.collections.contractor_profiles, []);
     assert.doesNotMatch(JSON.stringify(response.body), /secret|do-not-export/i);
@@ -2614,6 +2615,62 @@ test('/api/admin/system-data/import cannot resurrect an existing terminal Classi
   });
 });
 
+test('/api/admin/system-data/import canonicalizes Document and ClientContract identity and rejects conflicts atomically', async () => {
+  const collections = {
+    counterparties: [
+      { id: 'CP-1', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
+      { id: 'CP-2', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
+    ],
+    counterparty_role_assignments: [
+      { id: 'A-1', counterpartyId: 'CP-1', roleCode: 'customer', status: 'active', validTo: null },
+      { id: 'A-2', counterpartyId: 'CP-2', roleCode: 'customer', status: 'active', validTo: null },
+    ],
+    clients: [
+      { id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Одинаковое' },
+      { id: 'C-2', counterpartyId: 'CP-2', company: 'ООО Одинаковое' },
+    ],
+    client_contracts: [],
+    documents: [],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const imported = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        client_contracts: [{ id: 'CC-legacy', clientId: 'C-1', number: '1', status: 'active' }],
+        documents: [{ id: 'D-legacy', type: 'contract', clientId: 'C-1', client: 'ООО Одинаковое' }],
+      },
+    });
+    assert.equal(imported.status, 200, JSON.stringify(imported.body));
+    assert.equal(collections.client_contracts[0].counterpartyId, 'CP-1');
+    assert.equal(collections.documents[0].counterpartyId, 'CP-1');
+
+    const beforeContracts = structuredClone(collections.client_contracts);
+    const beforeDocuments = structuredClone(collections.documents);
+    const writeCount = writes.length;
+    const rejected = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        client_contracts: [{ id: 'CC-bad', counterpartyId: 'CP-2', clientId: 'C-1', number: '2', status: 'active' }],
+        documents: [{ id: 'D-name-only', type: 'contract', client: 'ООО Одинаковое' }],
+      },
+    });
+    assert.equal(rejected.status, 400);
+    assert.match(JSON.stringify(rejected.body.errors), /COUNTERPARTY_RELATION_MISMATCH|COUNTERPARTY_RELATION_ID_REQUIRED/);
+    assert.deepEqual(collections.client_contracts, beforeContracts);
+    assert.deepEqual(collections.documents, beforeDocuments);
+    assert.equal(writes.length, writeCount);
+  });
+});
+
 test('/api/admin/system-data/import canonicalizes Payment identity and rejects metadata-only links atomically', async () => {
   const collections = {
     counterparties: [
@@ -3147,4 +3204,84 @@ test('/api/sync canonicalizes Payment relations and never resolves metadata-only
     if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;
     else process.env.ENABLE_LEGACY_SYNC = previousEnabled;
   }
+});
+
+test('/api/sync canonicalizes staged Document and ClientContract relations and rejects conflicts before writing', async () => {
+  const store = createLegacySyncStore({
+    counterparties: [
+      { id: 'CP-1', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
+      { id: 'CP-2', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
+    ],
+    counterparty_role_assignments: [
+      { id: 'A-1', counterpartyId: 'CP-1', roleCode: 'customer', status: 'active', validTo: null },
+      { id: 'A-2', counterpartyId: 'CP-2', roleCode: 'customer', status: 'active', validTo: null },
+    ],
+    clients: [
+      { id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Одинаковое' },
+      { id: 'C-2', counterpartyId: 'CP-2', company: 'ООО Одинаковое' },
+    ],
+    client_contracts: [],
+    documents: [],
+  });
+
+  await withLegacySyncEnabled(async () => {
+    await withServer(store.app, async (baseUrl) => {
+      const synced = await postJson(baseUrl, '/api/sync', {
+        client_contracts: [{ id: 'CC-sync', clientId: 'C-1', number: 'SYNC-1', status: 'active' }],
+        documents: [
+          { id: 'D-parent', type: 'contract', clientId: 'C-1', status: 'draft' },
+          { id: 'D-child', type: 'rental_specification', parentDocumentId: 'D-parent', status: 'draft' },
+        ],
+      });
+      assert.equal(synced.status, 200, JSON.stringify(synced.body));
+      assert.equal(store.collections.client_contracts[0].counterpartyId, 'CP-1');
+      assert.deepEqual(
+        store.collections.documents.map(document => document.counterpartyId),
+        ['CP-1', 'CP-1'],
+      );
+
+      for (const [collection, field] of [
+        ['client_contracts', 'createdAt'],
+        ['client_contracts', 'updatedAt'],
+        ['documents', 'createdAt'],
+        ['documents', 'updatedAt'],
+      ]) {
+        const beforeContracts = structuredClone(store.collections.client_contracts);
+        const beforeDocuments = structuredClone(store.collections.documents);
+        const writeCount = store.writes.length;
+        const rejectedAuditField = await postJson(baseUrl, '/api/sync', {
+          [collection]: [{
+            id: collection === 'client_contracts' ? 'CC-forged' : 'D-forged',
+            ...(collection === 'client_contracts'
+              ? { clientId: 'C-1', number: 'SYNC-FORGED', status: 'active' }
+              : { type: 'contract', clientId: 'C-1', status: 'draft' }),
+            [field]: '2000-01-01T00:00:00.000Z',
+          }],
+        });
+        assert.equal(rejectedAuditField.status, 403);
+        assert.match(rejectedAuditField.body.error, new RegExp(field));
+        assert.deepEqual(store.collections.client_contracts, beforeContracts);
+        assert.deepEqual(store.collections.documents, beforeDocuments);
+        assert.equal(store.writes.length, writeCount);
+      }
+
+      const beforeContracts = structuredClone(store.collections.client_contracts);
+      const beforeDocuments = structuredClone(store.collections.documents);
+      const writeCount = store.writes.length;
+      const rejected = await postJson(baseUrl, '/api/sync', {
+        client_contracts: [{
+          id: 'CC-bad',
+          counterpartyId: 'CP-2',
+          clientId: 'C-1',
+          number: 'SYNC-BAD',
+          status: 'active',
+        }],
+        documents: [{ id: 'D-name-only', type: 'contract', client: 'ООО Одинаковое', status: 'draft' }],
+      });
+      assert.equal(rejected.status, 409);
+      assert.deepEqual(store.collections.client_contracts, beforeContracts);
+      assert.deepEqual(store.collections.documents, beforeDocuments);
+      assert.equal(store.writes.length, writeCount);
+    });
+  });
 });

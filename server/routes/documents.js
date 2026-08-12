@@ -19,8 +19,10 @@ const {
 } = require('../lib/documents-core');
 const {
   enrichRecordFromRentalLinks,
-  normalizeClientRelationLinks,
 } = require('../lib/client-relations');
+const {
+  canonicalizeDocumentCounterpartyRelation,
+} = require('../lib/document-counterparty-relations');
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 const {
   queryDocumentsIndex,
@@ -286,16 +288,18 @@ function registerDocumentRoutes(router, deps) {
         })
       : item;
     const enriched = enrichRecordFromRentalLinks(linked, readData);
-    return normalizeClientRelationLinks(enriched, enriched.clientId, {
-      readData,
+    return canonicalizeDocumentCounterpartyRelation(enriched, { readData }, {
+      existing,
       requireActiveObject: !existing,
-      allowArchivedObjectId: existing?.objectId,
     });
   }
 
   function documentCollections() {
     return {
       clients: readData('clients') || [],
+      counterparties: readData('counterparties') || [],
+      client_objects: readData('client_objects') || [],
+      client_contracts: readData('client_contracts') || [],
       rentals: readData('rentals') || [],
       gantt_rentals: readData('gantt_rentals') || [],
       equipment: readData('equipment') || [],
@@ -313,7 +317,8 @@ function registerDocumentRoutes(router, deps) {
       const idx = documents.findIndex(item => item.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       accessControl.assertCanUpdateEntity('documents', documents[idx], req.user);
-      const updated = prepareDocumentPatch(documents[idx], { status }, {
+      const normalized = normalizeDocumentDomainRecord({ ...documents[idx], status }, documents[idx]);
+      const updated = prepareDocumentPatch(documents[idx], normalized, {
         documents,
         nowIso,
         user: req.user,
@@ -349,6 +354,7 @@ function registerDocumentRoutes(router, deps) {
       'client',
       'clientName',
       'clientId',
+      'counterpartyId',
       'rentalId',
       'rental',
       'equipmentInv',
@@ -361,6 +367,7 @@ function registerDocumentRoutes(router, deps) {
     const filters = {
       status: item => item.status,
       type: item => item.type || item.documentType,
+      counterpartyId: item => item.counterpartyId,
       clientId: item => item.clientId,
       rentalId: item => item.rentalId || item.rental,
       equipmentId: item => item.equipmentId,
@@ -410,6 +417,7 @@ function registerDocumentRoutes(router, deps) {
       documentType: doc.documentType || doc.type,
       number: doc.number || doc.documentNumber || '',
       documentNumber: doc.documentNumber || doc.number || '',
+      counterpartyId: doc.counterpartyId || '',
       clientId: doc.clientId || '',
       client: doc.client || doc.clientName || '',
       date: doc.date || doc.documentDate || '',
@@ -458,6 +466,7 @@ function registerDocumentRoutes(router, deps) {
       ganttRentalId: item.id,
       sourceRentalId: item.sourceRentalId || '',
       originalRentalId: item.originalRentalId || '',
+      counterpartyId: item.counterpartyId || '',
       clientId: item.clientId || '',
       client: item.client || item.clientName || item.clientShort || '',
       equipmentId: item.equipmentId || '',
@@ -482,6 +491,7 @@ function registerDocumentRoutes(router, deps) {
     let list = Array.isArray(rows) ? rows : [];
     let hasNarrowingFilter = false;
     const filters = {
+      counterpartyId: item => item.counterpartyId,
       clientId: item => item.clientId,
       equipmentId: item => item.equipmentId,
       objectId: item => item.objectId,
@@ -513,6 +523,7 @@ function registerDocumentRoutes(router, deps) {
       'client',
       'clientName',
       'clientShort',
+      'counterpartyId',
       'clientId',
       'equipmentInv',
       'inventoryNumber',
@@ -873,7 +884,8 @@ function registerDocumentRoutes(router, deps) {
       };
       accessControl.assertCanCreateCollection('documents', req.user, copyInput);
       const input = accessControl.sanitizeCreateInput('documents', copyInput, req.user);
-      const prepared = prepareDocumentCreate(input, {
+      const normalized = normalizeDocumentDomainRecord({ ...input, id: generateId(idPrefixes.documents || 'D') });
+      const prepared = prepareDocumentCreate(normalized, {
         documents,
         settings: readSettings(),
         nowIso,
@@ -921,7 +933,9 @@ function registerDocumentRoutes(router, deps) {
       if (documentNumber(documents[idx])) return res.json(documents[idx]);
       const settings = readSettings();
       const generated = nextDocumentNumber(documents, settings, documents[idx].documentType || documents[idx].type, Number(String(documents[idx].documentDate || documents[idx].date || documents[idx].createdAt || nowIso()).slice(0, 4)));
+      const normalized = normalizeDocumentDomainRecord(documents[idx], documents[idx]);
       const updated = prepareDocumentPatch(documents[idx], {
+        ...normalized,
         number: generated.number,
         documentNumber: generated.number,
       }, {

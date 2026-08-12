@@ -50,6 +50,28 @@ test('canonical counterpartyId takes precedence over compatibility clientId in s
   );
 });
 
+test('Document scope uses canonical Counterparty and never equal display names', () => {
+  const state = {
+    rentals: [
+      { id: 'R-own', managerId: 'U-manager', counterpartyId: 'CP-own', clientId: 'C-own', client: 'ООО Одинаковое' },
+      { id: 'R-other', managerId: 'U-other', counterpartyId: 'CP-other', clientId: 'C-other', client: 'ООО Одинаковое' },
+    ],
+    gantt_rentals: [],
+  };
+  const access = createAccess(state);
+  const user = { userId: 'U-manager', userName: 'Руслан', userRole: 'Менеджер по аренде' };
+  const documents = [
+    { id: 'D-own', counterpartyId: 'CP-own', client: 'ООО Одинаковое' },
+    { id: 'D-other', counterpartyId: 'CP-other', clientId: 'C-own', client: 'ООО Одинаковое' },
+    { id: 'D-name-only', client: 'ООО Одинаковое' },
+  ];
+
+  assert.deepEqual(
+    access.filterCollectionByScope('documents', documents, user).map(item => item.id),
+    ['D-own'],
+  );
+});
+
 test('Counterparty relation bulk input rejects missing and duplicate stable IDs', () => {
   const access = createAccess({});
 

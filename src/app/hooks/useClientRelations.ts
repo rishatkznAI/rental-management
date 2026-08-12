@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { clientObjectsService } from '../services/client-objects.service';
-import { clientContractsService } from '../services/client-contracts.service';
+import { clientContractsService, type ClientContractCreateInput } from '../services/client-contracts.service';
 import type { ClientContract, ClientObject } from '../types';
 
 type IdempotentCreateInput<T> = Omit<T, 'id'> & { idempotencyKey?: string };
@@ -59,7 +59,7 @@ export function useClientContractsList(options: QueryOptions = {}) {
 export function useCreateClientContract() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ idempotencyKey, ...data }: IdempotentCreateInput<ClientContract>) =>
+    mutationFn: ({ idempotencyKey, ...data }: ClientContractCreateInput & { idempotencyKey?: string }) =>
       clientContractsService.create(data, idempotencyKey),
     onSuccess: (created) => {
       qc.setQueryData<ClientContract[]>(CLIENT_CONTRACT_KEYS.all, current => [

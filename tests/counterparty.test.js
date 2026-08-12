@@ -135,6 +135,26 @@ test('Counterparty contract requires at least one explicit role', async () => {
   });
 });
 
+test('Counterparty role filter follows RoleAssignment authority with legacy projection fallback only', async () => {
+  const state = createState({
+    counterparties: [
+      { id: 'CP-active', ...legalEntity({ inn: '1655000011' }) },
+      { id: 'CP-inactive', ...legalEntity({ inn: '1655000012' }) },
+      { id: 'CP-legacy', ...legalEntity({ inn: '1655000013' }) },
+    ],
+    counterparty_role_assignments: [
+      { id: 'A-active', counterpartyId: 'CP-active', roleCode: 'customer', status: 'active', validTo: null },
+      { id: 'A-inactive', counterpartyId: 'CP-inactive', roleCode: 'customer', status: 'inactive', validTo: '2026-01-01' },
+    ],
+  });
+  const app = createApp(state);
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'GET', '/api/counterparties?role=customer');
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.map(item => item.id), ['CP-active', 'CP-legacy']);
+  });
+});
+
 test('Counterparty supports customer, supplier, contractor and deterministic multi-role sets', async () => {
   const state = createState();
   const app = createApp(state);

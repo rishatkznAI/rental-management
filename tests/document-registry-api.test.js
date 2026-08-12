@@ -24,8 +24,28 @@ function createApp(options = {}) {
       { id: 'U-mechanic', name: 'Петров', role: 'Механик', status: 'Активен' },
       { id: 'U-investor', name: 'Инвестор', role: 'Инвестор', status: 'Активен', ownerId: 'OWN-1' },
     ],
+    counterparties: [{
+      id: 'CP-1',
+      type: 'legal_entity',
+      legalName: 'ООО Клиент',
+      shortName: 'ООО Клиент',
+      inn: '7701000000',
+      status: 'active',
+      archivedAt: null,
+      roles: ['customer'],
+    }],
+    counterparty_role_assignments: [{
+      id: 'CPRA-1',
+      counterpartyId: 'CP-1',
+      roleCode: 'customer',
+      status: 'active',
+      validTo: null,
+    }],
+    client_objects: [],
+    client_contracts: [],
     clients: [{
       id: 'C-1',
+      counterpartyId: 'CP-1',
       company: 'ООО Клиент',
       inn: '7701000000',
       kpp: '770101001',
@@ -37,7 +57,7 @@ function createApp(options = {}) {
       bankAccount: '40702810000000000001',
       corrAccount: '30101810000000000000',
     }],
-    rentals: [{ id: 'R-1', clientId: 'C-1', client: 'ООО Клиент', manager: 'Руслан', managerId: 'U-manager', startDate: '2026-05-10', plannedReturnDate: '2026-05-12', equipment: ['A-1'], rate: '10000/день', price: 30000 }],
+    rentals: [{ id: 'R-1', counterpartyId: 'CP-1', clientId: 'C-1', client: 'ООО Клиент', manager: 'Руслан', managerId: 'U-manager', startDate: '2026-05-10', plannedReturnDate: '2026-05-12', equipment: ['A-1'], rate: '10000/день', price: 30000 }],
     gantt_rentals: [],
     equipment: [
       { id: 'EQ-1', inventoryNumber: 'A-1', manufacturer: 'Genie', model: 'GS-1932', serialNumber: 'SN-1', ownerId: 'OWN-1' },
@@ -404,10 +424,108 @@ test('documents API creates documents with automatic numbers and separate sequen
   });
 });
 
+test('customer Documents accept CP-only identity and reject mismatch, inactive role, and name-only identity', async () => {
+  const { app, state } = createApp();
+  state.counterparties.push({
+    id: 'CP-2',
+    type: 'legal_entity',
+    legalName: 'ООО Клиент',
+    shortName: 'ООО Клиент',
+    status: 'active',
+    archivedAt: null,
+    roles: ['customer'],
+  }, {
+    id: 'CP-INACTIVE',
+    type: 'legal_entity',
+    legalName: 'ООО Неактивный',
+    status: 'active',
+    archivedAt: null,
+    roles: ['customer'],
+  });
+  state.counterparty_role_assignments.push(
+    { id: 'CPRA-2', counterpartyId: 'CP-2', roleCode: 'customer', status: 'active', validTo: null },
+    { id: 'CPRA-INACTIVE', counterpartyId: 'CP-INACTIVE', roleCode: 'customer', status: 'inactive', validTo: '2026-01-01' },
+  );
+
+  await withServer(app, async baseUrl => {
+    const cpOnly = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'rental_contract',
+      counterpartyId: 'CP-2',
+      signerName: 'Иванов Иван',
+      signerPosition: 'директор',
+      signerBasis: 'Устав',
+      date: '2026-05-09',
+    });
+    assert.equal(cpOnly.response.status, 201, JSON.stringify(cpOnly.json));
+    assert.equal(cpOnly.json.counterpartyId, 'CP-2');
+    assert.equal(cpOnly.json.clientId, undefined);
+    assert.equal(cpOnly.json.snapshot.client.legalName, 'ООО Клиент');
+
+    const duplicate = await request(baseUrl, 'POST', `/api/documents/${cpOnly.json.id}/duplicate`, 'office');
+    assert.equal(duplicate.response.status, 201);
+    assert.equal(duplicate.json.counterpartyId, 'CP-2');
+    assert.equal(duplicate.json.clientId, undefined);
+
+    const matching = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'contract', counterpartyId: 'CP-1', clientId: 'C-1', client: 'Snapshot', date: '2026-05-09', status: 'draft',
+    });
+    assert.equal(matching.response.status, 201);
+
+    const mismatch = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'contract', counterpartyId: 'CP-2', clientId: 'C-1', client: 'ООО Клиент', date: '2026-05-09', status: 'draft',
+    });
+    assert.equal(mismatch.response.status, 409);
+    assert.equal(mismatch.json.code, 'COUNTERPARTY_RELATION_MISMATCH');
+
+    const inactive = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'contract', counterpartyId: 'CP-INACTIVE', client: 'ООО Неактивный', date: '2026-05-09', status: 'draft',
+    });
+    assert.equal(inactive.response.status, 409);
+    assert.equal(inactive.json.code, 'COUNTERPARTY_RELATION_CUSTOMER_ROLE_REQUIRED');
+
+    const nameOnly = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'contract', client: 'ООО Клиент', date: '2026-05-09', status: 'draft',
+    });
+    assert.equal(nameOnly.response.status, 400);
+    assert.equal(nameOnly.json.code, 'COUNTERPARTY_RELATION_ID_REQUIRED');
+  });
+});
+
+test('Rental Counterparty controls Document relation and conflicting object/contract chains reject', async () => {
+  const { app, state } = createApp();
+  state.counterparties.push({
+    id: 'CP-2', legalName: 'ООО Другой', status: 'active', archivedAt: null, roles: ['customer'],
+  });
+  state.counterparty_role_assignments.push({
+    id: 'CPRA-2', counterpartyId: 'CP-2', roleCode: 'customer', status: 'active', validTo: null,
+  });
+  state.clients.push({ id: 'C-2', counterpartyId: 'CP-2', company: 'ООО Другой' });
+  state.client_objects.push({ id: 'O-2', counterpartyId: 'CP-2', clientId: 'C-2', name: 'Чужой', address: 'Москва', status: 'active' });
+  state.client_contracts.push({ id: 'CC-2', counterpartyId: 'CP-2', clientId: 'C-2', number: '2', status: 'active' });
+
+  await withServer(app, async baseUrl => {
+    const derived = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'contract', rentalId: 'R-1', client: 'Snapshot', date: '2026-05-09', status: 'draft',
+    });
+    assert.equal(derived.response.status, 201, JSON.stringify(derived.json));
+    assert.equal(derived.json.counterpartyId, 'CP-1');
+    assert.equal(derived.json.clientId, 'C-1');
+
+    for (const link of [{ objectId: 'O-2' }, { contractId: 'CC-2' }]) {
+      const rejected = await request(baseUrl, 'POST', '/api/documents', 'office', {
+        type: 'contract', rentalId: 'R-1', date: '2026-05-09', status: 'draft', ...link,
+      });
+      assert.equal(rejected.response.status, 409);
+      assert.equal(rejected.json.code, 'COUNTERPARTY_RELATION_MISMATCH');
+    }
+  });
+});
+
 test('closing rental documents snapshot downtime-adjusted billing amount', async () => {
   const { app, state } = createApp();
   state.rentals = [{
     id: 'R-metal',
+    counterpartyId: 'CP-1',
     clientId: 'C-1',
     client: 'ООО Клиент',
     manager: 'Руслан',
@@ -467,6 +585,7 @@ test('document snapshots stay fixed and new documents use current downtime billi
   const { app, state } = createApp();
   state.rentals = [{
     id: 'R-snapshot',
+    counterpartyId: 'CP-1',
     clientId: 'C-1',
     client: 'ООО Клиент',
     manager: 'Руслан',
@@ -527,6 +646,7 @@ test('contract and custom invoice amounts are not overwritten by downtime billin
   const { app, state } = createApp();
   state.rentals = [{
     id: 'R-contract',
+    counterpartyId: 'CP-1',
     clientId: 'C-1',
     client: 'ООО Клиент',
     startDate: '2026-05-01',
@@ -782,9 +902,28 @@ test('rental contract print uses stored snapshot, preserves date, and tolerates 
   const { app, state } = createApp();
   state.clients.push({
     id: 'C-partial',
+    counterpartyId: 'CP-partial',
     company: 'ИП Частичный',
     inn: '771122334455',
     legalAddress: 'Москва, пер. Короткий, 2',
+  });
+  state.counterparties.push({
+    id: 'CP-partial',
+    type: 'individual_entrepreneur',
+    legalName: 'ИП Частичный',
+    shortName: 'ИП Частичный',
+    inn: '771122334455',
+    legalAddress: 'Москва, пер. Короткий, 2',
+    status: 'active',
+    archivedAt: null,
+    roles: ['customer'],
+  });
+  state.counterparty_role_assignments.push({
+    id: 'CPRA-partial',
+    counterpartyId: 'CP-partial',
+    roleCode: 'customer',
+    status: 'active',
+    validTo: null,
   });
 
   await withServer(app, async (baseUrl) => {
@@ -952,7 +1091,7 @@ test('documents generate API rejects missing required data and supports status e
       date: '2026-05-09',
     });
     assert.equal(missingClient.response.status, 400);
-    assert.equal(missingClient.json.code, 'DOCUMENT_REQUIRED_FIELDS');
+    assert.equal(missingClient.json.code, 'COUNTERPARTY_RELATION_ID_REQUIRED');
 
     const missing = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
       type: 'rental_contract',

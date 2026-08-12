@@ -21,7 +21,8 @@ import {
 } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Textarea } from '../components/ui/textarea';
-import { ClientCombobox, clientLabel } from '../components/ui/ClientCombobox';
+import { clientLabel } from '../components/ui/ClientCombobox';
+import { CustomerCounterpartyCombobox } from '../components/ui/CustomerCounterpartyCombobox';
 import {
   AlertTriangle,
   CalendarDays,
@@ -71,7 +72,6 @@ import {
   contextFilterLabel,
   hasClientContext,
   matchesClientContext,
-  normalizeContextName,
 } from '../lib/quickActionContext.js';
 import { downloadPrintableHtml, openPrintableHtml } from '../lib/serviceWorkOrder';
 import { saleConditionKind } from '../lib/equipmentSaleMode.js';
@@ -87,6 +87,7 @@ import { mechanicsService } from '../services/mechanics.service';
 import { mechanicDocumentsService } from '../services/mechanic-documents.service';
 import { appSettingsService } from '../services/app-settings.service';
 import { serviceVehiclesService } from '../services/service-vehicles.service';
+import { counterpartiesService } from '../services/counterparties.service';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../lib/permissions';
 import { normalizeUserRole } from '../lib/userStorage';
@@ -95,6 +96,7 @@ import { PaginationControls } from '../components/common/PaginationControls';
 import { usePaginatedDeliveries } from '../hooks/useDeliveries';
 import type {
   Client,
+  Counterparty,
   Document as Doc,
   DocumentContractKind,
   DocumentStatus,
@@ -155,6 +157,7 @@ type DocumentQuickFilter =
 
 type DocumentWizardState = {
   type: DocumentType;
+  counterpartyId: string;
   clientId: string;
   rentalId: string;
   equipmentId: string;
@@ -211,6 +214,7 @@ type DocumentWizardState = {
 
 const EMPTY_WIZARD: DocumentWizardState = {
   type: 'rental_contract',
+  counterpartyId: '',
   clientId: '',
   rentalId: '',
   equipmentId: '',
@@ -274,19 +278,24 @@ function clientField(client: Client | null | undefined, keys: string[]): string 
   return '';
 }
 
-function fillWizardClientFields(current: DocumentWizardState, client: Client | null): DocumentWizardState {
-  if (!client) {
-    return { ...current, clientId: '' };
+function fillWizardCustomerFields(
+  current: DocumentWizardState,
+  client: Client | null,
+  counterparty: Counterparty | null,
+): DocumentWizardState {
+  if (!client && !counterparty) {
+    return { ...current, counterpartyId: '', clientId: '' };
   }
   return {
     ...current,
-    clientId: client.id,
-    clientLegalName: current.clientLegalName || clientField(client, ['legalName', 'fullName', 'company']),
-    clientInn: current.clientInn || clientField(client, ['inn', 'taxId']),
-    clientKpp: current.clientKpp || clientField(client, ['kpp']),
-    clientOgrn: current.clientOgrn || clientField(client, ['ogrn']),
-    clientLegalAddress: current.clientLegalAddress || clientField(client, ['legalAddress', 'address']),
-    clientPostalAddress: current.clientPostalAddress || clientField(client, ['postalAddress', 'mailingAddress', 'actualAddress', 'address']),
+    counterpartyId: counterparty?.id || client?.counterpartyId || '',
+    clientId: client?.id || '',
+    clientLegalName: current.clientLegalName || counterparty?.legalName || clientField(client, ['legalName', 'fullName', 'company']),
+    clientInn: current.clientInn || counterparty?.inn || clientField(client, ['inn', 'taxId']),
+    clientKpp: current.clientKpp || counterparty?.kpp || clientField(client, ['kpp']),
+    clientOgrn: current.clientOgrn || counterparty?.ogrn || counterparty?.ogrnip || clientField(client, ['ogrn']),
+    clientLegalAddress: current.clientLegalAddress || counterparty?.legalAddress || clientField(client, ['legalAddress', 'address']),
+    clientPostalAddress: current.clientPostalAddress || counterparty?.actualAddress || clientField(client, ['postalAddress', 'mailingAddress', 'actualAddress', 'address']),
     clientBankName: current.clientBankName || clientField(client, ['bankName', 'bank']),
     clientBankBik: current.clientBankBik || clientField(client, ['bankBik', 'bik']),
     clientBankAccount: current.clientBankAccount || clientField(client, ['bankAccount', 'settlementAccount', 'account']),
@@ -295,6 +304,7 @@ function fillWizardClientFields(current: DocumentWizardState, client: Client | n
 }
 
 type ContractFormState = {
+  counterpartyId: string;
   clientId: string;
   client: string;
   rentalId: string;
@@ -306,6 +316,7 @@ type ContractFormState = {
 };
 
 type CommercialOfferFormState = {
+  counterpartyId: string;
   clientId: string;
   client: string;
   equipmentId: string;
@@ -798,6 +809,11 @@ export default function Documents() {
   const [wizardForm, setWizardForm] = React.useState<DocumentWizardState>(EMPTY_WIZARD);
   const referenceLoadEnabled = createDialogOpen || commercialOfferDialogOpen || documentWizardOpen;
   const { data: clientsReference } = usePaginatedClients({ page: 1, pageSize: 100, sortBy: 'company', sortDir: 'asc' }, { enabled: referenceLoadEnabled });
+  const { data: customerCounterparties = [] } = useQuery<Counterparty[]>({
+    queryKey: ['counterparties', 'customer', 'documents'],
+    queryFn: () => counterpartiesService.getAll({ role: 'customer' }),
+    enabled: referenceLoadEnabled,
+  });
   const { data: rentalsReference } = usePaginatedRentals({ page: 1, pageSize: 100, sortBy: 'startDate', sortDir: 'desc' }, { enabled: referenceLoadEnabled });
   const { data: equipmentReference } = usePaginatedEquipment({ page: 1, pageSize: 100, sortBy: 'inventoryNumber', sortDir: 'asc' }, { enabled: referenceLoadEnabled });
   const { data: serviceTicketsReference } = usePaginatedServiceTickets({ page: 1, pageSize: 100, sortBy: 'createdAt', sortDir: 'desc' }, { enabled: referenceLoadEnabled });
@@ -871,6 +887,7 @@ export default function Documents() {
   const [sortKey, setSortKey] = React.useState<'date' | 'number' | 'client' | 'status' | 'createdAt'>('date');
   const [createContractKind, setCreateContractKind] = React.useState<DocumentContractKind>('rental');
   const [contractForm, setContractForm] = React.useState<ContractFormState>({
+    counterpartyId: '',
     clientId: '',
     client: '',
     rentalId: '',
@@ -881,6 +898,7 @@ export default function Documents() {
     comment: '',
   });
   const [commercialOfferForm, setCommercialOfferForm] = React.useState<CommercialOfferFormState>({
+    counterpartyId: '',
     clientId: '',
     client: '',
     equipmentId: '',
@@ -896,6 +914,7 @@ export default function Documents() {
   const ganttReferencesQuery = useDocumentGanttReferences({
     limit: 100,
     search: debouncedRentalReferenceSearch.trim() || undefined,
+    counterpartyId: wizardForm.counterpartyId || contractForm.counterpartyId || commercialOfferForm.counterpartyId || undefined,
     clientId: wizardForm.clientId || contractForm.clientId || commercialOfferForm.clientId || undefined,
     rentalId: wizardForm.rentalId || contractForm.rentalId || undefined,
     equipmentId: wizardForm.equipmentId || contractForm.equipmentId || commercialOfferForm.equipmentId || undefined,
@@ -924,6 +943,7 @@ export default function Documents() {
     types: 'rental_contract,rental_specification',
     ids: referenceDocumentIds || undefined,
     filters: {
+      counterpartyId: wizardForm.counterpartyId || undefined,
       clientId: wizardForm.clientId || undefined,
       rentalId: wizardForm.rentalId || undefined,
       parentDocumentId: wizardForm.parentDocumentId || undefined,
@@ -953,6 +973,10 @@ export default function Documents() {
   const clientsById = React.useMemo(
     () => new Map((clients as Client[]).map(client => [client.id, client])),
     [clients],
+  );
+  const counterpartiesById = React.useMemo(
+    () => new Map(customerCounterparties.map(counterparty => [counterparty.id, counterparty])),
+    [customerCounterparties],
   );
   const rentalsById = React.useMemo(
     () => new Map((rentals as Rental[]).map(rental => [rental.id, rental])),
@@ -1008,10 +1032,8 @@ export default function Documents() {
     if (quickActionContext.clientId) {
       return clientsById.get(quickActionContext.clientId);
     }
-    const wantedName = normalizeContextName(quickActionContext.clientName);
-    if (!wantedName) return undefined;
-    return (clients as Client[]).find(client => normalizeContextName(client.company) === wantedName);
-  }, [clients, clientsById, quickActionContext.clientId, quickActionContext.clientName]);
+    return undefined;
+  }, [clientsById, quickActionContext.clientId]);
   const quickActionRental = quickActionContext.rentalId ? rentalsById.get(quickActionContext.rentalId) : undefined;
   const quickActionEquipment = React.useMemo(() => {
     if (quickActionContext.equipmentId) return equipmentById.get(quickActionContext.equipmentId);
@@ -1019,16 +1041,18 @@ export default function Documents() {
     return undefined;
   }, [equipmentById, equipmentByInventory, quickActionContext.equipmentId, quickActionContext.equipmentInv]);
   const relatedRentalOptions = React.useMemo(() => {
-    if (!contractForm.clientId && !contractForm.client) return rentalReferenceOptions;
+    if (!contractForm.counterpartyId && !contractForm.clientId) return rentalReferenceOptions;
     return rentalReferenceOptions.filter(option => {
       const rental = rentalsById.get(option.id);
       const gantt = ganttByRentalId.get(option.id);
+      if (contractForm.counterpartyId) {
+        return rental?.counterpartyId === contractForm.counterpartyId
+          || gantt?.counterpartyId === contractForm.counterpartyId;
+      }
       return rental?.clientId === contractForm.clientId
-        || rental?.client === contractForm.client
-        || gantt?.clientId === contractForm.clientId
-        || gantt?.client === contractForm.client;
+        || gantt?.clientId === contractForm.clientId;
     });
-  }, [contractForm.client, contractForm.clientId, ganttByRentalId, rentalReferenceOptions, rentalsById]);
+  }, [contractForm.clientId, contractForm.counterpartyId, ganttByRentalId, rentalReferenceOptions, rentalsById]);
   const selectedWizardRentalLabel = React.useMemo(() => {
     if (!wizardForm.rentalId) return '';
     return rentalReferenceOptions.find(option => option.id === wizardForm.rentalId)?.label
@@ -1132,6 +1156,7 @@ export default function Documents() {
     ];
     if (['commercial_offer', 'quote', 'kp', 'кп'].includes(requestedType)) {
       openCommercialOfferCreate({
+        counterpartyId: quickActionRental?.counterpartyId || quickActionClient?.counterpartyId || quickActionContext.counterpartyId,
         clientId: quickActionClient?.id || quickActionRental?.clientId || quickActionContext.clientId,
         client: quickActionClient?.company || quickActionRental?.client || quickActionContext.clientName,
         equipmentId: quickActionEquipment?.id || quickActionContext.equipmentId,
@@ -1143,6 +1168,7 @@ export default function Documents() {
         || '';
       openDocumentWizard({
         type: requestedType as DocumentType,
+        counterpartyId: quickActionRental?.counterpartyId || quickActionClient?.counterpartyId || quickActionContext.counterpartyId,
         clientId: quickActionClient?.id || quickActionRental?.clientId || quickActionContext.clientId,
         rentalId: quickActionRental?.id || quickActionContext.rentalId,
         equipmentId: quickActionEquipment?.id || quickActionContext.equipmentId,
@@ -1158,6 +1184,7 @@ export default function Documents() {
       });
     } else {
       openContractCreate('rental', {
+        counterpartyId: quickActionRental?.counterpartyId || quickActionClient?.counterpartyId || quickActionContext.counterpartyId,
         clientId: quickActionClient?.id || quickActionRental?.clientId || quickActionContext.clientId,
         client: quickActionClient?.company || quickActionRental?.client || quickActionContext.clientName,
         rentalId: quickActionRental?.id || '',
@@ -1186,6 +1213,7 @@ export default function Documents() {
       ? equipmentById.get(equipmentId)
       : (equipmentInv ? equipmentByInventory.get(equipmentInv) : undefined);
     const normalizedClientId = doc.clientId || rental?.clientId || '';
+    const normalizedCounterpartyId = doc.counterpartyId || rental?.counterpartyId || gantt?.counterpartyId || '';
     const normalizedClient = doc.client || rental?.client || clientsById.get(normalizedClientId)?.company || '';
     const normalizedManager = doc.manager || rental?.manager || gantt?.manager || '';
     const documentDate = getDocumentDate(doc).slice(0, 10);
@@ -1210,9 +1238,9 @@ export default function Documents() {
     const matchesWithoutNumber = !withoutNumberOnly || !docNumber;
     const matchesDuplicates = !duplicatesOnly || duplicateDocumentIds.has(doc.id);
     const matchesClient = clientFilter === 'all'
-      || normalizedClientId === clientFilter
-      || normalizedClient === clientsById.get(clientFilter)?.company;
+      || normalizedClientId === clientFilter;
     const matchesQuickClient = matchesClientContext({
+      counterpartyId: normalizedCounterpartyId,
       clientId: normalizedClientId,
       clientName: normalizedClient,
     }, quickActionContext);
@@ -1372,8 +1400,10 @@ export default function Documents() {
   const wizardGanttRental = wizardForm.rentalId ? ganttByRentalId.get(wizardForm.rentalId) : undefined;
   const wizardParentDocument = wizardForm.parentDocumentId ? referenceDocuments.find(doc => doc.id === wizardForm.parentDocumentId) : undefined;
   const wizardSpecification = wizardForm.specificationId ? referenceDocuments.find(doc => doc.id === wizardForm.specificationId) : undefined;
+  const wizardResolvedCounterpartyId = wizardForm.counterpartyId || wizardParentDocument?.counterpartyId || wizardSpecification?.counterpartyId || wizardRental?.counterpartyId || wizardGanttRental?.counterpartyId || '';
   const wizardResolvedClientId = wizardForm.clientId || wizardParentDocument?.clientId || wizardSpecification?.clientId || wizardRental?.clientId || wizardGanttRental?.clientId || '';
   const wizardClient = wizardResolvedClientId ? clientsById.get(wizardResolvedClientId) : undefined;
+  const wizardCounterparty = wizardResolvedCounterpartyId ? counterpartiesById.get(wizardResolvedCounterpartyId) : undefined;
   const wizardEquipment = wizardForm.equipmentId ? equipmentById.get(wizardForm.equipmentId) : undefined;
   const wizardServiceTicket = wizardForm.serviceTicketId ? serviceTicketsById.get(wizardForm.serviceTicketId) : undefined;
   const wizardDelivery = wizardForm.deliveryId ? deliveriesById.get(wizardForm.deliveryId) : undefined;
@@ -1398,17 +1428,20 @@ export default function Documents() {
         ? !wizardResolvedClientId
         : !wizardForm[field as keyof DocumentWizardState])
       .map(field => labels[field] || field);
+    if (wizardTypeMeta.requiresCustomer && !wizardResolvedCounterpartyId) {
+      missing.push('Выберите клиента-контрагента');
+    }
     if (wizardForm.type === 'rental_specification') {
       if (!wizardForm.parentDocumentId) missing.push('Договор аренды');
       if (!wizardForm.dailyRate && !wizardForm.amount) missing.push('Ставка или сумма');
     }
     return missing;
-  }, [wizardForm, wizardResolvedClientId, wizardTypeMeta]);
+  }, [wizardForm, wizardResolvedClientId, wizardResolvedCounterpartyId, wizardTypeMeta]);
   const wizardPreviewRows = React.useMemo(() => ([
     ['Тип', wizardTypeMeta.label],
     ['Дата', wizardForm.type === 'rental_contract' ? 'Будет установлена автоматически' : new Date().toISOString().slice(0, 10)],
     ['Номер', 'Будет сгенерирован автоматически'],
-    ['Клиент', wizardClient ? clientLabel(wizardClient) : wizardRental?.client || wizardGanttRental?.client || '—'],
+    ['Клиент', wizardCounterparty?.shortName || wizardCounterparty?.legalName || (wizardClient ? clientLabel(wizardClient) : wizardRental?.client || wizardGanttRental?.client || '—')],
     ['Договор', wizardParentDocument ? `${getDocumentNumber(wizardParentDocument)} от ${formatDate(getDocumentDate(wizardParentDocument))}` : '—'],
     ['Спецификация', wizardSpecification ? `${getDocumentNumber(wizardSpecification)} от ${formatDate(getDocumentDate(wizardSpecification))}` : '—'],
     ...(wizardForm.type === 'rental_contract' ? [
@@ -1438,7 +1471,7 @@ export default function Documents() {
     if (wizardForm.type === 'rental_contract') return !['Договор', 'Спецификация', 'Техника', 'Аренда', 'Период', 'Ставка', 'Количество дней', 'Сервис', 'Доставка', 'Механик', 'Служебная машина', 'Сумма'].includes(label);
     if (wizardForm.type !== 'rental_specification') return label !== 'Ставка' && label !== 'Количество дней';
     return label !== 'Спецификация';
-  }), [wizardClient, wizardDelivery, wizardEquipment, wizardForm, wizardGanttRental, wizardMechanic, wizardParentDocument, wizardRental, wizardServiceTicket, wizardServiceVehicle, wizardSpecification, wizardTypeMeta]);
+  }), [wizardClient, wizardCounterparty, wizardDelivery, wizardEquipment, wizardForm, wizardGanttRental, wizardMechanic, wizardParentDocument, wizardRental, wizardServiceTicket, wizardServiceVehicle, wizardSpecification, wizardTypeMeta]);
 
   const persistMechanicDocuments = React.useCallback(async (next: MechanicDocument[]) => {
     setMechanicDocuments(next);
@@ -1480,6 +1513,7 @@ export default function Documents() {
     setCreateContractKind(kind);
     setContractForm({
       clientId: '',
+      counterpartyId: '',
       client: '',
       rentalId: '',
       equipmentId: '',
@@ -1499,6 +1533,7 @@ export default function Documents() {
     validUntil.setDate(validUntil.getDate() + Math.max(1, salesSettings.quoteTemplate.validityDays));
     setCommercialOfferForm({
       clientId: '',
+      counterpartyId: '',
       client: '',
       equipmentId: '',
       date: new Date().toISOString().slice(0, 10),
@@ -1527,7 +1562,10 @@ export default function Documents() {
       type: initial.type || EMPTY_WIZARD.type,
     };
     const initialClient = nextForm.clientId ? clientsById.get(nextForm.clientId) : null;
-    setWizardForm(initialClient ? fillWizardClientFields(nextForm, initialClient) : nextForm);
+    const initialCounterparty = nextForm.counterpartyId ? counterpartiesById.get(nextForm.counterpartyId) : null;
+    setWizardForm(initialClient || initialCounterparty
+      ? fillWizardCustomerFields(nextForm, initialClient || null, initialCounterparty || null)
+      : nextForm);
     setWizardStep(1);
     setDocumentWizardOpen(true);
   }
@@ -1547,6 +1585,7 @@ export default function Documents() {
     setWizardForm(current => ({
       ...current,
       rentalId: value === 'none' ? '' : value,
+      counterpartyId: rental?.counterpartyId || gantt?.counterpartyId || current.counterpartyId || '',
       clientId: rental?.clientId || gantt?.clientId || current.clientId || '',
       equipmentId: current.equipmentId || rentalEquipment?.id || gantt?.equipmentId || '',
       rentalStartDate: current.rentalStartDate || rental?.startDate || gantt?.startDate || '',
@@ -1562,6 +1601,7 @@ export default function Documents() {
     setWizardForm(current => ({
       ...current,
       parentDocumentId: value === 'none' ? '' : value,
+      counterpartyId: parent?.counterpartyId || current.counterpartyId,
       clientId: parent?.clientId || current.clientId,
     }));
   }
@@ -1572,6 +1612,7 @@ export default function Documents() {
       ...current,
       specificationId: value === 'none' ? '' : value,
       parentDocumentId: specification?.parentDocumentId || current.parentDocumentId,
+      counterpartyId: specification?.counterpartyId || current.counterpartyId,
       clientId: specification?.clientId || current.clientId,
       rentalId: specification?.rentalId || current.rentalId,
       equipmentId: specification?.equipmentId || current.equipmentId,
@@ -1589,6 +1630,7 @@ export default function Documents() {
       type,
       parentDocumentId: source.type === 'rental_contract' ? source.id : source.parentDocumentId || '',
       specificationId: source.type === 'rental_specification' ? source.id : '',
+      counterpartyId: source.counterpartyId || '',
       clientId: source.clientId || '',
       rentalId: source.rentalId || '',
       equipmentId: source.equipmentId || '',
@@ -1619,8 +1661,9 @@ export default function Documents() {
         documentType: wizardForm.type,
         date: new Date().toISOString().slice(0, 10),
         status: 'draft',
+        counterpartyId: wizardResolvedCounterpartyId || undefined,
         clientId: wizardResolvedClientId || undefined,
-        client: wizardClient ? clientLabel(wizardClient) : wizardRental?.client || wizardGanttRental?.client || '',
+        client: wizardCounterparty?.shortName || wizardCounterparty?.legalName || (wizardClient ? clientLabel(wizardClient) : wizardRental?.client || wizardGanttRental?.client || ''),
         rentalId: wizardForm.rentalId || undefined,
         equipmentId: wizardForm.equipmentId || undefined,
         deliveryId: wizardForm.deliveryId || undefined,
@@ -1716,8 +1759,8 @@ export default function Documents() {
   }
 
   async function handleCreateContract() {
-    if (!contractForm.clientId || !contractForm.client.trim()) {
-      toast.error('Выберите клиента.');
+    if (!contractForm.counterpartyId || !contractForm.client.trim()) {
+      toast.error('Выберите клиента-контрагента.');
       return;
     }
     if (!contractForm.signatoryName.trim()) {
@@ -1737,7 +1780,8 @@ export default function Documents() {
       type: 'contract',
       contractKind: createContractKind,
       number: '',
-      clientId: contractForm.clientId,
+      counterpartyId: contractForm.counterpartyId,
+      clientId: contractForm.clientId || undefined,
       client: contractForm.client.trim(),
       date: contractForm.date,
       status: 'draft',
@@ -1802,6 +1846,7 @@ export default function Documents() {
       type: 'commercial_offer',
       documentType: 'commercial_offer',
       number: '',
+      counterpartyId: commercialOfferForm.counterpartyId || undefined,
       clientId: commercialOfferForm.clientId || undefined,
       client: clientName,
       date: commercialOfferForm.date,
@@ -2739,19 +2784,24 @@ export default function Documents() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2 md:col-span-2">
                         <div className="text-sm font-medium text-foreground">Клиент</div>
-                        <ClientCombobox
+                        <CustomerCounterpartyCombobox
+                          counterparties={customerCounterparties}
                           clients={clients as Client[]}
-                          value={wizardClient ? clientLabel(wizardClient) : ''}
-                          valueId={wizardResolvedClientId}
+                          value={wizardCounterparty?.shortName || wizardCounterparty?.legalName || (wizardClient ? clientLabel(wizardClient) : '')}
+                          counterpartyId={wizardResolvedCounterpartyId}
+                          clientId={wizardResolvedClientId}
                           onChange={(value) => {
-                            if (!value) setWizardForm(current => ({ ...current, clientId: '' }));
+                            if (!value) setWizardForm(current => fillWizardCustomerFields(current, null, null));
                           }}
-                          onClientSelect={(client) => setWizardForm(current => fillWizardClientFields(current, client))}
-                          placeholder={(clients as Client[]).length > 0 ? 'Выберите клиента из базы' : 'Клиенты не найдены'}
-                          initialLimit={20}
+                          onSelect={(selection) => setWizardForm(current => fillWizardCustomerFields(
+                            current,
+                            selection?.client || null,
+                            selection?.counterparty || null,
+                          ))}
+                          placeholder={customerCounterparties.length > 0 ? 'Выберите клиента-контрагента' : 'Активные клиенты-контрагенты не найдены'}
                         />
-                        {(clients as Client[]).length === 0 ? (
-                          <p className="text-xs text-muted-foreground">Клиенты не найдены</p>
+                        {customerCounterparties.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">Активные клиенты-контрагенты не найдены</p>
                         ) : null}
                         {wizardClient && !wizardForm.clientInn && !wizardForm.clientLegalAddress ? (
                           <p className="text-xs text-amber-700 dark:text-amber-300">Реквизиты клиента не заполнены. Можно создать черновик и дозаполнить позже.</p>
@@ -2861,16 +2911,21 @@ export default function Documents() {
                     {['rental_specification', 'transfer_act_to_client', 'return_act_from_client'].includes(wizardForm.type) ? (
                       <div className="space-y-2">
                         <div className="text-sm font-medium text-foreground">Клиент</div>
-                        <ClientCombobox
+                        <CustomerCounterpartyCombobox
+                          counterparties={customerCounterparties}
                           clients={clients as Client[]}
-                          value={wizardClient ? clientLabel(wizardClient) : ''}
-                          valueId={wizardResolvedClientId}
+                          value={wizardCounterparty?.shortName || wizardCounterparty?.legalName || (wizardClient ? clientLabel(wizardClient) : '')}
+                          counterpartyId={wizardResolvedCounterpartyId}
+                          clientId={wizardResolvedClientId}
                           onChange={(value) => {
-                            if (!value) setWizardForm(current => ({ ...current, clientId: '' }));
+                            if (!value) setWizardForm(current => fillWizardCustomerFields(current, null, null));
                           }}
-                          onClientSelect={(client) => setWizardForm(current => ({ ...current, clientId: client?.id ?? '' }))}
-                          placeholder={(clients as Client[]).length > 0 ? 'Выберите клиента из базы' : 'Клиенты не найдены'}
-                          initialLimit={20}
+                          onSelect={(selection) => setWizardForm(current => fillWizardCustomerFields(
+                            current,
+                            selection?.client || null,
+                            selection?.counterparty || null,
+                          ))}
+                          placeholder={customerCounterparties.length > 0 ? 'Выберите клиента-контрагента' : 'Активные клиенты-контрагенты не найдены'}
                         />
                       </div>
                     ) : null}
@@ -3146,20 +3201,23 @@ export default function Documents() {
 
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-foreground">Клиент</div>
-                  <ClientCombobox
+                  <CustomerCounterpartyCombobox
+                    counterparties={customerCounterparties}
                     clients={clients as Client[]}
                     value={contractForm.client}
-                    valueId={contractForm.clientId}
+                    counterpartyId={contractForm.counterpartyId}
+                    clientId={contractForm.clientId}
                     onChange={(value) => setContractForm(current => ({
                       ...current,
                       client: value,
                       rentalId: '',
                       equipmentId: '',
                     }))}
-                    onClientSelect={(client) => setContractForm(current => ({
+                    onSelect={(selection) => setContractForm(current => ({
                       ...current,
-                      clientId: client?.id ?? '',
-                      client: client?.company ?? '',
+                      counterpartyId: selection?.counterpartyId ?? '',
+                      clientId: selection?.clientId ?? '',
+                      client: selection?.label ?? '',
                       rentalId: '',
                       equipmentId: '',
                     }))}
@@ -3285,15 +3343,18 @@ export default function Documents() {
               <div className="grid gap-4 py-2">
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-foreground">Клиент</div>
-                  <ClientCombobox
+                  <CustomerCounterpartyCombobox
+                    counterparties={customerCounterparties}
                     clients={clients as Client[]}
                     value={commercialOfferForm.client}
-                    valueId={commercialOfferForm.clientId}
+                    counterpartyId={commercialOfferForm.counterpartyId}
+                    clientId={commercialOfferForm.clientId}
                     onChange={(value) => setCommercialOfferForm(current => ({ ...current, client: value }))}
-                    onClientSelect={(client) => setCommercialOfferForm(current => ({
+                    onSelect={(selection) => setCommercialOfferForm(current => ({
                       ...current,
-                      clientId: client?.id ?? '',
-                      client: client?.company ?? '',
+                      counterpartyId: selection?.counterpartyId ?? '',
+                      clientId: selection?.clientId ?? '',
+                      client: selection?.label ?? '',
                     }))}
                     placeholder="Выберите клиента или оставьте потенциального"
                   />

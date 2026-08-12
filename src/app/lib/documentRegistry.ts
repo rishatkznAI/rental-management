@@ -6,6 +6,7 @@ export type DocumentRegistryItem = {
   icon: string;
   color: string;
   numberPrefix: string;
+  requiresCustomer: boolean;
   allowedRoles: string[];
   requiredFields: string[];
   optionalFields: string[];
@@ -21,8 +22,9 @@ export const DOCUMENT_TYPE_REGISTRY: Record<string, DocumentRegistryItem> = {
     icon: 'FileSignature',
     color: 'blue',
     numberPrefix: 'DA',
+    requiresCustomer: true,
     allowedRoles: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'],
-    requiredFields: ['clientId', 'signerName', 'signerPosition', 'signerBasis'],
+    requiredFields: ['signerName', 'signerPosition', 'signerBasis'],
     optionalFields: [
       'clientLegalName',
       'clientInn',
@@ -48,8 +50,9 @@ export const DOCUMENT_TYPE_REGISTRY: Record<string, DocumentRegistryItem> = {
     icon: 'ClipboardList',
     color: 'indigo',
     numberPrefix: 'SP',
+    requiresCustomer: true,
     allowedRoles: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'],
-    requiredFields: ['clientId', 'equipmentId'],
+    requiredFields: ['equipmentId'],
     optionalFields: ['parentDocumentId', 'contractNumber', 'rentalId', 'rentalStartDate', 'rentalEndDate', 'dailyRate', 'quantityDays', 'amount', 'objectId', 'contractId', 'notes'],
     defaultStatus: 'draft',
     supportedActions: ['open', 'print', 'send', 'markSigned', 'duplicate', 'delete'],
@@ -61,8 +64,9 @@ export const DOCUMENT_TYPE_REGISTRY: Record<string, DocumentRegistryItem> = {
     icon: 'Send',
     color: 'emerald',
     numberPrefix: 'AP',
+    requiresCustomer: true,
     allowedRoles: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'],
-    requiredFields: ['clientId', 'equipmentId', 'transferDate'],
+    requiredFields: ['equipmentId', 'transferDate'],
     optionalFields: ['parentDocumentId', 'specificationId', 'rentalId', 'deliveryId', 'equipmentCondition', 'completeness', 'companyRepresentative', 'clientRepresentative', 'notes'],
     defaultStatus: 'draft',
     supportedActions: ['open', 'print', 'send', 'markSigned', 'duplicate', 'delete'],
@@ -74,8 +78,9 @@ export const DOCUMENT_TYPE_REGISTRY: Record<string, DocumentRegistryItem> = {
     icon: 'Undo2',
     color: 'amber',
     numberPrefix: 'AR',
+    requiresCustomer: true,
     allowedRoles: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'],
-    requiredFields: ['clientId', 'equipmentId', 'returnDate'],
+    requiredFields: ['equipmentId', 'returnDate'],
     optionalFields: ['parentDocumentId', 'specificationId', 'rentalId', 'deliveryId', 'returnCondition', 'damages', 'missingItems', 'serviceRequired', 'serviceTicketId', 'companyRepresentative', 'clientRepresentative', 'notes'],
     defaultStatus: 'draft',
     supportedActions: ['open', 'print', 'send', 'markSigned', 'duplicate', 'delete'],
@@ -87,6 +92,7 @@ export const DOCUMENT_TYPE_REGISTRY: Record<string, DocumentRegistryItem> = {
     icon: 'Wrench',
     color: 'orange',
     numberPrefix: 'ZN',
+    requiresCustomer: false,
     allowedRoles: ['Администратор', 'Офис-менеджер', 'Механик'],
     requiredFields: ['serviceTicketId'],
     optionalFields: ['equipmentId', 'mechanicId', 'clientId', 'rentalId'],
@@ -100,6 +106,7 @@ export const DOCUMENT_TYPE_REGISTRY: Record<string, DocumentRegistryItem> = {
     icon: 'Route',
     color: 'cyan',
     numberPrefix: 'PL',
+    requiresCustomer: false,
     allowedRoles: ['Администратор', 'Офис-менеджер', 'Механик'],
     requiredFields: ['mechanicId'],
     optionalFields: ['serviceCarId', 'serviceTicketId', 'deliveryId'],

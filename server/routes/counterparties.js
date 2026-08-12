@@ -19,6 +19,7 @@ const {
   boundaryEntries,
   boundaryState,
   deactivateCounterpartyRole,
+  hasActiveCounterpartyRole,
 } = require('../lib/counterparty-role-profiles');
 
 const COUNTERPARTY_WRITE_FIELDS = new Set([
@@ -181,7 +182,10 @@ function registerCounterpartyRoutes(router, deps) {
 
     let rows = Array.isArray(readData('counterparties')) ? readData('counterparties') : [];
     if (!includeArchived) rows = rows.filter(item => !item?.archivedAt && item?.status !== 'archived');
-    if (role) rows = rows.filter(item => Array.isArray(item?.roles) && item.roles.includes(role));
+    if (role) {
+      const roleState = readRoleProfileState();
+      rows = rows.filter(item => hasActiveCounterpartyRole(item, role, roleState));
+    }
     if (type) rows = rows.filter(item => item?.type === type);
     if (search) {
       rows = rows.filter(item => [

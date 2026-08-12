@@ -36,13 +36,14 @@ test('documents workspace has KPI cards and type-specific generation wizard', ()
   assert.match(source, /Создайте юридическую рамку договора с клиентом/);
 });
 
-test('rental contract wizard uses searchable client selection and sends signer payload', () => {
-  assert.match(source, /ClientCombobox/);
-  assert.match(source, /valueId=\{wizardResolvedClientId\}/);
+test('rental contract wizard uses searchable customer Counterparty selection and sends signer payload', () => {
+  assert.match(source, /CustomerCounterpartyCombobox/);
+  assert.match(source, /counterpartyId=\{wizardResolvedCounterpartyId\}/);
+  assert.match(source, /clientId=\{wizardResolvedClientId\}/);
+  assert.match(source, /counterpartyId: wizardResolvedCounterpartyId \|\| undefined/);
   assert.match(source, /clientId: wizardResolvedClientId \|\| undefined/);
-  assert.match(source, /Клиенты не найдены/);
-  assert.match(source, /field === 'clientId'[\s\S]*!\s*wizardResolvedClientId/);
-  assert.match(source, /fillWizardClientFields/);
+  assert.match(source, /wizardTypeMeta\.requiresCustomer && !wizardResolvedCounterpartyId/);
+  assert.match(source, /fillWizardCustomerFields/);
   assert.match(source, /signer:\s*\{/);
   assert.match(source, /requisites:\s*\{/);
   assert.match(source, /bank:\s*\{/);
@@ -101,7 +102,7 @@ test('documents quick action can open rental document wizard with chain context'
   assert.match(source, /specificationId: quickActionContext\.specificationId/);
   assert.match(source, /transferDate: quickActionContext\.transferDate \|\| quickActionRental\?\.startDate/);
   assert.match(source, /returnDate: quickActionContext\.returnDate \|\| quickActionRental\?\.actualReturnDate/);
-  assert.match(source, /setWizardForm\(initialClient \? fillWizardClientFields\(nextForm, initialClient\) : nextForm\)/);
+  assert.match(source, /setWizardForm\(initialClient \|\| initialCounterparty[\s\S]*fillWizardCustomerFields\(nextForm, initialClient \|\| null, initialCounterparty \|\| null\)/);
 });
 
 test('documents rental selects render selected labels from id fallback', () => {

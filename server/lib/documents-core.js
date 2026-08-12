@@ -327,6 +327,7 @@ function buildDocumentRegistrySummary(documents = [], todayIso = new Date().toIS
 
 function fieldLabel(field) {
   const labels = {
+    counterpartyId: 'контрагента',
     clientId: 'клиент',
     rentalId: 'аренда',
     equipmentId: 'техника',
@@ -422,6 +423,10 @@ function compactRows(rows) {
 
 function buildSnapshot(input, collections = {}, nowIso = () => new Date().toISOString()) {
   const client = resolveById(collections.clients, input.clientId);
+  const counterparty = resolveById(
+    collections.counterparties,
+    input.counterpartyId || client?.counterpartyId,
+  );
   const rental = resolveById(collections.rentals, input.rentalId) || resolveById(collections.gantt_rentals, input.rentalId);
   const equipment = resolveById(collections.equipment, input.equipmentId) || resolveRentalEquipment(rental, collections.equipment, input.equipmentId);
   const serviceTicket = resolveById(collections.service, input.serviceTicketId);
@@ -433,24 +438,26 @@ function buildSnapshot(input, collections = {}, nowIso = () => new Date().toISOS
 
   return {
     generatedAt: nowIso(),
-    client: client ? {
-      id: client.id,
-      company: client.company || client.name || input.client,
-      legalName: input.clientLegalName || client.legalName || client.fullName || client.company || client.name,
-      inn: input.clientInn || client.inn,
-      kpp: input.clientKpp || client.kpp,
-      ogrn: input.clientOgrn || client.ogrn,
-      address: input.clientLegalAddress || client.legalAddress || client.address,
-      legalAddress: input.clientLegalAddress || client.legalAddress || client.address,
-      postalAddress: input.clientPostalAddress || client.postalAddress || client.mailingAddress || client.actualAddress || client.address,
-      bankName: input.clientBankName || client.bankName || client.bank,
-      bankBik: input.clientBankBik || client.bankBik || client.bik,
-      bankAccount: input.clientBankAccount || client.bankAccount || client.settlementAccount || client.account,
-      corrAccount: input.clientCorrAccount || client.corrAccount || client.correspondentAccount || client.bankCorrAccount,
-      phone: client.phone,
-      email: client.email,
-    } : (input.client || input.clientId ? {
+    client: client || counterparty ? {
+      id: client?.id,
+      counterpartyId: counterparty?.id || client?.counterpartyId || input.counterpartyId,
+      company: client?.company || client?.name || counterparty?.shortName || counterparty?.legalName || input.client,
+      legalName: input.clientLegalName || client?.legalName || client?.fullName || counterparty?.legalName || client?.company || client?.name,
+      inn: input.clientInn || client?.inn || counterparty?.inn,
+      kpp: input.clientKpp || client?.kpp || counterparty?.kpp,
+      ogrn: input.clientOgrn || client?.ogrn || counterparty?.ogrn || counterparty?.ogrnip,
+      address: input.clientLegalAddress || client?.legalAddress || counterparty?.legalAddress || client?.address,
+      legalAddress: input.clientLegalAddress || client?.legalAddress || counterparty?.legalAddress || client?.address,
+      postalAddress: input.clientPostalAddress || client?.postalAddress || client?.mailingAddress || client?.actualAddress || counterparty?.actualAddress || client?.address,
+      bankName: input.clientBankName || client?.bankName || client?.bank,
+      bankBik: input.clientBankBik || client?.bankBik || client?.bik,
+      bankAccount: input.clientBankAccount || client?.bankAccount || client?.settlementAccount || client?.account,
+      corrAccount: input.clientCorrAccount || client?.corrAccount || client?.correspondentAccount || client?.bankCorrAccount,
+      phone: client?.phone || counterparty?.phone,
+      email: client?.email || counterparty?.email,
+    } : (input.client || input.clientId || input.counterpartyId ? {
       id: input.clientId,
+      counterpartyId: input.counterpartyId,
       company: input.client,
       legalName: input.clientLegalName || input.client,
       inn: input.clientInn,
@@ -465,6 +472,7 @@ function buildSnapshot(input, collections = {}, nowIso = () => new Date().toISOS
     } : null),
     rental: rental ? {
       id: rental.id,
+      counterpartyId: rental.counterpartyId,
       clientId: rental.clientId,
       client: rental.client,
       startDate: input.rentalStartDate || rental.startDate,
@@ -505,12 +513,13 @@ function buildSnapshot(input, collections = {}, nowIso = () => new Date().toISOS
     } : null,
     mechanic: mechanic ? { id: mechanic.id, name: mechanic.name, phone: mechanic.phone } : null,
     serviceCar: serviceCar ? { id: serviceCar.id, label: [serviceCar.make, serviceCar.model, serviceCar.plateNumber].filter(Boolean).join(' '), mileage: serviceCar.currentMileage } : null,
-    parentDocument: parentDocument ? { id: parentDocument.id, number: documentNumber(parentDocument), date: parentDocument.documentDate || parentDocument.date, type: parentDocument.type, clientId: parentDocument.clientId, client: parentDocument.client } : null,
+    parentDocument: parentDocument ? { id: parentDocument.id, number: documentNumber(parentDocument), date: parentDocument.documentDate || parentDocument.date, type: parentDocument.type, counterpartyId: parentDocument.counterpartyId, clientId: parentDocument.clientId, client: parentDocument.client } : null,
     specification: specification ? {
       id: specification.id,
       number: documentNumber(specification),
       date: specification.documentDate || specification.date,
       parentDocumentId: specification.parentDocumentId,
+      counterpartyId: specification.counterpartyId,
       clientId: specification.clientId,
       rentalId: specification.rentalId,
       equipmentId: specification.equipmentId,

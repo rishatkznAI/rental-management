@@ -11,6 +11,7 @@ import {
 test('buildQuickActionContext reads safe query values', () => {
   const context = buildQuickActionContext(new URLSearchParams({
     action: 'create',
+    counterpartyId: 'counterparty-1',
     clientId: 'client-1',
     clientName: ' ООО Альфа ',
     rentalId: 'rent-1',
@@ -20,6 +21,7 @@ test('buildQuickActionContext reads safe query values', () => {
 
   assert.deepEqual(context, {
     action: 'create',
+    counterpartyId: 'counterparty-1',
     clientId: 'client-1',
     clientName: 'ООО Альфа',
     rentalId: 'rent-1',

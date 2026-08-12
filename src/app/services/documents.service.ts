@@ -38,6 +38,7 @@ type DocumentReferenceQueryParams = PaginatedQueryParams & {
 
 export type DocumentGanttReferenceQueryParams = {
   search?: string;
+  counterpartyId?: string;
   clientId?: string;
   rentalId?: string;
   equipmentId?: string;

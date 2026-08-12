@@ -36,7 +36,11 @@ const {
 const { buildRentalLinkDiagnostics } = require('../lib/rental-link-diagnostics');
 const { buildDataIntegrityDiagnostics } = require('../lib/data-integrity-diagnostics');
 const { buildServiceRepairQualityView } = require('../lib/service-repeat-breakdowns');
-const { normalizeClientRelationLinks } = require('../lib/client-relations');
+const { normalizeClientContractRecord, normalizeClientRelationLinks } = require('../lib/client-relations');
+const {
+  canonicalizeDocumentCounterpartyRelation,
+  isHistoricalDocumentRelation,
+} = require('../lib/document-counterparty-relations');
 const { rentalServerOwnedAuditFields } = require('../lib/rental-data-integrity');
 const { validateTerminalRentalTransition } = require('../lib/rental-lifecycle');
 const { canonicalizeRentalCounterpartyRelation } = require('../lib/rental-counterparty-relations');
@@ -177,6 +181,7 @@ const SYSTEM_DATA_COLLECTIONS = [
   SUPPLIER_PROFILES_COLLECTION,
   CONTRACTOR_PROFILES_COLLECTION,
   'clients',
+  'client_contracts',
   'service',
   'documents',
   'payments',
@@ -1130,6 +1135,43 @@ function analyzeSystemDataImport(payload, readData) {
     }
   }
 
+  if (Array.isArray(sanitizedCollections.client_contracts)) {
+    const stagedReadData = name => {
+      if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
+      return readData(name) || [];
+    };
+    const existingById = new Map((readData('client_contracts') || [])
+      .map(contract => [String(contract?.id || ''), contract]));
+    try {
+      sanitizedCollections.client_contracts = sanitizedCollections.client_contracts
+        .map(contract => normalizeClientContractRecord(
+          contract,
+          existingById.get(String(contract?.id || '')) || null,
+          { readData: stagedReadData, nowIso: () => new Date().toISOString() },
+        ));
+    } catch (error) {
+      integrityErrors.push(`${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
+    }
+  }
+
+  if (Array.isArray(sanitizedCollections.documents)) {
+    const stagedReadData = name => {
+      if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
+      return readData(name) || [];
+    };
+    const existingById = new Map((readData('documents') || [])
+      .map(document => [String(document?.id || ''), document]));
+    try {
+      sanitizedCollections.documents = sanitizedCollections.documents
+        .map(document => canonicalizeDocumentCounterpartyRelation(document, stagedReadData, {
+          existing: existingById.get(String(document?.id || '')) || null,
+          allowArchived: isHistoricalDocumentRelation(document),
+        }));
+    } catch (error) {
+      integrityErrors.push(`${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
+    }
+  }
+
   if (Array.isArray(sanitizedCollections.payments)) {
     const stagedData = {
       readData(name) {
@@ -1381,6 +1423,7 @@ function registerSystemRoutes(app, deps) {
         service,
         warranty_claims,
         clients,
+        client_contracts,
         payments,
         company_expenses,
         users,
@@ -1396,6 +1439,31 @@ function registerSystemRoutes(app, deps) {
         });
       }
       const prev = getSnapshot();
+      if (Array.isArray(equipment)) {
+        assertProductionSmokeFixtureMutationAllowed({
+          action: 'legacy_sync',
+          existingList: prev.equipment || [],
+          nextList: equipment,
+        });
+      }
+      const externalSyncPayload = {
+        equipment,
+        service,
+        warranty_claims,
+        clients,
+        client_contracts,
+        payments,
+        company_expenses,
+        users,
+        documents,
+        mechanic_documents,
+        shipping_photos,
+      };
+      for (const [collection, value] of Object.entries(externalSyncPayload)) {
+        if (Array.isArray(value)) {
+          assertSafeAdminBulkReplaceInput(collection, value, 'legacy sync');
+        }
+      }
       const now = Date.now();
       let normalizedClients = Array.isArray(clients) ? clients.map(normalizeClientInnFields) : clients;
       let normalizedCounterparties = null;
@@ -1437,12 +1505,42 @@ function registerSystemRoutes(app, deps) {
         normalizedPayments = payments
           .map(payment => canonicalizePaymentCounterpartyRelation(payment, stagedData));
       }
-      if (Array.isArray(equipment)) {
-        assertProductionSmokeFixtureMutationAllowed({
-          action: 'legacy_sync',
-          existingList: prev.equipment || [],
-          nextList: equipment,
-        });
+      const roleBoundaryByCollection = new Map((clientRoleBoundaryEntries || [])
+        .map(entry => [entry.name, entry.value]));
+      const stagedBoundaryReadData = name => {
+        if (name === 'clients' && Array.isArray(normalizedClients)) return normalizedClients;
+        if (name === 'counterparties' && Array.isArray(normalizedCounterparties)) return normalizedCounterparties;
+        if (roleBoundaryByCollection.has(name)) return roleBoundaryByCollection.get(name);
+        if (name === 'client_contracts' && Array.isArray(client_contracts)) return client_contracts;
+        if (name === 'documents' && Array.isArray(documents)) return documents;
+        return readData(name) || [];
+      };
+      let normalizedClientContracts = client_contracts;
+      if (Array.isArray(client_contracts)) {
+        const existingById = new Map((readData('client_contracts') || [])
+          .map(contract => [String(contract?.id || ''), contract]));
+        normalizedClientContracts = client_contracts.map(contract => normalizeClientContractRecord(
+          contract,
+          existingById.get(String(contract?.id || '')) || null,
+          { readData: stagedBoundaryReadData, nowIso: () => new Date().toISOString() },
+        ));
+      }
+      let normalizedDocuments = documents;
+      if (Array.isArray(documents)) {
+        const existingById = new Map((readData('documents') || [])
+          .map(document => [String(document?.id || ''), document]));
+        const syncReadData = name => {
+          if (name === 'client_contracts' && Array.isArray(normalizedClientContracts)) return normalizedClientContracts;
+          return stagedBoundaryReadData(name);
+        };
+        normalizedDocuments = documents.map(document => canonicalizeDocumentCounterpartyRelation(
+          document,
+          syncReadData,
+          {
+            existing: existingById.get(String(document?.id || '')) || null,
+            allowArchived: isHistoricalDocumentRelation(document),
+          },
+        ));
       }
       let normalizedRentals = rentals;
       let normalizedGanttRentals = gantt_rentals;
@@ -1468,25 +1566,6 @@ function registerSystemRoutes(app, deps) {
         if (collection === 'rentals') normalizedRentals = normalized;
         else normalizedGanttRentals = normalized;
       }
-      const syncPayload = {
-        equipment,
-        rentals: normalizedRentals,
-        gantt_rentals: normalizedGanttRentals,
-        service,
-        warranty_claims,
-        clients: normalizedClients,
-        payments: normalizedPayments,
-        company_expenses,
-        users,
-        documents,
-        mechanic_documents,
-        shipping_photos,
-      };
-      for (const [collection, value] of Object.entries(syncPayload)) {
-        if (Array.isArray(value)) {
-          assertSafeAdminBulkReplaceInput(collection, value, 'legacy sync');
-        }
-      }
       if (equipment) writeData('equipment', equipment);
       if (normalizedRentals) writeData('rentals', normalizedRentals);
       if (normalizedGanttRentals) writeData('gantt_rentals', normalizedGanttRentals);
@@ -1498,10 +1577,11 @@ function registerSystemRoutes(app, deps) {
           { name: 'clients', value: normalizedClients },
         ]);
       }
+      if (normalizedClientContracts) writeData('client_contracts', normalizedClientContracts);
       if (normalizedPayments) writeData('payments', normalizedPayments);
       if (company_expenses) writeData('company_expenses', company_expenses);
       if (users) writeData('users', users);
-      if (documents) writeData('documents', documents);
+      if (normalizedDocuments) writeData('documents', normalizedDocuments);
       if (mechanic_documents) writeData('mechanic_documents', mechanic_documents);
       if (shipping_photos) writeData('shipping_photos', shipping_photos);
 
@@ -1551,9 +1631,11 @@ function registerSystemRoutes(app, deps) {
         ...req.body,
         ...(normalizedCounterparties ? { counterparties: normalizedCounterparties } : {}),
         ...(normalizedClients ? { clients: normalizedClients } : {}),
+        ...(normalizedClientContracts ? { client_contracts: normalizedClientContracts } : {}),
         ...(normalizedRentals ? { rentals: normalizedRentals } : {}),
         ...(normalizedGanttRentals ? { gantt_rentals: normalizedGanttRentals } : {}),
         ...(normalizedPayments ? { payments: normalizedPayments } : {}),
+        ...(normalizedDocuments ? { documents: normalizedDocuments } : {}),
         lastOverdueCheck: prev.lastOverdueCheck || 0,
       });
 

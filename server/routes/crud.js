@@ -41,6 +41,10 @@ const {
   normalizeClientObjectRecord,
 } = require('../lib/client-relations');
 const {
+  canonicalizeDocumentCounterpartyRelation,
+  isHistoricalDocumentRelation,
+} = require('../lib/document-counterparty-relations');
+const {
   prepareClientCompatibilityBulkReplace,
   prepareClientCompatibilityCreate,
   prepareClientCompatibilityUpdate,
@@ -299,7 +303,7 @@ function registerCrudRoutes(deps) {
     });
   }
 
-  function normalizeClientDomainRecord(collection, item, existing = null) {
+  function normalizeClientDomainRecord(collection, item, existing = null, readDataOverride = readData) {
     if (collection === 'clients') {
       const normalized = normalizeClientInnFields(item);
       if (normalized.counterpartyId && !normalized.inn) return normalized;
@@ -307,16 +311,23 @@ function registerCrudRoutes(deps) {
       return normalized;
     }
     if (collection === 'client_objects') {
-      return normalizeClientObjectRecord(item, existing, { readData, nowIso });
+      return normalizeClientObjectRecord(item, existing, { readData: readDataOverride, nowIso });
     }
     if (collection === 'client_contracts') {
-      return normalizeClientContractRecord(item, existing, { readData, nowIso });
+      return normalizeClientContractRecord(item, existing, { readData: readDataOverride, nowIso });
     }
     if (collection === 'payments' || collection === 'payment_allocations' || collection === 'documents' || collection === 'service') {
-      const enriched = enrichRecordFromRentalLinks(item, readData);
+      const enriched = enrichRecordFromRentalLinks(item, readDataOverride);
+      if (collection === 'documents') {
+        return canonicalizeDocumentCounterpartyRelation(enriched, readDataOverride, {
+          existing,
+          allowArchived: isHistoricalDocumentRelation(enriched),
+          requireActiveObject: !existing,
+        });
+      }
       if (collection === 'service') validateServiceRelationLinks(enriched);
       const normalized = normalizeClientRelationLinks(enriched, enriched.clientId, {
-        readData,
+        readData: readDataOverride,
         requireActiveObject: !existing,
         allowArchivedObjectId: existing?.objectId,
         includeObjectSnapshot: collection === 'service',
@@ -1344,7 +1355,7 @@ function registerCrudRoutes(deps) {
       },
     },
     documents: {
-      searchFields: ['number', 'documentNumber', 'type', 'documentType', 'client', 'clientName', 'clientId', 'rentalId', 'rental', 'equipmentInv', 'equipmentId', 'deliveryId', 'status', 'signatoryName', 'signatoryBasis'],
+      searchFields: ['number', 'documentNumber', 'type', 'documentType', 'client', 'clientName', 'clientId', 'counterpartyId', 'rentalId', 'rental', 'equipmentInv', 'equipmentId', 'deliveryId', 'status', 'signatoryName', 'signatoryBasis'],
       sortFields: {
         date: item => item.date || item.documentDate || item.createdAt,
         number: item => item.number || item.documentNumber,
@@ -1356,6 +1367,7 @@ function registerCrudRoutes(deps) {
       filters: {
         status: (item, value) => item.status === value,
         type: (item, value) => item.type === value || item.documentType === value,
+        counterpartyId: (item, value) => item.counterpartyId === value,
         clientId: (item, value) => item.clientId === value,
         rentalId: (item, value) => item.rentalId === value || item.rental === value,
         equipmentId: (item, value) => item.equipmentId === value,
@@ -2537,8 +2549,16 @@ function registerCrudRoutes(deps) {
           for (const item of list) assertClientInnValid(item);
           assertClientInnListUnique(list);
         }
-        if (collection === 'client_objects' || collection === 'client_contracts') {
-          for (const item of list) normalizeClientDomainRecord(collection, item);
+        if (collection === 'client_objects' || collection === 'client_contracts' || collection === 'documents') {
+          const existingById = new Map((readData(collection) || [])
+            .map(item => [String(item?.id || ''), item]));
+          const stagedReadData = name => name === collection ? list : readData(name);
+          list = list.map(item => normalizeClientDomainRecord(
+            collection,
+            item,
+            existingById.get(String(item?.id || '')) || null,
+            stagedReadData,
+          ));
         }
         if (collection === 'service_works') {
           for (const item of list) validateServiceWorkCatalogRecord(item);

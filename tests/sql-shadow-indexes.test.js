@@ -12,6 +12,7 @@ const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const Database = serverRequire('better-sqlite3');
 const {
+  DOCUMENT_COUNTERPARTY_MIGRATION_NAME,
   DOCUMENTS_TABLE,
   EXPECTED_INDEXES,
   GANTT_TABLE,
@@ -141,6 +142,11 @@ test('SQL shadow schema creates documents and gantt tables idempotently', () => 
     const documentColumns = db.prepare(`PRAGMA table_info(${DOCUMENTS_TABLE})`).all().map(row => row.name);
     assert.ok(documentColumns.includes('date'));
     assert.ok(documentColumns.includes('documentDate'));
+    assert.ok(documentColumns.includes('counterpartyId'));
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM sql_shadow_schema_migrations
+      WHERE name = ? AND version = 1
+    `).get(DOCUMENT_COUNTERPARTY_MIGRATION_NAME).count, 1);
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -326,6 +332,31 @@ test('full PR1-PR8 startup chain preserves shadow registration on a new process 
   }
 });
 
+test('counterparty extension upgrades an existing v2 shadow schema without mutating base registration', () => {
+  const { db, dir } = makeDb();
+  try {
+    ensureSqlShadowSchema(db);
+    const baseRegistration = migrationRow(db);
+    db.prepare('DELETE FROM sql_shadow_schema_migrations WHERE name = ?')
+      .run(DOCUMENT_COUNTERPARTY_MIGRATION_NAME);
+    db.exec('DROP INDEX idx_documents_sql_counterparty');
+    db.exec(`ALTER TABLE ${DOCUMENTS_TABLE} DROP COLUMN counterpartyId`);
+
+    assert.equal(ensureSqlShadowSchema(db), true);
+    assert.deepEqual(migrationRow(db), baseRegistration);
+    assert.equal(ensureSqlShadowSchema(db), false);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM sql_shadow_schema_migrations
+      WHERE name = ? AND version = 1
+    `).get(DOCUMENT_COUNTERPARTY_MIGRATION_NAME).count, 1);
+    assert.ok(db.prepare(`PRAGMA table_info(${DOCUMENTS_TABLE})`).all()
+      .some(column => column.name === 'counterpartyId'));
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('SQL shadow schema backfills legacy gantt table columns before sync', () => {
   const { db, dir } = makeDb();
   try {
@@ -454,8 +485,8 @@ test('SQL read helpers support document filters/search and gantt date overlap', 
   const { db, dir } = makeDb();
   try {
     setCollection(db, 'documents', [
-      { id: 'D-1', number: 'ACT-1', type: 'act', status: 'signed', clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1', createdAt: '2026-05-01', client: 'Альфа' },
-      { id: 'D-2', number: 'INV-2', type: 'invoice', status: 'draft', clientId: 'C-2', rentalId: 'R-2', equipmentId: 'EQ-2', createdAt: '2026-06-01', client: 'Бета' },
+      { id: 'D-1', number: 'ACT-1', type: 'act', status: 'signed', counterpartyId: 'CP-1', clientId: 'C-1', rentalId: 'R-1', equipmentId: 'EQ-1', createdAt: '2026-05-01', client: 'Альфа' },
+      { id: 'D-2', number: 'INV-2', type: 'invoice', status: 'draft', counterpartyId: 'CP-2', rentalId: 'R-2', equipmentId: 'EQ-2', createdAt: '2026-06-01', client: 'Бета' },
     ]);
     setCollection(db, 'gantt_rentals', [
       { id: 'GR-1', rentalId: 'R-1', equipmentId: 'EQ-1', clientId: 'C-1', status: 'active', startDate: '2026-05-01', endDate: '2026-05-10' },
@@ -463,7 +494,8 @@ test('SQL read helpers support document filters/search and gantt date overlap', 
     ]);
     backfillSqlShadowIndexes(db);
     assert.deepEqual(queryDocumentsIndex(db, { type: 'act', search: 'альфа' }).map(item => item.id), ['D-1']);
-    assert.deepEqual(queryDocumentsIndex(db, { clientId: 'C-2', dateFrom: '2026-06-01', dateTo: '2026-06-30' }).map(item => item.id), ['D-2']);
+    assert.deepEqual(queryDocumentsIndex(db, { clientId: 'C-1', dateFrom: '2026-05-01', dateTo: '2026-05-31' }).map(item => item.id), ['D-1']);
+    assert.deepEqual(queryDocumentsIndex(db, { counterpartyId: 'CP-2' }).map(item => item.id), ['D-2']);
     assert.deepEqual(queryGanttIndex(db, { equipmentId: 'EQ-1', dateFrom: '2026-05-05', dateTo: '2026-05-20' }).map(item => item.id), ['GR-1']);
     assert.deepEqual(queryGanttIndex(db, { rentalId: 'R-2' }).map(item => item.id), ['GR-2']);
   } finally {

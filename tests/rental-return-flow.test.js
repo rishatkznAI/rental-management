@@ -77,6 +77,7 @@ function createReturnState() {
       },
       {
         id: 'R-2',
+        counterpartyId: 'CP-2',
         clientId: 'C-2',
         objectId: 'CO-2',
         contractId: 'CC-2',
@@ -142,6 +143,7 @@ function createReturnState() {
       {
         id: 'GR-2',
         rentalId: 'R-2',
+        counterpartyId: 'CP-2',
         clientId: 'C-2',
         objectId: 'CO-2',
         contractId: 'CC-2',
@@ -335,6 +337,7 @@ test('return with damage creates service ticket and keeps equipment in service',
     assert.equal(ticket.status, 'new');
     assert.match(ticket.description, /Погнута корзина/);
     assert.equal(ticket.rentalId, 'R-2');
+    assert.equal(ticket.counterpartyId, 'CP-2');
     assert.equal(ticket.objectId, 'CO-2');
     assert.equal(ticket.contractId, 'CC-2');
   });

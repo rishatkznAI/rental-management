@@ -72,7 +72,7 @@ export function CustomerCounterpartyCombobox({
     counterpartyId: selection.counterpartyId,
     company: selection.label,
     inn: selection.counterparty.inn || '',
-    contact: selection.client?.contact || '',
+    contact: [selection.client?.contact, `ID ${selection.counterpartyId}`].filter(Boolean).join(' · '),
     phone: selection.counterparty.phone || selection.client?.phone || '',
     email: selection.counterparty.email || selection.client?.email || '',
     paymentTerms: selection.client?.paymentTerms || '',

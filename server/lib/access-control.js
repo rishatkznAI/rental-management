@@ -878,6 +878,7 @@ const NON_ADMIN_CREATE_FIELDS = {
     'sla',
     'reporterContact',
     'client',
+    'counterpartyId',
     'clientId',
     'clientName',
     'rentalId',

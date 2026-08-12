@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Camera, ImagePlus, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePermissions } from '../../lib/permissions';
@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui
 import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { EquipmentCombobox } from '../ui/EquipmentCombobox';
-import { ClientCombobox } from '../ui/ClientCombobox';
+import { CustomerCounterpartyCombobox } from '../ui/CustomerCounterpartyCombobox';
 import { useClientsList } from '../../hooks/useClients';
 import { useClientContractsList, useClientObjectsList } from '../../hooks/useClientRelations';
 import { SERVICE_TICKET_KEYS, useCreateServiceTicket } from '../../hooks/useServiceTickets';
@@ -18,6 +18,7 @@ import type { Rental, ServiceTicket } from '../../types';
 import type { GanttRentalData } from '../../mock-data';
 import { getEquipmentTypeLabel } from '../../lib/equipmentClassification';
 import { isMechanicRole } from '../../lib/userStorage';
+import { counterpartiesService } from '../../services/counterparties.service';
 import {
   getServiceScenarioLabel,
   SERVICE_SCENARIO_DESCRIPTION_HINTS,
@@ -42,6 +43,7 @@ type ServiceTicketFormProps = {
 type ServiceRentalOption = {
   id: string;
   label: string;
+  counterpartyId?: string;
   clientId?: string;
   client?: string;
   clientName?: string;
@@ -56,10 +58,6 @@ type ServiceRentalOption = {
 
 function compact(values: Array<unknown>): string[] {
   return values.flat().map(value => String(value || '').trim()).filter(Boolean);
-}
-
-function normalizeText(value: unknown): string {
-  return String(value || '').trim().toLowerCase();
 }
 
 function rentalPeriodLabel(startDate?: string, endDate?: string): string {
@@ -87,6 +85,7 @@ function rentalOptionFromClassic(rental: Rental): ServiceRentalOption {
       objectLabel,
       periodLabel,
     ]).join(' · '),
+    counterpartyId: rental.counterpartyId,
     clientId: rental.clientId,
     client: rental.client,
     clientName: rawRental.clientName,
@@ -112,6 +111,7 @@ function rentalOptionFromGantt(rental: GanttRentalData): ServiceRentalOption {
       rawRental.objectName || rawRental.location,
       periodLabel,
     ]).join(' · '),
+    counterpartyId: rental.counterpartyId,
     clientId: rental.clientId,
     client: rental.client,
     clientName: rawRental.clientName,
@@ -147,6 +147,11 @@ export function ServiceTicketForm({
   const canViewClients = can('view', 'clients');
   const canViewRentals = can('view', 'rentals');
   const { data: clients = [] } = useClientsList({ enabled: canViewClients });
+  const { data: customerCounterparties = [] } = useQuery({
+    queryKey: ['counterparties', 'customer', 'service-ticket-form'],
+    queryFn: () => counterpartiesService.getAll({ role: 'customer' }),
+    enabled: canViewClients,
+  });
   const { data: clientObjects = [] } = useClientObjectsList({ enabled: canViewClients });
   const { data: clientContracts = [] } = useClientContractsList({ enabled: canViewClients });
   const { data: rentals = [] } = useRentalsList({ enabled: canViewRentals });
@@ -164,6 +169,7 @@ export function ServiceTicketForm({
     location: '',
     priority: 'medium',
     reporterContact: '',
+    counterpartyId: '',
     clientId: '',
     client: '',
     rentalId: initialRentalId ?? '',
@@ -176,10 +182,12 @@ export function ServiceTicketForm({
   });
 
   const selectedEquipment = equipmentList.find(e => e.id === formData.equipmentId);
+  const selectedCounterparty = customerCounterparties.find(item => item.id === formData.counterpartyId);
   const selectedClient = clients.find(item => item.id === formData.clientId);
-  const selectedClientObjects = clientObjects.filter(item => item.clientId === formData.clientId && item.status !== 'archived');
+  const compatibleClients = clients.filter(item => item.counterpartyId === formData.counterpartyId);
+  const selectedClientObjects = clientObjects.filter(item => item.counterpartyId === formData.counterpartyId && item.status !== 'archived');
   const selectedClientContracts = clientContracts.filter(item =>
-    item.clientId === formData.clientId &&
+    item.counterpartyId === formData.counterpartyId &&
     item.status !== 'archived' &&
     (!formData.objectId || !item.objectId || item.objectId === formData.objectId)
   );
@@ -192,21 +200,14 @@ export function ServiceTicketForm({
     ],
     [ganttRentals, rentals],
   );
-  const rentalBelongsToSelectedClient = (rental: ServiceRentalOption, clientId = formData.clientId, clientName = formData.client) => {
-    const selectedId = String(clientId || '').trim();
-    const rentalClientId = String(rental.clientId || '').trim();
-    if (selectedId && rentalClientId) return rentalClientId === selectedId;
-    if (rentalClientId) return false;
-
-    const selectedName = normalizeText(
-      clientName || clients.find(item => item.id === selectedId)?.company,
-    );
-    if (!selectedName) return false;
-    return compact([rental.client, rental.clientName, rental.companyName]).some(name => normalizeText(name) === selectedName);
+  const rentalBelongsToSelectedCounterparty = (rental: ServiceRentalOption, counterpartyId = formData.counterpartyId) => {
+    const selectedId = String(counterpartyId || '').trim();
+    const rentalCounterpartyId = String(rental.counterpartyId || '').trim();
+    return Boolean(selectedId && rentalCounterpartyId && rentalCounterpartyId === selectedId);
   };
   const filteredRentalOptions = useMemo(
-    () => formData.clientId ? rentalOptions.filter(rental => rentalBelongsToSelectedClient(rental)) : [],
-    [clients, formData.client, formData.clientId, rentalOptions],
+    () => formData.counterpartyId ? rentalOptions.filter(rental => rentalBelongsToSelectedCounterparty(rental)) : [],
+    [formData.counterpartyId, rentalOptions],
   );
   const selectedRental = rentalOptions.find(item => item.id === formData.rentalId);
   const activeRentalForEquipment = useMemo(() => {
@@ -228,16 +229,24 @@ export function ServiceTicketForm({
 
   const applyRentalLink = (rental: ServiceRentalOption | undefined) => {
     if (!rental) return;
-    if (formData.clientId && !rentalBelongsToSelectedClient(rental)) {
-      setSubmitError('Аренда не принадлежит выбранному клиенту');
+    if (!rental.counterpartyId) {
+      setSubmitError('Аренда не содержит canonical counterpartyId');
       return;
     }
-    const nextClient = rental.clientId ? clients.find(item => item.id === rental.clientId) : undefined;
+    if (formData.counterpartyId && !rentalBelongsToSelectedCounterparty(rental)) {
+      setSubmitError('Аренда не принадлежит выбранному Counterparty');
+      return;
+    }
+    const nextClient = rental.clientId
+      ? clients.find(item => item.id === rental.clientId && item.counterpartyId === rental.counterpartyId)
+      : undefined;
+    const nextCounterparty = customerCounterparties.find(item => item.id === rental.counterpartyId);
     setFormData(prev => ({
       ...prev,
       rentalId: rental.id,
-      clientId: rental.clientId || prev.clientId,
-      client: nextClient?.company || rental.client || prev.client,
+      counterpartyId: rental.counterpartyId || prev.counterpartyId,
+      clientId: nextClient?.id || '',
+      client: nextClient?.company || nextCounterparty?.shortName || nextCounterparty?.legalName || '',
       objectId: rental.objectId || '',
       contractId: rental.contractId || '',
       location: rental.location || prev.location,
@@ -262,7 +271,7 @@ export function ServiceTicketForm({
   useEffect(() => {
     if (!initialRentalId) return;
     applyRentalLink(rentalOptions.find(item => item.id === initialRentalId));
-  }, [clients, initialRentalId, rentalOptions]);
+  }, [clients, customerCounterparties, initialRentalId, rentalOptions]);
 
   useEffect(() => {
     setFormData(prev => ({
@@ -360,30 +369,33 @@ export function ServiceTicketForm({
     setPhotos(prev => prev.filter((_, i) => i !== idx));
   };
 
-  const handleClientReset = (clientId: string, clientName: string) => {
+  const handleCounterpartyReset = (counterpartyId: string, counterpartyName: string) => {
     setFormData(prev => {
       const currentRental = rentalOptions.find(item => item.id === prev.rentalId);
-      const shouldResetRental = Boolean(currentRental && !rentalBelongsToSelectedClient(currentRental, clientId, clientName));
+      const shouldResetRental = Boolean(currentRental && !rentalBelongsToSelectedCounterparty(currentRental, counterpartyId));
       if (shouldResetRental) {
-        setRelationNotice('Аренда сброшена, потому что она относится к другому клиенту');
+        setRelationNotice('Аренда сброшена, потому что она относится к другому Counterparty');
       } else {
         setRelationNotice(null);
       }
       return resetRentalDerivedFields({
         ...prev,
-        clientId,
-        client: clientName,
+        counterpartyId,
+        clientId: clients.some(client => client.id === prev.clientId && client.counterpartyId === counterpartyId)
+          ? prev.clientId
+          : '',
+        client: counterpartyName,
         rentalId: shouldResetRental ? '' : prev.rentalId,
       }, shouldResetRental);
     });
   };
 
   useEffect(() => {
-    if (!formData.clientId || !formData.rentalId || !selectedRental) return;
-    if (rentalBelongsToSelectedClient(selectedRental)) return;
+    if (!formData.counterpartyId || !formData.rentalId || !selectedRental) return;
+    if (rentalBelongsToSelectedCounterparty(selectedRental)) return;
     setFormData(prev => resetRentalDerivedFields(prev));
-    setRelationNotice('Аренда сброшена, потому что она относится к другому клиенту');
-  }, [formData.clientId, formData.rentalId, selectedRental]);
+    setRelationNotice('Аренда сброшена, потому что она относится к другому Counterparty');
+  }, [formData.counterpartyId, formData.rentalId, selectedRental]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -430,9 +442,14 @@ export function ServiceTicketForm({
       createdByUserId: user?.id,
       createdByUserName: authorName,
       reporterContact: formData.reporterContact || undefined,
+      counterpartyId: formData.counterpartyId || undefined,
       clientId: formData.clientId || undefined,
-      client: selectedClient?.company || formData.client || undefined,
-      clientName: selectedClient?.company || formData.client || undefined,
+      client: formData.counterpartyId
+        ? selectedClient?.company || selectedCounterparty?.shortName || selectedCounterparty?.legalName
+        : undefined,
+      clientName: formData.counterpartyId
+        ? selectedClient?.company || selectedCounterparty?.shortName || selectedCounterparty?.legalName
+        : undefined,
       rentalId: formData.rentalId || undefined,
       objectId: formData.objectId || undefined,
       contractId: formData.contractId || undefined,
@@ -579,35 +596,58 @@ export function ServiceTicketForm({
 
       <Card>
         <CardHeader>
-          <CardTitle>Клиент и объект</CardTitle>
-          <CardDescription>Привязка нужна, если техника находится на объекте клиента</CardDescription>
+          <CardTitle>Заказчик и объект</CardTitle>
+          <CardDescription>Выберите customer Counterparty либо оставьте поля пустыми для внутренней заявки</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Клиент</label>
-            <ClientCombobox
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Customer Counterparty</label>
+            <CustomerCounterpartyCombobox
+              counterparties={customerCounterparties}
               clients={clients}
+              counterpartyId={formData.counterpartyId}
+              clientId={formData.clientId}
               value={formData.client}
-              valueId={formData.clientId}
-              placeholder={canViewClients ? 'Введите название, ИНН, контакт или телефон…' : 'Клиент не выбран'}
+              placeholder={canViewClients ? 'Выберите customer Counterparty' : 'Заказчик не выбран'}
               onChange={(value) => {
-                handleClientReset(value ? formData.clientId : '', value);
+                if (!value) handleCounterpartyReset('', '');
               }}
-              onClientSelect={(client) => {
-                handleClientReset(client?.id || '', client?.company || '');
+              onSelect={(selection) => {
+                handleCounterpartyReset(selection?.counterpartyId || '', selection?.label || '');
               }}
             />
-            {!formData.clientId && (
+            {!formData.counterpartyId && (
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Можно оставить пустым только для внутренней заявки по собственной технике.
               </p>
             )}
           </div>
           <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Профиль Client (необязательно)</label>
+            <Select
+              value={formData.clientId || 'none'}
+              disabled={!formData.counterpartyId || compatibleClients.length === 0}
+              onValueChange={(value) => setFormData(prev => ({
+                ...prev,
+                clientId: value === 'none' ? '' : value,
+              }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={formData.counterpartyId ? 'Без профиля Client' : 'Сначала выберите Counterparty'} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Без профиля Client</SelectItem>
+                {compatibleClients.map(client => (
+                  <SelectItem key={client.id} value={client.id}>{client.company} · {client.id}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Аренда</label>
             <Select
               value={formData.rentalId || 'none'}
-              disabled={!formData.clientId}
+              disabled={!formData.counterpartyId}
               onValueChange={(value) => {
                 if (value === 'none') {
                   setFormData(prev => resetRentalDerivedFields(prev));
@@ -618,7 +658,7 @@ export function ServiceTicketForm({
               }}
             >
               <SelectTrigger>
-                <SelectValue placeholder={formData.clientId ? 'Без аренды' : 'Сначала выберите клиента'} />
+                <SelectValue placeholder={formData.counterpartyId ? 'Без аренды' : 'Сначала выберите Counterparty'} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Без аренды</SelectItem>
@@ -628,11 +668,11 @@ export function ServiceTicketForm({
               </SelectContent>
             </Select>
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              {!formData.clientId
-                ? 'Сначала выберите клиента, затем аренду'
+              {!formData.counterpartyId
+                ? 'Сначала выберите Counterparty, затем аренду'
                 : filteredRentalOptions.length === 0
-                  ? 'У выбранного клиента нет аренд. Можно создать заявку без аренды'
-                  : 'В списке показаны только аренды выбранного клиента'}
+                  ? 'У выбранного Counterparty нет аренд. Можно создать заявку без аренды'
+                  : 'В списке показаны только аренды выбранного Counterparty'}
             </p>
             {relationNotice && (
               <p className="text-xs text-amber-600 dark:text-amber-400">{relationNotice}</p>
@@ -652,11 +692,11 @@ export function ServiceTicketForm({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Объект</label>
             <Select
               value={formData.objectId || 'none'}
-              disabled={!formData.clientId || selectedClientObjects.length === 0}
+              disabled={!formData.counterpartyId || selectedClientObjects.length === 0}
               onValueChange={(value) => setFormData(prev => ({ ...prev, objectId: value === 'none' ? '' : value, contractId: '' }))}
             >
               <SelectTrigger>
-                <SelectValue placeholder={formData.clientId ? 'Без объекта' : 'Сначала выберите клиента'} />
+                <SelectValue placeholder={formData.counterpartyId ? 'Без объекта' : 'Сначала выберите Counterparty'} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Без объекта</SelectItem>
@@ -670,7 +710,7 @@ export function ServiceTicketForm({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Договор</label>
             <Select
               value={formData.contractId || 'none'}
-              disabled={!formData.clientId}
+              disabled={!formData.counterpartyId}
               onValueChange={(value) => setFormData(prev => ({ ...prev, contractId: value === 'none' ? '' : value }))}
             >
               <SelectTrigger>

@@ -514,7 +514,8 @@ test('payments documents and service reject foreign object or contract links', a
       sla: '24 ч',
       status: 'new',
     });
-    assert.equal(service.status, 400);
+    assert.equal(service.status, 409);
+    assert.equal(service.body.code, 'SERVICE_COUNTERPARTY_SOURCE_RELATION_MISSING');
   });
 });
 

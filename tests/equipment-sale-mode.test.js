@@ -1220,7 +1220,7 @@ test('ordinary service ticket form still keeps service scenarios', () => {
   assert.match(source, /option value="to">ТО/);
   assert.match(source, /option value="chto">ЧТО/);
   assert.match(source, /option value="pto">ПТО/);
-  assert.match(source, /Клиент и объект/);
+  assert.match(source, /Заказчик и объект/);
 });
 
 test('sale status label uses existing sale and sold fields', () => {

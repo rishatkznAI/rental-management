@@ -311,11 +311,17 @@ function getCompactServiceStatusPill(status: ServiceTicket['status']) {
 }
 
 function getTicketClientDetails(ticket: ServiceTicket, clientLookup: Map<string, Client>) {
-  const client = (ticket.clientId ? clientLookup.get(`id:${ticket.clientId}`) : undefined)
-    ?? (ticket.client ? clientLookup.get(`name:${normalizeSearch(ticket.client)}`) : undefined);
+  const client = ticket.clientId ? clientLookup.get(ticket.clientId) : undefined;
+  const displayName = ticket.customerDisplayName
+    || ticket.counterpartyName
+    || client?.company
+    || ticket.client
+    || '—';
 
   return {
-    name: ticket.client || client?.company || '—',
+    name: ticket.counterpartyId && displayName !== '—'
+      ? `${displayName} · ${ticket.counterpartyId}`
+      : displayName,
     inn: client?.inn || '',
   };
 }
@@ -1623,8 +1629,7 @@ export default function Service() {
   const clientLookup = React.useMemo(() => {
     const lookup = new Map<string, Client>();
     clients.forEach(client => {
-      lookup.set(`id:${client.id}`, client);
-      if (client.company) lookup.set(`name:${normalizeSearch(client.company)}`, client);
+      lookup.set(client.id, client);
     });
     return lookup;
   }, [clients]);

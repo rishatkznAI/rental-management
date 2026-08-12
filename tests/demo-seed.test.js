@@ -153,6 +153,12 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
   assert.ok(rentals.some(item => item.status === 'closed'));
   assert.ok(rentals.some(item => item.status === 'created'));
   assert.ok(service.some(item => item.status === 'waiting_parts'));
+  assert.equal(service.length, 66);
+  assert.ok(service.every(item => ![
+    'counterpartyId', 'clientId', 'rentalId', 'objectId', 'contractId',
+    'client', 'clientName', 'company', 'companyName', 'clientInn', 'customerPhone',
+    'objectName', 'objectAddress', 'contractNumber',
+  ].some(field => String(item?.[field] || '').trim())));
   assert.ok(deliveries.some(item => item.status === 'new'));
   assert.ok(deliveries.some(item => item.status === 'in_transit'));
   assert.ok(deliveries.some(item => item.status === 'completed'));

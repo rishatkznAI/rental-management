@@ -92,6 +92,10 @@ const {
   deliveryCarrierReferenceBlockers,
   isHistoricalDeliveryCarrierRelation,
 } = require('../lib/delivery-counterparty-relations');
+const {
+  canonicalizeServiceTicketCounterpartyRelation,
+  decorateServiceTicketCounterparty,
+} = require('../lib/service-counterparty-relations');
 
 const INLINE_RELATION_IDEMPOTENCY_COLLECTION = 'inline_relation_idempotency';
 const INLINE_RELATION_IDEMPOTENCY_SCOPES = new Set(['client_objects', 'client_contracts']);
@@ -336,13 +340,13 @@ function registerCrudRoutes(deps) {
           requireActiveObject: !existing,
         });
       }
-      if (collection === 'service') validateServiceRelationLinks(enriched);
+      if (collection === 'service') {
+        return canonicalizeServiceTicketCounterpartyRelation(enriched, { readData: readDataOverride }, { existing });
+      }
       const normalized = normalizeClientRelationLinks(enriched, enriched.clientId, {
         readData: readDataOverride,
         requireActiveObject: !existing,
         allowArchivedObjectId: existing?.objectId,
-        includeObjectSnapshot: collection === 'service',
-        includeContractSnapshot: collection === 'service',
       });
       if (collection === 'payment_allocations') validatePaymentAllocationRecord(normalized, existing);
       if (collection === 'payments') {
@@ -389,40 +393,6 @@ function registerCrudRoutes(deps) {
     if (status === 'closed') return false;
     const due = text(ticket?.dueDate || ticket?.deadline || ticket?.targetDate || ticket?.plannedDate || ticket?.scheduledDate).slice(0, 10);
     return Boolean(due && due < new Date().toISOString().slice(0, 10));
-  }
-
-  function findRentalForServiceLink(rentalId) {
-    const id = text(rentalId);
-    if (!id) return null;
-    return [
-      ...(readData('rentals') || []),
-      ...(readData('gantt_rentals') || []),
-    ].find(item => [
-      item?.id,
-      item?.rentalId,
-      item?.sourceRentalId,
-      item?.originalRentalId,
-    ].some(candidate => text(candidate) === id)) || null;
-  }
-
-  function serviceRentalBelongsToClient(rental, record) {
-    const clientId = text(record?.clientId);
-    const rentalClientId = text(rental?.clientId);
-    if (clientId && rentalClientId) return clientId === rentalClientId;
-    if (rentalClientId) return false;
-    if (!clientId) return true;
-    return false;
-  }
-
-  function validateServiceRelationLinks(record) {
-    if (!record || !record.rentalId) return;
-    const rental = findRentalForServiceLink(record.rentalId);
-    if (!rental) return;
-    if (!serviceRentalBelongsToClient(rental, record)) {
-      const error = new Error('Аренда не принадлежит выбранному клиенту');
-      error.status = 400;
-      throw error;
-    }
   }
 
   function rentalBelongsToClient(rental, client) {
@@ -481,7 +451,7 @@ function registerCrudRoutes(deps) {
       { collection: 'documents', label: 'documents', nameFields: ['client', 'clientName'] },
       { collection: 'payments', label: 'payments', nameFields: ['client', 'clientName'] },
       { collection: 'deliveries', label: 'deliveries', nameFields: ['client', 'clientName'] },
-      { collection: 'service', label: 'service', nameFields: ['client', 'clientName'] },
+      { collection: 'service', label: 'service', nameFields: [] },
       { collection: 'warranty_claims', label: 'warranty_claims', nameFields: ['client', 'clientName'] },
       { collection: 'crm_deals', label: 'crm_deals', nameFields: ['company', 'client', 'clientName'] },
       { collection: 'debt_collection_plans', label: 'debt_collection_plans', nameFields: ['clientName', 'client'] },
@@ -491,7 +461,7 @@ function registerCrudRoutes(deps) {
       .map(spec => {
         const items = readData(spec.collection) || [];
         const matches = items.filter(item => (
-          spec.collection === 'payments' || spec.collection === 'deliveries'
+          spec.collection === 'payments' || spec.collection === 'deliveries' || spec.collection === 'service'
             ? String(item?.clientId || '').trim() === String(client?.id || '').trim()
             : recordBelongsToClient(item, client, spec.nameFields)
         ));
@@ -1572,6 +1542,9 @@ function registerCrudRoutes(deps) {
         accessControl.filterCollectionByScope(collection, data, req.user),
         req.user,
       );
+      if (collection === 'service') {
+        data = data.map(item => decorateServiceTicketCounterparty(item, { readData }));
+      }
       if (collection === 'payments') {
         data = data.map(item => decoratePaymentCounterparty(item, { readData }));
       }
@@ -1688,7 +1661,9 @@ function registerCrudRoutes(deps) {
       const sanitized = accessControl.sanitizeEntityForRead(collection, item, req.user);
       return res.json(collection === 'payments'
         ? decoratePaymentCounterparty(sanitized, { readData })
-        : sanitized);
+        : collection === 'service'
+          ? decorateServiceTicketCounterparty(sanitized, { readData })
+          : sanitized);
     });
 
     router.post(`/${collection}`, ...writeMiddlewares(collection), (req, res) => {
@@ -1873,6 +1848,7 @@ function registerCrudRoutes(deps) {
             persistService: true,
             serviceTickets: [...data, newItem],
           });
+          newItem = lifecycleResult?.ticket || newItem;
           if (lifecycleResult?.persisted !== true) writeData(collection, [...data, newItem]);
         } else if (collection === 'clients') {
           persistDataBatch(clientCompatibilityWrite.entries);
@@ -1937,7 +1913,9 @@ function registerCrudRoutes(deps) {
         }
         return res.status(201).json(collection === 'payments'
           ? decoratePaymentCounterparty(newItem, { readData })
-          : newItem);
+          : collection === 'service'
+            ? decorateServiceTicketCounterparty(newItem, { readData })
+            : newItem);
       } catch (error) {
         if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
           return sendCounterpartyCompatibilityError(res, error);
@@ -2233,7 +2211,9 @@ function registerCrudRoutes(deps) {
         }
         return res.json(collection === 'payments'
           ? decoratePaymentCounterparty(data[idx], { readData })
-          : data[idx]);
+          : collection === 'service'
+            ? decorateServiceTicketCounterparty(data[idx], { readData })
+            : data[idx]);
       } catch (error) {
         if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
           return sendCounterpartyCompatibilityError(res, error);
@@ -2717,13 +2697,14 @@ function registerCrudRoutes(deps) {
         }
       }
 
-      let normalizedList = list.map(item => {
-        const linked = withClientLink(collection, item);
-        const normalized = normalizeClientDomainRecord(collection, linked);
-        return collection === 'equipment' ? normalizeEquipmentStorageRecord(normalized) : normalized;
-      });
+      let normalizedList;
       let clientCompatibilityWrite = null;
       try {
+        normalizedList = list.map(item => {
+          const linked = withClientLink(collection, item);
+          const normalized = normalizeClientDomainRecord(collection, linked);
+          return collection === 'equipment' ? normalizeEquipmentStorageRecord(normalized) : normalized;
+        });
         if (collection === 'clients') {
           const prepared = prepareClientCompatibilityBulkReplace({
             previousClients: readData('clients') || [],
@@ -2782,10 +2763,11 @@ function registerCrudRoutes(deps) {
         try {
           persistServiceTicketBulkReplace(normalizedList, req.user.userName);
         } catch (error) {
-          return res.status(500).json({
+          return res.status(error?.status || 500).json({
             ok: false,
-            code: 'SERVICE_BULK_REPLACE_PERSISTENCE_FAILED',
+            code: error?.code || 'SERVICE_BULK_REPLACE_PERSISTENCE_FAILED',
             error: error?.message || 'Не удалось атомарно заменить сервисные заявки.',
+            ...(error?.details ? { details: error.details } : {}),
           });
         }
       } else if (collection === 'clients') {

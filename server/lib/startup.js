@@ -237,6 +237,32 @@ async function startServer({ app, port, deps, logger = console }) {
         logger.warn(`[delivery-counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
       }
     }
+    if (typeof deps.auditServiceCounterpartyRelations === 'function') {
+      try {
+        const result = deps.auditServiceCounterpartyRelations({ readData: deps.readData });
+        const classifications = result?.summary?.classifications || {};
+        const hasIssues = (classifications.deterministic_repair || 0)
+          + (result?.summary?.broken || 0) > 0;
+        const log = hasIssues ? logger.warn : logger.log;
+        log?.call(
+          logger,
+          `[service-counterparty-relations] integrity audit: canonical=${classifications.already_canonical || 0} `
+          + `internal=${classifications.internal_unlinked_valid || 0} `
+          + `repairable=${classifications.deterministic_repair || 0} broken=${result?.summary?.broken || 0}`,
+        );
+        for (const issue of (result?.entries || []).filter(entry => ![
+          'already_canonical',
+          'internal_unlinked_valid',
+        ].includes(entry.classification))) {
+          logger.warn?.(
+            `[service-counterparty-relations] integrity issue: serviceTicketId=${issue.recordId || 'missing'} `
+            + `classification=${issue.classification} code=${issue.code} repairability=${issue.repairability}`,
+          );
+        }
+      } catch (error) {
+        logger.warn(`[service-counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
+      }
+    }
     cleanupExpiredSessions();
     seedDefaultUsers();
     ensureLegacyDefaultUsers();

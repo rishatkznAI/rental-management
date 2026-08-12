@@ -2,6 +2,10 @@ const { createAuditEntry } = require('./audit-history');
 const { resolveCurrentUserAsMechanic } = require('./service-assignment');
 const { isPdiServiceTicket } = require('./service-ticket-kind');
 const { normalizeServiceTicketForWrite } = require('./service-dto');
+const {
+  canonicalizeServiceTicketCollection,
+  canonicalizeServiceTicketCounterpartyRelation,
+} = require('./service-counterparty-relations');
 const { assertProductionSmokeFixtureMutationAllowed } = require('./protected-fixtures');
 const { linkedRentalIds } = require('./gantt-rental-link-guard');
 const {
@@ -62,19 +66,24 @@ function createServiceCore(deps) {
 
   function applyServiceTicketCreationEffects(ticket, author = 'Система', options = {}) {
     if (!ticket) return;
+    const previous = readServiceTickets().find(item => String(item?.id || '') === String(ticket?.id || '')) || null;
+    ticket = canonicalizeServiceTicketCounterpartyRelation(ticket, { readData }, { existing: previous });
+    const requestedServiceTickets = Array.isArray(options.serviceTickets)
+      ? options.serviceTickets.map(item => String(item?.id || '') === String(ticket.id || '') ? ticket : item)
+      : options.serviceTickets;
     if (isPdiServiceTicket(ticket)) {
-      if (options.persistService && Array.isArray(options.serviceTickets)) {
-        persistDataBatch([{ name: 'service', value: options.serviceTickets }]);
-        return { persisted: true };
+      if (options.persistService && Array.isArray(requestedServiceTickets)) {
+        persistDataBatch([{ name: 'service', value: requestedServiceTickets }]);
+        return { persisted: true, ticket };
       }
-      return { persisted: false };
+      return { persisted: false, ticket };
     }
 
     const equipmentList = readData('equipment') || [];
     const ganttRentals = readData('gantt_rentals') || [];
     const classicRentals = readData('rentals') || [];
-    const storedServiceTickets = Array.isArray(options.serviceTickets)
-      ? options.serviceTickets
+    const storedServiceTickets = Array.isArray(requestedServiceTickets)
+      ? requestedServiceTickets
       : readServiceTickets();
     const serviceTickets = storedServiceTickets.some(item => String(item?.id || '') === String(ticket.id || ''))
       ? storedServiceTickets
@@ -151,7 +160,7 @@ function createServiceCore(deps) {
       ...(nextRentals.some((item, index) => item !== ganttRentals[index]) ? [{ name: 'gantt_rentals', value: nextRentals }] : []),
       ...(lifecycle.changed ? [{ name: 'equipment', value: nextEquipment }] : []),
     ]);
-    return { persisted: Boolean(options.persistService) };
+    return { persisted: Boolean(options.persistService), ticket };
   }
 
   function appendServiceLog(ticket, text, author, type = 'comment') {
@@ -217,11 +226,16 @@ function createServiceCore(deps) {
   function persistServiceTicketUpdate(updatedTicket, author = 'Система') {
     const tickets = readServiceTickets();
     const previous = tickets.find(ticket => ticket.id === updatedTicket.id) || null;
-    const normalized = normalizeServiceTicketForWrite(updatedTicket, {
+    const normalizedForWrite = normalizeServiceTicketForWrite(updatedTicket, {
       previous,
       isCreate: !previous,
       nowIso,
     });
+    const normalized = canonicalizeServiceTicketCounterpartyRelation(
+      normalizedForWrite,
+      { readData },
+      { existing: previous },
+    );
     const nextTickets = tickets.map(ticket => ticket.id === normalized.id ? normalized : ticket);
     const equipmentList = readData('equipment') || [];
     const matchedEquipmentIds = new Set(equipmentList
@@ -282,11 +296,14 @@ function createServiceCore(deps) {
   function persistServiceTicketBulkReplace(tickets, author = 'Система') {
     const previousTickets = readServiceTickets();
     const previousById = new Map(previousTickets.map(ticket => [String(ticket?.id || ''), ticket]));
-    const nextTickets = (Array.isArray(tickets) ? tickets : []).map(ticket => normalizeServiceTicketForWrite(ticket, {
+    const normalizedTickets = (Array.isArray(tickets) ? tickets : []).map(ticket => normalizeServiceTicketForWrite(ticket, {
       previous: previousById.get(String(ticket?.id || '')) || null,
       isCreate: !previousById.has(String(ticket?.id || '')),
       nowIso,
     })).filter(Boolean);
+    const nextTickets = canonicalizeServiceTicketCollection(normalizedTickets, { readData }, {
+      existingTickets: previousTickets,
+    });
     const equipmentList = readData('equipment') || [];
     const changedTickets = [...previousTickets, ...nextTickets];
     const affectedEquipmentIds = new Set(equipmentList

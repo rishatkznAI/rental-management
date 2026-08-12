@@ -314,9 +314,9 @@ test('manual service createdAt backfill script dry-run does not write', () => {
 
 test('manual service createdAt backfill script apply updates only missing createdAt and is idempotent', () => {
   const original = [
-    { id: 'S-created', createdAt: '2026-04-01T08:00:00.000Z', updatedAt: '2026-04-01T08:00:00.000Z' },
-    { id: 'S-created-date', createdDate: '2026-05-01T08:00:00.000Z' },
-    { id: 'S-updated', updatedAt: '2026-05-02T08:00:00.000Z' },
+    { id: 'S-created', counterpartyId: 'CP-1', clientId: 'CL-1', rentalId: 'R-1', objectId: 'O-1', contractId: 'C-1', createdAt: '2026-04-01T08:00:00.000Z', updatedAt: '2026-04-01T08:00:00.000Z' },
+    { id: 'S-created-date', counterpartyId: 'CP-2', clientId: 'CL-2', createdDate: '2026-05-01T08:00:00.000Z' },
+    { id: 'S-updated', counterpartyId: 'CP-3', rentalId: 'R-3', updatedAt: '2026-05-02T08:00:00.000Z' },
   ];
   const { tempDir, dbPath } = createTempServiceDb(original);
 
@@ -333,6 +333,22 @@ test('manual service createdAt backfill script apply updates only missing create
     assert.equal(afterFirst[0].createdAt, original[0].createdAt);
     assert.equal(afterFirst[1].createdAt, '2026-05-01T08:00:00.000Z');
     assert.equal(afterFirst[2].createdAt, '2026-05-02T08:00:00.000Z');
+    assert.deepEqual(
+      afterFirst.map(item => ({
+        counterpartyId: item.counterpartyId,
+        clientId: item.clientId,
+        rentalId: item.rentalId,
+        objectId: item.objectId,
+        contractId: item.contractId,
+      })),
+      original.map(item => ({
+        counterpartyId: item.counterpartyId,
+        clientId: item.clientId,
+        rentalId: item.rentalId,
+        objectId: item.objectId,
+        contractId: item.contractId,
+      })),
+    );
 
     assert.equal(second.status, 0, second.stderr);
     assert.match(second.stdout, /Apply requested: nothing to update/);

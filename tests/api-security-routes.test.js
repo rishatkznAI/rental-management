@@ -3172,8 +3172,8 @@ test('admin service create may leave mechanic unassigned through API', async () 
 
 test('service create preserves client links for web service roles without exposing clients to forbidden roles', async () => {
   const { app, state } = createSecurityApp();
-  state.clients.push({ id: 'C-service', company: 'ООО Сервис клиент', inn: '7707083893' });
-  state.rentals.push({ id: 'R-service', clientId: 'C-service', client: 'ООО Сервис клиент', equipmentId: 'EQ-own' });
+  state.clients.push({ id: 'C-service', counterpartyId: 'CP-own', company: 'ООО Сервис клиент', inn: '7707083893' });
+  state.rentals.push({ id: 'R-service', counterpartyId: 'CP-own', clientId: 'C-service', client: 'ООО Сервис клиент', equipmentId: 'EQ-own' });
 
   await withServer(app, async baseUrl => {
     for (const [token, roleName] of [
@@ -3190,6 +3190,7 @@ test('service create preserves client links for web service roles without exposi
       });
 
       assert.equal(response.status, 201, roleName);
+      assert.equal(response.body.counterpartyId, 'CP-own', roleName);
       assert.equal(response.body.clientId, 'C-service', roleName);
       assert.equal(response.body.clientName, 'ООО Сервис клиент', roleName);
       assert.equal(response.body.rentalId, 'R-service', roleName);
@@ -3206,20 +3207,20 @@ test('service create preserves client links for web service roles without exposi
 test('service create rejects rental from another client and can infer client from rental', async () => {
   const { app, state } = createSecurityApp();
   state.clients.push(
-    { id: 'C-a', company: 'ООО Клиент А', inn: '7707083893' },
-    { id: 'C-b', company: 'ООО Клиент Б', inn: '7707083894' },
+    { id: 'C-a', counterpartyId: 'CP-own', company: 'ООО Клиент А', inn: '7707083893' },
+    { id: 'C-b', counterpartyId: 'CP-other', company: 'ООО Клиент Б', inn: '7707083894' },
   );
   state.client_objects.push(
-    { id: 'CO-a', clientId: 'C-a', name: 'Объект А', address: 'Казань', status: 'active' },
-    { id: 'CO-b', clientId: 'C-b', name: 'Объект Б', address: 'Москва', status: 'active' },
+    { id: 'CO-a', counterpartyId: 'CP-own', clientId: 'C-a', name: 'Объект А', address: 'Казань', status: 'active' },
+    { id: 'CO-b', counterpartyId: 'CP-other', clientId: 'C-b', name: 'Объект Б', address: 'Москва', status: 'active' },
   );
   state.client_contracts.push(
-    { id: 'CC-a', clientId: 'C-a', objectId: 'CO-a', number: 'Д-А', status: 'active' },
-    { id: 'CC-b', clientId: 'C-b', objectId: 'CO-b', number: 'Д-Б', status: 'active' },
+    { id: 'CC-a', counterpartyId: 'CP-own', clientId: 'C-a', objectId: 'CO-a', number: 'Д-А', status: 'active' },
+    { id: 'CC-b', counterpartyId: 'CP-other', clientId: 'C-b', objectId: 'CO-b', number: 'Д-Б', status: 'active' },
   );
   state.rentals.push(
-    { id: 'R-a', clientId: 'C-a', client: 'ООО Клиент А', objectId: 'CO-a', contractId: 'CC-a', equipmentId: 'EQ-own' },
-    { id: 'R-b', clientId: 'C-b', client: 'ООО Клиент Б', objectId: 'CO-b', contractId: 'CC-b', equipmentId: 'EQ-other' },
+    { id: 'R-a', counterpartyId: 'CP-own', clientId: 'C-a', client: 'ООО Клиент А', objectId: 'CO-a', contractId: 'CC-a', equipmentId: 'EQ-own' },
+    { id: 'R-b', counterpartyId: 'CP-other', clientId: 'C-b', client: 'ООО Клиент Б', objectId: 'CO-b', contractId: 'CC-b', equipmentId: 'EQ-other' },
   );
 
   await withServer(app, async baseUrl => {
@@ -3233,6 +3234,7 @@ test('service create rejects rental from another client and can infer client fro
       contractId: 'CC-a',
     });
     assert.equal(valid.status, 201);
+    assert.equal(valid.body.counterpartyId, 'CP-own');
     assert.equal(valid.body.clientId, 'C-a');
     assert.equal(valid.body.rentalId, 'R-a');
     assert.equal(valid.body.objectId, 'CO-a');
@@ -3245,14 +3247,15 @@ test('service create rejects rental from another client and can infer client fro
       clientName: 'ООО Клиент А',
       rentalId: 'R-b',
     });
-    assert.equal(foreignRental.status, 400);
-    assert.equal(foreignRental.body.error, 'Аренда не принадлежит выбранному клиенту');
+    assert.equal(foreignRental.status, 409);
+    assert.equal(foreignRental.body.code, 'COUNTERPARTY_RELATION_MISMATCH');
 
     const inferred = await request(baseUrl, 'POST', '/api/service', 'admin-token', {
       ...servicePayload,
       rentalId: 'R-b',
     });
     assert.equal(inferred.status, 201);
+    assert.equal(inferred.body.counterpartyId, 'CP-other');
     assert.equal(inferred.body.clientId, 'C-b');
     assert.equal(inferred.body.clientName, 'ООО Клиент Б');
     assert.equal(inferred.body.objectId, 'CO-b');
@@ -3267,16 +3270,17 @@ test('service create rejects rental from another client and can infer client fro
 test('service patch rejects conflicting rental client link', async () => {
   const { app, state } = createSecurityApp();
   state.clients.push(
-    { id: 'C-a', company: 'ООО Клиент А', inn: '7707083893' },
-    { id: 'C-b', company: 'ООО Клиент Б', inn: '7707083894' },
+    { id: 'C-a', counterpartyId: 'CP-own', company: 'ООО Клиент А', inn: '7707083893' },
+    { id: 'C-b', counterpartyId: 'CP-other', company: 'ООО Клиент Б', inn: '7707083894' },
   );
   state.rentals.push(
-    { id: 'R-a', clientId: 'C-a', client: 'ООО Клиент А', equipmentId: 'EQ-own' },
-    { id: 'R-b', clientId: 'C-b', client: 'ООО Клиент Б', equipmentId: 'EQ-other' },
+    { id: 'R-a', counterpartyId: 'CP-own', clientId: 'C-a', client: 'ООО Клиент А', equipmentId: 'EQ-own' },
+    { id: 'R-b', counterpartyId: 'CP-other', clientId: 'C-b', client: 'ООО Клиент Б', equipmentId: 'EQ-other' },
   );
   state.service.push({
     ...servicePayload,
     id: 'S-client-a',
+    counterpartyId: 'CP-own',
     clientId: 'C-a',
     client: 'ООО Клиент А',
     clientName: 'ООО Клиент А',
@@ -3287,8 +3291,9 @@ test('service patch rejects conflicting rental client link', async () => {
     const response = await request(baseUrl, 'PATCH', '/api/service/S-client-a', 'admin-token', {
       rentalId: 'R-b',
     });
-    assert.equal(response.status, 400);
-    assert.equal(response.body.error, 'Аренда не принадлежит выбранному клиенту');
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'COUNTERPARTY_RELATION_MISMATCH');
+    assert.equal(state.service.find(item => item.id === 'S-client-a').counterpartyId, 'CP-own');
   });
 });
 

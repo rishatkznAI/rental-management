@@ -303,6 +303,7 @@ test('Stage H MAX receiving atomically closes classic and planner rental with st
   }];
   state.rentals = [{
     id: 'R-1',
+    counterpartyId: 'CP-1',
     clientId: 'C-1',
     client: 'ООО Клиент',
     equipmentId: 'EQ-1',
@@ -313,6 +314,7 @@ test('Stage H MAX receiving atomically closes classic and planner rental with st
   state.gantt_rentals = [{
     id: 'GR-1',
     rentalId: 'R-1',
+    counterpartyId: 'CP-1',
     clientId: 'C-1',
     client: 'ООО Клиент',
     equipmentId: 'EQ-1',
@@ -337,6 +339,7 @@ test('Stage H MAX receiving atomically closes classic and planner rental with st
   assert.equal(result.event.rentalId, 'R-1');
   assert.equal(result.event.ganttRentalId, 'GR-1');
   assert.equal(result.createdServiceTicket.rentalId, 'R-1');
+  assert.equal(result.createdServiceTicket.counterpartyId, 'CP-1');
   assert.equal(result.createdServiceTicket.ganttRentalId, 'GR-1');
   assert.equal(state.rentals[0].status, 'closed');
   assert.equal(state.rentals[0].actualReturnDate, '2026-04-30');
@@ -377,7 +380,7 @@ test('Stage H MAX receiving supports a legacy active classic rental without Gant
     currentClient: 'ООО Клиент', returnDate: '2026-05-20',
   }];
   state.rentals = [{
-    id: 'R-legacy', clientId: 'C-1', client: 'ООО Клиент', equipmentId: 'EQ-1',
+    id: 'R-legacy', counterpartyId: 'CP-1', clientId: 'C-1', client: 'ООО Клиент', equipmentId: 'EQ-1',
     startDate: '2026-04-01', plannedReturnDate: '2026-05-20', status: 'active',
   }];
 
@@ -389,6 +392,7 @@ test('Stage H MAX receiving supports a legacy active classic rental without Gant
   assert.equal(result.event.rentalId, 'R-legacy');
   assert.equal(result.event.ganttRentalId, undefined);
   assert.equal(result.createdServiceTicket.rentalId, 'R-legacy');
+  assert.equal(result.createdServiceTicket.counterpartyId, 'CP-1');
   assert.equal(result.createdServiceTicket.ganttRentalId, undefined);
   assert.equal(state.rentals[0].status, 'closed');
   assert.equal(state.equipment[0].status, 'in_service');

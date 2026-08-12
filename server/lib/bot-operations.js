@@ -544,6 +544,7 @@ function createBotOperations(deps) {
     const rentalLink = ticketContext?.key === 'rental' && context?.rentalLink
       ? {
           rentalId: context.rentalLink.rentalId || undefined,
+          counterpartyId: context.rentalLink.counterpartyId || undefined,
           clientId: context.rentalLink.clientId || undefined,
           objectId: context.rentalLink.objectId || undefined,
           contractId: context.rentalLink.contractId || undefined,
@@ -641,6 +642,7 @@ function createBotOperations(deps) {
     const rentalLink = ticketContext?.key === 'rental' && context?.rentalLink
       ? {
           rentalId: context.rentalLink.rentalId || undefined,
+          counterpartyId: context.rentalLink.counterpartyId || undefined,
           clientId: context.rentalLink.clientId || undefined,
           objectId: context.rentalLink.objectId || undefined,
           contractId: context.rentalLink.contractId || undefined,
@@ -769,6 +771,7 @@ function createBotOperations(deps) {
       rentalId: options.rentalId || linkedRentalIds(activeRental || {})[0] || activeRental?.id || undefined,
       ganttRentalId: options.ganttRentalId
         || (linkedRentalIds(activeRental || {}).length > 0 ? activeRental?.id : undefined),
+      counterpartyId: activeRental?.counterpartyId || undefined,
       clientId: activeRental?.clientId || undefined,
       objectId: activeRental?.objectId || undefined,
       contractId: activeRental?.contractId || undefined,

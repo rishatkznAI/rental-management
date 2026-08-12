@@ -1332,6 +1332,7 @@ function registerRentalRoutes(deps) {
         photos: [],
         archived: false,
         rentalId: rental?.id,
+        counterpartyId: rental?.counterpartyId,
         clientId: rental?.clientId,
         client: rental?.client,
         objectId: rental?.objectId,

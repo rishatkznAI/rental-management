@@ -21,6 +21,7 @@ const {
   deactivateCounterpartyRole,
   hasActiveCounterpartyRole,
 } = require('../lib/counterparty-role-profiles');
+const { activeServiceCounterpartyReferences } = require('../lib/service-counterparty-relations');
 
 const COUNTERPARTY_WRITE_FIELDS = new Set([
   'type',
@@ -488,6 +489,17 @@ function registerCounterpartyRoutes(router, deps) {
           'Нельзя архивировать контрагента, пока существуют связанные активные аренды.',
           409,
           { counterpartyId: id, rentalIds: [...new Set(linkedActiveRentalIds)] },
+        );
+      }
+      const linkedActiveServiceIds = activeServiceCounterpartyReferences(id, { readData })
+        .map(ticket => ticket.id)
+        .filter(Boolean);
+      if (linkedActiveServiceIds.length > 0) {
+        throw counterpartyError(
+          'COUNTERPARTY_DOMAIN_LINK_CONFLICT',
+          'Нельзя архивировать контрагента, пока существуют связанные активные сервисные заявки.',
+          409,
+          { counterpartyId: id, serviceTicketIds: [...new Set(linkedActiveServiceIds)] },
         );
       }
       const terminalDeliveryStatuses = new Set(['completed', 'cancelled', 'canceled']);

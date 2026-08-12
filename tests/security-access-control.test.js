@@ -383,7 +383,7 @@ test('new mass assignment protected fields are stripped or rejected for non-admi
     status: 'in_progress',
   }, mechanic);
   assert.equal(mechanicSafe.status, 'in_progress');
-  for (const field of ['mechanicId', 'assignedMechanicId', 'assignedUserId', 'closedAt']) {
+  for (const field of ['mechanicId', 'assignedMechanicId', 'assignedUserId', 'closedAt', 'counterpartyId', 'clientId', 'rentalId', 'objectId', 'contractId']) {
     assert.throws(() => access.sanitizeUpdateInput('service', {
       status: 'in_progress',
       [field]: field === 'closedAt' ? '2026-04-28T12:00:00.000Z' : 'M-other',
@@ -435,6 +435,7 @@ test('non-admin service create allows only explicit PDI markers and strips unsaf
     saleMode: true,
     pdiData: { status: 'in_progress' },
     equipmentId: 'EQ-1',
+    counterpartyId: 'CP-1',
     clientId: 'C-1',
     client: 'ООО Клиент',
     clientName: 'ООО Клиент',
@@ -448,6 +449,8 @@ test('non-admin service create allows only explicit PDI markers and strips unsaf
     location: 'Склад',
     closedAt: '2026-05-01T10:00:00.000Z',
   }, manager);
+
+  assert.equal(safe.counterpartyId, 'CP-1');
 
   assert.equal(safe.type, 'pdi');
   assert.equal(safe.scenario, 'pdi');

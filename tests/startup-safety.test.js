@@ -34,6 +34,16 @@ function createStartupDeps(state, events) {
       recordCall('auditCounterpartyRelations');
       return { healthy: [], repairable: [], broken: [], summary: { healthy: 0, repairable: 0, broken: 0 } };
     },
+    auditServiceCounterpartyRelations: () => {
+      recordCall('auditServiceCounterpartyRelations');
+      return {
+        entries: [{ classification: 'internal_unlinked_valid', recordId: 'S-1' }],
+        summary: {
+          broken: 0,
+          classifications: { already_canonical: 0, internal_unlinked_valid: 1, deterministic_repair: 0 },
+        },
+      };
+    },
     writeDataBatch: entries => {
       for (const entry of entries || []) writeData(entry.name, entry.value);
     },
@@ -143,6 +153,7 @@ test('server start disables only business maintenance by default', async () => {
   assert.equal(events.calls.includes('ensureClientObjectCounterpartyLinks'), false);
   assert.equal(events.calls.includes('auditCounterpartyRoleProfiles'), true);
   assert.equal(events.calls.includes('auditCounterpartyRelations'), true);
+  assert.equal(events.calls.includes('auditServiceCounterpartyRelations'), true);
   assert.equal(events.calls.includes('cleanupExpiredSessions'), true);
   assert.equal(events.calls.includes('seedDefaultUsers'), true);
   assert.equal(events.calls.includes('ensureLegacyDefaultUsers'), true);
@@ -157,6 +168,7 @@ test('server start disables only business maintenance by default', async () => {
   assert.equal(events.writes.some(event => event.name === 'gantt_rentals'), false);
   assert.equal(events.writes.some(event => event.name === 'payment_allocations'), false);
   assert.equal(events.writes.some(event => event.name === 'crm_deals'), false);
+  assert.deepEqual(state.service, original.service);
   assert.equal(warnings.some(message => message.includes(`${STARTUP_BUSINESS_MAINTENANCE_ENV}=apply`)), true);
 });
 

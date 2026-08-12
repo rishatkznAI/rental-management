@@ -2783,6 +2783,86 @@ test('/api/sync fails closed when legacy payload contains Delivery collections',
   });
 });
 
+test('/api/admin/system-data Service round-trip canonicalizes after prerequisite stable collections and rejects conflicts atomically', async () => {
+  const collections = {
+    counterparties: [],
+    counterparty_role_assignments: [],
+    clients: [],
+    client_objects: [],
+    client_contracts: [],
+    rentals: [],
+    gantt_rentals: [],
+    service: [],
+  };
+  const batches = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeDataBatch(entries) {
+      batches.push(structuredClone(entries));
+      for (const entry of entries) collections[entry.name] = entry.value;
+    },
+  });
+  const payloadCollections = {
+    counterparties: [{ id: 'CP-1', type: 'legal_entity', legalName: 'ООО Клиент', inn: '7707083893', status: 'active', roles: ['customer'] }],
+    counterparty_role_assignments: [{ id: 'A-1', counterpartyId: 'CP-1', roleCode: 'customer', status: 'active' }],
+    clients: [{ id: 'CL-1', counterpartyId: 'CP-1', company: 'ООО Клиент', inn: '7707083893' }],
+    client_objects: [{ id: 'O-1', counterpartyId: 'CP-1', clientId: 'CL-1', name: 'Объект', address: 'Казань', status: 'active' }],
+    client_contracts: [{ id: 'C-1', counterpartyId: 'CP-1', clientId: 'CL-1', objectId: 'O-1', number: '1', status: 'active' }],
+    rentals: [{ id: 'R-1', counterpartyId: 'CP-1', clientId: 'CL-1', objectId: 'O-1', contractId: 'C-1', status: 'active' }],
+    service: [{ id: 'S-1', rentalId: 'R-1', clientId: 'CL-1', objectId: 'O-1', contractId: 'C-1', status: 'new' }],
+  };
+
+  await withServer(app, async baseUrl => {
+    const dryRun = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', { collections: payloadCollections });
+    assert.equal(dryRun.status, 200, JSON.stringify(dryRun.body));
+    assert.equal(dryRun.body.ok, true);
+    assert.equal(batches.length, 0);
+
+    const applied = await postJson(baseUrl, '/api/admin/system-data/import', { confirm: true, collections: payloadCollections });
+    assert.equal(applied.status, 200, JSON.stringify(applied.body));
+    assert.equal(collections.service[0].counterpartyId, 'CP-1');
+    const names = batches[0].map(entry => entry.name);
+    assert.ok(names.indexOf('counterparties') < names.indexOf('counterparty_role_assignments'));
+    assert.ok(names.indexOf('counterparty_role_assignments') < names.indexOf('clients'));
+    assert.ok(names.indexOf('clients') < names.indexOf('client_objects'));
+    assert.ok(names.indexOf('client_objects') < names.indexOf('client_contracts'));
+    assert.ok(names.indexOf('client_contracts') < names.indexOf('rentals'));
+    assert.ok(names.indexOf('rentals') < names.indexOf('service'));
+
+    const exported = await getJson(baseUrl, '/api/admin/system-data/export');
+    assert.equal(exported.status, 200);
+    assert.equal(exported.body.collections.service[0].counterpartyId, 'CP-1');
+    assert.equal(exported.body.collections.service[0].rentalId, 'R-1');
+
+    const before = structuredClone(collections);
+    const batchCount = batches.length;
+    const rejected = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        service: [
+          { ...collections.service[0] },
+          { id: 'S-bad', counterpartyId: 'CP-1', rentalId: 'R-missing', status: 'new' },
+        ],
+      },
+    });
+    assert.equal(rejected.status, 400);
+    assert.match(rejected.body.errors.join(' '), /SERVICE_COUNTERPARTY_RENTAL_NOT_FOUND/);
+    assert.deepEqual(collections, before);
+    assert.equal(batches.length, batchCount);
+  });
+});
+
+test('/api/sync fails closed when legacy payload contains Service', async () => {
+  await withLegacySyncEnabled(async () => {
+    const { app } = createSystemApp();
+    await withServer(app, async baseUrl => {
+      const response = await postJson(baseUrl, '/api/sync', { service: [] });
+      assert.equal(response.status, 409);
+      assert.equal(response.body.code, 'SERVICE_COUNTERPARTY_SYNC_DISABLED');
+    });
+  });
+});
+
 test('/api/admin/system-data/import rejects duplicate client INNs before writing any collection', async () => {
   const collections = {
     equipment: [{ id: 'EQ-old', serialNumber: 'OLD' }],
@@ -2857,8 +2937,8 @@ test('/api/admin/system-data/import accepts valid clients payload', async () => 
     });
     assert.deepEqual(writes.map(write => write.name), [
       'counterparties',
-      'clients',
       'counterparty_role_assignments',
+      'clients',
       'supplier_profiles',
       'contractor_profiles',
     ]);

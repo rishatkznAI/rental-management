@@ -429,13 +429,21 @@ function findRoleRemovalBlockers({ counterpartyId, roleCode, data }) {
     : role === 'supplier' ? SUPPLIER_REFERENCE_SPECS : CONTRACTOR_REFERENCE_SPECS;
   const blockers = [];
   for (const [collection, counterpartyFields, clientFields = []] of specs) {
-    const records = readCollection(data, collection).filter(record => recordMatchesStableRelation(
-      record,
-      id,
-      clientIds,
-      counterpartyFields,
-      clientFields,
-    ));
+    const records = readCollection(data, collection)
+      .filter(record => recordMatchesStableRelation(
+        record,
+        id,
+        clientIds,
+        counterpartyFields,
+        clientFields,
+      ))
+      .filter(record => role !== 'customer' || collection !== 'service' || ![
+        'ready',
+        'closed',
+        'completed',
+        'cancelled',
+        'canceled',
+      ].includes(relationId(record?.status).toLowerCase()));
     if (records.length === 0) continue;
     blockers.push({
       collection,

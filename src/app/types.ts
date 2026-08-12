@@ -1046,6 +1046,9 @@ export interface ServiceTicket {
   assignedMechanicId?: string;
   assignedMechanicName?: string;
   createdBy?: string;
+  counterpartyId?: string;
+  counterpartyName?: string;
+  customerDisplayName?: string;
   clientId?: string;
   client?: string;
   clientName?: string;

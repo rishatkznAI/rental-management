@@ -26,6 +26,9 @@ test('service DTO normalizes incomplete legacy records without mutating storage 
   assert.equal(ticket.inventoryNumber, 'INV-7');
   assert.equal(ticket.mechanicId, 'M-1');
   assert.equal(ticket.assignedMechanicId, 'M-1');
+  assert.equal(ticket.counterpartyId, '');
+  assert.equal(ticket.counterpartyName, '');
+  assert.equal(ticket.customerDisplayName, '');
   assert.equal(ticket.clientId, '');
   assert.equal(ticket.rentalId, '');
   assert.deepEqual(ticket.workLog, []);
@@ -55,6 +58,9 @@ test('mechanic service DTO keeps object context without financial fields', () =>
     description: 'Осмотр',
     priority: 'medium',
     status: 'new',
+    counterpartyId: 'CP-1',
+    counterpartyName: 'ООО Клиент',
+    customerDisplayName: 'ООО Клиент',
     clientId: 'C-1',
     client: 'ООО Клиент',
     objectId: 'CO-1',
@@ -71,6 +77,8 @@ test('mechanic service DTO keeps object context without financial fields', () =>
   });
 
   assert.equal(ticket.objectId, 'CO-1');
+  assert.equal(ticket.counterpartyId, 'CP-1');
+  assert.equal(ticket.customerDisplayName, 'ООО Клиент');
   assert.equal(ticket.objectName, 'ТЦ Север');
   assert.equal(ticket.objectAddress, 'Казань, Северная 1');
   assert.equal(ticket.objectContactName, 'Ильдар');

@@ -51,6 +51,7 @@ const {
   isHistoricalDeliveryCarrierRelation,
   isHistoricalDeliveryRelation,
 } = require('../lib/delivery-counterparty-relations');
+const { canonicalizeServiceTicketCollection } = require('../lib/service-counterparty-relations');
 const {
   SYSTEM_FIXTURE_PROTECTED_CODE,
   SYSTEM_FIXTURE_PROTECTED_MESSAGE,
@@ -988,23 +989,6 @@ function analyzeSystemDataImport(payload, readData) {
         for (const field of rentalServerOwnedAuditFields(item)) blocked.add(field);
       }
     }
-    if (collection === 'rentals' && blocked.size === 0) {
-      const existingById = new Map((readData('rentals') || []).map(item => [String(item?.id || ''), item]));
-      try {
-        sanitized = sanitized.map(item => {
-          const existing = existingById.get(String(item?.id || '')) || null;
-          return normalizeClientRelationLinks(item, item?.clientId || existing?.clientId, {
-            readData,
-            requireActiveObject: Boolean(item?.objectId) && String(item.objectId) !== String(existing?.objectId || ''),
-            allowArchivedObjectId: existing?.objectId,
-            includeObjectSnapshot: true,
-            includeContractSnapshot: true,
-          });
-        });
-      } catch (error) {
-        integrityErrors.push(`Некорректные связи аренды: ${error.message}`);
-      }
-    }
     sanitizedCollections[collection] = sanitized;
     if (blocked.size > 0) forbiddenFields[collection] = Array.from(blocked).sort();
     collections[collection] = {
@@ -1127,9 +1111,21 @@ function analyzeSystemDataImport(payload, readData) {
       },
     };
     try {
+      const existingById = new Map((readData(collection) || []).map(rental => [String(rental?.id || ''), rental]));
+      if (collection === 'rentals') {
+        sanitizedCollections[collection] = sanitizedCollections[collection].map(item => {
+          const existing = existingById.get(String(item?.id || '')) || null;
+          return normalizeClientRelationLinks(item, item?.clientId || existing?.clientId, {
+            readData: stagedData.readData,
+            requireActiveObject: Boolean(item?.objectId) && String(item.objectId) !== String(existing?.objectId || ''),
+            allowArchivedObjectId: existing?.objectId,
+            includeObjectSnapshot: true,
+            includeContractSnapshot: true,
+          });
+        });
+      }
       sanitizedCollections[collection] = sanitizedCollections[collection]
         .map(rental => canonicalizeRentalCounterpartyRelation(rental, stagedData));
-      const existingById = new Map((readData(collection) || []).map(rental => [String(rental?.id || ''), rental]));
       for (const rental of sanitizedCollections[collection]) {
         const terminalValidation = validateTerminalRentalTransition(
           existingById.get(String(rental?.id || '')) || null,
@@ -1140,7 +1136,8 @@ function analyzeSystemDataImport(payload, readData) {
         }
       }
     } catch (error) {
-      integrityErrors.push(`${collection}:${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
+      const prefix = collection === 'rentals' ? 'Некорректные связи аренды' : collection;
+      integrityErrors.push(`${prefix}:${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
     }
   }
 
@@ -1160,6 +1157,24 @@ function analyzeSystemDataImport(payload, readData) {
         ));
     } catch (error) {
       integrityErrors.push(`${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
+    }
+  }
+
+  if (Array.isArray(sanitizedCollections.service)) {
+    const stagedData = {
+      readData(name) {
+        if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
+        return readData(name) || [];
+      },
+    };
+    try {
+      sanitizedCollections.service = canonicalizeServiceTicketCollection(
+        sanitizedCollections.service,
+        stagedData,
+        { existingTickets: readData('service') || [] },
+      );
+    } catch (error) {
+      integrityErrors.push(`${error.code || 'SERVICE_COUNTERPARTY_RELATION_FAILED'}: ${error.message}`);
     }
   }
 
@@ -1496,6 +1511,13 @@ function registerSystemRoutes(app, deps) {
           ok: false,
           code: 'DELIVERY_COUNTERPARTY_SYNC_DISABLED',
           error: 'Legacy sync не может заменять deliveries или delivery_carriers. Используйте canonical Delivery API или System Data import.',
+        });
+      }
+      if (Array.isArray(service)) {
+        return res.status(409).json({
+          ok: false,
+          code: 'SERVICE_COUNTERPARTY_SYNC_DISABLED',
+          error: 'Legacy sync не может заменять service. Используйте canonical Service API или System Data import.',
         });
       }
       const prev = getSnapshot();
@@ -2163,11 +2185,18 @@ function registerSystemRoutes(app, deps) {
 
     const imported = {};
     const writes = [];
-    const importEntries = Object.entries(analysis.sanitizedCollections).sort(([left], [right]) => {
-      if (left === 'counterparties' && right === 'clients') return -1;
-      if (left === 'clients' && right === 'counterparties') return 1;
-      return 0;
-    });
+    const importOrder = new Map([
+      ['counterparties', 10],
+      [ROLE_ASSIGNMENTS_COLLECTION, 20],
+      ['clients', 30],
+      ['client_objects', 40],
+      ['client_contracts', 50],
+      ['rentals', 60],
+      ['gantt_rentals', 61],
+      ['service', 70],
+    ]);
+    const importEntries = Object.entries(analysis.sanitizedCollections)
+      .sort(([left], [right]) => (importOrder.get(left) || 100) - (importOrder.get(right) || 100));
     for (const [collection, list] of importEntries) {
       const nextList = collection === 'users'
         ? mergeImportedUsers(list, readData('users') || [])

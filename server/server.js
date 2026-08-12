@@ -99,6 +99,10 @@ const {
   canonicalizeDeliveryPersistenceEntries,
 } = require('./lib/delivery-counterparty-relations');
 const {
+  auditServiceCounterpartyRelations,
+  canonicalizeServicePersistenceEntries,
+} = require('./lib/service-counterparty-relations');
+const {
   mergeEntityHistory,
   mergeRentalHistory,
 } = require('./lib/audit-history');
@@ -427,13 +431,15 @@ function writeData(name, data) {
     [{ name, value: data }],
     { readData },
   );
-  const [entry] = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
+  const deliveryEntries = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
+  const [entry] = canonicalizeServicePersistenceEntries(deliveryEntries, { readData });
   setData(entry.name, entry.value);
 }
 
 function writeDataBatch(entries) {
   const rentalEntries = canonicalizeRentalPersistenceEntries(entries, { readData });
-  setDataBatch(canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData }));
+  const deliveryEntries = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
+  setDataBatch(canonicalizeServicePersistenceEntries(deliveryEntries, { readData }));
 }
 
 const accessControl = createAccessControl({ readData });
@@ -2741,6 +2747,7 @@ startServer({
     auditCounterpartyRelations,
     auditRentalCounterpartyRelations,
     auditDeliveryCounterpartyRelations,
+    auditServiceCounterpartyRelations,
     writeDataBatch,
     cleanupExpiredSessions,
     seedDefaultUsers,

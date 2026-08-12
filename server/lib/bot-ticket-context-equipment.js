@@ -173,6 +173,7 @@ function findBestRentalLinkForEquipment(equipment, data = {}) {
   return {
     rentalId,
     ganttRentalId: text(row.id),
+    counterpartyId: text(source.counterpartyId || row.counterpartyId),
     clientId: text(source.clientId || row.clientId),
     objectId: text(source.objectId || row.objectId || source.clientObjectId || row.clientObjectId),
     contractId: text(source.contractId || row.contractId || source.clientContractId || row.clientContractId),

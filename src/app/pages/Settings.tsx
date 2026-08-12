@@ -6060,10 +6060,16 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
       JSON.stringify(ticket.parts ?? []),
       ticket.createdAt,
       JSON.stringify(ticket.photos ?? []),
+      ticket.counterpartyId ?? '',
+      ticket.clientId ?? '',
+      ticket.rentalId ?? '',
+      ticket.objectId ?? '',
+      ticket.contractId ?? '',
+      ticket.clientName ?? ticket.client ?? '',
     ]);
 
     const csv = [
-      ['ID техники', 'Техника', 'Инв. номер', 'Серийный номер', 'Код типа техники', 'Тип техники', 'Локация', 'Причина', 'Описание', 'Приоритет', 'SLA', 'Назначен', 'ID механика', 'Имя механика', 'Создал', 'ID автора', 'Имя автора', 'Контактное лицо', 'Источник', 'Статус', 'Плановая дата', 'Дата закрытия', 'Результат', 'Результат JSON', 'Журнал работ JSON', 'Запчасти JSON', 'Создано', 'Фото JSON']
+      ['ID техники', 'Техника', 'Инв. номер', 'Серийный номер', 'Код типа техники', 'Тип техники', 'Локация', 'Причина', 'Описание', 'Приоритет', 'SLA', 'Назначен', 'ID механика', 'Имя механика', 'Создал', 'ID автора', 'Имя автора', 'Контактное лицо', 'Источник', 'Статус', 'Плановая дата', 'Дата закрытия', 'Результат', 'Результат JSON', 'Журнал работ JSON', 'Запчасти JSON', 'Создано', 'Фото JSON', 'ID контрагента', 'ID клиента', 'ID аренды', 'ID объекта', 'ID договора', 'Клиент (снимок)']
         .map(escapeCSV).join(','),
       ...rows.map(row => row.map(escapeCSV).join(',')),
     ].join('\n');
@@ -6084,6 +6090,9 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
       const text = await file.text();
       const rows = csvToRows(text);
       if (rows.length < 2) throw new Error('Файл пустой или не содержит строк для импорта');
+      if (!rows[0].includes('ID контрагента')) {
+        throw new Error('Legacy CSV сервиса не содержит stable ID контрагента. Экспортируйте новый файл или используйте System Data import; восстановление по имени запрещено.');
+      }
 
       const importedItems = rows.slice(1).map((columns, index) => {
         const [
@@ -6115,6 +6124,12 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           partsRaw,
           createdAt,
           photosRaw,
+          counterpartyId,
+          clientId,
+          rentalId,
+          objectId,
+          contractId,
+          clientName,
         ] = columns;
 
         if (!equipmentId || !equipmentName || !reason || !description || !priority || !sla) {
@@ -6130,6 +6145,10 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
             return fallback;
           }
         };
+
+        if (clientName && !counterpartyId && !clientId && !rentalId && !objectId && !contractId) {
+          throw new Error(`Строка ${index + 2}: customer metadata не содержит stable customer relation`);
+        }
 
         return {
           id: `service-import-${Date.now()}-${index}`,
@@ -6151,6 +6170,13 @@ function DataManagementSection({ canManageData }: { canManageData: boolean }) {
           createdByUserId: createdByUserId || undefined,
           createdByUserName: createdByUserName || undefined,
           reporterContact: reporterContact || undefined,
+          counterpartyId: counterpartyId || undefined,
+          clientId: clientId || undefined,
+          rentalId: rentalId || undefined,
+          objectId: objectId || undefined,
+          contractId: contractId || undefined,
+          client: clientName || undefined,
+          clientName: clientName || undefined,
           source: (source || undefined) as ServiceTicket['source'],
           status: SERVICE_STATUS_IMPORT_MAP[(statusRaw || '').toLowerCase()] ?? 'new',
           plannedDate: plannedDate || undefined,

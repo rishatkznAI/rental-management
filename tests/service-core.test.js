@@ -26,6 +26,11 @@ function createMemoryServiceCore(options = {}) {
     }],
     rentals: [],
     gantt_rentals: [],
+    counterparties: [{ id: 'CP-1', legalName: 'Customer', status: 'active', roles: ['customer'] }],
+    counterparty_role_assignments: [{ id: 'A-1', counterpartyId: 'CP-1', roleCode: 'customer', status: 'active' }],
+    clients: [{ id: 'CL-1', counterpartyId: 'CP-1', company: 'Customer' }],
+    client_objects: [],
+    client_contracts: [],
   };
   const core = createServiceCore({
     readData: (name) => state[name] ?? [],
@@ -86,7 +91,7 @@ test('sales PDI creation does not move equipment into ordinary service', () => {
     comments: [],
   }];
 
-  core.applyServiceTicketCreationEffects({
+  const result = core.applyServiceTicketCreationEffects({
     id: 'PDI-1',
     equipmentId: 'EQ-1',
     type: 'pdi',
@@ -100,6 +105,8 @@ test('sales PDI creation does not move equipment into ordinary service', () => {
   assert.equal(state.equipment[0].status, 'available');
   assert.equal(state.gantt_rentals[0].status, 'active');
   assert.deepEqual(state.gantt_rentals[0].comments, []);
+  assert.equal(result.ticket.counterpartyId, undefined);
+  assert.equal(result.ticket.clientId, undefined);
 });
 
 test('production smoke fixture cannot be moved into service by service creation side effects', () => {
@@ -220,4 +227,35 @@ test('Stage H service batch failure rolls back ticket, rental, planner and equip
     serviceTickets: [ticket],
   }), /Injected service batch failure/);
   assert.deepEqual(state, before);
+});
+
+test('Service-core status, revision, and bulk mutations preserve canonical customer identity', () => {
+  const { state, core } = createMemoryServiceCore();
+  state.service[0] = {
+    ...state.service[0],
+    counterpartyId: 'CP-1',
+    clientId: 'CL-1',
+    assignedMechanicId: 'M-1',
+    assignedMechanicName: 'Петров',
+  };
+
+  const ready = core.updateServiceTicketStatus(state.service[0], 'ready', 'Админ', 'Готово');
+  assert.equal(ready.counterpartyId, 'CP-1');
+  assert.equal(ready.clientId, 'CL-1');
+
+  const revision = core.returnServiceTicketForRevision(ready, { reason: 'Проверка' }, { userId: 'U-1', userName: 'Админ' });
+  assert.equal(revision.counterpartyId, 'CP-1');
+  assert.equal(revision.clientId, 'CL-1');
+
+  const resolved = core.resolveServiceTicketRevision(revision, { resolutionComment: 'Исправлено' }, { userId: 'U-2', userName: 'Петров' });
+  assert.equal(resolved.counterpartyId, 'CP-1');
+
+  core.persistServiceTicketBulkReplace([{ ...resolved, description: 'Атомарно' }], 'Админ');
+  assert.equal(state.service[0].counterpartyId, 'CP-1');
+  assert.equal(state.service[0].description, 'Атомарно');
+
+  assert.throws(
+    () => core.persistServiceTicketUpdate({ ...state.service[0], counterpartyId: 'CP-2' }, 'Админ'),
+    /Counterparty|counterparty|ServiceTicket/,
+  );
 });

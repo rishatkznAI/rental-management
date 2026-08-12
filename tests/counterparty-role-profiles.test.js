@@ -361,6 +361,63 @@ test('role removal is blocked by durable stable-ID references and audit reports 
   )), true);
 });
 
+test('active Service relation blocks customer-role removal while terminal history does not', () => {
+  const raw = data({
+    counterparties: [counterparty('CP-1', ['customer', 'supplier'])],
+    service: [{ id: 'S-1', counterpartyId: 'CP-1', status: 'needs_revision' }],
+  });
+  migrate(raw);
+  let state = boundaryState(raw);
+
+  assert.throws(() => deactivateCounterpartyRole({
+    state,
+    data: raw,
+    counterpartyId: 'CP-1',
+    roleCode: 'customer',
+    nowIso: () => NOW,
+  }), error => {
+    assert.equal(error.code, ROLE_PROFILE_CODES.ROLE_REMOVAL_BLOCKED);
+    assert.equal(error.details.blockers.some(item => item.collection === 'service' && item.recordIds.includes('S-1')), true);
+    return true;
+  });
+
+  raw.service[0].status = 'closed';
+  state = boundaryState(raw);
+  const result = deactivateCounterpartyRole({
+    state,
+    data: raw,
+    counterpartyId: 'CP-1',
+    roleCode: 'customer',
+    nowIso: () => NOW,
+  });
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.counterparty.roles, ['supplier']);
+});
+
+test('terminal Service contractor reference still blocks contractor-role removal', () => {
+  const raw = data({
+    counterparties: [counterparty('CP-1', ['customer', 'contractor'])],
+    service: [{ id: 'S-1', contractorCounterpartyId: 'CP-1', status: 'closed' }],
+  });
+  migrate(raw);
+
+  assert.throws(() => deactivateCounterpartyRole({
+    state: boundaryState(raw),
+    data: raw,
+    counterpartyId: 'CP-1',
+    roleCode: 'contractor',
+    nowIso: () => NOW,
+  }), error => {
+    assert.equal(error.code, ROLE_PROFILE_CODES.ROLE_REMOVAL_BLOCKED);
+    assert.equal(error.details.blockers.some(item => (
+      item.collection === 'service'
+      && item.recordIds.includes('S-1')
+      && item.relationFields.includes('contractorCounterpartyId')
+    )), true);
+    return true;
+  });
+});
+
 test('supplier and contractor removal fail closed for role-ambiguous Payment references', () => {
   const raw = data({
     counterparties: [counterparty('CP-1', ['customer', 'supplier', 'contractor'])],

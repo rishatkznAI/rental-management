@@ -672,26 +672,19 @@ export default function ServiceDetail({
   }, [documents, ticket]);
   const relatedClient = React.useMemo(() => {
     if (!ticket) return undefined;
-    return (
-      (ticket.clientId ? clients.find(item => item.id === ticket.clientId) : undefined)
-      ?? (ticket.client ? clients.find(item => item.company === ticket.client) : undefined)
-    );
+    return ticket.clientId
+      ? clients.find(item => item.id === ticket.clientId && item.counterpartyId === ticket.counterpartyId)
+      : undefined;
   }, [clients, ticket]);
   const relatedRental = React.useMemo(() => {
     if (!ticket) return undefined;
-    return (
-      (ticket.rentalId ? rentals.find(item => item.id === ticket.rentalId) : undefined)
-      ?? (ticket.contractId ? rentals.find(item => item.contractId === ticket.contractId) : undefined)
-      ?? (ticket.clientId ? rentals.find(item => item.clientId === ticket.clientId && item.equipment?.some(eq => eq === ticket.inventoryNumber || eq === ticket.equipmentId || eq === ticket.equipment)) : undefined)
-    );
+    return ticket.rentalId ? rentals.find(item => item.id === ticket.rentalId) : undefined;
   }, [rentals, ticket]);
   const relatedGanttRental = React.useMemo(() => {
     if (!ticket) return undefined;
-    return (
-      (ticket.rentalId ? ganttRentals.find(item => item.id === ticket.rentalId || item.rentalId === ticket.rentalId || item.sourceRentalId === ticket.rentalId) : undefined)
-      ?? (ticket.equipmentId ? ganttRentals.find(item => item.equipmentId === ticket.equipmentId && item.status !== 'closed' && item.status !== 'returned') : undefined)
-      ?? (ticket.inventoryNumber ? ganttRentals.find(item => item.equipmentInv === ticket.inventoryNumber && item.status !== 'closed' && item.status !== 'returned') : undefined)
-    );
+    return ticket.rentalId
+      ? ganttRentals.find(item => item.id === ticket.rentalId || item.rentalId === ticket.rentalId || item.sourceRentalId === ticket.rentalId)
+      : undefined;
   }, [ganttRentals, ticket]);
   const relatedDeliveries = React.useMemo(() => {
     if (!ticket) return [];
@@ -1476,7 +1469,8 @@ export default function ServiceDetail({
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="grid gap-2">
-                  <DetailTile label="Клиент" value={ticket.clientName || ticket.client || relatedClient?.company || relatedGanttRental?.client} />
+                  <DetailTile label="Клиент" value={ticket.customerDisplayName || ticket.counterpartyName || relatedClient?.company || ticket.clientName || ticket.client} />
+                  <DetailTile label="Counterparty ID" value={ticket.counterpartyId} mono />
                   <DetailTile label="Объект" value={ticket.objectName || relatedRental?.deliveryAddress || relatedGanttRental?.deliveryAddress} />
                   <DetailTile label="Аренда" value={ticket.rentalId || relatedRental?.id || relatedGanttRental?.rentalId || relatedGanttRental?.id} mono />
                   <DetailTile label="Менеджер" value={relatedRental?.manager || relatedGanttRental?.manager} />
@@ -1568,7 +1562,8 @@ export default function ServiceDetail({
                 {ticket.closedAt && <Field label="Фактическое закрытие" value={formatServiceDate(ticket.closedAt)} />}
                 <Field label="Источник" value={ticket.source ? SOURCE_LABELS[ticket.source] : undefined} />
                 <Field label="Кто создал" value={ticket.createdByUserName ?? ticket.createdBy} />
-                <Field label="Клиент" value={ticket.clientName || ticket.client || relatedClient?.company} />
+                <Field label="Клиент" value={ticket.customerDisplayName || ticket.counterpartyName || relatedClient?.company || ticket.clientName || ticket.client} />
+                <Field label="Counterparty ID" value={ticket.counterpartyId} mono />
                 <Field label="Объект" value={ticket.objectName || ticket.objectId} />
                 <Field label="Адрес объекта" value={ticket.objectAddress} />
                 <Field label="Контакт объекта" value={[ticket.objectContactName, ticket.objectContactPhone].filter(Boolean).join(' · ')} />

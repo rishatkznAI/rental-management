@@ -1,10 +1,12 @@
 const SHADOW_SCHEMA_VERSION = 2;
 const SHADOW_MIGRATION_NAME = 'documents_gantt_shadow_indexes';
+const DOCUMENT_COUNTERPARTY_SCHEMA_VERSION = 1;
+const DOCUMENT_COUNTERPARTY_MIGRATION_NAME = 'documents_counterparty_shadow_index';
 
 const DOCUMENTS_TABLE = 'documents_sql';
 const GANTT_TABLE = 'gantt_rentals_sql';
 
-const EXPECTED_TABLE_COLUMNS = Object.freeze({
+const BASE_EXPECTED_TABLE_COLUMNS = Object.freeze({
   [DOCUMENTS_TABLE]: Object.freeze([
     ['id', 'TEXT', 0, 1],
     ['number', 'TEXT', 0, 0],
@@ -47,7 +49,7 @@ const EXPECTED_TABLE_COLUMNS = Object.freeze({
   ]),
 });
 
-const EXPECTED_INDEXES = Object.freeze({
+const BASE_EXPECTED_INDEXES = Object.freeze({
   idx_gantt_rentals_sql_rental: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['rentalId']) }),
   idx_gantt_rentals_sql_source_rental: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['sourceRentalId']) }),
   idx_gantt_rentals_sql_original_rental: Object.freeze({ table: GANTT_TABLE, columns: Object.freeze(['originalRentalId']) }),
@@ -78,6 +80,22 @@ const EXPECTED_INDEXES = Object.freeze({
       'type', 'status', 'clientId', 'rentalId', 'equipmentId', 'contractId',
       'date', 'documentDate', 'createdAt',
     ]),
+  }),
+});
+
+const EXPECTED_TABLE_COLUMNS = Object.freeze({
+  ...BASE_EXPECTED_TABLE_COLUMNS,
+  [DOCUMENTS_TABLE]: Object.freeze([
+    ...BASE_EXPECTED_TABLE_COLUMNS[DOCUMENTS_TABLE],
+    ['counterpartyId', 'TEXT', 0, 0],
+  ]),
+});
+
+const EXPECTED_INDEXES = Object.freeze({
+  ...BASE_EXPECTED_INDEXES,
+  idx_documents_sql_counterparty: Object.freeze({
+    table: DOCUMENTS_TABLE,
+    columns: Object.freeze(['counterpartyId']),
   }),
 });
 
@@ -126,6 +144,7 @@ function documentSearchText(record) {
     record?.type,
     record?.documentType,
     record?.status,
+    record?.counterpartyId,
     record?.clientId,
     record?.client,
     record?.clientName,
@@ -175,6 +194,7 @@ function normalizeDocumentRecord(record) {
     number: nullableText(record?.number || record?.documentNumber),
     type: nullableText(record?.type || record?.documentType),
     status: nullableText(record?.status),
+    counterpartyId: nullableText(record?.counterpartyId),
     clientId: nullableText(record?.clientId),
     rentalId: nullableText(record?.rentalId || record?.rental),
     equipmentId: nullableText(record?.equipmentId),
@@ -223,13 +243,13 @@ function schemaObjectExists(db, type, name) {
   `).get(type, name));
 }
 
-function getSqlShadowMigration(db) {
+function getSqlShadowMigration(db, name = SHADOW_MIGRATION_NAME) {
   if (!schemaObjectExists(db, 'table', 'sql_shadow_schema_migrations')) return null;
   return db.prepare(`
     SELECT name, version, applied_at
     FROM sql_shadow_schema_migrations
     WHERE name = ?
-  `).get(SHADOW_MIGRATION_NAME) || null;
+  `).get(name) || null;
 }
 
 function tableColumns(db, table) {
@@ -286,6 +306,37 @@ function assertSqlShadowStructure(db) {
   return true;
 }
 
+function assertSqlShadowBaseStructure(db) {
+  for (const [table, expectedColumns] of Object.entries(BASE_EXPECTED_TABLE_COLUMNS)) {
+    if (!schemaObjectExists(db, 'table', table)) {
+      throw new Error(`SQL_SHADOW_SCHEMA_INCOMPLETE:table:${table}`);
+    }
+    const actual = new Map(tableColumns(db, table).map(column => [column[0], column]));
+    for (const expected of expectedColumns) {
+      if (JSON.stringify(actual.get(expected[0])) !== JSON.stringify(expected)) {
+        throw new Error(`SQL_SHADOW_TABLE_STRUCTURE_MISMATCH:${table}`);
+      }
+    }
+  }
+  for (const [name, expected] of Object.entries(BASE_EXPECTED_INDEXES)) {
+    const index = db.prepare(`
+      SELECT tbl_name AS tableName
+      FROM sqlite_master
+      WHERE type = 'index' AND name = ?
+    `).get(name);
+    const metadata = db.prepare(`PRAGMA index_list("${expected.table}")`).all()
+      .find(row => row.name === name);
+    const columns = db.prepare(`PRAGMA index_info("${name}")`).all().map(row => row.name);
+    if (!index || index.tableName !== expected.table || !metadata ||
+        Number(metadata.unique) !== 0 || Number(metadata.partial) !== 0 ||
+        metadata.origin !== 'c' ||
+        JSON.stringify(columns) !== JSON.stringify(expected.columns)) {
+      throw new Error(`SQL_SHADOW_INDEX_STRUCTURE_MISMATCH:${name}`);
+    }
+  }
+  return true;
+}
+
 function assertSqlShadowMigration(db, migration) {
   if (!migration || migration.name !== SHADOW_MIGRATION_NAME) {
     throw new Error('SQL_SHADOW_MIGRATION_REGISTRATION_MISSING');
@@ -296,7 +347,11 @@ function assertSqlShadowMigration(db, migration) {
   if (!text(migration.applied_at)) {
     throw new Error('SQL_SHADOW_MIGRATION_TIMESTAMP_MISSING');
   }
-  assertSqlShadowStructure(db);
+  if (getSqlShadowMigration(db, DOCUMENT_COUNTERPARTY_MIGRATION_NAME)) {
+    assertSqlShadowStructure(db);
+  } else {
+    assertSqlShadowBaseStructure(db);
+  }
 }
 
 function applySqlShadowMigration(db) {
@@ -318,6 +373,7 @@ function applySqlShadowMigration(db) {
       number TEXT,
       type TEXT,
       status TEXT,
+      counterpartyId TEXT,
       clientId TEXT,
       rentalId TEXT,
       equipmentId TEXT,
@@ -390,12 +446,34 @@ function applySqlShadowMigration(db) {
 }
 
 function ensureSqlShadowSchema(db) {
-  const migration = getSqlShadowMigration(db);
-  if (migration) {
-    assertSqlShadowMigration(db, migration);
-    return false;
-  }
-  return db.transaction(() => applySqlShadowMigration(db)).immediate();
+  return db.transaction(() => {
+    let applied = false;
+    const migration = getSqlShadowMigration(db);
+    if (migration) assertSqlShadowMigration(db, migration);
+    else applied = applySqlShadowMigration(db) || applied;
+
+    const counterpartyMigration = getSqlShadowMigration(db, DOCUMENT_COUNTERPARTY_MIGRATION_NAME);
+    if (counterpartyMigration) {
+      if (counterpartyMigration.version !== DOCUMENT_COUNTERPARTY_SCHEMA_VERSION) {
+        throw new Error(`SQL_SHADOW_COUNTERPARTY_MIGRATION_VERSION_MISMATCH:${counterpartyMigration.version}`);
+      }
+      if (!text(counterpartyMigration.applied_at)) {
+        throw new Error('SQL_SHADOW_COUNTERPARTY_MIGRATION_TIMESTAMP_MISSING');
+      }
+      assertSqlShadowStructure(db);
+    } else {
+      ensureTableColumn(db, DOCUMENTS_TABLE, 'counterpartyId', 'TEXT');
+      const definition = EXPECTED_INDEXES.idx_documents_sql_counterparty;
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_documents_sql_counterparty ON ${definition.table}(${definition.columns.join(', ')});`);
+      assertSqlShadowStructure(db);
+      db.prepare(`
+        INSERT INTO sql_shadow_schema_migrations (name, version)
+        VALUES (?, ?)
+      `).run(DOCUMENT_COUNTERPARTY_MIGRATION_NAME, DOCUMENT_COUNTERPARTY_SCHEMA_VERSION);
+      applied = true;
+    }
+    return applied;
+  }).immediate();
 }
 
 function readAppDataCollection(db, name) {
@@ -419,16 +497,17 @@ function upsertDocuments(db, records) {
   const existing = new Set(db.prepare(`SELECT id FROM ${DOCUMENTS_TABLE}`).all().map(row => row.id));
   const stmt = db.prepare(`
     INSERT INTO ${DOCUMENTS_TABLE} (
-      id, number, type, status, clientId, rentalId, equipmentId, objectId, contractId,
+      id, number, type, status, counterpartyId, clientId, rentalId, equipmentId, objectId, contractId,
       date, documentDate, createdAt, updatedAt, signedAt, sentAt, managerId, ownerId, parentDocumentId, searchText, rawJson
     ) VALUES (
-      @id, @number, @type, @status, @clientId, @rentalId, @equipmentId, @objectId, @contractId,
+      @id, @number, @type, @status, @counterpartyId, @clientId, @rentalId, @equipmentId, @objectId, @contractId,
       @date, @documentDate, @createdAt, @updatedAt, @signedAt, @sentAt, @managerId, @ownerId, @parentDocumentId, @searchText, @rawJson
     )
     ON CONFLICT(id) DO UPDATE SET
       number = excluded.number,
       type = excluded.type,
       status = excluded.status,
+      counterpartyId = excluded.counterpartyId,
       clientId = excluded.clientId,
       rentalId = excluded.rentalId,
       equipmentId = excluded.equipmentId,
@@ -591,6 +670,7 @@ function queryDocumentsIndex(db, query = {}) {
   for (const [field, column] of Object.entries({
     status: 'status',
     type: 'type',
+    counterpartyId: 'counterpartyId',
     clientId: 'clientId',
     rentalId: 'rentalId',
     equipmentId: 'equipmentId',
@@ -782,8 +862,11 @@ function diagnoseSqlShadowConsistency(db) {
 }
 
 module.exports = {
+  DOCUMENT_COUNTERPARTY_MIGRATION_NAME,
+  DOCUMENT_COUNTERPARTY_SCHEMA_VERSION,
   DOCUMENTS_TABLE,
   EXPECTED_INDEXES,
+  EXPECTED_TABLE_COLUMNS,
   GANTT_TABLE,
   SHADOW_MIGRATION_NAME,
   SHADOW_SCHEMA_VERSION,

@@ -1,10 +1,13 @@
 const {
   resolveDomainCounterpartyRelation,
 } = require('./counterparty-relations');
+const {
+  canonicalizeClientContractCounterpartyRelation,
+} = require('./document-counterparty-relations');
 const { counterpartyError } = require('./counterparty');
 
 const OBJECT_REQUIRED_ERROR = 'Для объекта укажите clientId или counterpartyId, название и адрес';
-const CONTRACT_REQUIRED_ERROR = 'Для договора клиента укажите клиента и номер договора';
+const CONTRACT_REQUIRED_ERROR = 'Для договора клиента укажите Counterparty/Client и номер договора';
 const ORPHAN_CLIENT_ERROR = 'Клиент для записи не найден';
 const ORPHAN_OBJECT_ERROR = 'Объект клиента не найден или не принадлежит клиенту';
 const ORPHAN_CONTRACT_ERROR = 'Договор клиента не найден или не принадлежит клиенту';
@@ -210,36 +213,51 @@ function normalizeClientObjectRecord(record, existing = null, deps = {}) {
 
 function normalizeClientContractRecord(record, existing = null, deps = {}) {
   const nowIso = typeof deps.nowIso === 'function' ? deps.nowIso : () => new Date().toISOString();
-  const clientId = text(record?.clientId || existing?.clientId);
-  const objectId = text(record?.objectId);
-  const objectIds = Array.isArray(record?.objectIds)
-    ? [...new Set(record.objectIds.map(text).filter(Boolean))]
+  const clientId = text(
+    Object.prototype.hasOwnProperty.call(record || {}, 'clientId')
+      ? record.clientId
+      : existing?.clientId,
+  );
+  const counterpartyId = text(
+    Object.prototype.hasOwnProperty.call(record || {}, 'counterpartyId')
+      ? record.counterpartyId
+      : existing?.counterpartyId,
+  );
+  const objectId = text(
+    Object.prototype.hasOwnProperty.call(record || {}, 'objectId')
+      ? record.objectId
+      : existing?.objectId,
+  );
+  const objectIds = Array.isArray(record?.objectIds ?? existing?.objectIds)
+    ? [...new Set((record?.objectIds ?? existing?.objectIds).map(text).filter(Boolean))]
     : [];
   const number = text(record?.number);
-  if (!clientId || !number) {
+  if ((!clientId && !counterpartyId && !objectId && objectIds.length === 0) || !number) {
     const error = new Error(CONTRACT_REQUIRED_ERROR);
     error.status = 400;
     throw error;
   }
-  if (typeof deps.readData === 'function') {
-    assertClientExists(deps.readData, clientId);
-    assertObjectBelongsToClient(deps.readData, objectId, clientId);
-    objectIds.forEach(id => assertObjectBelongsToClient(deps.readData, id, clientId));
-  }
-  return {
+  const status = normalizeStatus(record?.status ?? existing?.status);
+  const normalized = {
     ...existing,
     ...record,
-    clientId,
+    clientId: clientId || undefined,
+    counterpartyId: counterpartyId || undefined,
     objectId: objectId || undefined,
     objectIds,
     number,
     date: text(record?.date) || undefined,
     title: text(record?.title) || number,
-    status: normalizeStatus(record?.status ?? existing?.status),
+    status,
     notes: text(record?.notes) || undefined,
     createdAt: existing?.createdAt || record?.createdAt || nowIso(),
     updatedAt: nowIso(),
   };
+  if (typeof deps.readData !== 'function') return normalized;
+  return canonicalizeClientContractCounterpartyRelation(normalized, { readData: deps.readData }, {
+    existing,
+    allowArchived: Boolean(existing) && status === 'archived',
+  });
 }
 
 function enrichRecordFromRentalLinks(record, readData) {

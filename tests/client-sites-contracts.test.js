@@ -270,6 +270,70 @@ test('counterparty-native object accepts supplier-only identity without creating
   });
 });
 
+test('ClientContract accepts an active CP-only customer and rejects inactive or mismatched relations', async () => {
+  const activeCustomer = {
+    id: 'CP-CUSTOMER',
+    type: 'legal_entity',
+    legalName: 'ООО Клиент без профиля',
+    status: 'active',
+    archivedAt: null,
+    roles: ['customer'],
+  };
+  const inactiveCustomer = {
+    id: 'CP-INACTIVE',
+    type: 'legal_entity',
+    legalName: 'ООО Неактивный',
+    status: 'active',
+    archivedAt: null,
+    roles: ['customer'],
+  };
+  const { app, state } = makeCrudApp({
+    counterparties: [activeCustomer, inactiveCustomer],
+    counterparty_role_assignments: [
+      { id: 'A-1', counterpartyId: activeCustomer.id, roleCode: 'customer', status: 'active', validTo: null },
+      { id: 'A-2', counterpartyId: inactiveCustomer.id, roleCode: 'customer', status: 'inactive', validTo: '2026-01-01' },
+    ],
+    clients: [{ id: 'C-1', counterpartyId: activeCustomer.id, company: 'ООО Клиент' }],
+  });
+
+  await withServer(app, async baseUrl => {
+    const cpOnly = await request(baseUrl, 'POST', '/api/client_contracts', {
+      counterpartyId: activeCustomer.id,
+      number: 'CP-ONLY-1',
+      status: 'active',
+    });
+    assert.equal(cpOnly.status, 201);
+    assert.equal(cpOnly.body.counterpartyId, activeCustomer.id);
+    assert.equal(cpOnly.body.clientId, undefined);
+    assert.equal(state.clients.length, 1);
+
+    const matching = await request(baseUrl, 'POST', '/api/client_contracts', {
+      counterpartyId: activeCustomer.id,
+      clientId: 'C-1',
+      number: 'MATCH-1',
+      status: 'active',
+    });
+    assert.equal(matching.status, 201);
+
+    const mismatch = await request(baseUrl, 'POST', '/api/client_contracts', {
+      counterpartyId: inactiveCustomer.id,
+      clientId: 'C-1',
+      number: 'BAD-1',
+      status: 'active',
+    });
+    assert.equal(mismatch.status, 409);
+    assert.equal(mismatch.body.code, 'COUNTERPARTY_RELATION_MISMATCH');
+
+    const inactive = await request(baseUrl, 'POST', '/api/client_contracts', {
+      counterpartyId: inactiveCustomer.id,
+      number: 'BAD-2',
+      status: 'active',
+    });
+    assert.equal(inactive.status, 409);
+    assert.equal(inactive.body.code, 'COUNTERPARTY_RELATION_CUSTOMER_ROLE_REQUIRED');
+  });
+});
+
 test('client INN is required, normalized, length-validated, and unique', async () => {
   const { app, state } = makeCrudApp();
   await withServer(app, async (baseUrl) => {
@@ -364,7 +428,7 @@ test('client objects and contracts are client-scoped and validated', async () =>
       objectId: 'CO-other',
       number: 'Чужой объект',
     });
-    assert.equal(foreignContractObject.status, 400);
+    assert.equal(foreignContractObject.status, 409);
 
     const foreignObjectContract = await request(baseUrl, 'POST', '/api/client_objects', {
       clientId: 'C-1',
@@ -427,7 +491,7 @@ test('payments documents and service reject foreign object or contract links', a
       number: 'D-1',
       status: 'draft',
     });
-    assert.equal(documentObject.status, 400);
+    assert.equal(documentObject.status, 409);
 
     const documentContract = await request(baseUrl, 'POST', '/api/documents', {
       clientId: 'C-1',
@@ -437,7 +501,7 @@ test('payments documents and service reject foreign object or contract links', a
       number: 'D-2',
       status: 'draft',
     });
-    assert.equal(documentContract.status, 400);
+    assert.equal(documentContract.status, 409);
 
     const service = await request(baseUrl, 'POST', '/api/service', {
       clientId: 'C-1',

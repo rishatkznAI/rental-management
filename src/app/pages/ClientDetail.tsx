@@ -986,6 +986,7 @@ export default function ClientDetail() {
   function handleCreateContract() {
     if (!client || !canEdit) return;
     createClientContract.mutate({
+      counterpartyId: client.counterpartyId,
       clientId: client.id,
       objectId: contractForm.objectId || undefined,
       number: contractForm.number,

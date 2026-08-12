@@ -1329,8 +1329,10 @@ export interface ClientObject {
 
 export interface ClientContract {
   id: string;
-  clientId: string;
+  counterpartyId: string;
+  clientId?: string;
   objectId?: string;
+  objectIds?: string[];
   number: string;
   date?: string;
   title?: string;
@@ -1402,6 +1404,7 @@ export interface Document {
   contractKind?: DocumentContractKind;
   number: string;
   documentNumber?: string;
+  counterpartyId?: string;
   clientId?: string;
   objectId?: string;
   contractId?: string;

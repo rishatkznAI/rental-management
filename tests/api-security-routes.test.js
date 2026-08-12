@@ -1327,13 +1327,14 @@ test('/api/documents remains readable for roles with Documents section access', 
 
 test('/api/documents preserves stable rental, equipment and client links', async () => {
   const { app, state } = createSecurityApp();
-  state.clients = [{ id: 'C-1', company: 'ООО Свой' }];
+  state.clients = [{ id: 'C-1', counterpartyId: 'CP-own', company: 'ООО Свой' }];
 
   await withServer(app, async (baseUrl) => {
     const create = await request(baseUrl, 'POST', '/api/documents', 'admin-token', {
       type: 'contract',
       contractKind: 'rental',
       number: 'DOC-LINK-1',
+      counterpartyId: 'CP-own',
       clientId: 'C-1',
       client: 'ООО Свой',
       rentalId: 'R-own',
@@ -1347,6 +1348,7 @@ test('/api/documents preserves stable rental, equipment and client links', async
     });
 
     assert.equal(create.status, 201);
+    assert.equal(create.body.counterpartyId, 'CP-own');
     assert.equal(create.body.clientId, 'C-1');
     assert.equal(create.body.rentalId, 'R-own');
     assert.equal(create.body.rental, 'R-own');
@@ -1355,6 +1357,7 @@ test('/api/documents preserves stable rental, equipment and client links', async
     assert.equal(create.body.status, 'sent');
 
     const stored = state.documents.find(item => item.id === create.body.id);
+    assert.equal(stored.counterpartyId, 'CP-own');
     assert.equal(stored.clientId, 'C-1');
     assert.equal(stored.rentalId, 'R-own');
     assert.equal(stored.equipmentId, 'EQ-own');
@@ -1362,6 +1365,56 @@ test('/api/documents preserves stable rental, equipment and client links', async
     const list = await request(baseUrl, 'GET', '/api/documents', 'office-token');
     assert.equal(list.status, 200);
     assert.equal(list.body.some(item => item.rentalId === 'R-own' && item.equipmentId === 'EQ-own'), true);
+  });
+});
+
+test('generic bulk replace canonicalizes Document and ClientContract relations and rejects conflicts atomically', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [
+    { id: 'C-own', counterpartyId: 'CP-own', company: 'ООО Одинаковое' },
+    { id: 'C-other', counterpartyId: 'CP-other', company: 'ООО Одинаковое' },
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const contracts = await request(baseUrl, 'PUT', '/api/client_contracts', 'admin-token', [{
+      id: 'CC-bulk',
+      clientId: 'C-own',
+      number: 'BULK-1',
+      status: 'active',
+    }]);
+    assert.equal(contracts.status, 200, JSON.stringify(contracts.body));
+    assert.equal(state.client_contracts[0].counterpartyId, 'CP-own');
+
+    const documents = await request(baseUrl, 'PUT', '/api/documents', 'admin-token', [{
+      id: 'D-bulk',
+      type: 'contract',
+      clientId: 'C-own',
+      client: 'ООО Одинаковое',
+      status: 'draft',
+    }]);
+    assert.equal(documents.status, 200, JSON.stringify(documents.body));
+    assert.equal(state.documents[0].counterpartyId, 'CP-own');
+
+    const beforeContracts = structuredClone(state.client_contracts);
+    const rejectedContract = await request(baseUrl, 'PUT', '/api/client_contracts', 'admin-token', [{
+      id: 'CC-bad',
+      counterpartyId: 'CP-other',
+      clientId: 'C-own',
+      number: 'BULK-BAD',
+      status: 'active',
+    }]);
+    assert.equal(rejectedContract.status, 409);
+    assert.deepEqual(state.client_contracts, beforeContracts);
+
+    const beforeDocuments = structuredClone(state.documents);
+    const rejectedDocument = await request(baseUrl, 'PUT', '/api/documents', 'admin-token', [{
+      id: 'D-name-only',
+      type: 'contract',
+      client: 'ООО Одинаковое',
+      status: 'draft',
+    }]);
+    assert.equal(rejectedDocument.status, 400);
+    assert.deepEqual(state.documents, beforeDocuments);
   });
 });
 

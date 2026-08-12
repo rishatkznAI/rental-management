@@ -189,6 +189,7 @@ function assertClientCounterpartyLink({ clientId, counterpartyId }, data, option
 function resolveDomainCounterpartyRelation(record, data, {
   allowArchived = false,
   allowCounterpartyOnly = true,
+  requireCustomerRole = false,
 } = {}) {
   const clientId = relationId(record?.clientId);
   const counterpartyId = relationId(record?.counterpartyId);
@@ -201,6 +202,14 @@ function resolveDomainCounterpartyRelation(record, data, {
   }
   if (counterpartyId && allowCounterpartyOnly) {
     const counterparty = resolveCounterpartyById(counterpartyId, data, { allowArchived });
+    if (requireCustomerRole && !hasActiveCounterpartyRole(counterparty, 'customer', data)) {
+      throw counterpartyError(
+        COUNTERPARTY_RELATION_CODES.CUSTOMER_ROLE_REQUIRED,
+        'Counterparty должен иметь активную роль customer.',
+        409,
+        { counterpartyId: relationId(counterparty.id) },
+      );
+    }
     return {
       client: null,
       counterparty,

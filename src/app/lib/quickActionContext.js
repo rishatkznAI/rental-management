@@ -18,6 +18,7 @@ function readParam(source, key) {
 export function buildQuickActionContext(source) {
   return {
     action: readParam(source, 'action'),
+    counterpartyId: readParam(source, 'counterpartyId'),
     clientId: readParam(source, 'clientId'),
     clientName: readParam(source, 'clientName') || readParam(source, 'client'),
     rentalId: readParam(source, 'rentalId'),
@@ -39,22 +40,25 @@ export function buildQuickActionContext(source) {
 }
 
 export function hasClientContext(context) {
-  return Boolean(safeText(context?.clientId) || safeText(context?.clientName));
+  return Boolean(safeText(context?.counterpartyId) || safeText(context?.clientId) || safeText(context?.clientName));
 }
 
 export function matchesClientContext(record, context) {
   if (!hasClientContext(context)) return true;
 
   const wantedId = safeText(context?.clientId);
+  const wantedCounterpartyId = safeText(context?.counterpartyId);
   const wantedName = normalizeContextName(context?.clientName);
   const recordId = safeText(record?.clientId);
+  const recordCounterpartyId = safeText(record?.counterpartyId);
   const recordName = normalizeContextName(record?.clientName);
 
+  if (wantedCounterpartyId) return recordCounterpartyId === wantedCounterpartyId;
   if (wantedId && recordId) return recordId === wantedId;
   if (wantedName && recordName) return recordName === wantedName;
   return false;
 }
 
 export function contextFilterLabel(context, fallback = 'выбранному клиенту') {
-  return safeText(context?.clientName) || safeText(context?.clientId) || fallback;
+  return safeText(context?.clientName) || safeText(context?.counterpartyId) || safeText(context?.clientId) || fallback;
 }

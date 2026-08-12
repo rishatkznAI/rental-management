@@ -93,6 +93,7 @@ import { usersService } from '../services/users.service';
 import { ownersService } from '../services/owners.service';
 import { mechanicsService } from '../services/mechanics.service';
 import { deliveryCarriersService, type DeliveryCarrierConnection } from '../services/delivery-carriers.service';
+import { counterpartiesService } from '../services/counterparties.service';
 import { serviceWorksService } from '../services/service-works.service';
 import { sparePartsService } from '../services/spare-parts.service';
 import { serviceRouteNormsService } from '../services/service-route-norms.service';
@@ -162,6 +163,7 @@ import type {
   ServiceStatus,
   Mechanic,
   DeliveryCarrier,
+  Counterparty,
   ReferenceStatus,
   ServiceWork,
   ServiceRouteNorm,
@@ -6946,9 +6948,13 @@ function DeliveryCarriersReferenceList() {
     queryKey: ['deliveryCarrierConnections'],
     queryFn: deliveryCarriersService.getConnections,
   });
+  const { data: contractorCounterparties = [] } = useQuery<Counterparty[]>({
+    queryKey: ['counterparties', 'delivery-carriers', 'contractor'],
+    queryFn: () => counterpartiesService.getAll({ role: 'contractor' }),
+  });
   const [carriers, setCarriers] = React.useState<DeliveryCarrier[]>([]);
   const [showOnlyConnected, setShowOnlyConnected] = React.useState(false);
-  const [draft, setDraft] = React.useState({ name: '', company: '', inn: '', phone: '', notes: '', systemUserId: '', maxCarrierKey: '' });
+  const [draft, setDraft] = React.useState({ counterpartyId: '', phone: '', notes: '', systemUserId: '', maxCarrierKey: '' });
 
   React.useEffect(() => {
     setCarriers(
@@ -6966,6 +6972,7 @@ function DeliveryCarriersReferenceList() {
     await deliveryCarriersService.bulkReplace(next.map((item) => ({
       id: item.id,
       key: item.id,
+      counterpartyId: item.counterpartyId,
       name: item.name,
       company: item.company,
       inn: item.inn,
@@ -7018,12 +7025,14 @@ function DeliveryCarriersReferenceList() {
             ? users.find((item) => item.id === carrier.systemUserId)
             : null;
           const isConnected = Boolean(linkedConnection);
+          const counterparty = contractorCounterparties.find(item => item.id === carrier.counterpartyId);
 
           return (
             <div key={carrier.id} className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1">
                   <p className="text-sm font-medium">{carrier.name}</p>
+                  <p className="text-xs text-gray-500">Counterparty: {counterparty?.shortName || counterparty?.legalName || carrier.counterpartyId}</p>
                   {(carrier.company || carrier.inn) && (
                     <p className="text-xs text-gray-500">
                       {carrier.company || 'Без компании'}
@@ -7118,9 +7127,18 @@ function DeliveryCarriersReferenceList() {
         <div className="rounded-lg border border-dashed border-gray-300 p-3 dark:border-gray-700">
           <p className="mb-2 text-sm font-medium">Добавить перевозчика</p>
           <div className="space-y-2">
-            <Input placeholder="Название перевозчика" value={draft.name} onChange={e => setDraft(prev => ({ ...prev, name: e.target.value }))} />
-            <Input placeholder="Компания" value={draft.company} onChange={e => setDraft(prev => ({ ...prev, company: e.target.value }))} />
-            <Input placeholder="ИНН" value={draft.inn} onChange={e => setDraft(prev => ({ ...prev, inn: e.target.value }))} />
+            <select
+              value={draft.counterpartyId || '__none__'}
+              onChange={(e) => setDraft(prev => ({ ...prev, counterpartyId: e.target.value === '__none__' ? '' : e.target.value }))}
+              className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+            >
+              <option value="__none__">Выберите contractor Counterparty</option>
+              {contractorCounterparties.map(counterparty => (
+                <option key={counterparty.id} value={counterparty.id}>
+                  {counterparty.shortName || counterparty.legalName}{counterparty.inn ? ` · ИНН ${counterparty.inn}` : ''}
+                </option>
+              ))}
+            </select>
             <Input placeholder="Телефон" value={draft.phone} onChange={e => setDraft(prev => ({ ...prev, phone: e.target.value }))} />
             <Input placeholder="Примечание" value={draft.notes} onChange={e => setDraft(prev => ({ ...prev, notes: e.target.value }))} />
             <select
@@ -7150,14 +7168,16 @@ function DeliveryCarriersReferenceList() {
             <Button
               size="sm"
               onClick={() => {
-                if (!draft.name.trim()) return;
+                const counterparty = contractorCounterparties.find(item => item.id === draft.counterpartyId);
+                if (!counterparty) return;
                 const nextId = `carrier-${Date.now()}`;
                 const next: DeliveryCarrier = {
                   id: nextId,
                   key: nextId,
-                  name: draft.name.trim(),
-                  company: draft.company.trim() || undefined,
-                  inn: draft.inn.trim() || undefined,
+                  counterpartyId: counterparty.id,
+                  name: counterparty.shortName || counterparty.legalName,
+                  company: counterparty.shortName || counterparty.legalName,
+                  inn: counterparty.inn || undefined,
                   phone: draft.phone.trim() || undefined,
                   notes: draft.notes.trim() || undefined,
                   status: 'active',
@@ -7166,8 +7186,9 @@ function DeliveryCarriersReferenceList() {
                   maxConnected: Boolean(draft.maxCarrierKey && connections.some((entry) => entry.key === draft.maxCarrierKey)),
                 };
                 void persist([...carriers, next]);
-                setDraft({ name: '', company: '', inn: '', phone: '', notes: '', systemUserId: '', maxCarrierKey: '' });
+                setDraft({ counterpartyId: '', phone: '', notes: '', systemUserId: '', maxCarrierKey: '' });
               }}
+              disabled={!draft.counterpartyId}
             >
               Добавить
             </Button>

@@ -48,10 +48,28 @@ test('Counterparty role API keeps one identity multi-role without creating Clien
 
     const rolesResponse = await api.get(`/api/counterparties/${created.id}/roles`);
     expect(rolesResponse.ok(), await rolesResponse.text()).toBeTruthy();
-    const roles = await rolesResponse.json() as { counterpartyId: string; roles: CounterpartyRole[] };
-    expect(roles).toEqual({
+    const roles = await rolesResponse.json() as {
+      counterpartyId: string;
+      roles: CounterpartyRole[];
+      assignments: Array<{ counterpartyId: string; roleCode: CounterpartyRole; status: string }>;
+      profiles: {
+        contractor: { counterpartyId: string; status: string } | null;
+      };
+    };
+    expect(roles.counterpartyId).toBe(created.id);
+    expect(roles.roles).toEqual(['customer', 'supplier', 'contractor']);
+    expect(roles.assignments.map(item => ({
+      counterpartyId: item.counterpartyId,
+      roleCode: item.roleCode,
+      status: item.status,
+    })).sort((left, right) => left.roleCode.localeCompare(right.roleCode))).toEqual([
+      { counterpartyId: created.id, roleCode: 'contractor', status: 'active' },
+      { counterpartyId: created.id, roleCode: 'customer', status: 'active' },
+      { counterpartyId: created.id, roleCode: 'supplier', status: 'active' },
+    ]);
+    expect(roles.profiles.contractor).toMatchObject({
       counterpartyId: created.id,
-      roles: ['customer', 'supplier', 'contractor'],
+      status: 'active',
     });
 
     const clientsResponse = await api.get('/api/clients');

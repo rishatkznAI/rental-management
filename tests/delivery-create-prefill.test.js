@@ -24,16 +24,19 @@ test('delivery create quick action preselects canonical rental and operation typ
   assert.match(openCreateBlock, /classicRentalId: matchedRental\?\.classicRentalId \|\| requestedRentalId/);
 });
 
-test('delivery rental options prefer source rental id over legacy name matching', () => {
+test('delivery rental options require source rental id and never use legacy name matching', () => {
   const optionsBlock = extract('const rentalOptions = useMemo<RentalOption[]>', 'const carrierOptions = useMemo');
 
   assert.match(optionsBlock, /const sourceId = getGanttRentalSourceId\(gantt\)/);
-  assert.match(optionsBlock, /sourceId && classicById\.get\(sourceId\)/);
+  assert.match(optionsBlock, /sourceId \? classicById\.get\(sourceId\) : undefined/);
+  assert.doesNotMatch(optionsBlock, /item\.client === gantt\.client/);
   assert.match(optionsBlock, /const groupedRentals = new Map<string, GanttRentalData\[\]>\(\)/);
   assert.match(optionsBlock, /const key = getGanttRentalSourceId\(item\) \|\| item\.id/);
   assert.match(optionsBlock, /chooseBestGanttRentalEntry\(entries, \{ todayKey: todayIso\(\) \}\)/);
   assert.match(optionsBlock, /classicRentalId: getGanttRentalSourceId\(item\) \|\| classic\?\.id \|\| ''/);
-  assert.match(optionsBlock, /clientId: item\.clientId \|\| classic\?\.clientId \|\| client\?\.id \|\| ''/);
+  assert.match(optionsBlock, /const stableClientId = item\.clientId \|\| classic\?\.clientId \|\| ''/);
+  assert.match(optionsBlock, /const counterpartyId = item\.counterpartyId \|\| classic\?\.counterpartyId \|\| client\?\.counterpartyId \|\| ''/);
+  assert.match(optionsBlock, /counterpartyId,\n\s+clientId: stableClientId/);
 });
 
 test('delivery create buttons open the form without forwarding click events as params', () => {

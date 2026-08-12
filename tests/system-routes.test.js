@@ -2720,6 +2720,69 @@ test('/api/admin/system-data/import canonicalizes Payment identity and rejects m
   });
 });
 
+test('/api/admin/system-data import/export preserves canonical Delivery customer and contractor identities', async () => {
+  const collections = {
+    counterparties: [
+      { id: 'CP-C', legalName: 'Customer', shortName: 'Customer', status: 'active', roles: ['customer'] },
+      { id: 'CP-K', legalName: 'Carrier', shortName: 'Carrier', status: 'active', roles: ['contractor'] },
+    ],
+    counterparty_role_assignments: [
+      { id: 'A-C', counterpartyId: 'CP-C', roleCode: 'customer', status: 'active', validTo: null },
+      { id: 'A-K', counterpartyId: 'CP-K', roleCode: 'contractor', status: 'active', validTo: null },
+    ],
+    clients: [{ id: 'CL-C', counterpartyId: 'CP-C', company: 'Old customer label' }],
+    delivery_carriers: [],
+    deliveries: [],
+  };
+  const writes = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeDataBatch(entries) {
+      writes.push(entries);
+      for (const entry of entries) collections[entry.name] = entry.value;
+    },
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const imported = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        delivery_carriers: [{ id: 'DC-1', counterpartyId: 'CP-K', status: 'active' }],
+        deliveries: [{ id: 'D-1', clientId: 'CL-C', carrierId: 'DC-1', status: 'new' }],
+      },
+    });
+    assert.equal(imported.status, 200);
+    assert.equal(collections.deliveries[0].counterpartyId, 'CP-C');
+    assert.equal(collections.deliveries[0].carrierCounterpartyId, 'CP-K');
+    assert.equal(collections.delivery_carriers[0].counterpartyId, 'CP-K');
+
+    const exported = await getJson(baseUrl, '/api/admin/system-data/export');
+    assert.equal(exported.status, 200);
+    assert.equal(exported.body.collections.deliveries[0].counterpartyId, 'CP-C');
+    assert.equal(exported.body.collections.deliveries[0].carrierCounterpartyId, 'CP-K');
+    assert.equal(exported.body.collections.delivery_carriers[0].counterpartyId, 'CP-K');
+
+    const rejected = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: { deliveries: [{ id: 'D-2', client: 'Customer', status: 'new' }] },
+    });
+    assert.equal(rejected.status, 400);
+    assert.match(rejected.body.errors.join(' '), /stable counterpartyId|stable-ID/i);
+    assert.equal(writes.length, 1);
+  });
+});
+
+test('/api/sync fails closed when legacy payload contains Delivery collections', async () => {
+  await withLegacySyncEnabled(async () => {
+    const { app } = createSystemApp();
+    await withServer(app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/sync', { deliveries: [] });
+      assert.equal(response.status, 409);
+      assert.equal(response.body.code, 'DELIVERY_COUNTERPARTY_SYNC_DISABLED');
+    });
+  });
+});
+
 test('/api/admin/system-data/import rejects duplicate client INNs before writing any collection', async () => {
   const collections = {
     equipment: [{ id: 'EQ-old', serialNumber: 'OLD' }],

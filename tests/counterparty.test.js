@@ -749,6 +749,18 @@ test('Counterparty archive is soft-delete and refuses active Client, Site/Object
     assert.deepEqual(rentalBlocked.body.details.rentalIds, ['R-active-direct']);
 
     state.rentals[0].status = 'closed';
+    state.deliveries = [{ id: 'D-active', counterpartyId: 'CP-archive', status: 'in_transit' }];
+    const deliveryBlocked = await request(baseUrl, 'DELETE', '/api/counterparties/CP-archive');
+    assert.equal(deliveryBlocked.status, 409);
+    assert.deepEqual(deliveryBlocked.body.details.deliveryIds, ['D-active']);
+
+    state.deliveries[0].status = 'completed';
+    state.delivery_carriers = [{ id: 'DC-active', counterpartyId: 'CP-archive', status: 'active' }];
+    const carrierBlocked = await request(baseUrl, 'DELETE', '/api/counterparties/CP-archive');
+    assert.equal(carrierBlocked.status, 409);
+    assert.deepEqual(carrierBlocked.body.details.deliveryCarrierIds, ['DC-active']);
+
+    state.delivery_carriers[0].status = 'inactive';
     const archived = await request(baseUrl, 'DELETE', '/api/counterparties/CP-archive');
     assert.equal(archived.status, 200);
     assert.equal(archived.body.counterparty.status, 'archived');

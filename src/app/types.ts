@@ -2635,6 +2635,7 @@ export interface Delivery {
   cost: number;
   comment?: string;
   client: string;
+  counterpartyId?: string | null;
   clientId?: string | null;
   objectId?: string | null;
   contractId?: string | null;
@@ -2644,6 +2645,7 @@ export interface Delivery {
   objectContactPhone?: string | null;
   manager: string;
   carrierId?: string | null;
+  carrierCounterpartyId?: string | null;
   carrierKey?: string | null;
   carrierName?: string | null;
   carrierPhone?: string | null;
@@ -2673,6 +2675,7 @@ export interface Delivery {
 
 export interface DeliveryCarrier {
   id: string;
+  counterpartyId: string;
   name: string;
   company?: string;
   inn?: string;

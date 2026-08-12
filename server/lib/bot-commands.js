@@ -27,6 +27,11 @@ const {
   stageImageAttachment,
 } = require('./bot-stage-images');
 const { isMechanicRole, normalizeRole } = require('./role-groups');
+const { activeRolesForCounterparty } = require('./counterparty-role-profiles');
+const {
+  canonicalizeDeliveryCarrierCounterpartyRelation,
+  canonicalizeDeliveryCounterpartyRelations,
+} = require('./delivery-counterparty-relations');
 
 function createBotHandlers(deps) {
   const {
@@ -462,14 +467,25 @@ function createBotHandlers(deps) {
   function getActiveDeliveryCarriers() {
     return (readData('delivery_carriers') || [])
       .filter(isActiveDeliveryCarrier)
-      .map((carrier) => ({
-        ...carrier,
-        id: String(carrier.id || carrier.key || '').trim(),
-        key: String(carrier.key || carrier.id || '').trim(),
-        name: String(carrier.name || '').trim(),
-        phone: carrier.phone ? String(carrier.phone).trim() : null,
-        maxCarrierKey: carrier.maxCarrierKey ? String(carrier.maxCarrierKey).trim() : null,
-      }))
+      .map((carrier) => {
+        try {
+          const canonical = canonicalizeDeliveryCarrierCounterpartyRelation(
+            carrier,
+            { readData },
+          );
+          return {
+            ...canonical,
+            id: String(canonical.id || canonical.key || '').trim(),
+            key: String(canonical.key || canonical.id || '').trim(),
+            name: String(canonical.name || '').trim(),
+            phone: canonical.phone ? String(canonical.phone).trim() : null,
+            maxCarrierKey: canonical.maxCarrierKey ? String(canonical.maxCarrierKey).trim() : null,
+          };
+        } catch (_error) {
+          return null;
+        }
+      })
+      .filter(Boolean)
       .filter(carrier => carrier.id)
       .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
   }
@@ -489,6 +505,63 @@ function createBotHandlers(deps) {
     );
     rows.push([button('Отмена', 'deliverycreate:cancel')]);
     return keyboard(rows);
+  }
+
+  function getActiveDeliveryCustomers() {
+    const assignments = readData('counterparty_role_assignments') || [];
+    return (readData('counterparties') || [])
+      .filter(counterparty => (
+        counterparty
+        && counterparty.status !== 'archived'
+        && !counterparty.archivedAt
+        && activeRolesForCounterparty(assignments, counterparty.id).includes('customer')
+      ))
+      .map(counterparty => {
+        const matchingClients = (readData('clients') || [])
+          .filter(client => String(client?.counterpartyId || '') === String(counterparty.id || ''));
+        return {
+          counterparty,
+          client: matchingClients.length === 1 ? matchingClients[0] : null,
+          label: String(counterparty.shortName || counterparty.legalName || '').trim(),
+        };
+      })
+      .filter(item => item.label)
+      .sort((left, right) => left.label.localeCompare(right.label, 'ru'));
+  }
+
+  function managerDeliveryCustomerKeyboard(customers) {
+    const rows = chunkButtons(
+      customers.map(item => button(
+        item.label,
+        `deliverycreate:customer:${encodeURIComponent(item.counterparty.id)}`,
+      )),
+      1,
+    );
+    rows.push([button('Отмена', 'deliverycreate:cancel')]);
+    return keyboard(rows);
+  }
+
+  function promptManagerDeliveryCustomer(senderId, phone, authUser, draft, uiContext = {}) {
+    const customers = getActiveDeliveryCustomers();
+    updateBotSession(phone, {
+      pendingAction: 'manager_delivery_customer',
+      pendingPayload: { managerDeliveryDraft: draft },
+    });
+    return reply(
+      senderId,
+      customers.length
+        ? '🏢 Выберите клиента из справочника контрагентов.'
+        : 'Нет активных Counterparty с ролью customer. Создание доставки остановлено.',
+      {
+        attachments: customers.length
+          ? managerDeliveryCustomerKeyboard(customers)
+          : keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
+        ...managerStageOptions(authUser.userRole, 'manager_delivery'),
+        phone,
+        callbackContext: uiContext.callbackContext,
+        replaceMessage: Boolean(uiContext.callbackContext),
+      },
+    );
   }
 
   function createDeliveryConfirmKeyboard() {
@@ -601,7 +674,7 @@ function createBotHandlers(deps) {
     if (!draft.carrierId || !draft.carrierName) {
       throw new Error('Перед созданием доставки выберите перевозчика.');
     }
-    const delivery = {
+    const delivery = canonicalizeDeliveryCounterpartyRelations({
       id: generateId(idPrefixes.deliveries),
       type: draft.type === 'receiving' ? 'receiving' : 'shipping',
       status: 'new',
@@ -615,10 +688,12 @@ function createBotHandlers(deps) {
       cost: 0,
       comment: draft.comment || '',
       client: draft.client,
+      counterpartyId: draft.counterpartyId || null,
       clientId: draft.clientId || null,
       manager: authUser.userName,
       managerId: authUser.userId || null,
       carrierId: String(draft.carrierId),
+      carrierCounterpartyId: draft.carrierCounterpartyId || null,
       carrierKey: String(draft.carrierKey || draft.carrierId),
       carrierName: String(draft.carrierName || ''),
       carrierPhone: draft.carrierPhone || null,
@@ -644,7 +719,7 @@ function createBotHandlers(deps) {
       createdByName: authUser.userName || 'Система',
       createdByPhone: authUser.phone || null,
       createdByEmail: authUser.email || null,
-    };
+    }, { readData }, { requireActiveObject: true, requireActiveCarrier: true });
     deliveries.push(delivery);
     writeData('deliveries', deliveries);
     return delivery;
@@ -1065,24 +1140,7 @@ function createBotHandlers(deps) {
   function ensureCarrierForSystemUser(user) {
     const existing = findCarrierBySystemUser(user);
     if (existing) return existing;
-    if (!isCarrierSystemUser(user) || user?.status !== 'Активен') return null;
-
-    const carrierId = String(user.carrierId || user.id || generateId('carrier')).trim();
-    if (!carrierId) return null;
-
-    const carriers = readData('delivery_carriers') || [];
-    const carrier = {
-      id: carrierId,
-      key: carrierId,
-      name: user.name || user.email || 'Перевозчик',
-      phone: user.phone || undefined,
-      notes: user.email ? `Пользователь системы: ${user.email}` : undefined,
-      status: 'active',
-      systemUserId: user.id || null,
-      maxCarrierKey: user.maxUserId ? String(user.maxUserId) : null,
-    };
-    writeData('delivery_carriers', [...carriers, carrier]);
-    return carrier;
+    return null;
   }
 
   function normalizeMaxUserId(phone) {
@@ -2923,6 +2981,59 @@ function createBotHandlers(deps) {
       });
     }
 
+    if (normalized.startsWith('deliverycreate:customer:')) {
+      const authUser = getAuthorizedUser(String(phone));
+      if (!authUser) {
+        return reply(senderId, '🔒 Сначала авторизуйтесь.', {
+          attachments: authKeyboard(),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      const draft = getBotSession(phone).pendingPayload?.managerDeliveryDraft || null;
+      if (!draft) {
+        resetBotFlow(phone);
+        return reply(senderId, '❌ Черновик доставки не найден. Начните заново.', {
+          attachments: managerSummaryKeyboard(),
+          ...managerStageOptions(authUser.userRole, 'manager_main'),
+          phone,
+          callbackContext,
+          replaceMessage: true,
+        });
+      }
+      let counterpartyId = normalized.slice('deliverycreate:customer:'.length);
+      try {
+        counterpartyId = decodeURIComponent(counterpartyId);
+      } catch (_error) {
+        counterpartyId = String(counterpartyId || '').trim();
+      }
+      const customer = getActiveDeliveryCustomers()
+        .find(item => String(item.counterparty.id) === String(counterpartyId));
+      if (!customer) {
+        return promptManagerDeliveryCustomer(senderId, phone, authUser, draft, { callbackContext });
+      }
+      const nextDraft = {
+        ...draft,
+        counterpartyId: customer.counterparty.id,
+        clientId: customer.client?.id || null,
+        client: customer.label,
+        contactName: draft.contactName || customer.client?.contactPerson || null,
+        contactPhone: draft.contactPhone || customer.client?.phone || customer.counterparty.phone || null,
+      };
+      updateBotSession(phone, {
+        pendingAction: 'manager_delivery_origin',
+        pendingPayload: { managerDeliveryDraft: nextDraft },
+      });
+      return reply(senderId, `Клиент выбран: ${customer.label}.\n\n📍 Напишите точку отправления.`, {
+        attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
+        ...managerStageOptions(authUser.userRole, 'manager_delivery'),
+        phone,
+        callbackContext,
+        replaceMessage: true,
+      });
+    }
+
     if (normalized.startsWith('deliverycreate:carrier:')) {
       const authUser = getAuthorizedUser(String(phone));
       if (!authUser) {
@@ -2969,6 +3080,7 @@ function createBotHandlers(deps) {
         carrierKey: carrier.key || carrier.id,
         carrierName: carrier.name,
         carrierPhone: carrier.phone || null,
+        carrierCounterpartyId: carrier.counterpartyId,
       };
       updateBotSession(phone, {
         pendingAction: 'manager_delivery_confirm',
@@ -3026,6 +3138,7 @@ function createBotHandlers(deps) {
         carrierKey: carrier.key || carrier.id,
         carrierName: carrier.name,
         carrierPhone: carrier.phone || null,
+        carrierCounterpartyId: carrier.counterpartyId,
       });
       delivery = await sendDeliveryToCarrierFromBot(delivery);
       if (notificationService?.notifyDeliveryCreated) {
@@ -4588,36 +4701,16 @@ function createBotHandlers(deps) {
         });
       }
       if (session.pendingAction === 'manager_delivery_cargo' && isRentalManager) {
-        updateBotSession(phone, {
-          pendingAction: 'manager_delivery_client',
-          pendingPayload: {
-            managerDeliveryDraft: {
-              ...(session.pendingPayload?.managerDeliveryDraft || {}),
-              cargo: trimmed,
-            },
-          },
-        });
-        return reply(senderId, '🏢 Напишите название клиента.', {
-          attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
-          mechanicStage: 'manager_delivery',
-          phone,
-          callbackContext: uiContext.callbackContext,
-          replaceMessage: Boolean(uiContext.callbackContext),
-        });
+        return promptManagerDeliveryCustomer(senderId, phone, authUser, {
+          ...(session.pendingPayload?.managerDeliveryDraft || {}),
+          cargo: trimmed,
+        }, uiContext);
       }
       if (session.pendingAction === 'manager_delivery_client' && isRentalManager) {
-        updateBotSession(phone, {
-          pendingAction: 'manager_delivery_origin',
-          pendingPayload: {
-            managerDeliveryDraft: {
-              ...(session.pendingPayload?.managerDeliveryDraft || {}),
-              client: trimmed,
-            },
-          },
-        });
-        return reply(senderId, '📍 Напишите точку отправления.', {
-          attachments: keyboard([[button('Отмена', 'deliverycreate:cancel')]]),
-          mechanicStage: 'manager_delivery',
+        resetBotFlow(phone);
+        return reply(senderId, '❌ Старый сценарий ввода клиента текстом больше не поддерживается. Начните создание доставки заново и выберите Counterparty из списка.', {
+          attachments: managerSummaryKeyboard(),
+          ...managerStageOptions(authUser.userRole, 'manager_main'),
           phone,
           callbackContext: uiContext.callbackContext,
           replaceMessage: Boolean(uiContext.callbackContext),

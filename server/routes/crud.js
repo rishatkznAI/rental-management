@@ -87,6 +87,11 @@ const {
   canonicalizePaymentCounterpartyRelation,
   decoratePaymentCounterparty,
 } = require('../lib/payment-counterparty-relations');
+const {
+  canonicalizeDeliveryCarrierCounterpartyRelation,
+  deliveryCarrierReferenceBlockers,
+  isHistoricalDeliveryCarrierRelation,
+} = require('../lib/delivery-counterparty-relations');
 
 const INLINE_RELATION_IDEMPOTENCY_COLLECTION = 'inline_relation_idempotency';
 const INLINE_RELATION_IDEMPOTENCY_SCOPES = new Set(['client_objects', 'client_contracts']);
@@ -316,6 +321,12 @@ function registerCrudRoutes(deps) {
     if (collection === 'client_contracts') {
       return normalizeClientContractRecord(item, existing, { readData: readDataOverride, nowIso });
     }
+    if (collection === 'delivery_carriers') {
+      return canonicalizeDeliveryCarrierCounterpartyRelation(item, { readData: readDataOverride }, {
+        existing,
+        allowArchived: isHistoricalDeliveryCarrierRelation(item),
+      });
+    }
     if (collection === 'payments' || collection === 'payment_allocations' || collection === 'documents' || collection === 'service') {
       const enriched = enrichRecordFromRentalLinks(item, readDataOverride);
       if (collection === 'documents') {
@@ -480,7 +491,7 @@ function registerCrudRoutes(deps) {
       .map(spec => {
         const items = readData(spec.collection) || [];
         const matches = items.filter(item => (
-          spec.collection === 'payments'
+          spec.collection === 'payments' || spec.collection === 'deliveries'
             ? String(item?.clientId || '').trim() === String(client?.id || '').trim()
             : recordBelongsToClient(item, client, spec.nameFields)
         ));
@@ -2319,6 +2330,17 @@ function registerCrudRoutes(deps) {
           });
         }
       }
+      if (collection === 'delivery_carriers') {
+        const blockers = deliveryCarrierReferenceBlockers(removedItem, { readData });
+        if (blockers.length > 0) {
+          return res.status(409).json({
+            ok: false,
+            code: 'DELIVERY_CARRIER_HAS_HISTORY',
+            error: 'Перевозчика нельзя удалить: существуют связанные доставки. Переведите запись в неактивный статус.',
+            blockers,
+          });
+        }
+      }
       if (collection === 'payments' && req.user?.userRole !== 'Администратор') {
         const request = createEntityChangeRequest(req, {
           entityType: 'payment',
@@ -2558,6 +2580,31 @@ function registerCrudRoutes(deps) {
             item,
             existingById.get(String(item?.id || '')) || null,
             stagedReadData,
+          ));
+        }
+        if (collection === 'delivery_carriers') {
+          const existing = readData('delivery_carriers') || [];
+          const existingById = new Map(existing.map(item => [String(item?.id || ''), item]));
+          const incomingIds = new Set(list.map(item => String(item?.id || '')).filter(Boolean));
+          for (const carrier of existing) {
+            if (incomingIds.has(String(carrier?.id || ''))) continue;
+            const blockers = deliveryCarrierReferenceBlockers(carrier, { readData });
+            if (blockers.length > 0) {
+              const error = new Error('Массовая замена не может удалить перевозчика со связанной историей.');
+              error.status = 409;
+              error.code = 'DELIVERY_CARRIER_HAS_HISTORY';
+              error.blockers = blockers;
+              throw error;
+            }
+          }
+          const stagedReadData = name => name === 'delivery_carriers' ? list : readData(name);
+          list = list.map(item => canonicalizeDeliveryCarrierCounterpartyRelation(
+            item,
+            { readData: stagedReadData },
+            {
+              existing: existingById.get(String(item?.id || '')) || null,
+              allowArchived: isHistoricalDeliveryCarrierRelation(item),
+            },
           ));
         }
         if (collection === 'service_works') {

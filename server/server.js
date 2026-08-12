@@ -95,6 +95,10 @@ const {
   canonicalizeRentalPersistenceEntries,
 } = require('./lib/rental-counterparty-relations');
 const {
+  auditDeliveryCounterpartyRelations,
+  canonicalizeDeliveryPersistenceEntries,
+} = require('./lib/delivery-counterparty-relations');
+const {
   mergeEntityHistory,
   mergeRentalHistory,
 } = require('./lib/audit-history');
@@ -419,15 +423,17 @@ function readData(name) {
 }
 
 function writeData(name, data) {
-  const [entry] = canonicalizeRentalPersistenceEntries(
+  const rentalEntries = canonicalizeRentalPersistenceEntries(
     [{ name, value: data }],
     { readData },
   );
+  const [entry] = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
   setData(entry.name, entry.value);
 }
 
 function writeDataBatch(entries) {
-  setDataBatch(canonicalizeRentalPersistenceEntries(entries, { readData }));
+  const rentalEntries = canonicalizeRentalPersistenceEntries(entries, { readData });
+  setDataBatch(canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData }));
 }
 
 const accessControl = createAccessControl({ readData });
@@ -2734,6 +2740,7 @@ startServer({
     auditCounterpartyRoleProfiles,
     auditCounterpartyRelations,
     auditRentalCounterpartyRelations,
+    auditDeliveryCounterpartyRelations,
     writeDataBatch,
     cleanupExpiredSessions,
     seedDefaultUsers,

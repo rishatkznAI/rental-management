@@ -20,7 +20,13 @@ const ROLES = {
 };
 
 const REPAIR_ITEMS_ADMIN_MESSAGE = 'Недостаточно прав. Работы и запчасти может изменять только администратор';
-const COUNTERPARTY_RELATION_BULK_COLLECTIONS = new Set(['clients', 'rentals', 'gantt_rentals', 'payments']);
+const COUNTERPARTY_RELATION_BULK_COLLECTIONS = new Set([
+  'clients',
+  'rentals',
+  'gantt_rentals',
+  'payments',
+  'warranty_claims',
+]);
 
 const SYSTEM_FIELD_PATTERN = /^(?:__|_)/;
 
@@ -433,6 +439,27 @@ const WARRANTY_CLAIM_MUTATION_FIELDS = new Set([
   'comments',
   'attachments',
   'resolution',
+]);
+
+const STRICT_WARRANTY_CLAIM_BULK_REPLACE_FIELDS = new Set([
+  'id',
+  'number',
+  'counterpartyId',
+  'clientId',
+  'client',
+  'clientName',
+  'customerDisplayName',
+  'counterpartyName',
+  'rentalId',
+  ...WARRANTY_CLAIM_MUTATION_FIELDS,
+  'reason',
+  'deadline',
+  'result',
+  'responsible',
+  'responsibleUserId',
+  'responsibleUserName',
+  'createdAt',
+  'updatedAt',
 ]);
 
 const STRICT_PAYMENT_ORDINARY_MUTATION_FIELDS = new Set([
@@ -1675,6 +1702,7 @@ function isAdminBulkReplaceBlockedField(collection, field) {
   if (collection === 'users' && !STRICT_USER_MUTATION_FIELDS.has(field)) return true;
   if (collection === 'clients') return !STRICT_CLIENT_BULK_REPLACE_FIELDS.has(field);
   if (collection === 'payments') return !STRICT_PAYMENT_BULK_REPLACE_FIELDS.has(field);
+  if (collection === 'warranty_claims') return !STRICT_WARRANTY_CLAIM_BULK_REPLACE_FIELDS.has(field);
   return isAdminGenericPatchBlockedField(collection, field);
 }
 

@@ -103,6 +103,10 @@ const {
   canonicalizeServicePersistenceEntries,
 } = require('./lib/service-counterparty-relations');
 const {
+  auditWarrantyClaimCounterpartyRelations,
+  canonicalizeWarrantyPersistenceEntries,
+} = require('./lib/warranty-claim-counterparty-relations');
+const {
   mergeEntityHistory,
   mergeRentalHistory,
 } = require('./lib/audit-history');
@@ -432,14 +436,16 @@ function writeData(name, data) {
     { readData },
   );
   const deliveryEntries = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
-  const [entry] = canonicalizeServicePersistenceEntries(deliveryEntries, { readData });
+  const serviceEntries = canonicalizeServicePersistenceEntries(deliveryEntries, { readData });
+  const [entry] = canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData });
   setData(entry.name, entry.value);
 }
 
 function writeDataBatch(entries) {
   const rentalEntries = canonicalizeRentalPersistenceEntries(entries, { readData });
   const deliveryEntries = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
-  setDataBatch(canonicalizeServicePersistenceEntries(deliveryEntries, { readData }));
+  const serviceEntries = canonicalizeServicePersistenceEntries(deliveryEntries, { readData });
+  setDataBatch(canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData }));
 }
 
 const accessControl = createAccessControl({ readData });
@@ -2748,6 +2754,7 @@ startServer({
     auditRentalCounterpartyRelations,
     auditDeliveryCounterpartyRelations,
     auditServiceCounterpartyRelations,
+    auditWarrantyClaimCounterpartyRelations,
     writeDataBatch,
     cleanupExpiredSessions,
     seedDefaultUsers,

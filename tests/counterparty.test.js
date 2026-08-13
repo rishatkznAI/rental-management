@@ -779,6 +779,40 @@ test('Counterparty archive is soft-delete and refuses active Client, Site/Object
   });
 });
 
+test('Counterparty archive is blocked by active canonical and deterministic Warranty claims but not terminal history', async () => {
+  const counterparty = {
+    id: 'CP-warranty',
+    ...legalEntity(),
+    inn: '1655123456',
+    status: 'active',
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+    archivedAt: null,
+  };
+  const state = createState({
+    counterparties: [counterparty],
+    service: [{ id: 'S-warranty', counterpartyId: counterparty.id, status: 'ready' }],
+    warranty_claims: [{ id: 'W-canonical', counterpartyId: counterparty.id, status: 'approved' }],
+  });
+  const app = createApp(state);
+
+  await withServer(app, async baseUrl => {
+    const canonicalBlocked = await request(baseUrl, 'DELETE', `/api/counterparties/${counterparty.id}`);
+    assert.equal(canonicalBlocked.status, 409);
+    assert.deepEqual(canonicalBlocked.body.details.warrantyClaimIds, ['W-canonical']);
+
+    state.warranty_claims = [{ id: 'W-derived', serviceTicketId: 'S-warranty', status: 'parts_shipping' }];
+    const deterministicBlocked = await request(baseUrl, 'DELETE', `/api/counterparties/${counterparty.id}`);
+    assert.equal(deterministicBlocked.status, 409);
+    assert.deepEqual(deterministicBlocked.body.details.warrantyClaimIds, ['W-derived']);
+
+    state.warranty_claims[0].status = 'closed';
+    const archived = await request(baseUrl, 'DELETE', `/api/counterparties/${counterparty.id}`);
+    assert.equal(archived.status, 200);
+    assert.equal(archived.body.counterparty.status, 'archived');
+  });
+});
+
 test('Counterparty archive deactivates role assignments and profiles without deleting them', async () => {
   const state = createState();
   const app = createApp(state);

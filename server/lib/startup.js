@@ -263,6 +263,34 @@ async function startServer({ app, port, deps, logger = console }) {
         logger.warn(`[service-counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
       }
     }
+    if (typeof deps.auditWarrantyClaimCounterpartyRelations === 'function') {
+      try {
+        const result = deps.auditWarrantyClaimCounterpartyRelations({ readData: deps.readData });
+        const classifications = result?.summary?.classifications || {};
+        const hasIssues = (classifications.deterministic_repair || 0)
+          + (result?.summary?.broken || 0) > 0;
+        const log = hasIssues ? logger.warn : logger.log;
+        log?.call(
+          logger,
+          `[warranty-counterparty-relations] integrity audit: canonical=${classifications.already_canonical || 0} `
+          + `internal=${classifications.internal_unlinked_valid || 0} `
+          + `terminalHistory=${classifications.canonical_terminal_history || 0} `
+          + `repairable=${classifications.deterministic_repair || 0} broken=${result?.summary?.broken || 0}`,
+        );
+        for (const issue of (result?.entries || []).filter(entry => ![
+          'already_canonical',
+          'internal_unlinked_valid',
+          'canonical_terminal_history',
+        ].includes(entry.classification))) {
+          logger.warn?.(
+            `[warranty-counterparty-relations] integrity issue: warrantyClaimId=${issue.recordId || 'missing'} `
+            + `classification=${issue.classification} code=${issue.code} repairability=${issue.repairability}`,
+          );
+        }
+      } catch (error) {
+        logger.warn(`[warranty-counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
+      }
+    }
     cleanupExpiredSessions();
     seedDefaultUsers();
     ensureLegacyDefaultUsers();

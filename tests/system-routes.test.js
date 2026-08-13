@@ -2863,6 +2863,122 @@ test('/api/sync fails closed when legacy payload contains Service', async () => 
   });
 });
 
+test('/api/sync fails closed when legacy payload contains Warranty claims', async () => {
+  await withLegacySyncEnabled(async () => {
+    const { app } = createSystemApp();
+    await withServer(app, async baseUrl => {
+      const response = await postJson(baseUrl, '/api/sync', { warranty_claims: [] });
+      assert.equal(response.status, 409);
+      assert.equal(response.body.code, 'WARRANTY_COUNTERPARTY_SYNC_DISABLED');
+    });
+  });
+});
+
+test('/api/admin/system-data Warranty round-trip follows dependency order and rejects broken, conflicting, duplicate, and missing IDs atomically', async () => {
+  const collections = {
+    counterparties: [],
+    counterparty_role_assignments: [],
+    clients: [],
+    rentals: [],
+    gantt_rentals: [],
+    service: [],
+    warranty_claims: [],
+  };
+  const batches = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeDataBatch(entries) {
+      batches.push(structuredClone(entries));
+      for (const entry of entries) collections[entry.name] = entry.value;
+    },
+  });
+  const payloadCollections = {
+    counterparties: [
+      { id: 'CP-1', type: 'legal_entity', legalName: 'ООО Клиент', inn: '7707083893', status: 'active', roles: ['customer'] },
+      { id: 'CP-2', type: 'legal_entity', legalName: 'ООО Другой', inn: '7707083894', status: 'active', roles: ['customer'] },
+    ],
+    counterparty_role_assignments: [
+      { id: 'A-1', counterpartyId: 'CP-1', roleCode: 'customer', status: 'active' },
+      { id: 'A-2', counterpartyId: 'CP-2', roleCode: 'customer', status: 'active' },
+    ],
+    clients: [{ id: 'CL-1', counterpartyId: 'CP-1', company: 'ООО Клиент', inn: '7707083893' }],
+    rentals: [{ id: 'R-1', counterpartyId: 'CP-1', clientId: 'CL-1', status: 'active' }],
+    service: [{ id: 'S-1', rentalId: 'R-1', clientId: 'CL-1', status: 'new' }],
+    warranty_claims: [{
+      id: 'W-1', serviceTicketId: 'S-1', clientId: 'CL-1', rentalId: 'R-1', status: 'approved',
+      equipmentLabel: 'Lift', factoryName: 'Factory', failureDescription: 'Failure', requestedResolution: 'Repair', priority: 'medium',
+    }],
+  };
+
+  await withServer(app, async baseUrl => {
+    const dryRun = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', { collections: payloadCollections });
+    assert.equal(dryRun.status, 200, JSON.stringify(dryRun.body));
+    assert.equal(batches.length, 0);
+
+    const applied = await postJson(baseUrl, '/api/admin/system-data/import', { confirm: true, collections: payloadCollections });
+    assert.equal(applied.status, 200, JSON.stringify(applied.body));
+    assert.equal(collections.warranty_claims[0].counterpartyId, 'CP-1');
+    const names = batches[0].map(entry => entry.name);
+    assert.ok(names.indexOf('counterparties') < names.indexOf('counterparty_role_assignments'));
+    assert.ok(names.indexOf('counterparty_role_assignments') < names.indexOf('clients'));
+    assert.ok(names.indexOf('clients') < names.indexOf('rentals'));
+    assert.ok(names.indexOf('rentals') < names.indexOf('service'));
+    assert.ok(names.indexOf('service') < names.indexOf('warranty_claims'));
+
+    const exported = await getJson(baseUrl, '/api/admin/system-data/export');
+    assert.equal(exported.status, 200);
+    assert.equal(exported.body.collections.warranty_claims[0].counterpartyId, 'CP-1');
+
+    const cases = [
+      [{ id: 'W-broken', serviceTicketId: 'S-missing', status: 'draft' }, /WARRANTY_COUNTERPARTY_SERVICE_NOT_FOUND/],
+      [{ id: 'W-conflict', counterpartyId: 'CP-2', serviceTicketId: 'S-1', status: 'draft' }, /COUNTERPARTY_RELATION_MISMATCH/],
+    ];
+    for (const [claim, pattern] of cases) {
+      const before = structuredClone(collections);
+      const batchCount = batches.length;
+      const rejected = await postJson(baseUrl, '/api/admin/system-data/import', {
+        confirm: true,
+        collections: { warranty_claims: [claim] },
+      });
+      assert.equal(rejected.status, 400);
+      assert.match(rejected.body.errors.join(' '), pattern);
+      assert.deepEqual(collections, before);
+      assert.equal(batches.length, batchCount);
+    }
+
+    const duplicate = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: { warranty_claims: [collections.warranty_claims[0], collections.warranty_claims[0]] },
+    });
+    assert.equal(duplicate.status, 400);
+    assert.match(duplicate.body.errors.join(' '), /Дубликаты id|DUPLICATE/i);
+    const missingId = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: { warranty_claims: [{ status: 'draft' }] },
+    });
+    assert.equal(missingId.status, 400);
+    assert.match(missingId.body.errors.join(' '), /WARRANTY_COUNTERPARTY_CLAIM_ID_REQUIRED/);
+    assert.equal(batches.length, 1);
+  });
+});
+
+test('System Control Center exposes Warranty relation health and broken counts read-only', async () => {
+  const collections = {
+    warranty_claims: [{ id: 'W-broken', serviceTicketId: 'S-missing', status: 'draft' }],
+    service: [],
+  };
+  const before = structuredClone(collections);
+  const status = buildSystemControlCenterStatus({
+    dbPath: ':memory:',
+    readData: name => collections[name] || [],
+    inspectStorage: () => ({ available: false, signalPresent: false, mountPath: '/data' }),
+  });
+  assert.equal(status.warrantyRelations.scanned, 1);
+  assert.equal(status.warrantyRelations.broken, 1);
+  assert.equal(status.warrantyRelations.authority, 'WarrantyClaim.counterpartyId -> Counterparty.id');
+  assert.deepEqual(collections, before);
+});
+
 test('/api/admin/system-data/import rejects duplicate client INNs before writing any collection', async () => {
   const collections = {
     equipment: [{ id: 'EQ-old', serialNumber: 'OLD' }],

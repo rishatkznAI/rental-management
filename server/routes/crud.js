@@ -96,6 +96,11 @@ const {
   canonicalizeServiceTicketCounterpartyRelation,
   decorateServiceTicketCounterparty,
 } = require('../lib/service-counterparty-relations');
+const {
+  canonicalizeWarrantyClaimCounterpartyRelation,
+  decorateWarrantyClaimCounterparty,
+  isTerminalWarrantyClaim,
+} = require('../lib/warranty-claim-counterparty-relations');
 
 const INLINE_RELATION_IDEMPOTENCY_COLLECTION = 'inline_relation_idempotency';
 const INLINE_RELATION_IDEMPOTENCY_SCOPES = new Set(['client_objects', 'client_contracts']);
@@ -331,6 +336,15 @@ function registerCrudRoutes(deps) {
         allowArchived: isHistoricalDeliveryCarrierRelation(item),
       });
     }
+    if (collection === 'warranty_claims') {
+      return canonicalizeWarrantyClaimCounterpartyRelation(item, { readData: readDataOverride }, {
+        existing,
+        // Existing terminal history may retain an inactive target. New API rows may not.
+        allowHistoricalTarget: Boolean(existing)
+          && isTerminalWarrantyClaim(existing)
+          && isTerminalWarrantyClaim(item),
+      });
+    }
     if (collection === 'payments' || collection === 'payment_allocations' || collection === 'documents' || collection === 'service') {
       const enriched = enrichRecordFromRentalLinks(item, readDataOverride);
       if (collection === 'documents') {
@@ -359,6 +373,23 @@ function registerCrudRoutes(deps) {
 
   function normalizeClientName(value) {
     return String(value || '').trim().toLowerCase();
+  }
+
+  function assertWarrantyTargetServiceAccess(nextClaim, previousClaim, user) {
+    const nextServiceTicketId = String(nextClaim?.serviceTicketId || '').trim();
+    const previousServiceTicketId = String(previousClaim?.serviceTicketId || '').trim();
+    if (!nextServiceTicketId || nextServiceTicketId === previousServiceTicketId) return;
+    const matches = (readData('service') || [])
+      .filter(ticket => String(ticket?.id || '').trim() === nextServiceTicketId);
+    // Relation canonicalization owns missing/duplicate diagnostics. Authorization is
+    // evaluated only after an exact unique target exists.
+    if (matches.length !== 1) return;
+    if (!accessControl.canAccessEntity('service', matches[0], user)) {
+      const error = new Error('Недостаточно прав на целевую сервисную заявку рекламации.');
+      error.status = 403;
+      error.code = 'WARRANTY_TARGET_SERVICE_FORBIDDEN';
+      throw error;
+    }
   }
 
   function text(value) {
@@ -452,7 +483,7 @@ function registerCrudRoutes(deps) {
       { collection: 'payments', label: 'payments', nameFields: ['client', 'clientName'] },
       { collection: 'deliveries', label: 'deliveries', nameFields: ['client', 'clientName'] },
       { collection: 'service', label: 'service', nameFields: [] },
-      { collection: 'warranty_claims', label: 'warranty_claims', nameFields: ['client', 'clientName'] },
+      { collection: 'warranty_claims', label: 'warranty_claims', nameFields: [] },
       { collection: 'crm_deals', label: 'crm_deals', nameFields: ['company', 'client', 'clientName'] },
       { collection: 'debt_collection_plans', label: 'debt_collection_plans', nameFields: ['clientName', 'client'] },
     ];
@@ -461,7 +492,7 @@ function registerCrudRoutes(deps) {
       .map(spec => {
         const items = readData(spec.collection) || [];
         const matches = items.filter(item => (
-          spec.collection === 'payments' || spec.collection === 'deliveries' || spec.collection === 'service'
+          spec.collection === 'payments' || spec.collection === 'deliveries' || spec.collection === 'service' || spec.collection === 'warranty_claims'
             ? String(item?.clientId || '').trim() === String(client?.id || '').trim()
             : recordBelongsToClient(item, client, spec.nameFields)
         ));
@@ -1307,7 +1338,7 @@ function registerCrudRoutes(deps) {
       }),
     },
     warranty_claims: {
-      searchFields: ['id', 'equipmentLabel', 'factoryName', 'clientName', 'responsibleName', 'description'],
+      searchFields: ['id', 'equipmentLabel', 'factoryName', 'counterpartyId', 'counterpartyName', 'customerDisplayName', 'clientName', 'responsibleName', 'description'],
       sortFields: {
         createdAt: item => item.createdAt,
         updatedAt: item => item.updatedAt || item.createdAt,
@@ -1318,6 +1349,7 @@ function registerCrudRoutes(deps) {
       filters: {
         status: (item, value) => item.status === value,
         equipmentId: (item, value) => item.equipmentId === value,
+        counterpartyId: (item, value) => item.counterpartyId === value,
         clientId: (item, value) => item.clientId === value,
       },
     },
@@ -1545,6 +1577,15 @@ function registerCrudRoutes(deps) {
       if (collection === 'service') {
         data = data.map(item => decorateServiceTicketCounterparty(item, { readData }));
       }
+      if (collection === 'warranty_claims') {
+        data = data.map(item => decorateWarrantyClaimCounterparty(item, { readData }));
+        if (req.query.counterpartyId) {
+          data = data.filter(item => item.counterpartyId === req.query.counterpartyId);
+        }
+        if (req.query.clientId) {
+          data = data.filter(item => item.clientId === req.query.clientId);
+        }
+      }
       if (collection === 'payments') {
         data = data.map(item => decoratePaymentCounterparty(item, { readData }));
       }
@@ -1663,6 +1704,8 @@ function registerCrudRoutes(deps) {
         ? decoratePaymentCounterparty(sanitized, { readData })
         : collection === 'service'
           ? decorateServiceTicketCounterparty(sanitized, { readData })
+          : collection === 'warranty_claims'
+            ? decorateWarrantyClaimCounterparty(sanitized, { readData })
           : sanitized);
     });
 
@@ -1770,6 +1813,9 @@ function registerCrudRoutes(deps) {
         const data = readData(collection) || [];
         let newItem = withClientLink(collection, { ...input, id: input.id || generateId(prefix) });
         newItem = normalizeClientDomainRecord(collection, newItem);
+        if (collection === 'warranty_claims') {
+          assertWarrantyTargetServiceAccess(newItem, null, req.user);
+        }
         if (collection === 'service') {
           newItem = assignCurrentUserAsMechanicIfNeeded(newItem, req.user, {
             mechanics: readData('mechanics') || [],
@@ -1915,6 +1961,8 @@ function registerCrudRoutes(deps) {
           ? decoratePaymentCounterparty(newItem, { readData })
           : collection === 'service'
             ? decorateServiceTicketCounterparty(newItem, { readData })
+            : collection === 'warranty_claims'
+              ? decorateWarrantyClaimCounterparty(newItem, { readData })
             : newItem);
       } catch (error) {
         if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
@@ -2002,6 +2050,9 @@ function registerCrudRoutes(deps) {
       try {
         let clientCompatibilityWrite = null;
         let safePatch = accessControl.sanitizeUpdateInput(collection, req.body, req.user, data[idx]);
+        if (collection === 'warranty_claims') {
+          assertWarrantyTargetServiceAccess({ ...data[idx], ...safePatch }, data[idx], req.user);
+        }
         if (
           collection === 'service'
           && Object.prototype.hasOwnProperty.call(safePatch, 'comment')
@@ -2213,6 +2264,8 @@ function registerCrudRoutes(deps) {
           ? decoratePaymentCounterparty(data[idx], { readData })
           : collection === 'service'
             ? decorateServiceTicketCounterparty(data[idx], { readData })
+            : collection === 'warranty_claims'
+              ? decorateWarrantyClaimCounterparty(data[idx], { readData })
             : data[idx]);
       } catch (error) {
         if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
@@ -2700,9 +2753,17 @@ function registerCrudRoutes(deps) {
       let normalizedList;
       let clientCompatibilityWrite = null;
       try {
+        const existingById = new Map((readData(collection) || [])
+          .map(item => [String(item?.id || ''), item]));
         normalizedList = list.map(item => {
           const linked = withClientLink(collection, item);
-          const normalized = normalizeClientDomainRecord(collection, linked);
+          const normalized = normalizeClientDomainRecord(
+            collection,
+            linked,
+            collection === 'warranty_claims'
+              ? (existingById.get(String(item?.id || '')) || null)
+              : null,
+          );
           return collection === 'equipment' ? normalizeEquipmentStorageRecord(normalized) : normalized;
         });
         if (collection === 'clients') {

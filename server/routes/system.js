@@ -53,6 +53,10 @@ const {
 } = require('../lib/delivery-counterparty-relations');
 const { canonicalizeServiceTicketCollection } = require('../lib/service-counterparty-relations');
 const {
+  auditWarrantyClaimCounterpartyRelations,
+  canonicalizeWarrantyClaimCollection,
+} = require('../lib/warranty-claim-counterparty-relations');
+const {
   SYSTEM_FIXTURE_PROTECTED_CODE,
   SYSTEM_FIXTURE_PROTECTED_MESSAGE,
   assertProductionSmokeFixtureMutationAllowed,
@@ -192,6 +196,7 @@ const SYSTEM_DATA_COLLECTIONS = [
   'client_objects',
   'client_contracts',
   'service',
+  'warranty_claims',
   'documents',
   'payments',
   'debt_collection_plans',
@@ -774,10 +779,33 @@ function buildSystemControlCenterStatus({
   });
   const dataRisks = buildDataRisks(readData);
   const serviceQuality = buildServiceQualitySummary(readData);
+  let warrantyRelations;
+  try {
+    const warrantyAudit = auditWarrantyClaimCounterpartyRelations({ readData });
+    warrantyRelations = {
+      authority: warrantyAudit.authority,
+      canonical: Number(warrantyAudit.summary?.classifications?.already_canonical) || 0,
+      internal: Number(warrantyAudit.summary?.classifications?.internal_unlinked_valid) || 0,
+      terminalHistory: Number(warrantyAudit.summary?.classifications?.canonical_terminal_history) || 0,
+      repairable: Number(warrantyAudit.summary?.repairable) || 0,
+      broken: Number(warrantyAudit.summary?.broken) || 0,
+      scanned: Number(warrantyAudit.summary?.scanned?.warranty_claims) || 0,
+    };
+  } catch {
+    warrantyRelations = {
+      authority: 'WarrantyClaim.counterpartyId -> Counterparty.id',
+      canonical: 0,
+      internal: 0,
+      terminalHistory: 0,
+      repairable: 0,
+      broken: 1,
+      scanned: 0,
+    };
+  }
   const hasDataRisk = Object.values(dataRisks).some(value => Number(value) > 0);
   const environmentLabel = safeEnvironmentLabel(environment);
   const runtimeRisk = (environment.isProductionLike && (!botDisabled.disabled || !gsmWritesBlocked)) ? 'risk' : 'ok';
-  const dataRiskStatus = hasDataRisk ? 'warning' : 'ok';
+  const dataRiskStatus = hasDataRisk || warrantyRelations.broken > 0 ? 'warning' : 'ok';
   const serviceStatus = serviceQuality.critical > 0 ? 'risk' : serviceQuality.high > 0 ? 'warning' : 'ok';
   const storageStatus = isolationUnknown || !storageSignal.signalPresent ? 'warning' : 'ok';
   const versionStatus = releaseStatus.status === 'risk' ? 'risk' : releaseStatus.status === 'warning' ? 'warning' : 'ok';
@@ -817,6 +845,7 @@ function buildSystemControlCenterStatus({
       lastCheckedAt: new Date().toISOString(),
     },
     dataRisks,
+    warrantyRelations,
     serviceQuality,
     environment,
     conservation: {
@@ -1178,6 +1207,27 @@ function analyzeSystemDataImport(payload, readData) {
     }
   }
 
+  if (Array.isArray(sanitizedCollections.warranty_claims)) {
+    const stagedData = {
+      readData(name) {
+        if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
+        return readData(name) || [];
+      },
+    };
+    try {
+      sanitizedCollections.warranty_claims = canonicalizeWarrantyClaimCollection(
+        sanitizedCollections.warranty_claims,
+        stagedData,
+        {
+          existingClaims: readData('warranty_claims') || [],
+          allowHistoricalTarget: true,
+        },
+      );
+    } catch (error) {
+      integrityErrors.push(`${error.code || 'WARRANTY_COUNTERPARTY_RELATION_FAILED'}: ${error.message}`);
+    }
+  }
+
   if (Array.isArray(sanitizedCollections.documents)) {
     const stagedReadData = name => {
       if (Array.isArray(sanitizedCollections[name])) return sanitizedCollections[name];
@@ -1520,6 +1570,13 @@ function registerSystemRoutes(app, deps) {
           error: 'Legacy sync не может заменять service. Используйте canonical Service API или System Data import.',
         });
       }
+      if (Array.isArray(warranty_claims)) {
+        return res.status(409).json({
+          ok: false,
+          code: 'WARRANTY_COUNTERPARTY_SYNC_DISABLED',
+          error: 'Legacy sync не может заменять warranty_claims. Используйте canonical Warranty API или System Data import.',
+        });
+      }
       const prev = getSnapshot();
       if (Array.isArray(equipment)) {
         assertProductionSmokeFixtureMutationAllowed({
@@ -1652,7 +1709,6 @@ function registerSystemRoutes(app, deps) {
       if (normalizedRentals) writeData('rentals', normalizedRentals);
       if (normalizedGanttRentals) writeData('gantt_rentals', normalizedGanttRentals);
       if (service) writeData('service', service);
-      if (warranty_claims) writeData('warranty_claims', warranty_claims);
       if (clients) {
         persistDataBatch(clientRoleBoundaryEntries || [
           { name: 'counterparties', value: normalizedCounterparties },
@@ -2194,6 +2250,7 @@ function registerSystemRoutes(app, deps) {
       ['rentals', 60],
       ['gantt_rentals', 61],
       ['service', 70],
+      ['warranty_claims', 80],
     ]);
     const importEntries = Object.entries(analysis.sanitizedCollections)
       .sort(([left], [right]) => (importOrder.get(left) || 100) - (importOrder.get(right) || 100));

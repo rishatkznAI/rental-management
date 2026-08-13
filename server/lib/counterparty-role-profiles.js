@@ -429,6 +429,21 @@ function findRoleRemovalBlockers({ counterpartyId, roleCode, data }) {
     : role === 'supplier' ? SUPPLIER_REFERENCE_SPECS : CONTRACTOR_REFERENCE_SPECS;
   const blockers = [];
   for (const [collection, counterpartyFields, clientFields = []] of specs) {
+    if (role === 'customer' && collection === 'warranty_claims') {
+      // Lazy loading avoids a module-initialization cycle: Warranty resolution uses
+      // the authoritative role helper from this module.
+      const { activeWarrantyCounterpartyReferences } = require('./warranty-claim-counterparty-relations');
+      const records = activeWarrantyCounterpartyReferences(id, data);
+      if (records.length > 0) {
+        blockers.push({
+          collection,
+          recordIds: records.map(record => relationId(record?.id)).filter(Boolean),
+          count: records.length,
+          relationFields: ['counterpartyId', 'serviceTicketId', 'clientId', 'rentalId'],
+        });
+      }
+      continue;
+    }
     const records = readCollection(data, collection)
       .filter(record => recordMatchesStableRelation(
         record,

@@ -44,6 +44,21 @@ function createStartupDeps(state, events) {
         },
       };
     },
+    auditWarrantyClaimCounterpartyRelations: () => {
+      recordCall('auditWarrantyClaimCounterpartyRelations');
+      return {
+        entries: [{ classification: 'deterministic_repair', recordId: 'W-1', repairability: 'deterministic_stable_id_chain' }],
+        summary: {
+          broken: 0,
+          classifications: {
+            already_canonical: 0,
+            internal_unlinked_valid: 0,
+            canonical_terminal_history: 0,
+            deterministic_repair: 1,
+          },
+        },
+      };
+    },
     writeDataBatch: entries => {
       for (const entry of entries || []) writeData(entry.name, entry.value);
     },
@@ -128,6 +143,7 @@ test('server start disables only business maintenance by default', async () => {
     documents: [{ id: 'D-1', client: 'Legacy Client' }],
     crm_deals: [{ id: 'CRM-1' }],
     service: [{ id: 'S-1' }],
+    warranty_claims: [{ id: 'W-1', serviceTicketId: 'S-1' }],
     app_settings: [{ key: 'crm_archive_state', value: { status: 'archived', archivedAt: '2020-01-01T00:00:00.000Z' } }],
     knowledge_base_progress: [],
   };
@@ -154,6 +170,7 @@ test('server start disables only business maintenance by default', async () => {
   assert.equal(events.calls.includes('auditCounterpartyRoleProfiles'), true);
   assert.equal(events.calls.includes('auditCounterpartyRelations'), true);
   assert.equal(events.calls.includes('auditServiceCounterpartyRelations'), true);
+  assert.equal(events.calls.includes('auditWarrantyClaimCounterpartyRelations'), true);
   assert.equal(events.calls.includes('cleanupExpiredSessions'), true);
   assert.equal(events.calls.includes('seedDefaultUsers'), true);
   assert.equal(events.calls.includes('ensureLegacyDefaultUsers'), true);
@@ -169,6 +186,7 @@ test('server start disables only business maintenance by default', async () => {
   assert.equal(events.writes.some(event => event.name === 'payment_allocations'), false);
   assert.equal(events.writes.some(event => event.name === 'crm_deals'), false);
   assert.deepEqual(state.service, original.service);
+  assert.deepEqual(state.warranty_claims, original.warranty_claims);
   assert.equal(warnings.some(message => message.includes(`${STARTUP_BUSINESS_MAINTENANCE_ENV}=apply`)), true);
 });
 

@@ -33,6 +33,7 @@ import {
   useWarrantyClaimsList,
 } from '../../hooks/useWarrantyClaims';
 import { cn, formatDate } from '../../lib/utils';
+import type { WarrantyClaimDto } from '../../services/warranty-claims.service';
 import type {
   Equipment,
   ServicePriority,
@@ -205,7 +206,7 @@ function formatEquipmentLabel(equipment: Equipment) {
   return `${equipment.manufacturer} ${equipment.model} (INV: ${equipment.inventoryNumber})`;
 }
 
-function getClaimSearchText(claim: WarrantyClaim) {
+function getClaimSearchText(claim: WarrantyClaimDto) {
   return [
     claim.id,
     claim.number,
@@ -214,6 +215,9 @@ function getClaimSearchText(claim: WarrantyClaim) {
     claim.inventoryNumber,
     claim.serialNumber,
     claim.manufacturer,
+    claim.counterpartyId,
+    claim.counterpartyName,
+    claim.customerDisplayName,
     claim.client,
     claim.clientName,
     claim.factoryName,
@@ -226,28 +230,28 @@ function getClaimSearchText(claim: WarrantyClaim) {
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
-function getClaimNumber(claim: WarrantyClaim) {
+function getClaimNumber(claim: WarrantyClaimDto) {
   return claim.number || claim.id;
 }
 
-function getClaimClient(claim: WarrantyClaim, ticketById: Map<string, ServiceTicket>) {
+function getClaimClient(claim: WarrantyClaimDto, ticketById: Map<string, ServiceTicket>) {
   const ticket = claim.serviceTicketId ? ticketById.get(claim.serviceTicketId) : undefined;
-  return claim.clientName || claim.client || ticket?.client || '—';
+  return claim.customerDisplayName || claim.counterpartyName || claim.clientName || claim.client || ticket?.client || '—';
 }
 
-function getClaimResponsible(claim: WarrantyClaim) {
+function getClaimResponsible(claim: WarrantyClaimDto) {
   return claim.responsible || claim.responsibleUserName || claim.createdByUserName || claim.responsibleUserId || claim.createdByUserId || '—';
 }
 
-function getClaimReason(claim: WarrantyClaim) {
+function getClaimReason(claim: WarrantyClaimDto) {
   return claim.reason || claim.failureDescription || '—';
 }
 
-function getClaimDeadline(claim: WarrantyClaim) {
+function getClaimDeadline(claim: WarrantyClaimDto) {
   return claim.deadline || claim.responseDueDate;
 }
 
-function getClaimResult(claim: WarrantyClaim) {
+function getClaimResult(claim: WarrantyClaimDto) {
   return claim.result || claim.decision || claim.factoryResponse || '—';
 }
 
@@ -299,7 +303,7 @@ function toEditableStatus(status?: string): WarrantyClaimStatus {
     : 'factory_review';
 }
 
-function isClaimClosedThisMonth(claim: WarrantyClaim) {
+function isClaimClosedThisMonth(claim: WarrantyClaimDto) {
   const status = normalizeManagementStatus(claim.status);
   if (status !== 'closed' && status !== 'rejected') return false;
   const dateKey = (claim.closedAt || claim.updatedAt || claim.createdAt || '').slice(0, 10);
@@ -310,14 +314,14 @@ function isClaimClosedThisMonth(claim: WarrantyClaim) {
   return dateKey >= monthStart && dateKey <= todayKey;
 }
 
-function getClaimDueTone(claim: WarrantyClaim) {
+function getClaimDueTone(claim: WarrantyClaimDto) {
   if (normalizeManagementStatus(claim.status) === 'closed') return 'text-success-foreground';
   if (isResponseOverdue(claim)) return 'font-semibold text-danger-foreground';
   if (claim.status === 'factory_review' || claim.status === 'parts_shipping') return 'font-semibold text-warning-foreground';
   return 'text-muted-foreground';
 }
 
-function claimMatchesPeriod(claim: WarrantyClaim, period: string) {
+function claimMatchesPeriod(claim: WarrantyClaimDto, period: string) {
   if (period === 'all') return true;
   const createdKey = (claim.createdAt || '').slice(0, 10);
   if (!createdKey) return false;
@@ -331,7 +335,7 @@ function claimMatchesPeriod(claim: WarrantyClaim, period: string) {
   return createdKey >= startKey && createdKey <= todayKey;
 }
 
-function isResponseOverdue(claim: WarrantyClaim) {
+function isResponseOverdue(claim: WarrantyClaimDto) {
   const deadline = getClaimDeadline(claim);
   if (!deadline || ['closed', 'rejected'].includes(normalizeManagementStatus(claim.status))) return false;
   return deadline.slice(0, 10) < new Date().toISOString().slice(0, 10);
@@ -384,7 +388,21 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
 
   const filterOptions = React.useMemo(() => ({
     equipment: Array.from(new Set(claims.map(claim => claim.equipmentLabel).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'ru')),
-    clients: Array.from(new Set(claims.map(claim => getClaimClient(claim, ticketById)).filter(value => value && value !== '—'))).sort((left, right) => left.localeCompare(right, 'ru')),
+    clients: (() => {
+      const byId = new Map<string, string>();
+      claims.forEach(claim => {
+        if (!claim.counterpartyId) return;
+        byId.set(claim.counterpartyId, getClaimClient(claim, ticketById));
+      });
+      const nameCounts = new Map<string, number>();
+      byId.forEach(name => nameCounts.set(name, (nameCounts.get(name) || 0) + 1));
+      return [...byId.entries()]
+        .map(([id, name]) => ({
+          id,
+          label: (nameCounts.get(name) || 0) > 1 ? `${name} · ${id.slice(-8)}` : name,
+        }))
+        .sort((left, right) => left.label.localeCompare(right.label, 'ru'));
+    })(),
     factories: Array.from(new Set(claims.map(claim => claim.factoryName).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'ru')),
     responsible: Array.from(new Set(claims.map(getClaimResponsible).filter(value => value && value !== '—'))).sort((left, right) => left.localeCompare(right, 'ru')),
   }), [claims, ticketById]);
@@ -394,7 +412,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
     return claims
       .filter(claim => statusFilter === 'all' || normalizeManagementStatus(claim.status) === statusFilter)
       .filter(claim => equipmentFilter === 'all' || claim.equipmentLabel === equipmentFilter)
-      .filter(claim => clientFilter === 'all' || getClaimClient(claim, ticketById) === clientFilter)
+      .filter(claim => clientFilter === 'all' || claim.counterpartyId === clientFilter)
       .filter(claim => factoryFilter === 'all' || claim.factoryName === factoryFilter)
       .filter(claim => responsibleFilter === 'all' || getClaimResponsible(claim) === responsibleFilter)
       .filter(claim => claimMatchesPeriod(claim, periodFilter))
@@ -836,7 +854,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   <SelectContent>
                     <SelectItem value="all">Все клиенты</SelectItem>
                     {filterOptions.clients.map(client => (
-                      <SelectItem key={client} value={client}>{client}</SelectItem>
+                      <SelectItem key={client.id} value={client.id}>{client.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

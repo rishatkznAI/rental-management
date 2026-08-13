@@ -46,6 +46,16 @@ test('reclamations status filter normalizes legacy statuses only for display', (
   }
 });
 
+test('reclamations customer display and filtering use canonical Counterparty IDs', () => {
+  assert.match(warrantyServiceSource, /counterpartyId\?: string/);
+  assert.match(warrantyServiceSource, /params\.set\('counterpartyId'/);
+  assert.match(warrantyTabSource, /claim\.counterpartyId === clientFilter/);
+  assert.match(warrantyTabSource, /key=\{client\.id\} value=\{client\.id\}/);
+  assert.match(warrantyTabSource, /id\.slice\(-8\)/);
+  assert.match(warrantyTabSource, /claim\.customerDisplayName \|\| claim\.counterpartyName/);
+  assert.doesNotMatch(warrantyTabSource, /getClaimClient\(claim, ticketById\) === clientFilter/);
+});
+
 test('reclamations expose required KPIs including overdue and closed this month', () => {
   for (const label of ['Активные', 'Новые', 'На рассмотрении', 'Просрочены', 'Закрыты за месяц']) {
     assert.match(warrantyTabSource, new RegExp(label));

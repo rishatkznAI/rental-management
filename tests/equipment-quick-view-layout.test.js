@@ -61,10 +61,10 @@ test('quick view tabs are stateful and render distinct sections', () => {
 test('desktop equipment workspace keeps registry and detail panel as sibling columns', () => {
   assert.match(equipmentPageSource, /data-testid="equipment-workspace-grid"/);
   assert.match(equipmentPageSource, /equipment-workspace-grid grid min-w-0 grid-cols-1 gap-3 overflow-x-hidden/);
-  assert.match(equipmentPageSource, /xl:grid-cols-\[minmax\(0,1fr\)_minmax\(360px,430px\)\]/);
+  assert.match(equipmentPageSource, /2xl:grid-cols-\[minmax\(0,1fr\)_minmax\(360px,430px\)\]/);
   assert.match(equipmentPageSource, /data-testid="equipment-registry-workspace"/);
   assert.match(equipmentPageSource, /data-testid="equipment-quick-view-slot"/);
-  assert.match(equipmentPageSource, /className="min-w-0 overflow-hidden xl:min-w-\[360px\] xl:max-w-\[430px\]"/);
+  assert.match(equipmentPageSource, /className="min-w-0 overflow-hidden 2xl:min-w-\[360px\] 2xl:max-w-\[430px\]"/);
 
   const workspaceIndex = equipmentPageSource.indexOf('data-testid="equipment-workspace-grid"');
   const registryIndex = equipmentPageSource.indexOf('data-testid="equipment-registry-workspace"', workspaceIndex);
@@ -97,6 +97,8 @@ test('equipment quick view layout avoids page horizontal overflow at common smok
   assert.match(equipmentPageSource, /<div className="min-w-0" data-testid="equipment-registry-workspace">/);
   assert.match(equipmentPageSource, /className="hidden min-w-0 overflow-hidden rounded-2xl/);
   assert.match(registryTableSource, /<div className="app-scroll-fade-x min-w-0 overflow-x-auto">/);
+  assert.match(registryTableSource, /min-w-\[1280px\]/);
+  assert.match(registryTableSource, /sticky right-0[\s\S]*Действия/);
   assert.match(quickViewSource, /max-h-\[calc\(100vh-2rem\)\]/);
   assert.match(quickViewSource, /w-full min-w-0 max-w-full/);
 });

@@ -10,12 +10,18 @@ test('shared motion system exposes restrained tokens and reduced-motion support'
   assert.match(themeSource, /--motion-duration-fast:\s*160ms/);
   assert.match(themeSource, /--motion-duration-normal:\s*220ms/);
   assert.match(themeSource, /--motion-duration-slow:\s*320ms/);
+  assert.match(themeSource, /--motion-duration-micro:\s*120ms/);
+  assert.match(themeSource, /--motion-duration-ui:\s*200ms/);
+  assert.match(themeSource, /--motion-duration-emphasis:\s*400ms/);
   assert.match(themeSource, /--motion-scale-subtle-from:\s*0\.98/);
   assert.doesNotMatch(themeSource, /--motion-modal-scale-from:\s*0\.9[0-7]/);
   assert.match(themeSource, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(themeSource, /\.app-page-transition/);
   assert.match(themeSource, /\.app-demo-highlight/);
   assert.match(themeSource, /app-demo-highlight-pulse/);
+  assert.match(themeSource, /rentcore-dashboard-enter/);
+  assert.match(themeSource, /\.app-skeleton::after/);
+  assert.match(animationsSource, /usePrefersReducedMotion/);
 });
 
 test('route layout applies page motion and opt-in demo presentation motion only visually', () => {

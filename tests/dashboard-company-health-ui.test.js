@@ -143,8 +143,9 @@ test('dashboard company health exposes weighted score explanation', () => {
     assert.match(block, new RegExp(formulaPart));
   }
 
-  assert.match(themeSource, /\.company-health-explanation-popover\s*\{[\s\S]*position: absolute;[\s\S]*bottom: 9px;[\s\S]*overflow: auto;/);
-  assert.match(themeSource, /@container \(max-width: 520px\)\s*\{[\s\S]*\.company-health-explanation-popover\s*\{[\s\S]*top: 148px;[\s\S]*bottom: 9px;/);
+  assert.match(themeSource, /\.company-health-explanation-popover\s*\{[\s\S]*position: relative;[\s\S]*width: 100%;[\s\S]*max-height: min\(520px, 56vh\);[\s\S]*overflow: auto;/);
+  assert.match(themeSource, /@container \(max-width: 520px\)\s*\{[\s\S]*\.company-health-explanation-popover\s*\{[\s\S]*width: 100%;[\s\S]*max-height: min\(480px, 60vh\);/);
+  assert.doesNotMatch(themeSource, /\.company-health-explanation-popover\s*\{[\s\S]{0,180}position: absolute/);
 });
 
 test('dashboard Company Health Finance explanation separates factual amounts from missing plans', () => {

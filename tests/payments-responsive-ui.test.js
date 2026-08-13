@@ -16,9 +16,20 @@ test('payments page preserves desktop table while exposing mobile cards', () => 
   assert.match(source, /data-payments-responsive-root="true"/);
   assert.match(source, /overflow-x-clip/);
   assert.match(source, /data-payment-desktop-table="true" className="hidden overflow-x-auto md:block"/);
-  assert.match(source, /<table className="min-w-\[1040px\] w-full border-collapse text-sm">/);
+  assert.match(source, /<table className="min-w-\[1000px\] w-full border-collapse text-sm">/);
+  assert.match(source, /sticky right-0[\s\S]*aria-label="Действия"/);
   assert.match(source, /data-payment-mobile-list="true" className="grid gap-3 p-3 md:hidden"/);
   assert.match(source, /data-payment-mobile-card="true"/);
+});
+
+test('payments page uses dark-safe semantic surfaces and adaptive KPI geometry', () => {
+  assert.match(source, /bg-background p-4 text-foreground/);
+  assert.match(source, /grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5/);
+  assert.match(source, /border border-border bg-card/);
+  assert.match(source, /bg-input-background/);
+  assert.match(source, /paymentsQuery\.isLoading/);
+  assert.match(source, /paymentsQuery\.isError/);
+  assert.doesNotMatch(source, /!bg-white|!bg-slate|!text-slate/);
 });
 
 test('payment mobile cards expose safe office payment fields and actions', () => {
@@ -68,6 +79,7 @@ test('payment detail allocation panel has mobile card structure and desktop tabl
 test('payment forms and empty state are mobile-safe', () => {
   assert.match(source, /className="grid gap-3 sm:grid-cols-2"/);
   assert.match(source, /max-h-\[min\(92dvh,calc\(100dvh-2rem\)\)\]/);
+  assert.match(source, /className="app-animate-modal relative z-10/);
   assert.match(source, /overflow-y-auto px-6 py-5/);
   assert.match(source, /Сбросить фильтры/);
   assert.match(source, /pagination\.setFilters\(\{ counterpartyId: 'all', status: 'all' \}\)/);

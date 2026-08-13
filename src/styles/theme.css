@@ -2,62 +2,64 @@
 
 :root {
   --font-size: 16px;
-  --background: #f3f6f1;
-  --foreground: #121a16;
-  --card: rgba(255, 255, 255, 0.94);
-  --card-foreground: #121a16;
+  --background: #f2f5f8;
+  --foreground: #111827;
+  --card: rgba(255, 255, 255, 0.96);
+  --card-foreground: #111827;
   --popover: #ffffff;
-  --popover-foreground: #121a16;
-  --primary: #82c91e;
-  --primary-hover: #6fb318;
-  --primary-foreground: #071006;
-  --secondary: #e8efe4;
-  --secondary-foreground: #263326;
-  --muted: #e8eee5;
-  --muted-foreground: #657066;
-  --accent: #edf8dc;
-  --accent-foreground: #1d351a;
+  --popover-foreground: #111827;
+  --primary: #0284c7;
+  --primary-hover: #0369a1;
+  --primary-foreground: #f8fcff;
+  --secondary: #e7edf3;
+  --secondary-foreground: #1f2937;
+  --muted: #e8edf3;
+  --muted-foreground: #64748b;
+  --accent: rgba(2, 132, 199, 0.10);
+  --accent-foreground: #0c4a6e;
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
-  --border: rgba(71, 85, 70, 0.18);
-  --input: rgba(71, 85, 70, 0.2);
-  --input-background: rgba(255, 255, 255, 0.92);
+  --border: rgba(15, 23, 42, 0.10);
+  --input: rgba(15, 23, 42, 0.14);
+  --input-background: rgba(255, 255, 255, 0.94);
   --switch-background: #cbd5e1;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: rgba(130, 201, 30, 0.36);
-  --chart-1: #82c91e;
-  --chart-2: #2dd4bf;
-  --chart-3: #38bdf8;
+  --ring: rgba(2, 132, 199, 0.35);
+  --chart-1: #0284c7;
+  --chart-2: #06b6d4;
+  --chart-3: #14b8a6;
   --chart-4: #f59e0b;
   --chart-5: #fb7185;
-  --radius: 1rem;
-  --sidebar: #f7faf4;
-  --sidebar-foreground: #172117;
-  --sidebar-primary: #6fb318;
-  --sidebar-primary-foreground: #071006;
-  --sidebar-accent: rgba(130, 201, 30, 0.12);
-  --sidebar-accent-foreground: #172117;
-  --sidebar-border: rgba(71, 85, 70, 0.16);
-  --sidebar-ring: rgba(130, 201, 30, 0.38);
-  --rc-app-bg: #f3f6f1;
-  --rc-graphite-950: #060807;
-  --rc-graphite-900: #0b0f0d;
-  --rc-graphite-850: #101712;
-  --rc-graphite-800: #151f19;
-  --rc-surface: rgba(255, 255, 255, 0.94);
+  --radius: 0.5rem;
+  --sidebar: #f7f9fb;
+  --sidebar-foreground: #172033;
+  --sidebar-primary: #0284c7;
+  --sidebar-primary-foreground: #f8fcff;
+  --sidebar-accent: rgba(2, 132, 199, 0.08);
+  --sidebar-accent-foreground: #172033;
+  --sidebar-border: rgba(15, 23, 42, 0.09);
+  --sidebar-ring: rgba(2, 132, 199, 0.36);
+  --rc-app-bg: #f2f5f8;
+  --rc-graphite-950: #080c12;
+  --rc-graphite-900: #0b111a;
+  --rc-graphite-850: #101822;
+  --rc-graphite-800: #172230;
+  --rc-surface: rgba(255, 255, 255, 0.96);
   --rc-surface-elevated: rgba(255, 255, 255, 0.98);
-  --rc-surface-subtle: rgba(232, 238, 229, 0.88);
-  --rc-topbar: rgba(250, 253, 247, 0.9);
-  --rc-border: rgba(71, 85, 70, 0.18);
-  --rc-border-strong: rgba(71, 85, 70, 0.28);
-  --rc-text-primary: #121a16;
-  --rc-text-secondary: #465246;
-  --rc-text-muted: #657066;
-  --rc-accent: #82c91e;
-  --rc-accent-strong: #6fb318;
-  --rc-accent-soft: rgba(130, 201, 30, 0.13);
-  --rc-accent-border: rgba(130, 201, 30, 0.34);
+  --rc-surface-subtle: rgba(231, 237, 243, 0.88);
+  --rc-topbar: rgba(247, 249, 251, 0.92);
+  --rc-border: rgba(15, 23, 42, 0.10);
+  --rc-border-strong: rgba(15, 23, 42, 0.16);
+  --rc-hover: rgba(2, 132, 199, 0.06);
+  --rc-active: rgba(2, 132, 199, 0.10);
+  --rc-text-primary: #111827;
+  --rc-text-secondary: #475569;
+  --rc-text-muted: #64748b;
+  --rc-accent: #0284c7;
+  --rc-accent-strong: #0369a1;
+  --rc-accent-soft: rgba(2, 132, 199, 0.10);
+  --rc-accent-border: rgba(2, 132, 199, 0.28);
   --success: #22c55e;
   --success-foreground: #14532d;
   --success-soft: rgba(34, 197, 94, 0.14);
@@ -71,6 +73,9 @@
   --info-foreground: #0c4a6e;
   --info-soft: rgba(14, 165, 233, 0.14);
   --motion-duration-instant: 1ms;
+  --motion-duration-micro: 120ms;
+  --motion-duration-ui: 200ms;
+  --motion-duration-emphasis: 400ms;
   --motion-duration-fast: 160ms;
   --motion-duration-normal: 220ms;
   --motion-duration-slow: 320ms;
@@ -93,56 +98,58 @@
 }
 
 .dark {
-  --background: #070a08;
-  --foreground: #f2f7ef;
-  --card: rgba(18, 25, 21, 0.82);
-  --card-foreground: #f2f7ef;
-  --popover: #111914;
-  --popover-foreground: #f2f7ef;
-  --primary: #b7f23a;
-  --primary-hover: #a5dc2f;
-  --primary-foreground: #071006;
-  --secondary: rgba(35, 48, 40, 0.9);
-  --secondary-foreground: #edf6e9;
-  --muted: rgba(34, 45, 39, 0.82);
-  --muted-foreground: #99a797;
-  --accent: rgba(183, 242, 58, 0.12);
-  --accent-foreground: #effddb;
+  --background: #080c12;
+  --foreground: #f4f7fb;
+  --card: rgba(15, 22, 32, 0.94);
+  --card-foreground: #f4f7fb;
+  --popover: #141c27;
+  --popover-foreground: #f4f7fb;
+  --primary: #38bdf8;
+  --primary-hover: #60c9fa;
+  --primary-foreground: #04131d;
+  --secondary: rgba(24, 34, 47, 0.94);
+  --secondary-foreground: #e5edf6;
+  --muted: rgba(26, 36, 50, 0.92);
+  --muted-foreground: #8f9cac;
+  --accent: rgba(56, 189, 248, 0.10);
+  --accent-foreground: #dff6ff;
   --destructive: #fb7185;
   --destructive-foreground: #ffffff;
-  --border: rgba(229, 255, 212, 0.105);
-  --input: rgba(67, 84, 72, 0.42);
-  --input-background: rgba(14, 20, 17, 0.86);
-  --ring: rgba(183, 242, 58, 0.42);
+  --border: rgba(255, 255, 255, 0.075);
+  --input: rgba(255, 255, 255, 0.12);
+  --input-background: rgba(12, 18, 27, 0.96);
+  --ring: rgba(56, 189, 248, 0.42);
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --chart-1: #b7f23a;
-  --chart-2: #5eead4;
-  --chart-3: #38bdf8;
+  --chart-1: #38bdf8;
+  --chart-2: #22d3ee;
+  --chart-3: #2dd4bf;
   --chart-4: #fbbf24;
   --chart-5: #fb7185;
-  --sidebar: #070a08;
-  --sidebar-foreground: #f2f7ef;
-  --sidebar-primary: #b7f23a;
-  --sidebar-primary-foreground: #071006;
-  --sidebar-accent: rgba(183, 242, 58, 0.105);
-  --sidebar-accent-foreground: #f2f7ef;
-  --sidebar-border: rgba(229, 255, 212, 0.105);
-  --sidebar-ring: rgba(183, 242, 58, 0.45);
-  --rc-app-bg: #070a08;
-  --rc-surface: rgba(18, 25, 21, 0.82);
-  --rc-surface-elevated: rgba(25, 35, 29, 0.92);
-  --rc-surface-subtle: rgba(33, 45, 38, 0.72);
-  --rc-topbar: rgba(4, 9, 14, 0.86);
-  --rc-border: rgba(229, 255, 212, 0.105);
-  --rc-border-strong: rgba(229, 255, 212, 0.18);
-  --rc-text-primary: #f2f7ef;
-  --rc-text-secondary: #c6d2c3;
-  --rc-text-muted: #99a797;
-  --rc-accent: #b7f23a;
-  --rc-accent-strong: #a5dc2f;
-  --rc-accent-soft: rgba(183, 242, 58, 0.13);
-  --rc-accent-border: rgba(183, 242, 58, 0.34);
+  --sidebar: #090e15;
+  --sidebar-foreground: #e9eef5;
+  --sidebar-primary: #38bdf8;
+  --sidebar-primary-foreground: #04131d;
+  --sidebar-accent: rgba(56, 189, 248, 0.085);
+  --sidebar-accent-foreground: #f4f7fb;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --sidebar-ring: rgba(56, 189, 248, 0.44);
+  --rc-app-bg: #080c12;
+  --rc-surface: rgba(15, 22, 32, 0.94);
+  --rc-surface-elevated: rgba(20, 29, 41, 0.98);
+  --rc-surface-subtle: rgba(24, 34, 47, 0.88);
+  --rc-topbar: rgba(8, 12, 18, 0.90);
+  --rc-border: rgba(255, 255, 255, 0.075);
+  --rc-border-strong: rgba(255, 255, 255, 0.13);
+  --rc-hover: rgba(56, 189, 248, 0.065);
+  --rc-active: rgba(56, 189, 248, 0.11);
+  --rc-text-primary: #f4f7fb;
+  --rc-text-secondary: #b6c0ce;
+  --rc-text-muted: #8f9cac;
+  --rc-accent: #38bdf8;
+  --rc-accent-strong: #60c9fa;
+  --rc-accent-soft: rgba(56, 189, 248, 0.10);
+  --rc-accent-border: rgba(56, 189, 248, 0.30);
   --success: #4ade80;
   --success-foreground: #bbf7d0;
   --success-soft: rgba(74, 222, 128, 0.15);
@@ -214,21 +221,20 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: 'Geist', sans-serif;
+    font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-feature-settings: "tnum" 1, "ss01" 1;
+    font-variant-numeric: tabular-nums;
     overflow-x: clip;
     background-image:
-      linear-gradient(135deg, color-mix(in srgb, var(--primary) 8%, transparent), transparent 34%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.72), transparent 36%),
-      repeating-linear-gradient(90deg, transparent 0 39px, color-mix(in srgb, var(--foreground) 4%, transparent) 39px 40px);
+      radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--primary) 5%, transparent), transparent 30rem),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.5), transparent 24rem);
     background-attachment: fixed;
   }
 
   html.dark body {
     background-image:
-      linear-gradient(135deg, rgba(183, 242, 58, 0.085), transparent 32%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.038), transparent 36%),
-      linear-gradient(115deg, rgba(56, 189, 248, 0.052), transparent 58%),
-      repeating-linear-gradient(90deg, transparent 0 39px, rgba(229, 255, 212, 0.018) 39px 40px);
+      radial-gradient(circle at 10% 0%, rgba(56, 189, 248, 0.055), transparent 31rem),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 24rem);
   }
 
   /**
@@ -264,21 +270,21 @@
   }
 
   h1 {
-    font-size: var(--text-2xl);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
+    font-size: 1.625rem;
+    font-weight: 600;
+    line-height: 1.2;
   }
 
   h2 {
-    font-size: var(--text-xl);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1.3;
   }
 
   h3 {
-    font-size: var(--text-lg);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.35;
   }
 
   h4 {
@@ -297,6 +303,13 @@
     font-size: var(--text-base);
     font-weight: var(--font-weight-medium);
     line-height: 1.5;
+    transition-duration: var(--motion-duration-micro);
+    transition-timing-function: var(--motion-ease-standard);
+  }
+
+  button:not(:disabled):active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    transform: scale(0.98);
   }
 
   input {
@@ -321,15 +334,13 @@
 
 @layer components {
   .app-shell-title {
-    font-family: 'Manrope', sans-serif;
-    letter-spacing: 0;
-    font-weight: 800;
+    font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: -0.015em;
+    font-weight: 650;
   }
 
   .rentcore-industrial-shell {
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--background) 94%, var(--primary) 6%) 0%, var(--background) 44%),
-      var(--background);
+    background: var(--background);
   }
 
   .rentcore-industrial-shell main {
@@ -341,7 +352,7 @@
   }
 
   .app-page-header {
-    @apply flex flex-col gap-3 rounded-2xl border border-border bg-card/70 px-4 py-4 shadow-[0_24px_70px_-54px_rgba(0,0,0,0.42)] backdrop-blur-xl sm:flex-row sm:items-start sm:justify-between sm:px-5;
+    @apply flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5;
   }
 
   .app-page-eyebrow {
@@ -349,9 +360,9 @@
   }
 
   .app-page-title {
-    @apply text-2xl font-extrabold leading-tight text-foreground sm:text-3xl;
-    font-family: 'Manrope', sans-serif;
-    letter-spacing: 0;
+    @apply text-2xl font-semibold leading-tight text-foreground sm:text-[26px];
+    font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: -0.015em;
   }
 
   .app-page-subtitle {
@@ -359,17 +370,39 @@
   }
 
   .app-panel {
-    @apply rounded-2xl border border-border bg-card text-card-foreground shadow-[0_24px_70px_-54px_rgba(0,0,0,0.45)] backdrop-blur-xl;
+    @apply rounded-lg border border-border bg-card text-card-foreground;
   }
 
   .app-panel-elevated {
     background: var(--rc-surface-elevated);
     border: 1px solid var(--rc-border-strong);
-    box-shadow: 0 30px 86px -62px rgba(0, 0, 0, 0.7);
+    box-shadow: none;
   }
 
   .app-kpi-card {
-    @apply rounded-2xl border border-border bg-card/85 text-card-foreground shadow-[0_24px_70px_-58px_rgba(0,0,0,0.5)] backdrop-blur-xl transition duration-200 hover:-translate-y-0.5 hover:border-primary/35 hover:bg-card;
+    @apply rounded-lg border border-border bg-card/85 text-card-foreground transition-colors duration-[var(--motion-duration-ui)] hover:border-primary/30 hover:bg-card;
+  }
+
+  .rentcore-sidebar {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--sidebar) 97%, var(--primary) 3%), var(--sidebar));
+    box-shadow: none;
+  }
+
+  .app-skeleton {
+    position: relative;
+    overflow: hidden;
+    border-radius: 6px;
+    background: var(--muted);
+  }
+
+  .app-skeleton::after {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--foreground) 7%, transparent), transparent);
+    content: "";
+    transform: translateX(-100%);
+    animation: app-skeleton-shimmer 1.35s var(--motion-ease-standard) infinite;
   }
 
   .rentcore-command-screen {
@@ -829,12 +862,11 @@
   }
 
   .company-health-explanation-popover {
-    position: absolute;
-    top: 72px;
-    right: 9px;
-    bottom: 9px;
+    position: relative;
+    inset: auto;
     z-index: 6;
-    width: min(430px, calc(100% - 18px));
+    width: 100%;
+    max-height: min(520px, 56vh);
     box-sizing: border-box;
     overflow: auto;
     border: 1px solid rgba(226, 255, 232, 0.14);
@@ -844,6 +876,7 @@
     box-shadow:
       0 22px 64px -42px rgba(0, 0, 0, 0.96),
       inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    margin-top: 6px;
     padding: 10px;
   }
 
@@ -976,11 +1009,9 @@
     }
 
     .company-health-explanation-popover {
-      top: 148px;
-      left: 9px;
-      right: 9px;
-      bottom: 9px;
-      width: auto;
+      inset: auto;
+      width: 100%;
+      max-height: min(480px, 60vh);
     }
 
     .company-health-signals-grid {
@@ -1654,7 +1685,7 @@
   }
 
   .app-filter-bar {
-    @apply flex flex-col gap-3 rounded-2xl border border-border bg-card/70 p-3 shadow-[0_18px_60px_-52px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:flex-row sm:flex-wrap sm:items-center;
+    @apply flex flex-col gap-3 rounded-lg border border-border bg-card/70 p-3 sm:flex-row sm:flex-wrap sm:items-center;
   }
 
   .app-button-ghost {
@@ -1667,7 +1698,7 @@
 
   .app-button-primary {
     @apply border border-primary/30 bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)];
-    box-shadow: 0 18px 42px -28px color-mix(in srgb, var(--primary) 72%, transparent);
+    box-shadow: none;
   }
 
   .app-status-pill {
@@ -1730,6 +1761,15 @@
 
   .dark .app-scroll-fade-x {
     --app-scroll-shadow: rgba(255, 255, 255, 0.18);
+  }
+
+  .app-scrollbar-none {
+    scrollbar-width: none;
+    scrollbar-gutter: auto;
+  }
+
+  .app-scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 
   .rentals-action-strip {
@@ -1828,29 +1868,25 @@
 
   .dark.rentcore-industrial-ui [data-slot="card"],
   .dark.rentcore-industrial-ui .app-panel {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 42%),
-      var(--rc-surface);
+    background: var(--rc-surface);
     border-color: var(--rc-border);
-    box-shadow: 0 28px 82px -62px rgba(0, 0, 0, 0.9);
+    box-shadow: none;
   }
 
   .dark.rentcore-industrial-ui [data-slot="dialog-content"],
   .dark.rentcore-industrial-ui [data-slot="sheet-content"],
   .dark.rentcore-industrial-ui [data-slot="select-content"] {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 38%),
-      var(--rc-surface-elevated);
+    background: var(--rc-surface-elevated);
     border-color: var(--rc-border-strong);
     color: var(--foreground);
   }
 
   .dark.rentcore-industrial-ui [data-slot="table-container"] {
-    border-radius: 1rem;
+    border-radius: 0.5rem;
   }
 
   .dark.rentcore-industrial-ui [data-slot="table-header"] {
-    background: rgba(229, 255, 212, 0.045);
+    background: color-mix(in srgb, var(--muted) 72%, transparent);
   }
 
   .dark.rentcore-industrial-ui .bg-white,
@@ -2202,38 +2238,31 @@
 .dark .rentcore-command-screen,
 body.rentcore-dashboard-reference-mode .rentcore-command-screen {
   background:
-    radial-gradient(circle at 12% 0%, rgba(69, 240, 208, 0.09), transparent 28rem),
-    radial-gradient(circle at 82% 4%, rgba(163, 255, 53, 0.075), transparent 30rem),
-    linear-gradient(135deg, #07100f 0%, #0a1418 44%, #08101a 100%) !important;
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--primary) 6%, transparent), transparent 30rem),
+    var(--background) !important;
 }
 
 .rentcore-command-screen::before,
 .dark .rentcore-command-screen::before {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 22rem),
-    radial-gradient(circle at 50% 18%, rgba(93, 220, 255, 0.055), transparent 34rem) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--foreground) 2.5%, transparent), transparent 24rem) !important;
   opacity: 1 !important;
 }
 
 .rentcore-command-shell,
 .dark .rentcore-command-shell,
 body.rentcore-dashboard-reference-mode .rentcore-command-shell {
-  background:
-    linear-gradient(145deg, rgba(12, 25, 27, 0.76), rgba(5, 11, 17, 0.82)) !important;
-  border-color: rgba(163, 255, 53, 0.13) !important;
-  box-shadow:
-    0 34px 100px -72px rgba(0, 0, 0, 0.98),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
-  backdrop-filter: blur(18px) !important;
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
 }
 
 .rentcore-command-board,
 .dark .rentcore-command-board,
 body.rentcore-dashboard-reference-mode .rentcore-command-board {
-  background:
-    linear-gradient(135deg, rgba(21, 38, 39, 0.48), rgba(8, 17, 24, 0.62)) !important;
-  border-color: rgba(163, 255, 53, 0.11) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
 }
 
 .rentcore-command-header,
@@ -2246,29 +2275,23 @@ body.rentcore-dashboard-reference-mode .rentcore-command-header,
 body.rentcore-dashboard-reference-mode .rentcore-command-panel,
 body.rentcore-dashboard-reference-mode .rentcore-command-analytics {
   border-radius: 8px !important;
-  background:
-    linear-gradient(145deg, rgba(24, 38, 39, 0.88), rgba(11, 20, 27, 0.92)) !important;
-  border: 1px solid rgba(226, 255, 232, 0.09) !important;
-  box-shadow:
-    0 24px 70px -58px rgba(0, 0, 0, 0.86),
-    inset 0 1px 0 rgba(255, 255, 255, 0.065) !important;
-  backdrop-filter: blur(14px) !important;
+  background: var(--rc-surface) !important;
+  border: 1px solid var(--rc-border) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
 }
 
 .rentcore-command-header,
 .dark .rentcore-command-header,
 body.rentcore-dashboard-reference-mode .rentcore-command-header {
-  background:
-    radial-gradient(circle at 18% 0%, rgba(69, 240, 208, 0.14), transparent 34%),
-    linear-gradient(135deg, rgba(26, 44, 43, 0.9), rgba(9, 17, 25, 0.94)) !important;
+  background: color-mix(in srgb, var(--rc-surface) 88%, transparent) !important;
 }
 
 .rentcore-command-panel,
 .dark .rentcore-command-panel,
 body.rentcore-dashboard-reference-mode .rentcore-command-panel {
-  background:
-    radial-gradient(circle at 0% 0%, rgba(255, 107, 107, 0.11), transparent 34%),
-    linear-gradient(145deg, rgba(25, 36, 39, 0.9), rgba(11, 18, 24, 0.94)) !important;
+  background: var(--rc-surface-elevated) !important;
+  border-color: color-mix(in srgb, var(--danger) 20%, var(--rc-border)) !important;
 }
 
 .rentcore-command-kpi,
@@ -2281,19 +2304,16 @@ body.rentcore-dashboard-reference-mode .rentcore-command-kpi,
 body.rentcore-dashboard-reference-mode .rentcore-command-card,
 body.rentcore-dashboard-reference-mode .rentcore-command-signal {
   border-radius: 8px !important;
-  background:
-    linear-gradient(145deg, rgba(30, 47, 48, 0.88), rgba(13, 23, 30, 0.9)) !important;
-  border: 1px solid rgba(226, 255, 232, 0.085) !important;
-  box-shadow:
-    0 18px 50px -44px rgba(0, 0, 0, 0.82),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  background: var(--rc-surface-subtle) !important;
+  border: 1px solid var(--rc-border) !important;
+  box-shadow: none !important;
 }
 
 .rentcore-command-kpi::after,
 .rentcore-command-card::after,
 .rentcore-command-signal::after {
-  display: block !important;
-  opacity: 0.45 !important;
+  display: none !important;
+  opacity: 0 !important;
 }
 
 .rentcore-radial-overview,
@@ -2302,12 +2322,9 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
   min-height: 156px !important;
   height: 156px !important;
   overflow: hidden !important;
-  border-radius: 22px !important;
-  background:
-    radial-gradient(circle at 24% 4%, rgba(217, 249, 157, 0.18), transparent 34%),
-    radial-gradient(circle at 82% 10%, rgba(125, 211, 252, 0.13), transparent 34%),
-    linear-gradient(145deg, rgba(13, 25, 29, 0.92), rgba(4, 10, 18, 0.96)) !important;
-  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--rc-surface-subtle) !important;
+  border: 1px solid var(--rc-border) !important;
 }
 
 .rentcore-radial-overview .rentcore-health-svg,
@@ -2420,6 +2437,21 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
   }
 }
 
+@keyframes app-skeleton-shimmer {
+  to { transform: translateX(100%); }
+}
+
+@keyframes rentcore-dashboard-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Dashboard layout: one 12-column track system across KPI and command cards. */
 .rentcore-dashboard-grid {
   display: grid;
@@ -2440,9 +2472,13 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   grid-auto-rows: 1fr;
-  gap: 14px;
+  gap: 0;
   align-items: stretch;
   min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--rc-border);
+  border-radius: 8px;
+  background: var(--rc-surface);
 }
 
 .rentcore-dashboard-kpi-grid > * {
@@ -2450,6 +2486,21 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
   min-width: 0;
   width: 100%;
   height: 100%;
+}
+
+.rentcore-dashboard-kpi-grid .rentcore-command-kpi,
+.dark .rentcore-dashboard-kpi-grid .rentcore-command-kpi,
+body.rentcore-dashboard-reference-mode .rentcore-dashboard-kpi-grid .rentcore-command-kpi {
+  border: 0 !important;
+  border-top: 1px solid var(--rc-border) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.rentcore-dashboard-kpi-grid > :first-child .rentcore-command-kpi,
+.rentcore-dashboard-kpi-grid > .rentcore-command-kpi:first-child {
+  border-top: 0 !important;
 }
 
 .rentcore-dashboard-secondary,
@@ -2469,11 +2520,11 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
 }
 
 .rentcore-dashboard-signals { order: 2; }
-.rentcore-dashboard-tasks { order: 3; }
-.rentcore-dashboard-month { order: 4; }
-.rentcore-dashboard-health { order: 5; }
-.rentcore-dashboard-aging { order: 6; }
-.rentcore-dashboard-fleet { order: 7; }
+.rentcore-dashboard-month { order: 3; }
+.rentcore-dashboard-aging { order: 4; }
+.rentcore-dashboard-tasks { order: 5; }
+.rentcore-dashboard-fleet { order: 6; }
+.rentcore-dashboard-health { order: 7; }
 
 .rentcore-dashboard-health > [data-testid="dashboard-company-health"] {
   width: 100%;
@@ -2496,51 +2547,156 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
   .rentcore-dashboard-kpi-grid > * {
     grid-column: span 6 / span 6;
   }
+
+  .rentcore-dashboard-kpi-grid .rentcore-command-kpi:nth-child(2) {
+    border-top: 0 !important;
+  }
+
+  .rentcore-dashboard-kpi-grid .rentcore-command-kpi:nth-child(odd) {
+    border-right: 1px solid var(--rc-border) !important;
+  }
 }
 
 @media (min-width: 1200px) {
   .rentcore-dashboard-kpi-grid > * {
-    grid-column: span 4 / span 4;
+    grid-column: span 3 / span 3;
   }
 
   .rentcore-dashboard-signals,
-  .rentcore-dashboard-tasks {
+  .rentcore-dashboard-month {
     grid-column: span 6 / span 6;
   }
 
-  .rentcore-dashboard-month,
   .rentcore-dashboard-health {
     grid-column: span 12 / span 12;
   }
 
+  .rentcore-dashboard-tasks,
   .rentcore-dashboard-aging,
   .rentcore-dashboard-fleet {
-    grid-column: span 6 / span 6;
+    grid-column: span 4 / span 4;
+  }
+
+  .rentcore-dashboard-kpi-grid .rentcore-command-kpi {
+    border-top: 0 !important;
+    border-right: 1px solid var(--rc-border) !important;
+  }
+
+  .rentcore-dashboard-kpi-grid .rentcore-command-kpi:last-child {
+    border-right: 0 !important;
   }
 }
 
 @media (min-width: 1600px) {
-  .rentcore-dashboard-kpi-grid > * {
-    grid-column: span 2 / span 2;
-  }
-
   .rentcore-dashboard-signals {
-    grid-column: span 4 / span 4;
-  }
-
-  .rentcore-dashboard-tasks,
-  .rentcore-dashboard-fleet {
-    grid-column: span 3 / span 3;
-  }
-
-  .rentcore-dashboard-month,
-  .rentcore-dashboard-health {
     grid-column: span 5 / span 5;
   }
 
+  .rentcore-dashboard-month {
+    grid-column: span 7 / span 7;
+  }
+
+  .rentcore-dashboard-health {
+    grid-column: span 12 / span 12;
+  }
+
+  .rentcore-dashboard-tasks,
+  .rentcore-dashboard-fleet,
   .rentcore-dashboard-aging {
     grid-column: span 4 / span 4;
   }
+}
+
+.rentcore-dashboard-kpi-grid > :first-child:nth-last-child(3),
+.rentcore-dashboard-kpi-grid > :first-child:nth-last-child(3) ~ * {
+  grid-column: span 4 / span 4;
+}
+
+.rentcore-dashboard-kpi-grid > :first-child:nth-last-child(2),
+.rentcore-dashboard-kpi-grid > :first-child:nth-last-child(2) ~ * {
+  grid-column: span 6 / span 6;
+}
+
+.rentcore-dashboard-kpi-grid > :only-child {
+  grid-column: span 12 / span 12;
+}
+
+.rentcore-dashboard-reveal {
+  animation: rentcore-dashboard-enter var(--motion-duration-emphasis) var(--motion-ease-emphasized) both;
+  will-change: opacity, transform;
+}
+
+.rentcore-dashboard-reveal-header { animation-delay: 0ms; }
+.rentcore-dashboard-reveal-kpi { animation-delay: calc(35ms + var(--dashboard-sequence-index, 0) * 40ms); }
+.rentcore-dashboard-reveal-chart { animation-delay: 160ms; }
+.rentcore-dashboard-reveal-attention { animation-delay: 210ms; }
+.rentcore-dashboard-reveal-operational { animation-delay: 250ms; }
+
+.company-health-premium,
+.dark .company-health-premium,
+body.rentcore-dashboard-reference-mode .company-health-premium {
+  border: 1px solid var(--rc-border) !important;
+  border-radius: 8px !important;
+  background: var(--rc-surface) !important;
+  box-shadow: none !important;
+}
+
+.company-health-premium::before {
+  display: none !important;
+}
+
+.company-health-pill,
+.company-health-status-row,
+.company-health-completeness-strip {
+  border-color: var(--rc-border) !important;
+  background: var(--rc-surface-subtle) !important;
+  box-shadow: none !important;
+}
+
+.company-health-status-row,
+.company-health-explanation-popover,
+.company-health-signal {
+  border-radius: 8px !important;
+}
+
+.company-health-explain-button {
+  border-color: var(--rc-accent-border) !important;
+  background: var(--rc-accent-soft) !important;
+  box-shadow: none !important;
+}
+
+.company-health-explanation-popover {
+  border-color: var(--rc-border-strong) !important;
+  background: var(--rc-surface-elevated) !important;
+  box-shadow: none !important;
+}
+
+.company-health-explanation-row,
+.company-health-signal,
+.dark .company-health-signal {
+  border-color: var(--rc-border) !important;
+  background: var(--rc-surface-subtle) !important;
+  box-shadow: none !important;
+}
+
+.company-health-segment {
+  background: var(--rc-health-segment-color) !important;
+  box-shadow: none !important;
+}
+
+.company-health-signal .rentcore-command-card-status {
+  background: var(--primary) !important;
+}
+
+.rentcore-command-screen .text-lime-100,
+.rentcore-command-screen .text-lime-200,
+.rentcore-command-screen .text-lime-300 {
+  color: var(--primary) !important;
+}
+
+.rentcore-radial-overview,
+.dark .rentcore-radial-overview {
+  box-shadow: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2548,6 +2704,8 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
   *::before,
   *::after {
     scroll-behavior: auto !important;
+    transition-delay: 0ms !important;
+    transition-duration: var(--motion-duration-instant) !important;
   }
 
   .app-animate-overlay,
@@ -2563,9 +2721,20 @@ body.rentcore-dashboard-reference-mode .rentcore-command-signal {
   .app-page-motion-scope [data-slot="table-container"],
   .app-animate-card-reveal,
   .app-animate-list-reveal,
-  .app-demo-highlight::after {
+  .app-demo-highlight::after,
+  .rentcore-dashboard-reveal,
+  .app-skeleton::after {
     animation-duration: var(--motion-duration-instant) !important;
     animation-timing-function: linear !important;
     animation-delay: 0ms !important;
+  }
+
+  .app-skeleton::after {
+    display: none;
+  }
+
+  button:not(:disabled):active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    transform: none !important;
   }
 }

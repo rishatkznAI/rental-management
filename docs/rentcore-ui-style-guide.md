@@ -15,23 +15,23 @@ The dark theme is the primary presentation theme. The light theme may remain ava
 - Text primary: `--foreground`; use for titles, metrics, and table body values.
 - Text secondary: `--rc-text-secondary`; use for supporting metadata.
 - Text muted: `--muted-foreground`; use for labels, hints, empty states.
-- Accent: `--primary`, the rentCore green. Use for active navigation, primary actions, focus, selected states, and sparingly for KPI emphasis.
+- Accent: `--primary`, the rentCore cold blue/cyan. Use for active navigation, primary actions, focus, selected states, and sparingly for KPI emphasis.
 - Accent soft: `--accent` or `--rc-accent-soft`; use for hover, selected row backgrounds, and subtle active panels.
 - Status colors: use `--success`, `--warning`, `--danger`, and `--info` through shared badge/status classes.
 
 ## Sidebar
 
 - Sidebar is a dark graphite surface with a subtle vertical industrial gradient.
-- Active item uses the rentCore green accent with `text-primary-foreground`.
-- Hover items use a translucent accent fill, never bright blue.
-- Search stays compact and dark, with a green focus ring.
+- Active item uses a quiet blue/cyan indicator, stronger text, and a translucent token-based surface.
+- Hover items use a translucent accent fill and stay visually monochrome.
+- Search stays compact and dark, with a blue/cyan focus ring.
 - Collapsed state must keep icons legible and preserve badges.
 
 ## Topbar
 
 - Topbar uses `--rc-topbar` with blur and a thin bottom border.
-- Icon buttons use card surfaces, green hover/focus, and 10-12px radius.
-- User area uses a compact elevated chip. Avatar gradients may use green/cyan, not blue/purple as the main brand signal.
+- Icon buttons use card surfaces, blue/cyan hover/focus, and 6-8px radius.
+- User area uses a compact elevated chip. Purple is not part of the primary brand signal.
 
 ## Page Header
 
@@ -43,28 +43,28 @@ The dark theme is the primary presentation theme. The light theme may remain ava
 
 - Prefer `app-kpi-card` for local KPI helpers and shared `Card` for richer metrics.
 - KPI cards should be compact, stable in height, and readable on mobile.
-- Use green for positive/primary emphasis, amber for warning, red for risk, cyan/blue only for informational states.
+- Use blue/cyan for primary emphasis, green for success, amber for warning, and red for risk.
 - Avoid oversized decorative KPIs and avoid one-off card shadows.
 
 ## Cards
 
 - Use shared `Card` or `app-panel`.
-- Large panels: 20-24px radius.
-- Small controls and chips: 10-14px radius.
+- Large panels: 8px radius.
+- Small controls and chips: 6-8px radius; status pills may remain fully rounded.
 - Do not nest decorative cards inside decorative cards. Use inner rows, lists, or bordered blocks when detail is needed.
 
 ## Tables
 
 - Use shared table primitives when possible.
 - Tables should be compact, with muted uppercase headers, thin borders, and soft accent hover.
-- Selected rows use a soft green accent, not saturated blue.
+- Selected rows use the tokenized soft blue/cyan accent, never a saturated fill.
 - Avoid white table containers in dark theme.
 
 ## Filters And Search
 
 - Prefer `app-filter-bar` for page-level filters.
 - Inputs, selects, and textareas must use shared primitives or the same token values.
-- Focus states use `--ring` and green accent borders.
+- Focus states use `--ring` and blue/cyan accent borders.
 - Filter chips use `app-filter-chip` and `data-active="true"` for selected state.
 
 ## Buttons
@@ -90,7 +90,7 @@ The dark theme is the primary presentation theme. The light theme may remain ava
 - Use shared `Dialog` and `Sheet`.
 - Modal and drawer surfaces are elevated graphite with translucent borders.
 - Footer areas must stay sticky when the modal has a scrollable body.
-- Close buttons use muted text and green hover/focus.
+- Close buttons use muted text and blue/cyan hover/focus.
 
 ## Mobile
 

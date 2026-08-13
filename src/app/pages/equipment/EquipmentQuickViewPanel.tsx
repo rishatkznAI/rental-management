@@ -97,7 +97,7 @@ export function EquipmentQuickViewPanel({
     <aside
       data-testid="equipment-quick-view-panel"
       className={mode === 'embedded'
-        ? 'pointer-events-auto flex max-h-[calc(100vh-2rem)] min-h-[560px] w-full min-w-0 max-w-full flex-col overflow-hidden rounded-2xl border border-border/90 bg-card/92 shadow-[0_18px_42px_-36px_rgba(15,23,42,0.9)] xl:min-w-[360px] xl:max-w-[430px]'
+        ? 'pointer-events-auto flex max-h-[calc(100vh-2rem)] min-h-[560px] w-full min-w-0 max-w-full flex-col overflow-hidden rounded-2xl border border-border/90 bg-card/92 shadow-[0_18px_42px_-36px_rgba(15,23,42,0.9)] 2xl:min-w-[360px] 2xl:max-w-[430px]'
         : 'fixed inset-x-0 bottom-0 z-50 flex max-h-[82vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border/90 bg-background shadow-2xl xl:hidden'
       }
     >

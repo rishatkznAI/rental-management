@@ -95,6 +95,7 @@ import {
 } from '../lib/fleetUtilization';
 import { APP_BRAND_NAME } from '../lib/appBrand';
 import { buildRentalNewRoute } from '../lib/rental-new-route.js';
+import { usePrefersReducedMotion } from '../lib/animations';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -332,6 +333,7 @@ const EXECUTIVE_KPI_TEST_IDS: Record<string, string> = {
   'executive-fleet-utilization': 'dashboard-kpi-fleet-utilization',
   'executive-service-load': 'dashboard-kpi-service-load',
   'executive-operational-load': 'dashboard-kpi-operational-load',
+  'executive-active-rentals': 'dashboard-kpi-active-rentals',
 };
 
 type DashboardRisk = {
@@ -736,7 +738,15 @@ function ManagerMyPlanBlock({
   );
 }
 
-const DASHBOARD_CHART_COLORS = ['#2563eb', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#64748b'];
+const DASHBOARD_CHART_COLORS = ['#0284c7', '#06b6d4', '#14b8a6', '#f59e0b', '#f43f5e', '#64748b'];
+
+const DASHBOARD_TOOLTIP_STYLE = {
+  borderRadius: 8,
+  border: '1px solid var(--rc-border-strong)',
+  background: 'var(--popover)',
+  color: 'var(--popover-foreground)',
+  boxShadow: 'none',
+};
 
 const toneStyles: Record<DashboardTone, { bubble: string; accent: string; dot: string }> = {
   default: {
@@ -772,11 +782,11 @@ const toneStyles: Record<DashboardTone, { bubble: string; accent: string; dot: s
 };
 
 const commandMetricToneClass: Record<DashboardTone, string> = {
-  default: 'text-lime-700 dark:text-lime-100',
-  success: 'text-lime-700 dark:text-lime-200',
-  warning: 'text-amber-700 dark:text-amber-200',
-  danger: 'text-red-600 dark:text-red-200',
-  info: 'text-cyan-700 dark:text-cyan-200',
+  default: 'text-primary',
+  success: 'text-success',
+  warning: 'text-warning',
+  danger: 'text-danger',
+  info: 'text-info',
   violet: 'text-violet-700 dark:text-violet-200',
 };
 
@@ -1320,12 +1330,12 @@ type CompanyHealthScoreBreakdown = {
 };
 
 const healthSegmentColors: Record<DashboardTone, string> = {
-  default: '#78909c',
-  success: '#8fae74',
-  warning: '#b9975b',
-  danger: '#c97972',
-  info: '#6f9aa4',
-  violet: '#9a8ab6',
+  default: 'var(--rc-text-muted)',
+  success: 'var(--success)',
+  warning: 'var(--warning)',
+  danger: 'var(--danger)',
+  info: 'var(--info)',
+  violet: 'var(--chart-2)',
 };
 
 function formatHealthWeight(weight: number) {
@@ -1432,9 +1442,9 @@ function CompanyHealthTrendOverview({
     y: padding.top + plotHeight - (clampPercent(value) / 100) * plotHeight,
   });
   const series = [
-    { key: 'health', label: 'Health', color: '#d9f99d', fill: 'url(#companyHealthAreaHealth)', values: chartValues.map(item => item.health) },
-    { key: 'operations', label: 'Контур', color: '#7dd3fc', fill: 'url(#companyHealthAreaOps)', values: chartValues.map(item => item.operations) },
-    { key: 'risk', label: 'Риск', color: '#fcd34d', fill: 'url(#companyHealthAreaRisk)', values: chartValues.map(item => item.risk) },
+    { key: 'health', label: 'Health', color: 'var(--primary)', fill: 'url(#companyHealthAreaHealth)', values: chartValues.map(item => item.health) },
+    { key: 'operations', label: 'Контур', color: 'var(--chart-2)', fill: 'url(#companyHealthAreaOps)', values: chartValues.map(item => item.operations) },
+    { key: 'risk', label: 'Риск', color: 'var(--warning)', fill: 'url(#companyHealthAreaRisk)', values: chartValues.map(item => item.risk) },
   ];
   const nodePoints = series.flatMap(line => line.values.map((value, index) => ({
     key: `${line.key}-${chartValues[index].period}`,
@@ -1458,16 +1468,16 @@ function CompanyHealthTrendOverview({
       >
         <defs>
           <linearGradient id="companyHealthAreaHealth" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#d9f99d" stopOpacity={shouldShowEmpty ? '0.12' : '0.26'} />
-            <stop offset="100%" stopColor="#d9f99d" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--primary)" stopOpacity={shouldShowEmpty ? '0.12' : '0.24'} />
+            <stop offset="100%" stopColor="var(--primary)" stopOpacity="0" />
           </linearGradient>
           <linearGradient id="companyHealthAreaOps" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#7dd3fc" stopOpacity={shouldShowEmpty ? '0.08' : '0.16'} />
-            <stop offset="100%" stopColor="#7dd3fc" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--chart-2)" stopOpacity={shouldShowEmpty ? '0.08' : '0.16'} />
+            <stop offset="100%" stopColor="var(--chart-2)" stopOpacity="0" />
           </linearGradient>
           <linearGradient id="companyHealthAreaRisk" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#fcd34d" stopOpacity={shouldShowEmpty ? '0.06' : '0.12'} />
-            <stop offset="100%" stopColor="#fcd34d" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--warning)" stopOpacity={shouldShowEmpty ? '0.06' : '0.12'} />
+            <stop offset="100%" stopColor="var(--warning)" stopOpacity="0" />
           </linearGradient>
           <filter id="companyHealthTrendGlow" x="-20%" y="-30%" width="140%" height="160%">
             <feGaussianBlur stdDeviation="4" result="coloredBlur" />
@@ -1478,13 +1488,13 @@ function CompanyHealthTrendOverview({
           </filter>
         </defs>
 
-        <rect x="0" y="0" width={width} height={height} rx="24" fill="transparent" />
+        <rect x="0" y="0" width={width} height={height} rx="8" fill="transparent" />
         {[0, 25, 50, 75, 100].map(value => {
           const y = padding.top + plotHeight - (value / 100) * plotHeight;
-          return <line key={value} x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="rgba(226,232,240,0.10)" strokeDasharray="4 12" />;
+          return <line key={value} x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="var(--rc-border-strong)" strokeDasharray="4 12" />;
         })}
 
-        <g data-testid="dashboard-radial-core" filter="url(#companyHealthTrendGlow)">
+        <g data-testid="dashboard-radial-core">
           {series.map((line) => {
             const points = line.values.map((value, index) => toPoint(value, index));
             const path = smoothSvgPath(points);
@@ -1672,7 +1682,7 @@ function CompanyHealthCommandCenter({
     >
       <div className="company-health-header flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <CardTitle className="app-shell-title text-2xl font-black text-white" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
+          <CardTitle className="app-shell-title text-base font-semibold text-white" data-testid="dashboard-company-health-title">Здоровье компании</CardTitle>
           <p className="mt-0.5 max-w-[68ch] text-xs font-semibold leading-4 text-slate-300/78">{executiveStatus}</p>
         </div>
         <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:shrink-0">
@@ -1804,7 +1814,7 @@ function CompanyHealthCommandCenter({
         {(bars.length > 0 ? bars.slice(0, 5) : [{ label: 'Аренда', value: 0, hint: 'Нет данных', color: healthSegmentColors.default }]).map((item, index) => {
           const percent = clampPercent(item.value);
           const isMuted = percent <= 0;
-          const segmentColor = ['#d9f99d', '#a7f3d0', '#7dd3fc', '#fde68a', '#c4b5fd'][index] || '#94a3b8';
+          const segmentColor = ['var(--primary)', 'var(--chart-2)', 'var(--chart-3)', 'var(--warning)', 'var(--danger)'][index] || 'var(--rc-text-muted)';
           return (
             <div
               key={`${item.label}-${index}`}
@@ -1932,6 +1942,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const { can, canReadCollection } = usePermissions();
   const qc = useQueryClient();
+  const prefersReducedMotion = usePrefersReducedMotion();
   const canViewReports = can('view', 'reports');
   const canViewFinance = can('view', 'finance');
   const canViewPayments = can('view', 'payments');
@@ -3317,10 +3328,10 @@ export default function Dashboard() {
   ].filter(item => item.value > 0);
   const hasServiceStatusData = serviceStatusChartData.some(item => item.value > 0);
   const fleetDonutData = [
-    { label: 'Заняты', value: rentedEquipment, fill: '#a3e635' },
-    { label: 'Доступны', value: availableEquipment, fill: '#5eead4' },
-    { label: 'Сервис', value: equipmentInServiceList.length, fill: '#facc15' },
-    { label: 'Резерв', value: reservedEquipment, fill: '#67e8f9' },
+    { label: 'Заняты', value: rentedEquipment, fill: 'var(--primary)' },
+    { label: 'Доступны', value: availableEquipment, fill: 'var(--chart-2)' },
+    { label: 'Сервис', value: equipmentInServiceList.length, fill: 'var(--warning)' },
+    { label: 'Резерв', value: reservedEquipment, fill: 'var(--info)' },
   ].filter(item => item.value > 0);
   const hasFleetDonutData = fleetDonutData.length > 0;
   const fleetDonutTotal = fleetDonutData.reduce((sum, item) => sum + item.value, 0);
@@ -4243,7 +4254,7 @@ export default function Dashboard() {
     { label: 'Деньги', value: companyHealthContourById.get('payments')?.status === 'no_data' ? 0 : receivablesTone === 'success' ? 92 : receivablesTone === 'warning' ? 62 : 34, hint: companyHealthContourById.get('payments')?.stateLabel || 'Нет данных', color: companyHealthContourById.get('payments')?.status === 'no_data' ? '#64748b' : '#fb7185' },
     { label: 'Парк', value: totalEquipment > 0 ? utilization : 0, hint: companyHealthContourById.get('equipment')?.stateLabel || 'Нет данных', color: totalEquipment > 0 ? '#34d399' : '#64748b' },
     { label: 'Сервис', value: companyHealthContourById.get('service')?.status === 'no_data' ? 0 : serviceTone === 'success' ? 88 : serviceTone === 'warning' ? 58 : 28, hint: companyHealthContourById.get('service')?.stateLabel || 'Нет данных', color: companyHealthContourById.get('service')?.status === 'no_data' ? '#64748b' : serviceTone === 'danger' ? '#ef4444' : '#f59e0b' },
-    { label: 'Возвраты', value: companyHealthContourById.get('rentals')?.status === 'no_data' ? 0 : overdueRentalsList.length > 0 ? 35 : rentalsEndingToday.length > 0 ? 65 : 90, hint: companyHealthContourById.get('rentals')?.stateLabel || 'Нет данных', color: companyHealthContourById.get('rentals')?.status === 'no_data' ? '#64748b' : '#a78bfa' },
+    { label: 'Возвраты', value: companyHealthContourById.get('rentals')?.status === 'no_data' ? 0 : overdueRentalsList.length > 0 ? 35 : rentalsEndingToday.length > 0 ? 65 : 90, hint: companyHealthContourById.get('rentals')?.stateLabel || 'Нет данных', color: companyHealthContourById.get('rentals')?.status === 'no_data' ? '#64748b' : 'var(--chart-2)' },
     { label: 'Документы', value: companyHealthContourById.get('documents')?.status === 'no_data' ? 0 : unsignedDocumentsCount > 0 ? 58 : 90, hint: companyHealthContourById.get('documents')?.stateLabel || 'Нет данных', color: companyHealthContourById.get('documents')?.status === 'no_data' ? '#64748b' : '#f59e0b' },
     { label: 'Доставки', value: companyHealthContourById.get('deliveries')?.status === 'no_data' ? 0 : overdueDeliveries.length > 0 ? 32 : unassignedDeliveries.length > 0 ? 60 : 88, hint: companyHealthContourById.get('deliveries')?.stateLabel || 'Нет данных', color: companyHealthContourById.get('deliveries')?.status === 'no_data' ? '#64748b' : '#38bdf8' },
   ];
@@ -4331,6 +4342,56 @@ export default function Dashboard() {
       tone: operationalLoadTone,
       href: '/planner',
       cta: 'Открыть обзор',
+    },
+  ].filter(Boolean) as DashboardKpi[];
+  const primaryDashboardKpis = [
+    canViewMoney && {
+      id: 'executive-month-payments',
+      label: 'Поступления месяца',
+      value: hasPaymentsSourceData ? formatCurrency(monthlyPaidAmount) : 'Нет данных',
+      hint: hasPaymentsSourceData
+        ? `${monthlyPayments.length} ${formatCountLabel(monthlyPayments.length, 'платёж', 'платежа', 'платежей')}`
+        : 'Платежи за период не зарегистрированы',
+      icon: CreditCard,
+      tone: monthlyPaidAmount > 0 ? 'info' : 'default',
+      href: '/payments',
+      cta: 'Открыть платежи',
+    },
+    canViewEquipment && {
+      id: 'executive-fleet-utilization',
+      label: 'Загрузка парка',
+      value: activeEquipment > 0 ? `${utilization}%` : 'Нет данных',
+      hint: activeEquipment > 0
+        ? `В аренде ${rentedEquipment} из ${activeEquipment} ед.`
+        : 'Активный парк не сформирован',
+      icon: Activity,
+      tone: utilizationTone,
+      href: '/equipment?status=rented',
+      cta: 'Открыть технику в аренде',
+    },
+    canViewMoney && {
+      id: 'executive-overdue-receivables',
+      label: 'Просроченная дебиторка',
+      value: hasDebtSourceData ? formatCurrency(overdueReceivablesAmount) : 'Нет данных',
+      hint: hasDebtSourceData
+        ? overdueReceivablesAmount > 0
+          ? `${overdueReceivablesClients} ${formatCountLabel(overdueReceivablesClients, 'клиент', 'клиента', 'клиентов')} с долгом`
+          : 'Подтверждённой просрочки нет'
+        : 'Нет строк дебиторки для расчёта',
+      icon: ShieldAlert,
+      tone: receivablesTone,
+      href: '/payments',
+      cta: 'Проверить долги',
+    },
+    canViewRentals && {
+      id: 'executive-active-rentals',
+      label: 'Активные аренды',
+      value: String(activeRentalsList.length),
+      hint: `${rentalsEndingToday.length} ${formatCountLabel(rentalsEndingToday.length, 'возврат', 'возврата', 'возвратов')} сегодня`,
+      icon: FileText,
+      tone: activeRentalsList.length > 0 ? 'info' : 'default',
+      onClick: () => setSelectedKPI('activeRentals'),
+      cta: 'Открыть активные аренды',
     },
   ].filter(Boolean) as DashboardKpi[];
   const executiveControlRows = visibleAlerts.length > 0
@@ -4704,10 +4765,10 @@ export default function Dashboard() {
   // ── render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="rentcore-command-screen">
+    <div className="rentcore-command-screen" data-reduced-motion={prefersReducedMotion ? 'true' : 'false'}>
       <div className="relative h-full px-1 py-1 sm:px-1.5 sm:py-1.5 lg:px-2">
         <div className="rentcore-command-shell mx-0 flex min-h-full max-w-none flex-col gap-2 p-2 sm:p-2.5 min-[1360px]:min-h-0">
-          <header className="rentcore-command-header grid min-h-[72px] flex-none gap-2 rounded-[14px] px-4 py-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <header className="rentcore-command-header rentcore-dashboard-reveal rentcore-dashboard-reveal-header grid min-h-[84px] flex-none gap-2 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-muted-foreground">
                 <span>{APP_BRAND_NAME}</span>
@@ -4717,15 +4778,16 @@ export default function Dashboard() {
                 <span>Операционный контроль бизнеса</span>
               </div>
               <div className="mt-1 flex flex-wrap items-end gap-x-4 gap-y-1">
-                <h1 className="app-shell-title text-[24px] font-extrabold leading-none tracking-normal text-foreground lg:text-[26px]">
+                <h1 className="app-shell-title text-[24px] font-semibold leading-none tracking-normal text-foreground lg:text-[26px]">
                   Операционный центр
                 </h1>
-                <p className="pb-0.5 text-sm font-medium text-muted-foreground">
-                  Пульт управления арендным бизнесом · {monthPeriodLabel} · {monthRangeLabel}
-                </p>
+                <p className="pb-0.5 text-sm font-medium text-muted-foreground">Пульт управления арендным бизнесом · {monthPeriodLabel} · {monthRangeLabel}</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <p className="w-full text-xs font-medium capitalize text-muted-foreground lg:text-right">
+                {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}
+              </p>
               <span className="rounded-full border border-border bg-background px-3 py-1 text-xs font-semibold text-muted-foreground">
                 Обновлено {dashboardUpdatedLabel}
               </span>
@@ -4744,7 +4806,7 @@ export default function Dashboard() {
           <section className="rentcore-command-board rentcore-dashboard-grid min-h-0 overflow-visible rounded-[16px] p-2" data-testid="dashboard-command-board">
             <section className="rentcore-dashboard-kpi-row" data-testid="dashboard-top-cockpit">
               <div className="rentcore-dashboard-kpi-grid" data-testid="dashboard-executive-cockpit">
-              {executiveSummaryCards.map(card => {
+              {primaryDashboardKpis.map((card, index) => {
               const Icon = card.icon;
               const tone = toneStyles[card.tone ?? 'default'];
               const testId = EXECUTIVE_KPI_TEST_IDS[card.id];
@@ -4752,22 +4814,22 @@ export default function Dashboard() {
                 ? overdueReceivablesTrendData
                 : card.id === 'executive-fleet-utilization'
                   ? utilizationTrendData
-                  : card.id === 'executive-service-load'
-                    ? serviceLoadRows.map((row, index) => ({ label: row.label, value: row.value + index }))
-                    : monthCashflowDisplayData.slice(-10).map(point => ({ label: point.label, value: point.revenue + point.payments + point.overdue }));
+                  : card.id === 'executive-active-rentals'
+                    ? monthEventsData.slice(-10).map(point => ({ label: point.label, value: point.rentals }))
+                    : monthCashflowDisplayData.slice(-10).map(point => ({ label: point.label, value: point.payments }));
               const stroke = card.tone === 'danger'
-                ? '#fb7185'
+                ? 'var(--danger)'
                 : card.tone === 'warning'
-                  ? '#facc15'
+                  ? 'var(--warning)'
                   : card.tone === 'success'
-                    ? '#a3e635'
-                    : '#54d4c2';
+                    ? 'var(--success)'
+                    : 'var(--primary)';
               const content = (
                 <div className="relative z-10 flex h-full min-h-[124px] flex-col justify-between">
                   <div className="flex items-start justify-between gap-2.5">
                     <div className="min-w-0">
                       <p className="line-clamp-1 min-h-[13px] text-xs font-bold leading-none text-muted-foreground">{card.label}</p>
-                      <p className="dashboard-kpi-value mt-3 text-[28px] font-extrabold leading-none text-foreground min-[1500px]:text-[30px]">{card.value}</p>
+                      <p className="dashboard-kpi-value mt-3 text-[28px] font-semibold leading-none text-foreground min-[1500px]:text-[30px]">{card.value}</p>
                     </div>
                     <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-border bg-background ${tone.accent}`}>
                       <Icon className="h-4 w-4" />
@@ -4779,20 +4841,21 @@ export default function Dashboard() {
                   </div>
                 </div>
               );
-              const className = "rentcore-command-kpi group h-full min-w-0 w-full p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35";
-              if (card.href) return <Link key={card.id} to={card.href} data-testid={testId} className={className}>{content}</Link>;
-              if (card.onClick) return <button key={card.id} type="button" onClick={card.onClick} data-testid={testId} className={className}>{content}</button>;
-              return <div key={card.id} data-testid={testId} className={className}>{content}</div>;
+              const className = "rentcore-command-kpi group h-full min-w-0 w-full rentcore-dashboard-reveal rentcore-dashboard-reveal-kpi p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35";
+              const revealStyle = { '--dashboard-sequence-index': index } as React.CSSProperties;
+              if (card.href) return <Link key={card.id} to={card.href} data-testid={testId} className={className} style={revealStyle}>{content}</Link>;
+              if (card.onClick) return <button key={card.id} type="button" onClick={card.onClick} data-testid={testId} className={className} style={revealStyle}>{content}</button>;
+              return <div key={card.id} data-testid={testId} className={className} style={revealStyle}>{content}</div>;
               })}
               </div>
             </section>
 
-            <aside className="rentcore-command-panel rentcore-dashboard-secondary rentcore-dashboard-signals flex flex-col overflow-hidden rounded-[14px] p-3.5 min-[1600px]:p-4" data-testid="dashboard-key-signals">
+            <aside className="rentcore-command-panel rentcore-dashboard-secondary rentcore-dashboard-signals rentcore-dashboard-reveal rentcore-dashboard-reveal-attention flex flex-col overflow-hidden p-3.5 min-[1600px]:p-4" data-testid="dashboard-key-signals">
               <div data-testid="dashboard-key-signals-command" className="flex min-h-0 flex-1 flex-col">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold text-muted-foreground">Критические сигналы</p>
-                    <h3 className="app-shell-title mt-1 text-lg font-extrabold text-foreground">Главные сигналы сегодня</h3>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-danger">Требует внимания</p>
+                    <h3 className="app-shell-title mt-1 text-[15px] font-semibold text-foreground">Главные сигналы сегодня</h3>
                     <p className="mt-0.5 text-xs text-muted-foreground">Что требует внимания сейчас</p>
                   </div>
                   <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-bold text-muted-foreground">
@@ -4855,10 +4918,10 @@ export default function Dashboard() {
               </div>
             </aside>
 
-            <div className="rentcore-command-analytics rentcore-dashboard-secondary rentcore-dashboard-tasks flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-tasks">
+            <div className="rentcore-command-analytics rentcore-dashboard-secondary rentcore-dashboard-tasks rentcore-dashboard-reveal rentcore-dashboard-reveal-operational flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-tasks">
               <div className="mb-0.5">
                 <p className="text-xs font-semibold text-muted-foreground">Задачи</p>
-                <h3 className="app-shell-title text-[17px] font-extrabold leading-tight text-foreground">Задачи сегодня</h3>
+                <h3 className="app-shell-title text-[15px] font-semibold leading-tight text-foreground">Задачи сегодня</h3>
                 <p className="text-xs text-muted-foreground">Сегодняшний цикл: возвраты, доставки, платежи, сервис и документы</p>
               </div>
               <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden pt-1.5">
@@ -4885,17 +4948,17 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics rentcore-dashboard-secondary rentcore-dashboard-month flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-month-dynamics">
+            <div className="rentcore-command-analytics rentcore-dashboard-secondary rentcore-dashboard-month rentcore-dashboard-reveal rentcore-dashboard-reveal-chart flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-month-dynamics">
               <div data-testid="dashboard-month-dynamics-command" className="flex min-h-0 flex-1 flex-col">
                 <div className="mb-2 flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="app-shell-title whitespace-nowrap text-lg font-extrabold text-foreground">Динамика месяца</h3>
+                    <h3 className="app-shell-title whitespace-nowrap text-[15px] font-semibold text-foreground">Динамика месяца</h3>
                     <p className="text-xs text-muted-foreground">Деньги: начисления, поступления, просрочка</p>
                   </div>
                   <div className="hidden shrink-0 items-center gap-2 text-[10px] font-semibold text-muted-foreground min-[1536px]:flex">
-                    <span className="flex items-center gap-1"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-emerald-500" />Начисл.</span>
-                    <span className="flex items-center gap-1"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-teal-300" />Поступл.</span>
-                    <span className="flex items-center gap-1"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-rose-400" />Проср.</span>
+                    <span className="flex items-center gap-1"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-primary" />Начисл.</span>
+                    <span className="flex items-center gap-1"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-[color:var(--chart-2)]" />Поступл.</span>
+                    <span className="flex items-center gap-1"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-danger" />Проср.</span>
                   </div>
                 </div>
                 <div className="mt-1.5 flex min-h-0 flex-1 items-center justify-center">
@@ -4904,24 +4967,24 @@ export default function Dashboard() {
                       <ComposedChart data={monthCashflowDisplayData} margin={{ top: 8, right: 8, left: -2, bottom: 0 }}>
                         <defs>
                           <linearGradient id="commandRevenueGradientV2" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#8fbf43" stopOpacity={0.30} />
-                            <stop offset="72%" stopColor="#8fbf43" stopOpacity={0.08} />
-                            <stop offset="100%" stopColor="#8fbf43" stopOpacity={0.01} />
+                            <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.26} />
+                            <stop offset="72%" stopColor="var(--primary)" stopOpacity={0.07} />
+                            <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.01} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid stroke="rgba(148,163,184,0.13)" strokeDasharray="2 8" vertical={false} />
-                        <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} interval="preserveStartEnd" minTickGap={8} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} tickFormatter={formatCompactCurrency} width={38} />
+                        <CartesianGrid stroke="var(--rc-border-strong)" strokeDasharray="2 8" vertical={false} />
+                        <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'var(--rc-text-muted)', fontSize: 10, fontWeight: 600 }} interval="preserveStartEnd" minTickGap={8} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--rc-text-muted)', fontSize: 10, fontWeight: 600 }} tickFormatter={formatCompactCurrency} width={38} />
                         <Tooltip
                           formatter={(value, name) => [
                             formatCurrency(Number(value)),
                             name === 'payments' ? 'Поступления' : name === 'overdue' ? 'Просрочка' : 'Начисления',
                           ]}
-                          contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }}
+                          contentStyle={DASHBOARD_TOOLTIP_STYLE}
                         />
-                        <Area type="monotone" dataKey="revenue" stroke="#8fbf43" strokeWidth={2.8} fill="url(#commandRevenueGradientV2)" dot={false} activeDot={{ r: 4.6, stroke: '#ecfccb', strokeWidth: 1.2 }} />
-                        <Line type="monotone" dataKey="payments" stroke="#54d4c2" strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} />
-                        <Line type="monotone" dataKey="overdue" stroke="#f97386" strokeWidth={2} strokeDasharray="5 5" dot={false} activeDot={{ r: 4 }} />
+                        <Area type="monotone" dataKey="revenue" stroke="var(--primary)" strokeWidth={2.4} fill="url(#commandRevenueGradientV2)" dot={false} activeDot={{ r: 4 }} isAnimationActive={!prefersReducedMotion} animationDuration={400} />
+                        <Line type="monotone" dataKey="payments" stroke="var(--chart-2)" strokeWidth={2.1} dot={false} activeDot={{ r: 4 }} isAnimationActive={!prefersReducedMotion} animationDuration={400} />
+                        <Line type="monotone" dataKey="overdue" stroke="var(--danger)" strokeWidth={1.8} strokeDasharray="5 5" dot={false} activeDot={{ r: 4 }} isAnimationActive={!prefersReducedMotion} animationDuration={400} />
                       </ComposedChart>
                     </ResponsiveContainer>
                   ) : (
@@ -4938,8 +5001,8 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-command-analytics rentcore-dashboard-tertiary rentcore-dashboard-fleet flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-fleet-utilization">
-              <h3 className="app-shell-title text-lg font-extrabold text-foreground">Загрузка техники</h3>
+            <div className="rentcore-command-analytics rentcore-dashboard-tertiary rentcore-dashboard-fleet rentcore-dashboard-reveal rentcore-dashboard-reveal-operational flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-fleet-utilization">
+              <h3 className="app-shell-title text-[15px] font-semibold text-foreground">Загрузка техники</h3>
               <p className="text-xs text-muted-foreground">
                 {activeEquipment > 0
                   ? activeRentalsList.length > 0
@@ -4976,18 +5039,18 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <StatusBars rows={[
-                  { label: 'В аренде', value: rentedEquipment, color: '#a3e635' },
-                  { label: 'Свободно', value: availableEquipment, color: '#5eead4' },
-                  { label: 'В сервисе', value: equipmentInServiceList.length, color: '#facc15' },
-                  { label: 'На доставке', value: activeDeliveries.length, color: '#67e8f9' },
+                  { label: 'В аренде', value: rentedEquipment, color: 'var(--primary)' },
+                  { label: 'Свободно', value: availableEquipment, color: 'var(--chart-2)' },
+                  { label: 'В сервисе', value: equipmentInServiceList.length, color: 'var(--warning)' },
+                  { label: 'На доставке', value: activeDeliveries.length, color: 'var(--chart-3)' },
                 ]} total={Math.max(activeEquipment, 1)} compact />
               </div>
             </div>
 
-            <div className="rentcore-command-analytics rentcore-dashboard-tertiary rentcore-dashboard-aging flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-receivables-aging">
+            <div className="rentcore-command-analytics rentcore-dashboard-tertiary rentcore-dashboard-aging rentcore-dashboard-reveal rentcore-dashboard-reveal-operational flex min-w-0 flex-col overflow-hidden p-3" data-testid="dashboard-receivables-aging">
               <div className="mb-2 flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="app-shell-title text-lg font-extrabold text-foreground">Возраст дебиторки</h3>
+                  <h3 className="app-shell-title text-[15px] font-semibold text-foreground">Возраст дебиторки</h3>
                   <p className="text-xs text-muted-foreground">Финансовый срез</p>
                 </div>
                 <span className="shrink-0 text-right text-[11px] font-semibold text-muted-foreground">Всего: <b className="text-foreground">{formatCurrency(totalDebt)}</b></span>
@@ -4996,15 +5059,15 @@ export default function Dashboard() {
                 {hasReceivablesAging ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={receivablesAgingData} margin={{ top: 8, right: 8, left: -4, bottom: 0 }}>
-                      <CartesianGrid stroke="rgba(148,163,184,0.13)" strokeDasharray="3 8" vertical={false} />
-                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 700 }} />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 700 }} tickFormatter={formatCompactCurrency} width={44} />
-                      <Tooltip formatter={(value) => [formatCurrency(Number(value)), 'Долг']} contentStyle={{ borderRadius: 10, borderColor: 'rgba(132,204,22,0.25)', background: '#07111a', color: '#e2e8f0' }} />
-                      <Bar dataKey="value" radius={[4, 4, 2, 2]} barSize={16}>
+                      <CartesianGrid stroke="var(--rc-border-strong)" strokeDasharray="3 8" vertical={false} />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'var(--rc-text-muted)', fontSize: 11, fontWeight: 600 }} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--rc-text-muted)', fontSize: 11, fontWeight: 600 }} tickFormatter={formatCompactCurrency} width={44} />
+                      <Tooltip formatter={(value) => [formatCurrency(Number(value)), 'Долг']} contentStyle={DASHBOARD_TOOLTIP_STYLE} />
+                      <Bar dataKey="value" radius={[4, 4, 2, 2]} barSize={16} isAnimationActive={!prefersReducedMotion} animationDuration={400}>
                         {receivablesAgingData.map((item, index) => (
                           <Cell
                             key={item.label}
-                            fill={index >= receivablesAgingData.length - 1 ? '#fb7185' : index === receivablesAgingData.length - 2 ? '#facc15' : index === 0 ? '#5eead4' : '#a3e635'}
+                            fill={index >= receivablesAgingData.length - 1 ? 'var(--danger)' : index === receivablesAgingData.length - 2 ? 'var(--warning)' : index === 0 ? 'var(--chart-2)' : 'var(--primary)'}
                           />
                         ))}
                       </Bar>
@@ -5020,7 +5083,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="rentcore-dashboard-tertiary rentcore-dashboard-health flex min-w-0" data-testid="dashboard-operational-summary">
+            <div className="rentcore-dashboard-tertiary rentcore-dashboard-health rentcore-dashboard-reveal rentcore-dashboard-reveal-operational flex min-w-0" data-testid="dashboard-operational-summary">
               <CompanyHealthCommandCenter
                 leftDirections={commandCenterLeftDirections}
                 rightDirections={commandCenterRightDirections}

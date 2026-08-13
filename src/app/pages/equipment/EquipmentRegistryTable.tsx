@@ -45,22 +45,22 @@ export function EquipmentRegistryTable({
 }: EquipmentRegistryTableProps) {
   return (
     <div className="app-scroll-fade-x min-w-0 overflow-x-auto">
-      <table className="w-full min-w-[1480px] table-fixed border-separate border-spacing-0 text-left text-sm text-foreground">
+      <table className="w-full min-w-[1280px] table-fixed border-separate border-spacing-0 text-left text-sm text-foreground">
         <thead className="sticky top-0 z-10 border-b border-border/90 bg-card/96 text-[10px] uppercase tracking-[0.14em] text-foreground/60 backdrop-blur">
           <tr>
             <th className="w-[52px] px-4 py-3 font-medium">Выбор</th>
             <th className="w-[82px] px-3 py-3 font-medium">Фото</th>
             <th className="w-[150px] px-3 py-3 font-medium">Инв. номер</th>
-            <th className="w-[210px] px-3 py-3 font-medium">Модель</th>
-            <th className="w-[170px] px-3 py-3 font-medium">Тип / Привод</th>
+            <th className="w-[180px] px-3 py-3 font-medium">Модель</th>
+            <th className="w-[150px] px-3 py-3 font-medium">Тип / Привод</th>
             <th className="w-[135px] px-3 py-3 font-medium">Статус</th>
             <th className="w-[125px] px-3 py-3 font-medium">Категория</th>
-            <th className="w-[145px] px-3 py-3 font-medium">Собственник</th>
-            <th className="w-[150px] px-3 py-3 font-medium">Локация</th>
-            <th className="w-[170px] px-3 py-3 font-medium">Клиент / объект</th>
-            <th className="w-[120px] px-3 py-3 font-medium">GSM</th>
-            <th className="w-[120px] px-3 py-3 font-medium">Приоритет</th>
-            <th className="w-[58px] px-3 py-3 font-medium">Действия</th>
+            <th className="w-[130px] px-3 py-3 font-medium">Собственник</th>
+            <th className="w-[130px] px-3 py-3 font-medium">Локация</th>
+            <th className="w-[155px] px-3 py-3 font-medium">Клиент / объект</th>
+            <th className="w-[105px] px-3 py-3 font-medium">GSM</th>
+            <th className="w-[110px] px-3 py-3 font-medium">Приоритет</th>
+            <th className="sticky right-0 z-20 w-[68px] bg-card px-3 py-3 font-medium">Действия</th>
           </tr>
         </thead>
         <tbody>
@@ -177,7 +177,7 @@ export function EquipmentRegistryTable({
                     {getPriorityLabel(equipment.priority)}
                   </span>
                 </td>
-                <td className="border-b border-border/75 px-3 py-3">
+                <td className="sticky right-0 z-[5] border-b border-border/75 bg-card px-3 py-3">
                   <DropdownMenu.Root>
                     <DropdownMenu.Trigger asChild>
                       <button

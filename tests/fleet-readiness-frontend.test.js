@@ -31,7 +31,7 @@ test('readiness loss KPI cards render financial counters', () => {
 
 test('readiness renders as a compact strip above the registry', () => {
   assert.match(equipmentPageSource, /операционная сводка/);
-  assert.match(equipmentPageSource, /flex min-w-0 flex-1 gap-2 overflow-x-auto/);
+  assert.match(equipmentPageSource, /app-scrollbar-none flex min-w-0 flex-1 gap-2 overflow-x-auto/);
   assert.doesNotMatch(equipmentPageSource, /READINESS_FILTERS/);
   assert.doesNotMatch(equipmentPageSource, /min-w-\[1280px\]/);
 });

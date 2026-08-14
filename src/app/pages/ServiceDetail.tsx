@@ -1998,7 +1998,7 @@ export default function ServiceDetail({
                   {canEditTicketFields && (
                     <button
                       onClick={() => photoInputRef.current?.click()}
-                      className="mt-2 text-sm text-[--color-primary] hover:underline"
+                      className="mt-2 text-sm text-primary-content hover:underline"
                     >
                       Загрузить фото
                     </button>

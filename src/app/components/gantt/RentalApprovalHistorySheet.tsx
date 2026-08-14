@@ -242,7 +242,7 @@ export function RentalApprovalHistorySheet({
       <SheetContent side="right" className="flex w-full flex-col bg-card text-card-foreground sm:max-w-3xl">
         <SheetHeader className="border-b border-border bg-card/95 pb-4">
           <SheetTitle className="flex items-center gap-2 text-xl text-foreground">
-            <FileText className="h-5 w-5 text-[--color-primary]" />
+            <FileText className="h-5 w-5 text-primary-content" />
             Согласования аренды
           </SheetTitle>
           <SheetDescription>

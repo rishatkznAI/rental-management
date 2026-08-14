@@ -167,7 +167,7 @@ export default function Login() {
 
         <section className="rentcore-login-auth-zone flex w-full items-center justify-center px-5 py-9 sm:px-8 sm:py-12 lg:min-h-[100dvh] lg:px-12 xl:px-20">
           <div className="rentcore-login-auth-panel w-full max-w-[420px] rounded-lg border p-5 sm:p-7">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Авторизация</p>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary-content">Авторизация</p>
             <h2 className="app-shell-title text-[23px] font-semibold leading-7 tracking-[-0.02em] text-foreground">Добро пожаловать</h2>
             <p className="mb-8 mt-1.5 text-[13px] leading-5 text-muted-foreground">Войдите, чтобы продолжить работу</p>
 
@@ -293,7 +293,7 @@ export default function Login() {
               <div className="mt-5 border-t border-white/[0.07] pt-5 text-center">
                 <a
                   href={DEMO_URL}
-                  className="inline-flex items-center justify-center gap-2 text-[12px] font-medium text-primary transition hover:text-[color:var(--primary-hover)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="inline-flex items-center justify-center gap-2 text-[12px] font-medium text-primary-content transition hover:text-[color:var(--primary-hover)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   rel="noopener noreferrer"
                   target="_blank"
                 >

@@ -2,21 +2,30 @@
 
 :root {
   --font-size: 16px;
+  --rc-brand: #82c91e;
+  --rc-brand-hover: #6fb318;
+  --rc-brand-dark: #b7f23a;
+  --rc-brand-dark-hover: #a5dc2f;
+  --rc-brand-foreground: #071006;
+  --rc-brand-content: #4b7511;
+  --rc-brand-content-hover: #3f6212;
   --background: #f2f5f8;
   --foreground: #111827;
   --card: rgba(255, 255, 255, 0.96);
   --card-foreground: #111827;
   --popover: #ffffff;
   --popover-foreground: #111827;
-  --primary: #0284c7;
-  --primary-hover: #0369a1;
-  --primary-foreground: #f8fcff;
+  --primary: var(--rc-brand);
+  --primary-hover: var(--rc-brand-hover);
+  --primary-foreground: var(--rc-brand-foreground);
+  --primary-content: var(--rc-brand-content);
+  --primary-content-hover: var(--rc-brand-content-hover);
   --secondary: #e7edf3;
   --secondary-foreground: #1f2937;
   --muted: #e8edf3;
   --muted-foreground: #64748b;
-  --accent: rgba(2, 132, 199, 0.10);
-  --accent-foreground: #0c4a6e;
+  --accent: color-mix(in srgb, var(--primary) 10%, transparent);
+  --accent-foreground: #1d351a;
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
   --border: rgba(15, 23, 42, 0.10);
@@ -25,7 +34,7 @@
   --switch-background: #cbd5e1;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: rgba(2, 132, 199, 0.35);
+  --ring: var(--primary-content);
   --chart-1: #0284c7;
   --chart-2: #06b6d4;
   --chart-3: #14b8a6;
@@ -34,12 +43,12 @@
   --radius: 0.5rem;
   --sidebar: #f7f9fb;
   --sidebar-foreground: #172033;
-  --sidebar-primary: #0284c7;
-  --sidebar-primary-foreground: #f8fcff;
-  --sidebar-accent: rgba(2, 132, 199, 0.08);
+  --sidebar-primary: var(--rc-brand);
+  --sidebar-primary-foreground: var(--rc-brand-foreground);
+  --sidebar-accent: color-mix(in srgb, var(--sidebar-primary) 8%, transparent);
   --sidebar-accent-foreground: #172033;
   --sidebar-border: rgba(15, 23, 42, 0.09);
-  --sidebar-ring: rgba(2, 132, 199, 0.36);
+  --sidebar-ring: var(--primary-content);
   --rc-app-bg: #f2f5f8;
   --rc-graphite-950: #080c12;
   --rc-graphite-900: #0b111a;
@@ -51,15 +60,15 @@
   --rc-topbar: rgba(247, 249, 251, 0.92);
   --rc-border: rgba(15, 23, 42, 0.10);
   --rc-border-strong: rgba(15, 23, 42, 0.16);
-  --rc-hover: rgba(2, 132, 199, 0.06);
-  --rc-active: rgba(2, 132, 199, 0.10);
+  --rc-hover: color-mix(in srgb, var(--primary) 6%, transparent);
+  --rc-active: color-mix(in srgb, var(--primary) 10%, transparent);
   --rc-text-primary: #111827;
   --rc-text-secondary: #475569;
   --rc-text-muted: #64748b;
-  --rc-accent: #0284c7;
-  --rc-accent-strong: #0369a1;
-  --rc-accent-soft: rgba(2, 132, 199, 0.10);
-  --rc-accent-border: rgba(2, 132, 199, 0.28);
+  --rc-accent: var(--rc-brand);
+  --rc-accent-strong: var(--rc-brand-hover);
+  --rc-accent-soft: color-mix(in srgb, var(--rc-accent) 10%, transparent);
+  --rc-accent-border: color-mix(in srgb, var(--rc-accent) 28%, transparent);
   --success: #22c55e;
   --success-foreground: #14532d;
   --success-soft: rgba(34, 197, 94, 0.14);
@@ -104,21 +113,23 @@
   --card-foreground: #f4f7fb;
   --popover: #141c27;
   --popover-foreground: #f4f7fb;
-  --primary: #38bdf8;
-  --primary-hover: #60c9fa;
-  --primary-foreground: #04131d;
+  --primary: var(--rc-brand-dark);
+  --primary-hover: var(--rc-brand-dark-hover);
+  --primary-foreground: var(--rc-brand-foreground);
+  --primary-content: var(--rc-brand-dark);
+  --primary-content-hover: var(--rc-brand-dark-hover);
   --secondary: rgba(24, 34, 47, 0.94);
   --secondary-foreground: #e5edf6;
   --muted: rgba(26, 36, 50, 0.92);
   --muted-foreground: #8f9cac;
-  --accent: rgba(56, 189, 248, 0.10);
-  --accent-foreground: #dff6ff;
+  --accent: color-mix(in srgb, var(--primary) 10%, transparent);
+  --accent-foreground: #effddb;
   --destructive: #fb7185;
   --destructive-foreground: #ffffff;
   --border: rgba(255, 255, 255, 0.075);
   --input: rgba(255, 255, 255, 0.12);
   --input-background: rgba(12, 18, 27, 0.96);
-  --ring: rgba(56, 189, 248, 0.42);
+  --ring: var(--primary);
   --font-weight-medium: 500;
   --font-weight-normal: 400;
   --chart-1: #38bdf8;
@@ -128,12 +139,12 @@
   --chart-5: #fb7185;
   --sidebar: #090e15;
   --sidebar-foreground: #e9eef5;
-  --sidebar-primary: #38bdf8;
-  --sidebar-primary-foreground: #04131d;
-  --sidebar-accent: rgba(56, 189, 248, 0.085);
+  --sidebar-primary: var(--rc-brand-dark);
+  --sidebar-primary-foreground: var(--rc-brand-foreground);
+  --sidebar-accent: color-mix(in srgb, var(--sidebar-primary) 8.5%, transparent);
   --sidebar-accent-foreground: #f4f7fb;
   --sidebar-border: rgba(255, 255, 255, 0.07);
-  --sidebar-ring: rgba(56, 189, 248, 0.44);
+  --sidebar-ring: var(--primary);
   --rc-app-bg: #080c12;
   --rc-surface: rgba(15, 22, 32, 0.94);
   --rc-surface-elevated: rgba(20, 29, 41, 0.98);
@@ -141,15 +152,15 @@
   --rc-topbar: rgba(8, 12, 18, 0.90);
   --rc-border: rgba(255, 255, 255, 0.075);
   --rc-border-strong: rgba(255, 255, 255, 0.13);
-  --rc-hover: rgba(56, 189, 248, 0.065);
-  --rc-active: rgba(56, 189, 248, 0.11);
+  --rc-hover: color-mix(in srgb, var(--primary) 6.5%, transparent);
+  --rc-active: color-mix(in srgb, var(--primary) 11%, transparent);
   --rc-text-primary: #f4f7fb;
   --rc-text-secondary: #b6c0ce;
   --rc-text-muted: #8f9cac;
-  --rc-accent: #38bdf8;
-  --rc-accent-strong: #60c9fa;
-  --rc-accent-soft: rgba(56, 189, 248, 0.10);
-  --rc-accent-border: rgba(56, 189, 248, 0.30);
+  --rc-accent: var(--rc-brand-dark);
+  --rc-accent-strong: var(--rc-brand-dark-hover);
+  --rc-accent-soft: color-mix(in srgb, var(--rc-accent) 10%, transparent);
+  --rc-accent-border: color-mix(in srgb, var(--rc-accent) 30%, transparent);
   --success: #4ade80;
   --success-foreground: #bbf7d0;
   --success-soft: rgba(74, 222, 128, 0.15);
@@ -174,6 +185,8 @@
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-content: var(--primary-content);
+  --color-primary-content-hover: var(--primary-content-hover);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -219,6 +232,11 @@
     @apply border-border outline-ring/50;
   }
 
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--primary);
+  }
+
   body {
     @apply bg-background text-foreground;
     font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -233,7 +251,7 @@
 
   html.dark body {
     background-image:
-      radial-gradient(circle at 10% 0%, rgba(56, 189, 248, 0.055), transparent 31rem),
+      radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--primary) 4.5%, transparent), transparent 31rem),
       linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 24rem);
   }
 
@@ -1178,7 +1196,7 @@
       radial-gradient(circle at 50% 50%, rgba(148, 163, 184, 0.08), transparent 48%),
       radial-gradient(circle at center, transparent 0 78%, rgba(248, 252, 245, 0.82) 79% 100%),
       radial-gradient(circle at center, rgba(248, 252, 245, 0.78) 0 52%, transparent 53%),
-      conic-gradient(from -90deg, #82c91e 0deg var(--health-lime-angle), var(--health-warning-color, #facc15) var(--health-lime-angle) var(--health-angle), rgba(100, 116, 139, 0.18) var(--health-angle) 360deg);
+      conic-gradient(from -90deg, var(--rc-brand) 0deg var(--health-lime-angle), var(--health-warning-color, #facc15) var(--health-lime-angle) var(--health-angle), rgba(100, 116, 139, 0.18) var(--health-angle) 360deg);
     box-shadow:
       0 0 34px rgba(132, 204, 22, 0.13),
       0 0 0 1px rgba(190, 242, 100, 0.18),
@@ -1212,7 +1230,7 @@
 
   .rentcore-health-core {
     background:
-      radial-gradient(circle at 50% 0%, rgba(130, 201, 30, 0.12), transparent 46%),
+      radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--rc-brand) 12%, transparent), transparent 46%),
       radial-gradient(circle at center, rgba(255, 255, 255, 0.96), rgba(239, 246, 235, 0.98) 68%);
     box-shadow:
       inset 0 0 22px rgba(190, 242, 100, 0.065),
@@ -1355,7 +1373,7 @@
   .rentcore-command-screen .rentcore-command-signal {
     border-color: rgba(52, 71, 50, 0.22);
     background:
-      radial-gradient(circle at 8% 0%, rgba(130, 201, 30, 0.1), transparent 38%),
+      radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--rc-brand) 10%, transparent), transparent 38%),
       linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(238, 245, 234, 0.78));
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.78),
@@ -1659,15 +1677,15 @@
 
   html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-command-panel {
     background:
-      radial-gradient(circle at 50% 48%, rgba(130, 201, 30, 0.045), transparent 34%),
+      radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--rc-brand) 4.5%, transparent), transparent 34%),
       linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(244, 249, 240, 0.78));
   }
 
   html:not(.dark) body.rentcore-dashboard-reference-mode .rentcore-health-orb {
     background:
-      radial-gradient(circle at center, rgba(130, 201, 30, 0.11), transparent 31%),
+      radial-gradient(circle at center, color-mix(in srgb, var(--rc-brand) 11%, transparent), transparent 31%),
       radial-gradient(circle at center, rgba(100, 116, 139, 0.08), transparent 54%),
-      radial-gradient(circle at center, transparent 0 61%, rgba(100, 116, 139, 0.12) 62% 63%, transparent 64% 73%, rgba(130, 201, 30, 0.2) 74% 75%, transparent 76%);
+      radial-gradient(circle at center, transparent 0 61%, rgba(100, 116, 139, 0.12) 62% 63%, transparent 64% 73%, color-mix(in srgb, var(--rc-brand) 20%, transparent) 74% 75%, transparent 76%);
   }
 
   @media (prefers-reduced-motion: reduce) {

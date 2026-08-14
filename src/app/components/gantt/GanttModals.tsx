@@ -270,7 +270,7 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
                         value={opt.value}
                         checked={result === opt.value}
                         onChange={() => setResult(opt.value as typeof result)}
-                        className="h-4 w-4 text-[--color-primary]"
+                        className="h-4 w-4 text-primary-content"
                       />
                       <span className="text-sm text-gray-700 dark:text-gray-300">{opt.label}</span>
                     </label>

@@ -304,7 +304,7 @@ test('rentals workspace active tabs keep readable contrast in light and dark the
 
   assert.match(rentalsPageSource, /aria-pressed=\{active\}/);
   assert.match(rentalsPageSource, /data-state=\{active \? 'active' : 'inactive'\}/);
-  assert.match(rentalsPageSource, /rentals-workspace-tab-active border-blue-600 text-blue-700/);
+  assert.match(rentalsPageSource, /rentals-workspace-tab-active border-primary text-primary-content/);
   assert.match(rentalsPageSource, /rentals-workspace-tab-badge-active/);
   assert.match(themeSource, /\.rentals-workspace-tab-active\s*\{[\s\S]*border-bottom-color: var\(--primary\);[\s\S]*background-color: transparent;[\s\S]*color: var\(--primary\);/);
   assert.match(themeSource, /\.dark \.rentals-workspace-tab-active\s*\{[\s\S]*border-bottom-color: var\(--primary\);[\s\S]*background-color: transparent;[\s\S]*color: var\(--primary\);/);

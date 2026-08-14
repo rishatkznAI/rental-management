@@ -167,7 +167,7 @@ export function Layout() {
       aria-pressed={theme === 'dark'}
       aria-label={themeToggleLabel}
       title={themeToggleLabel}
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-card/80 text-muted-foreground transition-colors duration-[var(--motion-duration-micro)] hover:border-primary/35 hover:bg-accent hover:text-primary"
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-card/80 text-muted-foreground transition-colors duration-[var(--motion-duration-micro)] hover:border-primary/35 hover:bg-accent hover:text-primary-content"
     >
       <ThemeIcon className="h-5 w-5" />
     </button>
@@ -385,7 +385,7 @@ export function Layout() {
             <button
               type="button"
               onClick={() => navigate('/planner')}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card/80 text-muted-foreground transition-colors duration-[var(--motion-duration-micro)] hover:border-primary/35 hover:bg-accent hover:text-primary"
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card/80 text-muted-foreground transition-colors duration-[var(--motion-duration-micro)] hover:border-primary/35 hover:bg-accent hover:text-primary-content"
               aria-label="Планировщик"
               title="Планировщик"
             >
@@ -502,11 +502,11 @@ export function Layout() {
                 className={cn(
                   'flex flex-col items-center justify-center gap-0.5 py-2 px-1 text-[10px] font-medium transition-colors',
                   isActive
-                    ? 'text-primary'
+                    ? 'text-primary-content'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
-                <Icon className={cn('h-5 w-5', isActive && 'text-primary')} />
+                <Icon className={cn('h-5 w-5', isActive && 'text-primary-content')} />
                 <span className="leading-none">{item.name}</span>
               </button>
             );

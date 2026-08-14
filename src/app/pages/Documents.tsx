@@ -2112,7 +2112,7 @@ export default function Documents() {
                     <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</p>
                     <p className="mt-1 text-3xl font-bold text-slate-950 dark:text-white">{value}</p>
                   </div>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary-content">
                     <Icon className="h-5 w-5" />
                   </div>
                 </div>
@@ -2227,11 +2227,11 @@ export default function Documents() {
             <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
               {canManageDocuments ? (
                 <>
-                  <Button variant="secondary" onClick={() => openContractCreate('rental')} className="border border-primary/35 bg-primary/10 text-primary hover:bg-primary/15">
+                  <Button variant="secondary" onClick={() => openContractCreate('rental')} className="border border-primary/35 bg-primary/10 text-primary-content hover:bg-primary/15">
                     <Plus className="h-4 w-4" />
                     Договор аренды
                   </Button>
-                  <Button variant="secondary" onClick={() => openContractCreate('supply')} className="border border-primary/35 bg-primary/10 text-primary hover:bg-primary/15">
+                  <Button variant="secondary" onClick={() => openContractCreate('supply')} className="border border-primary/35 bg-primary/10 text-primary-content hover:bg-primary/15">
                     <Plus className="h-4 w-4" />
                     Договор поставки
                   </Button>
@@ -2561,7 +2561,7 @@ export default function Documents() {
                   const typeVisual = getDocumentTypeVisual(doc);
                   const TypeIcon = typeVisual.Icon;
                   return (
-                  <TableRow key={row.key} className="group cursor-pointer border-slate-100 bg-white hover:bg-cyan-50/60 dark:border-white/10 dark:bg-slate-900/35 dark:hover:bg-cyan-300/[0.07]" onClick={() => setSelectedDocument(doc)}>
+                  <TableRow key={row.key} className="group cursor-pointer border-slate-100 bg-white hover:bg-primary/[0.06] dark:border-white/10 dark:bg-slate-900/35" onClick={() => setSelectedDocument(doc)}>
                     <TableCell className="max-w-[260px] py-3">
                       <div className="flex min-w-0 items-center gap-3">
                         <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ${typeVisual.className}`}>
@@ -2604,7 +2604,7 @@ export default function Documents() {
                         <p className="truncate text-xs text-slate-500 dark:text-slate-500">Аренда: {row.rentalId}</p>
                       ) : null}
                     </TableCell>
-                    <TableCell className="sticky right-0 z-10 bg-white text-right group-hover:bg-cyan-50 dark:bg-slate-900 dark:group-hover:bg-slate-900">
+                    <TableCell className="sticky right-0 z-10 bg-white text-right group-hover:bg-accent dark:bg-slate-900">
                       <details className="relative inline-block" onClick={(event) => event.stopPropagation()}>
                         <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500 transition hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.12] [&::-webkit-details-marker]:hidden">
                           <MoreHorizontal className="h-4 w-4" />
@@ -3741,8 +3741,8 @@ export default function Documents() {
                     <TableCell>{row.action}</TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-1 text-xs">
-                        {row.rentalUrl ? <a className="text-[--color-primary] hover:underline" href={row.rentalUrl}>Открыть аренду</a> : null}
-                        <a className="text-[--color-primary] hover:underline" href={row.documentsUrl}>Открыть документы</a>
+                        {row.rentalUrl ? <a className="text-primary-content hover:underline" href={row.rentalUrl}>Открыть аренду</a> : null}
+                        <a className="text-primary-content hover:underline" href={row.documentsUrl}>Открыть документы</a>
                       </div>
                     </TableCell>
                   </TableRow>

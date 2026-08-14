@@ -930,7 +930,7 @@ export default function Deliveries() {
             <button
               type="button"
               onClick={() => setSelectedDeliveryId(null)}
-              className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200"
+              className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-ring dark:text-gray-500 dark:hover:border-gray-800 dark:hover:bg-gray-900 dark:hover:text-gray-200"
               aria-label="Закрыть панель доставки"
             >
               ×
@@ -961,7 +961,7 @@ export default function Deliveries() {
               onClick={() => setDetailTab(id)}
               className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold transition ${
                 detailTab === id
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-primary text-primary-foreground'
                   : 'text-gray-500 hover:bg-gray-100 hover:text-gray-950 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-white'
               }`}
             >
@@ -1276,7 +1276,7 @@ export default function Deliveries() {
                     isActive
                       ? isOverdueTab
                         ? 'bg-red-600 text-white shadow-sm'
-                        : 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-primary text-primary-foreground shadow-sm'
                       : isOverdueTab
                         ? 'text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30'
                         : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
@@ -1285,7 +1285,9 @@ export default function Deliveries() {
                   {tab.label}
                   <span className={`ml-2 rounded-full px-1.5 py-0.5 text-xs ${
                     isActive
-                      ? 'bg-white/20 text-white'
+                      ? isOverdueTab
+                        ? 'bg-white/20 text-white'
+                        : 'bg-primary-foreground/15 text-primary-foreground'
                       : isOverdueTab
                         ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
                         : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
@@ -1353,8 +1355,8 @@ export default function Deliveries() {
                   setSelectedDeliveryId(delivery.id);
                   setDetailTab('overview');
                 }}
-                className={`min-w-0 rounded-2xl border p-4 text-left transition hover:border-blue-300 hover:shadow-sm dark:hover:border-blue-800 ${
-                  selectedDeliveryId === delivery.id ? 'border-blue-400 bg-blue-50/70 dark:border-blue-700 dark:bg-blue-950/20' : 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950/40'
+                className={`min-w-0 rounded-2xl border p-4 text-left transition hover:border-primary/45 hover:shadow-sm ${
+                  selectedDeliveryId === delivery.id ? 'border-primary/55 bg-primary/10' : 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950/40'
                 }`}
               >
                 <div className="flex min-w-0 items-start justify-between gap-3">
@@ -1389,7 +1391,7 @@ export default function Deliveries() {
                   key={delivery.id}
                   className={`min-w-0 rounded-2xl border p-4 shadow-sm ${
                     isSelected
-                      ? 'border-blue-400 bg-blue-50/70 dark:border-blue-700 dark:bg-blue-950/20'
+                      ? 'border-primary/55 bg-primary/10'
                       : 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950/40'
                   }`}
                   data-delivery-mobile-card="true"
@@ -1403,7 +1405,7 @@ export default function Deliveries() {
                       }}
                       className="min-w-0 text-left"
                     >
-                      <span className="block break-words text-sm font-semibold text-blue-700 dark:text-blue-300">{delivery.id}</span>
+                      <span className="block break-words text-sm font-semibold text-primary-content">{delivery.id}</span>
                       <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
                         {formatDate(delivery.transportDate)} · {delivery.pickupTime || 'время не указано'}
                       </span>
@@ -1412,7 +1414,7 @@ export default function Deliveries() {
                       <DropdownMenu.Trigger asChild>
                         <button
                           type="button"
-                          className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none dark:hover:bg-accent/50"
+                          className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-ring focus-visible:ring-[3px] focus-visible:outline-none dark:hover:bg-accent/50"
                           aria-label={`Действия доставки ${delivery.id}`}
                         >
                           <MoreHorizontal className="h-4 w-4" />
@@ -1610,8 +1612,8 @@ export default function Deliveries() {
                         setSelectedDeliveryId(delivery.id);
                         setDetailTab('overview');
                       }}
-                      className={`cursor-pointer align-top transition hover:bg-blue-50/50 dark:hover:bg-blue-950/10 ${
-                        isSelected ? 'bg-blue-50/80 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/20 dark:ring-blue-900' : 'bg-white dark:bg-gray-900'
+                      className={`cursor-pointer align-top transition hover:bg-primary/[0.06] ${
+                        isSelected ? 'bg-primary/10 ring-1 ring-inset ring-primary/25' : 'bg-white dark:bg-gray-900'
                       }`}
                     >
                       <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
@@ -1633,7 +1635,7 @@ export default function Deliveries() {
                             setSelectedDeliveryId(delivery.id);
                             setDetailTab('overview');
                           }}
-                          className="text-left font-semibold text-blue-700 underline-offset-2 hover:underline dark:text-blue-300"
+                          className="text-left font-semibold text-primary-content underline-offset-2 hover:underline"
                         >
                           {delivery.id}
                         </button>
@@ -1717,7 +1719,7 @@ export default function Deliveries() {
                           <DropdownMenu.Trigger asChild>
                             <button
                               type="button"
-                              className="inline-flex size-9 items-center justify-center rounded-md text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none dark:hover:bg-accent/50"
+                              className="inline-flex size-9 items-center justify-center rounded-md text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-ring focus-visible:ring-[3px] focus-visible:outline-none dark:hover:bg-accent/50"
                               aria-label={`Действия доставки ${delivery.id}`}
                             >
                               <MoreHorizontal className="h-4 w-4" />

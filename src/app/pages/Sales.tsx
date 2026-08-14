@@ -557,7 +557,7 @@ export default function Sales() {
           type="checkbox"
           checked={checked}
           onChange={(event) => onChange(event.target.checked)}
-          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+          className="h-4 w-4 rounded border-gray-300 text-primary-content focus:ring-primary"
         />
         {label}
       </label>
@@ -982,7 +982,7 @@ export default function Sales() {
             <TabsTrigger
               key={tab.value}
               value={tab.value}
-              className="whitespace-nowrap border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 transition-colors hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary] dark:hover:text-gray-300"
+              className="whitespace-nowrap border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 transition-colors hover:text-gray-700 data-[state=active]:border-[--color-primary] data-[state=active]:text-primary-content dark:hover:text-gray-300"
             >
               {tab.label}
             </TabsTrigger>
@@ -993,7 +993,7 @@ export default function Sales() {
       <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800 sm:p-5">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[--color-primary]">Коммерческая сводка</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary-content">Коммерческая сводка</p>
             <h2 className="mt-1 text-xl font-bold text-gray-900 dark:text-white">Готовность техники к продаже</h2>
             <p className="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
               КП, PDI, блокеры и готовность к показу клиенту собраны перед рабочим реестром.
@@ -1492,7 +1492,7 @@ export default function Sales() {
                 <div key={type} className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
                   <p className="font-semibold text-gray-900 dark:text-white">{type}</p>
                   <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Документ связан с продажной техникой и открывается через общий реестр документов.</p>
-                  <Link to="/documents" className="mt-3 inline-flex text-sm font-medium text-primary hover:underline">
+                  <Link to="/documents" className="mt-3 inline-flex text-sm font-medium text-primary-content hover:underline">
                     Открыть документ
                   </Link>
                 </div>
@@ -1520,7 +1520,7 @@ export default function Sales() {
                       <span className="space-y-3">
                         <span className="flex items-start justify-between gap-3">
                           <span className="font-semibold text-gray-900 dark:text-white">{item.title}</span>
-                          <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-400 transition group-hover:translate-x-0.5 group-hover:text-primary" />
+                          <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-400 transition group-hover:translate-x-0.5 group-hover:text-primary-content" />
                         </span>
                         <Badge variant={configured ? 'success' : 'warning'}>
                           {configured ? 'Настроено' : 'Не настроено'}
@@ -1529,7 +1529,7 @@ export default function Sales() {
                           {settingsSummary(item.id)}
                         </span>
                       </span>
-                      <span className="mt-4 inline-flex h-9 w-fit items-center rounded-xl border border-gray-200 px-3 text-sm font-medium text-primary transition group-hover:border-primary/40 group-hover:bg-white dark:border-gray-700 dark:group-hover:bg-gray-900">
+                      <span className="mt-4 inline-flex h-9 w-fit items-center rounded-xl border border-gray-200 px-3 text-sm font-medium text-primary-content transition group-hover:border-primary/40 group-hover:bg-white dark:border-gray-700 dark:group-hover:bg-gray-900">
                         Настроить
                       </span>
                     </button>

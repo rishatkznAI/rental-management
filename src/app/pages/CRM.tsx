@@ -697,7 +697,7 @@ export default function CRM() {
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div className="min-w-0">
-          <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+          <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary-content">
             <Briefcase className="h-3.5 w-3.5" />
             CRM
           </div>

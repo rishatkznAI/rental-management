@@ -1156,7 +1156,7 @@ export default function RentalDetail() {
             }}
             className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
               activeDetailTab === tab
-                ? 'bg-[--color-primary] text-white shadow-sm'
+                ? 'bg-[--color-primary] text-[--color-primary-foreground] shadow-sm'
                 : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-900'
             }`}
           >
@@ -1170,7 +1170,7 @@ export default function RentalDetail() {
           <Card>
             <CardHeader>
               <CardTitle id="rental-tab-overview" className="flex scroll-mt-24 items-center gap-2">
-                <User className="h-5 w-5 text-[--color-primary]" />
+                <User className="h-5 w-5 text-primary-content" />
                 Клиент
               </CardTitle>
             </CardHeader>
@@ -1290,7 +1290,7 @@ export default function RentalDetail() {
               )}
               {selectedClient && (
                 <div className="pt-1">
-                  <Link to={`/clients/${selectedClient.id}`} className="text-sm text-[--color-primary] hover:underline">
+                  <Link to={`/clients/${selectedClient.id}`} className="text-sm text-primary-content hover:underline">
                     Перейти к карточке клиента →
                   </Link>
                 </div>
@@ -1301,7 +1301,7 @@ export default function RentalDetail() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Truck className="h-5 w-5 text-[--color-primary]" />
+                <Truck className="h-5 w-5 text-primary-content" />
                 Техника в аренде
               </CardTitle>
               {linkedGanttCandidates.length > 1 && (
@@ -1346,7 +1346,7 @@ export default function RentalDetail() {
           <Card>
             <CardHeader>
               <CardTitle id="rental-tab-terms" className="flex scroll-mt-24 items-center gap-2">
-                <Calendar className="h-5 w-5 text-[--color-primary]" />
+                <Calendar className="h-5 w-5 text-primary-content" />
                 Даты аренды
               </CardTitle>
             </CardHeader>
@@ -1404,7 +1404,7 @@ export default function RentalDetail() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5 text-[--color-primary]" />
+                <MessageSquare className="h-5 w-5 text-primary-content" />
                 Комментарии
               </CardTitle>
               <CardDescription>{comments.length} записей</CardDescription>
@@ -1474,7 +1474,7 @@ export default function RentalDetail() {
           <Card>
             <CardHeader>
               <CardTitle id="rental-tab-payments" className="flex scroll-mt-24 items-center gap-2">
-                <DollarSign className="h-5 w-5 text-[--color-primary]" />
+                <DollarSign className="h-5 w-5 text-primary-content" />
                 Финансы
               </CardTitle>
             </CardHeader>
@@ -1655,7 +1655,7 @@ export default function RentalDetail() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5 text-[--color-primary]" />
+                <FileText className="h-5 w-5 text-primary-content" />
                 Счёт и оплата
               </CardTitle>
               <CardDescription>
@@ -1741,7 +1741,7 @@ export default function RentalDetail() {
           <Card>
             <CardHeader>
               <CardTitle id="rental-tab-delivery" className="flex scroll-mt-24 items-center gap-2">
-                <User className="h-5 w-5 text-[--color-primary]" />
+                <User className="h-5 w-5 text-primary-content" />
                 Менеджер и статус
               </CardTitle>
             </CardHeader>
@@ -1786,7 +1786,7 @@ export default function RentalDetail() {
           <Card>
             <CardHeader>
               <CardTitle id="rental-tab-documents" className="flex scroll-mt-24 items-center gap-2">
-                <FileText className="h-5 w-5 text-[--color-primary]" />
+                <FileText className="h-5 w-5 text-primary-content" />
                 Документы по аренде
               </CardTitle>
             </CardHeader>
@@ -1867,7 +1867,7 @@ export default function RentalDetail() {
           <Card>
             <CardHeader>
               <CardTitle id="rental-change-history" className="flex items-center gap-2 scroll-mt-24">
-                <Clock className="h-5 w-5 text-[--color-primary]" />
+                <Clock className="h-5 w-5 text-primary-content" />
                 История изменений
               </CardTitle>
               <CardDescription>
@@ -1919,7 +1919,7 @@ export default function RentalDetail() {
           <Card>
             <CardHeader>
               <CardTitle id="rental-tab-history" className="flex scroll-mt-24 items-center gap-2">
-                <Clock className="h-5 w-5 text-[--color-primary]" />
+                <Clock className="h-5 w-5 text-primary-content" />
                 История
               </CardTitle>
             </CardHeader>

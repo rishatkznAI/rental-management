@@ -35,7 +35,7 @@ export function FilterButton({
           <SlidersHorizontal className="h-4 w-4" />
           {label}
           {activeCount > 0 && (
-            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary-content">
               {activeCount}
             </span>
           )}

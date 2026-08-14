@@ -556,7 +556,7 @@ function ManagerMyPlanBlock({
                   <div key={item.label} className="flex min-h-[132px] flex-col justify-between rounded-xl border border-border bg-background/80 px-4 py-4 shadow-sm dark:bg-background/30">
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-xs font-bold uppercase tracking-normal text-muted-foreground">{item.label}</p>
-                      <div className="rounded-lg bg-primary/10 p-2 text-primary">
+                      <div className="rounded-lg bg-primary/10 p-2 text-primary-content">
                         <Icon className="h-4 w-4 shrink-0" />
                       </div>
                     </div>
@@ -605,7 +605,7 @@ function ManagerMyPlanBlock({
                       <p className="text-base font-extrabold text-foreground">Быстро добавить активность</p>
                       <p className="mt-1 text-sm text-muted-foreground">Звонок, выезд или заметка по результату контакта.</p>
                     </div>
-                    <Activity className="h-5 w-5 text-primary" />
+                    <Activity className="h-5 w-5 text-primary-content" />
                   </div>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1 text-xs font-semibold text-muted-foreground">
@@ -711,7 +711,7 @@ function ManagerMyPlanBlock({
                         const Icon = managerActivityIcon(item.activityType);
                         return (
                           <div key={item.id} className="flex gap-3 px-4 py-3">
-                            <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
+                            <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary-content">
                               <Icon className="h-4 w-4" />
                             </div>
                             <div className="min-w-0 flex-1">
@@ -750,8 +750,8 @@ const DASHBOARD_TOOLTIP_STYLE = {
 
 const toneStyles: Record<DashboardTone, { bubble: string; accent: string; dot: string }> = {
   default: {
-    bubble: 'bg-blue-50 text-blue-600 dark:bg-primary/12 dark:text-primary',
-    accent: 'text-blue-600 dark:text-primary',
+    bubble: 'bg-blue-50 text-blue-600 dark:bg-primary/12 dark:text-primary-content',
+    accent: 'text-blue-600 dark:text-primary-content',
     dot: 'bg-blue-500',
   },
   success: {
@@ -782,7 +782,7 @@ const toneStyles: Record<DashboardTone, { bubble: string; accent: string; dot: s
 };
 
 const commandMetricToneClass: Record<DashboardTone, string> = {
-  default: 'text-primary',
+  default: 'text-primary-content',
   success: 'text-success',
   warning: 'text-warning',
   danger: 'text-danger',
@@ -5230,7 +5230,7 @@ export default function Dashboard() {
                   )}
 
                   {card.cta && (
-                    <span className="mt-auto inline-flex items-center gap-2 pt-3 text-sm font-semibold text-primary transition group-hover:gap-3">
+                    <span className="mt-auto inline-flex items-center gap-2 pt-3 text-sm font-semibold text-primary-content transition group-hover:gap-3">
                       {card.cta}
                       <ArrowRight className="h-4 w-4" />
                     </span>
@@ -6173,7 +6173,7 @@ export default function Dashboard() {
           <CardHeader className="pb-4">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
               <div className="space-y-2">
-                <Badge variant="default" className="bg-primary/12 text-primary dark:bg-primary/12 dark:text-primary">{roleDashboardMeta.badge}</Badge>
+                <Badge variant="default" className="bg-primary/12 text-primary-content dark:bg-primary/12 dark:text-primary-content">{roleDashboardMeta.badge}</Badge>
                 <CardTitle className="app-shell-title text-xl font-extrabold">{roleDashboardMeta.title}</CardTitle>
                 <CardDescription className="max-w-3xl text-sm text-muted-foreground">
                   {roleDashboardMeta.description}
@@ -6201,7 +6201,7 @@ export default function Dashboard() {
                     ? 'bg-orange-400/12 text-orange-300'
                     : item.tone === 'success'
                     ? 'bg-emerald-400/12 text-emerald-300'
-                    : 'bg-primary/12 text-primary';
+                    : 'bg-primary/12 text-primary-content';
 
                 return (
                   <div key={item.id} className={`rounded-2xl border p-4 ${toneClass}`}>
@@ -6227,7 +6227,7 @@ export default function Dashboard() {
         <Card className={dashboardCardClass}>
           <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary-content">
                 <ListChecks className="h-5 w-5" />
               </div>
               <div>
@@ -6436,7 +6436,7 @@ export default function Dashboard() {
             <Card className={dashboardCardClass}>
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2">
-                  <User className="h-5 w-5 text-[--color-primary]" />
+                  <User className="h-5 w-5 text-primary-content" />
                   Менеджеры аренды
                 </CardTitle>
                 <CardDescription>Активные сделки, выручка месяца, долг и документы по каждому менеджеру.</CardDescription>
@@ -6509,7 +6509,7 @@ export default function Dashboard() {
             <Card className={dashboardCardClass}>
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2">
-                  <Wrench className="h-5 w-5 text-[--color-primary]" />
+                  <Wrench className="h-5 w-5 text-primary-content" />
                   Механики
                 </CardTitle>
                 <CardDescription>Текущая нагрузка, готовые заявки, ожидание запчастей и сервисная выработка.</CardDescription>
@@ -6737,7 +6737,7 @@ export default function Dashboard() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <User className="h-5 w-5 text-[--color-primary]" />
+            <User className="h-5 w-5 text-primary-content" />
             Результаты менеджера за текущий месяц
           </CardTitle>
           <CardDescription>
@@ -7224,7 +7224,7 @@ export default function Dashboard() {
         <SheetContent side="right" className="flex w-full flex-col overflow-hidden border-gray-200 bg-white p-0 sm:max-w-2xl dark:border-gray-700 dark:bg-gray-950">
           <SheetHeader className="shrink-0 border-b border-gray-200 pb-4 pr-12 dark:border-gray-700">
             <SheetTitle className="flex items-center gap-2 text-left">
-              <User className="h-5 w-5 text-[--color-primary]" />
+              <User className="h-5 w-5 text-primary-content" />
               Расшифровка карточки менеджера
             </SheetTitle>
             <SheetDescription className="text-left">
@@ -7548,7 +7548,7 @@ export default function Dashboard() {
                     onClick={() => setOfficeUpdManagerFilter('')}
                     className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
                       officeUpdManagerFilter === ''
-                        ? 'border-[--color-primary] bg-[--color-primary]/10 text-[--color-primary]'
+                        ? 'border-[--color-primary] bg-[--color-primary]/10 text-primary-content'
                         : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'
                     }`}
                   >
@@ -7564,7 +7564,7 @@ export default function Dashboard() {
                       onClick={() => setOfficeUpdManagerFilter(row.name)}
                       className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
                         officeUpdManagerFilter === row.name
-                          ? 'border-[--color-primary] bg-[--color-primary]/10 text-[--color-primary]'
+                          ? 'border-[--color-primary] bg-[--color-primary]/10 text-primary-content'
                           : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'
                       }`}
                     >

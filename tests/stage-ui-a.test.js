@@ -14,6 +14,8 @@ test('Stage UI-A centralizes the cold industrial visual system', () => {
   for (const token of [
     '--rc-surface:',
     '--rc-surface-elevated:',
+    '--rc-brand:',
+    '--rc-brand-dark:',
     '--rc-border:',
     '--rc-hover:',
     '--rc-active:',
@@ -30,7 +32,13 @@ test('Stage UI-A centralizes the cold industrial visual system', () => {
   }
 
   assert.match(themeSource, /\.dark\s*\{[\s\S]*--background:\s*#080c12/);
-  assert.match(themeSource, /\.dark\s*\{[\s\S]*--primary:\s*#38bdf8/);
+  assert.match(themeSource, /--rc-brand:\s*#82c91e/);
+  assert.match(themeSource, /--rc-brand-dark:\s*#b7f23a/);
+  assert.match(themeSource, /--rc-brand-content:\s*#4b7511/);
+  assert.match(themeSource, /--rc-brand-content-hover:\s*#3f6212/);
+  assert.match(themeSource, /\.dark\s*\{[\s\S]*--primary:\s*var\(--rc-brand-dark\)/);
+  assert.match(themeSource, /input\[type="checkbox"\],[\s\S]*accent-color:\s*var\(--primary\)/);
+  assert.match(themeSource, /\.dark\s*\{[\s\S]*--info:\s*#38bdf8/);
   assert.match(themeSource, /--radius:\s*0\.5rem/);
   assert.match(themeSource, /border:\s*1px solid var\(--rc-border\)/);
 });
@@ -67,7 +75,7 @@ test('Stage UI-A keeps the sidebar shared, collapsible, quiet, and route-driven'
   assert.match(layoutSource, /<Sidebar/);
 });
 
-test('Stage UI-A uses cyan primary actions and hidden-but-scrollable compact rails', () => {
+test('Stage UI-A uses rentCore green primary actions and hidden-but-scrollable compact rails', () => {
   assert.match(documentsSource, /bg-primary text-primary-foreground hover:bg-\[color:var\(--primary-hover\)\]/);
   assert.match(profileSettingsSource, /bg-primary text-primary-foreground hover:bg-\[color:var\(--primary-hover\)\]/);
   assert.doesNotMatch(documentsSource, /bg-lime-300 text-slate-950/);

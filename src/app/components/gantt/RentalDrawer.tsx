@@ -1431,7 +1431,7 @@ export function RentalDrawer({
                         onClick={() => handlePaymentStatusChange(status)}
                         className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
                           rental.paymentStatus === status
-                            ? 'bg-[--color-primary] text-white'
+                            ? 'bg-[--color-primary] text-[--color-primary-foreground]'
                             : 'bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
                         }`}
                       >
@@ -1835,7 +1835,7 @@ export function RentalDrawer({
                             {docDate ? formatDate(docDate) : '—'} · {docStatus}
                           </div>
                         </div>
-                        <Link to={`/documents?rentalId=${encodeURIComponent(canonicalRentalId || doc.rentalId || doc.rental || '')}`} className="shrink-0 text-xs font-medium text-[--color-primary] hover:underline">
+                        <Link to={`/documents?rentalId=${encodeURIComponent(canonicalRentalId || doc.rentalId || doc.rental || '')}`} className="shrink-0 text-xs font-medium text-primary-content hover:underline">
                           Открыть
                         </Link>
                       </div>

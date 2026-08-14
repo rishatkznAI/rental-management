@@ -198,7 +198,7 @@ export default function BotDetail() {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0">
             <h1 className="flex min-w-0 items-center gap-3 text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">
-              <Bot className="h-7 w-7 shrink-0 text-[--color-primary]" />
+              <Bot className="h-7 w-7 shrink-0 text-primary-content" />
               {bot.name}
             </h1>
             <p className="mt-2 max-w-3xl break-words text-sm text-gray-500 dark:text-gray-400">{bot.description}</p>

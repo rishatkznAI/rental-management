@@ -521,13 +521,13 @@ function ManagementActionRequiredStrip({
                       <td className="px-3 py-3 text-xs font-semibold text-foreground">{readinessLossText(item.estimatedDailyLoss)}</td>
                       <td className="px-5 py-3 text-xs">
                         <div className="flex flex-wrap gap-2">
-                          <Link className="inline-flex items-center gap-1 text-primary hover:underline" to={item.links.equipment || `/equipment/${item.equipmentId}`}>
+                          <Link className="inline-flex items-center gap-1 text-primary-content hover:underline" to={item.links.equipment || `/equipment/${item.equipmentId}`}>
                             Техника <ExternalLink className="h-3 w-3" />
                           </Link>
-                          {item.links.serviceTicket ? <Link className="text-primary hover:underline" to={item.links.serviceTicket}>Сервис</Link> : null}
-                          {item.links.rental ? <Link className="text-primary hover:underline" to={item.links.rental}>Аренда</Link> : null}
-                          {item.links.delivery ? <Link className="text-primary hover:underline" to={item.links.delivery}>Доставка</Link> : null}
-                          {item.links.document ? <Link className="text-primary hover:underline" to={item.links.document}>Документ</Link> : null}
+                          {item.links.serviceTicket ? <Link className="text-primary-content hover:underline" to={item.links.serviceTicket}>Сервис</Link> : null}
+                          {item.links.rental ? <Link className="text-primary-content hover:underline" to={item.links.rental}>Аренда</Link> : null}
+                          {item.links.delivery ? <Link className="text-primary-content hover:underline" to={item.links.delivery}>Доставка</Link> : null}
+                          {item.links.document ? <Link className="text-primary-content hover:underline" to={item.links.document}>Документ</Link> : null}
                         </div>
                       </td>
                     </tr>

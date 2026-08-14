@@ -27,7 +27,7 @@ test('Stage UI-A preserves reduced motion and the four-KPI dashboard contract', 
 
   expect(visualContract).toEqual({
     background: '#080c12',
-    primary: '#38bdf8',
+    primary: '#b7f23a',
     revealAnimationDuration: '0.001s',
     revealAnimationDelay: '0s',
     sidebarTransitionDuration: '0.001s',

@@ -518,7 +518,7 @@ export function Sidebar({
                                   {highlightMatch(result.subtitle, normalizedSearch)}
                                 </div>
                               </div>
-                              <span className="mt-1 shrink-0 text-[11px] font-semibold text-primary">Открыть</span>
+                              <span className="mt-1 shrink-0 text-[11px] font-semibold text-primary-content">Открыть</span>
                             </button>
                           );
                         })}
@@ -577,7 +577,7 @@ export function Sidebar({
                             ? 'bg-sidebar-primary/14 text-sidebar-foreground'
                             : item.section === 'service'
                               ? 'bg-amber-500/14 text-amber-300'
-                              : 'bg-primary/14 text-primary',
+                              : 'bg-primary/14 text-primary-content',
                         )}>
                           {badgeValue > 99 ? '99+' : badgeValue}
                         </span>
@@ -599,7 +599,7 @@ export function Sidebar({
             aria-label={themeToggleLabel}
             title={desktopCollapsed ? themeToggleLabel : undefined}
             className={cn(
-              'flex min-h-11 w-full items-center gap-3 rounded-lg border border-sidebar-border bg-transparent px-3 py-2 text-left text-sidebar-foreground/74 transition-colors duration-[var(--motion-duration-micro)] hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+              'flex min-h-11 w-full items-center gap-3 rounded-lg border border-sidebar-border bg-transparent px-3 py-2 text-left text-sidebar-foreground/74 transition-colors duration-[var(--motion-duration-micro)] hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
               desktopCollapsed && 'sm:justify-center sm:px-0',
             )}
           >

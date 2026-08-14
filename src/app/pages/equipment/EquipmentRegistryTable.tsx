@@ -118,7 +118,7 @@ export function EquipmentRegistryTable({
                   <Link
                     to={detailPath}
                     onClick={(event) => event.stopPropagation()}
-                    className="block truncate font-semibold text-foreground hover:text-primary"
+                    className="block truncate font-semibold text-foreground hover:text-primary-content"
                     title={equipment.inventoryNumber || '—'}
                   >
                     {equipment.inventoryNumber || '—'}
@@ -128,7 +128,7 @@ export function EquipmentRegistryTable({
                   </div>
                 </td>
                 <td className="border-b border-border/75 px-3 py-3">
-                  <Link to={detailPath} onClick={(event) => event.stopPropagation()} className="block truncate font-semibold text-foreground hover:text-primary" title={title}>
+                  <Link to={detailPath} onClick={(event) => event.stopPropagation()} className="block truncate font-semibold text-foreground hover:text-primary-content" title={title}>
                     {title}
                   </Link>
                   {equipment.year ? (

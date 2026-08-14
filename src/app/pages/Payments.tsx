@@ -535,7 +535,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
               placeholder="Примечание к платежу..."
               value={form.comment}
               onChange={e => set('comment', e.target.value)}
-              className="min-h-20 w-full rounded-lg border border-input bg-input-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-ring/40"
+              className="min-h-20 w-full rounded-lg border border-input bg-input-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-ring"
             />
           </div>
 
@@ -1264,7 +1264,7 @@ export default function Payments() {
           title="Прогноз поступлений"
           value={formatCurrency(forecastAmount)}
           caption="на 30 дней"
-          tone="bg-primary/10 text-primary"
+          tone="bg-primary/10 text-primary-content"
         />
       </div>
 
@@ -1389,7 +1389,7 @@ export default function Payments() {
               className={cn(
                 'flex h-14 shrink-0 items-center gap-2 border-b-2 px-1 text-sm font-semibold transition',
                 pagination.filters.status === tab.value
-                  ? 'border-primary text-primary'
+                  ? 'border-primary text-primary-content'
                   : 'border-transparent text-muted-foreground hover:text-foreground',
               )}
             >
@@ -1423,7 +1423,7 @@ export default function Payments() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">№ платежа</p>
-                    <p className="mt-1 break-words font-semibold text-primary">{paymentNumber(payment)}</p>
+                    <p className="mt-1 break-words font-semibold text-primary-content">{paymentNumber(payment)}</p>
                   </div>
                   <div data-payment-mobile-status="true" className="flex max-w-[52%] shrink-0 justify-end">
                     <PaymentStatusPill status={payment.status} />
@@ -1437,7 +1437,7 @@ export default function Payments() {
                       <Link
                         to={`/clients/${clientProfileId}`}
                         onClick={(event) => event.stopPropagation()}
-                        className="mt-1 block break-words rounded-md text-sm font-semibold text-foreground transition hover:text-primary"
+                        className="mt-1 block break-words rounded-md text-sm font-semibold text-foreground transition hover:text-primary-content"
                         aria-label={`Открыть карточку клиента ${paymentClientName(payment)}`}
                       >
                         {paymentClientName(payment)}
@@ -1525,7 +1525,7 @@ export default function Payments() {
                     {paymentDateLabel(payment)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 align-middle">
-                    <button type="button" onClick={() => setSelectedPaymentId(payment.id)} className="font-semibold text-primary hover:text-primary/80">
+                    <button type="button" onClick={() => setSelectedPaymentId(payment.id)} className="font-semibold text-primary-content hover:text-primary-content/80">
                       {paymentNumber(payment)}
                     </button>
                   </td>
@@ -1534,7 +1534,7 @@ export default function Payments() {
                       <Link
                         to={`/clients/${clientProfileId}`}
                         onClick={(event) => event.stopPropagation()}
-                        className="block truncate rounded-md font-medium text-foreground/85 transition hover:text-primary"
+                        className="block truncate rounded-md font-medium text-foreground/85 transition hover:text-primary-content"
                         aria-label={`Открыть карточку клиента ${paymentClientName(payment)}`}
                       >
                         {paymentClientName(payment)}

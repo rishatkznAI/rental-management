@@ -247,11 +247,11 @@ export function ClientCombobox({
                     className={cn(
                       'flex cursor-pointer select-none items-start gap-2 px-3 py-2 text-sm transition-colors',
                       isHighlighted
-                        ? 'bg-[--color-primary]/10 text-[--color-primary]'
+                        ? 'bg-[--color-primary]/10 text-primary-content'
                         : 'text-gray-900 hover:bg-gray-100 dark:text-white dark:hover:bg-gray-700/60',
                     )}
                   >
-                    <span className="w-4 shrink-0 text-[--color-primary]">{isSelected ? '✓' : ''}</span>
+                    <span className="w-4 shrink-0 text-primary-content">{isSelected ? '✓' : ''}</span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{clientLabel(clientItem)}</p>
                       <p className="truncate text-xs text-gray-500 dark:text-gray-400">

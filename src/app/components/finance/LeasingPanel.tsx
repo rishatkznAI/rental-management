@@ -426,7 +426,7 @@ export function LeasingPanel({ canManageFinance, canDeleteFinance }: { canManage
                     <TableCell>
                       <button
                         type="button"
-                        className="text-left font-medium text-gray-900 hover:text-[--color-primary] dark:text-white"
+                        className="text-left font-medium text-gray-900 hover:text-primary-content dark:text-white"
                         onClick={() => setSelectedContract(contract)}
                       >
                         {contract.contractNumber}

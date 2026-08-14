@@ -260,7 +260,7 @@ export default function TasksCenter() {
             <Card key={group.id}>
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  {group.id === 'overdue' ? <AlertTriangle className="h-4 w-4 text-red-500" /> : <CalendarClock className="h-4 w-4 text-primary" />}
+                  {group.id === 'overdue' ? <AlertTriangle className="h-4 w-4 text-red-500" /> : <CalendarClock className="h-4 w-4 text-primary-content" />}
                   {group.title}
                   <Badge variant="default">{group.tasks.length}</Badge>
                 </CardTitle>
@@ -306,7 +306,7 @@ export default function TasksCenter() {
 
       <Card>
         <CardContent className="flex items-start gap-3 p-4 text-sm text-muted-foreground">
-          <ListChecks className="mt-0.5 h-5 w-5 text-primary" />
+          <ListChecks className="mt-0.5 h-5 w-5 text-primary-content" />
           <p>
             В MVP задачи вычисляются из существующих данных и не создают записей в базе. Закрытие, скрытие и MAX-уведомления намеренно не включены.
           </p>

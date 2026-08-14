@@ -172,14 +172,14 @@ function KpiCard({
   return (
     <div className="app-kpi-card min-h-[138px] p-4 text-card-foreground">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/12 text-primary shadow-[0_12px_30px_-24px_rgba(183,242,58,0.72)]">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/12 text-primary-content shadow-[0_12px_30px_-24px_var(--rc-accent-border)]">
           <Icon className="h-5 w-5" />
         </div>
         <span className="h-2 w-2 rounded-full bg-lime-500 shadow-[0_0_14px_rgba(132,204,22,0.48)] dark:bg-lime-300/80 dark:shadow-[0_0_16px_rgba(190,242,100,0.8)]" />
       </div>
       <p className="mt-4 text-sm font-medium text-muted-foreground">{title}</p>
       <p className="mt-2 truncate text-2xl font-semibold tracking-normal text-foreground dark:text-white">{value}</p>
-      <p className="mt-2 text-xs font-semibold text-primary">{caption}</p>
+      <p className="mt-2 text-xs font-semibold text-primary-content">{caption}</p>
     </div>
   );
 }
@@ -362,7 +362,7 @@ export default function Clients() {
         <button
           type="button"
           onClick={resetFilters}
-          className="inline-flex h-11 items-center gap-2 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary dark:hover:text-lime-200"
+          className="inline-flex h-11 items-center gap-2 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary-content dark:hover:text-lime-200"
         >
           <RotateCcw className="h-4 w-4" />
           Сбросить
@@ -421,13 +421,13 @@ export default function Clients() {
               {visibleClients.map(({ client, kind, manager }, index) => (
                 <TableRow key={client.id} className="border-border bg-transparent hover:bg-accent/55 dark:border-white/10 dark:hover:bg-lime-300/[0.035]">
                   <TableCell className="px-4 py-3">
-                    <button type="button" aria-label="Избранное" className="text-muted-foreground transition-colors hover:text-primary dark:text-slate-600 dark:hover:text-lime-200">
+                    <button type="button" aria-label="Избранное" className="text-muted-foreground transition-colors hover:text-primary-content dark:text-slate-600 dark:hover:text-lime-200">
                       <Star className="h-4 w-4" />
                     </button>
                   </TableCell>
                   <TableCell className="px-4 py-3">
                     <Link to={`/clients/${client.id}`} className="block max-w-[260px]">
-                      <span className="block truncate text-sm font-semibold text-foreground hover:text-primary dark:text-white dark:hover:text-lime-200">{safeText(client.company, 'Без названия')}</span>
+                      <span className="block truncate text-sm font-semibold text-foreground hover:text-primary-content dark:text-white dark:hover:text-lime-200">{safeText(client.company, 'Без названия')}</span>
                       {(index === 0 || Number(client.totalRentals || 0) >= 3) && (
                         <span className="mt-1 inline-flex rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:bg-white/5 dark:text-slate-400">
                           Постоянный клиент

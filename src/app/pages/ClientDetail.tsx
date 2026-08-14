@@ -2165,7 +2165,7 @@ export default function ClientDetail() {
                     <Field
                       label="Телефон"
                       value={client.phone ? (
-                        <a href={`tel:${client.phone}`} className="text-[--color-primary] hover:underline">
+                        <a href={`tel:${client.phone}`} className="text-primary-content hover:underline">
                         {client.phone}
                       </a>
                       ) : null}
@@ -2176,7 +2176,7 @@ export default function ClientDetail() {
                     <Field
                       label="Email"
                       value={client.email ? (
-                        <a href={`mailto:${client.email}`} className="text-[--color-primary] hover:underline">
+                        <a href={`mailto:${client.email}`} className="text-primary-content hover:underline">
                           {client.email}
                         </a>
                       ) : null}
@@ -2342,7 +2342,7 @@ export default function ClientDetail() {
                     <p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{clientDebtPlan.comment || clientDebtPlan.result || 'Комментариев нет'}</p>
                   </div>
                   <div className="md:col-span-2">
-                    <Link to="/finance" className="text-sm text-[--color-primary] hover:underline">Открыть план в Финансах</Link>
+                    <Link to="/finance" className="text-sm text-primary-content hover:underline">Открыть план в Финансах</Link>
                   </div>
                 </div>
               )}
@@ -2403,7 +2403,7 @@ export default function ClientDetail() {
                             </p>
                             <p className="text-xs text-gray-500">{rental.manager || '—'}</p>
                             {navigationId ? (
-                              <Link to={`/rentals/${navigationId}`} className="mt-1 inline-block text-xs text-[--color-primary] hover:underline" onClick={event => event.stopPropagation()}>
+                              <Link to={`/rentals/${navigationId}`} className="mt-1 inline-block text-xs text-primary-content hover:underline" onClick={event => event.stopPropagation()}>
                                 Открыть аренду
                               </Link>
                             ) : (
@@ -2442,7 +2442,7 @@ export default function ClientDetail() {
                       <div>
                         <p className="text-sm font-medium text-gray-900 dark:text-white">{doc.type}</p>
                         <p className="text-xs text-gray-400">{formatDate(doc.date)} · {doc.rental}</p>
-                        <Link to="/documents" className="text-xs text-[--color-primary] hover:underline">Открыть документы</Link>
+                        <Link to="/documents" className="text-xs text-primary-content hover:underline">Открыть документы</Link>
                       </div>
                       <Badge variant={doc.rawStatus === 'signed' ? 'success' : doc.rawStatus === 'sent' ? 'info' : 'default'}>{doc.status}</Badge>
                     </div>
@@ -2474,7 +2474,7 @@ export default function ClientDetail() {
                       <div>
                         <p className="text-sm font-medium text-gray-900 dark:text-white">{payment.invoiceNumber || payment.id}</p>
                         <p className="text-xs text-gray-400">{formatDate(payment.date)} · {payment.rentalId}</p>
-                        <Link to="/payments" className="text-xs text-[--color-primary] hover:underline">Открыть платежи</Link>
+                        <Link to="/payments" className="text-xs text-primary-content hover:underline">Открыть платежи</Link>
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(payment.amount)}</p>
@@ -2509,7 +2509,7 @@ export default function ClientDetail() {
                       <div>
                         <p className="text-sm font-medium text-gray-900 dark:text-white">{ticket.equipment}</p>
                         <p className="text-xs text-gray-400">{formatDate(ticket.date)} · {ticket.status}</p>
-                        <Link to={`/service/${ticket.id}`} className="text-xs text-[--color-primary] hover:underline">Открыть заявку</Link>
+                        <Link to={`/service/${ticket.id}`} className="text-xs text-primary-content hover:underline">Открыть заявку</Link>
                       </div>
                       <Badge variant={servicePriorityVariant(ticket.priority)}>{ticket.priority}</Badge>
                     </div>

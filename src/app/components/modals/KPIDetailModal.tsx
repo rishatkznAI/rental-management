@@ -102,7 +102,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
             <div className="space-y-4">
               <div className={mutedPanelClass}>
                 <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary-content">
                     <CalendarDays className="h-5 w-5" />
                   </div>
                   <div>
@@ -122,7 +122,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                 </div>
                 <div className={infoMetricClass}>
                   <p className="text-sm text-muted-foreground">Участвует в расчёте</p>
-                  <p className="mt-1 text-2xl font-bold text-primary">{activeEquipment}</p>
+                  <p className="mt-1 text-2xl font-bold text-primary-content">{activeEquipment}</p>
                 </div>
                 {excludedEquipment > 0 && (
                   <div className={warningMetricClass}>
@@ -182,7 +182,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                           <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
                             {equipment.inRent ? (equipment.rentalClient ? `В аренде · ${equipment.rentalClient}` : 'В аренде') : utilizationEquipmentStatusLabel(equipment.status)}
                           </span>
-                          <span className="rounded-md bg-primary/10 px-2 py-1 font-semibold text-primary">
+                          <span className="rounded-md bg-primary/10 px-2 py-1 font-semibold text-primary-content">
                             {equipment.inRent ? `${safeNumber(equipment.occupiedMachineDays) || 1} м-дн.` : 'знаменатель'}
                           </span>
                         </div>
@@ -249,7 +249,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
             <div className="space-y-3">
               <div className={infoMetricClass}>
                 <p className="text-sm text-muted-foreground">Всего активных договоров</p>
-                <p className="text-3xl font-bold text-primary">{data.activeRentals?.length || 0}</p>
+                <p className="text-3xl font-bold text-primary-content">{data.activeRentals?.length || 0}</p>
               </div>
               <div className="space-y-2">
                 <p className="text-sm font-medium text-foreground">Список активных аренд:</p>
@@ -271,7 +271,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                     </div>
                     <div className="ml-3 flex items-center gap-2">
                       <p className="font-semibold text-foreground">{safeCurrency(rental.price)}</p>
-                      <ExternalLink className="h-4 w-4 text-[--color-primary]" />
+                      <ExternalLink className="h-4 w-4 text-primary-content" />
                     </div>
                   </Link>
                 ))}
@@ -342,7 +342,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                 </div>
                 <div className={infoMetricClass}>
                   <p className="text-sm text-muted-foreground">Завтра</p>
-                  <p className="text-2xl font-bold text-primary">{data.tomorrowRentals?.length || 0}</p>
+                  <p className="text-2xl font-bold text-primary-content">{data.tomorrowRentals?.length || 0}</p>
                 </div>
               </div>
               <div className="space-y-2">
@@ -377,11 +377,11 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                   >
                     <div>
                       <p className="font-medium text-foreground">{rental.client}</p>
-                      <p className="text-sm text-primary">
+                      <p className="text-sm text-primary-content">
                         Возврат {formatDate(rental.plannedReturnDate)} · {rental.equipmentInv}
                       </p>
                     </div>
-                    <ExternalLink className="h-4 w-4 text-primary" />
+                    <ExternalLink className="h-4 w-4 text-primary-content" />
                   </Link>
                 )) : (
                   <p className="text-sm text-muted-foreground">На завтра возвратов нет</p>
@@ -421,7 +421,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                         {equipment.inventoryNumber} · {equipment.status === 'inactive' ? 'Неактивна' : 'Свободна'}
                       </p>
                     </div>
-                    <ExternalLink className="h-4 w-4 text-[--color-primary]" />
+                    <ExternalLink className="h-4 w-4 text-primary-content" />
                   </Link>
                 )) : (
                   <p className="text-sm text-muted-foreground">В простое техники нет</p>
@@ -457,7 +457,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                           {ticket.reason} · {ticket.assignedMechanicName || ticket.assignedTo || 'Без механика'}
                         </p>
                       </div>
-                      <ExternalLink className="h-4 w-4 text-[--color-primary]" />
+                      <ExternalLink className="h-4 w-4 text-primary-content" />
                     </Link>
                   ))}
                 </div>
@@ -571,7 +571,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                 </div>
                 <div className={infoMetricClass}>
                   <p className="text-sm text-muted-foreground">Средний срок</p>
-                  <p className="text-2xl font-bold text-primary">{data.averageDays || 0} дн.</p>
+                  <p className="text-2xl font-bold text-primary-content">{data.averageDays || 0} дн.</p>
                 </div>
                 <div className={dangerMetricClass}>
                   <p className="text-sm text-muted-foreground">Максимум</p>
@@ -594,7 +594,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-warning">{row.daysInService} дн.</span>
-                      <ExternalLink className="h-4 w-4 text-[--color-primary]" />
+                      <ExternalLink className="h-4 w-4 text-primary-content" />
                     </div>
                   </Link>
                 )) : (
@@ -657,7 +657,7 @@ export function KPIDetailModal({ open, onOpenChange, kpiType, data }: KPIDetailM
                       </div>
                       <div className="flex items-center gap-2">
                         <p className="font-semibold text-warning">{safeCurrency(client.debt)}</p>
-                        <ExternalLink className="h-4 w-4 text-[--color-primary]" />
+                        <ExternalLink className="h-4 w-4 text-primary-content" />
                       </div>
                     </Link>
                   ))}

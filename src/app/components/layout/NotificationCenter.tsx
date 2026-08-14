@@ -25,13 +25,13 @@ const priorityStyles: Record<NotificationPriority, string> = {
 const priorityDotStyles: Record<NotificationPriority, string> = {
   critical: 'bg-danger text-danger',
   high: 'bg-warning text-warning',
-  medium: 'bg-primary text-primary',
+  medium: 'bg-primary text-primary-content',
 };
 
 const priorityChipStyles: Record<NotificationPriority, string> = {
   critical: 'border-danger/25 bg-danger/10 text-danger-foreground',
   high: 'border-warning/25 bg-warning/10 text-warning-foreground',
-  medium: 'border-primary/20 bg-primary/10 text-primary',
+  medium: 'border-primary/20 bg-primary/10 text-primary-content',
 };
 
 function readIdsFromStorage(): string[] {
@@ -168,7 +168,7 @@ export function NotificationCenter() {
       <SheetTrigger asChild>
         <button
           type="button"
-          className="relative rounded-xl border border-transparent p-2 text-muted-foreground transition-colors hover:border-primary/30 hover:bg-accent hover:text-primary"
+          className="relative rounded-xl border border-transparent p-2 text-muted-foreground transition-colors hover:border-primary/30 hover:bg-accent hover:text-primary-content"
           aria-label="Уведомления"
           title="Уведомления"
         >
@@ -203,7 +203,7 @@ export function NotificationCenter() {
               <button
                 type="button"
                 onClick={() => setReadIds(prev => Array.from(new Set([...prev, ...unreadNotifications.map(item => item.id)])))}
-                className="inline-flex min-h-9 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 px-3 text-sm font-semibold text-primary transition hover:border-primary/35 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex min-h-9 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 px-3 text-sm font-semibold text-primary-content transition hover:border-primary/35 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Отметить прочитанным
               </button>
@@ -212,7 +212,7 @@ export function NotificationCenter() {
 
           {unreadNotifications.length === 0 ? (
             <div className="mt-4 rounded-xl border border-dashed border-border bg-muted/25 px-5 py-8 text-center">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary-content">
                 <Bell className="h-5 w-5" />
               </div>
               <p className="mt-3 text-sm font-semibold text-foreground">Все уведомления прочитаны</p>
@@ -256,7 +256,7 @@ export function NotificationCenter() {
                           <Link
                             to={notification.link}
                             onClick={() => setOpen(false)}
-                            className="inline-flex min-h-9 max-w-full items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary/10 px-3 text-sm font-semibold text-primary transition hover:border-primary/35 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="inline-flex min-h-9 max-w-full items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary/10 px-3 text-sm font-semibold text-primary-content transition hover:border-primary/35 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             <span className="break-words text-left">{notification.linkLabel}</span>
                             <ArrowRight className="h-4 w-4 shrink-0" />

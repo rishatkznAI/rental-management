@@ -11,7 +11,7 @@ export function EquipmentQuickActions({ actions }: EquipmentQuickActionsProps) {
   if (actions.length === 0) return null;
 
   const toneClassName: Record<NonNullable<EquipmentPreviewQuickAction['tone']>, string> = {
-    primary: 'border-primary/35 bg-primary/15 text-primary hover:bg-primary/20',
+    primary: 'border-primary/35 bg-primary/15 text-primary-content hover:bg-primary/20',
     default: 'border-border/80 bg-secondary/62 text-foreground hover:bg-secondary/85',
     danger: 'border-red-500/25 bg-red-500/10 text-red-200 hover:bg-red-500/15',
   };

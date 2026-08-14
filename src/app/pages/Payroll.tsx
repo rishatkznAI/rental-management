@@ -911,7 +911,7 @@ export default function Payroll() {
 
       <Card className="rounded-2xl border-border">
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
-          <WalletCards className="h-5 w-5 text-primary" />
+          <WalletCards className="h-5 w-5 text-primary-content" />
           <span className="text-sm text-muted-foreground">Статус периода</span>
           <Badge className={cn('rounded-full', statusBadgeClass(periodStatus))}>
             {PERIOD_STATUS_LABELS[periodStatus] || periodStatus}

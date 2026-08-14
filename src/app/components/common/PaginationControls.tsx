@@ -35,7 +35,7 @@ export function PaginationControls({
   return (
     <div className={`flex flex-col gap-3 border-t border-border px-3 py-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between ${className}`}>
       <div className="flex min-w-0 items-center gap-2">
-        {loading && <Loader2 className="h-4 w-4 animate-spin text-[--color-primary]" />}
+        {loading && <Loader2 className="h-4 w-4 animate-spin text-primary-content" />}
         <span className="font-medium text-foreground">{rangeLabel(pagination)}</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -44,7 +44,7 @@ export function PaginationControls({
           <select
             value={pageSize}
             onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground shadow-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-ring/50"
+            className="h-9 rounded-lg border border-border bg-input-background px-2 text-sm text-foreground shadow-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-ring"
           >
             {PAGE_SIZE_OPTIONS.map(option => (
               <option key={option} value={option}>{option}</option>

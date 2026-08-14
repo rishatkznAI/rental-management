@@ -225,7 +225,7 @@ export default function Bots() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <CardTitle className="flex min-w-0 items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
-                        <Bot className="h-5 w-5 shrink-0 text-[--color-primary]" />
+                        <Bot className="h-5 w-5 shrink-0 text-primary-content" />
                         {bot.name}
                       </CardTitle>
                       <CardDescription className="mt-1 break-words">{bot.description}</CardDescription>
@@ -287,7 +287,7 @@ export default function Bots() {
                       <TableCell>
                         <div className="min-w-0 space-y-1">
                           <div className="flex min-w-0 items-center gap-2 font-medium text-gray-900 dark:text-white">
-                            <Bot className="h-4 w-4 shrink-0 text-[--color-primary]" />
+                            <Bot className="h-4 w-4 shrink-0 text-primary-content" />
                             {bot.name}
                           </div>
                           <p className="max-w-md break-words text-xs text-gray-500 dark:text-gray-400">{bot.description}</p>
@@ -394,7 +394,7 @@ export default function Bots() {
               <Card key={`${bot.id}-history`}>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-[--color-primary]" />
+                    <Activity className="h-4 w-4 text-primary-content" />
                     Последние действия: {bot.name}
                   </CardTitle>
                   <CardDescription>Короткая лента событий перед переходом в деталку.</CardDescription>

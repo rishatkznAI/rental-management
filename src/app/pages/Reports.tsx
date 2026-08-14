@@ -1474,7 +1474,7 @@ export default function Reports() {
               <TabsTrigger
                 key={tab.value}
                 value={tab.value}
-                className="border-b-2 border-transparent px-5 py-3 text-sm font-medium text-gray-500 transition-colors hover:text-gray-700 dark:hover:text-gray-300 data-[state=active]:border-[--color-primary] data-[state=active]:text-[--color-primary]"
+                className="border-b-2 border-transparent px-5 py-3 text-sm font-medium text-gray-500 transition-colors hover:text-gray-700 dark:hover:text-gray-300 data-[state=active]:border-[--color-primary] data-[state=active]:text-primary-content"
               >
                 {tab.label}
               </TabsTrigger>
@@ -1859,7 +1859,7 @@ export default function Reports() {
                         <td className="py-3 pr-4">{row.daysOnSale}</td>
                         <td className="py-3 pr-4">{shortDate(row.lastPriceDate)}</td>
                         <td className="py-3 pr-4">
-                          <Link to={`/sales/equipment/${row.id}`} className="font-medium text-primary hover:underline">
+                          <Link to={`/sales/equipment/${row.id}`} className="font-medium text-primary-content hover:underline">
                             Открыть карточку
                           </Link>
                         </td>
@@ -2494,14 +2494,14 @@ export default function Reports() {
                           <td className="px-3 py-2">{row.date || '—'}</td>
                           <td className="px-3 py-2 font-mono text-xs">
                             {row.serviceTicketId ? (
-                              <Link to={`/service/${row.serviceTicketId}`} className="text-[--color-primary] hover:underline">
+                              <Link to={`/service/${row.serviceTicketId}`} className="text-primary-content hover:underline">
                                 {row.serviceTicketId}
                               </Link>
                             ) : '—'}
                           </td>
                           <td className="px-3 py-2">
                             {row.equipmentId ? (
-                              <Link to={`/equipment/${row.equipmentId}`} className="font-medium text-[--color-primary] hover:underline">
+                              <Link to={`/equipment/${row.equipmentId}`} className="font-medium text-primary-content hover:underline">
                                 {row.equipmentLabel}
                               </Link>
                             ) : row.equipmentLabel}
@@ -2849,13 +2849,13 @@ export default function Reports() {
                           <td className="px-3 py-2">{row.mechanicName}</td>
                           <td className="px-3 py-2">{getServiceScenarioLabel(row.serviceKind)}</td>
                           <td className="px-3 py-2 font-mono text-xs">
-                            <Link to={`/service/${row.repairId}`} className="text-[--color-primary] hover:underline">
+                            <Link to={`/service/${row.repairId}`} className="text-primary-content hover:underline">
                               {row.repairId}
                             </Link>
                           </td>
                           <td className="px-3 py-2">
                             {row.equipmentId ? (
-                              <Link to={`/equipment/${row.equipmentId}`} className="font-medium text-[--color-primary] hover:underline">
+                              <Link to={`/equipment/${row.equipmentId}`} className="font-medium text-primary-content hover:underline">
                                 {row.equipmentLabel}
                               </Link>
                             ) : (
@@ -2913,13 +2913,13 @@ export default function Reports() {
                         <tr key={trip.id} className="border-b border-gray-100 dark:border-gray-800">
                           <td className="px-3 py-2">{trip.mechanicName}</td>
                           <td className="px-3 py-2 font-mono text-xs">
-                            <Link to={`/service/${trip.repairId}`} className="text-[--color-primary] hover:underline">
+                            <Link to={`/service/${trip.repairId}`} className="text-primary-content hover:underline">
                               {trip.repairId}
                             </Link>
                           </td>
                           <td className="px-3 py-2">
                             {trip.equipmentId ? (
-                              <Link to={`/equipment/${trip.equipmentId}`} className="font-medium text-[--color-primary] hover:underline">
+                              <Link to={`/equipment/${trip.equipmentId}`} className="font-medium text-primary-content hover:underline">
                                 {trip.equipmentLabel}
                               </Link>
                             ) : (
@@ -2962,7 +2962,7 @@ export default function Reports() {
                         <div className="flex items-start justify-between gap-4">
                           <div>
                             {item.equipmentId ? (
-                              <Link to={`/equipment/${item.equipmentId}`} className="text-sm font-semibold text-[--color-primary] hover:underline">
+                              <Link to={`/equipment/${item.equipmentId}`} className="text-sm font-semibold text-primary-content hover:underline">
                                 {item.equipmentLabel}
                               </Link>
                             ) : (

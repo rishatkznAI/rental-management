@@ -197,7 +197,7 @@ export function SearchableSelect({
                   className={cn(
                     'flex w-full items-start justify-between gap-3 px-3 py-2 text-left text-sm transition-colors',
                     highlighted === index
-                      ? 'bg-[--color-primary]/10 text-[--color-primary]'
+                      ? 'bg-[--color-primary]/10 text-primary-content'
                       : 'text-gray-900 hover:bg-gray-100 dark:text-white dark:hover:bg-gray-700/60',
                   )}
                   onMouseEnter={() => setHighlighted(index)}

@@ -73,7 +73,7 @@ test('dashboard reference mode does not restyle the global shell or sidebar', ()
 test('admin dashboard overview uses theme-aware surfaces and controls', () => {
   assert.match(settingsSource, /const adminCardClass = 'rounded-\[16px\] border border-border\/80 bg-card text-card-foreground/);
   assert.match(settingsSource, /const adminMutedTextClass = 'text-muted-foreground'/);
-  assert.match(settingsSource, /const adminLinkClass = 'text-\[12px\] font-semibold text-primary/);
+  assert.match(settingsSource, /const adminLinkClass = 'text-\[12px\] font-semibold text-primary-content/);
 
   assert.match(settingsSource, /data-testid="admin-reference-dashboard" className="min-h-\[calc\(100vh-4rem\)\] bg-background text-foreground transition-colors"/);
   assert.match(settingsSource, /border border-input bg-input-background/);

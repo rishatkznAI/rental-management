@@ -1755,7 +1755,7 @@ export default function EquipmentDetail() {
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
             Запись с ID <span className="font-mono">{id}</span> не существует или была удалена
           </p>
-          <Link to={routeContext === 'sales' ? '/sales' : '/equipment'} className="mt-6 inline-flex items-center gap-2 text-[--color-primary] hover:underline">
+          <Link to={routeContext === 'sales' ? '/sales' : '/equipment'} className="mt-6 inline-flex items-center gap-2 text-primary-content hover:underline">
             <ArrowLeft className="h-4 w-4" />
             {routeContext === 'sales' ? 'Вернуться в продажи' : 'Вернуться к списку'}
           </Link>
@@ -3174,7 +3174,7 @@ export default function EquipmentDetail() {
                           <TableCell>{rental.status}</TableCell>
                           <TableCell>{rental.manager || rental.managerInitials || '—'}</TableCell>
                           {canViewFinance && <TableCell>{formatCurrency(rental.amount || 0)}</TableCell>}
-                          <TableCell><Link to={`/rentals/${rental.id}`} className="text-[--color-primary] hover:underline">Открыть</Link></TableCell>
+                          <TableCell><Link to={`/rentals/${rental.id}`} className="text-primary-content hover:underline">Открыть</Link></TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -3743,10 +3743,10 @@ export default function EquipmentDetail() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2">
-                    <Calendar className="h-5 w-5 text-[--color-primary]" />
+                    <Calendar className="h-5 w-5 text-primary-content" />
                     Аренда
                   </CardTitle>
-                  <Link to="/rentals" className="flex items-center gap-1 text-xs text-[--color-primary] hover:underline">
+                  <Link to="/rentals" className="flex items-center gap-1 text-xs text-primary-content hover:underline">
                     Открыть планировщик <ChevronRight className="h-3 w-3" />
                   </Link>
                 </div>
@@ -3814,10 +3814,10 @@ export default function EquipmentDetail() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2">
-                    <Wrench className="h-5 w-5 text-[--color-primary]" />
+                    <Wrench className="h-5 w-5 text-primary-content" />
                     Сервис
                   </CardTitle>
-                  <Link to="/service" className="flex items-center gap-1 text-xs text-[--color-primary] hover:underline">
+                  <Link to="/service" className="flex items-center gap-1 text-xs text-primary-content hover:underline">
                     Открыть сервис <ChevronRight className="h-3 w-3" />
                   </Link>
                 </div>
@@ -3896,7 +3896,7 @@ export default function EquipmentDetail() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <DollarSign className="h-5 w-5 text-[--color-primary]" />
+                  <DollarSign className="h-5 w-5 text-primary-content" />
                   Экономика
                 </CardTitle>
               </CardHeader>
@@ -3971,7 +3971,7 @@ export default function EquipmentDetail() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-[--color-primary]" />
+                  <TrendingUp className="h-5 w-5 text-primary-content" />
                   Финансовые показатели · {currentMonthLabel}
                 </CardTitle>
               </CardHeader>
@@ -4035,7 +4035,7 @@ export default function EquipmentDetail() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <User className="h-5 w-5 text-[--color-primary]" />
+                  <User className="h-5 w-5 text-primary-content" />
                   Расчёт для менеджера
                 </CardTitle>
                 <CardDescription>Владелец: {ownerLabels[equipment.owner]}</CardDescription>
@@ -4134,7 +4134,7 @@ export default function EquipmentDetail() {
                       return (
                         <TableRow key={gr.id}>
                           <TableCell>
-                            <span className="font-mono text-xs text-[--color-primary]">{gr.id}</span>
+                            <span className="font-mono text-xs text-primary-content">{gr.id}</span>
                           </TableCell>
                           <TableCell>{gr.client}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">
@@ -4213,7 +4213,7 @@ export default function EquipmentDetail() {
                     {serviceHistory.map(ticket => (
                       <TableRow key={ticket.id}>
                         <TableCell>
-                          <Link to={`/service/${ticket.id}`} className="font-mono text-xs text-[--color-primary] hover:underline">
+                          <Link to={`/service/${ticket.id}`} className="font-mono text-xs text-primary-content hover:underline">
                             {ticket.id}
                           </Link>
                         </TableCell>
@@ -5062,7 +5062,7 @@ export default function EquipmentDetail() {
                     {canEditEquipment && (
                       <button
                         onClick={() => setShowUploadPhotoForm(true)}
-                        className="mt-3 text-sm text-[--color-primary] hover:underline"
+                        className="mt-3 text-sm text-primary-content hover:underline"
                       >
                         Загрузить первое фото
                       </button>
@@ -5357,7 +5357,7 @@ function ServiceTicketCompactCard({
     <div className="rounded-xl border border-border bg-secondary/50 p-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <Link to={`/service/${ticket.id}`} className="text-sm font-semibold text-foreground hover:text-[--color-primary] hover:underline">
+          <Link to={`/service/${ticket.id}`} className="text-sm font-semibold text-foreground hover:text-primary-content hover:underline">
             {ticket.reason || ticket.description || ticket.id}
           </Link>
           <p className="mt-1 text-xs text-muted-foreground">

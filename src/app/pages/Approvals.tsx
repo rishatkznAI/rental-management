@@ -232,7 +232,7 @@ export default function Approvals() {
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <CardTitle className="flex items-center gap-2 text-lg">
-                      {request.status === 'pending' ? <Clock className="h-5 w-5 text-amber-500" /> : <FileText className="h-5 w-5 text-[--color-primary]" />}
+                      {request.status === 'pending' ? <Clock className="h-5 w-5 text-amber-500" /> : <FileText className="h-5 w-5 text-primary-content" />}
                       {request.type}
                     </CardTitle>
                     <CardDescription>
@@ -280,7 +280,7 @@ export default function Approvals() {
                 <div className="grid gap-3 md:grid-cols-3">
                   <div>
                     <p className="text-xs text-gray-500 dark:text-gray-400">Аренда</p>
-                    <Link to={`/rentals/${request.rentalId}`} className="font-medium text-[--color-primary] hover:underline">
+                    <Link to={`/rentals/${request.rentalId}`} className="font-medium text-primary-content hover:underline">
                       {request.rentalId || '—'}
                     </Link>
                   </div>
@@ -357,7 +357,7 @@ export default function Approvals() {
           <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[760px]">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                {selected.status === 'pending' ? <Clock className="h-5 w-5 text-amber-500" /> : <FileText className="h-5 w-5 text-[--color-primary]" />}
+                {selected.status === 'pending' ? <Clock className="h-5 w-5 text-amber-500" /> : <FileText className="h-5 w-5 text-primary-content" />}
                 {selected.type}
               </DialogTitle>
               <DialogDescription>
@@ -378,7 +378,7 @@ export default function Approvals() {
               <div className="grid gap-3 md:grid-cols-3">
                 <DetailField label="Аренда">
                   {selected.rentalId ? (
-                    <Link to={`/rentals/${selected.rentalId}`} className="text-[--color-primary] hover:underline">
+                    <Link to={`/rentals/${selected.rentalId}`} className="text-primary-content hover:underline">
                       {selected.rentalId}
                     </Link>
                   ) : '—'}

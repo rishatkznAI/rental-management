@@ -440,9 +440,9 @@ function ServiceMetricCard({
   const safeValue = Number.isFinite(value) ? value : 0;
   const toneClasses = {
     lime: {
-      value: 'text-[--color-primary]',
+      value: 'text-primary-content',
       accent: 'bg-[--color-primary]/20',
-      icon: 'bg-[--color-primary]/12 text-[--color-primary]',
+      icon: 'bg-[--color-primary]/12 text-primary-content',
     },
     blue: {
       value: 'text-blue-600 dark:text-blue-300',
@@ -531,7 +531,7 @@ function RequestSubTabLabel({ label, count }: { label: string; count: number }) 
   return (
     <span className="inline-flex min-w-0 items-center gap-2">
       <span className="truncate">{label}</span>
-      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500 group-data-[active=true]:bg-[--color-primary]/15 group-data-[active=true]:text-[--color-primary] dark:bg-white/8 dark:text-gray-300">
+      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-500 group-data-[active=true]:bg-[--color-primary]/15 group-data-[active=true]:text-primary-content dark:bg-white/8 dark:text-gray-300">
         {count}
       </span>
     </span>
@@ -543,7 +543,7 @@ function ServiceTabLabel({ label, count }: { label: string; count?: number }) {
     <span className="inline-flex min-w-0 items-center gap-2">
       <span className="truncate">{label}</span>
       {typeof count === 'number' && (
-        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500 transition-colors group-data-[state=active]:bg-[--color-primary]/15 group-data-[state=active]:text-[--color-primary] dark:bg-white/8 dark:text-gray-300">
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500 transition-colors group-data-[state=active]:bg-[--color-primary]/15 group-data-[state=active]:text-primary-content dark:bg-white/8 dark:text-gray-300">
           {count}
         </span>
       )}
@@ -804,7 +804,7 @@ function ServiceQueueTab({
                   <button
                     type="button"
                     onClick={() => onOpenTicket(item.ticketId)}
-                    className="font-mono text-sm font-bold text-[--color-primary] hover:underline"
+                    className="font-mono text-sm font-bold text-primary-content hover:underline"
                     aria-label={`Открыть заявку ${item.ticketId}`}
                   >
                     {item.ticketId}
@@ -1106,8 +1106,8 @@ function RepeatBreakdownsTab({
                         <span className={`w-fit rounded-full px-2 py-0.5 text-xs font-bold ${repeatSeverityClass(item.qualityRisk)}`}>{repairQualityRiskLabel(item.qualityRisk)}</span>
                         <div className="text-sm text-gray-600 dark:text-gray-300">{safeRepeatText(item.recommendedAction)}</div>
                         <div className="flex flex-wrap gap-2">
-                          {item.links.equipment && <Link className="text-sm font-semibold text-[--color-primary] hover:underline" to={item.links.equipment}>Техника</Link>}
-                          {item.links.repeatServiceTicket && <Link className="text-sm font-semibold text-[--color-primary] hover:underline" to={item.links.repeatServiceTicket}>Заявка</Link>}
+                          {item.links.equipment && <Link className="text-sm font-semibold text-primary-content hover:underline" to={item.links.equipment}>Техника</Link>}
+                          {item.links.repeatServiceTicket && <Link className="text-sm font-semibold text-primary-content hover:underline" to={item.links.repeatServiceTicket}>Заявка</Link>}
                         </div>
                       </div>
                     ))}
@@ -1249,11 +1249,11 @@ function RepeatBreakdownsTab({
                 <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-bold ${repeatSeverityClass(item.repeatSeverity)}`}>{repeatSeverityLabel(item.repeatSeverity)}</span>
               </div>
               <div className="min-w-0">
-                <div className="font-mono text-sm font-bold text-[--color-primary]">{safeRepeatText(item.previousTicketNumber)}</div>
+                <div className="font-mono text-sm font-bold text-primary-content">{safeRepeatText(item.previousTicketNumber)}</div>
                 <div className="mt-1 text-xs text-gray-500">{formatShortDate(item.previousClosedAt)}</div>
               </div>
               <div className="min-w-0">
-                <div className="font-mono text-sm font-bold text-[--color-primary]">{safeRepeatText(item.repeatTicketNumber)}</div>
+                <div className="font-mono text-sm font-bold text-primary-content">{safeRepeatText(item.repeatTicketNumber)}</div>
                 <div className="mt-1 text-xs text-gray-500">{formatShortDate(item.repeatCreatedAt)}</div>
               </div>
               <div className="text-sm font-bold text-gray-900 dark:text-white">{Number.isFinite(item.daysBetween) ? item.daysBetween : 0}</div>
@@ -1262,9 +1262,9 @@ function RepeatBreakdownsTab({
               <div className="text-sm text-gray-600 dark:text-gray-300">{safeRepeatText(item.reason)}</div>
               <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{safeRepeatText(item.recommendedAction)}</div>
               <div className="flex flex-wrap gap-2">
-                {item.links.equipment && <Link className="text-sm font-semibold text-[--color-primary] hover:underline" to={item.links.equipment}>Техника</Link>}
-                {item.links.previousServiceTicket && <Link className="text-sm font-semibold text-[--color-primary] hover:underline" to={item.links.previousServiceTicket}>Пред.</Link>}
-                {item.links.repeatServiceTicket && <Link className="text-sm font-semibold text-[--color-primary] hover:underline" to={item.links.repeatServiceTicket}>Повтор</Link>}
+                {item.links.equipment && <Link className="text-sm font-semibold text-primary-content hover:underline" to={item.links.equipment}>Техника</Link>}
+                {item.links.previousServiceTicket && <Link className="text-sm font-semibold text-primary-content hover:underline" to={item.links.previousServiceTicket}>Пред.</Link>}
+                {item.links.repeatServiceTicket && <Link className="text-sm font-semibold text-primary-content hover:underline" to={item.links.repeatServiceTicket}>Повтор</Link>}
               </div>
             </div>
           ))
@@ -1347,8 +1347,8 @@ function ServiceManagementPanel({
           {quickActions.filter(action => action.show).map(action => (
             action.to ? (
               <Link key={action.label} to={action.to}>
-                <span className="flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-sm font-medium text-gray-700 transition hover:bg-blue-50 hover:text-[--color-primary] dark:text-gray-200 dark:hover:bg-blue-500/10">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-50 text-[--color-primary] dark:bg-blue-500/15">{action.icon}</span>
+                <span className="flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-sm font-medium text-gray-700 transition hover:bg-primary/10 hover:text-primary-content dark:text-gray-200">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary-content">{action.icon}</span>
                   {action.label}
                 </span>
               </Link>
@@ -1356,7 +1356,7 @@ function ServiceManagementPanel({
               <button
                 key={action.label}
                 type="button"
-                className="flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm font-medium text-gray-700 transition hover:bg-blue-50 hover:text-[--color-primary] dark:text-gray-200 dark:hover:bg-blue-500/10"
+                className="flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm font-medium text-gray-700 transition hover:bg-primary/10 hover:text-primary-content dark:text-gray-200"
                 onClick={() => {
                   if (action.action === 'planner') onShowPlanner();
                   if (action.action === 'warranty') onShowWarranty();
@@ -1369,7 +1369,7 @@ function ServiceManagementPanel({
                   }
                 }}
               >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-50 text-[--color-primary] dark:bg-blue-500/15">{action.icon}</span>
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary-content">{action.icon}</span>
                 {action.label}
               </button>
             )
@@ -1401,7 +1401,7 @@ function ServiceManagementPanel({
                   className="w-full rounded-lg border border-gray-100 p-2.5 text-left transition hover:border-[--color-primary]/40 hover:bg-[--color-primary]/5 dark:border-white/8"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="inline-flex min-w-0 items-center gap-1.5 font-mono text-xs font-bold text-[--color-primary]">
+                    <span className="inline-flex min-w-0 items-center gap-1.5 font-mono text-xs font-bold text-primary-content">
                       <span className={`h-2 w-2 shrink-0 rounded-full ${group.accent}`} />
                       {item.ticketId}
                     </span>
@@ -1417,7 +1417,7 @@ function ServiceManagementPanel({
                   const [first] = group.rows;
                   if (first) onOpenTicket(first.ticketId);
                 }}
-                className="mt-1 text-xs font-semibold text-[--color-primary] hover:underline"
+                className="mt-1 text-xs font-semibold text-primary-content hover:underline"
               >
                 Смотреть все
               </button>
@@ -1779,10 +1779,10 @@ export default function Service() {
     dateTo !== '',
   ].filter(Boolean).length;
 
-  const serviceTabTriggerBaseClass = 'group min-w-0 flex-none rounded-none border-0 border-b-2 bg-transparent px-3 py-2.5 text-sm font-semibold shadow-none transition hover:bg-blue-50/60 hover:text-gray-900 dark:hover:bg-blue-500/10 dark:hover:text-white sm:px-4';
+  const serviceTabTriggerBaseClass = 'group min-w-0 flex-none rounded-none border-0 border-b-2 bg-transparent px-3 py-2.5 text-sm font-semibold shadow-none transition hover:bg-primary/10 hover:text-gray-900 dark:hover:text-white sm:px-4';
   const serviceTabTriggerClass = (tab: string) => `${serviceTabTriggerBaseClass} ${
     activeTopTab === tab
-      ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-300'
+      ? 'border-primary text-primary-content'
       : 'border-transparent text-gray-500 dark:text-gray-400'
   }`;
   const requestTabCounts = {
@@ -1996,9 +1996,9 @@ export default function Service() {
                   type="button"
                   onClick={() => handleRequestTabChange(tab.value)}
                   data-active={String(isActive)}
-                  className={`group min-w-0 flex-none border-b-2 px-2.5 py-2 text-sm font-semibold transition hover:bg-blue-50/60 hover:text-gray-900 sm:px-3 dark:hover:bg-blue-500/10 dark:hover:text-white ${
+                  className={`group min-w-0 flex-none border-b-2 px-2.5 py-2 text-sm font-semibold transition hover:bg-primary/10 hover:text-gray-900 sm:px-3 dark:hover:text-white ${
                     isActive
-                      ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-300'
+                      ? 'border-primary text-primary-content'
                       : 'border-transparent text-gray-500 dark:text-gray-400'
                   }`}
                 >
@@ -2073,7 +2073,7 @@ export default function Service() {
                 <Filter className="h-4 w-4" />
                 Фильтры
                 {activeFilterCount > 0 && (
-                  <span className="ml-1 rounded-full bg-[--color-primary]/15 px-1.5 py-0.5 text-[11px] font-bold text-[--color-primary]">{activeFilterCount}</span>
+                  <span className="ml-1 rounded-full bg-[--color-primary]/15 px-1.5 py-0.5 text-[11px] font-bold text-primary-content">{activeFilterCount}</span>
                 )}
               </Button>
             </div>
@@ -2141,7 +2141,7 @@ export default function Service() {
                                   : 'border-gray-200 bg-gray-50 dark:border-white/10 dark:bg-white/[0.04]'
                               }`}
                             >
-                              <div className="font-mono text-xs font-bold text-[--color-primary]">{ticket.id}</div>
+                              <div className="font-mono text-xs font-bold text-primary-content">{ticket.id}</div>
                               <div className="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{getTicketEquipmentTitle(ticket)}</div>
                               <div className="mt-1 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">{ticket.reason || 'Без описания'}</div>
                             </button>
@@ -2203,14 +2203,14 @@ export default function Service() {
                               openTicket();
                             }
                           }}
-                          className={`grid min-w-0 cursor-pointer gap-3 rounded-lg border border-gray-200 px-3 py-3 shadow-sm shadow-slate-200/40 transition-colors hover:bg-blue-50/70 dark:border-white/10 dark:hover:bg-blue-500/10 md:grid-cols-[minmax(160px,0.9fr)_minmax(220px,1.1fr)] lg:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_minmax(190px,0.9fr)_minmax(160px,0.8fr)] xl:rounded-none xl:border-0 xl:border-b xl:border-gray-100 xl:px-3 xl:py-2.5 xl:shadow-none xl:last:border-b-0 xl:dark:border-white/6 xl:grid-cols-[92px_minmax(160px,1fr)_minmax(138px,0.8fr)_90px_92px_86px_minmax(116px,0.7fr)_74px_74px_28px] lg:items-center ${
+                          className={`grid min-w-0 cursor-pointer gap-3 rounded-lg border border-gray-200 px-3 py-3 shadow-sm shadow-slate-200/40 transition-colors hover:bg-primary/[0.07] dark:border-white/10 md:grid-cols-[minmax(160px,0.9fr)_minmax(220px,1.1fr)] lg:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_minmax(190px,0.9fr)_minmax(160px,0.8fr)] xl:rounded-none xl:border-0 xl:border-b xl:border-gray-100 xl:px-3 xl:py-2.5 xl:shadow-none xl:last:border-b-0 xl:dark:border-white/6 xl:grid-cols-[92px_minmax(160px,1fr)_minmax(138px,0.8fr)_90px_92px_86px_minmax(116px,0.7fr)_74px_74px_28px] lg:items-center ${
                             isSelected
-                              ? 'bg-blue-50 ring-1 ring-inset ring-[--color-primary]/25 dark:bg-blue-500/10'
+                              ? 'bg-primary/10 ring-1 ring-inset ring-[--color-primary]/25'
                               : index % 2 === 0 ? 'bg-white dark:bg-transparent' : 'bg-slate-50/35 dark:bg-white/[0.015]'
                           }`}
                         >
                           <div className="min-w-0 text-left">
-                            <div className="break-all font-mono text-sm font-bold text-[--color-primary] xl:truncate">{ticket.id}</div>
+                            <div className="break-all font-mono text-sm font-bold text-primary-content xl:truncate">{ticket.id}</div>
                             <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
                           </div>
                           <div className="flex min-w-0 items-center gap-3 text-left">
@@ -2260,7 +2260,7 @@ export default function Service() {
                               event.stopPropagation();
                               openTicket();
                             }}
-                            className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-[--color-primary] sm:w-9 xl:h-8 xl:w-8 xl:border-0 xl:text-gray-400 dark:border-white/10 dark:hover:bg-white/10"
+                            className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-primary-content sm:w-9 xl:h-8 xl:w-8 xl:border-0 xl:text-gray-400 dark:border-white/10 dark:hover:bg-white/10"
                             title="Открыть полную карточку"
                             aria-label={`Открыть полную карточку заявки ${ticket.id}`}
                           >
@@ -2376,7 +2376,7 @@ export default function Service() {
                         }`}
                       >
                         <div className="min-w-0 text-left">
-                          <div className="break-all font-mono text-sm font-bold text-[--color-primary] lg:truncate">{ticket.id}</div>
+                          <div className="break-all font-mono text-sm font-bold text-primary-content lg:truncate">{ticket.id}</div>
                           <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
                         </div>
                         <div className="min-w-0">
@@ -2405,7 +2405,7 @@ export default function Service() {
                             event.stopPropagation();
                             openTicket();
                           }}
-                          className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-[--color-primary] sm:w-9 lg:h-8 lg:w-8 lg:border-0 lg:text-gray-400 dark:border-white/10 dark:hover:bg-white/10"
+                          className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-primary-content sm:w-9 lg:h-8 lg:w-8 lg:border-0 lg:text-gray-400 dark:border-white/10 dark:hover:bg-white/10"
                           title="Открыть полную карточку"
                           aria-label={`Открыть полную карточку архивной заявки ${ticket.id}`}
                         >
@@ -2519,7 +2519,7 @@ export default function Service() {
                     }`}
                   >
                     <div className="min-w-0 text-left">
-                      <div className="break-all font-mono text-sm font-bold text-[--color-primary] lg:truncate">{ticket.id}</div>
+                      <div className="break-all font-mono text-sm font-bold text-primary-content lg:truncate">{ticket.id}</div>
                       <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
                     </div>
                     <div className="min-w-0">
@@ -2548,7 +2548,7 @@ export default function Service() {
                         event.stopPropagation();
                         openTicket();
                       }}
-                      className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-[--color-primary] sm:w-9 lg:h-8 lg:w-8 lg:border-0 lg:text-gray-400 dark:border-white/10 dark:hover:bg-white/10"
+                      className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-primary-content sm:w-9 lg:h-8 lg:w-8 lg:border-0 lg:text-gray-400 dark:border-white/10 dark:hover:bg-white/10"
                       title="Открыть полную карточку"
                       aria-label={`Открыть полную карточку архивной заявки ${ticket.id}`}
                     >

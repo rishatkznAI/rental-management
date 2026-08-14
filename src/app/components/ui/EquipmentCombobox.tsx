@@ -174,11 +174,11 @@ export function EquipmentCombobox({
         className={cn(
           'flex cursor-pointer select-none items-baseline gap-1.5 px-3 py-2 text-sm transition-colors',
           isHL
-            ? 'bg-[--color-primary]/10 text-[--color-primary]'
+            ? 'bg-[--color-primary]/10 text-primary-content'
             : 'text-gray-900 hover:bg-gray-100 dark:text-white dark:hover:bg-gray-700/60',
         )}
       >
-        <span className="w-4 shrink-0 text-[--color-primary]">{isSel ? '✓' : ''}</span>
+        <span className="w-4 shrink-0 text-primary-content">{isSel ? '✓' : ''}</span>
         <span className="min-w-0 truncate">{eqLabel(eq)}</span>
       </li>
     );

@@ -197,7 +197,7 @@ function SummaryTable({
                   <td className="px-3 py-2.5">
                     <button
                       onClick={() => onSelectManager(row.manager)}
-                      className="text-xs text-[--color-primary] hover:underline whitespace-nowrap"
+                      className="text-xs text-primary-content hover:underline whitespace-nowrap"
                     >
                       Детализация →
                     </button>
@@ -274,8 +274,8 @@ function DetailTable({
   const SortIcon = ({ k }: { k: SortKey }) => {
     if (sortKey !== k) return <ArrowUpDown className="h-3 w-3 opacity-40" />;
     return sortDir === 'asc'
-      ? <ArrowUp className="h-3 w-3 text-[--color-primary]" />
-      : <ArrowDown className="h-3 w-3 text-[--color-primary]" />;
+      ? <ArrowUp className="h-3 w-3 text-primary-content" />
+      : <ArrowDown className="h-3 w-3 text-primary-content" />;
   };
 
   const th = (label: string, key?: SortKey, extra = '') => (
@@ -294,7 +294,7 @@ function DetailTable({
     <div className="space-y-2">
       <div className="flex items-center gap-2 justify-end">
         <button onClick={allExpanded ? collapseAll : expandAll}
-          className="text-xs text-[--color-primary] hover:underline">
+          className="text-xs text-primary-content hover:underline">
           {allExpanded ? 'Свернуть всё' : 'Развернуть всё'}
         </button>
       </div>
@@ -323,7 +323,7 @@ function DetailTable({
                     {isOpen
                       ? <ChevronUp className="h-4 w-4 text-gray-400 flex-shrink-0" />
                       : <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />}
-                    <Users className="h-4 w-4 text-[--color-primary] flex-shrink-0" />
+                    <Users className="h-4 w-4 text-primary-content flex-shrink-0" />
                     <span className="font-semibold text-gray-900 dark:text-white text-sm">{manager}</span>
                     <span className="text-xs text-gray-500 dark:text-gray-400">
                       {rentalsCount} аренд · {mRows.length} начислений · {formatCurrency(totalAmt)}

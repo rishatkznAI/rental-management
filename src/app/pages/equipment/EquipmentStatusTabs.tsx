@@ -33,7 +33,7 @@ export function EquipmentStatusTabs({
             {tab.label}
             <span className={`ml-2 rounded-full px-2 py-0.5 text-[11px] ${
               activeTab === tab.key
-                ? 'bg-primary/15 text-primary'
+                ? 'bg-primary/15 text-primary-content'
                 : count === 0
                   ? 'bg-secondary/40 text-foreground/38'
                   : 'bg-secondary/85 text-foreground/56'

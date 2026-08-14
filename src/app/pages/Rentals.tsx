@@ -3913,9 +3913,9 @@ export default function Rentals() {
                   data-state={active ? 'active' : 'inactive'}
                   onClick={() => setActiveWorkspaceTab(tab.id)}
                   className={cn(
-                    'relative flex h-11 max-w-full items-center gap-2 border-b-2 px-1 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                    'relative flex h-11 max-w-full items-center gap-2 border-b-2 px-1 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     active
-                      ? 'rentals-workspace-tab-active border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300'
+                      ? 'rentals-workspace-tab-active border-primary text-primary-content'
                       : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
                   )}
                 >
@@ -4072,7 +4072,7 @@ export default function Rentals() {
                   className={cn(
                     'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-1 transition-colors',
                     rentalPreset === 'unpaid'
-                      ? 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300'
+                      ? 'border-primary/45 bg-primary/10 text-primary-content'
                       : 'border-border bg-secondary/60 text-muted-foreground hover:text-foreground',
                   )}
                   title="Показать аренды без оплаты"
@@ -4115,7 +4115,7 @@ export default function Rentals() {
             onClick={() => setCompactView('cards')}
             className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
               compactView === 'cards'
-                ? 'bg-[--color-primary] text-white'
+                ? 'bg-[--color-primary] text-[--color-primary-foreground]'
                 : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600'
             }`}
           >
@@ -4126,7 +4126,7 @@ export default function Rentals() {
             onClick={() => setCompactView('timeline')}
             className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
               compactView === 'timeline'
-                ? 'bg-[--color-primary] text-white'
+                ? 'bg-[--color-primary] text-[--color-primary-foreground]'
                 : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600'
             }`}
           >
@@ -4145,7 +4145,7 @@ export default function Rentals() {
 	                <p className="mt-1 text-sm text-muted-foreground">{shownEquipment} ед. в списке · {shownRentals} аренд · {rangeLabel}</p>
 	              </div>
 	              <div className="flex flex-wrap items-start justify-end gap-2">
-	                <div className="inline-flex rounded-2xl border border-blue-200 bg-blue-50/70 p-1 shadow-inner dark:border-blue-900/50 dark:bg-blue-950/20">
+	                <div className="inline-flex rounded-2xl border border-primary/25 bg-primary/10 p-1 shadow-inner">
 	                  {[
 	                    { value: 'week' as Scale, label: 'Дни' },
 	                    { value: 'month' as Scale, label: 'Недели' },
@@ -4158,8 +4158,8 @@ export default function Rentals() {
 	                      className={cn(
 	                        'rounded-xl px-4 py-2 text-sm font-bold transition-colors',
 	                        scale === option.value
-	                          ? 'bg-blue-600 text-white shadow-sm dark:bg-blue-500'
-	                          : 'text-blue-700 hover:bg-white/70 hover:text-blue-800 dark:text-blue-200 dark:hover:bg-blue-900/40',
+	                          ? 'bg-primary text-primary-foreground shadow-sm'
+	                          : 'text-primary-content hover:bg-primary/10 hover:text-primary-content-hover',
 	                      )}
 	                    >
 	                      {option.label}
@@ -4185,7 +4185,7 @@ export default function Rentals() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold text-foreground">Вид, период и фильтры</span>
                   {activeFilterCount > 0 && (
-                    <span className="rounded-full bg-[--color-primary]/12 px-2 py-0.5 text-[11px] font-semibold text-[--color-primary]">
+                    <span className="rounded-full bg-[--color-primary]/12 px-2 py-0.5 text-[11px] font-semibold text-primary-content">
                       {activeFilterCount}
                     </span>
                   )}
@@ -4317,8 +4317,8 @@ export default function Rentals() {
                     onClick={() => setScale(s)}
                     className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                       scale === s
-                        ? 'bg-[--color-primary] text-white shadow-sm'
-                        : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+                        ? 'bg-[--color-primary] text-[--color-primary-foreground] shadow-sm'
+                        : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-primary/45 hover:text-primary-content dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300'
                     }`}
                   >
                     {SCALE_CONFIG[s].label}
@@ -4375,8 +4375,8 @@ export default function Rentals() {
                   onClick={() => setDensityMode('comfortable')}
                   className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                     densityMode === 'comfortable'
-                      ? 'bg-[--color-primary] text-white shadow-sm'
-                      : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+                      ? 'bg-[--color-primary] text-[--color-primary-foreground] shadow-sm'
+                      : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-primary/45 hover:text-primary-content dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300'
                   }`}
                 >
                   Обычный
@@ -4386,8 +4386,8 @@ export default function Rentals() {
                   onClick={() => setDensityMode('compact')}
                   className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                     densityMode === 'compact'
-                      ? 'bg-[--color-primary] text-white shadow-sm'
-                      : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300'
+                      ? 'bg-[--color-primary] text-[--color-primary-foreground] shadow-sm'
+                      : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-primary/45 hover:text-primary-content dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300'
                   }`}
                 >
                   Компактно
@@ -4417,8 +4417,8 @@ export default function Rentals() {
                 className={cn(
                   'rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
                   filterStatus === AVAILABLE_EQUIPMENT_STATUS_FILTER
-                    ? 'bg-[--color-primary] text-white shadow-sm'
-                    : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300',
+                    ? 'bg-[--color-primary] text-[--color-primary-foreground] shadow-sm'
+                    : 'border border-gray-200 bg-slate-50 text-gray-600 hover:border-primary/45 hover:text-primary-content dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300',
                 )}
               >
                 Только свободные
@@ -4470,8 +4470,8 @@ export default function Rentals() {
                     className={cn(
                       'rounded-xl border px-3 py-2 text-sm font-semibold transition-colors',
                       fleetLayers[item.key]
-                        ? 'border-[--color-primary] bg-[--color-primary] text-white'
-                        : 'border-gray-200 bg-slate-50 text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300',
+                        ? 'border-[--color-primary] bg-[--color-primary] text-[--color-primary-foreground]'
+                        : 'border-gray-200 bg-slate-50 text-gray-600 hover:border-primary/45 hover:text-primary-content dark:border-gray-600 dark:bg-gray-900/60 dark:text-gray-300',
                     )}
                   >
                     {item.label}
@@ -4536,7 +4536,7 @@ export default function Rentals() {
                 <button
                   type="button"
                   onClick={() => toggleGroupCollapsed(group.type)}
-                  className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-left transition-colors hover:border-blue-200 hover:bg-white dark:border-gray-700 dark:bg-gray-800/70 dark:hover:border-blue-500/40 dark:hover:bg-gray-800"
+                  className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-left transition-colors hover:border-primary/35 hover:bg-white dark:border-gray-700 dark:bg-gray-800/70 dark:hover:bg-gray-800"
                 >
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">Тип техники</div>
@@ -4760,21 +4760,21 @@ export default function Rentals() {
                     <div
                       key={idx}
                       className={`flex shrink-0 flex-col items-center justify-center border-r border-gray-100/60 dark:border-white/8 ${
-                        isToday ? 'bg-blue-50/55 dark:bg-blue-500/12' : weekend ? 'bg-gray-50/45 dark:bg-white/[0.03]' : ''
+                        isToday ? 'bg-primary/10' : weekend ? 'bg-gray-50/45 dark:bg-white/[0.03]' : ''
                       } ${densityMode === 'compact' ? 'py-1' : 'py-1.5'}`}
                       style={{ width: dayWidth }}
                     >
                       {scale === 'week' || (scale === 'custom' && totalDays <= 31) ? (
                         <>
-                          <span className={`text-[10px] ${isToday ? 'font-semibold text-blue-600 dark:text-blue-300' : 'text-gray-400'}`}>
+                          <span className={`text-[10px] ${isToday ? 'font-semibold text-primary-content' : 'text-gray-400'}`}>
                             {format(day, 'EEEEEE', { locale: ru })}
                           </span>
-                          <span className={`text-xs ${isToday ? 'font-semibold text-blue-700 dark:text-blue-200' : 'text-gray-600 dark:text-gray-400'}`}>
+                          <span className={`text-xs ${isToday ? 'font-semibold text-primary-content' : 'text-gray-600 dark:text-gray-400'}`}>
                             {format(day, 'd')}
                           </span>
                         </>
                       ) : (
-                        <span className={`text-[9px] ${isToday ? 'text-blue-700 dark:text-blue-300' : 'text-gray-500'}`}>
+                        <span className={`text-[9px] ${isToday ? 'text-primary-content' : 'text-gray-500'}`}>
                           {format(day, 'd')}
                         </span>
                       )}
@@ -4903,7 +4903,7 @@ export default function Rentals() {
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-gray-900 dark:text-white">Вид и период</span>
               {activeFilterCount > 0 && (
-                <span className="rounded-full bg-[--color-primary]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[--color-primary]">
+                <span className="rounded-full bg-[--color-primary]/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary-content">
                   {activeFilterCount}
                 </span>
               )}
@@ -4939,7 +4939,7 @@ export default function Rentals() {
                         className={cn(
                           'rounded-full border px-3 py-1.5 text-sm font-medium transition-colors',
                           movementFilter === filterOption.value
-                            ? 'border-[--color-primary] bg-[--color-primary]/12 text-[--color-primary]'
+                            ? 'border-[--color-primary] bg-[--color-primary]/12 text-primary-content'
                             : 'border-border bg-secondary/60 text-muted-foreground hover:text-foreground',
                         )}
                       >
@@ -4983,7 +4983,7 @@ export default function Rentals() {
                                 {entry.equipmentNavigationId ? (
                                   <Link
                                     to={`/equipment/${encodeURIComponent(entry.equipmentNavigationId)}`}
-                                    className="font-semibold text-[--color-primary] hover:underline"
+                                    className="font-semibold text-primary-content hover:underline"
                                   >
                                     {entry.equipmentLabel}
                                   </Link>
@@ -5246,7 +5246,7 @@ export default function Rentals() {
                         className={cn(
                           'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
                           debtDocsProblemFilter === item.value
-                            ? 'border-[--color-primary] bg-[--color-primary]/12 text-[--color-primary]'
+                            ? 'border-[--color-primary] bg-[--color-primary]/12 text-primary-content'
                             : 'border-border bg-secondary/50 text-muted-foreground hover:text-foreground',
                         )}
                       >
@@ -5524,7 +5524,7 @@ export default function Rentals() {
 	                                  </div>
 	                                  <div className="mt-3 flex items-center justify-between gap-2 text-xs">
 	                                    <span className="text-muted-foreground">{row.hasReturnDelivery ? 'Доставка запланирована' : 'Доставка не назначена'}</span>
-	                                    <span className={cn('font-semibold', isBrokenRentalLink ? 'text-red-600 dark:text-red-300' : 'text-[--color-primary]')}>
+	                                    <span className={cn('font-semibold', isBrokenRentalLink ? 'text-red-600 dark:text-red-300' : 'text-primary-content')}>
                                       {isBrokenRentalLink ? 'Нет записи rentals' : 'Открыть аренду'}
                                     </span>
 	                                  </div>
@@ -6335,7 +6335,7 @@ export default function Rentals() {
                   onClick={() => setMovementFilter(filterOption.value)}
                   className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
                     movementFilter === filterOption.value
-                      ? 'border-[--color-primary] bg-[--color-primary]/12 text-[--color-primary]'
+                      ? 'border-[--color-primary] bg-[--color-primary]/12 text-primary-content'
                       : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:text-white'
                   }`}
                 >
@@ -6372,7 +6372,7 @@ export default function Rentals() {
                           {entry.equipmentNavigationId ? (
                             <Link
                               to={`/equipment/${encodeURIComponent(entry.equipmentNavigationId)}`}
-                              className="inline-flex items-center gap-1 text-sm font-semibold text-[--color-primary] hover:underline"
+                              className="inline-flex items-center gap-1 text-sm font-semibold text-primary-content hover:underline"
                               onClick={() => setShowMovementSheet(false)}
                             >
                               {entry.equipmentLabel}
@@ -6549,7 +6549,7 @@ function EquipmentRow({
             <button
               type="button"
               onClick={onNewRental}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400/60 dark:hover:bg-blue-900/30 dark:hover:text-blue-400"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-primary/10 hover:text-primary-content focus:outline-none focus:ring-2 focus:ring-ring"
               title="Создать аренду"
               aria-label="Создать аренду"
             >
@@ -6593,7 +6593,7 @@ function EquipmentRow({
               key={idx}
               className={`absolute top-0 h-full border-r border-gray-200/30 dark:border-gray-700/30 ${
                 weekend ? 'bg-gray-100/14 dark:bg-gray-800/10' : ''
-              } ${isToday ? 'bg-blue-50/28 dark:bg-blue-900/10' : ''}`}
+              } ${isToday ? 'bg-primary/[0.06]' : ''}`}
               style={{ left: idx * dayWidth, width: dayWidth }}
             />
           );

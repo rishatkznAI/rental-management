@@ -87,7 +87,7 @@ test.describe('animation smoke', () => {
     await expect(customPaymentDialog).toBeHidden();
 
     await navigateInApp(page, '/service');
-    await page.getByRole('tab', { name: 'Очередь сервиса' }).click();
+    await page.getByRole('tab', { name: /Повторные поломки/ }).click();
     const tabContent = page.locator('[data-slot="tabs-content"][data-state="active"]').first();
     await expect(tabContent).toBeVisible();
     const tabMotion = await expectAnimation(tabContent, 'app-animate-tabs', /app-tabs-in/);

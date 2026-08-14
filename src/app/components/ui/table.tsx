@@ -8,7 +8,7 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div
       data-slot="table-container"
-      className="app-scroll-fade-x relative w-full overflow-x-auto rounded-2xl border border-border bg-card/70"
+      className="app-scroll-fade-x relative w-full overflow-x-auto rounded-lg border border-border bg-card/70"
     >
       <table
       data-slot="table"
@@ -57,7 +57,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "border-b border-border/70 transition-colors hover:bg-accent/55 data-[state=selected]:bg-muted",
+        "border-b border-border/70 transition-colors duration-[var(--motion-duration-micro)] hover:bg-accent/55 data-[state=selected]:bg-accent",
         className,
       )}
       {...props}

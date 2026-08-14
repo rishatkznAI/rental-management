@@ -18,7 +18,8 @@ test('delivery page preserves desktop table while exposing mobile cards', () => 
   assert.match(source, /className="space-y-3 p-3 md:hidden"/);
   assert.match(source, /data-delivery-desktop-table="true"/);
   assert.match(source, /className="hidden overflow-x-auto md:block"/);
-  assert.match(source, /<table className="w-full min-w-\[1360px\] text-sm">/);
+  assert.match(source, /<table className="w-full min-w-\[1240px\] text-sm">/);
+  assert.match(source, /sticky right-0[\s\S]*Действия/);
 });
 
 test('delivery mobile cards contain safe route, badge, and action structure', () => {
@@ -41,6 +42,10 @@ test('delivery list avoids table-only mobile layout', () => {
   assert.match(listBlock, /data-delivery-compact-cards="true"/);
   assert.match(listBlock, /data-delivery-mobile-cards="true"[\s\S]*data-delivery-desktop-table="true"/);
   assert.doesNotMatch(listBlock, /<div className="overflow-x-auto">\s*<table/);
+});
+
+test('delivery status rails remain scrollable without a permanently visible scrollbar', () => {
+  assert.match(source, /app-scroll-fade-x app-scrollbar-none flex max-w-full gap-1 overflow-x-auto/);
 });
 
 test('delivery sheets and filters are constrained for mobile overflow', () => {

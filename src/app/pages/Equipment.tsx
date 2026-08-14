@@ -668,7 +668,7 @@ function FleetReadinessSection({
             <span className="app-shell-title text-sm font-extrabold text-foreground">Готовность парка</span>
             <span className="text-xs text-muted-foreground">{isLoading ? 'загрузка' : 'операционная сводка'}</span>
           </div>
-          <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1 xl:pb-0">
+          <div className="app-scrollbar-none flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1 xl:pb-0">
             {kpis.map(({ label, value, icon: Icon, className }) => (
               <div key={label} className="flex min-w-max items-center gap-2 rounded-lg border border-border bg-secondary/45 px-3 py-2 text-xs">
                 <Icon className={`h-3.5 w-3.5 ${className}`} />
@@ -1964,7 +1964,7 @@ export default function Equipment() {
       <div
         data-testid="equipment-workspace-grid"
         className={`equipment-workspace-grid grid min-w-0 grid-cols-1 gap-3 overflow-x-hidden ${
-          quickViewPanelData ? 'xl:grid-cols-[minmax(0,1fr)_minmax(360px,430px)]' : ''
+          quickViewPanelData ? '2xl:grid-cols-[minmax(0,1fr)_minmax(360px,430px)]' : ''
         }`}
       >
         <div className="min-w-0" data-testid="equipment-registry-workspace">
@@ -2023,7 +2023,7 @@ export default function Equipment() {
         </div>
 
         {quickViewPanelData && !isMobileQuickView ? (
-          <div className="min-w-0 overflow-hidden xl:min-w-[360px] xl:max-w-[430px]" data-testid="equipment-quick-view-slot">
+          <div className="min-w-0 overflow-hidden 2xl:min-w-[360px] 2xl:max-w-[430px]" data-testid="equipment-quick-view-slot">
             {renderQuickViewPanel()}
           </div>
         ) : null}

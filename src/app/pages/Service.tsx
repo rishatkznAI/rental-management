@@ -488,8 +488,8 @@ function ServiceMetricCard({
       </div>
       <div className="ml-3 min-w-0 flex-1">
         <div className={`text-[26px] font-bold leading-none ${toneClasses.value}`}>{safeValue}</div>
-        <div className="mt-1 truncate text-sm font-semibold text-foreground">{title}</div>
-        <div className="mt-0.5 truncate text-xs text-muted-foreground">{caption}</div>
+        <div className="mt-1 text-sm font-semibold leading-snug text-foreground">{title}</div>
+        <div className="mt-0.5 text-xs leading-snug text-muted-foreground">{caption}</div>
       </div>
     </div>
   );
@@ -1074,7 +1074,7 @@ function RepeatBreakdownsTab({
           </div>
         ) : (
           <>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
               <ServiceMetricCard title="Критичные повторы" value={qualityData?.summary.critical ?? 0} caption="Требуют разбора" tone="red" icon={<ShieldAlert className="h-4 w-4" />} />
               <ServiceMetricCard title="Техника с повторами" value={qualityData?.summary.affectedEquipment ?? 0} caption="Затронутые единицы" tone="blue" icon={<Wrench className="h-4 w-4" />} />
               <ServiceMetricCard title="Повторы за 7 дней" value={qualityData?.summary.repeatWithin7 ?? 0} caption="После закрытия" tone="orange" icon={<AlertTriangle className="h-4 w-4" />} />
@@ -1159,7 +1159,7 @@ function RepeatBreakdownsTab({
         )}
       </section>
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         <ServiceMetricCard title="Повторов за 7 дней" value={data?.summary.repeatWithin7 ?? 0} caption="После завершения ремонта" tone="red" icon={<AlertTriangle className="h-4 w-4" />} />
         <ServiceMetricCard title="Повторов за 30 дней" value={data?.summary.repeatWithin30 ?? 0} caption="Все окна контроля" tone="orange" icon={<CalendarClock className="h-4 w-4" />} />
         <ServiceMetricCard title="Критичные" value={data?.summary.critical ?? 0} caption="Максимальный риск" tone="red" icon={<ShieldAlert className="h-4 w-4" />} />
@@ -2079,7 +2079,7 @@ export default function Service() {
             </div>
           </section>
 
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
             <ServiceMetricCard title="Актуальные" value={metrics.total} caption="Активных сейчас" tone="blue" icon={<ClipboardList className="h-4 w-4" />} />
             <ServiceMetricCard title="В работе" value={metrics.inProgress} caption="У механиков" tone="orange" icon={<Wrench className="h-4 w-4" />} />
             <ServiceMetricCard title="Ожидают запчасти" value={metrics.waitingParts} caption="Требуют снабжения" tone="purple" icon={<PackageSearch className="h-4 w-4" />} />

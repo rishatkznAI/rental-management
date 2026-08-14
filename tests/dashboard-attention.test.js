@@ -130,7 +130,7 @@ test('staging smoke follows the approved Dashboard attention contract shared wit
   );
   const commandScreenBlock = sourceBlock(
     dashboardSource,
-    '<div className="rentcore-command-screen">',
+    '<div className="rentcore-command-screen"',
     'return (\n    <div className="space-y-4',
   );
 
@@ -162,7 +162,7 @@ test('dashboard executive cockpit renders adaptive KPI cards and compact risk si
   assert.match(dashboardSource, /dashboard-kpi-month-payments/);
   assert.equal(dashboardSource.match(/data-testid="dashboard-month-dynamics"/g)?.length, 1);
   assert.equal(dashboardSource.match(/data-testid="dashboard-company-health"/g)?.length, 1);
-  assert.equal(dashboardSource.match(/<h3 className="app-shell-title whitespace-nowrap text-lg font-extrabold text-foreground">Динамика месяца<\/h3>/g)?.length, 1);
+  assert.equal(dashboardSource.match(/<h3 className="app-shell-title whitespace-nowrap text-\[15px\] font-semibold text-foreground">Динамика месяца<\/h3>/g)?.length, 1);
   assert.match(dashboardSource, /data-testid="dashboard-company-health-title">Здоровье компании<\/CardTitle>/);
   assert.match(dashboardSource, /operationalLoadScore/);
   assert.match(dashboardSource, /operationalLoadTone/);
@@ -180,7 +180,7 @@ test('dashboard does not render the removed global setup banner', () => {
 });
 
 test('dashboard command board uses enterprise grid without dominant company health circle', () => {
-  const commandScreenBlock = sourceBlock(dashboardSource, '<div className="rentcore-command-screen">', 'return (\n    <div className="space-y-4');
+  const commandScreenBlock = sourceBlock(dashboardSource, '<div className="rentcore-command-screen"', 'return (\n    <div className="space-y-4');
 
   assert.match(commandScreenBlock, /data-testid="dashboard-command-board"/);
   assert.match(commandScreenBlock, /rentcore-dashboard-grid[\s\S]*data-testid="dashboard-command-board"/);
@@ -197,7 +197,8 @@ test('dashboard command board uses enterprise grid without dominant company heal
   assert.doesNotMatch(commandScreenBlock, /xl:overflow-hidden/);
 
   assert.match(themeSource, /\.rentcore-dashboard-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\);[\s\S]*gap:\s*14px !important;[\s\S]*align-items:\s*stretch;/);
-  assert.match(themeSource, /@media \(min-width: 1600px\)[\s\S]*\.rentcore-dashboard-signals\s*\{[\s\S]*span 4[\s\S]*\.rentcore-dashboard-tasks,[\s\S]*\.rentcore-dashboard-fleet[\s\S]*span 3[\s\S]*\.rentcore-dashboard-month,[\s\S]*\.rentcore-dashboard-health[\s\S]*span 5[\s\S]*\.rentcore-dashboard-aging[\s\S]*span 4/);
+  assert.match(themeSource, /@media \(min-width: 1200px\)[\s\S]*\.rentcore-dashboard-kpi-grid > \*\s*\{[\s\S]*span 3[\s\S]*\.rentcore-dashboard-health\s*\{[\s\S]*span 12/);
+  assert.match(themeSource, /@media \(min-width: 1600px\)[\s\S]*\.rentcore-dashboard-signals\s*\{[\s\S]*span 5[\s\S]*\.rentcore-dashboard-month\s*\{[\s\S]*span 7[\s\S]*\.rentcore-dashboard-health\s*\{[\s\S]*span 12[\s\S]*\.rentcore-dashboard-tasks,[\s\S]*\.rentcore-dashboard-fleet,[\s\S]*\.rentcore-dashboard-aging[\s\S]*span 4/);
   assert.match(themeSource, /\.rentcore-command-screen\s*\{[\s\S]*min-height: 0;/);
   assert.match(themeSource, /\.rentcore-command-shell\s*\{[\s\S]*min-height: 0;/);
 });

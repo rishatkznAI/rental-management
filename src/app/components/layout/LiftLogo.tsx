@@ -12,7 +12,7 @@ export function LiftLogo({ className }: LiftLogoProps) {
       width="36"
       height="36"
       alt="rentCore"
-      className={cn('shrink-0 rounded-xl object-contain shadow-[0_12px_30px_-16px_rgba(212,247,74,0.95)]', className)}
+      className={cn('shrink-0 rounded-lg object-contain', className)}
     />
   );
 }

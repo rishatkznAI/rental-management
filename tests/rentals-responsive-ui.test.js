@@ -13,7 +13,8 @@ const themeSource = readSource('src/styles/theme.css');
 
 test('rentals desktop table is preserved while mobile cards are available', () => {
   assert.match(rentalsSource, /data-rental-desktop-table="true" className="hidden overflow-x-auto lg:block"/);
-  assert.match(rentalsSource, /<table className="min-w-\[1180px\] w-full text-left text-sm">/);
+  assert.match(rentalsSource, /<table className="min-w-\[1100px\] w-full text-left text-sm">/);
+  assert.match(rentalsSource, /sticky right-0[\s\S]*Действия/);
   assert.match(rentalsSource, /data-rental-mobile-list="true" className="grid gap-3 p-3 lg:hidden"/);
   assert.match(rentalsSource, /data-rental-mobile-card="true"/);
   assert.match(rentalsSource, /paginatedRentalRows\.map\(renderRentalMobileCard\)/);

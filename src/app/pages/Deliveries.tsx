@@ -947,7 +947,7 @@ export default function Deliveries() {
           </div>
         )}
 
-        <div className="flex max-w-full gap-1 overflow-x-auto border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+        <div className="app-scrollbar-none flex max-w-full gap-1 overflow-x-auto border-b border-gray-100 px-4 py-3 dark:border-gray-800">
           {([
             ['overview', 'Обзор'],
             ['route', 'Маршрут'],
@@ -1261,8 +1261,8 @@ export default function Deliveries() {
 
       <div className={selectedDelivery ? 'grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_400px]' : 'min-w-0'}>
       <section className="min-w-0 rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900" data-delivery-list-region="true">
-        <div className="flex flex-col gap-3 border-b border-gray-100 p-3 dark:border-gray-800 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex max-w-full gap-1 overflow-x-auto">
+        <div className="flex flex-col gap-3 border-b border-gray-100 p-3 dark:border-gray-800 2xl:flex-row 2xl:items-center 2xl:justify-between">
+          <div className="app-scroll-fade-x app-scrollbar-none flex max-w-full gap-1 overflow-x-auto">
             {tabItems.map((tab) => {
               const isActive = activeTab === tab.id;
               const isOverdueTab = tab.id === 'overdue';
@@ -1272,7 +1272,7 @@ export default function Deliveries() {
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                  className={`shrink-0 rounded-xl px-2.5 py-2 text-sm font-semibold transition ${
                     isActive
                       ? isOverdueTab
                         ? 'bg-red-600 text-white shadow-sm'
@@ -1296,7 +1296,7 @@ export default function Deliveries() {
               );
             })}
           </div>
-          <div className="flex w-full rounded-xl border border-gray-200 bg-gray-50 p-1 sm:w-auto dark:border-gray-800 dark:bg-gray-950">
+          <div className="flex w-full self-end rounded-xl border border-gray-200 bg-gray-50 p-1 sm:w-auto dark:border-gray-800 dark:bg-gray-950">
             {(['list', 'compact'] as DeliveryViewMode[]).map((mode) => (
               <button
                 key={mode}
@@ -1569,7 +1569,7 @@ export default function Deliveries() {
             })}
           </div>
           <div className="hidden overflow-x-auto md:block" data-delivery-desktop-table="true">
-            <table className="w-full min-w-[1360px] text-sm">
+            <table className="w-full min-w-[1240px] text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/70 text-left text-xs uppercase tracking-[0.12em] text-gray-500 dark:border-gray-800 dark:bg-gray-950/60 dark:text-gray-400">
                   <th className="px-4 py-3"><input type="checkbox" aria-label="Выбрать все доставки" /></th>
@@ -1583,7 +1583,7 @@ export default function Deliveries() {
                   {!isCarrierView && <th className="px-4 py-3 font-semibold">Водитель</th>}
                   <th className="px-4 py-3 font-semibold">Контакт</th>
                   {!isCarrierView && <th className="px-4 py-3 font-semibold">Стоимость</th>}
-                  <th className="px-4 py-3 font-semibold">Действия</th>
+                  <th className="sticky right-0 z-20 bg-gray-50 px-4 py-3 font-semibold dark:bg-gray-950">Действия</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -1712,7 +1712,7 @@ export default function Deliveries() {
                           {formatDeliveryCost(delivery.cost)}
                         </td>
                       )}
-                      <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                      <td className="sticky right-0 z-10 bg-inherit px-4 py-3" onClick={(event) => event.stopPropagation()}>
                         <DropdownMenu.Root>
                           <DropdownMenu.Trigger asChild>
                             <button

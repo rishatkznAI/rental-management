@@ -5578,7 +5578,7 @@ export default function Rentals() {
                 )}
               </div>
               <div data-rental-desktop-table="true" className="hidden overflow-x-auto lg:block">
-                <table className="min-w-[1180px] w-full text-left text-sm">
+                <table className="min-w-[1100px] w-full text-left text-sm">
                   <thead className="bg-secondary/60 text-xs uppercase tracking-[0.08em] text-muted-foreground">
                     {activeWorkspaceTab === 'returns' ? (
                       <tr>
@@ -5590,7 +5590,7 @@ export default function Rentals() {
                         <th className="px-4 py-3">Доставка</th>
                         <th className="px-4 py-3">Приёмка / сервис</th>
                         <th className="px-4 py-3">Менеджер</th>
-                        <th className="px-4 py-3">Действия</th>
+                        <th className="sticky right-0 z-20 bg-secondary px-4 py-3">Действия</th>
                       </tr>
                     ) : activeWorkspaceTab === 'debt_docs' ? (
                       <tr>
@@ -5605,7 +5605,7 @@ export default function Rentals() {
                         <th className="px-4 py-3">УПД</th>
                         <th className="px-4 py-3">Договор</th>
                         <th className="px-4 py-3">Следующий платёж</th>
-                        <th className="px-4 py-3">Действия</th>
+                        <th className="sticky right-0 z-20 bg-secondary px-4 py-3">Действия</th>
                       </tr>
                     ) : (
                       <tr>
@@ -5619,7 +5619,7 @@ export default function Rentals() {
                         <th className="px-4 py-3">Документы</th>
                         <th className="px-4 py-3">Доставка / возврат</th>
                         <th className="px-4 py-3">Менеджер</th>
-                        <th className="px-4 py-3"></th>
+                        <th className="sticky right-0 z-20 bg-secondary px-4 py-3" aria-label="Действия"></th>
                       </tr>
                     )}
                   </thead>
@@ -5873,7 +5873,7 @@ export default function Rentals() {
                               <td className="px-4 py-3">{row.rental.manager || '—'}</td>
                             </>
                           )}
-                          <td className="px-4 py-3 text-right" onClick={event => event.stopPropagation()}>
+                          <td className="sticky right-0 z-10 bg-inherit px-4 py-3 text-right" onClick={event => event.stopPropagation()}>
                             <div className="flex justify-end gap-1.5">
                               {activeWorkspaceTab === 'returns' && canEditRentals && !isBrokenRentalLink && (
                                 <Button size="sm" variant="ghost" className="rounded-xl px-2" title="Запланировать или изменить возврат" onClick={() => handleOpenReturn(row.rental)}>

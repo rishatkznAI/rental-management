@@ -214,7 +214,7 @@ test.describe('Dashboard enterprise layout', () => {
       await navigateInApp(page, '/');
 
       await expect(page.getByRole('heading', { name: 'Операционный центр', exact: true })).toBeVisible();
-      for (const label of ['Критические сигналы', 'Задачи', 'Динамика месяца', 'Загрузка техники', 'Возраст дебиторки']) {
+      for (const label of ['Требует внимания', 'Задачи', 'Динамика месяца', 'Загрузка техники', 'Возраст дебиторки']) {
         await expect(page.getByText(label, { exact: true }).first(), `${label} should be visible`).toBeVisible();
       }
 

@@ -47,6 +47,8 @@ export function Layout() {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(SIDEBAR_STATE_STORAGE_KEY) === 'collapsed';
   });
+  const [tabletSidebarCollapsed, setTabletSidebarCollapsed] = useState(true);
+  const [isTabletViewport, setIsTabletViewport] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -94,8 +96,9 @@ export function Layout() {
     return null;
   }, [can]);
   const canOpenPlanner = canView('planner');
-  const desktopSidebarOffsetClass = desktopSidebarCollapsed ? 'sm:left-20' : 'sm:left-60';
-  const desktopSidebarMarginClass = desktopSidebarCollapsed ? 'sm:ml-20' : 'sm:ml-60';
+  const effectiveSidebarCollapsed = isTabletViewport ? tabletSidebarCollapsed : desktopSidebarCollapsed;
+  const desktopSidebarOffsetClass = effectiveSidebarCollapsed ? 'sm:left-20' : 'sm:left-[248px]';
+  const desktopSidebarMarginClass = effectiveSidebarCollapsed ? 'sm:ml-20' : 'sm:ml-[248px]';
   const pageTitle = useMemo(() => {
     if (location.pathname === '/') return 'Дашборд';
     const segment = location.pathname.split('/').filter(Boolean)[0] || '';
@@ -135,12 +138,24 @@ export function Layout() {
   };
 
   const handleToggleDesktopSidebar = () => {
+    if (isTabletViewport) {
+      setTabletSidebarCollapsed(current => !current);
+      return;
+    }
     setDesktopSidebarCollapsed((current) => {
       const next = !current;
       window.localStorage.setItem(SIDEBAR_STATE_STORAGE_KEY, next ? 'collapsed' : 'expanded');
       return next;
     });
   };
+
+  useEffect(() => {
+    const tabletQuery = window.matchMedia('(min-width: 640px) and (max-width: 1199px)');
+    const syncTabletViewport = () => setIsTabletViewport(tabletQuery.matches);
+    syncTabletViewport();
+    tabletQuery.addEventListener('change', syncTabletViewport);
+    return () => tabletQuery.removeEventListener('change', syncTabletViewport);
+  }, []);
 
   const themeToggleLabel = theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему';
   const ThemeIcon = theme === 'dark' ? Sun : Moon;
@@ -152,7 +167,7 @@ export function Layout() {
       aria-pressed={theme === 'dark'}
       aria-label={themeToggleLabel}
       title={themeToggleLabel}
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card/80 text-muted-foreground shadow-[0_16px_38px_-34px_rgba(0,0,0,0.65)] transition hover:border-primary/35 hover:bg-accent hover:text-primary"
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-card/80 text-muted-foreground transition-colors duration-[var(--motion-duration-micro)] hover:border-primary/35 hover:bg-accent hover:text-primary"
     >
       <ThemeIcon className="h-5 w-5" />
     </button>
@@ -265,7 +280,7 @@ export function Layout() {
       <Sidebar
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
-        desktopCollapsed={desktopSidebarCollapsed}
+        desktopCollapsed={effectiveSidebarCollapsed}
         onToggleDesktopCollapse={handleToggleDesktopSidebar}
       />
 
@@ -278,7 +293,7 @@ export function Layout() {
       )}
 
       {/* Mobile top bar */}
-      <header className="fixed top-0 left-0 right-0 z-20 flex h-14 items-center justify-between border-b border-sidebar-border bg-sidebar/95 px-4 shadow-[0_18px_42px_-36px_rgba(0,0,0,0.9)] backdrop-blur-xl sm:hidden">
+      <header className="fixed top-0 left-0 right-0 z-20 flex h-14 items-center justify-between border-b border-sidebar-border bg-sidebar/95 px-4 backdrop-blur-xl sm:hidden">
         <button
           onClick={() => setSidebarOpen(true)}
           className="rounded-lg p-2 transition-colors hover:bg-accent"
@@ -297,7 +312,7 @@ export function Layout() {
             <button
               type="button"
               onClick={() => setProfileOpen((value) => !value)}
-              className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-primary/25 bg-[linear-gradient(135deg,var(--primary),#5eead4)] text-sm font-bold text-primary-foreground"
+              className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-primary/25 bg-primary text-sm font-bold text-primary-foreground"
               aria-expanded={profileOpen}
               aria-haspopup="menu"
               aria-label="Профиль пользователя"
@@ -311,7 +326,8 @@ export function Layout() {
             {profileOpen && (
               <div
                 role="menu"
-                className="absolute right-0 top-11 w-56 overflow-hidden rounded-2xl border border-border bg-popover p-1 text-popover-foreground shadow-[0_24px_70px_-38px_rgba(15,23,42,0.55)]"
+                data-state="open"
+                className="app-animate-popover absolute right-0 top-11 w-56 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground"
               >
                 <div className="px-3 py-2">
                   <p className="truncate text-sm font-semibold text-foreground">{user?.name ?? '—'}</p>
@@ -345,7 +361,7 @@ export function Layout() {
 
       {/* Desktop top bar */}
       <header className={cn(
-        'fixed right-0 top-0 z-20 hidden h-16 items-center justify-between border-b border-border bg-[color:var(--rc-topbar)] px-6 shadow-[0_22px_58px_-46px_rgba(0,0,0,0.82)] backdrop-blur-xl transition-[left] duration-300 sm:flex',
+        'fixed right-0 top-0 z-20 hidden h-16 items-center justify-between border-b border-border bg-[color:var(--rc-topbar)] px-6 backdrop-blur-xl transition-[left] duration-[var(--motion-duration-ui)] sm:flex',
         desktopSidebarOffsetClass,
       )}>
         <div className="min-w-0">
@@ -358,7 +374,7 @@ export function Layout() {
             <button
               type="button"
               onClick={() => navigate(primaryCreatePath)}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/30 bg-primary text-primary-foreground shadow-[0_18px_42px_-30px_rgba(183,242,58,0.72)] transition hover:bg-[color:var(--primary-hover)]"
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-primary/30 bg-primary text-primary-foreground transition-colors duration-[var(--motion-duration-micro)] hover:bg-[color:var(--primary-hover)]"
               aria-label="Создать"
               title="Создать"
             >
@@ -369,7 +385,7 @@ export function Layout() {
             <button
               type="button"
               onClick={() => navigate('/planner')}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card/80 text-muted-foreground transition hover:border-primary/35 hover:bg-accent hover:text-primary"
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card/80 text-muted-foreground transition-colors duration-[var(--motion-duration-micro)] hover:border-primary/35 hover:bg-accent hover:text-primary"
               aria-label="Планировщик"
               title="Планировщик"
             >
@@ -382,11 +398,11 @@ export function Layout() {
             <button
               type="button"
               onClick={() => setProfileOpen((value) => !value)}
-              className="flex min-w-0 items-center gap-3 rounded-2xl border border-border bg-card/80 px-3 py-2 text-left shadow-[0_18px_44px_-38px_rgba(0,0,0,0.75)] transition hover:border-primary/35 hover:bg-accent"
+              className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-card/80 px-3 py-2 text-left transition-colors duration-[var(--motion-duration-micro)] hover:border-primary/35 hover:bg-accent"
               aria-expanded={profileOpen}
               aria-haspopup="menu"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-primary/25 bg-[linear-gradient(135deg,var(--primary),#5eead4)] text-sm font-bold text-primary-foreground">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-primary/25 bg-primary text-sm font-bold text-primary-foreground">
                 {user?.profilePhoto ? (
                   <img src={user.profilePhoto} alt={user.name} className="h-full w-full object-cover" />
                 ) : (
@@ -403,7 +419,8 @@ export function Layout() {
             {profileOpen && (
               <div
                 role="menu"
-                className="absolute right-0 mt-2 w-56 overflow-hidden rounded-2xl border border-border bg-popover p-1 text-popover-foreground shadow-[0_24px_70px_-38px_rgba(15,23,42,0.55)]"
+                data-state="open"
+                className="app-animate-popover absolute right-0 mt-2 w-56 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground"
               >
                 {canView('profile_settings') ? (
                   <button
@@ -434,7 +451,7 @@ export function Layout() {
       {/* Main content */}
       <main className={cn(
         'min-h-screen',
-        'transition-[margin] duration-300',
+        'transition-[margin] duration-[var(--motion-duration-ui)]',
         desktopSidebarMarginClass,
         'pt-14 pb-16 sm:pt-16 sm:pb-0',
         'relative',
@@ -445,14 +462,21 @@ export function Layout() {
         </div>
         {navigation.state !== 'idle' && (
           <div className={cn(
-            'pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm transition-[left] duration-300',
+            'pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm transition-[left] duration-[var(--motion-duration-ui)]',
             desktopSidebarOffsetClass,
           )}>
-            <div className="w-full max-w-sm rounded-2xl border border-border bg-card/95 px-6 py-7 text-center shadow-[0_28px_82px_-58px_rgba(0,0,0,0.9)] backdrop-blur-xl">
-              <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
+            <div className="w-full max-w-sm rounded-lg border border-border bg-card/95 px-6 py-7 backdrop-blur-xl" role="status" aria-live="polite">
               <div className="space-y-1">
                 <p className="text-base font-semibold text-foreground">Загружаем раздел</p>
                 <p className="text-sm text-muted-foreground">Получаем свежие данные. Это займёт несколько секунд.</p>
+              </div>
+              <div className="mt-5 space-y-3" aria-hidden="true">
+                <div className="app-skeleton h-3 w-28" />
+                <div className="app-skeleton h-8 w-48" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="app-skeleton h-16" />
+                  <div className="app-skeleton h-16" />
+                </div>
               </div>
             </div>
           </div>
@@ -460,7 +484,7 @@ export function Layout() {
       </main>
 
       {/* Mobile bottom navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-sidebar-border bg-sidebar/95 shadow-[0_-18px_42px_-36px_rgba(0,0,0,0.9)] backdrop-blur-xl sm:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-sidebar-border bg-sidebar/95 backdrop-blur-xl sm:hidden">
         <div
           className="grid"
           style={{ gridTemplateColumns: `repeat(${Math.max(visibleBottomNav.length, 1)}, minmax(0, 1fr))` }}

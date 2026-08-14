@@ -158,7 +158,7 @@ export default function ProfileSettings() {
             <div className="flex justify-end">
               <Button
                 type="button"
-                className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                className="rounded-full bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]"
                 onClick={() => void handleSaveProfile()}
                 disabled={isSavingProfile}
               >
@@ -189,7 +189,7 @@ export default function ProfileSettings() {
             </div>
             <Button
               type="button"
-              className="w-full rounded-full bg-cyan-300 text-slate-950 hover:bg-cyan-200"
+              className="w-full rounded-full bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]"
               onClick={() => void handleChangePassword()}
               disabled={isSavingPassword}
             >

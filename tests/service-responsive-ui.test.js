@@ -27,6 +27,13 @@ test('service tabs wrap on mobile and scroll only from larger breakpoints', () =
   assert.match(detailSource, /data-service-responsive-tabs="detail"[\s\S]*flex-wrap[\s\S]*sm:flex-nowrap[\s\S]*sm:overflow-x-auto/);
 });
 
+test('service KPI cards wrap before six-column wide desktop layout without title clipping', () => {
+  assert.match(listSource, /grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6/);
+  assert.match(listSource, /text-sm font-semibold leading-snug text-foreground/);
+  assert.match(listSource, /text-xs leading-snug text-muted-foreground/);
+  assert.doesNotMatch(listSource, /mt-1 truncate text-sm font-semibold text-foreground/);
+});
+
 test('service detail has responsive safe containers and stacked mobile form actions', () => {
   assert.match(detailSource, /data-service-detail-responsive="true"[\s\S]*overflow-x-clip/);
   assert.match(detailSource, /data-service-detail-form-row="add-work"[\s\S]*grid min-w-0/);

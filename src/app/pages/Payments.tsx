@@ -127,11 +127,11 @@ function paymentStatusLabel(status: unknown) {
 
 function paymentStatusClass(status: unknown) {
   const value = text(status).toLowerCase();
-  if (value === 'paid') return '!bg-emerald-50 !text-emerald-700 ring-emerald-100';
-  if (value === 'overdue') return '!bg-red-50 !text-red-700 ring-red-100';
-  if (value === 'partial') return '!bg-orange-50 !text-orange-700 ring-orange-100';
-  if (value === 'pending') return '!bg-blue-50 !text-blue-700 ring-blue-100';
-  return '!bg-slate-100 !text-slate-600 ring-slate-200';
+  if (value === 'paid') return 'bg-success-soft text-success-foreground ring-success/25';
+  if (value === 'overdue') return 'bg-danger-soft text-danger-foreground ring-danger/25';
+  if (value === 'partial') return 'bg-warning-soft text-warning-foreground ring-warning/25';
+  if (value === 'pending') return 'bg-info-soft text-info-foreground ring-info/25';
+  return 'bg-muted text-muted-foreground ring-border';
 }
 
 function PaymentStatusPill({ status }: { status: unknown }) {
@@ -167,14 +167,14 @@ function PaymentKpiCard({
   valueClassName?: string;
 }) {
   return (
-    <div className="flex min-h-[116px] items-center gap-4 rounded-lg border border-slate-200 !bg-white p-5 !text-slate-950 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md">
+    <div className="app-kpi-card flex min-h-[116px] min-w-0 items-center gap-4 p-5 text-card-foreground">
       <div className={cn('flex h-12 w-12 shrink-0 items-center justify-center rounded-full', tone)}>
         <Icon className="h-5 w-5" />
       </div>
       <div className="min-w-0">
-        <p className="text-sm font-medium !text-slate-500">{title}</p>
-        <p className={cn('mt-1 truncate text-xl font-semibold !text-slate-950 sm:text-2xl', valueClassName)}>{value}</p>
-        <p className="mt-1 text-sm !text-slate-500">{caption}</p>
+        <p className="text-sm font-medium text-muted-foreground">{title}</p>
+        <p className={cn('mt-1 whitespace-normal text-xl font-semibold leading-tight text-foreground sm:text-2xl', valueClassName)}>{value}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{caption}</p>
       </div>
     </div>
   );
@@ -339,34 +339,34 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
         tabIndex={-1}
         data-state={presence.dataState}
         onAnimationEnd={presence.onExitAnimationEnd}
-        className="relative z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] transition duration-200 ease-out data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0 data-[state=open]:scale-100 data-[state=open]:opacity-100"
+        className="app-animate-modal relative z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-2xl transition duration-[var(--motion-duration-ui)] ease-out data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0 data-[state=open]:scale-100 data-[state=open]:opacity-100"
       >
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 pr-14">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-5 pr-14">
           <div>
-            <h2 id="new-payment-dialog-title" className="text-xl font-semibold text-slate-950">Новый платёж</h2>
-            <p id="new-payment-dialog-description" className="mt-1 text-sm text-slate-500">Свяжите оплату с контрагентом и, при необходимости, с арендой.</p>
+            <h2 id="new-payment-dialog-title" className="text-xl font-semibold text-foreground">Новый платёж</h2>
+            <p id="new-payment-dialog-description" className="mt-1 text-sm text-muted-foreground">Свяжите оплату с контрагентом и, при необходимости, с арендой.</p>
           </div>
-          <button type="button" aria-label="Закрыть форму нового платежа" onClick={onClose} className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-slate-400 transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700">
+          <button type="button" aria-label="Закрыть форму нового платежа" onClick={onClose} className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-lg border border-transparent text-muted-foreground transition hover:border-border hover:bg-accent hover:text-foreground">
             <X className="h-5 w-5" />
           </button>
         </div>
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
           {formError && (
-            <div id="new-payment-form-error" role="alert" aria-live="assertive" className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div id="new-payment-form-error" role="alert" aria-live="assertive" className="rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger-foreground">
               {formError}
             </div>
           )}
           {/* Rental link */}
           <div>
-            <label htmlFor="new-payment-rental" className="mb-1.5 block text-sm font-medium text-gray-700">
+            <label htmlFor="new-payment-rental" className="mb-1.5 block text-sm font-medium text-foreground">
               Аренда (необязательно)
             </label>
             <select
               id="new-payment-rental"
               value={form.rentalId}
               onChange={e => set('rentalId', e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15"
+              className="app-filter-input"
             >
               <option value="">— Выбрать аренду —</option>
               {rentals.map(r => (
@@ -379,7 +379,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
 
           {/* Counterparty */}
           <div>
-            <label id="new-payment-client-label" className="mb-1.5 block text-sm font-medium text-gray-700">
+            <label id="new-payment-client-label" className="mb-1.5 block text-sm font-medium text-foreground">
               Контрагент <span className="text-red-500">*</span>
             </label>
             <select
@@ -410,16 +410,16 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
               ))}
             </select>
             {clientError && (
-              <p id="new-payment-client-error" role="alert" aria-live="assertive" className="mt-1 text-xs text-red-600">{clientError}</p>
+              <p id="new-payment-client-error" role="alert" aria-live="assertive" className="mt-1 text-xs text-danger">{clientError}</p>
             )}
             {/* Debt banner */}
             {clientDebt && clientDebt.currentDebt > 0 && (
               <div className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-sm ${
                 clientDebt.exceededLimit
-                  ? 'bg-red-50 text-red-700'
+                  ? 'border border-danger/25 bg-danger-soft text-danger-foreground'
                   : clientDebt.overdueRentals > 0
-                  ? 'bg-orange-50 text-orange-700'
-                  : 'bg-yellow-50 text-yellow-700'
+                  ? 'border border-warning/25 bg-warning-soft text-warning-foreground'
+                  : 'border border-warning/25 bg-warning-soft text-warning-foreground'
               }`}>
                 {clientDebt.exceededLimit
                   ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -441,7 +441,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
               </div>
             )}
             {clientDebt && clientDebt.currentDebt === 0 && form.client && (
-              <div className="mt-2 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+              <div className="mt-2 flex items-center gap-2 rounded-lg border border-success/25 bg-success-soft px-3 py-2 text-sm text-success-foreground">
                 <CheckCircle className="h-4 w-4 shrink-0" />
                 <span>Задолженность отсутствует</span>
               </div>
@@ -451,7 +451,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
           <div className="grid gap-3 sm:grid-cols-2">
             {/* Amount due */}
             <div>
-              <label htmlFor="new-payment-amount" className="mb-1.5 block text-sm font-medium text-gray-700">
+              <label htmlFor="new-payment-amount" className="mb-1.5 block text-sm font-medium text-foreground">
                 Сумма к оплате <span className="text-red-500">*</span>
               </label>
               <Input
@@ -468,7 +468,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
             </div>
             {/* Paid amount */}
             <div>
-              <label htmlFor="new-payment-paid-amount" className="mb-1.5 block text-sm font-medium text-gray-700">
+              <label htmlFor="new-payment-paid-amount" className="mb-1.5 block text-sm font-medium text-foreground">
                 Оплачено
               </label>
               <Input
@@ -486,7 +486,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">
+              <label className="mb-1.5 block text-sm font-medium text-foreground">
                 Срок оплаты <span className="text-red-500">*</span>
               </label>
               <Input
@@ -497,7 +497,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">
+              <label className="mb-1.5 block text-sm font-medium text-foreground">
                 Дата оплаты
               </label>
               <Input
@@ -510,13 +510,13 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
 
           {/* Status */}
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-700">
+            <label className="mb-1.5 block text-sm font-medium text-foreground">
               Статус
             </label>
             <select
               value={form.status}
               onChange={e => set('status', e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15"
+              className="app-filter-input"
             >
               <option value="paid">Оплачено</option>
               <option value="partial">Частично оплачено</option>
@@ -527,7 +527,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
 
           {/* Comment */}
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-700">
+            <label className="mb-1.5 block text-sm font-medium text-foreground">
               Комментарий
             </label>
             <textarea
@@ -535,12 +535,12 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
               placeholder="Примечание к платежу..."
               value={form.comment}
               onChange={e => set('comment', e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15"
+              className="min-h-20 w-full rounded-lg border border-input bg-input-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-ring/40"
             />
           </div>
 
           </div>
-          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:flex-row">
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border bg-popover/95 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:flex-row">
             <Button type="button" variant="secondary" onClick={onClose}>Отмена</Button>
             <Button type="submit" className="flex-1">Сохранить платёж</Button>
           </div>
@@ -816,26 +816,26 @@ function PaymentAllocationPanel({
   }
 
   return (
-    <div data-payment-detail-responsive="true" className="max-w-full overflow-hidden rounded-lg border border-blue-200 !bg-white p-4 !text-slate-950 shadow-sm">
+    <div data-payment-detail-responsive="true" className="max-w-full overflow-hidden rounded-lg border border-primary/25 bg-card p-4 text-card-foreground">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold !text-gray-900">Распределение оплаты</h2>
-          <p className="mt-1 text-sm !text-gray-500">{payment.invoiceNumber || payment.id} · {payment.client}</p>
+          <h2 className="text-lg font-semibold text-foreground">Распределение оплаты</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{payment.invoiceNumber || payment.id} · {payment.client}</p>
         </div>
         <Button size="sm" variant="ghost" onClick={onClose}><X className="h-4 w-4" /> Закрыть</Button>
       </div>
 
-      {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {message && <div className="mb-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
+      {error && <div className="mb-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger-foreground">{error}</div>}
+      {message && <div className="mb-3 rounded-lg border border-success/30 bg-success-soft px-3 py-2 text-sm text-success-foreground">{message}</div>}
 
       <div className="grid gap-3 md:grid-cols-4">
-        <div className="rounded-lg border border-gray-200 !bg-white p-3"><p className="text-xs !text-gray-500">Сумма платежа</p><p className="font-semibold !text-slate-950">{formatCurrency(payment.amount)}</p></div>
-        <div className="rounded-lg border border-gray-200 !bg-white p-3"><p className="text-xs !text-gray-500">Распределено</p><p className="font-semibold !text-green-600">{formatCurrency(allocated)}</p></div>
-        <div className="rounded-lg border border-gray-200 !bg-white p-3"><p className="text-xs !text-gray-500">Не распределено</p><p className="font-semibold !text-orange-600">{formatCurrency(unallocated)}</p></div>
-        <div className="rounded-lg border border-gray-200 !bg-white p-3"><p className="text-xs !text-gray-500">Статус</p><p className="font-semibold !text-slate-950">{allocationStatus}</p></div>
+        <div className="rounded-lg border border-border bg-secondary/35 p-3"><p className="text-xs text-muted-foreground">Сумма платежа</p><p className="font-semibold text-foreground">{formatCurrency(payment.amount)}</p></div>
+        <div className="rounded-lg border border-border bg-secondary/35 p-3"><p className="text-xs text-muted-foreground">Распределено</p><p className="font-semibold text-success">{formatCurrency(allocated)}</p></div>
+        <div className="rounded-lg border border-border bg-secondary/35 p-3"><p className="text-xs text-muted-foreground">Не распределено</p><p className="font-semibold text-warning">{formatCurrency(unallocated)}</p></div>
+        <div className="rounded-lg border border-border bg-secondary/35 p-3"><p className="text-xs text-muted-foreground">Статус</p><p className="font-semibold text-foreground">{allocationStatus}</p></div>
       </div>
       {unallocated > 0 && (
-        <div className="mt-3 flex gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
+        <div className="mt-3 flex gap-2 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning-foreground">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>Часть платежа не распределена и не закрывает долг по арендам.</span>
         </div>
@@ -846,19 +846,19 @@ function PaymentAllocationPanel({
           const rental = item.rentalId ? rentalsById.get(item.rentalId) : null;
           const doc = item.documentId ? documentsById.get(item.documentId) : null;
           return (
-            <div key={item.id} data-payment-allocation-mobile-card="true" className="rounded-xl border border-gray-200 !bg-white p-3 text-sm">
+            <div key={item.id} data-payment-allocation-mobile-card="true" className="rounded-lg border border-border bg-card p-3 text-sm">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="break-words font-semibold !text-gray-900">
+                  <p className="break-words font-semibold text-foreground">
                     {item.rentalId ? `${item.rentalId} · ${rental?.equipmentInv || 'аренда'}` : 'Без аренды'}
                   </p>
-                  <p className="mt-1 break-words text-xs !text-gray-500">
+                  <p className="mt-1 break-words text-xs text-muted-foreground">
                     {objectsById.get(text(item.objectId))?.name || 'Без объекта'} · {contractsById.get(text(item.contractId))?.number || text(item.contractId) || 'без договора'}
                   </p>
                 </div>
-                <p className="shrink-0 whitespace-nowrap font-semibold !text-gray-900">{formatCurrency(item.amount)}</p>
+                <p className="shrink-0 whitespace-nowrap font-semibold text-foreground">{formatCurrency(item.amount)}</p>
               </div>
-              <div className="mt-3 grid gap-2 text-xs !text-gray-500">
+              <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
                 <p className="break-words">Документ: {doc ? `${doc.type} ${doc.number || doc.documentNumber || doc.id}` : text(item.documentId) || '—'}</p>
                 <p>Период: {item.periodStart || rental?.startDate || '—'} — {item.periodEnd || rental?.endDate || rental?.plannedReturnDate || '—'}</p>
                 <p className="break-words">Комментарий: {item.comment || '—'}</p>
@@ -872,11 +872,11 @@ function PaymentAllocationPanel({
           );
         })}
         {paymentAllocations.length === 0 && (
-          <div className="rounded-xl border border-dashed border-gray-200 px-3 py-6 text-center text-sm text-gray-500">Распределений пока нет</div>
+          <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">Распределений пока нет</div>
         )}
       </div>
 
-      <div data-payment-allocation-desktop-table="true" className="mt-5 hidden overflow-x-auto rounded-lg border border-gray-200 md:block">
+      <div data-payment-allocation-desktop-table="true" className="mt-5 hidden overflow-x-auto rounded-lg border border-border md:block">
         <Table>
           <TableHeader><TableRow><TableHead>Объект</TableHead><TableHead>Договор</TableHead><TableHead>Аренда</TableHead><TableHead>Документ/УПД</TableHead><TableHead>Период</TableHead><TableHead>Сумма</TableHead><TableHead>Комментарий</TableHead><TableHead>Источник</TableHead><TableHead>Действия</TableHead></TableRow></TableHeader>
           <TableBody>
@@ -902,14 +902,14 @@ function PaymentAllocationPanel({
                 </TableRow>
               );
             })}
-            {paymentAllocations.length === 0 && <TableRow><TableCell colSpan={9} className="py-6 text-center text-sm text-gray-500">Распределений пока нет</TableCell></TableRow>}
+            {paymentAllocations.length === 0 && <TableRow><TableCell colSpan={9} className="py-6 text-center text-sm text-muted-foreground">Распределений пока нет</TableCell></TableRow>}
           </TableBody>
         </Table>
       </div>
 
-      <div className="mt-5 rounded-lg border border-gray-200 p-4">
+      <div className="mt-5 rounded-lg border border-border bg-secondary/20 p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h3 className="font-semibold text-gray-900">{draft.id ? 'Изменить распределение' : 'Добавить распределение'}</h3>
+          <h3 className="font-semibold text-foreground">{draft.id ? 'Изменить распределение' : 'Добавить распределение'}</h3>
           {draft.id && <Button size="sm" variant="secondary" onClick={resetDraft}>Новая строка</Button>}
         </div>
         <div className="grid gap-3 md:grid-cols-3">
@@ -946,7 +946,7 @@ function PaymentAllocationPanel({
       </div>
 
       {showDebtPicker && (
-        <div className="mt-4 rounded-lg border border-gray-200 p-4">
+        <div className="mt-4 rounded-lg border border-border bg-secondary/20 p-4">
           <h3 className="mb-3 font-semibold">Долги клиента</h3>
           <div className="space-y-2">
             {clientDebtRows.map(row => {
@@ -959,7 +959,7 @@ function PaymentAllocationPanel({
                 ? Math.ceil((new Date(today()).getTime() - new Date(dueDate).getTime()) / 86400000)
                 : 0;
               return (
-                <div key={row.rentalId} className="grid gap-2 rounded-lg border border-gray-200 p-3 text-sm md:grid-cols-[1fr_150px]">
+                <div key={row.rentalId} className="grid gap-2 rounded-lg border border-border bg-card p-3 text-sm md:grid-cols-[1fr_150px]">
                   <div className="flex min-w-0 gap-3">
                     <input
                       type="checkbox"
@@ -972,28 +972,28 @@ function PaymentAllocationPanel({
                     />
                     <div className="min-w-0">
                     <p className="break-words font-medium">{payment.client} → {objectName} → {contractNumber} → {row.rentalId}</p>
-                    <p className="break-words text-gray-500">{rental?.equipmentInv || row.equipmentInv} · {row.startDate} — {row.endDate} · менеджер {row.manager || '—'} · документ {doc?.number || doc?.id || '—'}</p>
-                    <p className="break-words text-gray-500">Начислено {formatCurrency(row.amount)} · оплачено {formatCurrency(row.paidAmount)} · долг {formatCurrency(row.outstanding)} · просрочка {overdueDays > 0 ? `${overdueDays} дн.` : 'нет'}</p>
+                    <p className="break-words text-muted-foreground">{rental?.equipmentInv || row.equipmentInv} · {row.startDate} — {row.endDate} · менеджер {row.manager || '—'} · документ {doc?.number || doc?.id || '—'}</p>
+                    <p className="break-words text-muted-foreground">Начислено {formatCurrency(row.amount)} · оплачено {formatCurrency(row.paidAmount)} · долг {formatCurrency(row.outstanding)} · просрочка {overdueDays > 0 ? `${overdueDays} дн.` : 'нет'}</p>
                     </div>
                   </div>
                   <Input type="number" min="0" value={selectedDebt[row.rentalId] || ''} onChange={e => setSelectedDebt(current => ({ ...current, [row.rentalId]: e.target.value }))} placeholder="Сумма" />
                 </div>
               );
             })}
-            {clientDebtRows.length === 0 && <p className="text-sm text-gray-500">Неоплаченных аренд клиента нет</p>}
+            {clientDebtRows.length === 0 && <p className="text-sm text-muted-foreground">Неоплаченных аренд клиента нет</p>}
           </div>
           <Button className="mt-3" onClick={allocateSelectedDebt}>Распределить выбранное</Button>
         </div>
       )}
 
       {preview.length > 0 && (
-        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
-          <h3 className="mb-3 font-semibold text-blue-950">Предпросмотр автозачёта</h3>
+        <div className="mt-4 rounded-lg border border-primary/25 bg-primary/8 p-4">
+          <h3 className="mb-3 font-semibold text-foreground">Предпросмотр автозачёта</h3>
           <div className="space-y-2">
             {preview.map((item, index) => (
-              <div key={`${item.rentalId}-${index}`} className="rounded-lg bg-white p-3 text-sm">
+              <div key={`${item.rentalId}-${index}`} className="rounded-lg border border-border bg-card p-3 text-sm">
                 <div className="flex justify-between gap-3"><span>{item.rentalId} · {objectsById.get(text(item.objectId))?.name || 'объект'} · {contractsById.get(text(item.contractId))?.number || 'договор'}</span><b>{formatCurrency(item.amount || 0)}</b></div>
-                <p className="mt-1 text-xs text-gray-500">Причина выбора: {item.reason || 'правило автозачёта'}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Причина выбора: {item.reason || 'правило автозачёта'}</p>
               </div>
             ))}
           </div>
@@ -1185,7 +1185,7 @@ export default function Payments() {
   }
 
   return (
-    <div data-payments-responsive-root="true" className="min-h-screen max-w-full space-y-6 overflow-x-clip !bg-[#f6f8fb] p-4 !text-slate-950 sm:p-6 md:p-8">
+    <div data-payments-responsive-root="true" className="min-h-screen max-w-full space-y-6 overflow-x-clip bg-background p-4 text-foreground sm:p-6 md:p-8">
       <AddPaymentModal
         open={showAddModal}
         onClose={closeAddPaymentModal}
@@ -1200,8 +1200,8 @@ export default function Payments() {
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 ref={paymentsHeadingRef} tabIndex={-1} className="text-3xl font-semibold tracking-normal !text-slate-950 sm:text-4xl">Платежи</h1>
-          <p className="mt-2 text-sm !text-slate-500">Управление платежами и задолженностями</p>
+          <h1 ref={paymentsHeadingRef} tabIndex={-1} className="text-3xl font-semibold tracking-normal text-foreground sm:text-4xl">Платежи</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Управление платежами и задолженностями</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Button
@@ -1209,7 +1209,7 @@ export default function Payments() {
             variant="outline"
             onClick={exportCurrentPayments}
             disabled={paymentList.length === 0}
-            className="h-11 rounded-lg border-slate-200 !bg-white px-4 !text-slate-700 shadow-sm hover:!bg-slate-50"
+            className="h-11 rounded-lg border-border bg-card px-4 text-foreground hover:bg-accent"
           >
             <Download className="h-4 w-4" />
             Экспорт
@@ -1218,7 +1218,7 @@ export default function Payments() {
             <Button
               size="lg"
               onClick={() => setShowAddModal(true)}
-              className="h-11 rounded-lg bg-blue-600 px-5 font-semibold text-white shadow-[0_14px_28px_rgba(37,99,235,0.22)] hover:bg-blue-700"
+              className="h-11 rounded-lg bg-primary px-5 font-semibold text-primary-foreground hover:bg-[color:var(--primary-hover)]"
             >
               <Plus className="h-4 w-4" />
               Новый платеж
@@ -1227,71 +1227,71 @@ export default function Payments() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         <PaymentKpiCard
           icon={Clock}
           title="К оплате"
           value={formatCurrency(totalPending)}
           caption={`${pendingPaymentsCount} ${paymentCountLabel(pendingPaymentsCount)}`}
-          tone="bg-blue-100 text-blue-600"
+          tone="bg-info-soft text-info"
         />
         <PaymentKpiCard
           icon={CheckCircle}
           title="Оплачено"
           value={formatCurrency(totalPaid + totalPartial)}
           caption={`${paidPaymentsCount} ${paymentCountLabel(paidPaymentsCount)}`}
-          tone="bg-emerald-100 text-emerald-600"
-          valueClassName="!text-emerald-600"
+          tone="bg-success-soft text-success"
+          valueClassName="text-success"
         />
         <PaymentKpiCard
           icon={Hourglass}
           title="Ожидают"
           value={formatCurrency(totalPartial)}
           caption={`${waitingPaymentsCount} ${paymentCountLabel(waitingPaymentsCount)}`}
-          tone="bg-orange-100 text-orange-600"
-          valueClassName="!text-orange-600"
+          tone="bg-warning-soft text-warning"
+          valueClassName="text-warning"
         />
         <PaymentKpiCard
           icon={AlertTriangle}
           title="Просрочено"
           value={formatCurrency(totalOverdue)}
           caption={`${overduePaymentsCount} ${paymentCountLabel(overduePaymentsCount)}`}
-          tone="bg-red-100 text-red-500"
-          valueClassName="!text-red-600"
+          tone="bg-danger-soft text-danger"
+          valueClassName="text-danger"
         />
         <PaymentKpiCard
           icon={WalletCards}
           title="Прогноз поступлений"
           value={formatCurrency(forecastAmount)}
           caption="на 30 дней"
-          tone="bg-violet-100 text-violet-600"
+          tone="bg-primary/10 text-primary"
         />
       </div>
 
-      <div className="rounded-lg border border-slate-200 !bg-white p-4 shadow-sm">
-        <div className="grid gap-3 lg:grid-cols-[minmax(260px,1.4fr)_repeat(4,minmax(150px,0.7fr))_auto]">
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-[minmax(260px,1.4fr)_repeat(2,minmax(150px,0.7fr))] 2xl:grid-cols-[minmax(260px,1.4fr)_repeat(4,minmax(150px,0.7fr))_auto]">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Поиск по платежам, договорам, контрагентам..."
               value={pagination.search}
               onChange={(event) => pagination.setSearch(event.target.value)}
-              className="h-11 rounded-lg border-slate-200 !bg-white pl-10 !text-slate-700"
+              className="h-11 rounded-lg border-input bg-input-background pl-10 text-foreground"
             />
           </div>
           <div className="relative">
-            <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <select className="h-11 w-full rounded-lg border border-slate-200 !bg-white px-3 pr-9 text-sm !text-slate-700 shadow-sm" defaultValue="all">
+            <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <select className="app-filter-input h-11 pr-9" defaultValue="all">
               <option value="all">Период: все</option>
             </select>
           </div>
-          <select className="h-11 w-full rounded-lg border border-slate-200 !bg-white px-3 text-sm !text-slate-700 shadow-sm" defaultValue="all">
+          <select className="app-filter-input h-11" defaultValue="all">
             <option value="all">Тип: все</option>
           </select>
           <select
             value={pagination.filters.status}
             onChange={(event) => pagination.setFilters({ status: event.target.value })}
-            className="h-11 w-full rounded-lg border border-slate-200 !bg-white px-3 text-sm !text-slate-700 shadow-sm"
+            className="app-filter-input h-11"
           >
             <option value="all">Статус: все</option>
             <option value="pending">К оплате</option>
@@ -1302,7 +1302,7 @@ export default function Payments() {
           <select
             value={pagination.filters.counterpartyId}
             onChange={(event) => pagination.setFilters({ counterpartyId: event.target.value })}
-            className="h-11 w-full rounded-lg border border-slate-200 !bg-white px-3 text-sm !text-slate-700 shadow-sm"
+            className="app-filter-input h-11"
           >
             <option value="all">Контрагент: все</option>
             {counterparties.map(counterparty => (
@@ -1316,7 +1316,7 @@ export default function Payments() {
         </div>
         <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
           {activeFilterCount > 0 && (
-            <Button type="button" variant="ghost" onClick={resetFilters} className="h-9 rounded-lg text-slate-500">
+            <Button type="button" variant="ghost" onClick={resetFilters} className="h-9 rounded-lg text-muted-foreground">
               <X className="h-4 w-4" />
               Сбросить
             </Button>
@@ -1378,9 +1378,9 @@ export default function Payments() {
         </div>
       </FilterDialog>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-      <div className="min-w-0 overflow-hidden rounded-lg border border-slate-200 !bg-white shadow-sm">
-        <div className="flex max-w-full gap-5 overflow-x-auto border-b border-slate-100 !bg-white px-4 sm:px-6">
+      <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-card">
+        <div className="app-scrollbar-none flex max-w-full gap-5 overflow-x-auto border-b border-border bg-card px-4 sm:px-6">
           {tabs.map(tab => (
             <button
               key={tab.value}
@@ -1389,21 +1389,21 @@ export default function Payments() {
               className={cn(
                 'flex h-14 shrink-0 items-center gap-2 border-b-2 px-1 text-sm font-semibold transition',
                 pagination.filters.status === tab.value
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent !text-slate-500 hover:!text-slate-900',
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
               )}
             >
               {tab.label}
-              <span className="rounded-full !bg-slate-100 px-2 py-0.5 text-xs !text-slate-500">{tab.count}</span>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{tab.count}</span>
             </button>
           ))}
         </div>
-        <div className="flex flex-col gap-2 border-b border-slate-100 !bg-white px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="flex flex-col gap-2 border-b border-border bg-card px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
-            <h2 className="text-lg font-semibold !text-slate-950">Регистр платежей</h2>
-            <p className="mt-1 text-sm !text-slate-500">История счетов, оплат и распределений</p>
+            <h2 className="text-lg font-semibold text-foreground">Регистр платежей</h2>
+            <p className="mt-1 text-sm text-muted-foreground">История счетов, оплат и распределений</p>
           </div>
-          <div className="text-sm font-medium !text-slate-400">
+          <div className="text-sm font-medium text-muted-foreground">
             {paymentSummary?.count ?? paymentsQuery.data?.pagination.total ?? 0} записей
           </div>
         </div>
@@ -1416,14 +1416,14 @@ export default function Payments() {
                 data-payment-mobile-card="true"
                 onClick={() => setSelectedPaymentId(payment.id)}
                 className={cn(
-                  'max-w-full cursor-pointer rounded-lg border border-slate-200 !bg-white p-4 shadow-sm transition hover:border-blue-200 hover:!bg-blue-50/30',
-                  selectedPayment?.id === payment.id && 'border-blue-300 !bg-blue-50/60 ring-1 ring-blue-200',
+                  'max-w-full cursor-pointer rounded-lg border border-border bg-card p-4 transition hover:border-primary/45 hover:bg-accent/60',
+                  selectedPayment?.id === payment.id && 'border-primary/55 bg-primary/10 ring-1 ring-primary/25',
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-xs !text-slate-400">№ платежа</p>
-                    <p className="mt-1 break-words font-semibold text-blue-700">{paymentNumber(payment)}</p>
+                    <p className="text-xs text-muted-foreground">№ платежа</p>
+                    <p className="mt-1 break-words font-semibold text-primary">{paymentNumber(payment)}</p>
                   </div>
                   <div data-payment-mobile-status="true" className="flex max-w-[52%] shrink-0 justify-end">
                     <PaymentStatusPill status={payment.status} />
@@ -1432,34 +1432,34 @@ export default function Payments() {
 
                 <div className="mt-4 grid gap-3">
                   <div data-payment-mobile-client="true" className="min-w-0">
-                    <p className="text-xs !text-slate-400">Контрагент</p>
+                    <p className="text-xs text-muted-foreground">Контрагент</p>
                     {clientProfileId ? (
                       <Link
                         to={`/clients/${clientProfileId}`}
                         onClick={(event) => event.stopPropagation()}
-                        className="mt-1 block break-words rounded-md text-sm font-semibold !text-slate-800 transition hover:!text-blue-700"
+                        className="mt-1 block break-words rounded-md text-sm font-semibold text-foreground transition hover:text-primary"
                         aria-label={`Открыть карточку клиента ${paymentClientName(payment)}`}
                       >
                         {paymentClientName(payment)}
                       </Link>
                     ) : (
-                      <p className="mt-1 break-words text-sm font-semibold !text-slate-800">{paymentClientName(payment)}</p>
+                      <p className="mt-1 break-words text-sm font-semibold text-foreground">{paymentClientName(payment)}</p>
                     )}
                   </div>
 
                   <div data-payment-mobile-rental="true" className="min-w-0">
-                    <p className="text-xs !text-slate-400">Договор / заказ</p>
-                    <p className="mt-1 break-all text-sm !text-slate-700">{paymentContractLabel(payment, rentalsById)}</p>
+                    <p className="text-xs text-muted-foreground">Договор / заказ</p>
+                    <p className="mt-1 break-all text-sm text-foreground/85">{paymentContractLabel(payment, rentalsById)}</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <div data-payment-mobile-amount="true" className="min-w-0 rounded-lg !bg-slate-50 p-3">
-                      <p className="text-xs !text-slate-400">Сумма</p>
-                      <p className="mt-1 break-words text-base font-semibold !text-slate-950">{formatCurrency(payment.amount || 0)}</p>
+                    <div data-payment-mobile-amount="true" className="min-w-0 rounded-lg border border-border bg-muted/45 p-3">
+                      <p className="text-xs text-muted-foreground">Сумма</p>
+                      <p className="mt-1 break-words text-base font-semibold text-foreground">{formatCurrency(payment.amount || 0)}</p>
                     </div>
-                    <div data-payment-mobile-date="true" className="min-w-0 rounded-lg !bg-slate-50 p-3">
-                      <p className="text-xs !text-slate-400">Дата</p>
-                      <p className="mt-1 text-sm font-semibold !text-slate-700">{paymentDateLabel(payment)}</p>
+                    <div data-payment-mobile-date="true" className="min-w-0 rounded-lg border border-border bg-muted/45 p-3">
+                      <p className="text-xs text-muted-foreground">Дата</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground/85">{paymentDateLabel(payment)}</p>
                     </div>
                   </div>
                 </div>
@@ -1478,11 +1478,24 @@ export default function Payments() {
           })}
         </div>
 
+        {paymentsQuery.isLoading && (
+          <div className="flex min-h-64 items-center justify-center border-t border-border bg-card px-6 text-sm text-muted-foreground" role="status">
+            Загрузка платежей…
+          </div>
+        )}
+
+        {paymentsQuery.isError && (
+          <div className="m-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-6 text-center text-sm text-danger-foreground" role="alert">
+            Не удалось загрузить платежи. Обновите страницу и попробуйте ещё раз.
+          </div>
+        )}
+
+        {!paymentsQuery.isLoading && !paymentsQuery.isError && (
         <div data-payment-desktop-table="true" className="hidden overflow-x-auto md:block">
-        <table className="min-w-[1040px] w-full border-collapse text-sm">
-          <thead className="sticky top-0 z-10 !bg-slate-50 !text-slate-500">
-            <tr className="border-b border-slate-200">
-              <th className="w-12 px-4 py-3 text-left"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" aria-label="Выбрать все платежи" /></th>
+        <table className="min-w-[1000px] w-full border-collapse text-sm">
+          <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
+            <tr className="border-b border-border">
+              <th className="w-12 px-4 py-3 text-left"><input type="checkbox" className="h-4 w-4 rounded border-input bg-input-background" aria-label="Выбрать все платежи" /></th>
               <th className="px-4 py-3 text-left text-xs font-semibold">Дата</th>
               <th className="px-4 py-3 text-left text-xs font-semibold">№ платежа</th>
               <th className="px-4 py-3 text-left text-xs font-semibold">Контрагент</th>
@@ -1490,10 +1503,10 @@ export default function Payments() {
               <th className="px-4 py-3 text-left text-xs font-semibold">Тип</th>
               <th className="px-4 py-3 text-right text-xs font-semibold">Сумма</th>
               <th className="px-4 py-3 text-left text-xs font-semibold">Статус</th>
-              <th className="w-12 px-4 py-3 text-right text-xs font-semibold"></th>
+              <th className="sticky right-0 z-20 w-12 bg-muted px-4 py-3 text-right text-xs font-semibold" aria-label="Действия"></th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 !bg-white">
+          <tbody className="divide-y divide-border bg-card">
             {paymentList.map((payment) => {
               const clientProfileId = text(payment.clientId);
               return (
@@ -1501,18 +1514,18 @@ export default function Payments() {
                   key={payment.id}
                   onClick={() => setSelectedPaymentId(payment.id)}
                   className={cn(
-                    'cursor-pointer transition-colors hover:!bg-slate-50/90',
-                    selectedPayment?.id === payment.id && '!bg-blue-50/80',
+                    'group cursor-pointer transition-colors hover:bg-accent/60',
+                    selectedPayment?.id === payment.id && 'bg-primary/10',
                   )}
                 >
                   <td className="px-4 py-3 align-middle" onClick={(event) => event.stopPropagation()}>
-                    <input type="checkbox" className="h-4 w-4 rounded border-slate-300" aria-label={`Выбрать ${paymentNumber(payment)}`} />
+                    <input type="checkbox" className="h-4 w-4 rounded border-input bg-input-background" aria-label={`Выбрать ${paymentNumber(payment)}`} />
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 align-middle !text-slate-700">
+                  <td className="whitespace-nowrap px-4 py-3 align-middle text-foreground/85">
                     {paymentDateLabel(payment)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 align-middle">
-                    <button type="button" onClick={() => setSelectedPaymentId(payment.id)} className="font-semibold text-blue-700 hover:text-blue-800">
+                    <button type="button" onClick={() => setSelectedPaymentId(payment.id)} className="font-semibold text-primary hover:text-primary/80">
                       {paymentNumber(payment)}
                     </button>
                   </td>
@@ -1521,24 +1534,24 @@ export default function Payments() {
                       <Link
                         to={`/clients/${clientProfileId}`}
                         onClick={(event) => event.stopPropagation()}
-                        className="block truncate rounded-md font-medium !text-slate-700 transition hover:!text-blue-700"
+                        className="block truncate rounded-md font-medium text-foreground/85 transition hover:text-primary"
                         aria-label={`Открыть карточку клиента ${paymentClientName(payment)}`}
                       >
                         {paymentClientName(payment)}
                       </Link>
                     ) : (
-                      <p className="truncate font-medium !text-slate-700">{paymentClientName(payment)}</p>
+                      <p className="truncate font-medium text-foreground/85">{paymentClientName(payment)}</p>
                     )}
                   </td>
                   <td className="max-w-[240px] px-4 py-3 align-middle">
-                    <p className="truncate !text-slate-700">{paymentContractLabel(payment, rentalsById)}</p>
+                    <p className="truncate text-foreground/85">{paymentContractLabel(payment, rentalsById)}</p>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 align-middle">
-                    <span className="rounded-md !bg-blue-50 px-2.5 py-1 text-xs font-semibold !text-blue-700">{paymentTypeLabel(payment)}</span>
+                    <span className="rounded-md bg-info-soft px-2.5 py-1 text-xs font-semibold text-info-foreground">{paymentTypeLabel(payment)}</span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right align-middle font-semibold !text-slate-950">{formatCurrency(payment.amount || 0)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right align-middle font-semibold text-foreground">{formatCurrency(payment.amount || 0)}</td>
                   <td className="whitespace-nowrap px-4 py-3 align-middle"><PaymentStatusPill status={payment.status} /></td>
-                  <td className="px-4 py-3 text-right align-middle">
+                  <td className={cn('sticky right-0 z-[5] px-4 py-3 text-right align-middle transition-colors group-hover:bg-accent', selectedPayment?.id === payment.id ? 'bg-primary/10' : 'bg-card')}>
                     <Button
                       size="icon"
                       variant="ghost"
@@ -1554,20 +1567,21 @@ export default function Payments() {
           </tbody>
         </table>
         </div>
+        )}
 
-        {paymentList.length === 0 && (
+        {!paymentsQuery.isLoading && !paymentsQuery.isError && paymentList.length === 0 && (
           <div className="flex flex-col items-center justify-center py-14 text-center">
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full !bg-slate-100">
-              <DollarSign className="h-8 w-8 !text-slate-400" />
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-border bg-muted">
+              <DollarSign className="h-8 w-8 text-muted-foreground" />
             </div>
-            <h3 className="text-base font-semibold !text-slate-950">
+            <h3 className="text-base font-semibold text-foreground">
               {(paymentsQuery.data?.pagination.total ?? 0) === 0
                 ? 'Платежей ещё нет'
                 : hasQuickClientContext || pagination.filters.counterpartyId !== 'all'
                   ? 'Платежи по контрагенту не найдены'
                   : 'Платежи не найдены'}
             </h3>
-            <p className="mt-1 text-sm !text-slate-500">
+            <p className="mt-1 text-sm text-muted-foreground">
               {(paymentsQuery.data?.pagination.total ?? 0) === 0
                 ? 'Добавьте первый платёж по аренде'
                 : hasQuickClientContext || pagination.filters.counterpartyId !== 'all'
@@ -1601,18 +1615,18 @@ export default function Payments() {
         )}
       </div>
 
-        <aside className="min-w-0 rounded-lg border border-slate-200 !bg-white p-4 !text-slate-950 shadow-sm xl:sticky xl:top-6 xl:self-start">
+        <aside className="min-w-0 rounded-lg border border-border bg-card p-4 text-card-foreground 2xl:sticky 2xl:top-6 2xl:self-start">
           {!selectedPayment ? (
-            <div className="flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 !bg-white px-5 text-center">
-              <FileText className="mb-3 h-10 w-10 !text-slate-300" />
-              <h2 className="text-base font-semibold !text-slate-950">Выберите платёж</h2>
-              <p className="mt-2 text-sm !text-slate-500">Детали, документы и действия появятся здесь.</p>
+            <div className="flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/20 px-5 text-center">
+              <FileText className="mb-3 h-10 w-10 text-muted-foreground/65" />
+              <h2 className="text-base font-semibold text-foreground">Выберите платёж</h2>
+              <p className="mt-2 text-sm text-muted-foreground">Детали, документы и действия появятся здесь.</p>
             </div>
           ) : (
             <div className="space-y-5">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="break-words text-lg font-semibold !text-slate-950">{paymentNumber(selectedPayment)}</h2>
+                  <h2 className="break-words text-lg font-semibold text-foreground">{paymentNumber(selectedPayment)}</h2>
                   <div className="mt-3"><PaymentStatusPill status={selectedPayment.status} /></div>
                 </div>
                 <Button size="icon" variant="ghost" onClick={() => setSelectedPaymentId('')} aria-label="Закрыть детали">
@@ -1621,8 +1635,8 @@ export default function Payments() {
               </div>
 
               <div>
-                <p className="text-2xl font-semibold !text-slate-950">{formatCurrency(selectedPayment.amount || 0)}</p>
-                <p className="mt-1 text-sm !text-slate-500">{paymentPurpose(selectedPayment)}</p>
+                <p className="text-2xl font-semibold text-foreground">{formatCurrency(selectedPayment.amount || 0)}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{paymentPurpose(selectedPayment)}</p>
               </div>
 
               <dl className="grid gap-3 text-sm">
@@ -1636,15 +1650,15 @@ export default function Payments() {
                   ['Комментарий', safeLabel(selectedPayment.comment, '—')],
                 ].map(([label, value]) => (
                   <div key={label} className="grid grid-cols-[104px_minmax(0,1fr)] gap-3">
-                    <dt className="!text-slate-500">{label}</dt>
-                    <dd className="min-w-0 break-words font-medium !text-slate-800">{value}</dd>
+                    <dt className="text-muted-foreground">{label}</dt>
+                    <dd className="min-w-0 break-words font-medium text-foreground/85">{value}</dd>
                   </div>
                 ))}
               </dl>
 
-              <div className="rounded-lg border border-slate-200 !bg-white">
-                <div className="flex items-center justify-between border-b border-slate-100 !bg-white px-3 py-3">
-                  <h3 className="text-sm font-semibold !text-slate-950">Связанные документы ({relatedDocuments.length})</h3>
+              <div className="rounded-lg border border-border bg-card">
+                <div className="flex items-center justify-between border-b border-border px-3 py-3">
+                  <h3 className="text-sm font-semibold text-foreground">Связанные документы ({relatedDocuments.length})</h3>
                 </div>
                 <div className="space-y-2 p-3">
                   {relatedDocuments.length > 0 ? relatedDocuments.map(document => {
@@ -1652,14 +1666,14 @@ export default function Payments() {
                     return (
                       <div key={document.id} className="flex min-w-0 items-center gap-2 text-sm">
                         <FileText className="h-4 w-4 shrink-0 text-red-500" />
-                        <span className="min-w-0 flex-1 truncate !text-slate-700">
+                        <span className="min-w-0 flex-1 truncate text-foreground/85">
                           {safeLabel(documentRecord.type || documentRecord.documentType, 'Документ')} {safeLabel(documentRecord.number || documentRecord.documentNumber || document.id, '')}
                         </span>
-                        <span className="text-xs text-slate-400">PDF</span>
+                        <span className="text-xs text-muted-foreground">PDF</span>
                       </div>
                     );
                   }) : (
-                    <p className="py-3 text-sm !text-slate-500">Связанных документов нет</p>
+                    <p className="py-3 text-sm text-muted-foreground">Связанных документов нет</p>
                   )}
                 </div>
               </div>
@@ -1693,7 +1707,7 @@ export default function Payments() {
                   type="button"
                   onClick={markSelectedPaid}
                   disabled={!can('update', 'payments') || selectedPayment.status === 'paid' || updatePayment.isPending}
-                  className="rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                  className="rounded-lg bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]"
                 >
                   Отметить оплаченным
                 </Button>

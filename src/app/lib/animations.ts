@@ -3,6 +3,9 @@ import { cn } from './utils';
 
 export const animationDurations = {
   instant: 1,
+  micro: 120,
+  ui: 200,
+  emphasis: 400,
   fast: 160,
   normal: 220,
   slow: 320,
@@ -83,6 +86,22 @@ export function isDemoPresentationMotionEnabled(search = typeof window === 'unde
   return globalSearch.get('presentationMotion') === '1' ||
     routeSearch.get('presentationMotion') === '1' ||
     window.localStorage.getItem('skytech:demo-presentation-motion') === 'true';
+}
+
+export function usePrefersReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(() => (
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ));
+
+  React.useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updatePreference = () => setPrefersReducedMotion(mediaQuery.matches);
+    updatePreference();
+    mediaQuery.addEventListener?.('change', updatePreference);
+    return () => mediaQuery.removeEventListener?.('change', updatePreference);
+  }, []);
+
+  return prefersReducedMotion;
 }
 
 function getPresenceExitDelay(durationMs: number) {

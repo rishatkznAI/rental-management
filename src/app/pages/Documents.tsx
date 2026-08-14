@@ -2052,7 +2052,7 @@ export default function Documents() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canManageDocuments ? (
-            <Button onClick={() => openDocumentWizard()} className="bg-lime-300 text-slate-950 hover:bg-lime-200">
+            <Button onClick={() => openDocumentWizard()} className="bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]">
               <Plus className="h-4 w-4" />
               Создать документ
             </Button>
@@ -2065,7 +2065,7 @@ export default function Documents() {
             variant="secondary"
             onClick={() => setView('general')}
             className={view === 'general'
-              ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
+              ? 'bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]'
               : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]'}
           >
             Документы
@@ -2074,7 +2074,7 @@ export default function Documents() {
             variant="secondary"
             onClick={() => setView('control')}
             className={view === 'control'
-              ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
+              ? 'bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]'
               : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]'}
           >
             <AlertTriangle className="h-4 w-4" />
@@ -2092,7 +2092,7 @@ export default function Documents() {
             variant="secondary"
             onClick={() => setView('mechanics')}
             className={view === 'mechanics'
-              ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
+              ? 'bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]'
               : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-200 dark:hover:bg-white/[0.1]'}
           >
             <UserRound className="h-4 w-4" />
@@ -2106,13 +2106,13 @@ export default function Documents() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {kpiCards.map(({ label, value, Icon }) => (
               <div key={label} className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.055] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(132,204,22,0.12),transparent_36%)] dark:bg-[radial-gradient(circle_at_top_right,rgba(190,242,100,0.12),transparent_36%)]" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.10),transparent_36%)]" />
                 <div className="relative flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</p>
                     <p className="mt-1 text-3xl font-bold text-slate-950 dark:text-white">{value}</p>
                   </div>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-lime-200 bg-lime-50 text-lime-700 dark:border-white/10 dark:bg-slate-900/70 dark:text-lime-200">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
                     <Icon className="h-5 w-5" />
                   </div>
                 </div>
@@ -2120,7 +2120,7 @@ export default function Documents() {
             ))}
           </div>
 
-          <div className="app-scroll-fade-x flex max-w-full gap-2 overflow-x-auto pb-1">
+          <div className="app-scroll-fade-x app-scrollbar-none flex max-w-full gap-2 overflow-x-auto pb-1">
             {quickFilters.map(([key, label]) => (
               <button
                 key={key}
@@ -2136,7 +2136,7 @@ export default function Documents() {
                 }}
                 className={`h-9 shrink-0 rounded-full px-4 text-sm font-semibold transition ${
                   quickTypeFilter === key
-                    ? 'bg-lime-300 text-slate-950 shadow-[0_0_22px_rgba(190,242,100,0.18)]'
+                    ? 'bg-primary text-primary-foreground shadow-[0_0_22px_rgba(34,211,238,0.18)]'
                     : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.1] dark:hover:text-white'
                 }`}
               >
@@ -2227,11 +2227,11 @@ export default function Documents() {
             <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
               {canManageDocuments ? (
                 <>
-                  <Button variant="secondary" onClick={() => openContractCreate('rental')} className="border border-lime-300 bg-lime-50 text-lime-700 hover:bg-lime-100 dark:border-lime-300/20 dark:bg-lime-300/10 dark:text-lime-100 dark:hover:bg-lime-300/15">
+                  <Button variant="secondary" onClick={() => openContractCreate('rental')} className="border border-primary/35 bg-primary/10 text-primary hover:bg-primary/15">
                     <Plus className="h-4 w-4" />
                     Договор аренды
                   </Button>
-                  <Button variant="secondary" onClick={() => openContractCreate('supply')} className="border border-lime-300 bg-lime-50 text-lime-700 hover:bg-lime-100 dark:border-lime-300/20 dark:bg-lime-300/10 dark:text-lime-100 dark:hover:bg-lime-300/15">
+                  <Button variant="secondary" onClick={() => openContractCreate('supply')} className="border border-primary/35 bg-primary/10 text-primary hover:bg-primary/15">
                     <Plus className="h-4 w-4" />
                     Договор поставки
                   </Button>
@@ -2542,7 +2542,7 @@ export default function Documents() {
           </div>
 
           <div className="hidden overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-slate-900/70 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] [&_[data-slot=table-container]]:bg-none sm:block">
-            <Table className="min-w-[1080px]">
+            <Table className="min-w-[1040px]">
               <TableHeader>
                 <TableRow className="border-slate-200 bg-slate-50 hover:bg-slate-50 dark:border-white/12 dark:bg-slate-800/70 dark:hover:bg-slate-800/70">
                   <TableHead className="text-slate-500 dark:text-slate-300">Тип</TableHead>
@@ -2552,7 +2552,7 @@ export default function Documents() {
                   <TableHead className="text-slate-500 dark:text-slate-300">Техника / Объект</TableHead>
                   <TableHead className="text-slate-500 dark:text-slate-300">Статус</TableHead>
                   <TableHead className="text-slate-500 dark:text-slate-300">Связанная сущность</TableHead>
-                  <TableHead className="w-20 text-right text-slate-500 dark:text-slate-300">Действия</TableHead>
+                  <TableHead className="sticky right-0 z-20 w-20 bg-slate-50 text-right text-slate-500 dark:bg-slate-800 dark:text-slate-300">Действия</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -2561,7 +2561,7 @@ export default function Documents() {
                   const typeVisual = getDocumentTypeVisual(doc);
                   const TypeIcon = typeVisual.Icon;
                   return (
-                  <TableRow key={row.key} className="cursor-pointer border-slate-100 bg-white hover:bg-lime-50/60 dark:border-white/10 dark:bg-slate-900/35 dark:hover:bg-lime-300/[0.07]" onClick={() => setSelectedDocument(doc)}>
+                  <TableRow key={row.key} className="group cursor-pointer border-slate-100 bg-white hover:bg-cyan-50/60 dark:border-white/10 dark:bg-slate-900/35 dark:hover:bg-cyan-300/[0.07]" onClick={() => setSelectedDocument(doc)}>
                     <TableCell className="max-w-[260px] py-3">
                       <div className="flex min-w-0 items-center gap-3">
                         <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ${typeVisual.className}`}>
@@ -2604,7 +2604,7 @@ export default function Documents() {
                         <p className="truncate text-xs text-slate-500 dark:text-slate-500">Аренда: {row.rentalId}</p>
                       ) : null}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="sticky right-0 z-10 bg-white text-right group-hover:bg-cyan-50 dark:bg-slate-900 dark:group-hover:bg-slate-900">
                       <details className="relative inline-block" onClick={(event) => event.stopPropagation()}>
                         <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500 transition hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.12] [&::-webkit-details-marker]:hidden">
                           <MoreHorizontal className="h-4 w-4" />
@@ -2696,7 +2696,7 @@ export default function Documents() {
                 </p>
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
                   {canManageDocuments ? (
-                    <Button onClick={() => openDocumentWizard()} className="bg-lime-300 text-slate-950 hover:bg-lime-200">
+                    <Button onClick={() => openDocumentWizard()} className="bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]">
                       <Plus className="h-4 w-4" />
                       Создать документ
                     </Button>
@@ -2756,7 +2756,7 @@ export default function Documents() {
                           onClick={() => applyWizardType(item.type)}
                           className={`rounded-lg border p-4 text-left transition hover:border-slate-400 dark:hover:border-gray-500 ${
                             wizardForm.type === item.type
-                              ? 'border-lime-300 bg-lime-50 dark:border-lime-800 dark:bg-lime-950/20'
+                              ? 'border-primary/35 bg-primary/10'
                               : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
                           }`}
                         >
@@ -3319,7 +3319,7 @@ export default function Documents() {
                 </Button>
                 <Button
                   onClick={() => void handleCreateContract()}
-                  className="bg-lime-300 text-slate-950 hover:bg-lime-200"
+                  className="bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]"
                   disabled={createDocument.isPending}
                 >
                   Создать договор
@@ -3441,7 +3441,7 @@ export default function Documents() {
                 </Button>
                 <Button
                   onClick={() => void handleCreateCommercialOffer()}
-                  className="bg-lime-300 text-slate-950 hover:bg-lime-200"
+                  className="bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]"
                   disabled={createDocument.isPending || updateDocument.isPending}
                 >
                   Создать КП

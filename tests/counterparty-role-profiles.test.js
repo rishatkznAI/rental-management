@@ -394,6 +394,43 @@ test('active Service relation blocks customer-role removal while terminal histor
   assert.deepEqual(result.counterparty.roles, ['supplier']);
 });
 
+test('active Warranty factory relation blocks supplier-role/profile deactivation while terminal history does not', () => {
+  const raw = data({
+    counterparties: [counterparty('CP-1', ['customer', 'supplier'])],
+    warranty_claims: [{ id: 'W-factory', factoryCounterpartyId: 'CP-1', status: 'factory_review' }],
+  });
+  migrate(raw);
+  let state = boundaryState(raw);
+
+  assert.throws(() => deactivateCounterpartyRole({
+    state,
+    data: raw,
+    counterpartyId: 'CP-1',
+    roleCode: 'supplier',
+    nowIso: () => NOW,
+  }), error => {
+    assert.equal(error.code, ROLE_PROFILE_CODES.ROLE_REMOVAL_BLOCKED);
+    assert.equal(error.details.blockers.some(item => (
+      item.collection === 'warranty_claims'
+      && item.relationFields.includes('factoryCounterpartyId')
+      && item.recordIds.includes('W-factory')
+    )), true);
+    return true;
+  });
+
+  raw.warranty_claims[0].status = 'closed';
+  state = boundaryState(raw);
+  const result = deactivateCounterpartyRole({
+    state,
+    data: raw,
+    counterpartyId: 'CP-1',
+    roleCode: 'supplier',
+    nowIso: () => NOW,
+  });
+  assert.equal(result.changed, true);
+  assert.equal(state[SUPPLIER_PROFILES_COLLECTION][0].status, 'inactive');
+});
+
 test('terminal Service contractor reference still blocks contractor-role removal', () => {
   const raw = data({
     counterparties: [counterparty('CP-1', ['customer', 'contractor'])],

@@ -30,6 +30,7 @@ import {
   useCreateWarrantyClaim,
   useDeleteWarrantyClaim,
   useUpdateWarrantyClaim,
+  useWarrantyFactoryCounterpartyOptions,
   useWarrantyClaimsList,
 } from '../../hooks/useWarrantyClaims';
 import { cn, formatDate } from '../../lib/utils';
@@ -161,6 +162,7 @@ const KPI_TONE_CLASS = {
 type ClaimFormState = {
   serviceTicketId: string;
   equipmentId: string;
+  factoryCounterpartyId: string;
   factoryName: string;
   factoryContact: string;
   factoryCaseNumber: string;
@@ -172,6 +174,7 @@ type ClaimFormState = {
 
 type ClaimEditState = {
   status: WarrantyClaimStatus;
+  factoryCounterpartyId: string;
   factoryCaseNumber: string;
   responseDueDate: string;
   factoryResponse: string;
@@ -181,6 +184,7 @@ type ClaimEditState = {
 const EMPTY_FORM: ClaimFormState = {
   serviceTicketId: '',
   equipmentId: '',
+  factoryCounterpartyId: '',
   factoryName: '',
   factoryContact: '',
   factoryCaseNumber: '',
@@ -221,6 +225,8 @@ function getClaimSearchText(claim: WarrantyClaimDto) {
     claim.client,
     claim.clientName,
     claim.factoryName,
+    claim.factoryCounterpartyId,
+    claim.factoryCounterpartyDisplayName,
     claim.factoryCaseNumber,
     claim.reason,
     claim.failureDescription,
@@ -228,6 +234,14 @@ function getClaimSearchText(claim: WarrantyClaimDto) {
     claim.result,
     claim.decision,
   ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function requiresExternalFactoryRelation(input: Pick<WarrantyClaim, 'status'> & Partial<Pick<WarrantyClaim, 'sentAt' | 'factoryCaseNumber' | 'factoryResponse'>>) {
+  const status = String(input.status || '').trim().toLowerCase();
+  if (['closed', 'completed', 'done', 'rejected', 'declined'].includes(status)) return false;
+  if (input.sentAt || input.factoryCaseNumber?.trim() || input.factoryResponse?.trim()) return true;
+  if (['draft', 'new', 'created', 'open'].includes(status)) return false;
+  return true;
 }
 
 function getClaimNumber(claim: WarrantyClaimDto) {
@@ -366,6 +380,7 @@ type WarrantyClaimsTabProps = {
 export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocuments = false, onOpenTicket }: WarrantyClaimsTabProps) {
   const { user } = useAuth();
   const { data: claims = [], isLoading } = useWarrantyClaimsList();
+  const { data: factoryCounterpartyOptions = [] } = useWarrantyFactoryCounterpartyOptions();
   const { data: equipmentList = [] } = useEquipmentList();
   const createClaim = useCreateWarrantyClaim();
   const updateClaim = useUpdateWarrantyClaim();
@@ -403,7 +418,24 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
         }))
         .sort((left, right) => left.label.localeCompare(right.label, 'ru'));
     })(),
-    factories: Array.from(new Set(claims.map(claim => claim.factoryName).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'ru')),
+    factories: (() => {
+      const byId = new Map<string, string>();
+      claims.forEach(claim => {
+        if (!claim.factoryCounterpartyId) return;
+        byId.set(
+          claim.factoryCounterpartyId,
+          claim.factoryCounterpartyDisplayName || claim.factoryName || claim.factoryCounterpartyId,
+        );
+      });
+      const nameCounts = new Map<string, number>();
+      byId.forEach(name => nameCounts.set(name, (nameCounts.get(name) || 0) + 1));
+      return [...byId.entries()]
+        .map(([id, name]) => ({
+          id,
+          label: (nameCounts.get(name) || 0) > 1 ? `${name} · ${id.slice(-8)}` : name,
+        }))
+        .sort((left, right) => left.label.localeCompare(right.label, 'ru'));
+    })(),
     responsible: Array.from(new Set(claims.map(getClaimResponsible).filter(value => value && value !== '—'))).sort((left, right) => left.localeCompare(right, 'ru')),
   }), [claims, ticketById]);
 
@@ -413,7 +445,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
       .filter(claim => statusFilter === 'all' || normalizeManagementStatus(claim.status) === statusFilter)
       .filter(claim => equipmentFilter === 'all' || claim.equipmentLabel === equipmentFilter)
       .filter(claim => clientFilter === 'all' || claim.counterpartyId === clientFilter)
-      .filter(claim => factoryFilter === 'all' || claim.factoryName === factoryFilter)
+      .filter(claim => factoryFilter === 'all' || claim.factoryCounterpartyId === factoryFilter)
       .filter(claim => responsibleFilter === 'all' || getClaimResponsible(claim) === responsibleFilter)
       .filter(claim => claimMatchesPeriod(claim, periodFilter))
       .filter(claim => !query || getClaimSearchText(claim).includes(query))
@@ -438,6 +470,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
     setPanelTab('overview');
     setEditForm({
       status: toEditableStatus(selectedClaim.status),
+      factoryCounterpartyId: selectedClaim.factoryCounterpartyId ?? '',
       factoryCaseNumber: selectedClaim.factoryCaseNumber ?? '',
       responseDueDate: toDateInputValue(selectedClaim.responseDueDate),
       factoryResponse: selectedClaim.factoryResponse ?? '',
@@ -519,6 +552,10 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
       toast.error('Укажите ожидаемый управленческий итог.');
       return;
     }
+    if (form.factoryCaseNumber.trim() && !form.factoryCounterpartyId) {
+      toast.error('Для внешнего номера выберите завод/поставщика из справочника Counterparty.');
+      return;
+    }
 
     const author = user?.name || 'Сервис';
     const createdAt = nowIso();
@@ -530,7 +567,8 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
         equipmentLabel: claimEquipment.equipmentLabel,
         inventoryNumber: claimEquipment.inventoryNumber,
         serialNumber: claimEquipment.serialNumber,
-        manufacturer: claimEquipment.manufacturer || form.factoryName.trim(),
+        manufacturer: claimEquipment.manufacturer,
+        factoryCounterpartyId: form.factoryCounterpartyId || undefined,
         factoryName: form.factoryName.trim(),
         factoryContact: form.factoryContact.trim() || undefined,
         factoryCaseNumber: form.factoryCaseNumber.trim() || undefined,
@@ -569,6 +607,16 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
     const nextResponse = editForm.factoryResponse.trim();
     const nextDecision = editForm.decision.trim();
 
+    if (requiresExternalFactoryRelation({
+      status: editForm.status,
+      sentAt: selectedClaim.sentAt,
+      factoryCaseNumber: editForm.factoryCaseNumber,
+      factoryResponse: editForm.factoryResponse,
+    }) && !editForm.factoryCounterpartyId) {
+      toast.error('Перед внешним гарантийным этапом выберите завод/поставщика Counterparty.');
+      return;
+    }
+
     if (selectedClaim.status !== editForm.status) {
       const previousLabel = STATUS_META[selectedClaim.status as WarrantyClaimStatus]?.label ?? MANAGEMENT_STATUS_META[normalizeManagementStatus(selectedClaim.status)].label;
       const nextLabel = STATUS_META[editForm.status]?.label ?? MANAGEMENT_STATUS_META[normalizeManagementStatus(editForm.status)].label;
@@ -598,6 +646,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
 
     const payload: Partial<WarrantyClaim> = {
       status: editForm.status,
+      factoryCounterpartyId: editForm.factoryCounterpartyId || undefined,
       factoryCaseNumber: editForm.factoryCaseNumber.trim() || undefined,
       responseDueDate: editForm.responseDueDate || undefined,
       factoryResponse: nextResponse || undefined,
@@ -721,6 +770,24 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                       onChange={handleEquipmentChange}
                       placeholder="Модель / INV / SN"
                     />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={FIELD_LABEL_CLASS}>Завод / поставщик Counterparty</span>
+                    <Select
+                      value={form.factoryCounterpartyId || NO_VALUE}
+                      onValueChange={(value) => setForm(prev => ({
+                        ...prev,
+                        factoryCounterpartyId: value === NO_VALUE ? '' : value,
+                      }))}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Выберите поставщика" /></SelectTrigger>
+                      <SelectContent className="max-h-80">
+                        <SelectItem value={NO_VALUE}>Не выбран</SelectItem>
+                        {factoryCounterpartyOptions.map(option => (
+                          <SelectItem key={option.id} value={option.id}>{option.displayLabel}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </label>
                   <label className="space-y-1.5">
                     <span className={FIELD_LABEL_CLASS}>Контрагент / производитель</span>
@@ -863,7 +930,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   <SelectContent>
                     <SelectItem value="all">Все поставщики</SelectItem>
                     {filterOptions.factories.map(factory => (
-                      <SelectItem key={factory} value={factory}>{factory}</SelectItem>
+                      <SelectItem key={factory.id} value={factory.id}>{factory.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1065,6 +1132,11 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                         <p>Закрыто: {formatDateSafe(selectedClaim.closedAt)}</p>
                       </div>
                       <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground">
+                        <p className="font-medium text-foreground">Завод / поставщик</p>
+                        <p className="mt-1">Текущий: {selectedClaim.factoryCounterpartyDisplayName || '—'}</p>
+                        <p>Снимок: {selectedClaim.factoryName || '—'}</p>
+                      </div>
+                      <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground">
                         <p className="font-medium text-foreground">Связи</p>
                         <p className="mt-1">Заявка: {selectedClaim.serviceTicketId || '—'}</p>
                         <p>Аренда: {selectedClaim.rentalId || '—'}</p>
@@ -1202,6 +1274,31 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                             ))}
                           </SelectContent>
                         </Select>
+                      </label>
+                      <label className="space-y-1.5">
+                        <span className={FIELD_LABEL_CLASS}>Завод / поставщик Counterparty</span>
+                        {selectedClaim.factoryCounterpartyId ? (
+                          <div className={DETAIL_BLOCK_CLASS}>
+                            {selectedClaim.factoryCounterpartyDisplayName || selectedClaim.factoryCounterpartyId}
+                          </div>
+                        ) : (
+                          <Select
+                            value={editForm.factoryCounterpartyId || NO_VALUE}
+                            onValueChange={(value) => setEditForm(prev => prev ? ({
+                              ...prev,
+                              factoryCounterpartyId: value === NO_VALUE ? '' : value,
+                            }) : prev)}
+                            disabled={!canEdit}
+                          >
+                            <SelectTrigger><SelectValue placeholder="Выберите поставщика" /></SelectTrigger>
+                            <SelectContent className="max-h-80">
+                              <SelectItem value={NO_VALUE}>Не выбран</SelectItem>
+                              {factoryCounterpartyOptions.map(option => (
+                                <SelectItem key={option.id} value={option.id}>{option.displayLabel}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                       </label>
                       <label className="space-y-1.5">
                         <span className={FIELD_LABEL_CLASS}>Номер дела завода</span>

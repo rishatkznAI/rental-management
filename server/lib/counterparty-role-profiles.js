@@ -50,6 +50,7 @@ const CUSTOMER_REFERENCE_SPECS = Object.freeze([
 ]);
 const SUPPLIER_REFERENCE_SPECS = Object.freeze([
   ['payments', ['counterpartyId']],
+  ['warranty_claims', ['factoryCounterpartyId']],
   ['company_expenses', ['supplierCounterpartyId', 'vendorCounterpartyId']],
   ['finance_operations', ['supplierCounterpartyId', 'vendorCounterpartyId']],
   ['spare_parts', ['supplierCounterpartyId', 'vendorCounterpartyId']],
@@ -440,6 +441,19 @@ function findRoleRemovalBlockers({ counterpartyId, roleCode, data }) {
           recordIds: records.map(record => relationId(record?.id)).filter(Boolean),
           count: records.length,
           relationFields: ['counterpartyId', 'serviceTicketId', 'clientId', 'rentalId'],
+        });
+      }
+      continue;
+    }
+    if (role === 'supplier' && collection === 'warranty_claims') {
+      const { activeWarrantyFactoryCounterpartyReferences } = require('./warranty-claim-factory-counterparty-relations');
+      const records = activeWarrantyFactoryCounterpartyReferences(id, data);
+      if (records.length > 0) {
+        blockers.push({
+          collection,
+          recordIds: records.map(record => relationId(record?.id)).filter(Boolean),
+          count: records.length,
+          relationFields: ['factoryCounterpartyId'],
         });
       }
       continue;

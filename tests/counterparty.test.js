@@ -813,6 +813,40 @@ test('Counterparty archive is blocked by active canonical and deterministic Warr
   });
 });
 
+test('Counterparty archive is blocked by active Warranty factory supplier relations but not terminal factory history', async () => {
+  const counterparty = {
+    id: 'CP-warranty-factory',
+    ...legalEntity({ roles: ['supplier'] }),
+    inn: '1655123457',
+    status: 'active',
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+    archivedAt: null,
+  };
+  const state = createState({
+    counterparties: [counterparty],
+    counterparty_role_assignments: [{
+      id: 'A-warranty-factory', counterpartyId: counterparty.id, roleCode: 'supplier', status: 'active', validTo: null,
+    }],
+    supplier_profiles: [{ id: 'SP-warranty-factory', counterpartyId: counterparty.id, status: 'active' }],
+    warranty_claims: [{
+      id: 'W-factory-active', factoryCounterpartyId: counterparty.id, status: 'factory_review',
+    }],
+  });
+  const app = createApp(state);
+
+  await withServer(app, async baseUrl => {
+    const blocked = await request(baseUrl, 'DELETE', `/api/counterparties/${counterparty.id}`);
+    assert.equal(blocked.status, 409);
+    assert.deepEqual(blocked.body.details.warrantyFactoryClaimIds, ['W-factory-active']);
+
+    state.warranty_claims[0].status = 'closed';
+    const archived = await request(baseUrl, 'DELETE', `/api/counterparties/${counterparty.id}`);
+    assert.equal(archived.status, 200);
+    assert.equal(archived.body.counterparty.status, 'archived');
+  });
+});
+
 test('Counterparty archive deactivates role assignments and profiles without deleting them', async () => {
   const state = createState();
   const app = createApp(state);

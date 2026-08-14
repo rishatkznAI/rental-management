@@ -101,6 +101,11 @@ const {
   decorateWarrantyClaimCounterparty,
   isTerminalWarrantyClaim,
 } = require('../lib/warranty-claim-counterparty-relations');
+const {
+  canonicalizeWarrantyClaimFactoryCounterpartyRelation,
+  decorateWarrantyClaimFactoryCounterparty,
+  listEligibleWarrantyFactoryCounterparties,
+} = require('../lib/warranty-claim-factory-counterparty-relations');
 
 const INLINE_RELATION_IDEMPOTENCY_COLLECTION = 'inline_relation_idempotency';
 const INLINE_RELATION_IDEMPOTENCY_SCOPES = new Set(['client_objects', 'client_contracts']);
@@ -337,13 +342,23 @@ function registerCrudRoutes(deps) {
       });
     }
     if (collection === 'warranty_claims') {
-      return canonicalizeWarrantyClaimCounterpartyRelation(item, { readData: readDataOverride }, {
+      const customerCanonical = canonicalizeWarrantyClaimCounterpartyRelation(item, { readData: readDataOverride }, {
         existing,
         // Existing terminal history may retain an inactive target. New API rows may not.
         allowHistoricalTarget: Boolean(existing)
           && isTerminalWarrantyClaim(existing)
           && isTerminalWarrantyClaim(item),
       });
+      return canonicalizeWarrantyClaimFactoryCounterpartyRelation(
+        customerCanonical,
+        { readData: readDataOverride },
+        {
+          existing,
+          allowHistoricalTarget: Boolean(existing)
+            && isTerminalWarrantyClaim(existing)
+            && isTerminalWarrantyClaim(item),
+        },
+      );
     }
     if (collection === 'payments' || collection === 'payment_allocations' || collection === 'documents' || collection === 'service') {
       const enriched = enrichRecordFromRentalLinks(item, readDataOverride);
@@ -1338,7 +1353,7 @@ function registerCrudRoutes(deps) {
       }),
     },
     warranty_claims: {
-      searchFields: ['id', 'equipmentLabel', 'factoryName', 'counterpartyId', 'counterpartyName', 'customerDisplayName', 'clientName', 'responsibleName', 'description'],
+      searchFields: ['id', 'equipmentLabel', 'factoryName', 'factoryCounterpartyId', 'factoryCounterpartyDisplayName', 'counterpartyId', 'counterpartyName', 'customerDisplayName', 'clientName', 'responsibleName', 'description'],
       sortFields: {
         createdAt: item => item.createdAt,
         updatedAt: item => item.updatedAt || item.createdAt,
@@ -1350,6 +1365,7 @@ function registerCrudRoutes(deps) {
         status: (item, value) => item.status === value,
         equipmentId: (item, value) => item.equipmentId === value,
         counterpartyId: (item, value) => item.counterpartyId === value,
+        factoryCounterpartyId: (item, value) => item.factoryCounterpartyId === value,
         clientId: (item, value) => item.clientId === value,
       },
     },
@@ -1578,9 +1594,15 @@ function registerCrudRoutes(deps) {
         data = data.map(item => decorateServiceTicketCounterparty(item, { readData }));
       }
       if (collection === 'warranty_claims') {
-        data = data.map(item => decorateWarrantyClaimCounterparty(item, { readData }));
+        data = data.map(item => decorateWarrantyClaimFactoryCounterparty(
+          decorateWarrantyClaimCounterparty(item, { readData }),
+          { readData },
+        ));
         if (req.query.counterpartyId) {
           data = data.filter(item => item.counterpartyId === req.query.counterpartyId);
+        }
+        if (req.query.factoryCounterpartyId) {
+          data = data.filter(item => item.factoryCounterpartyId === req.query.factoryCounterpartyId);
         }
         if (req.query.clientId) {
           data = data.filter(item => item.clientId === req.query.clientId);
@@ -1597,6 +1619,22 @@ function registerCrudRoutes(deps) {
       }
       return res.json(data);
     });
+
+    if (collection === 'warranty_claims') {
+      router.get(
+        '/warranty_claims/factory-counterparty-options',
+        requireAuth,
+        requireRead('warranty_claims'),
+        (req, res) => {
+          try {
+            accessControl.assertCanReadCollection('warranty_claims', req.user);
+            return res.json(listEligibleWarrantyFactoryCounterparties({ readData }));
+          } catch (error) {
+            return sendAccessError(res, error);
+          }
+        },
+      );
+    }
 
     if (collection === 'clients') {
       router.get('/clients/diagnostics/duplicate-inn', requireAuth, async (req, res) => {
@@ -1705,8 +1743,11 @@ function registerCrudRoutes(deps) {
         : collection === 'service'
           ? decorateServiceTicketCounterparty(sanitized, { readData })
           : collection === 'warranty_claims'
-            ? decorateWarrantyClaimCounterparty(sanitized, { readData })
-          : sanitized);
+            ? decorateWarrantyClaimFactoryCounterparty(
+                decorateWarrantyClaimCounterparty(sanitized, { readData }),
+                { readData },
+              )
+            : sanitized);
     });
 
     router.post(`/${collection}`, ...writeMiddlewares(collection), (req, res) => {
@@ -1962,7 +2003,10 @@ function registerCrudRoutes(deps) {
           : collection === 'service'
             ? decorateServiceTicketCounterparty(newItem, { readData })
             : collection === 'warranty_claims'
-              ? decorateWarrantyClaimCounterparty(newItem, { readData })
+              ? decorateWarrantyClaimFactoryCounterparty(
+                  decorateWarrantyClaimCounterparty(newItem, { readData }),
+                  { readData },
+                )
             : newItem);
       } catch (error) {
         if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
@@ -2265,7 +2309,10 @@ function registerCrudRoutes(deps) {
           : collection === 'service'
             ? decorateServiceTicketCounterparty(data[idx], { readData })
             : collection === 'warranty_claims'
-              ? decorateWarrantyClaimCounterparty(data[idx], { readData })
+              ? decorateWarrantyClaimFactoryCounterparty(
+                  decorateWarrantyClaimCounterparty(data[idx], { readData }),
+                  { readData },
+                )
             : data[idx]);
       } catch (error) {
         if (String(error?.code || '').startsWith('COUNTERPARTY_')) {

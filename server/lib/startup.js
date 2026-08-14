@@ -147,9 +147,31 @@ async function startServer({ app, port, deps, logger = console }) {
     botToken,
   } = deps;
 
+  // The factory relation is a strict rollout boundary. Run migration first, then
+  // audit before opening the listening socket so a blocked deployment fails
+  // deterministically without serving partial application traffic.
+  migrateJsonFilesToDb();
+  let warrantyFactoryPreflight = null;
+  if (typeof deps.auditWarrantyClaimFactoryCounterpartyRelations === 'function') {
+    warrantyFactoryPreflight = deps.auditWarrantyClaimFactoryCounterpartyRelations({ readData: deps.readData });
+    if (warrantyFactoryPreflight?.strictRolloutReady === false) {
+      for (const issue of warrantyFactoryPreflight.strictRolloutBlockers || []) {
+        logger.error?.(
+          `[warranty-factory-counterparty-relations] strict rollout blocker: warrantyClaimId=${issue.recordId || 'missing'} `
+          + `classification=${issue.classification} code=${issue.code}`,
+        );
+      }
+      const error = new Error(
+        'Strict rollout blocked: active external Warranty claims have unresolved factory Counterparty relations.',
+      );
+      error.code = 'WARRANTY_FACTORY_STRICT_ROLLOUT_BLOCKED';
+      error.details = { blockers: warrantyFactoryPreflight.strictRolloutBlockers || [] };
+      throw error;
+    }
+  }
+
   return app.listen(port, async () => {
     const startupBusinessMaintenanceEnabled = isStartupBusinessMaintenanceEnabled();
-    migrateJsonFilesToDb();
     if (typeof deps.auditCounterpartyRoleProfiles === 'function') {
       try {
         const result = deps.auditCounterpartyRoleProfiles({ readData: deps.readData });
@@ -290,6 +312,20 @@ async function startServer({ app, port, deps, logger = console }) {
       } catch (error) {
         logger.warn(`[warranty-counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
       }
+    }
+    if (typeof deps.auditWarrantyClaimFactoryCounterpartyRelations === 'function') {
+      const result = warrantyFactoryPreflight;
+      const classifications = result?.summary?.classifications || {};
+      const unresolved = Number(result?.summary?.activeExternalUnresolved) || 0;
+      const log = unresolved > 0 || Number(result?.summary?.broken) > 0 ? logger.warn : logger.log;
+      log?.call(
+        logger,
+        `[warranty-factory-counterparty-relations] integrity audit: canonical=${classifications.canonical || 0} `
+        + `preExternal=${classifications.valid_pre_external_draft || 0} `
+        + `terminalHistory=${classifications.canonical_terminal_history || 0} `
+        + `unresolvedTerminal=${classifications.unresolved_terminal_historical_snapshot || 0} `
+        + `activeExternalUnresolved=${unresolved} broken=${result?.summary?.broken || 0}`,
+      );
     }
     cleanupExpiredSessions();
     seedDefaultUsers();

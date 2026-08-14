@@ -415,6 +415,7 @@ const USER_PATCH_CONTROL_FIELDS = new Set([
 
 const WARRANTY_CLAIM_MUTATION_FIELDS = new Set([
   'serviceTicketId',
+  'factoryCounterpartyId',
   'equipmentId',
   'equipmentLabel',
   'inventoryNumber',
@@ -445,6 +446,7 @@ const STRICT_WARRANTY_CLAIM_BULK_REPLACE_FIELDS = new Set([
   'id',
   'number',
   'counterpartyId',
+  'factoryCounterpartyId',
   'clientId',
   'client',
   'clientName',

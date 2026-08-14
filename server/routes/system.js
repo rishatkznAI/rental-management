@@ -57,6 +57,10 @@ const {
   canonicalizeWarrantyClaimCollection,
 } = require('../lib/warranty-claim-counterparty-relations');
 const {
+  auditWarrantyClaimFactoryCounterpartyRelations,
+  canonicalizeWarrantyClaimFactoryCollection,
+} = require('../lib/warranty-claim-factory-counterparty-relations');
+const {
   SYSTEM_FIXTURE_PROTECTED_CODE,
   SYSTEM_FIXTURE_PROTECTED_MESSAGE,
   assertProductionSmokeFixtureMutationAllowed,
@@ -802,10 +806,55 @@ function buildSystemControlCenterStatus({
       scanned: 0,
     };
   }
+  let warrantyFactoryRelations;
+  try {
+    const factoryAudit = auditWarrantyClaimFactoryCounterpartyRelations({ readData });
+    warrantyFactoryRelations = {
+      authority: factoryAudit.authority,
+      canonical: Number(factoryAudit.summary?.classifications?.canonical) || 0,
+      terminalHistory: Number(factoryAudit.summary?.classifications?.canonical_terminal_history) || 0,
+      validPreExternal: Number(factoryAudit.summary?.classifications?.valid_pre_external_draft) || 0,
+      unresolvedTerminalHistory: Number(factoryAudit.summary?.classifications?.unresolved_terminal_historical_snapshot) || 0,
+      activeExternalUnresolved: Number(factoryAudit.summary?.activeExternalUnresolved) || 0,
+      strictRolloutReady: factoryAudit.strictRolloutReady !== false,
+      broken: Number(factoryAudit.summary?.broken) || 0,
+      scanned: Number(factoryAudit.summary?.scanned?.warranty_claims) || 0,
+      issues: factoryAudit.entries
+        .filter(entry => ![
+          'canonical',
+          'canonical_terminal_history',
+          'valid_pre_external_draft',
+          'unresolved_terminal_historical_snapshot',
+        ].includes(entry.classification))
+        .map(entry => ({
+          warrantyClaimId: entry.recordId,
+          classification: entry.classification,
+          code: entry.code,
+        })),
+    };
+  } catch {
+    warrantyFactoryRelations = {
+      authority: 'WarrantyClaim.factoryCounterpartyId -> Counterparty.id -> active supplier RoleAssignment -> active SupplierProfile',
+      canonical: 0,
+      terminalHistory: 0,
+      validPreExternal: 0,
+      unresolvedTerminalHistory: 0,
+      activeExternalUnresolved: 1,
+      strictRolloutReady: false,
+      broken: 1,
+      scanned: 0,
+      issues: [{ warrantyClaimId: null, classification: 'audit_failed', code: 'WARRANTY_FACTORY_AUDIT_FAILED' }],
+    };
+  }
   const hasDataRisk = Object.values(dataRisks).some(value => Number(value) > 0);
   const environmentLabel = safeEnvironmentLabel(environment);
   const runtimeRisk = (environment.isProductionLike && (!botDisabled.disabled || !gsmWritesBlocked)) ? 'risk' : 'ok';
-  const dataRiskStatus = hasDataRisk || warrantyRelations.broken > 0 ? 'warning' : 'ok';
+  const dataRiskStatus = hasDataRisk
+    || warrantyRelations.broken > 0
+    || warrantyFactoryRelations.broken > 0
+    || !warrantyFactoryRelations.strictRolloutReady
+    ? 'warning'
+    : 'ok';
   const serviceStatus = serviceQuality.critical > 0 ? 'risk' : serviceQuality.high > 0 ? 'warning' : 'ok';
   const storageStatus = isolationUnknown || !storageSignal.signalPresent ? 'warning' : 'ok';
   const versionStatus = releaseStatus.status === 'risk' ? 'risk' : releaseStatus.status === 'warning' ? 'warning' : 'ok';
@@ -846,6 +895,7 @@ function buildSystemControlCenterStatus({
     },
     dataRisks,
     warrantyRelations,
+    warrantyFactoryRelations,
     serviceQuality,
     environment,
     conservation: {
@@ -1216,6 +1266,14 @@ function analyzeSystemDataImport(payload, readData) {
     };
     try {
       sanitizedCollections.warranty_claims = canonicalizeWarrantyClaimCollection(
+        sanitizedCollections.warranty_claims,
+        stagedData,
+        {
+          existingClaims: readData('warranty_claims') || [],
+          allowHistoricalTarget: true,
+        },
+      );
+      sanitizedCollections.warranty_claims = canonicalizeWarrantyClaimFactoryCollection(
         sanitizedCollections.warranty_claims,
         stagedData,
         {

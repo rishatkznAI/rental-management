@@ -5,6 +5,7 @@ import type { WarrantyClaim } from '../types';
 
 export const WARRANTY_CLAIM_KEYS = {
   all: ['warrantyClaims'] as const,
+  factoryCounterpartyOptions: ['warrantyClaims', 'factoryCounterpartyOptions'] as const,
 };
 
 type QueryOptions = {
@@ -16,6 +17,16 @@ export function useWarrantyClaimsList(options: QueryOptions = {}) {
   return useQuery({
     queryKey: WARRANTY_CLAIM_KEYS.all,
     queryFn: warrantyClaimsService.getAll,
+    enabled: (options.enabled ?? true) && canReadCollection('warranty_claims'),
+    staleTime: 1000 * 60 * 2,
+  });
+}
+
+export function useWarrantyFactoryCounterpartyOptions(options: QueryOptions = {}) {
+  const { canReadCollection } = usePermissions();
+  return useQuery({
+    queryKey: WARRANTY_CLAIM_KEYS.factoryCounterpartyOptions,
+    queryFn: warrantyClaimsService.getFactoryCounterpartyOptions,
     enabled: (options.enabled ?? true) && canReadCollection('warranty_claims'),
     staleTime: 1000 * 60 * 2,
   });

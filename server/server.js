@@ -107,6 +107,10 @@ const {
   canonicalizeWarrantyPersistenceEntries,
 } = require('./lib/warranty-claim-counterparty-relations');
 const {
+  auditWarrantyClaimFactoryCounterpartyRelations,
+  canonicalizeWarrantyFactoryPersistenceEntries,
+} = require('./lib/warranty-claim-factory-counterparty-relations');
+const {
   mergeEntityHistory,
   mergeRentalHistory,
 } = require('./lib/audit-history');
@@ -437,7 +441,8 @@ function writeData(name, data) {
   );
   const deliveryEntries = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
   const serviceEntries = canonicalizeServicePersistenceEntries(deliveryEntries, { readData });
-  const [entry] = canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData });
+  const warrantyEntries = canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData });
+  const [entry] = canonicalizeWarrantyFactoryPersistenceEntries(warrantyEntries, { readData });
   setData(entry.name, entry.value);
 }
 
@@ -445,7 +450,8 @@ function writeDataBatch(entries) {
   const rentalEntries = canonicalizeRentalPersistenceEntries(entries, { readData });
   const deliveryEntries = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
   const serviceEntries = canonicalizeServicePersistenceEntries(deliveryEntries, { readData });
-  setDataBatch(canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData }));
+  const warrantyEntries = canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData });
+  setDataBatch(canonicalizeWarrantyFactoryPersistenceEntries(warrantyEntries, { readData }));
 }
 
 const accessControl = createAccessControl({ readData });
@@ -2755,6 +2761,7 @@ startServer({
     auditDeliveryCounterpartyRelations,
     auditServiceCounterpartyRelations,
     auditWarrantyClaimCounterpartyRelations,
+    auditWarrantyClaimFactoryCounterpartyRelations,
     writeDataBatch,
     cleanupExpiredSessions,
     seedDefaultUsers,
@@ -2793,4 +2800,7 @@ startServer({
     seedsDir: path.join(__dirname, 'seeds'),
   },
   logger: console,
+}).catch(error => {
+  console.error(`[STARTUP] ${error?.code || 'STARTUP_FAILED'}: ${error?.message || String(error)}`);
+  process.exitCode = 1;
 });

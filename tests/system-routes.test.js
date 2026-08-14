@@ -2883,6 +2883,7 @@ test('/api/admin/system-data Warranty round-trip follows dependency order and re
     gantt_rentals: [],
     service: [],
     warranty_claims: [],
+    supplier_profiles: [],
   };
   const batches = [];
   const { app } = createSystemApp({
@@ -2896,16 +2897,19 @@ test('/api/admin/system-data Warranty round-trip follows dependency order and re
     counterparties: [
       { id: 'CP-1', type: 'legal_entity', legalName: 'ООО Клиент', inn: '7707083893', status: 'active', roles: ['customer'] },
       { id: 'CP-2', type: 'legal_entity', legalName: 'ООО Другой', inn: '7707083894', status: 'active', roles: ['customer'] },
+      { id: 'CP-F', type: 'legal_entity', legalName: 'Завод', inn: '7707083895', status: 'active', roles: ['supplier'] },
     ],
     counterparty_role_assignments: [
       { id: 'A-1', counterpartyId: 'CP-1', roleCode: 'customer', status: 'active' },
       { id: 'A-2', counterpartyId: 'CP-2', roleCode: 'customer', status: 'active' },
+      { id: 'A-F', counterpartyId: 'CP-F', roleCode: 'supplier', status: 'active', validTo: null },
     ],
+    supplier_profiles: [{ id: 'SP-F', counterpartyId: 'CP-F', status: 'active' }],
     clients: [{ id: 'CL-1', counterpartyId: 'CP-1', company: 'ООО Клиент', inn: '7707083893' }],
     rentals: [{ id: 'R-1', counterpartyId: 'CP-1', clientId: 'CL-1', status: 'active' }],
     service: [{ id: 'S-1', rentalId: 'R-1', clientId: 'CL-1', status: 'new' }],
     warranty_claims: [{
-      id: 'W-1', serviceTicketId: 'S-1', clientId: 'CL-1', rentalId: 'R-1', status: 'approved',
+      id: 'W-1', serviceTicketId: 'S-1', clientId: 'CL-1', rentalId: 'R-1', factoryCounterpartyId: 'CP-F', status: 'approved',
       equipmentLabel: 'Lift', factoryName: 'Factory', failureDescription: 'Failure', requestedResolution: 'Repair', priority: 'medium',
     }],
   };
@@ -2918,6 +2922,7 @@ test('/api/admin/system-data Warranty round-trip follows dependency order and re
     const applied = await postJson(baseUrl, '/api/admin/system-data/import', { confirm: true, collections: payloadCollections });
     assert.equal(applied.status, 200, JSON.stringify(applied.body));
     assert.equal(collections.warranty_claims[0].counterpartyId, 'CP-1');
+    assert.equal(collections.warranty_claims[0].factoryCounterpartyId, 'CP-F');
     const names = batches[0].map(entry => entry.name);
     assert.ok(names.indexOf('counterparties') < names.indexOf('counterparty_role_assignments'));
     assert.ok(names.indexOf('counterparty_role_assignments') < names.indexOf('clients'));
@@ -2964,7 +2969,7 @@ test('/api/admin/system-data Warranty round-trip follows dependency order and re
 
 test('System Control Center exposes Warranty relation health and broken counts read-only', async () => {
   const collections = {
-    warranty_claims: [{ id: 'W-broken', serviceTicketId: 'S-missing', status: 'draft' }],
+    warranty_claims: [{ id: 'W-broken', serviceTicketId: 'S-missing', status: 'factory_review' }],
     service: [],
   };
   const before = structuredClone(collections);
@@ -2976,6 +2981,15 @@ test('System Control Center exposes Warranty relation health and broken counts r
   assert.equal(status.warrantyRelations.scanned, 1);
   assert.equal(status.warrantyRelations.broken, 1);
   assert.equal(status.warrantyRelations.authority, 'WarrantyClaim.counterpartyId -> Counterparty.id');
+  assert.equal(status.warrantyFactoryRelations.scanned, 1);
+  assert.equal(status.warrantyFactoryRelations.activeExternalUnresolved, 1);
+  assert.equal(status.warrantyFactoryRelations.strictRolloutReady, false);
+  assert.match(status.warrantyFactoryRelations.authority, /WarrantyClaim\.factoryCounterpartyId/);
+  assert.deepEqual(status.warrantyFactoryRelations.issues, [{
+    warrantyClaimId: 'W-broken',
+    classification: 'blocked_manual_mapping',
+    code: 'WARRANTY_FACTORY_RELATION_REQUIRED',
+  }]);
   assert.deepEqual(collections, before);
 });
 

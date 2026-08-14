@@ -59,6 +59,23 @@ function createStartupDeps(state, events) {
         },
       };
     },
+    auditWarrantyClaimFactoryCounterpartyRelations: () => {
+      recordCall('auditWarrantyClaimFactoryCounterpartyRelations');
+      return {
+        strictRolloutReady: true,
+        strictRolloutBlockers: [],
+        summary: {
+          broken: 0,
+          activeExternalUnresolved: 0,
+          classifications: {
+            canonical: 0,
+            valid_pre_external_draft: 1,
+            canonical_terminal_history: 0,
+            unresolved_terminal_historical_snapshot: 0,
+          },
+        },
+      };
+    },
     writeDataBatch: entries => {
       for (const entry of entries || []) writeData(entry.name, entry.value);
     },
@@ -171,6 +188,7 @@ test('server start disables only business maintenance by default', async () => {
   assert.equal(events.calls.includes('auditCounterpartyRelations'), true);
   assert.equal(events.calls.includes('auditServiceCounterpartyRelations'), true);
   assert.equal(events.calls.includes('auditWarrantyClaimCounterpartyRelations'), true);
+  assert.equal(events.calls.includes('auditWarrantyClaimFactoryCounterpartyRelations'), true);
   assert.equal(events.calls.includes('cleanupExpiredSessions'), true);
   assert.equal(events.calls.includes('seedDefaultUsers'), true);
   assert.equal(events.calls.includes('ensureLegacyDefaultUsers'), true);
@@ -188,6 +206,34 @@ test('server start disables only business maintenance by default', async () => {
   assert.deepEqual(state.service, original.service);
   assert.deepEqual(state.warranty_claims, original.warranty_claims);
   assert.equal(warnings.some(message => message.includes(`${STARTUP_BUSINESS_MAINTENANCE_ENV}=apply`)), true);
+});
+
+test('startup refuses to listen when active external Warranty factory relations are unresolved', async () => {
+  const state = { warranty_claims: [{ id: 'W-blocked', status: 'factory_review' }] };
+  const events = { calls: [], writes: [] };
+  const deps = createStartupDeps(state, events);
+  deps.auditWarrantyClaimFactoryCounterpartyRelations = () => ({
+    strictRolloutReady: false,
+    strictRolloutBlockers: [{
+      recordId: 'W-blocked',
+      classification: 'blocked_manual_mapping',
+      code: 'WARRANTY_FACTORY_RELATION_REQUIRED',
+    }],
+    summary: { broken: 1, activeExternalUnresolved: 1, classifications: {} },
+  });
+  const errors = [];
+  await assert.rejects(
+    startServer({
+      app: express(),
+      port: 0,
+      deps,
+      logger: { log: () => {}, warn: () => {}, error: message => errors.push(String(message)) },
+    }),
+    error => error.code === 'WARRANTY_FACTORY_STRICT_ROLLOUT_BLOCKED',
+  );
+  assert.equal(events.calls.includes('migrateJsonFilesToDb'), true);
+  assert.equal(events.calls.includes('cleanupExpiredSessions'), false);
+  assert.equal(errors.some(message => message.includes('W-blocked')), true);
 });
 
 test('STARTUP_BUSINESS_MAINTENANCE=apply does not run Counterparty identity auto-repair', async () => {

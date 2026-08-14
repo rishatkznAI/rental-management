@@ -1120,6 +1120,7 @@ export interface WarrantyClaim {
   inventoryNumber?: string;
   serialNumber?: string;
   manufacturer?: string;
+  factoryCounterpartyId?: string;
   factoryName: string;
   factoryContact?: string;
   factoryCaseNumber?: string;

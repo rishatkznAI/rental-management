@@ -56,6 +56,25 @@ test('reclamations customer display and filtering use canonical Counterparty IDs
   assert.doesNotMatch(warrantyTabSource, /getClaimClient\(claim, ticketById\) === clientFilter/);
 });
 
+test('reclamations factory selector and filtering use canonical supplier Counterparty IDs', () => {
+  assert.match(warrantyServiceSource, /factoryCounterpartyId\?: string/);
+  assert.match(warrantyServiceSource, /factory-counterparty-options/);
+  assert.match(warrantyServiceSource, /params\.set\('factoryCounterpartyId'/);
+  assert.match(warrantyTabSource, /claim\.factoryCounterpartyId === factoryFilter/);
+  assert.match(warrantyTabSource, /key=\{factory\.id\} value=\{factory\.id\}/);
+  assert.match(warrantyTabSource, /factoryCounterpartyDisplayName \|\| claim\.factoryName/);
+  assert.match(warrantyTabSource, /id\.slice\(-8\)/);
+  assert.match(warrantyTabSource, /requiresExternalFactoryRelation/);
+  assert.match(warrantyTabSource, /Перед внешним гарантийным этапом выберите завод\/поставщика Counterparty/);
+  assert.doesNotMatch(warrantyTabSource, /factoryCounterpartyId:\s*(?:equipment|claimEquipment)\?\.manufacturer/);
+  assert.match(warrantyTabSource, /manufacturer: claimEquipment\.manufacturer/);
+});
+
+test('reclamations keep current supplier display separate from the historical factory snapshot', () => {
+  assert.match(warrantyTabSource, /Текущий: \{selectedClaim\.factoryCounterpartyDisplayName \|\| '—'\}/);
+  assert.match(warrantyTabSource, /Снимок: \{selectedClaim\.factoryName \|\| '—'\}/);
+});
+
 test('reclamations expose required KPIs including overdue and closed this month', () => {
   for (const label of ['Активные', 'Новые', 'На рассмотрении', 'Просрочены', 'Закрыты за месяц']) {
     assert.match(warrantyTabSource, new RegExp(label));

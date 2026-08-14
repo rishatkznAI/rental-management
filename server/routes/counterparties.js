@@ -23,6 +23,7 @@ const {
 } = require('../lib/counterparty-role-profiles');
 const { activeServiceCounterpartyReferences } = require('../lib/service-counterparty-relations');
 const { activeWarrantyCounterpartyReferences } = require('../lib/warranty-claim-counterparty-relations');
+const { activeWarrantyFactoryCounterpartyReferences } = require('../lib/warranty-claim-factory-counterparty-relations');
 
 const COUNTERPARTY_WRITE_FIELDS = new Set([
   'type',
@@ -512,6 +513,17 @@ function registerCounterpartyRoutes(router, deps) {
           'Нельзя архивировать контрагента, пока существуют связанные активные рекламации.',
           409,
           { counterpartyId: id, warrantyClaimIds: [...new Set(linkedActiveWarrantyClaimIds)] },
+        );
+      }
+      const linkedActiveWarrantyFactoryClaimIds = activeWarrantyFactoryCounterpartyReferences(id, { readData })
+        .map(claim => claim.id)
+        .filter(Boolean);
+      if (linkedActiveWarrantyFactoryClaimIds.length > 0) {
+        throw counterpartyError(
+          'COUNTERPARTY_DOMAIN_LINK_CONFLICT',
+          'Нельзя архивировать supplier Counterparty, пока существуют активные внешние гарантийные связи.',
+          409,
+          { counterpartyId: id, warrantyFactoryClaimIds: [...new Set(linkedActiveWarrantyFactoryClaimIds)] },
         );
       }
       const terminalDeliveryStatuses = new Set(['completed', 'cancelled', 'canceled']);

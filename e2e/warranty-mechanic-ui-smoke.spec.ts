@@ -30,6 +30,7 @@ type Mechanic = {
 type SeedData = {
   user: SmokeUser;
   mechanic: Mechanic;
+  factoryCounterparty: { id: string; shortName: string };
   equipment: { id: string; inventoryNumber: string; serialNumber: string; manufacturer: string; model: string };
   ticket: { id: string; reason: string };
   serviceWork: { id: string; name: string };
@@ -216,6 +217,13 @@ async function seedWarrantyMechanicData(api: APIRequestContext, suffix: string):
   const prefix = `SMOKE-WARRANTY-MECH-${suffix}`;
   const user = await ensureWarrantySmokeUser(api);
   const mechanic = await ensureWarrantyMechanic(api, user, prefix);
+  const factoryCounterparty = await postJson<{ id: string; shortName: string }>(api, '/api/counterparties', {
+    type: 'legal_entity',
+    legalName: `ООО ${prefix}-Factory`,
+    shortName: `${prefix}-Factory`,
+    inn: String(8_000_000_000 + Number(suffix)),
+    roles: ['supplier'],
+  });
 
   const equipment = await postJson<{ id: string; inventoryNumber: string; serialNumber: string; manufacturer: string; model: string }>(api, '/api/equipment', {
     inventoryNumber: `SWM-${suffix}`.slice(0, 18),
@@ -299,7 +307,7 @@ async function seedWarrantyMechanicData(api: APIRequestContext, suffix: string):
     priceSnapshot: 4200,
   });
 
-  return { user, mechanic, equipment, ticket, serviceWork, sparePart };
+  return { user, mechanic, factoryCounterparty, equipment, ticket, serviceWork, sparePart };
 }
 
 test('smoke-service can use warranty mechanic UI and warranty workflows without commercial/admin access', async ({ page, request }) => {
@@ -359,6 +367,18 @@ test('smoke-service can use warranty mechanic UI and warranty workflows without 
     expect(meJson.user.permissions.readableCollections).not.toContain(forbiddenCollection);
   }
 
+  const factoryOptionsResponse = await request.get(
+    'http://127.0.0.1:3000/api/warranty_claims/factory-counterparty-options',
+    { headers: authHeaders },
+  );
+  expect(factoryOptionsResponse.ok()).toBeTruthy();
+  const factoryOptions = await factoryOptionsResponse.json() as Array<Record<string, string>>;
+  expect(factoryOptions).toContainEqual({
+    id: seed.factoryCounterparty.id,
+    displayLabel: seed.factoryCounterparty.shortName,
+  });
+  expect(factoryOptions.every(option => Object.keys(option).sort().join(',') === 'displayLabel,id')).toBe(true);
+
   const sidebar = page.locator('aside');
   for (const section of ALLOWED_SECTIONS) {
     await expect(sidebar.getByRole('button', { name: section.name }), `${section.label} should be visible`).toBeVisible();
@@ -375,6 +395,7 @@ test('smoke-service can use warranty mechanic UI and warranty workflows without 
     inventoryNumber: seed.equipment.inventoryNumber,
     serialNumber: seed.equipment.serialNumber,
     manufacturer: seed.equipment.manufacturer,
+    factoryCounterpartyId: seed.factoryCounterparty.id,
     factoryName: seed.equipment.manufacturer,
     factoryContact: `${seed.ticket.reason}@factory.example`,
     factoryCaseNumber: `${seed.ticket.reason}-CASE`,
@@ -401,6 +422,8 @@ test('smoke-service can use warranty mechanic UI and warranty workflows without 
   expect(createClaim.ok(), `warranty claim create: ${createClaim.status()} ${await createClaim.text()}`).toBeTruthy();
   const createdClaim = await createClaim.json();
   expect(createdClaim.serviceTicketId).toBe(seed.ticket.id);
+  expect(createdClaim.factoryCounterpartyId).toBe(seed.factoryCounterparty.id);
+  expect(createdClaim.factoryCounterpartyDisplayName).toBe(seed.factoryCounterparty.shortName);
   expect(createdClaim.factoryName).toBe(seed.equipment.manufacturer);
   expect(createdClaim.failureDescription).toBe(claimPayload.failureDescription);
   expect(createdClaim.requestedResolution).toBe(claimPayload.requestedResolution);
@@ -513,6 +536,7 @@ test('smoke-service can use warranty mechanic UI and warranty workflows without 
     '/api/service',
     `/api/service/${seed.ticket.id}`,
     '/api/warranty_claims',
+    '/api/warranty_claims/factory-counterparty-options',
     `/api/warranty_claims/${createdClaim.id}`,
     '/api/mechanics',
     '/api/service_works',

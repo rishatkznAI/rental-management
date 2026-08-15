@@ -3121,7 +3121,11 @@ export default function Rentals() {
     const activeTrendDelta = (rentalMovementSparkValues.active[6] || 0) - (rentalMovementSparkValues.active[0] || 0);
     const activeRows = rentalDealRows.filter(row => row.isActive);
     const debtRows = activeRows.filter(row => row.debtAmount > 0);
-    const debtClientCount = new Set(debtRows.map(row => row.rental.clientId || row.rental.client).filter(Boolean)).size;
+    const debtClientCount = new Set(debtRows.map((row, index) => (
+      row.rental.counterpartyId
+        ? `counterparty:${row.rental.counterpartyId}`
+        : `unresolved:${row.rental.id || index}`
+    ))).size;
     const missingDocsShare = activeRows.length > 0
       ? (rentalWorkspaceKpis.missingDocs / activeRows.length) * 100
       : 0;

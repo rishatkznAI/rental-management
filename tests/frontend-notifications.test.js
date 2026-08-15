@@ -31,6 +31,7 @@ test('buildAppNotifications builds rental debt notification without runtime Refe
       rentals: [
         {
           id: 'old-rental',
+          counterpartyId: 'CP-1',
           clientId: 'client-1',
           client: 'Тестовый клиент',
           equipmentId: 'eq-1',
@@ -45,6 +46,7 @@ test('buildAppNotifications builds rental debt notification without runtime Refe
         },
         {
           id: 'new-rental',
+          counterpartyId: 'CP-1',
           clientId: 'client-1',
           client: 'Тестовый клиент',
           equipmentId: 'eq-2',

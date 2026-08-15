@@ -338,7 +338,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
   });
 
   const createWorkflowAction = useMutation({
-    mutationFn: (payload: Partial<ReceivableCollectionAction> & Pick<ReceivableCollectionAction, 'clientId' | 'actionType'>) =>
+    mutationFn: (payload: Partial<ReceivableCollectionAction> & Pick<ReceivableCollectionAction, 'counterpartyId' | 'actionType'>) =>
       financeService.createReceivableWorkflowAction(payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: QUERY_KEY });
@@ -396,6 +396,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
     if (!actionRow) return;
     const promisedAmount = Number(actionForm.promisedAmount);
     await createAction.mutateAsync({
+      counterpartyId: actionRow.counterpartyId,
       clientId: actionRow.clientId,
       actionType: actionForm.actionType,
       status: actionForm.status,
@@ -413,6 +414,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
     const amount = Number(planForm.amount);
     if (!Number.isFinite(amount) || amount <= 0) return;
     await createPlan.mutateAsync({
+      counterpartyId: planRow.counterpartyId,
       clientId: planRow.clientId,
       paymentDate: planForm.paymentDate,
       amount,
@@ -423,12 +425,13 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
 
   const submitWorkflow = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!workflowRow?.clientId) return;
+    if (!workflowRow?.counterpartyId) return;
     const numeric = (value: string) => {
       const amount = Number(value);
       return Number.isFinite(amount) && amount > 0 ? amount : undefined;
     };
     await createWorkflowAction.mutateAsync({
+      counterpartyId: workflowRow.counterpartyId,
       clientId: workflowRow.clientId,
       actionType: workflowForm.actionType,
       fromStage: workflowRow.collectionStage || 'new_debt',
@@ -566,7 +569,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
                   const writeOffAction = nextWorkflowActions(row.collectionStage || 'new_debt').find(item => item.type === 'write_off');
                   return (
                     <TableRow
-                      key={row.clientId || row.client}
+                      key={row.counterpartyId || row.rentals[0]?.rentalId || row.clientId || 'unresolved-debtor'}
                       className={row.collectionStatus === 'overdue_promise' || row.noNextAction ? 'bg-red-50/60 dark:bg-red-950/20' : undefined}
                       onClick={() => setSelectedRow(row)}
                     >
@@ -602,7 +605,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
                         </div>
                       </TableCell>
                       <TableCell onClick={(event) => event.stopPropagation()}>
-                        {canManageFinance ? (
+                        {canManageFinance && row.counterpartyId ? (
                           <div className="flex flex-wrap gap-1.5">
                             {row.clientId && (
                               <Button size="icon" variant="outline" title="Открыть клиента" aria-label="Открыть клиента" onClick={() => openPath(`/clients/${row.clientId}`)}>
@@ -652,7 +655,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
               const writeOffAction = nextWorkflowActions(row.collectionStage || 'new_debt').find(item => item.type === 'write_off');
               return (
                 <div
-                  key={`mobile-receivable-${row.clientId || row.client}`}
+                  key={`mobile-receivable-${row.counterpartyId || row.rentals[0]?.rentalId || row.clientId || 'unresolved-debtor'}`}
                   className={`rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40 ${row.collectionStatus === 'overdue_promise' || row.noNextAction ? 'border-red-200 bg-red-50/60 dark:border-red-900/60 dark:bg-red-950/20' : ''}`}
                   onClick={() => setSelectedRow(row)}
                 >
@@ -685,7 +688,7 @@ export function ReceivablesPanel({ canManageFinance }: { canManageFinance: boole
                     />
                     <ReceivableMobileField className="col-span-2" label="Этап взыскания" value={STAGE_LABELS[row.collectionStage || 'new_debt']} />
                   </div>
-                  {canManageFinance ? (
+                  {canManageFinance && row.counterpartyId ? (
                     <div className="mt-3 grid grid-cols-2 gap-2" data-finance-mobile-actions onClick={(event) => event.stopPropagation()}>
                       {row.clientId && (
                         <Button size="sm" variant="outline" className="w-full" title="Открыть клиента" aria-label="Открыть клиента" onClick={() => openPath(`/clients/${row.clientId}`)}>

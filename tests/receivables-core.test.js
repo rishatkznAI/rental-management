@@ -10,8 +10,13 @@ const {
 } = require('../server/lib/receivables-core.js');
 
 const clients = [
-  { id: 'c-1', company: 'ООО Вектор', inn: '7701000000', contact: 'Иван', phone: '+7999', manager: 'Мария' },
-  { id: 'c-2', company: 'ООО Старт', manager: 'Олег' },
+  { id: 'c-1', counterpartyId: 'CP-1', company: 'ООО Вектор', inn: '7701000000', contact: 'Иван', phone: '+7999', manager: 'Мария' },
+  { id: 'c-2', counterpartyId: 'CP-2', company: 'ООО Старт', manager: 'Олег' },
+];
+
+const counterparties = [
+  { id: 'CP-1', roles: ['customer'], status: 'active' },
+  { id: 'CP-2', roles: ['customer'], status: 'active' },
 ];
 
 const rentals = [
@@ -53,8 +58,9 @@ const rentals = [
   },
 ];
 
-test('buildReceivables groups debts by stable client id and computes aging', () => {
+test('buildReceivables groups debts by canonical Counterparty and computes aging', () => {
   const result = buildReceivables({
+    counterparties,
     clients,
     rentals,
     payments: [
@@ -68,6 +74,7 @@ test('buildReceivables groups debts by stable client id and computes aging', () 
 
   const vector = result.rows.find(row => row.clientId === 'c-1');
   assert.ok(vector);
+  assert.equal(vector.counterpartyId, 'CP-1');
   assert.equal(vector.client, 'ООО Вектор');
   assert.equal(vector.totalDebt, 60000);
   assert.equal(vector.overdueDebt, 60000);
@@ -80,6 +87,7 @@ test('buildReceivables groups debts by stable client id and computes aging', () 
 
 test('buildReceivables derives promise, plan and no-next-action workflow flags', () => {
   const result = buildReceivables({
+    counterparties,
     clients,
     rentals,
     payments: [],

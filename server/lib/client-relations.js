@@ -292,21 +292,50 @@ function objectLabel(object) {
 
 function buildClientObjectDebtBreakdown(clients, rentalDebtRows, objects = []) {
   const clientsById = new Map((clients || []).filter(item => item?.id).map(item => [String(item.id), item]));
+  const clientsByCounterpartyId = new Map();
+  for (const client of clients || []) {
+    const counterpartyId = text(client?.counterpartyId);
+    if (!counterpartyId) continue;
+    const matches = clientsByCounterpartyId.get(counterpartyId) || [];
+    matches.push(client);
+    matches.sort((left, right) => text(left?.id).localeCompare(text(right?.id)));
+    clientsByCounterpartyId.set(counterpartyId, matches);
+  }
   const objectsById = new Map((objects || []).filter(item => item?.id).map(item => [String(item.id), item]));
   const map = new Map();
-  for (const row of rentalDebtRows || []) {
+  for (const [sourceIndex, row] of (rentalDebtRows || []).entries()) {
     const clientId = text(row?.clientId);
+    const counterpartyId = text(row?.debtorCounterpartyId || row?.counterpartyId);
+    const counterpartyClients = counterpartyId ? (clientsByCounterpartyId.get(counterpartyId) || []) : [];
+    const linkedClient = clientId ? clientsById.get(clientId) : null;
+    const client = linkedClient?.counterpartyId === counterpartyId
+      ? linkedClient
+      : counterpartyClients[0] || linkedClient;
     const objectId = text(row?.objectId);
     const object = objectId ? objectsById.get(objectId) : null;
-    const key = `${clientId || 'unlinked'}|${objectId || 'none'}`;
+    const debtorKey = counterpartyId
+      ? `counterparty:${counterpartyId}`
+      : `unresolved:rental_debt_rows:${text(row?.rentalId) || 'missing_id'}:${sourceIndex}`;
+    const key = `${debtorKey}|${objectId || 'none'}`;
+    const clientIds = counterpartyClients.map(item => text(item?.id)).filter(Boolean);
+    if (clientId && !clientIds.includes(clientId)) clientIds.push(clientId);
     const item = map.get(key) || {
-      clientId: clientId || undefined,
-      client: clientsById.get(clientId)?.company || row?.client || 'Клиент не привязан',
+      counterpartyId: counterpartyId || undefined,
+      debtorCounterpartyId: counterpartyId || null,
+      debtorIdentityStatus: row?.debtorIdentityStatus || 'unresolved',
+      debtorIdentityIssues: Array.isArray(row?.debtorIdentityIssues) ? row.debtorIdentityIssues : [],
+      clientId: client?.id || clientId || undefined,
+      clientIds,
+      client: client?.company || row?.client || 'Контрагент не определён',
       objectId: objectId || undefined,
       objectName: object ? objectLabel(object) : 'Без объекта',
       debt: 0,
       rentals: 0,
     };
+    for (const compatibilityClientId of clientIds) {
+      if (!item.clientIds.includes(compatibilityClientId)) item.clientIds.push(compatibilityClientId);
+    }
+    item.clientIds.sort();
     item.debt += Number(row?.outstanding) || 0;
     item.rentals += 1;
     map.set(key, item);

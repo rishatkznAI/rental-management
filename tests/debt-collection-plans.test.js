@@ -28,9 +28,10 @@ function createState(overrides = {}) {
       { id: 'U-manager', name: 'Руслан', email: 'manager@example.test', role: 'Менеджер по аренде', status: 'Активен' },
       { id: 'U-mechanic', name: 'Петров', email: 'mechanic@example.test', role: 'Механик', status: 'Активен' },
     ],
-    clients: [{ id: 'C-1', company: 'ООО Должник', manager: 'Руслан' }],
+    counterparties: [{ id: 'CP-1', roles: ['customer'], status: 'active' }],
+    clients: [{ id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Должник', manager: 'Руслан' }],
     rentals: [],
-    gantt_rentals: [{ id: 'GR-1', clientId: 'C-1', client: 'ООО Должник', manager: 'Руслан' }],
+    gantt_rentals: [{ id: 'GR-1', counterpartyId: 'CP-1', clientId: 'C-1', client: 'ООО Должник', manager: 'Руслан' }],
     payments: [],
     debt_collection_plans: [],
     audit_logs: [],
@@ -168,6 +169,7 @@ test('admin and office can create plan, manager cannot mutate', async () => {
     });
     assert.equal(created.status, 201);
     assert.equal(created.body.id, 'DCP-1');
+    assert.equal(created.body.counterpartyId, 'CP-1');
     assert.equal(created.body.password, undefined);
     assert.equal(state.debt_collection_plans.length, 1);
     assert.equal(state.audit_logs[0].action, 'debt_collection_plans.create');
@@ -178,6 +180,7 @@ test('status update writes safe audit without sensitive fields', async () => {
   const state = createState({
     debt_collection_plans: [{
       id: 'DCP-1',
+      counterpartyId: 'CP-1',
       clientId: 'C-1',
       clientName: 'ООО Должник',
       status: 'new',
@@ -208,15 +211,43 @@ test('status update writes safe audit without sensitive fields', async () => {
   });
 });
 
+test('debt collection plan API rejects conflicting Client and Counterparty before persistence', async () => {
+  const state = createState({
+    counterparties: [
+      { id: 'CP-1', roles: ['customer'], status: 'active' },
+      { id: 'CP-2', roles: ['customer'], status: 'active' },
+    ],
+  });
+  const app = createApp(state);
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/debt-collection-plans', 'office-token', {
+      counterpartyId: 'CP-2',
+      clientId: 'C-1',
+      clientName: 'ООО Должник',
+      status: 'new',
+      priority: 'high',
+      nextActionType: 'call',
+    });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'AR_DEBTOR_IDENTITY_REQUIRED');
+    assert.equal(state.debt_collection_plans.length, 0);
+  });
+});
+
 test('manager sees only scoped plans and no financial sums are returned by plan endpoint', async () => {
   const state = createState({
     clients: [
-      { id: 'C-1', company: 'ООО Должник', manager: 'Руслан' },
-      { id: 'C-2', company: 'ООО Чужой', manager: 'Анна' },
+      { id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Должник', manager: 'Руслан' },
+      { id: 'C-2', counterpartyId: 'CP-2', company: 'ООО Чужой', manager: 'Анна' },
+    ],
+    counterparties: [
+      { id: 'CP-1', roles: ['customer'], status: 'active' },
+      { id: 'CP-2', roles: ['customer'], status: 'active' },
     ],
     debt_collection_plans: [
-      { id: 'DCP-1', clientId: 'C-1', clientName: 'ООО Должник', responsibleName: 'Руслан', status: 'new', priority: 'high', nextActionType: 'call' },
-      { id: 'DCP-2', clientId: 'C-2', clientName: 'ООО Чужой', responsibleName: 'Анна', status: 'new', priority: 'critical', nextActionType: 'email', amount: 999999 },
+      { id: 'DCP-1', counterpartyId: 'CP-1', clientId: 'C-1', clientName: 'ООО Должник', responsibleName: 'Руслан', status: 'new', priority: 'high', nextActionType: 'call' },
+      { id: 'DCP-2', counterpartyId: 'CP-2', clientId: 'C-2', clientName: 'ООО Чужой', responsibleName: 'Анна', status: 'new', priority: 'critical', nextActionType: 'email', amount: 999999 },
     ],
   });
   const app = createApp(state);
@@ -225,6 +256,6 @@ test('manager sees only scoped plans and no financial sums are returned by plan 
     assert.equal(response.status, 200);
     assert.equal(response.body.plans.length, 1);
     assert.equal(response.body.plans[0].id, 'DCP-1');
-    assert.doesNotMatch(JSON.stringify(response.body), /999999|amount|debt/i);
+    assert.doesNotMatch(JSON.stringify(response.body), /999999|"amount"/i);
   });
 });

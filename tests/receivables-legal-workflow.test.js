@@ -13,9 +13,11 @@ const receivablesCore = require('../server/lib/receivables-core.js');
 function createApp() {
   let idCounter = 0;
   const state = {
-    clients: [{ id: 'c-1', company: 'ООО Долг', inn: '7701000000', manager: 'Office' }],
+    counterparties: [{ id: 'CP-1', roles: ['customer'], status: 'active' }],
+    clients: [{ id: 'c-1', counterpartyId: 'CP-1', company: 'ООО Долг', inn: '7701000000', manager: 'Office' }],
     rentals: [{
       id: 'r-1',
+      counterpartyId: 'CP-1',
       clientId: 'c-1',
       client: 'ООО Долг',
       equipmentInv: 'A-1',
@@ -26,6 +28,7 @@ function createApp() {
     }],
     gantt_rentals: [{
       id: 'gr-1',
+      counterpartyId: 'CP-1',
       rentalId: 'r-1',
       sourceRentalId: 'r-1',
       originalRentalId: 'r-1',

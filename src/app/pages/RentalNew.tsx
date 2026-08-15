@@ -499,7 +499,10 @@ export default function RentalNew() {
   ]);
   const rentalDebtRows = useMemo(() => buildRentalDebtRows(ganttRents, payments), [ganttRents, payments]);
   const receivables = useMemo(() => buildClientReceivables(clients, rentalDebtRows), [clients, rentalDebtRows]);
-  const selectedClientReceivable = receivables.find(item => item.clientId === selectedClient?.id);
+  const selectedClientReceivable = receivables.find(item => Boolean(
+    selectedClient?.counterpartyId
+    && item.counterpartyId === selectedClient.counterpartyId
+  ));
   const currentCreditRisk = authoritativeCreditRisk?.clientId === selectId(selectedClient?.id)
     ? authoritativeCreditRisk
     : null;

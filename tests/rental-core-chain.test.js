@@ -961,18 +961,26 @@ test('document linked by rental is visible in rental client summary', () => {
 });
 
 test('payments and documents do not mix between similarly named clients', () => {
+  const clients = [
+    { id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Ромашка' },
+    { id: 'C-2', counterpartyId: 'CP-2', company: 'ООО Ромашка Плюс' },
+  ];
+  const rentals = [
+    { id: 'R-1', counterpartyId: 'CP-1', clientId: 'C-1', client: 'ООО Ромашка', equipmentInv: 'INV-1', amount: 100000, status: 'closed', endDate: '2026-05-20' },
+    { id: 'R-2', counterpartyId: 'CP-2', clientId: 'C-2', client: 'ООО Ромашка Плюс', equipmentInv: 'INV-2', amount: 100000, status: 'closed', endDate: '2026-05-20' },
+  ];
+  const payments = [
+    { id: 'P-1', counterpartyId: 'CP-1', rentalId: 'R-1', clientId: 'C-1', amount: 100000, paidAmount: 100000, status: 'paid' },
+  ];
+  const counterparties = [
+    { id: 'CP-1', roles: ['customer'], status: 'active' },
+    { id: 'CP-2', roles: ['customer'], status: 'active' },
+  ];
   const report = buildFinanceReport({
-    clients: [
-      { id: 'C-1', company: 'ООО Ромашка' },
-      { id: 'C-2', company: 'ООО Ромашка Плюс' },
-    ],
-    rentals: [
-      { id: 'R-1', clientId: 'C-1', client: 'ООО Ромашка', equipmentInv: 'INV-1', amount: 100000, status: 'closed', endDate: '2026-05-20' },
-      { id: 'R-2', clientId: 'C-2', client: 'ООО Ромашка Плюс', equipmentInv: 'INV-2', amount: 100000, status: 'closed', endDate: '2026-05-20' },
-    ],
-    payments: [
-      { id: 'P-1', rentalId: 'R-1', clientId: 'C-1', amount: 100000, paidAmount: 100000, status: 'paid' },
-    ],
+    clients,
+    rentals,
+    payments,
+    relationData: { clients, gantt_rentals: rentals, payments, counterparties },
   }, '2026-05-21');
 
   assert.deepEqual(report.debtRows.map(row => row.rentalId), ['R-2']);
@@ -980,8 +988,8 @@ test('payments and documents do not mix between similarly named clients', () => 
   assert.equal(report.clientSnapshots.find(item => item.clientId === 'C-2').currentDebt, 100000);
 
   const c1Summary = buildClient360Summary({
-    client: { id: 'C-1', company: 'ООО Ромашка' },
-    rentals: [{ id: 'R-1', clientId: 'C-1', client: 'ООО Ромашка', status: 'closed' }],
+    client: { id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Ромашка' },
+    rentals: [{ id: 'R-1', counterpartyId: 'CP-1', clientId: 'C-1', client: 'ООО Ромашка', status: 'closed' }],
     documents: [
       { id: 'D-1', rentalId: 'R-1', clientId: 'C-1', type: 'act', status: 'signed' },
       { id: 'D-2', rentalId: 'R-2', clientId: 'C-2', type: 'act', status: 'signed' },

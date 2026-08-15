@@ -431,6 +431,8 @@ test('legacy payment allocation backfill preserves payments and links rental or 
       { id: 'gr-2', clientId: 'c-1', objectId: 'o-2', contractId: 'ct-1' },
     ],
     documents: [{ id: 'd-1', rentalId: 'gr-2', clientId: 'c-1' }],
+    clients: [{ id: 'c-1', counterpartyId: 'CP-1' }],
+    counterparties: [{ id: 'CP-1', roles: ['customer'], status: 'active' }],
     nowIso: () => '2026-05-13T00:00:00.000Z',
   });
 

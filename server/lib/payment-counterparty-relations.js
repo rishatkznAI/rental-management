@@ -404,6 +404,89 @@ function findUniqueRentalEndpoint(rentals, ganttRentals, rentalId, allocation) {
   return aliases[0].rental;
 }
 
+function throwAllocationCandidateError(error, allocation, phase) {
+  error.details = {
+    ...(error?.details || {}),
+    allocationId: relationId(allocation?.id) || null,
+    paymentId: relationId(allocation?.paymentId) || null,
+    rentalId: relationId(allocation?.rentalId) || null,
+    phase,
+  };
+  throw error;
+}
+
+/**
+ * Read-only canonical boundary for a prospective PaymentAllocation.
+ *
+ * Payment identity is deliberately resolved without Rental authority: the
+ * allocation candidate must prove each endpoint independently before their
+ * Counterparty IDs are compared. Endpoint lookup retains the same exact-ID,
+ * then stable-alias semantics used by persisted allocation guards.
+ */
+function assertPaymentAllocationCandidateCanonical(allocation, state, {
+  allowArchived = true,
+} = {}) {
+  let payment;
+  try {
+    payment = findUniquePaymentEndpoint(state?.payments, allocation?.paymentId, allocation);
+  } catch (error) {
+    throwAllocationCandidateError(error, allocation, 'payment_endpoint');
+  }
+
+  let rental;
+  try {
+    rental = findUniqueRentalEndpoint(
+      state?.rentals,
+      state?.gantt_rentals,
+      allocation?.rentalId,
+      allocation,
+    );
+  } catch (error) {
+    throwAllocationCandidateError(error, allocation, 'rental_endpoint');
+  }
+
+  let paymentRelation;
+  try {
+    paymentRelation = resolvePaymentCounterpartyRelation(payment, state, {
+      allowArchived,
+      useRentalAuthority: false,
+    });
+  } catch (error) {
+    throwAllocationCandidateError(error, allocation, 'payment_identity');
+  }
+
+  let rentalRelation;
+  try {
+    rentalRelation = resolveRentalCounterpartyRelation(rental, state, { allowArchived });
+  } catch (error) {
+    throwAllocationCandidateError(error, allocation, 'rental_identity');
+  }
+
+  if (paymentRelation.counterpartyId !== rentalRelation.counterpartyId) {
+    throwAllocationCandidateError(
+      counterpartyError(
+        COUNTERPARTY_RELATION_CODES.MISMATCH,
+        'Payment and Rental belong to different counterparties.',
+        409,
+        {
+          paymentCounterpartyId: paymentRelation.counterpartyId,
+          rentalCounterpartyId: rentalRelation.counterpartyId,
+        },
+      ),
+      allocation,
+      'counterparty_match',
+    );
+  }
+
+  return {
+    counterpartyId: paymentRelation.counterpartyId,
+    payment: paymentRelation,
+    rental: rentalRelation,
+    paymentRecord: payment,
+    rentalRecord: rental,
+  };
+}
+
 function assertAllocationCanonicalInState(allocation, state, phase) {
   try {
     const payment = findUniquePaymentEndpoint(state.payments, allocation?.paymentId, allocation);
@@ -840,6 +923,7 @@ module.exports = {
   PAYMENT_METADATA_FIELDS,
   PAYMENT_RELATION_CLASSIFICATIONS,
   assertExistingPaymentAllocationsRemainCanonical,
+  assertPaymentAllocationCandidateCanonical,
   assertPaymentAllocationPersistenceEntriesSafe,
   assertPaymentRentalCounterpartyMatch,
   auditPaymentCounterpartyRelations,

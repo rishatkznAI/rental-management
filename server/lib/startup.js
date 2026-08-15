@@ -357,18 +357,36 @@ async function startServer({ app, port, deps, logger = console }) {
         const result = backfillPaymentAllocations({
           payments: deps.readData('payments') || [],
           paymentAllocations: deps.readData('payment_allocations') || [],
-          rentals: [
-            ...(deps.readData('rentals') || []),
-            ...(deps.readData('gantt_rentals') || []),
-          ],
+          rentals: deps.readData('rentals') || [],
+          ganttRentals: deps.readData('gantt_rentals') || [],
           documents: deps.readData('documents') || [],
+          clients: deps.readData('clients') || [],
+          counterparties: deps.readData('counterparties') || [],
+          counterpartyRoleAssignments: deps.readData('counterparty_role_assignments') || [],
           nowIso: () => new Date().toISOString(),
           generateId: prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         });
         if (result?.created > 0) {
           deps.writeData('payment_allocations', result.allocations);
-          logger.log(`[payments] payment_allocations backfill created: ${result.created}`);
         }
+        const summary = result?.summary || {};
+        const blocking = [
+          'unresolvedPayment',
+          'unresolvedRental',
+          'ambiguous',
+          'crossCounterparty',
+          'missingEndpoint',
+          'otherBlockers',
+        ].reduce((total, field) => total + Number(summary[field] || 0), 0);
+        const log = blocking > 0 ? logger.warn : logger.log;
+        log?.call(
+          logger,
+          `[payments] payment_allocations backfill summary: created=${Number(summary.created ?? result?.created ?? 0)} `
+          + `alreadyAllocated=${Number(summary.alreadyAllocated || 0)} notEligible=${Number(summary.notEligible || 0)} `
+          + `unresolvedPayment=${Number(summary.unresolvedPayment || 0)} unresolvedRental=${Number(summary.unresolvedRental || 0)} `
+          + `ambiguous=${Number(summary.ambiguous || 0)} crossCounterparty=${Number(summary.crossCounterparty || 0)} `
+          + `missingEndpoint=${Number(summary.missingEndpoint || 0)} otherBlockers=${Number(summary.otherBlockers || 0)}`,
+        );
       } catch (error) {
         logger.warn(`[payments] payment_allocations backfill skipped: ${error?.message || String(error)}`);
       }

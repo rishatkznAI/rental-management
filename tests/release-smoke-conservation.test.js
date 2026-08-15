@@ -108,10 +108,10 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
     'dashboard-company-health-compact',
     'healthSvgCount',
     'healthWidthShare',
+    'dashboard-kpi-month-payments',
     'dashboard-kpi-overdue-debt',
     'dashboard-kpi-fleet-utilization',
-    'dashboard-kpi-service-load',
-    'dashboard-kpi-operational-load',
+    'dashboard-kpi-active-rentals',
     'Пульт управления арендным бизнесом',
     'Очередь внимания',
     'Динамика месяца',
@@ -129,7 +129,7 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
   ]) {
     assert.match(releaseSmokeSource, new RegExp(marker));
   }
-  assert.match(releaseSmokeSource, /toHaveAttribute\('href', \/#\\\/service\$\//);
+  assert.ok(releaseSmokeSource.includes(".toHaveAttribute('href', /#\\/equipment\\?status=rented$/);"));
   assert.match(releaseSmokeSource, /captureExecutiveCockpitScreenshots\(page, normalizedConfig\.frontendUrl, testInfo\)/);
 });
 
